@@ -23,12 +23,12 @@ Each agent node uses:
 The harness and provider form the node's effective lane. A plan's run-level `harness` and
 `provider` are the default lane for every agent node, and a binding can override them with its own
 [`lane`](../reference/runtime-plan.md#per-node-lanes), for example to have Codex implement and
-Claude Code review. Zeroshot starts one harness adapter per distinct effective lane, and each node
+Claude Code review. zeroshot starts one harness adapter per distinct effective lane, and each node
 runs on its own lane's CLI. Model and connections are always chosen per node.
 
 [Harness adapters](../project/harness-adapters.md) lists available adapters and accepted
 harness/provider pairs, which apply to the default lane and to every node's lane. Admission rejects
-known-incompatible pairs, such as `codex` with `anthropic` and `claude` with `openai`. Zeroshot
+known-incompatible pairs, such as `codex` with `anthropic` and `claude` with `openai`. zeroshot
 does not check current provider availability, and model names remain provider-owned.
 
 ## Uniform and exact plans
@@ -66,10 +66,10 @@ A connection maps a stable key to required environment field names:
 }
 ```
 
-The submission environment or a target-owned connection store supplies the values. Zeroshot keeps
+The submission environment or a target-owned connection store supplies the values. zeroshot keeps
 them out of the graph, runtime JSON, run ledger, and observation records.
 
-When `connections` is omitted, Zeroshot materializes provider access for each node from its
+When `connections` is omitted, zeroshot materializes provider access for each node from its
 effective lane and the selected execution placement. Local adapters can reuse native authentication as described in
 [Harness adapters](../project/harness-adapters.md). Lanes requiring a connection and contained targets
 receive these canonical requirements:
@@ -115,7 +115,7 @@ zeroshot connection list
 updating a multi-field connection. `connection list` reports names and kind but never values.
 
 Hosted targets can also own user- or organization-scoped connections. Setup and dynamic connection
-kinds depend on the target; Zeroshot consumes only the resolved fields declared by the runtime.
+kinds depend on the target; zeroshot consumes only the resolved fields declared by the runtime.
 
 Source delivery selects its own credentials independently of agent model providers. GitHub uses
 `GH_TOKEN`; GitLab uses `GITLAB_TOKEN`. Local delivery can reuse the selected host's native
@@ -141,9 +141,9 @@ alone is insufficient. It sends the key as a bearer token. Claude requires the A
 API** and sends the key in `x-api-key`. The Pi, Copilot, OpenCode and Hermes gateway lanes let the caller name the wire protocol
 in `GATEWAY_API` and use the selected native transport without probing it; an unrecognized value
 fails before launch. The selected gateway/model must support the harness's
-requests, including structured output. Zeroshot does not probe capabilities or translate protocols.
+requests, including structured output. zeroshot does not probe capabilities or translate protocols.
 
-Supply the base URL expected by the selected harness, including any gateway path prefix. Zeroshot
+Supply the base URL expected by the selected harness, including any gateway path prefix. zeroshot
 preserves that path. For OpenRouter, use `https://openrouter.ai/api/v1` with Codex or
 `https://openrouter.ai/api` with Claude. Base URLs must use HTTP(S) and cannot contain embedded
 credentials, query parameters, or fragments. Both fields remain connection values, outside runtime
@@ -185,7 +185,7 @@ without adding it to agent bindings. The file contains one token, optionally fol
 It must be a regular file owned by the controller user with no access for other users.
 
 The host obtains short-lived tokens and renews them by atomically replacing the file. Mount its
-parent directory if the host writes outside a container. Zeroshot reopens the path on each delivery
+parent directory if the host writes outside a container. zeroshot reopens the path on each delivery
 visit and after authentication rejection; an unchanged rejected token waits for host renewal.
 Explicit `GH_TOKEN` takes precedence, including failing on an empty or malformed value.
 

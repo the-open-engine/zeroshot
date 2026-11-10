@@ -41,7 +41,7 @@ An empty catalog offers no sizes and has no default. Local execution and `target
 which uses the current host's CPU, memory and storage. Private capsules preserve the concrete size
 already admitted by their host. The descriptor extension uses its own key so older string-based size
 advertisements cannot break unrelated discovery operations. Size is shared by the graph's agents,
-independently of their harness/provider lanes; Zeroshot defines no AWS shapes or billing prices.
+independently of their harness/provider lanes; zeroshot defines no AWS shapes or billing prices.
 
 Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See [Harness adapters](../project/harness-adapters.md) for availability and
@@ -55,11 +55,11 @@ relative to the invoking folder. A folder inside a Git checkout resolves to its 
 root. Resume uses the original stored workspace.
 
 A run without Git delivery also accepts plain folders, remoteless repositories, detached checkouts,
-and unborn repositories. Zeroshot starts a detached controller and keeps the ledger under the local
+and unborn repositories. zeroshot starts a detached controller and keeps the ledger under the local
 state directory, where later CLI invocations can list, watch, or stop the run. It does not initialize
 Git to run in a plain folder.
 
-The workspace and active Zeroshot state directory must be disjoint, including symlink aliases.
+The workspace and active zeroshot state directory must be disjoint, including symlink aliases.
 If either contains the other, select another folder or set `ZEROSHOT_STATE_DIR` outside the workspace.
 Existing inactive state folders do not impose a separate admission rule. Disjoint workspaces can
 run concurrently. Aliases share one lease; a folder and its subtree cannot run at the same time. Reusing a submission key for
@@ -75,7 +75,7 @@ over native login state. Before the controller starts,
 check login state, so a missing login fails at that lane's first turn.
 
 Local Codex runs with `provider: "openai"` use the model provider and transport configured in the
-user's Codex configuration, including OpenAI-compatible proxies such as LiteLLM. Zeroshot supplies
+user's Codex configuration, including OpenAI-compatible proxies such as LiteLLM. zeroshot supplies
 the runtime's model and any explicit reasoning effort, but leaves web search and sandbox network
 access to Codex's configuration. Explicit `openrouter`, `bedrock`, `foundry`, and `gateway` selections configure
 those providers; hosted targets use their own isolated provider setup.
@@ -120,26 +120,26 @@ permission control, so Pi runs add no bypass flag; containment remains the bound
 
 The local target intentionally has the same-user trust boundary as running the harness CLI directly:
 native config, user files, and credential-store access remain subject to that harness's own sandbox
-and tool policy. Zeroshot transfers the invoking shell through a private, one-shot bootstrap and
+and tool policy. zeroshot transfers the invoking shell through a private, one-shot bootstrap and
 deletes it before the controller performs run effects; the detached controller itself receives only
 minimal platform environment. A later local CLI startup removes a bootstrap orphaned beyond the
 controller handoff window. This snapshot is never written to a run ledger or sent to a hosted target.
 
 Hosted Codex and Claude workers and verifiers always run with
 `--dangerously-bypass-approvals-and-sandbox` or `--dangerously-skip-permissions`, respectively.
-Zeroshot does not inspect the harness's native permission policy for hosted turns; the disposable
+zeroshot does not inspect the harness's native permission policy for hosted turns; the disposable
 capsule is the isolation boundary.
 
 Local Codex and Claude workers and verifiers use those flags only when no permission policy is
-configured. Before each local turn, Zeroshot queries the harness's resolved settings without sending
+configured. Before each local turn, zeroshot queries the harness's resolved settings without sending
 a model prompt. Explicit approval, sandbox, permission rules, and managed restrictions take
-precedence, so Zeroshot adds no bypass flag in those cases. Claude shell permission controls are
+precedence, so zeroshot adds no bypass flag in those cases. Claude shell permission controls are
 inherited locally too. If inspection fails or the CLI does not support it, the harness keeps its
 native permission behavior. Inspection adds one CLI startup per local turn and is bounded to sixty
 seconds. Whenever inspection is unavailable, for example because the CLI cannot start, exits early,
 returns an error or an incomplete or oversized answer, or exceeds the sixty seconds, `zeroshot logs`
 shows an error-level line for that node naming the harness and a bounded, redacted cause, and
-stating that Zeroshot is continuing without its automatic permission bypass. That line does not
+stating that zeroshot is continuing without its automatic permission bypass. That line does not
 change the node's outcome: the turn still runs with native permissions and its own result decides
 success. Native overrides and configured policy are not inspection failures and are not reported.
 The probe must finish cleanup before the model turn starts; unconfirmed cleanup stops the run and
@@ -147,7 +147,7 @@ identifies configuration inspection in its diagnostic. Inspection does not rewri
 though the CLI may update its own startup state.
 
 Every agent verifier node, including those in custom profiles, uses the same permission handling as
-workers. Zeroshot automatically adds instructions to inspect without modifying source, tests,
+workers. zeroshot automatically adds instructions to inspect without modifying source, tests,
 configuration, or other material under review or implementing repairs. Verifiers may run checks and
 create temporary files and generated artifacts, and must report failed or unavailable checks accurately.
 The built-in acceptance verifier also tries to run the repository's pre-commit checks and reports
@@ -159,23 +159,23 @@ They retain separate session homes and process cleanup markers, so ending one no
 another node or the run's startup services.
 
 Hosting applications can supply nonsecret machine facts and operating guidance through
-`ProductionHostingConfig.agent_context`, using an `AgentContextProvider`. Zeroshot samples this
+`ProductionHostingConfig.agent_context`, using an `AgentContextProvider`. zeroshot samples this
 context before every agent execution, including resumed attempts and auxiliary agents, and adds
 it to the prompt for every harness. The context is transient: it does not change the saved graph,
 runtime plan, or durable invocation. Local and direct targets attach no host context by default.
 
-Zeroshot controls the response format and session continuation. Web search follows Codex's
+zeroshot controls the response format and session continuation. Web search follows Codex's
 configuration: by default it uses live search with full access and cached search otherwise. For local
-runs, an explicit `web_search="cached"` prevents Zeroshot from adding bypass because Codex can
+runs, an explicit `web_search="cached"` prevents zeroshot from adding bypass because Codex can
 otherwise promote cached search to live search under full access. Hosted turns always use maximum
 bypass inside the disposable capsule, so Codex may promote cached search to live. Command network
 access follows the selected sandbox policy locally; hosted command isolation comes from the capsule.
 
-For local Codex, Zeroshot reads the active provider's `env_key` and environment-based header names
+For local Codex, zeroshot reads the active provider's `env_key` and environment-based header names
 from Codex's resolved configuration, then forwards only those values from the invoking shell to the
 model process. This lets custom OpenAI-compatible gateways keep using their existing Codex setup.
 Declared connection values take precedence, and a declared `OPENAI_API_KEY` remains available under
-that name. Zeroshot also supplies `CODEX_API_KEY` for native OpenAI authentication when needed.
+that name. zeroshot also supplies `CODEX_API_KEY` for native OpenAI authentication when needed.
 Values discovered from local configuration are not persisted or sent to hosted targets. See
 [Runtimes and connections](runtimes-and-connections.md).
 
@@ -184,7 +184,7 @@ Values discovered from local configuration are not persisted or sent to hosted t
 Workspace snapshots recursively copy entries without applying `.gitignore`, including generated
 directories such as `target/` and `node_modules/`.
 
-Zeroshot tries filesystem cloning or reflinks where supported. Otherwise, each capture needs space
+zeroshot tries filesystem cloning or reflinks where supported. Otherwise, each capture needs space
 for another full workspace copy during staging, in addition to Restic checkpoint storage. Concurrent
 runs increase peak disk usage and can fail with `no space left on device`.
 
@@ -198,8 +198,8 @@ available when a later backup fails.
 
 ## Direct target
 
-A direct target exposes Zeroshot's HTTP and OECP contracts without application-level authentication.
-The released container includes Zeroshot plus the pinned core harness CLIs listed in
+A direct target exposes zeroshot's HTTP and OECP contracts without application-level authentication.
+The released container includes zeroshot plus the pinned core harness CLIs listed in
 [Harness adapters](../project/harness-adapters.md).
 A run can mix their lanes; its connection requirements are then the union over its nodes, such as
 `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` for a Codex worker with Claude Code reviewers.
@@ -279,9 +279,9 @@ zeroshot target login production
 ```
 
 The hosting service owns login, source authorization, organization-scoped connections, queue policy,
-and capacity. Zeroshot's CLI and protocol do not prescribe those product policies.
+and capacity. zeroshot's CLI and protocol do not prescribe those product policies.
 
-Follow the [Platform documentation](https://app.zeroshot.sh/docs) for Zeroshot Platform. Its pages
+Follow the [Platform documentation](https://app.zeroshot.sh/docs) for zeroshot Platform. Its pages
 should link to the version of these core docs that matches the deployed target, as described in
 [Documentation versions](../project/versioning.md).
 
@@ -380,7 +380,7 @@ see [forge setup](../guides/forge-delivery.md) for supported versions and authen
 Other Git hosts support checkout and push.
 
 For local PR and merge delivery, the target branch is the current branch's upstream when configured;
-otherwise, Zeroshot uses the local branch name. Preparation verifies that the selected remote
+otherwise, zeroshot uses the local branch name. Preparation verifies that the selected remote
 contains the target before agent execution. A fresh worktree may not have an upstream configured. To
 target `main`, run `git branch --set-upstream-to=origin/main` in the worktree, or create it from
 `origin/main` so Git configures the tracking branch. A missing branch is reported separately from a

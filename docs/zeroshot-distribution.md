@@ -2,9 +2,9 @@
 description: 'The zeroshot distribution contract defines canonical releases, platform archives, npm delivery, checksums and release recovery.'
 ---
 
-# Zeroshot distribution contract
+# zeroshot distribution contract
 
-`.github/workflows/release.yml` is the only Zeroshot release workflow. An operator supplies an
+`.github/workflows/release.yml` is the only zeroshot release workflow. An operator supplies an
 `X.Y.Z` version with an exact commit on `main`; the workflow rejects versions before major 8.
 
 ## Canonical identity
@@ -31,7 +31,7 @@ fallback, or compatibility artifact.
 The npm installer copies every managed skill to `$HOME/.agents/skills/<skill-name>` for Codex,
 GitHub Copilot, and Pi, and to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<skill-name>` for Claude
 Code. Each skill has one canonical source across hosts. These fixed user scopes are installed
-by default so agents added later need no Zeroshot reinstall.
+by default so agents added later need no zeroshot reinstall.
 Package updates and `zeroshot update` replace only an unchanged managed copy. An edited or
 conflicting skill is preserved and fails installation visibly. npm 7 and newer provide no uninstall
 lifecycle, so users remove unchanged managed copies from these documented paths when they uninstall
@@ -49,12 +49,12 @@ refreshes every managed skill even when the executable version is already curren
 The target manifest declares Linux x64/arm64 musl, macOS x64/arm64, and Windows x64, and the npm
 target table must match it exactly. The installer stops on any other host.
 
-Every archive contains exactly the Zeroshot executable and its pinned Restic sidecar. npm, Python
+Every archive contains exactly the zeroshot executable and its pinned Restic sidecar. npm, Python
 wheels, self-update, and the target image install the pair together. The 10.4.0 through 10.8.0
 updaters predate the sidecar and reject these archives, so those installations upgrade once through
-npm as described in [Install Zeroshot](getting-started/install.md). `SHA256SUMS` covers each archive
+npm as described in [Install zeroshot](getting-started/install.md). `SHA256SUMS` covers each archive
 and the exact `zeroshot-skill.md`, `zeroshot-memory-init-skill.md`, `zeroshot-graph-design-skill.md`,
-and `zeroshot-plan-skill.md` copied from their canonical npm sources. The workflow also rejects a Linux Zeroshot release binary that has a dynamic interpreter.
+and `zeroshot-plan-skill.md` copied from their canonical npm sources. The workflow also rejects a Linux zeroshot release binary that has a dynamic interpreter.
 
 ## Version staging
 

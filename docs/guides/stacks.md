@@ -109,7 +109,7 @@ has merged.
 ## Stacked pull requests
 
 With `"delivery": "stacked_pull_requests"`, the stack is always one line. When you validate or
-submit it, Zeroshot puts the runs in dependency order, breaking ties by run name, and replaces each
+submit it, zeroshot puts the runs in dependency order, breaking ties by run name, and replaces each
 run's `needs` with just the run before it. A run therefore never starts before anything it needed.
 `zeroshot stack validate` prints the order. For the manifest above:
 
@@ -121,12 +121,12 @@ run's `needs` with just the run before it. A run therefore never starts before a
 `client`. The first run starts from the base branch and opens a pull request against it. Each later
 run starts from the branch of the run before it, which its status reports as `sourceBranch`, and
 opens its pull request against that branch, so each pull request shows only its own run's changes.
-A run's work is done when its pull request is open and its required checks pass; Zeroshot does not
+A run's work is done when its pull request is open and its required checks pass; zeroshot does not
 merge it. The stack is complete once every pull request is open.
 
 ### Review and merge the chain
 
-Review and merge the pull requests from the bottom of the stack up. Zeroshot and the hosted target
+Review and merge the pull requests from the bottom of the stack up. zeroshot and the hosted target
 never retarget a pull request; GitHub does:
 
 - When a parent pull request merges and its branch is deleted, GitHub moves the next pull request

@@ -5,7 +5,7 @@ description: 'Use the typed asynchronous zeroshot Python SDK with local, direct 
 # Python SDK
 
 `the-open-engine-zeroshot` is a typed asynchronous client for local, direct, and named hosted
-targets. Each platform wheel contains the corresponding Zeroshot executable, which keeps the client
+targets. Each platform wheel contains the corresponding zeroshot executable, which keeps the client
 and engine on one release line.
 
 ## Install and run
@@ -108,7 +108,7 @@ submitted at once. `delivery` chooses how it lands:
   (`builtin.git-delivery.merge@2` or `@3`). Each run merges into the base branch before its
   dependents start, and a run may need several others.
 - `"stacked_pull_requests"`: the profile contains exactly one `builtin.git-delivery.pr@2` node.
-  Zeroshot turns the runs into one linear stack: each run needs exactly the run before it, in
+  zeroshot turns the runs into one linear stack: each run needs exactly the run before it, in
   dependency order with ties broken by run name. Each run opens a pull request against the previous
   run's branch, the first against the base branch, and nothing is merged.
 

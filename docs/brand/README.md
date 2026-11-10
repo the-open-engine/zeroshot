@@ -187,20 +187,21 @@ const { pathToFileURL } = require('node:url');
 JS
 ```
 
-## README example graph
+## Example graph
 
-Under "Get started", the README shows zeroshot.sh's example graph from issue to merge: the
+The documentation home shows zeroshot.sh's example graph from issue to merge: the
 drawing in the page's `#one-graph` section, without the section's headline. It is an illustrative
-custom graph, not a recording or the built-in template; the end-to-end test is a custom addition.
+custom graph, not a recording or the built-in template; the adversarial test is a custom addition.
 The README's opening graph stays a text block, so agents that fetch it as plain text can read it.
 
 - `diagram-sources/example-graph-{wide,tall}.svg`: the page's wide and tall drawings, frozen on
-  November 4, 2026 from zeroshot-landing-page `846a4bd` (`index.html` and `styles.css`). Each file
-  inlines both themes' colours, the loop's rules and its 31.8-second run. HTML entities are written
-  as characters so the files parse as XML.
+  November 10, 2026 from zeroshot-landing-page `10cffbe` (`index.html` and `styles.css`). Each file
+  inlines both themes' colours, the loop's rules and its 31.8-second run. zeroshot.sh is light-only,
+  so the freeze keeps the dark colours of the previous freeze. HTML entities are written as
+  characters so the files parse as XML.
 - `../assets/example-graph-{wide,tall}-{light,dark}.gif`: the run, 1,590 frames at 50 fps,
-  looping. Wide is 1760px (880px at 2×); tall is 800px (400px at 2×), and the README picks it
-  below 641px viewport width.
+  looping. Wide is 1760px (880px at 2×); tall is 800px (400px at 2×), and the docs home picks it
+  at 640px viewport width and below.
 - `../assets/example-graph-{wide,tall}-{light,dark}.png`: the page's reduced-motion still, with no
   moving dot and the passing ticks shown, for readers who turn motion off.
 

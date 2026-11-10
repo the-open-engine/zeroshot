@@ -2,9 +2,9 @@
 description: 'Install the zeroshot CLI and its agent skills, connect Cloud, open the workspace UI and prepare a local run.'
 ---
 
-# Install Zeroshot
+# Install zeroshot
 
-To use Zeroshot from ChatGPT, Codex, or Claude without installing this CLI,
+To use zeroshot from ChatGPT, Codex, or Claude without installing this CLI,
 [install the plugin and connect MCP](../guides/plugins.md).
 
 Install the `zeroshot` command and its agent skills through the npm delivery package, which requires
@@ -75,7 +75,7 @@ remove. In PowerShell, set `$env:ZEROSHOT_SKIP_SKILLS = '1'` before running eith
 Unset the variable to restore automatic installation and refresh of unchanged managed skills.
 
 See [Active Memory storage and backups](../guides/active-memory.md#persistence-and-run-completion)
-for the local lesson database and how to preserve it when moving or reinstalling Zeroshot.
+for the local lesson database and how to preserve it when moving or reinstalling zeroshot.
 
 On Windows, the CLI and local in-process runs work natively from PowerShell or Command Prompt.
 Install Git for Windows and put Git and your chosen harness on `PATH`; npm-installed `.cmd`
@@ -85,9 +85,9 @@ these with absolute paths. The hosted target image requires Linux.
 
 For Codex, complete its [native Windows sandbox setup](https://developers.openai.com/codex/windows)
 if your Codex permission settings require it. Workers and reviewers use the same permission handling;
-Zeroshot does not install the sandbox.
+zeroshot does not install the sandbox.
 
-## Connect Zeroshot Platform
+## Connect zeroshot Platform
 
 The Platform target is built in. Sign in once; organization selection happens in the browser:
 
@@ -96,7 +96,7 @@ zeroshot target login platform
 ```
 
 Platform runs use `--target platform`. Omit `--target` for local execution. The
-[Zeroshot Platform docs](https://app.zeroshot.sh/docs) cover organizations, the GitHub App, and saved
+[zeroshot Platform docs](https://app.zeroshot.sh/docs) cover organizations, the GitHub App, and saved
 connections.
 
 ## Open the workspace UI
@@ -149,12 +149,12 @@ the runtime plan and put it on `PATH`; Claude Code must be 2.1.310 or newer. Off
 [Harness adapters](../project/harness-adapters.md) for availability and provider support.
 
 Local GitHub pull request delivery (`--pr` or `--ship`) also needs the GitHub CLI, `gh`, on `PATH`.
-Zeroshot runs the `gh` that `PATH` finds and rejects the run before any agent starts if there is
+zeroshot runs the `gh` that `PATH` finds and rejects the run before any agent starts if there is
 none.
 See [forge setup](../guides/forge-delivery.md) for host logins and token connections.
 
 Local lanes with native-login support reuse the installed harness's login and configuration. Other
-provider lanes can read declared values from the current environment or the private Zeroshot
+provider lanes can read declared values from the current environment or the private zeroshot
 connection store. For example, this command prompts without echo and keeps an OpenAI value out of
 runtime JSON for a contained target:
 
@@ -196,13 +196,13 @@ personal token with Copilot Requests permission in the `github` connection's
 `COPILOT_GITHUB_TOKEN` field. A GitHub App installation token is not the user-backed route.
 
 Local Copilot BYOK settings such as `COPILOT_PROVIDER_BASE_URL`, the static provider credential,
-headers, wire API, and wire-model mapping are also reused. Zeroshot transfers that provider
+headers, wire API, and wire-model mapping are also reused. zeroshot transfers that provider
 configuration into the private headless RPC session and strips its credential fields and native
 credential-store locators from tools. Command-backed keys configured with
 `COPILOT_PROVIDER_API_KEY_COMMAND` cross that private provider contract, so the pinned CLI refreshes
 them for each provider request. Eligible helper-only invoking-shell fields are exhaustively marked
 through Copilot's `--secret-env-vars`, keeping them out of shell and MCP tools; runtime, auth,
-provider, and parent-process loader controls are excluded. Zeroshot also reads a bounded
+provider, and parent-process loader controls are excluded. zeroshot also reads a bounded
 `COPILOT_PROVIDERS_CONFIG` or default `COPILOT_HOME/providers.json` registry and transfers its
 providers and models into the headless session; a nonempty registry takes precedence over legacy
 provider variables. An explicit declared GitHub token suppresses ambient BYOK and offline controls.
@@ -219,7 +219,7 @@ process running as your own user.
 
 Model IDs pass unchanged to the Copilot process. When a registry entry with `apiKeyCommand` must use
 Copilot's singular provider contract, its authored `modelId` becomes the RPC session model and its
-authored `wireModel` still names the provider request model. Zeroshot uses headless RPC schema output
+authored `wireModel` still names the provider request model. zeroshot uses headless RPC schema output
 and validates each response locally, allowing at most two correction turns in the same session.
 The target image already includes the native Copilot CLI.
 

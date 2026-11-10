@@ -46,7 +46,7 @@ See [Active Memory](../guides/active-memory.md) for budgets, provider inheritanc
 carries its own [`lane`](#per-node-lanes). `size` applies to the whole run. Model, effort, context
 window, output limit, session scope, and connections are chosen per node.
 
-`size` is a run-level resource class. Zeroshot records it with the run and reports it in run
+`size` is a run-level resource class. zeroshot records it with the run and reports it in run
 status; the hosting target decides what resources each class receives.
 
 `nodes` keys are graph node names: 1 to 128 bytes matching `[A-Za-z_][A-Za-z0-9_.-]*`.
@@ -78,7 +78,7 @@ need a connection.
 
 Pi, Copilot, OpenCode and Hermes gateway lanes carry `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`, and `GATEWAY_API`. The last names the
 wire protocol as `openai-responses`, `openai-completions`, or `anthropic-messages`, so one lane
-selects the native transport and the model identifier stays opaque and caller-owned. Zeroshot
+selects the native transport and the model identifier stays opaque and caller-owned. zeroshot
 never infers the protocol from the identifier, and an unrecognized value fails before launch.
 Pi's gateway model entry carries a node's `contextWindow` and `maxTokens` only when the caller
 has declared them; omitted limits keep Pi's own defaults. Built-in-provider endpoint overrides
@@ -89,7 +89,7 @@ To send Pi's `anthropic` lane to a caller-owned Messages-compatible endpoint, de
 `ANTHROPIC_AUTH_TOKEN`, or `ANTHROPIC_OAUTH_TOKEN`); a local run also honors the invoking shell's
 `ANTHROPIC_BASE_URL`. The endpoint override interpolates the API key only when the connection
 supplies it, so a token keeps Pi's own environment authentication. Pi's `openai` lane likewise
-honors `OPENAI_BASE_URL` or `OPENAI_API_BASE`. Pi ignores these variables itself, so Zeroshot turns each into a provider
+honors `OPENAI_BASE_URL` or `OPENAI_API_BASE`. Pi ignores these variables itself, so zeroshot turns each into a provider
 override that keeps that provider's own protocol; the `openai` lane therefore needs a
 Responses-compatible endpoint, and any other protocol uses `pi/gateway`. A declared endpoint ends
 native-login reuse, so the stored login is never sent to that host.
@@ -112,7 +112,7 @@ Named targets and contained placements reject script bindings.
 { "kind": "script", "command": ["python3", "retrieve.py"], "connections": {} }
 ```
 
-`command` is an executable followed by literal arguments. Zeroshot does not invoke a shell.
+`command` is an executable followed by literal arguments. zeroshot does not invoke a shell.
 There must be 1 to 128 entries, each at most 8,192 bytes, with no NUL characters and at most
 65,536 bytes in total. The executable must be nonblank. Paths resolve from the run workspace.
 Scripts inherit a small process environment for executable lookup, the user's home directory,
@@ -120,7 +120,7 @@ temporary files and locale. Public run variables and explicitly declared connect
 added through the existing connection resolver. Other ambient credentials are not inherited.
 
 The program receives one JSON value on stdin, followed by EOF, and must exit zero with exactly
-one JSON value on stdout. Zeroshot validates that value against the step's output schema.
+one JSON value on stdout. zeroshot validates that value against the step's output schema.
 Process input and output are each bounded at 8 MiB. A result must also fit the ledger's
 1 MiB serialized completion event, including execution metadata. Complete stderr is retained
 as bounded diagnostics with resolved connection values redacted. Truncated stderr is omitted because its cut boundary
@@ -146,7 +146,7 @@ may keep indexes or models warm across script invocations. Service lifecycle is 
 | `sessionScope`  | No       | `execution` (default) or `node_instance`                           |
 | `connections`   | No       | [Connection declarations](#connections); empty when omitted        |
 
-Zeroshot passes `model` and `effort` to the harness unchanged. It keeps no model catalog and does not
+zeroshot passes `model` and `effort` to the harness unchanged. It keeps no model catalog and does not
 check whether a model supports the chosen effort. `contextWindow` and `maxTokens` are caller
 declarations, never inferences: they are validated at admission, emitted only into the
 `pi/gateway` model entry, and otherwise left unset for the provider to default. An absent value
@@ -159,7 +159,7 @@ retains the provider's own limit; a present value must be a positive integer in 
 | `execution`     | Opens a fresh provider session for each execution of the node, then closes it                 |
 | `node_instance` | Reuses one session when the same node instance runs again, for example across loop iterations |
 
-If a reused session is lost, Zeroshot fails that execution with `session_lost`. It does not open a
+If a reused session is lost, zeroshot fails that execution with `session_lost`. It does not open a
 replacement session silently.
 
 ### `decision`
@@ -259,7 +259,7 @@ software-change --pr` prints a delivery node with the current contract.
 
 A graph can contain at most one delivery node, and no other executable node may run in parallel with
 it, either as a `par` sibling or inside a `map` that can have more than one item. A hosting service
-may require exactly one delivery node; Zeroshot Platform quick runs require one. See
+may require exactly one delivery node; zeroshot Platform quick runs require one. See
 [concurrent workspace changes](../concepts/execution.md#concurrent-workspace-changes).
 
 `ignore` skips pull-request discussion. CI, conflict, freshness, and merge-policy checks still apply.
@@ -318,7 +318,7 @@ model identifier and the reviewers need Anthropic ones.
   one. It is still a `lane` field, so the [target support](#target-support) check applies to it and
   older binaries reject it. Omit `lane` when a node should use the default lane.
 
-Zeroshot starts one harness adapter for each distinct effective lane, and each node runs on its own
+zeroshot starts one harness adapter for each distinct effective lane, and each node runs on its own
 lane's CLI. Model, effort, session scope, and connections stay per node. Provider access defaults
 also come from each node's effective lane; see [Connections](#connections).
 
@@ -335,7 +335,7 @@ target operation failed: target does not support per-node runtime lanes (openeng
 
 Plans without a `lane` do not require the per-node capability. Targets separately advertise enabled
 harness/provider pairs through `openengine.runtime-harnesses/v1`; see [Targets](../concepts/targets.md).
-Older Zeroshot binaries reject a plan that contains a `lane` field when they read it.
+Older zeroshot binaries reject a plan that contains a `lane` field when they read it.
 
 Local profiles are saved together in one file in the configuration store (`ZEROSHOT_CONFIG_DIR`).
 Once any local profile carries a `lane`, an older binary cannot read that file at all. Every local
@@ -413,7 +413,7 @@ The per-run limit also counts the connection fields and variable names of an att
 environment. Each connection value must be 1 byte to 64 KiB with no NUL. The static connection
 values supplied for one run, counting each key and field name with its value, must fit in 256 KiB.
 
-When a node omits `connections`, Zeroshot derives provider access from that node's
+When a node omits `connections`, zeroshot derives provider access from that node's
 [effective lane](#per-node-lanes) for the execution placement. Local native logins need no
 declaration; contained targets and non-native providers receive the canonical requirements listed in
 [Runtimes and connections](../concepts/runtimes-and-connections.md#runtime-configuration-contains-names-not-secret-values).
@@ -524,12 +524,12 @@ Omitting it preserves existing behavior. Nodes sharing a lane can have different
 
 Argument strings are passed directly, without a shell. Native options retain native semantics:
 unknown JSON keys may be accepted or ignored, and native versions may behave differently.
-Zeroshot validates the envelope and reserved controls, not a catalog of native settings or tools.
+zeroshot validates the envelope and reserved controls, not a catalog of native settings or tools.
 This feature does not guarantee a read-only filesystem or protect `tests/` when an allowed native
 tool can write files.
 
 `args` configures native options; positional task messages and unbound `@file` inputs are reserved
-for Zeroshot. Each CLI adapter recognizes its native separated option operands (including Claude's
+for zeroshot. Each CLI adapter recognizes its native separated option operands (including Claude's
 variadic tool lists and Pi's `--tools -read`). For other option syntax, bind a value explicitly with
 the harness's joined form, such as `--native-option=value`; unknown option names still reach the
 harness. Native values are not validated or translated. A bare value after a no-value switch is
@@ -544,7 +544,7 @@ the new harness interprets it without translation. JSON import/export and saved 
 Python `RuntimePlan` mappings accept it unchanged; `UniformRuntime(harness_config=...)` supplies the
 same object to every generated agent binding.
 
-Zeroshot reserves model/provider selection and credentials, private state, workspace/session identity,
+zeroshot reserves model/provider selection and credentials, private state, workspace/session identity,
 transport, prompt and response contracts, required hooks, and cleanup/cancellation. Conflicts identify
 the node, harness and configuration path or flag. Credentials must use declared connections. Opaque
 Claude `--settings` files and runtime-changing Codex profiles are excluded because they can replace
