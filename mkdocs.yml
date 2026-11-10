@@ -154,6 +154,7 @@ extra_javascript:
   - javascripts/command-wrap.js
 
 extra:
+  homepage: https://zeroshot.sh
   version:
     provider: mike
     default: current

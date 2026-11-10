@@ -170,21 +170,76 @@ input {
   font-weight: 500;
 }
 
+/* Keep the version picker quiet and open its menu below the masthead. */
 .md-version {
-  margin-right: 0.6rem;
-  order: 1;
-}
-
-.md-version__current {
-  color: var(--oe-muted);
   font-size: 0.65rem;
-  margin-left: 1rem;
+  margin-inline: 0.8rem 0.4rem;
+  order: 1;
+  position: relative;
 }
 
-.md-version__list {
+.md-header .md-version__current {
+  color: var(--oe-muted);
+  font: inherit;
+  margin: 0;
+}
+
+.md-header .md-version__current:is(:hover, :focus-visible) {
+  color: var(--oe-ink);
+}
+
+.md-header .md-version__list {
   border: 1px solid var(--oe-hairline);
   border-radius: 0.3rem;
-  box-shadow: none;
+  box-shadow: 0 0.2rem 0.6rem rgb(0 0 0 / 8%);
+  font-family: var(--oe-sans);
+  font-size: 0.65rem;
+  inset-inline-end: 0;
+  margin: 0;
+  min-width: 7rem;
+  overscroll-behavior: contain;
+  padding: 0.2rem;
+  pointer-events: none;
+  scroll-snap-type: none;
+  scrollbar-width: thin;
+  top: 100%;
+  visibility: hidden;
+}
+
+.md-header .md-version:is(:hover, :focus-within) .md-version__list {
+  max-height: min(calc(16.4rem + 2px), calc(100dvh - 4rem));
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.md-version__list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.md-version__list::-webkit-scrollbar-thumb {
+  background: var(--oe-rule);
+  border-radius: 2px;
+}
+
+.md-version__item {
+  line-height: 1.4;
+}
+
+.md-header .md-version__link {
+  border-radius: 0.15rem;
+  line-height: 1.4rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.md-version__link:is(:hover, :focus-visible) {
+  background: var(--oe-surface);
+  color: var(--oe-ink);
+}
+
+.md-header__topic:first-child > a:focus-visible,
+.md-header .md-version__current:focus-visible {
+  outline: 2px solid var(--oe-muted);
+  outline-offset: 3px;
 }
 
 /* Phones: the menu, theme and search buttons leave the lockup and version picker only the
@@ -198,8 +253,8 @@ input {
     --oe-lockup: clamp(0.7rem, (100vw - 12.5rem) / 4.8, 1.5rem);
   }
 
-  [dir='ltr'] .md-version__current {
-    margin-left: 0.6rem;
+  .md-version {
+    margin-inline: 0.6rem 0;
   }
 }
 
