@@ -793,7 +793,10 @@ pub(super) async fn integrate_rebase(
         credential,
     )
     .await?;
-    match integrated.outcome {
+    let SourceTargetIntegration::Integrated { outcome, .. } = integrated else {
+        return Err(SourceDeliveryError::Rejected);
+    };
+    match outcome {
         SourceReconciliationOutcome::NeedsWork(diagnostic) => {
             Err(SourceDeliveryError::repairable(diagnostic))
         }

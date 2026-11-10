@@ -60,7 +60,7 @@ impl SourceDeliveryAuthority for ContributedForge {
         request: SourceTargetReconciliation<'_>,
         _credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceTargetIntegration, SourceDeliveryError> {
-        Ok(SourceTargetIntegration {
+        Ok(SourceTargetIntegration::Integrated {
             target_revision: request.target.base_revision.clone(),
             outcome: SourceReconciliationOutcome::Unchanged,
         })

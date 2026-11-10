@@ -192,6 +192,12 @@ fn policy_page(
                     "baseRefName": "main",
                     "baseRef": {
                         "name": "main",
+                        "target": {"oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                        "compare": {
+                            "behindBy": 0,
+                            "baseTarget": {"oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                            "headTarget": {"oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+                        },
                         "branchProtectionRule": null,
                         "rules": {"totalCount": 0, "nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}},
                         "refUpdateRule": {
@@ -367,6 +373,11 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
     assert!(arguments.iter().any(|argument| argument == "owner=acme"));
     assert!(arguments.iter().any(|argument| argument == "name=project"));
     assert!(arguments.iter().any(|argument| argument == "number=17"));
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument == &format!("head={}", review().head_revision))
+    );
     let query = arguments
         .iter()
         .find(|argument| argument.starts_with("query="))
@@ -375,6 +386,7 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
     assert!(query.contains("checkSuite { app { databaseId } }"));
     assert!(query.contains("statusCheckRollup"));
     assert!(query.contains("isMergeQueueEnabled"));
+    assert!(query.contains("compare(headRef: $head)"));
     assert!(!query.contains("mergeCommitAllowed"));
     assert!(query.contains("requiredApprovingReviewCount"));
     assert!(query.contains("requiresConversationResolution"));
@@ -1210,4 +1222,99 @@ async fn run_branch_pr_outside_the_target_is_refused() {
         !root.path().join("writes").exists(),
         "discovery must refuse before writes"
     );
+}
+
+#[test]
+fn queue_removal_reconciles_even_clean_nonstrict_heads_without_saved_evidence() {
+    let mut page = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    page["data"]["repository"]["pullRequest"]["baseRef"]["compare"]["behindBy"] = json!(3);
+    page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
+    let queued = classify_policy(json!([page.clone()]), &review()).assert_value();
+    assert!(queued.head_update.is_none());
+    assert!(matches!(
+        merge_action(queued).assert_value(),
+        MergeAction::Submit { queued: true }
+    ));
+    page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(false);
+    let ordinary = classify_policy(json!([page]), &review()).assert_value();
+    assert!(ordinary.head_update.is_some());
+    assert!(matches!(
+        merge_action(ordinary).assert_value(),
+        MergeAction::Complete(SourceMergeRequestOutcome::HeadUpdateRequired)
+    ));
+}
+
+#[test]
+fn missing_comparison_never_grants_ordinary_merge_authority() {
+    let mut page = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    page["data"]["repository"]["pullRequest"]["baseRef"]["compare"] = Value::Null;
+    let ordinary = classify_policy(json!([page]), &review()).assert_value();
+    assert!(matches!(
+        merge_action(ordinary).assert_value(),
+        MergeAction::Complete(SourceMergeRequestOutcome::Pending)
+    ));
+}
+
+#[test]
+fn comparison_identity_and_partial_policy_cannot_authorize_merge() {
+    for (path, value) in [
+        (
+            "/data/repository/pullRequest/baseRef/compare/baseTarget/oid",
+            json!("c".repeat(40)),
+        ),
+        (
+            "/data/repository/pullRequest/baseRef/compare/headTarget/oid",
+            json!("c".repeat(40)),
+        ),
+        (
+            "/data/repository/pullRequest/baseRef/compare/behindBy",
+            json!(-1),
+        ),
+        ("/errors", json!([{"message":"partial"}])),
+    ] {
+        let mut page = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+        if path == "/errors" {
+            page["errors"] = value;
+        } else {
+            *page.pointer_mut(path).assert_value() = value;
+        }
+        assert!(classify_policy(json!([page]), &review()).is_err());
+    }
+}
+
+#[test]
+fn target_motion_never_hides_conflicts_or_required_check_failures_and_pending_checks() {
+    for (mergeable, status, contexts) in [
+        ("CONFLICTING", "DIRTY", None),
+        (
+            "MERGEABLE",
+            "CLEAN",
+            Some(vec![check_run("test", "COMPLETED", Some("FAILURE"), true)]),
+        ),
+        (
+            "MERGEABLE",
+            "CLEAN",
+            Some(vec![check_run("test", "IN_PROGRESS", None, true)]),
+        ),
+    ] {
+        for queue in [true, false] {
+            let mut page = policy_page(mergeable, status, contexts.clone(), (false, None));
+            page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(queue);
+            page["data"]["repository"]["pullRequest"]["baseRef"]["compare"]["behindBy"] = json!(2);
+            let snapshot = classify_policy(json!([page]), &review()).assert_value();
+            assert!(!matches!(
+                merge_action(snapshot).assert_value(),
+                MergeAction::Submit { .. }
+            ));
+        }
+    }
+}
+
+#[test]
+fn malformed_target_never_authorizes_queue_admission_with_unknown_comparison() {
+    let mut page = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
+    page["data"]["repository"]["pullRequest"]["baseRef"]["compare"] = Value::Null;
+    page["data"]["repository"]["pullRequest"]["baseRef"]["target"]["oid"] = json!("unknown");
+    assert!(classify_policy(json!([page]), &review()).is_err());
 }

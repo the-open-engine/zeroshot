@@ -31,7 +31,7 @@ pub(crate) fn shell_script() -> String {
         LOOPBACK_TARGET_PREAMBLE,
         r#"
 detached=$(
-  "$1" run --target prod --repository open-engine/zeroshot --branch main \
+  "$1" run --target prod --forward-gh-token --repository open-engine/zeroshot --branch main \
     --title "Loopback acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key acceptance-1 -d
 ) || exit $?
@@ -103,7 +103,7 @@ pub(crate) fn delivery_shell_script() -> String {
 "$1" target add prod --url "$2" || exit $?
 "$1" target login prod || exit $?
 result=$(
-  "$1" run --target prod --repository acme/project --branch main \
+  "$1" run --target prod --forward-gh-token --repository acme/project --branch main \
     --title "Delivery acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key "$7"
 ) || exit $?
@@ -119,7 +119,7 @@ pub(crate) fn loss_shell_script() -> String {
         LOOPBACK_TARGET_PREAMBLE,
         r#"
 detached=$(
-  "$1" run --target prod --repository open-engine/zeroshot --branch main \
+  "$1" run --target prod --forward-gh-token --repository open-engine/zeroshot --branch main \
     --title "Capsule loss acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key loss-1 -d
 ) || exit $?

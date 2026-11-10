@@ -161,7 +161,12 @@ async fn push_publishes_the_admitted_candidate_without_integrating_target_drift(
 
 #[tokio::test]
 async fn updated_target_workflow_is_integrated_and_reviewed_before_first_push() {
-    for mode in [DeliveryMode::PullRequest, DeliveryMode::Merge] {
+    for mode in [
+        DeliveryMode::PullRequest,
+        DeliveryMode::PullRequestV2,
+        DeliveryMode::Merge,
+        DeliveryMode::MergeV3,
+    ] {
         let (fixture, authority, adapter) = UpdatedTarget::harness(Script::NoCi);
         let admitted_source = admitted(&fixture.repo, mode).await.source;
 
@@ -300,5 +305,72 @@ async fn changed_conflict_observation_retains_the_confirmed_review_baseline() {
     assert_eq!(
         authority.conflict_materializations.load(Ordering::SeqCst),
         1
+    );
+}
+
+#[tokio::test]
+async fn forge_owned_target_drift_publishes_without_claiming_a_reviewed_baseline() {
+    for mode in [DeliveryMode::PullRequestV2, DeliveryMode::MergeV3] {
+        let (mut fixture, authority, adapter) = UpdatedTarget::harness(Script::TargetDeferred);
+        for n in 0..3 {
+            fixture.advance(&format!("name: upstream CI {n}\n"));
+        }
+        let candidate = fixture.head();
+        let delivered = run_with_adapter(fixture.request(mode), adapter.clone()).await;
+        assert_delivery_signal(&delivered.outcome, mode.success_outcome());
+        assert!(authority.pushed.load(Ordering::SeqCst));
+        let diagnostic = outcome_diagnostic(&delivered.outcome);
+        assert!(
+            diagnostic.contains("reviewBaseRevision: unavailable"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains(&format!("sourceRevision: {}", fixture.repo.base)),
+            "{diagnostic}"
+        );
+        assert_ne!(
+            fixture.head(),
+            candidate,
+            "delivery still commits dirty reviewed work"
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.repo.workspace.join(WORKFLOW)).assert_value(),
+            "name: original CI\n"
+        );
+        assert_eq!(
+            fixture.repo.base,
+            git_output(&fixture.repo.workspace, &["rev-parse", "HEAD^"])
+        );
+    }
+}
+
+#[tokio::test]
+async fn queue_enabled_after_a_lost_local_integration_still_requires_review() {
+    let (mut fixture, authority, adapter) =
+        UpdatedTarget::harness(Script::TargetIntegrationThenDeferred);
+    let delivered = run_with_adapter(
+        fixture.request(DeliveryMode::PullRequestV2),
+        adapter.clone(),
+    )
+    .await;
+    assert_delivery_signal(&delivered.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(!authority.pushed.load(Ordering::SeqCst));
+    assert!(authority.review_requests().is_empty());
+    assert!(outcome_diagnostic(&delivered.outcome).contains("reviewBaseRevision: unavailable"));
+    assert_eq!(
+        fs::read_to_string(fixture.repo.workspace.join(WORKFLOW)).assert_value(),
+        UPDATED_WORKFLOW
+    );
+    // Review the integrated candidate, then move the target again before the next publication.
+    let reviewed_head = fixture.head();
+    fixture.advance("name: later CI owned by the queue\n");
+    let delivered = run_with_adapter(fixture.request(DeliveryMode::MergeV3), adapter).await;
+    let receipt = assert_delivery_signal(&delivered.outcome, DELIVERY_MERGED_LABEL);
+    assert_eq!(receipt["headRevision"], reviewed_head);
+    assert_eq!(fixture.head(), reviewed_head);
+    assert!(outcome_diagnostic(&delivered.outcome).contains("reviewBaseRevision: unavailable"));
+    assert_eq!(
+        fs::read_to_string(fixture.repo.workspace.join(WORKFLOW)).assert_value(),
+        UPDATED_WORKFLOW
     );
 }

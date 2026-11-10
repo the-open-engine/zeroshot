@@ -32,6 +32,8 @@ pub(in crate::native_v2_delivery) enum Script {
     CiFailed,
     ReconcileCompletesThenUnavailable,
     TargetIntegrationResponseLost,
+    TargetDeferred,
+    TargetIntegrationThenDeferred,
     LaterTargetIntegrationFails,
     ConflictMaterializationFailsAfterMutation,
     LargeCiDiagnostic,
@@ -135,6 +137,8 @@ impl FakeGitHub {
             | Script::FeedbackReadTransient
             | Script::FeedbackTooLarge
             | Script::TargetIntegrationResponseLost
+            | Script::TargetDeferred
+            | Script::TargetIntegrationThenDeferred
             | Script::LaterTargetIntegrationFails
             | Script::CredentialExpires
             | Script::ReviewSyncRace
@@ -443,6 +447,11 @@ impl SourceDeliveryAuthority for FakeGitHub {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceTargetIntegration, SourceDeliveryError> {
         let attempt = self.target_reconciliations.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.script, Script::TargetDeferred)
+            || matches!(self.script, Script::TargetIntegrationThenDeferred) && attempt > 0
+        {
+            return Ok(SourceTargetIntegration::Deferred);
+        }
         let authority = crate::native_v2_candidate::test_support::local_delivery_authority(
             request.workspace,
             &self.remote,
@@ -450,10 +459,17 @@ impl SourceDeliveryAuthority for FakeGitHub {
         let result = authority
             .reconcile_delivery_target(request, credential)
             .await?;
-        if matches!(self.script, Script::TargetIntegrationResponseLost) && attempt == 0 {
+        if matches!(
+            self.script,
+            Script::TargetIntegrationResponseLost | Script::TargetIntegrationThenDeferred
+        ) && attempt == 0
+        {
             assert!(matches!(
-                result.outcome,
-                SourceReconciliationOutcome::NeedsWork(_)
+                result,
+                SourceTargetIntegration::Integrated {
+                    outcome: SourceReconciliationOutcome::NeedsWork(_),
+                    ..
+                }
             ));
             return Err(SourceDeliveryError::api(
                 Some(503),
@@ -462,8 +478,11 @@ impl SourceDeliveryAuthority for FakeGitHub {
         }
         if matches!(self.script, Script::LaterTargetIntegrationFails) && attempt == 1 {
             assert!(matches!(
-                result.outcome,
-                SourceReconciliationOutcome::NeedsWork(_)
+                result,
+                SourceTargetIntegration::Integrated {
+                    outcome: SourceReconciliationOutcome::NeedsWork(_),
+                    ..
+                }
             ));
             return Err(SourceDeliveryError::repairable(
                 "target integration completed but its response was malformed",
@@ -1040,7 +1059,9 @@ case "$endpoint:$method" in
       '"id":"PR_node_17","number":17,"state":"OPEN","merged":false,"mergeCommit":null,' \
       '"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,' \
       '"isInMergeQueue":false,"isMergeQueueEnabled":false,"baseRefName":"main",' \
-      '"baseRef":{"name":"main","branchProtectionRule":null,' \
+      '"baseRef":{"name":"main","target":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},' \
+      '"compare":{"behindBy":0,"baseTarget":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},' \
+      '"headTarget":{"oid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"branchProtectionRule":null,' \
       '"rules":{"totalCount":0,"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}},' \
       '"refUpdateRule":{"requiredApprovingReviewCount":0,' \
       '"requiredStatusCheckContexts":[],' \

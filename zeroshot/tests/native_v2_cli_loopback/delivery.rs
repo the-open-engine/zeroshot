@@ -193,7 +193,7 @@ impl SourceDeliveryAuthority for DeliveryAuthority {
             request.workspace,
             &["merge-base", "--is-ancestor", &target_revision, "HEAD"],
         );
-        Ok(SourceTargetIntegration {
+        Ok(SourceTargetIntegration::Integrated {
             target_revision,
             outcome: SourceReconciliationOutcome::Unchanged,
         })

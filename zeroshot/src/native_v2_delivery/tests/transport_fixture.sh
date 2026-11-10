@@ -4,6 +4,10 @@
 if [ "$1" = "api" ]; then
     for git_fixture_argument in "$@"; do
         case "$git_fixture_argument" in
+            *mergeQueue*)
+                printf '%s' '{"data":{"repository":{"nameWithOwner":"acme/project","mergeQueue":null}}}'
+                exit 0
+                ;;
             repos/acme/project/git/ref/heads/*)
                 git_fixture_branch=$(printf '%s' "$git_fixture_argument" |
                     /usr/bin/sed 's|^repos/acme/project/git/ref/heads/||')

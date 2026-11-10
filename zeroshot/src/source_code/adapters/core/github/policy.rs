@@ -10,7 +10,7 @@ mod checks;
 use checks::{RequiredChecks, classify_required_checks, failure_diagnostic};
 
 const POLICY_QUERY: &str = r#"
-query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String, $head: String!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
     pullRequest(number: $number) {
@@ -29,6 +29,8 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
       baseRefName
       baseRef {
         name
+        target { oid }
+        compare(headRef: $head) { behindBy baseTarget { oid } headTarget { oid } }
         refUpdateRule {
           requiredApprovingReviewCount
           requiredStatusCheckContexts
@@ -202,7 +204,17 @@ struct PullRequestPolicyWire {
 #[serde(rename_all = "camelCase")]
 struct RefWire {
     name: String,
+    target: RevisionWire,
+    compare: Option<ComparisonWire>,
     ref_update_rule: Option<RefUpdateRuleWire>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ComparisonWire {
+    behind_by: u64,
+    base_target: RevisionWire,
+    head_target: RevisionWire,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -314,13 +326,24 @@ struct RepositoryPolicyWire {
 pub(super) fn query_arguments(
     review: &SourceReviewReceipt,
 ) -> Result<Vec<String>, SourceDeliveryError> {
-    review_query_arguments(review, POLICY_QUERY)
+    let mut arguments = review_query_arguments(review, POLICY_QUERY)?;
+    arguments.extend(["-f".to_owned(), format!("head={}", review.head_revision)]);
+    Ok(arguments)
 }
 
 pub(super) fn classify_policy(
     value: Value,
     review: &SourceReviewReceipt,
 ) -> Result<PolicySnapshot, SourceDeliveryError> {
+    if value
+        .as_array()
+        .is_some_and(|pages| pages.iter().any(|page| page.get("errors").is_some()))
+    {
+        return Err(SourceDeliveryError::api(
+            None,
+            "GitHub returned incomplete delivery policy",
+        ));
+    }
     let pages: Vec<QueryPageWire> = serde_json::from_value(value).map_err(|error| {
         SourceDeliveryError::api(
             None,
@@ -434,7 +457,18 @@ fn require_identity<'a>(
         .pull_request
         .as_ref()
         .ok_or(SourceDeliveryError::Rejected)?;
-    let valid = !pull_request.id.trim().is_empty()
+    let comparison_valid = pull_request
+        .base_ref
+        .compare
+        .as_ref()
+        .is_none_or(|comparison| {
+            valid_revision(&comparison.base_target.oid)
+                && comparison.base_target == pull_request.base_ref.target
+                && comparison.head_target.oid == review.head_revision
+        });
+    let valid = comparison_valid
+        && valid_revision(&pull_request.base_ref.target.oid)
+        && !pull_request.id.trim().is_empty()
         && repository.name_with_owner == review.repository
         && pull_request.number.to_string() == review.review_id
         && pull_request.base_ref_name == review.target_branch
@@ -568,8 +602,13 @@ fn head_update(pull_request: &PullRequestPolicyWire) -> Option<HeadUpdate> {
         && !pull_request.is_draft
         && !pull_request.is_in_merge_queue
         && pull_request.mergeable == "MERGEABLE"
-        && pull_request.merge_state_status == "BEHIND")
-        .then(|| HeadUpdate(pull_request.id.clone()))
+        && (pull_request.merge_state_status == "BEHIND"
+            || pull_request
+                .base_ref
+                .compare
+                .as_ref()
+                .is_some_and(|comparison| comparison.behind_by > 0)))
+    .then(|| HeadUpdate(pull_request.id.clone()))
 }
 
 fn merge_gate_ready(pull_request: &PullRequestPolicyWire) -> bool {
@@ -580,7 +619,9 @@ fn merge_gate_ready(pull_request: &PullRequestPolicyWire) -> bool {
     !pull_request.is_draft
         && !pull_request.is_in_merge_queue
         && (pull_request.is_merge_queue_enabled
-            || pull_request.mergeable == "MERGEABLE" && state_ready)
+            || pull_request.base_ref.compare.is_some()
+                && pull_request.mergeable == "MERGEABLE"
+                && state_ready)
 }
 
 fn terminal_snapshot(
@@ -637,6 +678,7 @@ fn pull_request_ready(pull_request: &PullRequestPolicyWire) -> bool {
     !pull_request.is_draft
         && !pull_request.is_in_merge_queue
         && pull_request.mergeable == "MERGEABLE"
+        && (pull_request.is_merge_queue_enabled || pull_request.base_ref.compare.is_some())
         && pull_request.merge_state_status == "BLOCKED"
         && matches!(
             pull_request.review_decision.as_deref(),
