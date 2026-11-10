@@ -1,21 +1,21 @@
 ---
-description: 'Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a Zeroshot run to build.'
+description: 'Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a zeroshot run to build.'
 ---
 
 # Plan work before running it
 
-A Zeroshot run builds and checks a change against the task you give it, so the result is only as
+A zeroshot run builds and checks a change against the task you give it, so the result is only as
 good as that task. A plan makes the task explicit before any build tokens are spent: what should
 change, how each part will be checked, and what must stay as it is.
 
-Plans are Markdown files in your repository, and a Zeroshot run builds them: its worker implements
+Plans are Markdown files in your repository, and a zeroshot run builds them: its worker implements
 the plan and its verifiers judge the result against the criteria.
 
 ## Plan with your coding agent
 
 The npm package installs the `zeroshot-plan` skill for Codex, GitHub Copilot, Pi and Claude Code
 next to the `zeroshot` skill (see [Install](../getting-started/install.md)). Ask your agent to plan
-a change with Zeroshot, for example "plan this with zeroshot" or `/zeroshot-plan`, and it:
+a change with zeroshot, for example "plan this with zeroshot" or `/zeroshot-plan`, and it:
 
 1. reads the request, your repository's agent guidance (`AGENTS.md`, `CLAUDE.md`), the relevant code
    and any linked issue;
@@ -26,7 +26,7 @@ a change with Zeroshot, for example "plan this with zeroshot" or `/zeroshot-plan
    are asked about when nothing applies;
 3. turns vague goals into checkable acceptance criteria, including what must keep working, and asks
    you about any number it picks, such as a performance threshold;
-4. keeps one plan, and splits off follow-up plans only when one Zeroshot run could not build and
+4. keeps one plan, and splits off follow-up plans only when one zeroshot run could not build and
    verify everything well, for example when parts need different environments to check;
 5. writes the plan to `.zeroshot/plans/<id>.md`.
 
@@ -34,11 +34,11 @@ A plan is as long as the work needs: a small, clear change gets a short plan wit
 the issue already has a plan in this format posted by a bot, the skill continues from it instead of
 starting over. The skill only plans: it does not edit code or start runs.
 
-The skill runs only when you ask for Zeroshot planning. Ordinary planning requests stay with your
-agent, and when you ask Zeroshot to build vague or large work, the `zeroshot` skill suggests
+The skill runs only when you ask for zeroshot planning. Ordinary planning requests stay with your
+agent, and when you ask zeroshot to build vague or large work, the `zeroshot` skill suggests
 planning first and lets you choose. The skill is not your agent's plan mode. A plan mode prepares
 the edit the agent is about to make in the current session; the skill writes a plan file that
-outlives the session, so another agent or a Zeroshot run can build from it later.
+outlives the session, so another agent or a zeroshot run can build from it later.
 
 ## Plan format
 

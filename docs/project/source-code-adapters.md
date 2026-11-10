@@ -46,6 +46,17 @@ Adding a forge needs no new delivery node family or closed forge enum. Embedders
 admits an opaque nested repository and review ID, uses its own token field and credential refresh,
 and drives the existing PR and merge nodes through the supervisor and ledger.
 
+## Target reconciliation
+
+`SourceDeliveryAuthority::reconcile_delivery_target` returns `SourceTargetIntegration`:
+
+- `Integrated { target_revision, outcome }`: local reconciliation establishes a concrete target
+  revision and outcome.
+- `Deferred`: confirmed forge policy owns integration; the adapter establishes no local target revision.
+
+Consumers must handle both variants. Deferral does not advance `reviewBaseRevision`. Later delivery
+gates refresh forge policy and require ordinary reconciliation if the forge no longer owns integration.
+
 ## Required behavior
 
 An adapter must observe remote identity before effects, preserve the reviewed candidate SHA and
@@ -69,8 +80,8 @@ when composing a candidate or allocator. Built-in placements use the contributed
 
 The registry's coordinated delivery workflow obtains a scoped adapter through
 SourceCodeProvider.delivery_authority. Its descriptor advertises the operations that adapter
-supports. The older inspect_operation/operate contract remains available for callers of atomic
-operations; maintained adapters currently return an explicit unavailable error through that seam.
+supports. The `inspect_operation`/`operate` contract supports atomic operations; maintained adapters
+return an explicit unavailable error through that interface.
 Forge credential fields and default connection requirements belong to the registered adapter.
 Generated delivery bindings remain empty until placement selects the source or comment destination;
 materialization preserves explicit connection keys and fields. Review receipt links come from the

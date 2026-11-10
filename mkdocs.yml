@@ -55,7 +55,7 @@ nav:
       - Targets: concepts/targets.md
       - Delivery validation: concepts/delivery-validation.md
   - Guides:
-      - Use Zeroshot through a plugin: guides/plugins.md
+      - Use zeroshot through a plugin: guides/plugins.md
       - Plan work before running it: guides/planning.md
       - Prepare a runtime environment: guides/runtime-environments.md
       - Active Memory: guides/active-memory.md
@@ -69,6 +69,11 @@ nav:
       - Python SDK: guides/python-sdk.md
   - Reference:
       - CLI: zeroshot-cli.md
+      - Implementation details:
+          - Installation and updates: reference/installation.md
+          - Target runtime: reference/target-runtime.md
+          - Execution and delivery: reference/execution.md
+          - Memory lifecycle: reference/active-memory.md
       - Python API:
           - API overview: reference/python.md
           - Client and run handle: reference/python/client.md
@@ -90,7 +95,7 @@ nav:
       - Distribution contract: zeroshot-distribution.md
       - Source-code adapters: project/source-code-adapters.md
       - Harness adapters: project/harness-adapters.md
-  - Zeroshot Platform: https://app.zeroshot.sh/docs
+  - zeroshot Platform: https://app.zeroshot.sh/docs
   - zeroshot.sh: https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
 
 plugins:
@@ -134,13 +139,19 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
   - tables
   - toc:
       permalink: true
+      title: On this page
 
 extra_css:
   - assets/fonts/fonts.css
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/command-wrap.js
 
 extra:
   version:

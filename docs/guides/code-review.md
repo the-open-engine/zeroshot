@@ -63,7 +63,7 @@ credentials belong to the native node and are not declared on the review agents.
 
 ## Run the review
 
-Select a clean checkout already at the PR head. Zeroshot refuses a mismatch instead of switching
+Select a clean checkout already at the PR head. zeroshot refuses a mismatch instead of switching
 or resetting the worktree.
 
 ```console

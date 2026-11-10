@@ -2,104 +2,87 @@
 description: 'The engine for autonomous software production. Orchestrate coding agents through implementation, code review, testing, repair and delivery.'
 ---
 
-<p class="docs-kicker">Core documentation</p>
-
 # The engine for autonomous software production
 
 <p class="docs-lede">
-zeroshot is an open-source workflow engine for coding agents. Turn your team's development and
-QA process into a reusable multi-agent graph of implementation, independent code review, testing,
-repair and delivery. The engine enforces the graph's transitions and retry limits.
+zeroshot is an open-source workflow engine for coding agents. Write your team's development and
+QA process as a graph of implementation, independent review, testing, repair and delivery. Agents
+do the work; the graph decides what happens next, and the engine enforces its transitions and
+retry limits.
 </p>
 
-[Run a first task](getting-started/first-run.md){ .md-button .md-button--primary }
-[Read the CLI reference](zeroshot-cli.md){ .md-button }
+<figure class="docs-example-graph">
+--8<-- "overrides/partials/example-graph-wide.svg"
+--8<-- "overrides/partials/example-graph-tall.svg"
+<figcaption>
+An example graph: independent reviews and an adversarial test before the PR, CI before merge, and
+every rejection back through repair. <a href="https://zeroshot.sh/#one-graph">More examples on zeroshot.sh</a>
+</figcaption>
+</figure>
 
-[Open the workspace UI](getting-started/install.md#open-the-workspace-ui) to design profiles,
-watch live runs, and replay recorded history.
-
-## What a run contains
-
-Three authored values determine execution:
-
-- a **graph** that defines control flow and typed state;
-- a **runtime plan** that binds each executable node to a harness, provider, model, and named
-  connections;
-- an **initial input** that belongs to the caller and that Zeroshot checks against the graph before
-  execution.
-
-After validating those values, Zeroshot opens a durable ledger where it records each node result.
-Authored edges then route review, retries, and the final result.
-
-[![Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](assets/zeroshot-workflow.svg){ loading=lazy }](assets/zeroshot-workflow.svg){ .docs-graph-wide }
-
-[![Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](assets/zeroshot-workflow-mobile.svg){ loading=lazy }](assets/zeroshot-workflow-mobile.svg){ .docs-graph-tall }
-
-The built-in `software-change` template uses the route shown above. For work that does not need its
-review loop, use `single-worker`. To review a pull request, use `pr-review`, or `code-review` for a
-deeper review. For research, use `auto-research`. It runs ten rounds of experiments by default, and a
-new result replaces the current one only when the progress judge accepts it. Custom graphs follow
-the same protocol contracts.
-
-## Choose where it runs
+## Start here
 
 <!-- prettier-ignore-start -->
 
-<div class="grid cards" markdown>
+1. [Install](getting-started/install.md) the CLI:
 
-- **Local**
+    ```console
+    npm install --global @the-open-engine-company/zeroshot
+    ```
 
-    Local mode works in any folder (`--cwd FOLDER`), keeps state on the same machine, and calls your
-    chosen harness. Git is optional without delivery.
-
-    [Install Zeroshot](getting-started/install.md)
-
-- **Self-hosted target**
-
-    The target image checks out source on infrastructure you control. Agent processes and the run
-    ledger stay there as well.
-
-    [Understand targets](concepts/targets.md)
-
-- **Zeroshot Platform**
-
-    Platform accepts the same graph and runtime plan through a managed target. Its documentation covers
-    accounts, organization policy, and queue behavior.
-
-    [Open the Platform docs](https://app.zeroshot.sh/docs)
-
-</div>
+2. [Run a first task](getting-started/first-run.md) with the built-in `software-change` graph.
+3. [Build a review loop](guides/review-loop.md): write your own graph and runtime plan.
 
 <!-- prettier-ignore-end -->
 
+Working in ChatGPT, Codex or Claude? The [plugin](guides/plugins.md) runs zeroshot without the
+CLI. Prefer a browser? [`zeroshot ui`](getting-started/install.md#open-the-workspace-ui) edits
+profiles, follows live runs and replays finished ones.
+
+## What a run needs
+
+- A **graph**: the steps, the routes between them and the typed state they share.
+- A **runtime plan**: the agent CLI, provider and model for each step, and the connections it needs.
+- An **input**: the task. zeroshot checks it against the graph before any agent starts.
+
+Model output cannot add an edge or raise a bound. zeroshot records every step's result as the run
+advances, and closing the terminal does not stop the run. [How execution works](concepts/execution.md)
+
+## Built-in graphs
+
+Run them as they are, or export one as the start of your own.
+
+| Graph             | What it does                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `software-change` | Implements the task, runs acceptance and code review in parallel, repairs what they reject, then delivers.                |
+| `single-worker`   | One agent, no review loop.                                                                                                |
+| `pr-review`       | Reviews a pull request.                                                                                                   |
+| `code-review`     | Reviews a pull request in depth.                                                                                          |
+| `auto-research`   | Runs ten rounds of experiments by default. A new result replaces the current one only when the progress judge accepts it. |
+
+## Where it runs
+
+| Target             | Where code and run state live                                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local              | Any folder on your machine (`--cwd FOLDER`). Git is optional without delivery. [Install](getting-started/install.md)                                      |
+| Self-hosted target | Infrastructure you control. The target image checks out the source; agents and the run ledger stay there. [Targets](concepts/targets.md)                  |
+| zeroshot Platform  | A managed target that takes the same graph and runtime plan, with accounts, organization policy and queues. [Platform docs](https://app.zeroshot.sh/docs) |
+
 ### Where code is processed
 
-The execution target and model provider are separate choices. Local and self-hosted runs keep
-the checkout and run ledger on your infrastructure, but a harness using an external model provider
-sends that provider the code and context it needs. Self-hosting zeroshot does not make model
-processing local. Check the selected provider's data-handling terms before using client code.
+The target and the model provider are separate choices. Wherever a run happens, the agent sends its
+model provider the code and context it needs, so self-hosting zeroshot does not make model
+processing local. Check the provider's data-handling terms before running on client code.
+[Runtimes and connections](concepts/runtimes-and-connections.md) covers providers and credentials;
+for Platform, see the [privacy notice](https://app.zeroshot.sh/legal/privacy) and
+[retention](https://app.zeroshot.sh/legal/privacy#retention).
 
-For Platform-hosted execution, see the [Platform privacy notice](https://app.zeroshot.sh/legal/privacy)
-for data locations and [retention](https://app.zeroshot.sh/legal/privacy#retention).
-[Runtime connections](concepts/runtimes-and-connections.md) describe how to select providers and
-supply credentials.
+## Reference
 
-## Read more
+- [CLI](zeroshot-cli.md), generated from the command tree
+- [Python API](reference/python.md), generated from the SDK
+- [Cluster API](reference/cluster/api.md), generated from the OpenRPC contract
 
-[How execution works](concepts/execution.md) describes the graph and reduction model. Read
-[Runtimes and connections](concepts/runtimes-and-connections.md) before choosing models or supplying
-credentials; [Observe and control runs](guides/observe-and-control.md) covers failed-run recovery,
-durable status, and log streams. [Use a local graph as an ACP agent](guides/acp.md) covers the
-experimental stdio endpoint. [Build a review loop](guides/review-loop.md) builds a custom graph and
-runtime plan step by step.
-
-These reference pages are generated from product-owned definitions:
-
-- [CLI reference](zeroshot-cli.md), generated from the Clap command tree;
-- [Python API](reference/python.md), generated from the SDK's public objects and docstrings;
-- [Cluster API](reference/cluster/api.md), generated from the checked-in
-  OpenRPC contract and protocol schemas.
-
-Current follows `main` and may describe unreleased changes. For an installed release, choose its
-minor version from the header; each minor documents its newest published patch.
-[Documentation versions](project/versioning.md) defines the URL and manifest contract.
+These pages follow `main` and may describe unreleased changes. For an installed release, pick its
+version in the header. [Documentation versions](project/versioning.md)
+{ .docs-note }

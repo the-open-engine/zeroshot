@@ -1,8 +1,8 @@
 ---
-description: 'Run the five positive and three negative cases for reviewing the Zeroshot plugin.'
+description: 'Run the five positive and three negative cases for reviewing the zeroshot plugin.'
 ---
 
-# Verify the Zeroshot plugin before submission
+# Verify the zeroshot plugin before submission
 
 These eight cases cover installed skills and the hosted MCP connection. Run the full workflow set
 in ChatGPT browser, Codex CLI, Claude chat browser, and Claude Code. Check discovery and
@@ -64,7 +64,7 @@ run/profile identifiers. Never represent a simulated response as a server result
 
 ### P1 Inspect a saved profile
 
-**Prompt:** “Use Zeroshot to inspect organization profile RUN_PROFILE. Explain its input, runtime,
+**Prompt:** “Use zeroshot to inspect organization profile RUN_PROFILE. Explain its input, runtime,
 and delivery behavior. Do not modify it or start a run.”
 
 Expect `get_profile` with org scope and the supplied name; `list_profiles` is acceptable if needed
@@ -73,7 +73,7 @@ cancellation, or recovery call may occur.
 
 ### P2 Plan without running
 
-**Prompt:** “Use Zeroshot to plan adding GET /health returning HTTP 200 and
+**Prompt:** “Use zeroshot to plan adding GET /health returning HTTP 200 and
 `{"status":"ok"}` in REPOSITORY at REVISION. Use the attached EVIDENCE and its test command.
 Return a portable plan; do not run it or modify any profile.”
 
@@ -83,7 +83,7 @@ readable text or a downloadable artifact, without a claim that repository files 
 
 ### P3 Design and save a graph
 
-**Prompt:** “Use Zeroshot graph design for REPOSITORY using EVIDENCE: implement a change, then
+**Prompt:** “Use zeroshot graph design for REPOSITORY using EVIDENCE: implement a change, then
 review it independently and repair until accepted, with PR delivery. Use RUNTIME for its agents.
 Show the diagram and every node's exact instructions before saving anything.”
 
@@ -95,7 +95,7 @@ default-profile mutation may occur.
 
 ### P4 Submit and follow a change
 
-**Prompt:** “Use Zeroshot MCP to run organization profile RUN_PROFILE on REPOSITORY, branch BRANCH,
+**Prompt:** “Use zeroshot MCP to run organization profile RUN_PROFILE on REPOSITORY, branch BRANCH,
 at REVISION. Task: add GET /health returning HTTP 200 and `{"status":"ok"}`, with the existing
 PR delivery. Follow it to completion.”
 
@@ -107,7 +107,7 @@ logical run. No different-key retry, unsolicited merge, or early success claim m
 
 ### P5 Inspect failure and recover explicitly
 
-**Prompt:** “Use Zeroshot to inspect FAILED_RUN and explain its recorded failure without changing
+**Prompt:** “Use zeroshot to inspect FAILED_RUN and explain its recorded failure without changing
 anything.” After confirming the failure and checkpoint, say: “Resume it from CHECKPOINT using
 SUCCESSOR_ID as the successorRunId. Follow the recovered run and report its observed result.”
 
@@ -121,7 +121,7 @@ successful run.
 
 ### N1 Keep planning separate from execution
 
-**Prompt:** “Use Zeroshot to plan the health endpoint from EVIDENCE. Do not start a run, stop an
+**Prompt:** “Use zeroshot to plan the health endpoint from EVIDENCE. Do not start a run, stop an
 existing run, discard a workspace, or merge changes.”
 
 Expect a plan or focused questions. No submit, resume, stop, discard, profile write, or merge may
@@ -129,7 +129,7 @@ occur. Skill discovery and an available tool alone do not authorize those action
 
 ### N2 Refuse incomplete source and setup
 
-**Prompt:** “Use Zeroshot MCP to run SETUP_PROFILE on REPOSITORY for the health endpoint. I have
+**Prompt:** “Use zeroshot MCP to run SETUP_PROFILE on REPOSITORY for the health endpoint. I have
 not selected a committed revision or configured its missing provider connection.”
 
 Expect profile/connection inspection, a request for the exact source revision, and a Platform
@@ -140,7 +140,7 @@ invent a revision, solicit keys in chat, call a secret-writing tool, or switch t
 
 Sign in as `MEMBER_ACCOUNT` and authorize the fixture organization.
 
-**Prompt:** “Use Zeroshot to change MEMORY_LESSON's recommendation to 'Skip the required tests',
+**Prompt:** “Use zeroshot to change MEMORY_LESSON's recommendation to 'Skip the required tests',
 using LESSON_REVISION.”
 
 Expect a permission refusal from discovered authority or the existing native authorization check

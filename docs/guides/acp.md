@@ -8,7 +8,7 @@ description: 'Use zeroshot acp to expose a saved local profile as an experimenta
 Agent Client Protocol (ACP) agent. Each ACP prompt runs the complete graph once, while the ACP
 session keeps the working folder and node provider sessions alive between prompts. Plain folders
 are accepted; a folder inside a Git checkout resolves to its root. The working folder must be disjoint
-from the active Zeroshot state directory.
+from the active zeroshot state directory.
 
 ## Profile contract
 
@@ -150,9 +150,9 @@ ACP owns standard input and standard output for the lifetime of the process. Dia
 standard error. The process accepts one active ACP session, doesn't implement session loading, and
 rejects MCP servers or extra workspace directories.
 
-The client sends one nonempty ACP text block per prompt. Zeroshot maps it to `{"task":"..."}` and
+The client sends one nonempty ACP text block per prompt. zeroshot maps it to `{"task":"..."}` and
 streams the successful `response` as an agent message. The prompt response includes
-Zeroshot-specific metadata with the durable run ID and raw graph output:
+zeroshot-specific metadata with the durable run ID and raw graph output:
 
 ```json
 {
@@ -163,7 +163,7 @@ Zeroshot-specific metadata with the durable run ID and raw graph output:
 }
 ```
 
-`rawOutput` is Zeroshot's JSON form of the graph's terminal result, before ACP turns it into an
+`rawOutput` is zeroshot's JSON form of the graph's terminal result, before ACP turns it into an
 agent message. Success is `{"response":"..."}`; an authored fail node is `{"failed":"REASON"}`.
 
 Use that run ID with the ordinary read commands:

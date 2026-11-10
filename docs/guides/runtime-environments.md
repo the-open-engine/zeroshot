@@ -25,7 +25,7 @@ selection to the host. Direct Docker uses the base environment when none is supp
 run in that stack, while omission allows the host to resolve each repository's default.
 
 Hosts may provide saved environments and choose repository defaults before accepting a run.
-Zeroshot executes the resolved definition and preserves it for queued and resumed attempts; it
+zeroshot executes the resolved definition and preserves it for queued and resumed attempts; it
 does not store environment resources or interpret repository defaults. The local UI has no
 environment catalog or selector. Connection values come from the existing target connection
 mechanism and never belong in scripts or public variables. Only explicitly declared hook

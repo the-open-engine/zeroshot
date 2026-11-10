@@ -22,6 +22,6 @@ See the [Python SDK guide](../guides/python-sdk.md) for complete submissions and
 
 ## Version identity
 
-The SDK release paired with Zeroshot `vX.Y.Z` is `X.Y.Z.post1`. This site records that value in its
+The SDK release paired with zeroshot `vX.Y.Z` is `X.Y.Z.post1`. This site records that value in its
 version manifest. If a later SDK-only revision is published, it does not alter an existing core docs
 snapshot.
