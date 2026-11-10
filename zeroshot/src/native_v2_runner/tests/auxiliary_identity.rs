@@ -5,7 +5,7 @@ use openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
 
 use super::*;
 use crate::execution::process::HostedProcessPool;
-use crate::native_v2_capsule::provider_process::process_scope;
+use crate::native_v2_capsule::provider_process::{home_scope, process_scope};
 
 struct ContainedIdentityDriver {
     inner: FakeDriver,
@@ -28,13 +28,13 @@ impl NodeDriver for ContainedIdentityDriver {
         self.homes
             .lock()
             .assert_value()
-            .insert(scope.private_home(Path::new("/runtime")));
+            .insert(home_scope(&invocation)?.private_home(Path::new("/runtime")));
         self.inner.run(invocation, control).await
     }
 }
 
 #[tokio::test]
-async fn contained_auxiliary_sessions_start_after_the_last_primary_identity() {
+async fn contained_primary_and_auxiliary_retries_use_compact_shared_process_slots() {
     let admitted = admitted();
     let pool = HostedProcessPool::new(10_002, 10_002, 20_000)
         .assert_value()
@@ -51,7 +51,7 @@ async fn contained_auxiliary_sessions_start_after_the_last_primary_identity() {
         .start(request(
             "contained",
             "verify",
-            (FULL_V1_MAX_NODE_EXECUTIONS, FULL_V1_MAX_NODE_EXECUTIONS),
+            (FULL_V1_MAX_NODE_EXECUTIONS, 131074),
         ))
         .await
         .assert_value()
@@ -64,7 +64,7 @@ async fn contained_auxiliary_sessions_start_after_the_last_primary_identity() {
         .into_iter()
         .enumerate()
     {
-        let identity = AUXILIARY_PROVIDER_SLOT_OFFSET + index as u64 + 1;
+        let identity = AUXILIARY_EXECUTION_OFFSET + 1_000_000 + index as u64 + 1;
         global
             .start(request("contained", node, (identity, identity)))
             .await
@@ -81,7 +81,6 @@ async fn contained_auxiliary_sessions_start_after_the_last_primary_identity() {
     assert!(
         slots
             .iter()
-            .skip(1)
-            .all(|(_, slot)| *slot > FULL_V1_MAX_NODE_EXECUTIONS)
+            .all(|(_, slot)| *slot <= crate::native_v2_runner::MAX_PROCESS_SLOTS)
     );
 }

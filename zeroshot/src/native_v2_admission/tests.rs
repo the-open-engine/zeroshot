@@ -658,7 +658,10 @@ async fn host_selected_harness_registry_controls_profiles_intents_and_run_admiss
         .admit_with_context(request.clone(), context)
         .await
         .assert_value();
-    assert_eq!(admitted.runtime, request.runtime);
+    let mut effective_runtime = request.runtime.clone();
+    effective_runtime.max_concurrency =
+        Some(openengine_cluster_protocol::PositiveInteger::new(64).assert_value());
+    assert_eq!(admitted.runtime, effective_runtime);
     assert!(matches!(
         NativeV2Admission.admit(request.clone()).await,
         Err(NativeV2AdmissionError::InvalidRuntime(_))
@@ -706,3 +709,6 @@ async fn scripts_require_a_step_without_instructions() {
         ));
     }
 }
+
+#[path = "tests/join_regressions.rs"]
+mod join_regressions;

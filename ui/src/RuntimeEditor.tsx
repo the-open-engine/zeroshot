@@ -128,6 +128,23 @@ export function RuntimeEditor(p: {
           ))}
         </select>
       </Field>
+      <Field label="Maximum concurrent executions">
+        <input
+          type="number"
+          min={1}
+          max={65536}
+          step={1}
+          placeholder="64"
+          value={doc.runtime.maxConcurrency ?? ''}
+          aria-invalid={invalid('maxConcurrency', settingChanged('maxConcurrency'))}
+          onChange={(event) => {
+            const next = clone(doc);
+            if (event.target.value === '') delete next.runtime.maxConcurrency;
+            else next.runtime.maxConcurrency = Number(event.target.value);
+            p.edit(next, 'runtime.maxConcurrency');
+          }}
+        />
+      </Field>
       <RunSizePicker
         value={doc.runtime.size ?? undefined}
         runSizes={p.runSizes}

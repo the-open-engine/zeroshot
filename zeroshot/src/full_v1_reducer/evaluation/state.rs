@@ -4,14 +4,21 @@ pub(super) struct LoopCompletion {
     pub(super) local: Context,
     pub(super) position: HistoryPosition,
     pub(super) label: &'static str,
+    pub(super) iteration: u64,
 }
 
 impl LoopCompletion {
-    pub(super) fn new(local: Context, position: HistoryPosition, label: &'static str) -> Self {
+    pub(super) fn new(
+        local: Context,
+        position: HistoryPosition,
+        label: &'static str,
+        iteration: u64,
+    ) -> Self {
         Self {
             local,
             position,
             label,
+            iteration,
         }
     }
 }
@@ -74,4 +81,10 @@ pub(super) fn attempts_exhausted() -> Result<Status, ReducerError> {
             reason: attempts_exhausted_reason()?,
         },
     })
+}
+
+pub(super) struct DispatchVisit {
+    pub(super) node_instance: NodeInstanceId,
+    pub(super) occurrence: StructuralOccurrence,
+    pub(super) attempt: PositiveInteger,
 }

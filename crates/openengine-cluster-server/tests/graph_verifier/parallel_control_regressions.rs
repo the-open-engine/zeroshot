@@ -195,12 +195,11 @@ fn json_graph(root: Value) -> GraphSpec {
 }
 
 #[tokio::test]
-async fn first_join_rejects_no_satisfier_until_every_branch_completes() {
-    let error = ProductionGraphVerifier::new(registry())
+async fn first_join_accepts_no_satisfier_when_other_branches_cannot_qualify() {
+    ProductionGraphVerifier::new(registry())
         .verify(&first_no_satisfier_graph())
         .await
-        .assert_error();
-    assert!(rejection_codes(error).contains(&GraphDiagnosticCode::ChoiceExhaustiveness));
+        .assert_value();
 }
 
 fn controlled_signal_branch() -> Value {

@@ -435,10 +435,7 @@ async fn checked_folds_accept_exact_execution_loop_entry_and_concurrency_limits(
         verified.compiled_ir.bounds.max_node_executions.get(),
         FULL_V1_MAX_NODE_EXECUTIONS
     );
-    assert_eq!(
-        verified.compiled_ir.bounds.peak_concurrency.get(),
-        FULL_V1_MAX_PEAK_CONCURRENCY
-    );
+    assert_eq!(verified.compiled_ir.bounds.peak_concurrency.get(), 1024);
     let max_iterations = match verified.compiled_ir.bounds.termination {
         openengine_cluster_protocol::TerminationWitness::Bounded { max_iterations, .. } => {
             Some(max_iterations)
@@ -450,44 +447,33 @@ async fn checked_folds_accept_exact_execution_loop_entry_and_concurrency_limits(
 }
 
 #[tokio::test]
-async fn checked_execution_and_loop_entry_additions_reject_limit_plus_one() {
-    let execution_error = verify(&graph(vec![
+async fn dynamic_maps_report_runtime_work_enforcement_instead_of_cardinality_proofs() {
+    let verified = verify(&graph(vec![
         exact_fold_map(),
-        null_step("oneMoreExecution", 1),
+        null_step("later", 1),
         succeed("done"),
     ]))
     .await
-    .assert_error();
-    assert!(has_ceiling(execution_error, "children"));
-
-    let extra_loop = json!({
-        "kind":"loop","name":"oneMoreLoop","state":state(),
-        "body":null_verifier("extraVerify"),
-        "until":{"kind":"in","value":{"name":"extraVerify","source":"signal","field":"verdict"},"labels":["accepted"]},
-        "maxIterations":1,"promotedStatePaths":[]
-    });
-    let loop_error = verify(&graph(vec![exact_fold_map(), extra_loop, succeed("done")]))
-        .await
-        .assert_error();
-    assert!(has_ceiling(loop_error, "children"));
+    .assert_value();
+    assert_eq!(
+        verified.compiled_ir.bounds.work_enforcement,
+        openengine_cluster_protocol::WorkEnforcement::Runtime
+    );
 }
 
 #[tokio::test]
-async fn parallel_concurrency_rejects_limit_plus_one_at_combining_branches() {
-    let wide_map = json!({
-        "kind":"map","name":"wide","state":state(),"body":null_step("wideWork",1),
-        "over":{"source":"state","path":["items"]},"maxItems":FULL_V1_MAX_MAP_ITEMS,
-        "promotedStatePaths":[]
-    });
-    let parallel = json!({
-        "kind":"par","name":"parallel","state":state(),
-        "branches":[wide_map,null_step("oneMore",1)],
-        "promotedStatePaths":[],"join":{"kind":"all"}
-    });
-    let error = verify(&graph(vec![parallel, succeed("done")]))
+async fn operational_concurrency_bounds_wide_parallel_work_at_runtime() {
+    let wide_map = json!({"kind":"map","name":"wide","state":state(),"body":null_step("wideWork",1),
+        "over":{"source":"state","path":["items"]},"maxItems":FULL_V1_MAX_MAP_ITEMS,"promotedStatePaths":[]});
+    let parallel = json!({"kind":"par","name":"parallel","state":state(),"branches":[wide_map,null_step("oneMore",1)],
+        "promotedStatePaths":[],"join":{"kind":"all"}});
+    let verified = verify(&graph(vec![parallel, succeed("done")]))
         .await
-        .assert_error();
-    assert!(has_ceiling(error, "branches"));
+        .assert_value();
+    assert_eq!(
+        verified.compiled_ir.bounds.peak_concurrency.get(),
+        FULL_V1_MAX_PEAK_CONCURRENCY
+    );
 }
 
 fn path_nodes(path: &[DiagnosticPathSegment]) -> Vec<&str> {
@@ -511,7 +497,7 @@ fn item_error_check(name: &str, work: &str, otherwise: Value) -> Value {
         "kind":"choice","name":name,"state":state(),"promotedStatePaths":[],
         "branches":[{
             "when":{
-                "kind":"k_of_map","count":1,
+                "kind":"k_of_map","count":65536,
                 "value":{"source":"error","name":work,"field":null},
                 "labels":["timeout","crash","malformed","refusal"]
             },
@@ -604,3 +590,25 @@ use assert_value::AssertValue;
 #[path = "support/assert_error.rs"]
 mod assert_error;
 use assert_error::AssertError;
+
+#[tokio::test]
+async fn zero_work_map_controls_use_bounded_analysis_without_a_cardinality_assumption() {
+    let mut mapped = checked_map("many", "unused");
+    mapped["body"] = json!({"kind":"par","name":"noWork","state":state(),
+        "branches":[{"kind":"fail","name":"skip","reason":"skipped"}],
+        "join":{"kind":"all"},"promotedStatePaths":[]});
+    let check = choice_with_guard(json!({"kind":"k_of_map","count":65537,
+        "value":{"name":"noWork","source":"group","field":"joined"},
+        "labels":["quorum_unreachable"]}));
+    let rejected = diagnostics(verify(&graph(vec![mapped, check])).await.assert_error());
+    assert!(
+        rejected
+            .iter()
+            .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
+    );
+    assert!(
+        !rejected
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("map bound"))
+    );
+}

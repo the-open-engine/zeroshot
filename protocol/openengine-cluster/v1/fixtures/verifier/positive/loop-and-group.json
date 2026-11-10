@@ -15,7 +15,8 @@
               "repeat"
             ]
           ]
-        }
+        },
+        "workEnforcement": "static"
       },
       "initialInput": {
         "fields": {

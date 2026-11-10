@@ -18,8 +18,6 @@ async fn optional_map_collection(prefilled: bool) -> VerifiedGraph {
     let route = json!({
         "kind":"choice","name":"outcome","state":state.clone(),
         "branches":[
-            {"when":{"kind":"in","value":{"name":"collect","source":"group","field":"overflow"},"labels":["overflow"]},
-             "node":{"kind":"fail","name":"too_many","reason":"too_many_items"}},
             {"when":{"kind":"k_of_map","count":1,"value":{"name":"inspect","source":"error","field":null},
                      "labels":["timeout","crash","malformed","refusal"]},
              "node":{"kind":"fail","name":"inspection_failed","reason":"inspection_failed"}}

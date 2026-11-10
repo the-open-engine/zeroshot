@@ -2,7 +2,7 @@ async fn assert_unbounded_map_scope(graph: &GraphSpec) {
     let diagnostics = rejection_diagnostics(assert_graph_rejected(graph).await);
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == GraphDiagnosticCode::ChoiceExhaustiveness
-            && diagnostic.message == "k_of_map selector has no bounded enclosing map scope"
+            && diagnostic.message == "k_of_map selector has no enclosing map scope"
     }));
 }
 

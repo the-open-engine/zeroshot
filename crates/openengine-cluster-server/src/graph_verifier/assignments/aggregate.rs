@@ -3,7 +3,6 @@ use super::*;
 pub(super) fn aggregate_scope_dimensions(
     inputs: DimensionInputs<'_, '_>,
     scope_nodes: &BTreeMap<NodeName, Vec<SelectorKey>>,
-    maximum: u64,
     shared_keys: BTreeSet<SelectorKey>,
 ) -> Option<Vec<Vec<Assignment>>> {
     let scope_keys = scope_nodes.values().flatten().cloned().collect::<Vec<_>>();
@@ -17,20 +16,18 @@ pub(super) fn aggregate_scope_dimensions(
         let context = AggregateScopeContext {
             inputs,
             scope_nodes,
-            maximum,
             available_keys: &scope_key_set,
         };
         return component_dimensions(&context, &components, &Assignment::new());
     }
 
-    let shared_dimensions = dimensions_for_keys(inputs.nodes, &shared_keys)?;
+    let shared_dimensions = dimensions_for_keys(inputs.nodes, &shared_keys, inputs.budget)?;
     if !dimension_product_is_bounded(&shared_dimensions) {
         return None;
     }
     let context = AggregateScopeContext {
         inputs,
         scope_nodes,
-        maximum,
         available_keys: &available_keys,
     };
     combine_shared_dimensions(&context, &components, shared_dimensions)
@@ -125,7 +122,6 @@ fn scoped_guard_names<'a>(
 struct AggregateScopeContext<'a, 'graph> {
     inputs: DimensionInputs<'a, 'graph>,
     scope_nodes: &'a BTreeMap<NodeName, Vec<SelectorKey>>,
-    maximum: u64,
     available_keys: &'a BTreeSet<SelectorKey>,
 }
 
@@ -139,11 +135,8 @@ fn component_dimensions(
         .map(|component| {
             aggregate_component_dimension(
                 &AggregateComponentContext {
-                    nodes: context.inputs.nodes,
+                    inputs: context.inputs,
                     scope_nodes: context.scope_nodes,
-                    maximum: context.maximum,
-                    join_correlations: context.inputs.join_correlations,
-                    execution_correlations: context.inputs.execution_correlations,
                     shared_assignment,
                     available_keys: context.available_keys,
                 },
@@ -159,12 +152,12 @@ fn combine_shared_dimensions(
     shared_dimensions: Vec<Vec<Assignment>>,
 ) -> Option<Vec<Vec<Assignment>>> {
     let mut combined = Vec::new();
-    for shared in enumerate_assignments(shared_dimensions) {
+    for shared in enumerate_assignments(shared_dimensions, context.inputs.budget)? {
         let local_dimensions = component_dimensions(context, components, &shared)?;
         if !dimension_product_is_bounded(&local_dimensions) {
             return None;
         }
-        for local in enumerate_assignments(local_dimensions) {
+        for local in enumerate_assignments(local_dimensions, context.inputs.budget)? {
             if u64::try_from(combined.len()).unwrap_or(u64::MAX) >= FULL_V1_MAX_GUARD_ASSIGNMENTS {
                 return None;
             }
@@ -193,11 +186,8 @@ pub(super) fn merge_assignment_components(
 }
 
 pub(super) struct AggregateComponentContext<'a, 'graph> {
-    pub(super) nodes: &'a BTreeMap<NodeName, NodeInfo<'graph>>,
+    pub(super) inputs: DimensionInputs<'a, 'graph>,
     pub(super) scope_nodes: &'a BTreeMap<NodeName, Vec<SelectorKey>>,
-    pub(super) maximum: u64,
-    pub(super) join_correlations: &'a BTreeMap<NodeName, ParallelJoinCorrelation>,
-    pub(super) execution_correlations: &'a BTreeMap<NodeName, MapExecutionCorrelation>,
     pub(super) shared_assignment: &'a Assignment,
     pub(super) available_keys: &'a BTreeSet<SelectorKey>,
 }
@@ -215,47 +205,69 @@ pub(super) fn aggregate_component_dimension(
     let mut item_dimensions = Vec::new();
     for name in component {
         let node_keys = context.scope_nodes.get(name)?;
-        let node = context.nodes.get(name)?.node;
+        let node = context.inputs.nodes.get(name)?.node;
         let mut outcome_keys = node_keys.clone();
-        if context.execution_correlations.contains_key(name) {
+        if context.inputs.execution_correlations.contains_key(name) {
             outcome_keys.push(execution_key(name));
         }
-        let mut outcomes = per_execution_outcomes(node, &outcome_keys)?;
+        let mut outcomes = per_execution_outcomes(node, &outcome_keys, context.inputs.budget)?;
         outcomes.push(empty_outcome(&outcome_keys));
-        item_dimensions.push(outcomes);
+        item_dimensions.push(
+            outcomes
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+        );
     }
     if !dimension_product_is_bounded(&item_dimensions) {
         return None;
     }
-    let mut item_outcomes = enumerate_assignments(item_dimensions);
+    let mut item_outcomes = enumerate_assignments(item_dimensions, context.inputs.budget)?;
     item_outcomes.retain(|assignment| {
         if assignment_is_empty(assignment) {
             return false;
         }
         let mut correlated = context.shared_assignment.clone();
         correlated.extend(assignment.clone());
-        context.join_correlations.iter().all(|(name, correlation)| {
-            !correlation_is_available_to_scope(name, correlation, &key_set, context.available_keys)
-                || assignment_matches_parallel_join_correlation(&correlated, name, correlation)
-        }) && component.iter().all(|name| {
-            context
-                .execution_correlations
-                .get(name)
-                .is_none_or(|correlation| {
-                    assignment_matches_map_execution_correlation(&correlated, name, correlation)
-                })
-        })
+        context
+            .inputs
+            .join_correlations
+            .iter()
+            .all(|(name, correlation)| {
+                !correlation_is_available_to_scope(
+                    name,
+                    correlation,
+                    &key_set,
+                    context.available_keys,
+                ) || assignment_matches_parallel_join_correlation(&correlated, name, correlation)
+            })
+            && component.iter().all(|name| {
+                context
+                    .inputs
+                    .execution_correlations
+                    .get(name)
+                    .is_none_or(|correlation| {
+                        assignment_matches_map_execution_correlation(&correlated, name, correlation)
+                    })
+            })
     });
     for assignment in &mut item_outcomes {
         assignment.retain(|key, _| key.source != ControlSourceKey::Execution);
     }
     item_outcomes.retain(|assignment| !assignment_is_empty(assignment));
+    normalize_outcome_labels(&mut item_outcomes, context.inputs.label_classes)?;
     item_outcomes = item_outcomes
         .into_iter()
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    aggregate_assignments_from_outcomes(&keys, &item_outcomes, context.maximum)
+    aggregate_assignments_from_outcomes(AggregateCounts {
+        keys: &keys,
+        outcomes: &item_outcomes,
+        saturation: context.inputs.saturation,
+        budget: context.inputs.budget,
+    })
 }
 
 fn assignment_matches_map_execution_correlation(
@@ -309,10 +321,9 @@ pub(super) fn correlation_control_is_present(
     keys.iter().any(|key| {
         key.name == *name
             && key.source == ControlSourceKey::Group
-            && key
-                .field
-                .as_ref()
-                .is_some_and(|field| field.as_str() == correlation.field())
+            && key.field.as_ref().is_some_and(|field| {
+                field.as_str() == correlation.field() || retention_index(Some(field)).is_some()
+            })
     })
 }
 
@@ -332,4 +343,23 @@ pub(super) fn correlation_is_available_to_scope(
         .flat_map(guard_selectors)
         .map(SelectorKey::from)
         .all(|key| available_keys.contains(&key))
+}
+
+fn normalize_outcome_labels(
+    outcomes: &mut [Assignment],
+    classes: &BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
+) -> Option<()> {
+    for outcome in outcomes {
+        for (key, control) in outcome {
+            let Some(labels) = classes.get(key) else {
+                continue;
+            };
+            let mut counts = BTreeMap::new();
+            for (label, count) in &control.counts {
+                *counts.entry(labels.get(label)?.clone()).or_insert(0) += count;
+            }
+            control.counts = counts;
+        }
+    }
+    Some(())
 }

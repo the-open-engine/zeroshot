@@ -288,60 +288,17 @@ fn nested_profile_request(name: &str, depth: usize) -> RunProfileSetRequest {
 }
 
 #[test]
-fn unreadable_profile_writes_preserve_existing_profiles_and_defaults() {
+fn profile_store_round_trips_depth_64_graphs_with_transport_wrappers() {
     let root = tempfile::tempdir().assert_value();
     let store = LocalRunProfileStore::new(root.path().to_path_buf());
-    let original = store
-        .set(profile_request("alpha", "worker", true))
-        .assert_value()
-        .profile;
-    // Separate payload decoding can read the old 61/62 boundary and one further level.
-    for depth in [61, 62, 63] {
+    for depth in [61, 62, 63, 64] {
         store
             .set(nested_profile_request("nested", depth))
             .assert_value();
-        store.show(selector("nested")).assert_value();
-    }
-    let path = root.path().join(PROFILES_FILE);
-    let before = std::fs::read(&path).assert_value();
-
-    for name in ["deep", "alpha"] {
-        let mut request = nested_profile_request(name, 64);
-        request.set_default = true;
-        assert!(matches!(
-            store.set(request),
-            Err(NativeV2CliError::Local(message))
-                if message == "local profile store could not be read back before saving"
-        ));
-        assert_eq!(std::fs::read(&path).assert_value(), before);
         let reopened = LocalRunProfileStore::new(root.path().to_path_buf());
-        assert_eq!(reopened.show(selector("alpha")).assert_value(), original);
         reopened.show(selector("nested")).assert_value();
-        assert_eq!(
-            reopened
-                .list(RunProfileListRequest {
-                    scope: RunProfileScope::User
-                })
-                .assert_value()
-                .profiles
-                .len(),
-            2
-        );
     }
     assert!(store.delete(selector("nested")).assert_value().deleted);
-    assert!(store.delete(selector("alpha")).assert_value().deleted);
-}
-
-#[test]
-fn unreadable_initial_profile_does_not_create_a_store() {
-    let root = tempfile::tempdir().assert_value();
-    let store = LocalRunProfileStore::new(root.path().to_path_buf());
-    assert!(store.set(nested_profile_request("deep", 64)).is_err());
-    assert!(!root.path().join(PROFILES_FILE).exists());
-    store
-        .set(nested_profile_request("nested", 63))
-        .assert_value();
-    store.show(selector("nested")).assert_value();
 }
 
 fn temporary_store() -> (tempfile::TempDir, LocalRunProfileStore) {

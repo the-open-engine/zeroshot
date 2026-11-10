@@ -576,3 +576,11 @@ A native launch or session-initialization rejection fails the node with the nati
 normal bounded, redacted diagnostics and authored error routing. It does not trigger response
 correction, configuration fallback, or adapter retries of rejected initialization. Settings accepted
 or ignored by the native harness have no effective-configuration acknowledgement or added preflight.
+
+## Execution concurrency
+
+Optional `maxConcurrency` limits executing leaf nodes and Zeroshot-owned auxiliary agents across
+the run. Its effective default is 64 on every placement; explicit values range from 1 through
+65,536. Admission records the effective value in run metadata. Queued work has no execution
+identity, attempt, or timeout until admission. Map `maxItems` independently limits active complete
+item bodies. Neither limit changes the separate 65,536 logical-visit and loop-entry ceilings.

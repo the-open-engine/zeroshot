@@ -1175,9 +1175,14 @@
         },
         "termination": {
           "$ref": "#/$defs/TerminationWitness"
+        },
+        "workEnforcement": {
+          "$ref": "#/$defs/WorkEnforcement",
+          "description": "Static derivation or ceilings enforced against actual logical work during execution."
         }
       },
       "required": [
+        "workEnforcement",
         "termination",
         "maxNodeExecutions",
         "peakConcurrency",
@@ -1228,6 +1233,13 @@
           "type": "object"
         }
       ]
+    },
+    "WorkEnforcement": {
+      "enum": [
+        "static",
+        "runtime"
+      ],
+      "type": "string"
     },
     "WriteBinding": {
       "additionalProperties": false,

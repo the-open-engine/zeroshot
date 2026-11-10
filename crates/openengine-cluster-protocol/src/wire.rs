@@ -154,3 +154,7 @@ macro_rules! impl_bounded_redactable_string {
 }
 
 pub(crate) use impl_bounded_redactable_string;
+
+#[path = "bounded_json.rs"]
+mod bounded_json;
+pub use bounded_json::{bounded_json_from_slice, bounded_json_from_str};

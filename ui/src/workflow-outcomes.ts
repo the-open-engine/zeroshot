@@ -75,7 +75,6 @@ function validFailureLeaf(guard: Record<string, unknown>): guard is FailureLeaf 
 
 function expectedControl(node: GraphNode): [string, string] | undefined {
   if (node.kind === 'loop') return ['terminated', 'exhausted'];
-  if (node.kind === 'map') return ['overflow', 'overflow'];
   if (node.kind !== 'par') return undefined;
   if (node.join?.kind === 'first') return ['raced', 'no_satisfier'];
   return ['all', 'any', 'quorum'].includes(node.join?.kind)

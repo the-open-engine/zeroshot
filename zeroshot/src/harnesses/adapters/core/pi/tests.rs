@@ -131,6 +131,8 @@ fn invocation(
         environment,
         session: test_session(),
         provider_session_slot: NodeInstanceId::new(1).assert_value_with("session slot"),
+        provider_home_slot: NodeInstanceId::new(1).assert_value_with("session slot"),
+        auxiliary: false,
     }
 }
 

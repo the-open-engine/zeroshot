@@ -169,6 +169,23 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Initial input remains caller-owned and is validated unchanged. A root group may add required
   state fields only when their payload types have deterministic implicit empty values; verification
   proves this and reduction materializes missing null, string, array, and recursively empty record values.
+- `maxItems` limits active complete map bodies, never total input cardinality. The reducer derives
+  a bounded pending frontier from current visit markers and durable history; prior loop rounds do not
+  exempt fresh items. Admission records effective `maxConcurrency` (default 64, maximum 65,536).
+  The supervisor admits leaf executions before allocating identities, attempts or timeouts and keeps
+  capacity through cleanup and durable settlement. Native auxiliary runners share the candidate's
+  execution capacity. Provider sessions lease compact cleanup slots independently of durable retry
+  IDs; monotonically fresh home identities prevent cleanup-slot reuse from reusing native session
+  directories and recall budgets. Auxiliary ownership is explicit; large primary retry IDs never
+  imply auxiliary work. Auxiliary metadata IDs start beyond the genuine primary visit/attempt ceiling,
+  independently of contained cleanup reservations. Uncertain cleanup quarantines those slots and capacity. Logical visits and loop entries each
+  have a separate run ceiling of 65,536, reconstructed from ledger/checkpoint history.
+  Dynamic maps receive runtime-enforced work certificates. Correlated aggregate verification uses
+  saturated joint counts and one deterministic 8 Mi count-cell proof-work bound. First joins use
+  shared three-valued guard evaluation and joint retained-branch witnesses, so nested subset joins
+  cannot fabricate loser evidence. A completed map makes its aggregates available before a
+  pending branch tail. Graph-bearing JSON boundaries scan a 512-container envelope before decoding
+  depth-64 graphs and their payload/transport wrappers.
 - Map reduction collects a promoted field only when every item wrote it in that item scope. A worker
   error leaves an incomplete collection unchanged while its controls remain available to authored
   guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
@@ -596,7 +613,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the checker preserves them in the comment. PR headers omit a source revision already named
   by their captured head. Classifier/checker are inspection-only verifiers; the reproducer is a step
   that can prepare the full local stack and browser tests without repairing tracked source.
-  Mapped runtime failures and overflow stop before publication; failed checks and environment
+  Mapped runtime failures stop before publication; failed checks and environment
   blockers return evidence for the report. All model choices remain caller-authored; the supplied
   PR runtime binds the three independent agents to `gpt-6.1-sol` with `xhigh`. Negative findings
   are successful reviews. Selecting a review template defaults to comment
@@ -615,13 +632,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   task resolution through separate versioned discovery extensions.
 - `code-review` reuses the `pr-review` input type and review continuation, so `--task-from`,
   comparison preparation and comment publication are unchanged. Triage returns a summary and at most
-  six units (maps allow eight; overflow fails). Per-unit maps run two broad, a depth and a design
+  six units (maps allow eight concurrent items). Per-unit maps run two broad, a depth and a design
   reviewer beside five whole-change hunters (logic, state, contracts, errors, claims); the claims
   hunter checks linked issue acceptance criteria. Per-unit and remaining-file finalizers merge, try to
   disprove and rewrite `{file,startLine,endLine,severity,title,body}` findings, and a report agent
   renders one Markdown comment. Every agent is a read-only verifier with two attempts and no deadline.
   One choice per agent or map keeps each guard's control space under the verifier ceiling; any
-  agent error or map overflow fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
+  agent error fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
   prompt parser. Inspectors do not install dependencies or start applications, services or browsers.
   The report stays under 12,000 characters and 48,000 UTF-8 bytes to leave room for the publisher header. The supplied runtime splits agents across Claude Code and Codex;
   model choices remain caller-authored. Its supplied local runtime sets `workspaceCheckpoints: false`

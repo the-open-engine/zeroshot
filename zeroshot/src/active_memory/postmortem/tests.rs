@@ -27,7 +27,7 @@ use crate::native_v2_contract::{NodeInvocation, RunSubmission, TokenUsageDelta};
 use crate::native_v2_runner::test_support::CountingSession;
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NativeNodeRunner, NodeDriver,
-    NodeRole, NodeSession, ResolvedEnvironment, SessionFactory, AUXILIARY_PROVIDER_SLOT_OFFSET,
+    NodeRole, NodeSession, ResolvedEnvironment, SessionFactory, AUXILIARY_EXECUTION_OFFSET,
 };
 use crate::native_v2_supervisor::NativeV2Supervisor;
 use crate::v2_run_ledger::{CreateRun, RunEvent};
@@ -726,7 +726,7 @@ async fn four_specialists_share_run_authority_and_publish_scoped_lessons_without
         slots
             .iter()
             .filter(|(name, _)| name.starts_with("active_memory_"))
-            .all(|(_, slot)| *slot > AUXILIARY_PROVIDER_SLOT_OFFSET)
+            .all(|(_, slot)| (1..=crate::native_v2_runner::MAX_PROCESS_SLOTS).contains(slot))
     );
 }
 
@@ -1300,7 +1300,7 @@ async fn auxiliary_postmortem_output_and_tool_observations_are_not_discovery_evi
     let observations = vec![ToolObservation {
         seq: 1,
         node_id: "active_memory_repository".to_owned(),
-        execution_id: AUXILIARY_PROVIDER_SLOT_OFFSET + 1,
+        execution_id: AUXILIARY_EXECUTION_OFFSET + 1,
         timestamp_ms: 1,
         tool_name: "read_file".to_owned(),
         paths: Vec::new(),

@@ -40,6 +40,7 @@ impl Engine<'_> {
                 self.eval_terminal_node(node, context, traversal)
             }
         }?;
+        record_completed(node, context, traversal, &status);
         self.trace_finish(trace, &status, context);
         if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_)) {
             self.trace_terminal(trace, &status)?;
@@ -132,30 +133,39 @@ impl Engine<'_> {
         let mut local = context.clone();
         local.local_writes.clear();
         let mut position = HistoryPosition::ZERO;
-        for child in group.children.as_slice() {
-            match self.eval(child, &mut local, traversal)? {
+        for (index, child) in group.children.as_slice().iter().enumerate() {
+            let accepted_prefix = traversal.accepted_prefix
+                || group.children.as_slice()[index + 1..]
+                    .iter()
+                    .any(|later| self.item_has_history(later, traversal.map_indices, &local));
+            let result = self.eval(
+                child,
+                &mut local,
+                Traversal {
+                    accepted_prefix,
+                    ..traversal
+                },
+            );
+            if result.is_err() {
+                merge_runtime_facts(&local, context);
+            }
+            match result? {
                 Status::Continue {
                     position: child_position,
                 } => {
                     position = position.max(child_position);
                 }
-                other => return Ok(other.after(position)),
+                other => {
+                    merge_runtime_facts(&local, context);
+                    return Ok(other.after(position));
+                }
             }
         }
-        promote(PromotionRequest {
-            node: &group.name,
-            map_indices: traversal.map_indices,
-            paths: &group.promoted_state_paths,
-            optional_paths: self
-                .optional_promotions
-                .get(&group.name)
-                .ok_or(ReducerError::InconsistentHistory)?,
-            local: &local,
-            parent: context,
-            mode: traversal.mode,
-            decisions: &mut self.decisions,
-        })?;
-        self.continue_decision(&group.name, traversal.mode);
+        self.promote_group(
+            (&group.name, &group.promoted_state_paths),
+            (&local, context),
+            traversal,
+        )?;
         Ok(Status::Continue { position })
     }
 
@@ -173,33 +183,41 @@ impl Engine<'_> {
             clear_scoped_runtime_facts(&mut local, &loop_names, traversal.map_indices);
             // Optional outputs describe this iteration; required state still carries across rounds.
             local.local_writes.clear();
-            let mut loop_iterations = traversal.loop_iterations.to_vec();
-            loop_iterations.push(iteration);
-            match self.eval(
-                &group.body,
+            let loop_iterations = self.enter_loop_round(group, traversal, iteration)?;
+            let result = self.eval_loop_body(
+                group,
                 &mut local,
                 Traversal {
                     loop_iterations: &loop_iterations,
                     ..traversal
                 },
-            )? {
+            );
+            if result.is_err() {
+                merge_runtime_facts(&local, context);
+            }
+            match result? {
                 Status::Continue {
                     position: body_position,
                 } => {
                     position = position.max(body_position);
                 }
-                other => return Ok(other.after(position)),
+                other => {
+                    merge_runtime_facts(&local, context);
+                    return Ok(other.after(position));
+                }
             }
-            let converged = match &group.until {
-                Some(until) => self.guard(until, &local, traversal.map_indices)?,
-                None => false,
-            };
+            let converged = group
+                .until
+                .as_ref()
+                .map(|guard| self.guard(guard, &local, traversal.map_indices))
+                .transpose()?
+                .unwrap_or(false);
             if converged {
                 return self.finish_loop(LoopFinishRequest {
                     group,
                     context,
                     traversal,
-                    completion: LoopCompletion::new(local, position, "converged"),
+                    completion: LoopCompletion::new(local, position, "converged", iteration),
                 });
             }
         }
@@ -207,8 +225,48 @@ impl Engine<'_> {
             group,
             context,
             traversal,
-            completion: LoopCompletion::new(local, position, "exhausted"),
+            completion: LoopCompletion::new(
+                local,
+                position,
+                "exhausted",
+                group.max_iterations.get(),
+            ),
         })
+    }
+
+    fn enter_loop_round(
+        &mut self,
+        group: &openengine_cluster_protocol::LoopNode,
+        traversal: Traversal<'_>,
+        iteration: u64,
+    ) -> Result<Vec<u64>, ReducerError> {
+        let mut rounds = traversal.loop_iterations.to_vec();
+        rounds.push(iteration);
+        if traversal.mode != EvalMode::Probe || traversal.accepted_prefix {
+            self.charge_loop(&group.name, traversal.map_indices, &rounds)?;
+        }
+        if traversal.mode == EvalMode::Probe {
+            self.prospective_loops
+                .record(&group.name, traversal.map_indices, &rounds)
+                .map_err(|_| ReducerError::ProspectiveWorkLimit)?;
+        }
+        Ok(rounds)
+    }
+
+    fn eval_loop_body(
+        &mut self,
+        group: &openengine_cluster_protocol::LoopNode,
+        context: &mut Context,
+        traversal: Traversal<'_>,
+    ) -> Result<Status, ReducerError> {
+        self.active_loops.push((
+            group.name.clone(),
+            traversal.map_indices.to_vec(),
+            traversal.loop_iterations.to_vec(),
+        ));
+        let result = self.eval(&group.body, context, traversal);
+        self.active_loops.pop();
+        result
     }
 
     fn finish_loop(&mut self, request: LoopFinishRequest<'_, '_>) -> Result<Status, ReducerError> {
@@ -222,13 +280,21 @@ impl Engine<'_> {
             mut local,
             position,
             label,
+            iteration,
         } = completion;
-        if traversal.mode != EvalMode::Probe {
+        let mut final_round = traversal.loop_iterations.to_vec();
+        final_round.push(iteration);
+        let record_evidence = traversal.record_evidence
+            && (traversal.mode != EvalMode::Probe
+                || self
+                    .loop_entries
+                    .contains(&group.name, traversal.map_indices, &final_round));
+        if record_evidence {
             self.loop_evidence.exhausted_loops.retain(|prior| {
                 prior.node != group.name || prior.map_indices != traversal.map_indices
             });
         }
-        if traversal.mode != EvalMode::Probe && label == "exhausted" {
+        if record_evidence && label == "exhausted" {
             self.loop_evidence
                 .record_exhausted_loop(openengine_cluster_protocol::ExhaustedLoop {
                     node: group.name.clone(),
@@ -248,20 +314,11 @@ impl Engine<'_> {
                 map_indices: traversal.map_indices,
             },
         );
-        promote(PromotionRequest {
-            node: &group.name,
-            map_indices: traversal.map_indices,
-            paths: &group.promoted_state_paths,
-            optional_paths: self
-                .optional_promotions
-                .get(&group.name)
-                .ok_or(ReducerError::InconsistentHistory)?,
-            local: &local,
-            parent: context,
-            mode: traversal.mode,
-            decisions: &mut self.decisions,
-        })?;
-        self.continue_decision(&group.name, traversal.mode);
+        self.promote_group(
+            (&group.name, &group.promoted_state_paths),
+            (&local, context),
+            traversal,
+        )?;
         Ok(Status::Continue { position })
     }
 
@@ -282,6 +339,9 @@ impl Engine<'_> {
                 return Err(ReducerError::InconsistentHistory);
             }
             self.consumed_executions.insert(execution.execution);
+        }
+        if !visit.executions.is_empty() {
+            self.charge_active_loops()?;
         }
         mark_visit(
             spec.name,
@@ -367,11 +427,10 @@ impl Engine<'_> {
             map_indices: map_indices.to_vec(),
         };
         let mut matching = self
-            .executions
-            .iter()
-            .filter(|execution| execution.occurrence == occurrence)
+            .by_occurrence
+            .get(&occurrence)
             .cloned()
-            .collect::<Vec<_>>();
+            .unwrap_or_default();
         let number = next_visit(spec.name, map_indices, &context.controls);
         let (attempt, existing, executions) = match self.execution_mode {
             ExecutionMode::LegacyAttempts => {
@@ -425,33 +484,24 @@ impl Engine<'_> {
             input,
             traversal,
         } = request;
-        if traversal.mode != EvalMode::Decide || traversal.cutoff != HistoryPosition::MAX {
+        if !self.admit_leaf(spec.name, traversal)? {
             return Ok(Status::Pending);
         }
+        self.charge_active_loops()?;
+        self.charge_visit(spec.name)?;
         let node_instance = match visit.matching.last() {
             Some(previous) => previous.node_instance,
-            None => {
-                let allocated = NodeInstanceId::new(self.next_node_instance)
-                    .map_err(|_| ReducerError::IdentityOutOfRange)?;
-                self.next_node_instance = self
-                    .next_node_instance
-                    .checked_add(1)
-                    .ok_or(ReducerError::IdentityOutOfRange)?;
-                allocated
-            }
+            None => self.allocate_node_instance()?,
         };
-        self.record_boundary(&spec, traversal, visit.attempt.get())?;
-        let execution = self.allocate_execution()?;
-        self.decisions.push(Decision::Dispatch {
-            node_instance,
-            execution,
-            occurrence: visit.occurrence,
-            attempt: visit.attempt,
-            iteration: traversal.loop_iterations.last().copied().unwrap_or(0),
-            worker: spec.worker.clone(),
-            input,
-        });
-        Ok(Status::Pending)
+        self.dispatch_visit(
+            &spec,
+            DispatchVisit {
+                node_instance,
+                occurrence: visit.occurrence,
+                attempt: visit.attempt,
+            },
+            (input, traversal),
+        )
     }
 
     fn dispatch_retry(
@@ -464,7 +514,7 @@ impl Engine<'_> {
             execution: previous,
             input,
         } = request;
-        if traversal.mode != EvalMode::Decide || traversal.cutoff != HistoryPosition::MAX {
+        if !self.admit_leaf(spec.name, traversal)? {
             return Ok(Status::Pending);
         }
         let attempt = previous
@@ -475,13 +525,31 @@ impl Engine<'_> {
             .and_then(|value| {
                 PositiveInteger::new(value).map_err(|_| ReducerError::IdentityOutOfRange)
             })?;
-        self.record_boundary(&spec, traversal, attempt.get())?;
+        self.dispatch_visit(
+            &spec,
+            DispatchVisit {
+                node_instance: previous.node_instance,
+                occurrence: previous.occurrence,
+                attempt,
+            },
+            (input, traversal),
+        )
+    }
+
+    fn dispatch_visit(
+        &mut self,
+        spec: &ExecutableSpec<'_>,
+        visit: DispatchVisit,
+        request: (Value, Traversal<'_>),
+    ) -> Result<Status, ReducerError> {
+        let (input, traversal) = request;
+        self.record_boundary(spec, traversal, visit.attempt.get())?;
         let execution = self.allocate_execution()?;
         self.decisions.push(Decision::Dispatch {
-            node_instance: previous.node_instance,
+            node_instance: visit.node_instance,
             execution,
-            occurrence: previous.occurrence,
-            attempt,
+            occurrence: visit.occurrence,
+            attempt: visit.attempt,
             iteration: traversal.loop_iterations.last().copied().unwrap_or(0),
             worker: spec.worker.clone(),
             input,
@@ -513,6 +581,39 @@ impl Engine<'_> {
         }
         self.boundary = Some(boundary);
         Ok(())
+    }
+
+    fn admit_leaf(
+        &mut self,
+        node: &NodeName,
+        traversal: Traversal<'_>,
+    ) -> Result<bool, ReducerError> {
+        if !self.pending_leaf(node, traversal) {
+            return Ok(false);
+        }
+        self.trace_queued(node, traversal)?;
+        Ok(self.admit_pending(traversal))
+    }
+
+    fn admit_pending(&mut self, traversal: Traversal<'_>) -> bool {
+        if traversal.mode != EvalMode::Decide
+            || traversal.cutoff != HistoryPosition::MAX
+            || self.dispatch_remaining == 0
+        {
+            return false;
+        }
+        self.dispatch_remaining -= 1;
+        true
+    }
+
+    fn allocate_node_instance(&mut self) -> Result<NodeInstanceId, ReducerError> {
+        let allocated = NodeInstanceId::new(self.next_node_instance)
+            .map_err(|_| ReducerError::IdentityOutOfRange)?;
+        self.next_node_instance = self
+            .next_node_instance
+            .checked_add(1)
+            .ok_or(ReducerError::IdentityOutOfRange)?;
+        Ok(allocated)
     }
 
     fn allocate_execution(&mut self) -> Result<ExecutionId, ReducerError> {
@@ -640,4 +741,17 @@ fn native_visit_executions(
             (visit == requested_visit).then(|| execution.clone())
         })
         .collect()
+}
+
+fn record_completed(
+    node: &GraphNode,
+    context: &mut Context,
+    traversal: Traversal<'_>,
+    status: &Status,
+) {
+    if matches!(status, Status::Continue { .. }) {
+        context
+            .completed
+            .insert((node.name().clone(), traversal.map_indices.to_vec()));
+    }
 }

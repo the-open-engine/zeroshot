@@ -209,7 +209,7 @@ export function Inspector(p: InspectorProps) {
                 key={`${node.name}-items`}
                 node={node.name}
                 field="maxItems"
-                label="Maximum items"
+                label="Concurrent items"
                 value={node.maxItems}
                 onChange={(value) => graphChange('maxItems', value)}
               />

@@ -269,7 +269,7 @@ test('loop labels retain until conditions and round bounds; a one-round loop has
   );
 });
 
-test('maps identify separate item state, bounded item repetition, and empty/overflow bypasses', () => {
+test('maps identify separate item state, item concurrency, and empty-input bypasses', () => {
   const map: GraphNode = {
     kind: 'map',
     name: 'each_task',
@@ -280,16 +280,18 @@ test('maps identify separate item state, bounded item repetition, and empty/over
   const view = projectWorkflow(doc(seq('root', [map, done('finish')])));
   assert.match(
     byOwner(view, 'each_task', 'map-start').detail ?? '',
-    /Item · task.list.*Up to 5 items/
+    /Item · task.list.*5 concurrent items/
   );
-  assert.match(view.edges.find((edge) => edge.repeat)?.label ?? '', /independently/);
+  assert.match(view.edges.find((edge) => edge.repeat)?.label ?? '', /remaining items/);
+  const serial = projectWorkflow(doc(seq('root', [{ ...map, maxItems: 1 }, done('finish')])));
+  assert.ok(serial.edges.some((edge) => edge.repeat));
   const bypass = view.edges.find(
     (edge) =>
       edge.source === byOwner(view, 'each_task', 'map-start').id &&
       edge.target === byOwner(view, 'each_task', 'map-end').id
   )!;
   assert.equal(bypass.secondary, true);
-  assert.match(bypass.label ?? '', /No items or item limit exceeded/);
+  assert.match(bypass.label ?? '', /No items/);
   const terminalMap = { ...map, body: done('item_terminal') };
   const terminal = projectWorkflow(doc(seq('root', [terminalMap, agent('after_empty_map')])));
   assert.deepEqual(outgoing(terminal, byOwner(terminal, 'item_terminal').id), []);

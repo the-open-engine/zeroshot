@@ -187,8 +187,8 @@ fn nested_map_group_aggregate_graph() -> GraphSpec {
                 "kind":"map","name":"outerMap","state":state.clone(),
                 "over":{"source":"state","path":["outerItems"]},"maxItems":2,
                 "body":{
-                    "kind":"map","name":"innerMap","state":state.clone(),
-                    "over":{"source":"state","path":["innerItems"]},"maxItems":1,
+                    "kind":"loop","name":"innerLoop","state":state.clone(),
+                    "maxIterations":1,
                     "body":{
                         "kind":"verifier","name":"innerVerify","worker":"worker.verify@1",
                         "input":{"kind":"null"},"output":{"kind":"record","fields":{}},
@@ -205,8 +205,8 @@ fn nested_map_group_aggregate_graph() -> GraphSpec {
                 "branches":[{
                     "when":{
                         "kind":"k_of_map","count":2,
-                        "value":{"name":"innerMap","source":"group","field":"overflow"},
-                        "labels":["overflow"]
+                        "value":{"name":"innerLoop","source":"group","field":"terminated"},
+                        "labels":["exhausted"]
                     },
                     "node":{
                         "kind":"succeed","name":"twoInnerOverflows",

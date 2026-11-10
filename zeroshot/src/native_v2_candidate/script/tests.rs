@@ -48,6 +48,8 @@ async fn invocation(
         environment: request.environment,
         session,
         provider_session_slot: crate::native_v2_contract::NodeInstanceId::new(1).unwrap(),
+        provider_home_slot: crate::native_v2_contract::NodeInstanceId::new(1).unwrap(),
+        auxiliary: false,
     }
 }
 

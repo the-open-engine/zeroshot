@@ -366,19 +366,16 @@ fn report() -> Result<GraphNode, BuiltinTemplateError> {
     )
 }
 
-/// A failed map item or a map with more items than it allows.
+/// A failed item in the complete mapped input.
 fn map_failed(map: &str, body: &str) -> Result<(String, Guard), BuiltinTemplateError> {
-    let guard = Guard::Any {
-        guards: non_empty(vec![
-            control_guard(map, ControlSource::Group, Some("overflow"), &["overflow"])?,
-            Guard::KOfMap {
-                count: positive(1)?,
-                value: error_selector(body)?,
-                labels: worker_error_labels()?,
-            },
-        ])?,
-    };
-    Ok((map.to_owned(), guard))
+    Ok((
+        map.to_owned(),
+        Guard::KOfMap {
+            count: positive(1)?,
+            value: error_selector(body)?,
+            labels: worker_error_labels()?,
+        },
+    ))
 }
 
 fn agent_failed(node: &str) -> Result<(String, Guard), BuiltinTemplateError> {

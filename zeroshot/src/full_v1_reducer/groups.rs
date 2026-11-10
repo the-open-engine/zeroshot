@@ -44,23 +44,15 @@ impl Engine<'_> {
             .or(group.otherwise.as_deref())
             .ok_or(ReducerError::MissingChoiceRoute)?;
         self.trace_branch(&group.name, selected.name());
-        let status = self.eval(selected, &mut local, traversal)?;
+        let result = self.eval(selected, &mut local, traversal);
+        merge_runtime_facts(&local, context);
+        let status = result?;
         if let Status::Continue { position } = status {
-            promote(PromotionRequest {
-                node: &group.name,
-                map_indices: traversal.map_indices,
-                paths: &group.promoted_state_paths,
-                optional_paths: self
-                    .optional_promotions
-                    .get(&group.name)
-                    .ok_or(ReducerError::InconsistentHistory)?,
-                local: &local,
-                parent: context,
-                mode: traversal.mode,
-                decisions: &mut self.decisions,
-            })?;
-            merge_runtime_facts(&local, context);
-            self.continue_decision(&group.name, traversal.mode);
+            self.promote_group(
+                (&group.name, &group.promoted_state_paths),
+                (&local, context),
+                traversal,
+            )?;
             Ok(Status::Continue { position })
         } else {
             Ok(status)
@@ -79,6 +71,7 @@ impl Engine<'_> {
             context,
             Traversal {
                 mode: EvalMode::Probe,
+                record_evidence: false,
                 ..traversal
             },
         )?;
@@ -97,20 +90,21 @@ impl Engine<'_> {
                 required,
             },
         )? {
-            // A settled, unreachable join has no winner pass. Its completed branch paths are
-            // canonical facts of the reduction; pending probes and race losers stay private.
             if !matches!(status, Status::Pending) {
-                if traversal.mode == EvalMode::Probe {
-                    self.restore_trace(probe_trace)?;
-                } else {
+                if traversal.record_evidence {
+                    // Observe only history-backed completed loops. This remains a bounded probe:
+                    // unstarted tails neither acquire execution identities nor charge actual work.
                     self.evaluate_parallel_branches(
                         group,
                         context,
                         Traversal {
-                            mode: EvalMode::Replay,
+                            mode: EvalMode::Probe,
+                            record_evidence: true,
                             ..traversal
                         },
                     )?;
+                } else {
+                    self.restore_trace(probe_trace)?;
                 }
             }
             return Ok(status);
@@ -146,17 +140,34 @@ impl Engine<'_> {
         context: &Context,
         traversal: Traversal<'_>,
     ) -> Result<Vec<(Status, Context)>, ReducerError> {
-        group
+        let mut order = group
             .branches
             .as_slice()
             .iter()
-            .map(|branch| {
-                let mut branch_context = context.clone();
-                branch_context.local_writes.clear();
-                let status = self.eval(branch, &mut branch_context, traversal)?;
-                Ok((status, branch_context))
-            })
-            .collect()
+            .enumerate()
+            .collect::<Vec<_>>();
+        order.sort_by_key(|(index, branch)| {
+            (self.last_service(branch, traversal.map_indices), *index)
+        });
+        let base = self.prospective_loops.clone();
+        let mut results = Vec::new();
+        for (index, branch) in order {
+            self.prospective_loops = base.clone();
+            let mut branch_context = context.clone();
+            branch_context.local_writes.clear();
+            let status = self.probe(
+                branch,
+                &mut branch_context,
+                Traversal {
+                    accepted_prefix: false,
+                    ..traversal
+                },
+            )?;
+            results.push((index, (status, branch_context)));
+        }
+        self.prospective_loops = base;
+        results.sort_by_key(|(index, _)| *index);
+        Ok(results.into_iter().map(|(_, result)| result).collect())
     }
 
     fn parallel_completions(
@@ -171,7 +182,10 @@ impl Engine<'_> {
                 continue;
             };
             let satisfies = match &group.join {
-                Join::First { when } => self.guard(when, branch_context, traversal.map_indices)?,
+                Join::First { when } => {
+                    self.candidate_guard(when, branch_context, traversal.map_indices)
+                        == openengine_cluster_protocol::GuardTruth::True
+                }
                 Join::All {} | Join::Any {} | Join::Quorum { .. } => true,
             };
             if satisfies {
@@ -195,18 +209,60 @@ impl Engine<'_> {
         if summary.completed >= summary.required {
             return Ok(None);
         }
-        let settled = summary
+        let irrelevant = self.prune_ineligible_first(
+            GroupEvaluation {
+                group,
+                context,
+                traversal,
+            },
+            summary.probes,
+        );
+        let potential = summary
             .probes
             .iter()
-            .all(|(status, _)| !matches!(status, Status::Pending));
+            .zip(group.branches.as_slice())
+            .filter(|((status, candidate), branch)| {
+                matches!(status, Status::Pending)
+                    && match &group.join {
+                        Join::First { when } => {
+                            self.candidate_viable(when, candidate, (branch, traversal.map_indices))
+                        }
+                        _ => true,
+                    }
+            })
+            .count();
+        let settled = summary.completed + potential < summary.required;
         if !settled {
             if traversal.mode == EvalMode::Decide {
-                for branch in group.branches.as_slice() {
-                    let mut branch_context = context.clone();
-                    let _ = self.eval(branch, &mut branch_context, traversal)?;
+                let mut branches = group
+                    .branches
+                    .as_slice()
+                    .iter()
+                    .enumerate()
+                    .collect::<Vec<_>>();
+                branches.sort_by_key(|(index, branch)| {
+                    (self.last_service(branch, traversal.map_indices), *index)
+                });
+                for (_, branch) in branches {
+                    if irrelevant.contains(branch.name()) {
+                        continue;
+                    }
+                    let mut local = context.clone();
+                    let _ = self.eval(branch, &mut local, traversal)?;
                 }
             }
             return Ok(Some(Status::Pending));
+        }
+        for branch in group.branches.as_slice() {
+            self.void_active_descendants(
+                branch,
+                VoidScope {
+                    map_indices: traversal.map_indices,
+                    cutoff: HistoryPosition::ZERO,
+                    reason: ExecutionVoidReason::ParallelJoin,
+                    emit_decisions: traversal.mode == EvalMode::Decide,
+                },
+            );
         }
         self.record_parallel_control(
             GroupMutation {
@@ -225,6 +281,38 @@ impl Engine<'_> {
             .max()
             .unwrap_or(HistoryPosition::ZERO);
         Ok(Some(Status::Continue { position }))
+    }
+
+    fn prune_ineligible_first(
+        &mut self,
+        evaluation: GroupEvaluation<'_, ParNode>,
+        probes: &[(Status, Context)],
+    ) -> BTreeSet<NodeName> {
+        let GroupEvaluation {
+            group, traversal, ..
+        } = evaluation;
+        let mut irrelevant = BTreeSet::new();
+        if let Join::First { when } = &group.join {
+            for ((status, candidate), branch) in probes.iter().zip(group.branches.as_slice()) {
+                if matches!(status, Status::Pending)
+                    && !self.candidate_viable(when, candidate, (branch, traversal.map_indices))
+                {
+                    irrelevant.extend(descendant_names(branch));
+                    self.void_active_descendants(
+                        branch,
+                        VoidScope {
+                            map_indices: traversal.map_indices,
+                            cutoff: HistoryPosition::ZERO,
+                            reason: ExecutionVoidReason::ParallelJoin,
+                            emit_decisions: traversal.mode == EvalMode::Decide,
+                        },
+                    );
+                }
+            }
+            self.pending_frontier
+                .retain(|(name, _, _)| !irrelevant.contains(name));
+        }
+        irrelevant
     }
 
     fn join_parallel_winners(
@@ -261,6 +349,7 @@ impl Engine<'_> {
                 &mut branch_context,
                 Traversal {
                     cutoff: join_position,
+                    accepted_prefix: false,
                     ..traversal
                 },
             )?;

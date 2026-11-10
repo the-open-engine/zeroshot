@@ -16,16 +16,17 @@ impl Engine<'_> {
         let items = selected
             .as_array()
             .ok_or(ReducerError::InvalidDurableValue)?;
-        if items.len() as u64 > group.max_items.get() {
-            return Ok(self.map_overflow(group, context, traversal));
-        }
+        self.check_map_work(group, items, (context, traversal))?;
         let checkpoint = self.trace_checkpoint();
         let probes = self.evaluate_map_items(
             MapItemsEvaluation {
                 evaluation: GroupEvaluation {
                     group,
                     context: &*context,
-                    traversal,
+                    traversal: Traversal {
+                        record_evidence: false,
+                        ..traversal
+                    },
                 },
                 items,
             },
@@ -33,7 +34,7 @@ impl Engine<'_> {
         )?;
         let probe_trace = self.take_trace_since(checkpoint);
         if let Some((terminal_index, terminal)) = earliest_terminal(&probes) {
-            if traversal.mode == EvalMode::Probe {
+            if traversal.mode == EvalMode::Probe && !traversal.record_evidence {
                 let scope = &probes[terminal_index].scope;
                 self.restore_trace(
                     probe_trace
@@ -56,7 +57,7 @@ impl Engine<'_> {
                 },
             );
         }
-        let results = if traversal.mode == EvalMode::Probe {
+        let results = if traversal.mode == EvalMode::Probe && !traversal.record_evidence {
             self.restore_trace(probe_trace)?;
             probes
         } else {
@@ -72,9 +73,10 @@ impl Engine<'_> {
                 traversal.mode,
             )?
         };
-        if results
-            .iter()
-            .any(|result| matches!(result.status, Status::Pending))
+        if results.len() < items.len()
+            || results
+                .iter()
+                .any(|result| matches!(result.status, Status::Pending))
         {
             return Ok(Status::Pending);
         }
@@ -86,27 +88,6 @@ impl Engine<'_> {
             },
             &results,
         )
-    }
-
-    fn map_overflow(
-        &mut self,
-        group: &MapNode,
-        context: &mut Context,
-        traversal: Traversal<'_>,
-    ) -> Status {
-        self.set_group_control(
-            context,
-            GroupControlUpdate {
-                node: &group.name,
-                field: "overflow",
-                label: "overflow",
-                map_indices: traversal.map_indices,
-            },
-        );
-        self.continue_decision(&group.name, traversal.mode);
-        Status::Continue {
-            position: HistoryPosition::ZERO,
-        }
     }
 
     fn evaluate_map_items(
@@ -123,32 +104,48 @@ impl Engine<'_> {
                 },
             items,
         } = evaluation;
-        items
-            .iter()
-            .enumerate()
-            .map(|(index, item)| {
-                let mut scope = traversal.map_indices.to_vec();
-                scope.push(index as u64);
-                let mut item_context = context.clone();
-                // An incoming array is not a value produced for this item.
-                item_context.local_writes.clear();
-                let status = self.eval(
-                    &group.body,
-                    &mut item_context,
-                    Traversal {
-                        map_indices: &scope,
-                        item: Some(item),
-                        mode,
-                        ..traversal
-                    },
-                )?;
-                Ok(MapItemResult {
-                    status,
-                    context: item_context,
-                    scope,
-                })
-            })
-            .collect()
+        let base = self.prospective_loops.clone();
+        let mut results = Vec::new();
+        let mut pending = 0_u64;
+        for (index, item) in items.iter().enumerate() {
+            let mut scope = traversal.map_indices.to_vec();
+            scope.push(index as u64);
+            let historical = self.item_has_history(&group.body, &scope, context);
+            let retained = self.item_in_frontier(&group.body, &scope, traversal.loop_iterations);
+            if !historical
+                && !retained
+                && (pending >= group.max_items.get()
+                    || self.pending_frontier.len() >= self.frontier_limit)
+            {
+                continue;
+            }
+            if mode == EvalMode::Probe {
+                self.prospective_loops = base.clone();
+            }
+            let mut item_context = context.clone();
+            item_context.local_writes.clear();
+            let status = self.probe(
+                &group.body,
+                &mut item_context,
+                Traversal {
+                    map_indices: &scope,
+                    item: Some(item),
+                    mode,
+                    ..traversal
+                },
+            )?;
+            if matches!(status, Status::Pending) {
+                pending += 1;
+            }
+            results.push(MapItemResult {
+                prospective: self.prospective_loops.clone(),
+                status,
+                context: item_context,
+                scope,
+            });
+        }
+        self.prospective_loops = base;
+        Ok(results)
     }
 
     fn finish_terminal_map_item(
@@ -166,7 +163,12 @@ impl Engine<'_> {
             .get(selected.index)
             .ok_or(ReducerError::InconsistentHistory)?
             .scope;
-        let terminal = if traversal.mode != EvalMode::Probe {
+        if traversal.mode == EvalMode::Probe {
+            self.prospective_loops
+                .merge(&selected.probes[selected.index].prospective)
+                .map_err(|_| ReducerError::ProspectiveWorkLimit)?;
+        }
+        let terminal = if traversal.mode != EvalMode::Probe || traversal.record_evidence {
             let mut terminal_context = context.clone();
             self.eval(
                 &group.body,
@@ -211,6 +213,7 @@ impl Engine<'_> {
             context,
             traversal,
         } = evaluation;
+        self.merge_map_probe(traversal, results)?;
         let mut local = context.clone();
         let mut collected_paths = Vec::new();
         for path in &group.promoted_state_paths {
@@ -231,38 +234,34 @@ impl Engine<'_> {
             local.local_writes.insert(path.clone());
             collected_paths.push(path.clone());
         }
-        self.set_group_control(
-            &mut local,
-            GroupControlUpdate {
-                node: &group.name,
-                field: "overflow",
-                label: "ok",
-                map_indices: traversal.map_indices,
-            },
-        );
-        promote(PromotionRequest {
-            node: &group.name,
-            map_indices: traversal.map_indices,
-            paths: &collected_paths,
-            optional_paths: self
-                .optional_promotions
-                .get(&group.name)
-                .ok_or(ReducerError::InconsistentHistory)?,
-            local: &local,
-            parent: context,
-            mode: traversal.mode,
-            decisions: &mut self.decisions,
-        })?;
+        self.promote_group(
+            (&group.name, &collected_paths),
+            (&local, context),
+            traversal,
+        )?;
         let body_names = descendant_names(&group.body);
         for item in results {
             merge_scoped_runtime_facts(&item.context, context, &body_names, &item.scope);
         }
-        self.continue_decision(&group.name, traversal.mode);
         let position = results
             .iter()
             .map(|item| item.status.position())
             .max()
             .unwrap_or(HistoryPosition::ZERO);
         Ok(Status::Continue { position })
+    }
+    fn merge_map_probe(
+        &mut self,
+        traversal: Traversal<'_>,
+        results: &[MapItemResult],
+    ) -> Result<(), ReducerError> {
+        if traversal.mode == EvalMode::Probe {
+            for item in results {
+                self.prospective_loops
+                    .merge(&item.prospective)
+                    .map_err(|_| ReducerError::ProspectiveWorkLimit)?;
+            }
+        }
+        Ok(())
     }
 }

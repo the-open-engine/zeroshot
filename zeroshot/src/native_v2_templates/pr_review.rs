@@ -166,20 +166,10 @@ fn reproduction(state: &PayloadType) -> Result<GraphNode, BuiltinTemplateError> 
 }
 
 fn reproduction_error() -> Result<Guard, BuiltinTemplateError> {
-    Ok(Guard::Any {
-        guards: non_empty(vec![
-            control_guard(
-                "reproduction",
-                ControlSource::Group,
-                Some("overflow"),
-                &["overflow"],
-            )?,
-            Guard::KOfMap {
-                count: positive(1)?,
-                value: error_selector(REPRODUCER)?,
-                labels: worker_error_labels()?,
-            },
-        ])?,
+    Ok(Guard::KOfMap {
+        count: positive(1)?,
+        value: error_selector(REPRODUCER)?,
+        labels: worker_error_labels()?,
     })
 }
 

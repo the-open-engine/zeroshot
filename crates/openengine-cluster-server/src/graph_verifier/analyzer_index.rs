@@ -4,6 +4,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn new(graph: &'a GraphSpec) -> Self {
         Self {
             graph,
+            proof_work: ProofWork::default(),
             nodes: BTreeMap::new(),
             authored: Vec::new(),
             dependencies: BTreeMap::new(),
@@ -27,6 +28,9 @@ impl<'a> Analyzer<'a> {
         let root_path = vec![field_segment("root"), node_segment(self.graph.root.name())];
         self.index_node(&self.graph.root, root_path, 1);
         self.validate_global_limits();
+        if !self.diagnostics.is_empty() {
+            return None;
+        }
 
         let materialized_state = self
             .graph
@@ -117,6 +121,11 @@ impl<'a> Analyzer<'a> {
             }
         };
         Some(StructuralBounds {
+            work_enforcement: if fold.dynamic {
+                openengine_cluster_protocol::WorkEnforcement::Runtime
+            } else {
+                openengine_cluster_protocol::WorkEnforcement::Static
+            },
             termination,
             max_node_executions,
             peak_concurrency,
@@ -132,7 +141,9 @@ impl<'a> Analyzer<'a> {
     ) {
         self.index_identity(node, &path);
         self.validate_node_depth(node.name(), &path, depth);
-        self.index_children(node, &path, depth);
+        if depth <= FULL_V1_MAX_GRAPH_DEPTH {
+            self.index_children(node, &path, depth);
+        }
     }
 
     pub(super) fn index_identity(&mut self, node: &'a GraphNode, path: &[DiagnosticPathSegment]) {

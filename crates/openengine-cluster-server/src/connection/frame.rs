@@ -150,7 +150,7 @@ pub(crate) struct DecodedFrame {
 
 impl DecodedFrame {
     pub(crate) fn decode(input: &str) -> Result<Self, String> {
-        serde_json::from_str(input)
+        openengine_cluster_protocol::bounded_json_from_str(input)
             .map(|root| Self { root })
             .map_err(|_| serialize_error(None, PARSE_ERROR, "Parse error", None))
     }

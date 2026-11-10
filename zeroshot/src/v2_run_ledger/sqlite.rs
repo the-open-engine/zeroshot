@@ -178,8 +178,9 @@ impl RunLedger for SqliteRunLedger {
                 .query_map([], |row| row.get::<_, String>(0))
                 .map_err(sqlite_error)?;
             rows.map(|row| {
-                let stored: StoredRun = serde_json::from_str(&row.map_err(sqlite_error)?)
-                    .map_err(|_| RunLedgerError::Corrupt)?;
+                let stored: StoredRun =
+                    openengine_cluster_protocol::bounded_json_from_str(&row.map_err(sqlite_error)?)
+                        .map_err(|_| RunLedgerError::Corrupt)?;
                 validate_stored_size(&stored)?;
                 Ok(RunSummary::from(&stored.snapshot))
             })
@@ -280,7 +281,8 @@ fn decode_replay_event(
 ) -> Result<StoredRunEvent, RunLedgerError> {
     let sequence = row.get::<_, i64>(0).map_err(sqlite_error)?;
     let sequence = u64::try_from(sequence).map_err(|_| RunLedgerError::Corrupt)?;
-    let event = serde_json::from_str(json).map_err(|_| RunLedgerError::Corrupt)?;
+    let event = openengine_cluster_protocol::bounded_json_from_str(json)
+        .map_err(|_| RunLedgerError::Corrupt)?;
     Ok(StoredRunEvent {
         cursor: cursor_for(sequence),
         event,
@@ -492,7 +494,8 @@ fn decode_stored(
     cursor: i64,
     json: &str,
 ) -> Result<StoredRun, RunLedgerError> {
-    let stored: StoredRun = serde_json::from_str(json).map_err(|_| RunLedgerError::Corrupt)?;
+    let stored: StoredRun = openengine_cluster_protocol::bounded_json_from_str(json)
+        .map_err(|_| RunLedgerError::Corrupt)?;
     validate_stored_size(&stored)?;
     let cursor = u64::try_from(cursor).map_err(|_| RunLedgerError::Corrupt)?;
     if stored.snapshot.run_id != *expected_run_id

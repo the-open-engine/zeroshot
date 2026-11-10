@@ -1,5 +1,13 @@
 use super::*;
 
+struct AssignmentInputs {
+    selectors: Vec<ControlSelector>,
+    map_aggregates: BTreeMap<SelectorKey, MapAggregate>,
+    join_correlations: BTreeSet<NodeName>,
+    saturation: u64,
+    label_classes: BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
+}
+
 impl<'a> Analyzer<'a> {
     pub(super) fn guard_has_satisfying_assignment(
         &mut self,
@@ -57,10 +65,27 @@ impl<'a> Analyzer<'a> {
         guards: &[&Guard],
         path: &[DiagnosticPathSegment],
     ) -> Option<Vec<Assignment>> {
-        let (selectors, map_aggregates, join_correlations) = self.assignment_inputs(guards);
+        let Some(AssignmentInputs {
+            selectors,
+            map_aggregates,
+            join_correlations,
+            saturation,
+            label_classes,
+        }) = self.assignment_inputs(guards)
+        else {
+            self.assignment_ceiling(path);
+            return None;
+        };
+        if self.proof_work.charge(1 + selectors.len()).is_none() {
+            self.assignment_ceiling(path);
+            return None;
+        }
         let Some(dimensions) = build_dimensions(
             &selectors,
             DimensionInputs {
+                saturation,
+                budget: &self.proof_work,
+                label_classes: &label_classes,
                 nodes: &self.nodes,
                 map_aggregates: &map_aggregates,
                 join_correlations: &self.parallel_join_correlations,
@@ -70,31 +95,36 @@ impl<'a> Analyzer<'a> {
             self.assignment_ceiling(path);
             return None;
         };
-        if !self.assignment_count_is_bounded(&dimensions, path) {
+        let Some(mut assignments) = enumerate_assignments(dimensions, &self.proof_work) else {
+            self.assignment_ceiling(path);
             return None;
-        }
-        let mut assignments = enumerate_assignments(dimensions);
+        };
         assignments.retain(|assignment| {
             join_correlations
                 .iter()
+                .filter(|name| {
+                    !map_aggregates
+                        .keys()
+                        .any(|key| &key.name == *name && key.source == ControlSourceKey::Group)
+                })
                 .all(|name| self.assignment_matches_parallel_join_correlation(assignment, name))
         });
         Some(assignments)
     }
 
-    pub(super) fn assignment_inputs(
-        &self,
-        guards: &[&Guard],
-    ) -> (
-        Vec<ControlSelector>,
-        BTreeMap<SelectorKey, MapAggregate>,
-        BTreeSet<NodeName>,
-    ) {
+    fn assignment_inputs(&self, guards: &[&Guard]) -> Option<AssignmentInputs> {
         let mut expanded = guards.to_vec();
         let mut aggregates = self.explicit_map_aggregates(&expanded);
         let mut join_correlations = BTreeSet::new();
         let mut execution_correlations = BTreeSet::new();
         loop {
+            self.proof_work.charge(
+                expanded
+                    .iter()
+                    .map(|guard| guard_node_count(guard) as usize)
+                    .sum::<usize>()
+                    .saturating_add(aggregates.len()),
+            )?;
             let mut discovered = false;
             let selectors = expanded
                 .iter()
@@ -165,7 +195,70 @@ impl<'a> Analyzer<'a> {
             .cloned()
             .collect::<Vec<_>>();
 
-        (selectors, aggregates, join_correlations)
+        let saturation = expanded
+            .iter()
+            .map(|guard| aggregate_threshold(guard))
+            .max()
+            .unwrap_or(1);
+        let label_classes = self.aggregate_label_classes(&selectors, &aggregates, &expanded)?;
+        Some(AssignmentInputs {
+            selectors,
+            map_aggregates: aggregates,
+            join_correlations,
+            saturation,
+            label_classes,
+        })
+    }
+
+    fn aggregate_label_classes(
+        &self,
+        selectors: &[ControlSelector],
+        aggregates: &BTreeMap<SelectorKey, MapAggregate>,
+        expanded: &[&Guard],
+    ) -> Option<BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>> {
+        let mut queries = BTreeMap::<SelectorKey, Vec<Vec<EnumLabel>>>::new();
+        for guard in expanded {
+            collect_label_queries(guard, &mut queries, &self.proof_work)?;
+        }
+        let mut label_classes = BTreeMap::new();
+        for selector in selectors {
+            let key = SelectorKey::from(selector);
+            if !aggregates.contains_key(&key) || label_classes.contains_key(&key) {
+                continue;
+            }
+            let domain = self.proof_selector_domain(selector)?;
+            let tests = queries.get(&key)?;
+            self.proof_work.charge(
+                domain
+                    .len()
+                    .checked_mul(1 + tests.iter().map(Vec::len).sum::<usize>())?,
+            )?;
+            let mut representatives = BTreeMap::<Vec<bool>, EnumLabel>::new();
+            let classes = domain
+                .into_iter()
+                .map(|label| {
+                    let signature = tests.iter().map(|labels| labels.contains(&label)).collect();
+                    let representative = representatives
+                        .entry(signature)
+                        .or_insert_with(|| label.clone())
+                        .clone();
+                    (label, representative)
+                })
+                .collect();
+            label_classes.insert(key, classes);
+        }
+        Some(label_classes)
+    }
+
+    fn proof_selector_domain(&self, selector: &ControlSelector) -> Option<Vec<EnumLabel>> {
+        if selector.source == ControlSource::Group {
+            proof_group_domain(
+                self.nodes.get(&selector.name)?.node,
+                selector.field.as_ref(),
+            )
+        } else {
+            self.selector_domain(selector)
+        }
     }
 
     fn explicit_map_aggregates(&self, guards: &[&Guard]) -> BTreeMap<SelectorKey, MapAggregate> {
@@ -195,10 +288,64 @@ impl<'a> Analyzer<'a> {
     }
 }
 
+fn aggregate_threshold(guard: &Guard) -> u64 {
+    match guard {
+        Guard::KOfMap { count, .. } => count.get(),
+        Guard::All { guards } | Guard::Any { guards } => guards
+            .as_slice()
+            .iter()
+            .map(aggregate_threshold)
+            .max()
+            .unwrap_or(1),
+        Guard::Not { guard } => aggregate_threshold(guard),
+        Guard::In { .. } | Guard::KOfN { .. } => 1,
+    }
+}
+
 fn is_parallel_join_selector(selector: &ControlSelector, field: &str) -> bool {
     selector.source == ControlSource::Group
-        && selector
-            .field
-            .as_ref()
-            .is_some_and(|selector_field| selector_field.as_str() == field)
+        && selector.field.as_ref().is_some_and(|selector_field| {
+            selector_field.as_str() == field || retention_index(Some(selector_field)).is_some()
+        })
+}
+
+fn collect_label_queries(
+    guard: &Guard,
+    queries: &mut BTreeMap<SelectorKey, Vec<Vec<EnumLabel>>>,
+    budget: &ProofWork,
+) -> Option<()> {
+    match guard {
+        Guard::In { value, labels } | Guard::KOfMap { value, labels, .. } => add_label_queries(
+            std::slice::from_ref(value),
+            labels.values(),
+            queries,
+            budget,
+        )?,
+        Guard::KOfN { values, labels, .. } => {
+            add_label_queries(values.as_slice(), labels.values(), queries, budget)?
+        }
+        Guard::All { guards } | Guard::Any { guards } => {
+            for guard in guards.as_slice() {
+                collect_label_queries(guard, queries, budget)?;
+            }
+        }
+        Guard::Not { guard } => collect_label_queries(guard, queries, budget)?,
+    }
+    Some(())
+}
+
+fn add_label_queries(
+    values: &[ControlSelector],
+    labels: &[EnumLabel],
+    queries: &mut BTreeMap<SelectorKey, Vec<Vec<EnumLabel>>>,
+    budget: &ProofWork,
+) -> Option<()> {
+    budget.charge(values.len().checked_mul(1 + labels.len())?)?;
+    for value in values {
+        queries
+            .entry(SelectorKey::from(value))
+            .or_default()
+            .push(labels.to_vec());
+    }
+    Some(())
 }

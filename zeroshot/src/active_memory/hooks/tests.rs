@@ -5,7 +5,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::PayloadType;
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
@@ -13,7 +12,7 @@ use super::*;
 use crate::execution::WorkspaceAccessMode;
 use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::ProcessSessionCommand;
-use crate::native_v2_runner::{NodeResponseContract, NodeRole, NodeSession};
+use crate::native_v2_runner::NodeSession;
 
 type NativeInstaller = fn(&mut ProcessSessionCommand, &Path) -> std::io::Result<()>;
 
@@ -86,18 +85,7 @@ impl NodeSession for Session {
 
 fn invocation() -> DriverInvocation {
     let request = crate::native_v2_runner::test_support::request("memory-hooks", "worker", (1, 2));
-    DriverInvocation {
-        dispatch: Default::default(),
-        host_context: None,
-        provider_session_slot: request.invocation.reference.node_instance,
-        node: request.invocation,
-        role: NodeRole::Worker,
-        response: NodeResponseContract::Worker {
-            output: PayloadType::Null,
-        },
-        environment: request.environment,
-        session: Arc::new(Session),
-    }
+    crate::native_v2_runner::test_support::null_worker_invocation(request, Arc::new(Session))
 }
 
 fn command(path: &Path) -> ProcessSessionCommand {
@@ -338,7 +326,7 @@ fn auxiliary_roles_never_recall_even_when_a_main_node_has_the_same_name() {
     let source = Arc::new(Source::default());
     let hooks = ActiveMemoryHooks::new(source.clone()).assert_value();
     let home = tempfile::tempdir().assert_value();
-    let offset = crate::native_v2_runner::AUXILIARY_PROVIDER_SLOT_OFFSET;
+    let offset = crate::native_v2_runner::AUXILIARY_EXECUTION_OFFSET;
     for name in [
         "active_memory_repository",
         "active_memory_graph",
@@ -354,6 +342,7 @@ fn auxiliary_roles_never_recall_even_when_a_main_node_has_the_same_name() {
             main.host_context
         );
         let mut auxiliary = main;
+        auxiliary.auxiliary = true;
         auxiliary.node.reference.execution = ExecutionId::new(offset + 1).assert_value();
         auxiliary.node.reference.node_instance = NodeInstanceId::new(offset + 1).assert_value();
         auxiliary.provider_session_slot = NodeInstanceId::new(offset + 1).assert_value();
@@ -563,4 +552,24 @@ fn live_test_hook_executable_is_explicit_absolute_and_does_not_change_production
     );
     let error = native::test_hook_executable(Some("relative-cli".into())).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn primary_retries_keep_recall_and_fresh_homes_get_fresh_recall_budgets() {
+    use crate::native_v2_contract::{ExecutionId, NodeInstanceId};
+    let hooks = ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value();
+    for execution in [131074, crate::native_v2_runner::AUXILIARY_EXECUTION_OFFSET] {
+        let mut primary = invocation();
+        if let NodeRuntimeBinding::Agent { session_scope, .. } = &mut primary.node.binding {
+            *session_scope = SessionScope::NodeInstance;
+        }
+        primary.node.reference.execution = ExecutionId::new(execution).assert_value();
+        assert_ne!(
+            hooks.invocation(primary.clone()).node.instructions,
+            primary.node.instructions
+        );
+        let previous = super::provider_session_key(&primary);
+        primary.provider_home_slot = NodeInstanceId::new(3).assert_value();
+        assert_ne!(previous, super::provider_session_key(&primary));
+    }
 }

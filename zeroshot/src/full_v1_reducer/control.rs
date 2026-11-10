@@ -1,6 +1,75 @@
 use super::*;
 
 impl Engine<'_> {
+    fn candidate_count(
+        &self,
+        context: &Context,
+        indices: &[u64],
+        query: (&ControlSelector, &[EnumLabel], bool),
+    ) -> Option<u64> {
+        let (selector, labels, aggregate) = query;
+        let depth = *self.map_depths.get(&selector.name)?;
+        let available = if aggregate {
+            self.map_owners.get(&selector.name).is_some_and(|owner| {
+                let owner_depth = self.map_depths[owner];
+                indices.get(..owner_depth).is_some_and(|scope| {
+                    context.completed.contains(&(owner.clone(), scope.to_vec()))
+                })
+            })
+        } else {
+            indices.get(..depth).is_some_and(|scope| {
+                context
+                    .completed
+                    .contains(&(selector.name.clone(), scope.to_vec()))
+            })
+        };
+        available.then(|| {
+            self.control_values(selector, context, indices)
+                .iter()
+                .filter(|value| labels.iter().any(|label| label.as_str() == *value))
+                .count() as u64
+        })
+    }
+
+    pub(super) fn candidate_guard(
+        &self,
+        guard: &Guard,
+        context: &Context,
+        indices: &[u64],
+    ) -> openengine_cluster_protocol::GuardTruth {
+        openengine_cluster_protocol::evaluate_partial_guard(
+            guard,
+            &|selector, labels, aggregate| {
+                self.candidate_count(context, indices, (selector, labels, aggregate))
+            },
+        )
+    }
+
+    pub(super) fn candidate_viable(
+        &self,
+        guard: &Guard,
+        context: &Context,
+        scope: (&GraphNode, &[u64]),
+    ) -> bool {
+        let (branch, indices) = scope;
+        let owned = descendant_names(branch);
+        openengine_cluster_protocol::guard_can_become_true(
+            guard,
+            &|selector, labels, aggregate| {
+                self.candidate_count(context, indices, (selector, labels, aggregate))
+            },
+            &|selector, aggregate| {
+                if aggregate {
+                    self.map_owners
+                        .get(&selector.name)
+                        .is_some_and(|owner| owned.contains(owner))
+                } else {
+                    owned.contains(&selector.name)
+                }
+            },
+        )
+    }
+
     pub(super) fn guard(
         &self,
         guard: &Guard,

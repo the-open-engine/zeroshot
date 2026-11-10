@@ -36,7 +36,7 @@ Every graph node is tagged by `kind`. Node payloads reject unknown fields.
 | `choice`   | Declared state, non-empty authored-order guarded branches, optional `otherwise`, promoted paths                                                            |
 | `par`      | Declared state, non-empty branches, promoted paths, and a tagged join                                                                                      |
 | `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
-| `map`      | Declared state, body, structured array selector `over`, positive `maxItems`, promoted paths                                                                |
+| `map`      | Declared state, body, structured array selector `over`, positive concurrent-item limit `maxItems`, promoted paths                                          |
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
 | `fail`     | Finite-enum reason; `unhandled` is reserved for a future compiler's implicit sink                                                                          |
 
@@ -57,9 +57,14 @@ every branch carries the same completion guarantees as `all`. For `all`, `any`, 
 assignments combining `reached` with an unsatisfied predicate or `quorum_unreachable` with a
 satisfied predicate are not legal control assignments. Inside a map, this correlation is applied
 to each item's joint join/branch-control outcome before `k_of_map` aggregates label counts.
-For `first`, a winning branch must complete, guarantee the controls read by `when`, and make
-`when` true. The `raced=satisfied|no_satisfier` control is correlated with those legal winner
-assignments; a non-satisfying completion cannot contribute promotion guarantees.
+For `first`, a completed candidate uses its own available results and pre-parallel facts.
+Other racers remain unknown. Short-circuit truth allows either accepted reviewer to establish
+`any(a.accepted, b.accepted)`; conditional controls contribute only on their selected route.
+The guard must reference a racer and at least one candidate must be able to establish it.
+Once no unfinished candidate can qualify, the join reports `no_satisfier` and stops unnecessary
+work. Other impossible joins report `quorum_unreachable`; their queued eligible branches remain
+potential contributors until control proves otherwise. Voided or unstarted losers provide no
+controls or promoted writes.
 
 Worker failures retain those four codes. Native machine-readable credential rejections use
 `refusal` with reason `authentication_required`; rejected models use `refusal` with reason
@@ -186,8 +191,7 @@ incompatibility are graph rejections. Internal errors are reserved for impossibl
 compiled-IR construction failures after successful validation.
 
 Selectors use closed finite domains: verifier signals use their declared labels; worker errors are
-`timeout|crash|malformed|refusal`; loop `terminated` is `converged|exhausted`; map `overflow` is
-`ok|overflow`; `all|any|quorum` parallel `joined` is `reached|quorum_unreachable`; and `first`
+`timeout|crash|malformed|refusal`; loop `terminated` is `converged|exhausted`; `all|any|quorum` parallel `joined` is `reached|quorum_unreachable`; and `first`
 parallel `raced` is `satisfied|no_satisfier`. Choices are first-true in authored order and are
 checked over the bounded legal control space. An `otherwise` alternative is rejected as unreachable
 when earlier branches cover that space and does not participate in flow analysis. Loops are
@@ -234,25 +238,41 @@ The full-graph profile has fixed ceilings:
 | Graph depth                   |      64 |
 | Guard nodes                   |   4,096 |
 | Assignments per finite check  |  65,536 |
-| Map items                     |   1,024 |
+| Concurrent map items          |  65,536 |
 | Attempts per executable node  |     100 |
 | One-run executable node count |  65,536 |
 | Total loop-body entries       |  65,536 |
-| Peak concurrency              |   1,024 |
+| Run execution concurrency     |  65,536 |
 
-All structural arithmetic is checked. Authored values, computed folds, and arithmetic overflow
-above a ceiling produce `ceiling_exceeded` at the narrowest combining node or field. These bounds
-are public constants beside `ProductionGraphVerifier`; they are not backend configuration or
-product policy. `missing_bound` is reserved; the current `GraphSpec` always requires these proof
-bounds.
+Maps process their complete input. `maxItems` limits the number of items whose complete bodies
+are active, including nested work. Waiting parents consume no leaf execution slot. Runtime
+`maxConcurrency` defaults to 64 on every OS and placement and accepts positive overrides through
+65,536. It counts owned executing leaves and auxiliary agents; native tool subprocesses do not
+consume separate slots. Queue waiting spends no attempt or execution timeout. Authored terminals
+and joins can still void unnecessary work.
 
-Only `step` and `verifier` count as executions. Sequence sums executions, choice takes the maximum,
-parallel sums, map multiplies by `maxItems`, and loop multiplies by `maxIterations`. Parallel and
-map multiplication determine peak concurrency; loop body concurrency is unchanged. Loop-entry
-folds use sum for sequence/parallel, maximum for choice, map multiplication, and
-`maxIterations * (1 + bodyLoopEntries)` for loops. Attempts are recorded per executable and do not
-multiply the one-run execution bound. Loop-free graphs receive a stable reference-topological
-acyclic witness; graphs with loops receive deterministic outer-to-inner ranking identifiers.
+Only `step` and `verifier` count as logical executable visits. Retries stay in the same visit.
+The host enforces 65,536 logical visits and 65,536 loop-body entries against durable history,
+including checkpoint prefixes. Known excess work fails before dispatch; dynamic expansion fails
+at the responsible node before crossing a ceiling. Concurrency never proves total cardinality.
+Static graphs retain structural proofs; maps produce `workEnforcement: "runtime"` certificates.
+
+Aggregate checks preserve each item's joint outcomes and conditional presence. Structural map
+bodies can complete without executable visits, so analysis assumes no cardinality bound from
+concurrency or leaf-work ceilings. The verifier clips
+joint label counts at the largest queried threshold, so common `k_of_map(..., 1)` checks reach a
+fixed set of states independent of input length. One verification admits at most 65,536 assignment
+states and 8,388,608 count-cell operations. Each assignment transition charges its copied selector
+and count cells before allocation. Excess analysis reports `ceiling_exceeded` at the relevant
+node/guard; there is no user budget or timeout setting.
+
+Graph-bearing JSON decoding first checks a fixed 512-container envelope for structural arrays,
+payload nesting and transport wrappers. The graph verifier separately checks authored depth 64.
+
+Nested parallel outcomes use joint retained-branch witnesses during analysis. The required winner
+count and branch eligibility constrain these witnesses together, before per-item aggregation.
+Conditional controls from omitted branches remain unavailable, including when a nested group was
+skipped entirely. Proofs cannot combine results from mutually exclusive winners.
 
 ## Diagnostics, bounds, and artifact receipts
 
@@ -271,7 +291,7 @@ segments that do not fit:
 graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control assignment space exceeds 65536 (and 1 more diagnostic)
 ```
 
-`StructuralBounds` carries a termination witness, positive maximum node executions, positive peak
+`StructuralBounds` distinguishes static and runtime work enforcement and carries a termination witness, positive maximum node executions, positive peak
 concurrency, and positive per-node attempt ceilings. A termination witness is either an acyclic node
 order or a bounded structural ranking with positive maximum iterations.
 

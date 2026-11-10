@@ -326,6 +326,7 @@ async fn harness_with_session_scope(
         initial_input,
         driver,
         HarnessOptions {
+            max_concurrency: None,
             session_scope,
             resolver: None,
         },
@@ -334,6 +335,7 @@ async fn harness_with_session_scope(
 }
 
 struct HarnessOptions {
+    max_concurrency: Option<u64>,
     session_scope: SessionScope,
     resolver: Option<Arc<dyn RunConnectionResolver>>,
 }
@@ -372,6 +374,7 @@ async fn harness_with_options(
             "harness": "codex",
             "provider": "openai",
             "size": "medium",
+            "maxConcurrency":options.max_concurrency,
             "nodes": runtime_nodes
         },
         "source": {
@@ -474,3 +477,6 @@ mod checkpoint_tests;
 
 #[path = "tests/postmortem.rs"]
 mod postmortem_tests;
+
+#[path = "tests/concurrency.rs"]
+mod concurrency;

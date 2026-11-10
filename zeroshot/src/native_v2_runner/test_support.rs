@@ -129,6 +129,7 @@ pub(crate) fn admitted() -> AdmittedRun {
             policy: graph.policy,
             root: graph.root,
             bounds: StructuralBounds {
+                work_enforcement: openengine_cluster_protocol::WorkEnforcement::Static,
                 termination: TerminationWitness::Acyclic {
                     order: NonEmptyVec::new(vec![root_name.clone()]).assert_value(),
                 },
@@ -549,3 +550,55 @@ pub(crate) async fn restart_delivery_state(repository: &std::path::Path, state: 
 #[path = "test_support/delivery_recovery_tests.rs"]
 mod delivery_recovery_tests;
 pub(crate) use delivery_recovery_tests::interrupted_delivery_state;
+
+/// Direct adapter fixture for a null-output worker; production dispatch owns both session IDs.
+pub(crate) fn null_worker_invocation(
+    request: NodeRunRequest,
+    session: Arc<dyn NodeSession>,
+) -> DriverInvocation {
+    let provider_home_slot =
+        if session_scope(&request.invocation.binding).assert_value() == SessionScope::Execution {
+            NodeInstanceId::new(request.invocation.reference.execution.get()).assert_value()
+        } else {
+            request.invocation.reference.node_instance
+        };
+    DriverInvocation {
+        dispatch: request.dispatch,
+        host_context: None,
+        provider_session_slot: request.invocation.reference.node_instance,
+        provider_home_slot,
+        auxiliary: false,
+        node: request.invocation,
+        role: NodeRole::Worker,
+        response: NodeResponseContract::Worker {
+            output: openengine_cluster_protocol::PayloadType::Null,
+        },
+        environment: request.environment,
+        session,
+    }
+}
+
+/// Exercise direct adapter rejection and retain its session for explicit cleanup assertions.
+pub(crate) async fn run_null_worker<T: NodeDriver + SessionFactory>(
+    adapter: &T,
+    request: NodeRunRequest,
+) -> (
+    Result<WorkerOutcome, NodeRunnerError>,
+    String,
+    Arc<dyn NodeSession>,
+) {
+    let session = adapter
+        .open(&request.invocation, &request.environment)
+        .await
+        .assert_value();
+    let invocation = null_worker_invocation(request, session.clone());
+    let (_cancel, control, mut durable) = control();
+    let (result, logs) = tokio::join!(adapter.run(invocation, control), async {
+        let mut logs = Vec::new();
+        while let Ok(output) = durable.recv_output().await {
+            logs.push(output.text);
+        }
+        logs.join("\n")
+    });
+    (result, logs, session)
+}

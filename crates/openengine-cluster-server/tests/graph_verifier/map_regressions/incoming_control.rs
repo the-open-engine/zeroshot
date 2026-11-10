@@ -26,11 +26,7 @@ fn mapped_parallel_with_incoming_control_graph(first: bool) -> GraphSpec {
         (
             json!({
                 "kind":"first",
-                "when":{
-                    "kind":"in",
-                    "value":{"name":"gate","source":"signal","field":"verdict"},
-                    "labels":["accepted"]
-                }
+                "when":with_racer_reference(json!({"kind":"in","value":{"name":"gate","source":"signal","field":"verdict"},"labels":["accepted"]}))
             }),
             "raced",
             "no_satisfier",
@@ -110,7 +106,7 @@ fn mapped_parallel_with_shared_and_item_controls_graph(first: bool) -> GraphSpec
     });
     let (join, field, success_label, failure_label, branches) = if first {
         (
-            json!({"kind":"first","when":completion_guard}),
+            json!({"kind":"first","when":with_racer_reference(completion_guard)}),
             "raced",
             "satisfied",
             "no_satisfier",
@@ -195,4 +191,9 @@ async fn mapped_parallel_controls_keep_item_variation_with_incoming_controls() {
             .await
             .assert_value();
     }
+}
+
+fn with_racer_reference(guard: Value) -> Value {
+    let error = json!({"kind":"in","value":{"name":"mappedWork","source":"error","field":null},"labels":["crash"]});
+    json!({"kind":"all","guards":[guard,{"kind":"any","guards":[error.clone(),{"kind":"not","guard":error}]}]})
 }

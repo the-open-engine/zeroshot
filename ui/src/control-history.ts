@@ -8,7 +8,7 @@ export type ControlRecord = {
   node: string;
   mapIndices: number[];
   visitId: string;
-  state: 'entered' | 'completed' | 'succeeded' | 'failed' | 'stopped';
+  state: 'queued' | 'entered' | 'completed' | 'succeeded' | 'failed' | 'stopped';
   branch?: string;
   detail?: string;
   output?: unknown;
@@ -21,6 +21,7 @@ export type ControlVisit = ControlRecord & {
 
 /** A reducer `completed` visit is neutral: it also marks groups that a fail node ended. */
 export function controlState(state: ControlRecord['state']): WorkflowNodeObservation['state'] {
+  if (state === 'queued') return 'queued';
   return state === 'entered'
     ? 'running'
     : state === 'succeeded' || state === 'failed'
@@ -82,7 +83,7 @@ function validControlRecord(record: ControlRecord): boolean {
     typeof record.visitId === 'string' &&
     Array.isArray(record.mapIndices) &&
     record.mapIndices.every((index) => Number.isSafeInteger(index) && index >= 0) &&
-    ['entered', 'completed', 'succeeded', 'failed', 'stopped'].includes(record.state) &&
+    ['queued', 'entered', 'completed', 'succeeded', 'failed', 'stopped'].includes(record.state) &&
     (record.branch === undefined || typeof record.branch === 'string') &&
     (record.detail === undefined || typeof record.detail === 'string')
   );

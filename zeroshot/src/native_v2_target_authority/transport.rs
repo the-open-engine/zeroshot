@@ -329,13 +329,15 @@ impl NativeV2TargetServer {
     ) -> Result<DirectTaskResolutionRequest, serde_json::Error> {
         match &self.access {
             TargetServerAccess::Hosted(_) => {
-                serde_json::from_slice(body).map(|request| DirectTaskResolutionRequest {
-                    request,
-                    github_token: None,
+                openengine_cluster_protocol::bounded_json_from_slice(body).map(|request| {
+                    DirectTaskResolutionRequest {
+                        request,
+                        github_token: None,
+                    }
                 })
             }
             TargetServerAccess::Direct(_) | TargetServerAccess::Private { .. } => {
-                serde_json::from_slice(body)
+                openengine_cluster_protocol::bounded_json_from_slice(body)
             }
         }
     }
@@ -357,7 +359,10 @@ impl NativeV2TargetServer {
         let TargetServerAccess::Private { access, .. } = &self.access else {
             return not_found_response();
         };
-        let request = match serde_json::from_slice::<TargetPrivateBootstrapRequest>(&request.body) {
+        let request = match openengine_cluster_protocol::bounded_json_from_slice::<
+            TargetPrivateBootstrapRequest,
+        >(&request.body)
+        {
             Ok(request) => request,
             Err(_) => return invalid_request_response("private bootstrap request is malformed"),
         };
@@ -374,7 +379,10 @@ impl NativeV2TargetServer {
         if let Err(error) = self.authenticate_control(&request.head).await {
             return authority_error_response(error);
         }
-        let submission = match serde_json::from_slice::<TargetRunRequest>(&request.body) {
+        let submission = match openengine_cluster_protocol::bounded_json_from_slice::<
+            TargetRunRequest,
+        >(&request.body)
+        {
             Ok(submission) => submission,
             Err(_) => return invalid_request_response("target run request is malformed"),
         };
@@ -392,11 +400,13 @@ impl NativeV2TargetServer {
             Ok(identity) => identity,
             Err(error) => return authority_error_response(error),
         };
-        let session_request =
-            match serde_json::from_slice::<TargetOecpSessionRequest>(&request.body) {
-                Ok(request) if request.run_id.as_ref().is_none_or(is_canonical_uuid_v7) => request,
-                _ => return invalid_request_response("target OECP session request is malformed"),
-            };
+        let session_request = match openengine_cluster_protocol::bounded_json_from_slice::<
+            TargetOecpSessionRequest,
+        >(&request.body)
+        {
+            Ok(request) if request.run_id.as_ref().is_none_or(is_canonical_uuid_v7) => request,
+            _ => return invalid_request_response("target OECP session request is malformed"),
+        };
         if let Err(error) = self.target.controller().await {
             return authority_error_response(error);
         }

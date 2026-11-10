@@ -87,9 +87,9 @@ fn active_run_slots_are_disjoint_from_source_and_each_other() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn contained_auxiliary_cleanup_markers_do_not_overlap_primary_or_adjacent_runs() {
+fn contained_cleanup_markers_do_not_overlap_adjacent_runs() {
     let maximum = openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
-    let offset = crate::native_v2_runner::AUXILIARY_PROVIDER_SLOT_OFFSET;
+    let offset = maximum;
     let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
     let first = host.active_run_slot(0, maximum * 2).assert_value();
     let second = host.active_run_slot(1, maximum * 2).assert_value();
@@ -684,4 +684,26 @@ fn coverage_contract_command_domain_preflight_checks_supervisor_authority_before
         super::set_private_directory_owner(&invalid, Some((10_002, 10_002))),
         Err(ProcessRunnerError::InvalidCommand(_))
     ));
+}
+
+#[test]
+fn active_run_reservations_reject_retry_ids_outside_their_owned_range() {
+    let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
+    let first = host.active_run_slot(0, 131_072).assert_value();
+    let second = host.active_run_slot(1, 131_072).assert_value();
+    assert!(
+        first
+            .identity(HostedProcessScope::WriterExecution(131_074))
+            .is_err()
+    );
+    assert!(
+        first
+            .identity(HostedProcessScope::VerifierExecution(1_065_537))
+            .is_err()
+    );
+    assert!(
+        second
+            .identity(HostedProcessScope::WriterNodeInstance(1))
+            .is_ok()
+    );
 }

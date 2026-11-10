@@ -1,23 +1,14 @@
 use super::*;
 
 impl<'a> Analyzer<'a> {
-    pub(super) fn assignment_count_is_bounded(
-        &mut self,
-        dimensions: &[Vec<Assignment>],
-        path: &[DiagnosticPathSegment],
-    ) -> bool {
-        if !compatible_assignment_count_is_bounded(dimensions, FULL_V1_MAX_GUARD_ASSIGNMENTS) {
-            self.assignment_ceiling(path);
-            return false;
-        }
-        true
-    }
-
     pub(super) fn assignment_ceiling(&mut self, path: &[DiagnosticPathSegment]) {
         emit_diagnostic!(
             self,
             GraphDiagnosticCode::CeilingExceeded,
-            format!("control assignment space exceeds {FULL_V1_MAX_GUARD_ASSIGNMENTS}"),
+            format!(
+                "control analysis exceeds {FULL_V1_MAX_GUARD_ASSIGNMENTS} states or {} count-cell work units",
+                ProofWork::LIMIT
+            ),
             path.to_vec(),
             Vec::new(),
         );
@@ -105,6 +96,19 @@ impl<'a> Analyzer<'a> {
         path: &[DiagnosticPathSegment],
     ) {
         if let Join::First { when } = &group.join {
+            let racers = collect_descendant_names(&group.branches);
+            if !guard_selectors(when)
+                .iter()
+                .any(|selector| racers.contains(&selector.name))
+            {
+                emit_diagnostic!(
+                    self,
+                    GraphDiagnosticCode::InvalidGraphShape,
+                    "first join guard must reference a racer",
+                    field_path(path, &["join", "when"]),
+                    vec![group.name.clone()]
+                );
+            }
             let mut available = incoming.available.clone();
             available.extend(collect_descendant_names(&group.branches));
             for selector in guard_selectors(when) {

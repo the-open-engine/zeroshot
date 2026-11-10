@@ -64,6 +64,9 @@ fn is_parallel_group_control(key: &SelectorKey) -> bool {
 
 #[derive(Clone, Copy)]
 pub(super) struct DimensionInputs<'a, 'graph> {
+    pub(super) label_classes: &'a BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
+    pub(super) saturation: u64,
+    pub(super) budget: &'a ProofWork,
     pub(super) nodes: &'a BTreeMap<NodeName, NodeInfo<'graph>>,
     pub(super) map_aggregates: &'a BTreeMap<SelectorKey, MapAggregate>,
     pub(super) join_correlations: &'a BTreeMap<NodeName, ParallelJoinCorrelation>,
@@ -81,19 +84,13 @@ pub(super) fn build_dimensions(
             .or_default()
             .insert(SelectorKey::from(selector));
     }
-    let mut aggregate_scopes =
-        BTreeMap::<NodeName, (u64, BTreeMap<NodeName, Vec<SelectorKey>>)>::new();
+    let mut aggregate_scopes = BTreeMap::<NodeName, BTreeMap<NodeName, Vec<SelectorKey>>>::new();
     for (name, keys) in &by_node {
         for key in keys {
             let Some(aggregate) = inputs.map_aggregates.get(key) else {
                 continue;
             };
-            let (maximum, scope_nodes) = aggregate_scopes
-                .entry(aggregate.owner.clone())
-                .or_insert_with(|| (aggregate.maximum, BTreeMap::new()));
-            if *maximum != aggregate.maximum {
-                return None;
-            }
+            let scope_nodes = aggregate_scopes.entry(aggregate.owner.clone()).or_default();
             scope_nodes
                 .entry(name.clone())
                 .or_default()
@@ -102,7 +99,7 @@ pub(super) fn build_dimensions(
     }
     let shared_by_scope = aggregate_scopes
         .iter()
-        .map(|(owner, (_, scope_nodes))| {
+        .map(|(owner, scope_nodes)| {
             let mut shared =
                 aggregate_shared_keys(scope_nodes, inputs.map_aggregates, inputs.join_correlations);
             shared.extend(aggregate_shared_execution_keys(
@@ -132,56 +129,42 @@ pub(super) fn build_dimensions(
             node,
             &standalone,
             inputs.map_aggregates,
+            inputs.budget,
         )?);
     }
-    for (owner, (maximum, scope_nodes)) in aggregate_scopes {
+    for (owner, scope_nodes) in aggregate_scopes {
         dimensions.extend(aggregate_scope_dimensions(
             inputs,
             &scope_nodes,
-            maximum,
             shared_by_scope.get(&owner).cloned().unwrap_or_default(),
         )?);
     }
     Some(dimensions)
 }
 
-pub(super) fn enumerate_assignments(dimensions: Vec<Vec<Assignment>>) -> Vec<Assignment> {
-    let mut assignments = vec![Assignment::new()];
-    for dimension in dimensions {
-        let capacity = assignments
-            .len()
-            .saturating_mul(dimension.len())
-            .min(usize::try_from(FULL_V1_MAX_GUARD_ASSIGNMENTS).unwrap_or(usize::MAX));
-        let mut next = Vec::with_capacity(capacity);
-        for prefix in &assignments {
-            for choice in &dimension {
-                if !assignments_are_compatible(prefix, choice) {
-                    continue;
-                }
-                let mut assignment = prefix.clone();
-                assignment.extend(choice.clone());
-                next.push(assignment);
-            }
-        }
-        assignments = next;
-    }
-    assignments
-}
-
-pub(super) fn compatible_assignment_count_is_bounded(
-    dimensions: &[Vec<Assignment>],
-    maximum: u64,
-) -> bool {
+pub(super) fn enumerate_assignments(
+    dimensions: Vec<Vec<Assignment>>,
+    budget: &ProofWork,
+) -> Option<Vec<Assignment>> {
     let mut assignments = vec![Assignment::new()];
     for dimension in dimensions {
         let mut next = Vec::new();
         for prefix in &assignments {
-            for choice in dimension {
+            for choice in &dimension {
+                budget.charge(
+                    1 + prefix.len()
+                        + choice.len()
+                        + prefix
+                            .values()
+                            .chain(choice.values())
+                            .map(|control| control.counts.len())
+                            .sum::<usize>(),
+                )?;
                 if !assignments_are_compatible(prefix, choice) {
                     continue;
                 }
-                if u64::try_from(next.len()).unwrap_or(u64::MAX) >= maximum {
-                    return false;
+                if next.len() as u64 >= FULL_V1_MAX_GUARD_ASSIGNMENTS {
+                    return None;
                 }
                 let mut assignment = prefix.clone();
                 assignment.extend(choice.clone());
@@ -190,7 +173,7 @@ pub(super) fn compatible_assignment_count_is_bounded(
         }
         assignments = next;
     }
-    true
+    Some(assignments)
 }
 
 fn assignments_are_compatible(left: &Assignment, right: &Assignment) -> bool {
@@ -203,6 +186,7 @@ pub(super) fn scalar_dimensions_for_node(
     node: &GraphNode,
     keys: &BTreeSet<SelectorKey>,
     map_aggregates: &BTreeMap<SelectorKey, MapAggregate>,
+    budget: &ProofWork,
 ) -> Option<Vec<Vec<Assignment>>> {
     let mut dimensions = Vec::new();
     let scalar = keys
@@ -216,7 +200,7 @@ pub(super) fn scalar_dimensions_for_node(
         .filter(|key| key.source != ControlSourceKey::Group)
         .collect::<Vec<_>>();
     if !outcomes.is_empty() {
-        dimensions.push(single_outcome_dimension(node, &outcomes)?);
+        dimensions.push(single_outcome_dimension(node, &outcomes, budget)?);
     }
     Some(dimensions)
 }
@@ -224,6 +208,7 @@ pub(super) fn scalar_dimensions_for_node(
 fn dimensions_for_keys(
     nodes: &BTreeMap<NodeName, NodeInfo<'_>>,
     keys: &BTreeSet<SelectorKey>,
+    budget: &ProofWork,
 ) -> Option<Vec<Vec<Assignment>>> {
     let mut by_node = BTreeMap::<NodeName, BTreeSet<SelectorKey>>::new();
     for key in keys {
@@ -237,7 +222,12 @@ fn dimensions_for_keys(
         .into_iter()
         .try_fold(Vec::new(), |mut dimensions, (name, keys)| {
             let node = nodes.get(&name)?.node;
-            dimensions.extend(scalar_dimensions_for_node(node, &keys, &no_aggregates)?);
+            dimensions.extend(scalar_dimensions_for_node(
+                node,
+                &keys,
+                &no_aggregates,
+                budget,
+            )?);
             Some(dimensions)
         })
 }
@@ -300,6 +290,12 @@ fn aggregate_shared_execution_keys(
 
 mod aggregate;
 mod outcomes;
+mod retention;
 
 use aggregate::*;
 pub(super) use outcomes::*;
+pub(super) use retention::*;
+
+#[path = "proof_work.rs"]
+mod proof_work;
+pub(super) use proof_work::ProofWork;

@@ -14,7 +14,8 @@
             "verify",
             "done"
           ]
-        }
+        },
+        "workEnforcement": "static"
       },
       "initialInput": {
         "fields": {

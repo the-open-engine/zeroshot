@@ -22,11 +22,11 @@ pub const FULL_V1_MAX_GRAPH_NODES: u64 = 4_096;
 pub const FULL_V1_MAX_GRAPH_DEPTH: u64 = 64;
 pub const FULL_V1_MAX_GUARD_NODES: u64 = 4_096;
 pub const FULL_V1_MAX_GUARD_ASSIGNMENTS: u64 = 65_536;
-pub const FULL_V1_MAX_MAP_ITEMS: u64 = 1_024;
+pub const FULL_V1_MAX_MAP_ITEMS: u64 = 65_536;
 pub const FULL_V1_MAX_ATTEMPTS_PER_NODE: u64 = 100;
 pub const FULL_V1_MAX_NODE_EXECUTIONS: u64 = 65_536;
 pub const FULL_V1_MAX_LOOP_ENTRIES: u64 = 65_536;
-pub const FULL_V1_MAX_PEAK_CONCURRENCY: u64 = 1_024;
+pub const FULL_V1_MAX_PEAK_CONCURRENCY: u64 = 65_536;
 
 /// Reusable full-v1 verifier. The registry is the verifier's only asynchronous input.
 pub struct ProductionGraphVerifier<R> {
@@ -154,6 +154,10 @@ enum CompletionPredicate {
     #[default]
     Never,
     Guard(Guard),
+    CandidateGuard {
+        guard: Guard,
+        available: BTreeMap<SelectorKey, CompletionPredicate>,
+    },
     Not(Box<Self>),
     All(Vec<Self>),
     Any(Vec<Self>),
@@ -167,11 +171,18 @@ enum CompletionPredicate {
 enum ParallelJoinCorrelation {
     Joined {
         completion: CompletionPredicate,
+        retention: ParallelRetention,
     },
     First {
         satisfaction: CompletionPredicate,
-        all_completions: CompletionPredicate,
+        retention: ParallelRetention,
     },
+}
+
+#[derive(Clone)]
+struct ParallelRetention {
+    branches: Vec<CompletionPredicate>,
+    required: u64,
 }
 
 #[derive(Clone)]
@@ -189,14 +200,17 @@ struct ChoiceExecutionCorrelation {
 impl ParallelJoinCorrelation {
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
         match self {
-            Self::Joined { completion } => completion.collect_guards(guards),
-            Self::First {
-                satisfaction,
-                all_completions,
-            } => {
-                satisfaction.collect_guards(guards);
-                all_completions.collect_guards(guards);
-            }
+            Self::Joined { completion, .. } => completion.collect_guards(guards),
+            Self::First { satisfaction, .. } => satisfaction.collect_guards(guards),
+        }
+        for predicate in &self.retention().branches {
+            predicate.collect_guards(guards);
+        }
+    }
+
+    fn retention(&self) -> &ParallelRetention {
+        match self {
+            Self::Joined { retention, .. } | Self::First { retention, .. } => retention,
         }
     }
 
@@ -268,6 +282,17 @@ impl CompletionPredicate {
             Self::Always => true,
             Self::Never => false,
             Self::Guard(guard) => evaluate_guard(guard, assignment),
+            Self::CandidateGuard { guard, available } => {
+                openengine_cluster_protocol::evaluate_partial_guard(
+                    guard,
+                    &|selector, labels, _| {
+                        available
+                            .get(&SelectorKey::from(selector))
+                            .filter(|presence| presence.evaluate(assignment))
+                            .map(|_| selector_occurrences(selector, labels, assignment))
+                    },
+                ) == openengine_cluster_protocol::GuardTruth::True
+            }
             Self::Not(predicate) => !predicate.evaluate(assignment),
             Self::All(predicates) => predicates
                 .iter()
@@ -288,6 +313,12 @@ impl CompletionPredicate {
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
         match self {
             Self::Guard(guard) => guards.push(guard),
+            Self::CandidateGuard { guard, available } => {
+                guards.push(guard);
+                for presence in available.values() {
+                    presence.collect_guards(guards);
+                }
+            }
             Self::Not(predicate) => predicate.collect_guards(guards),
             Self::All(predicates) | Self::Any(predicates) | Self::AtLeast { predicates, .. } => {
                 for predicate in predicates {
@@ -441,10 +472,12 @@ struct Fold {
     executions: u64,
     concurrency: u64,
     loop_entries: u64,
+    dynamic: bool,
 }
 
 struct Analyzer<'a> {
     graph: &'a GraphSpec,
+    proof_work: ProofWork,
     nodes: BTreeMap<NodeName, NodeInfo<'a>>,
     authored: Vec<NodeName>,
     dependencies: BTreeMap<NodeName, BTreeSet<NodeName>>,

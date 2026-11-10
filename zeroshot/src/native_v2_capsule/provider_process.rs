@@ -14,7 +14,7 @@ use crate::execution::process::{
     ProcessRunnerError, ProcessSession, ProcessSessionCommand, ProcessSessionOutput,
     MAX_PROCESS_MESSAGE_BYTES,
 };
-use crate::native_v2_contract::NodeRuntimeBinding;
+use crate::native_v2_contract::{NodeInstanceId, NodeRuntimeBinding};
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRole, NodeRunnerError,
 };
@@ -113,16 +113,16 @@ impl ProviderProcessRunners {
     pub(crate) fn turn_process(
         self,
         root: &Path,
-        scope: HostedProcessScope,
+        scopes: (HostedProcessScope, HostedProcessScope),
     ) -> Result<(LocalProcessRunner, PathBuf), ProcessRunnerError> {
         match self {
             Self::Hosted(pool) => {
-                let identity = pool.identity(scope)?;
-                let home = identity.prepare_private_home(root)?;
+                let identity = pool.identity(scopes.0)?;
+                let home = identity.prepare_private_home_for(root, scopes.1)?;
                 Ok((identity.runner(), home))
             }
             Self::Local => {
-                let home = crate::execution::process::prepare_local_private_home(root, scope)?;
+                let home = crate::execution::process::prepare_local_private_home(root, scopes.1)?;
                 Ok((LocalProcessRunner::new(), home))
             }
         }
@@ -363,11 +363,24 @@ impl ProviderSessionCore {
 pub(crate) fn process_scope(
     invocation: &DriverInvocation,
 ) -> Result<HostedProcessScope, NodeRunnerError> {
+    provider_scope(invocation, invocation.provider_session_slot)
+}
+
+pub(crate) fn home_scope(
+    invocation: &DriverInvocation,
+) -> Result<HostedProcessScope, NodeRunnerError> {
+    provider_scope(invocation, invocation.provider_home_slot)
+}
+
+fn provider_scope(
+    invocation: &DriverInvocation,
+    identity: NodeInstanceId,
+) -> Result<HostedProcessScope, NodeRunnerError> {
     let NodeRuntimeBinding::Agent { session_scope, .. } = &invocation.node.binding else {
         return Err(NodeRunnerError::Driver);
     };
-    let node_instance = invocation.provider_session_slot.get();
-    let execution = invocation.node.reference.execution.get();
+    let node_instance = identity.get();
+    let execution = node_instance;
     match (invocation.role, *session_scope) {
         (NodeRole::Worker, SessionScope::NodeInstance) => {
             Ok(HostedProcessScope::WriterNodeInstance(node_instance))

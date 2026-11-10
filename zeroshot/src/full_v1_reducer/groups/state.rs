@@ -22,6 +22,7 @@ pub(super) struct TerminalMapSelection<'a> {
 }
 
 pub(super) struct MapItemResult {
+    pub(super) prospective: LoopWork,
     pub(super) status: Status,
     pub(super) context: Context,
     pub(super) scope: Vec<u64>,

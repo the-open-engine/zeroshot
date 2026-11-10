@@ -14,7 +14,8 @@
             "work",
             "done"
           ]
-        }
+        },
+        "workEnforcement": "static"
       },
       "initialInput": {
         "kind": "null"

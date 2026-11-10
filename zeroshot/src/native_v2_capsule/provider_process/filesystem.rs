@@ -13,7 +13,7 @@ use crate::execution::driver::DriverCancellation;
 use crate::execution::process::{HostedProcessIdentity, LocalProcessRunner, ProcessRunnerError};
 use crate::native_v2_runner::{DriverControl, DriverInvocation};
 
-use super::{ProviderProcessRunners, ProviderSessionCore, process_scope};
+use super::{ProviderProcessRunners, ProviderSessionCore, home_scope, process_scope};
 
 #[derive(Clone, Copy)]
 pub(crate) struct ProviderFilesystemConfig<'a> {
@@ -73,7 +73,13 @@ impl<'a> ProviderExecution<'a> {
         let scope = process_scope(self.invocation).map_err(|_| {
             ProcessRunnerError::InvalidCommand("provider filesystem scope is invalid".to_owned())
         })?;
-        let (runner, home) = self.config.runners.turn_process(self.config.root, scope)?;
+        let home_scope = home_scope(self.invocation).map_err(|_| {
+            ProcessRunnerError::InvalidCommand("provider home scope is invalid".to_owned())
+        })?;
+        let (runner, home) = self
+            .config
+            .runners
+            .turn_process(self.config.root, (scope, home_scope))?;
         let home = self.session.retain_home(home).await?;
         let identity = match self.config.runners {
             ProviderProcessRunners::Hosted(pool) => Some(pool.identity(scope)?),
@@ -84,7 +90,7 @@ impl<'a> ProviderExecution<'a> {
             home,
             root: self.config.root.join(format!(
                 "execution-{}",
-                self.invocation.node.reference.execution.get()
+                self.invocation.provider_home_slot.get()
             )),
             candidate: self.config.workspace.to_owned(),
             identity,
@@ -182,7 +188,7 @@ impl ProviderExecutionFiles {
         root: &Path,
         scope: crate::execution::process::HostedProcessScope,
     ) -> Result<Self, ProcessRunnerError> {
-        let (runner, home) = ProviderProcessRunners::Local.turn_process(root, scope)?;
+        let (runner, home) = ProviderProcessRunners::Local.turn_process(root, (scope, scope))?;
         // The scratch and execution directories live beside the session home, which turn_process
         // already created, so a test never has to invent a second naming scheme.
         let scratch = home.join("scratch");

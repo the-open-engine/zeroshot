@@ -57,7 +57,6 @@ export function controlSources(node?: GraphNode): string[] {
 export function controlFields(node?: GraphNode): Signals {
   if (node?.kind === 'verifier') return isObject(node.signals) ? node.signals : {};
   if (node?.kind === 'loop') return { terminated: ['converged', 'exhausted'] };
-  if (node?.kind === 'map') return { overflow: ['ok', 'overflow'] };
   if (node?.kind === 'par')
     return node.join?.kind === 'first'
       ? { raced: ['satisfied', 'no_satisfier'] }

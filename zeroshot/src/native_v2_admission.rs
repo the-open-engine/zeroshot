@@ -443,7 +443,7 @@ fn prepare_submission(
         title,
         mut graph,
         initial_input,
-        runtime,
+        mut runtime,
         environment,
         branch: _,
         submission_key: _,
@@ -453,6 +453,10 @@ fn prepare_submission(
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
     validate_executable_bindings(&declarations, &runtime, context)?;
+    runtime.max_concurrency = Some(
+        openengine_cluster_protocol::PositiveInteger::new(runtime.effective_max_concurrency())
+            .map_err(|error| NativeV2AdmissionError::InvalidRuntime(error.to_string()))?,
+    );
     validate_delivery_concurrency(&graph.root)?;
     comment::validate_comment_profile(&graph)?;
     comment::validate_comment_input_shape(&graph.root, &initial_input)?;

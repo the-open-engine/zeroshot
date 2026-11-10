@@ -5467,6 +5467,15 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
+        "maxConcurrency": {
+          "description": "Maximum owned leaf and auxiliary executions. Omission uses 64 on every placement.",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "nodes": {
           "additionalProperties": false,
           "patternProperties": {
@@ -5699,9 +5708,14 @@
         },
         "termination": {
           "$ref": "#/$defs/TerminationWitness"
+        },
+        "workEnforcement": {
+          "$ref": "#/$defs/WorkEnforcement",
+          "description": "Static derivation or ceilings enforced against actual logical work during execution."
         }
       },
       "required": [
+        "workEnforcement",
         "termination",
         "maxNodeExecutions",
         "peakConcurrency",
@@ -6184,6 +6198,13 @@
         "subscriptionId"
       ],
       "type": "object"
+    },
+    "WorkEnforcement": {
+      "enum": [
+        "static",
+        "runtime"
+      ],
+      "type": "string"
     },
     "WorkerErrorCode": {
       "enum": [

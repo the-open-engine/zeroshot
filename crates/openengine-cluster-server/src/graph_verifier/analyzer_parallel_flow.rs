@@ -117,6 +117,13 @@ impl<'a> Analyzer<'a> {
             group.name.clone(),
             ParallelJoinCorrelation::Joined {
                 completion: completion.clone(),
+                retention: ParallelRetention {
+                    branches: branches
+                        .iter()
+                        .map(|branch| branch.completion.clone())
+                        .collect(),
+                    required,
+                },
             },
         );
 
@@ -151,7 +158,8 @@ impl<'a> Analyzer<'a> {
             .into_iter()
             .collect::<Vec<_>>();
         let mut merged = merge_parallel_scenarios(branches, required, &scenarios);
-        merged.completion = completion;
+        // Both reached and impossible joins return normally; controls retain success eligibility.
+        merged.completion = CompletionPredicate::Always;
         merged
     }
 
@@ -163,33 +171,34 @@ impl<'a> Analyzer<'a> {
     ) -> Effects {
         let satisfiers = branches
             .iter()
-            .map(|branch| {
-                if self.first_guard_available_on_branch(context.when, branch, context.incoming) {
-                    CompletionPredicate::all([
-                        branch.completion.clone(),
-                        CompletionPredicate::Guard(context.when.clone()),
-                    ])
-                } else {
-                    CompletionPredicate::Never
-                }
+            .zip(group.branches.as_slice())
+            .map(|(branch, node)| {
+                let available = self.first_guard_available_on_branch(
+                    context.when,
+                    (branch, node),
+                    context.incoming,
+                );
+                CompletionPredicate::all([
+                    branch.completion.clone(),
+                    CompletionPredicate::CandidateGuard {
+                        guard: context.when.clone(),
+                        available,
+                    },
+                ])
             })
             .collect::<Vec<_>>();
         let satisfaction = CompletionPredicate::any(satisfiers.clone());
-        let all_completions = CompletionPredicate::all(
-            branches
-                .iter()
-                .map(|branch| branch.completion.clone())
-                .collect::<Vec<_>>(),
-        );
         self.parallel_join_correlations.insert(
             group.name.clone(),
             ParallelJoinCorrelation::First {
                 satisfaction: satisfaction.clone(),
-                all_completions: all_completions.clone(),
+                retention: ParallelRetention {
+                    branches: satisfiers.clone(),
+                    required: 1,
+                },
             },
         );
-        let settlement = CompletionPredicate::any([satisfaction.clone(), all_completions.clone()]);
-        let predicates = vec![&satisfaction, &all_completions];
+        let predicates = vec![&satisfaction];
         let Some(assignments) = self
             .assignments_for_completion_predicates(&predicates, &with_field(context.path, "join"))
         else {
@@ -214,29 +223,103 @@ impl<'a> Analyzer<'a> {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
+        if scenarios.is_empty() {
+            emit_diagnostic!(
+                self,
+                GraphDiagnosticCode::InvalidGraphShape,
+                "first join guard cannot be established by any candidate racer",
+                field_path(context.path, &["join", "when"]),
+                vec![group.name.clone()]
+            );
+        }
         let mut merged = merge_parallel_scenarios(branches, 1, &scenarios);
-        merged.falls_through = assignments
-            .iter()
-            .any(|assignment| settlement.evaluate(assignment));
-        merged.completion = settlement;
+        merged.falls_through = true;
+        merged.completion = CompletionPredicate::Always;
         merged
     }
 
     fn first_guard_available_on_branch(
         &self,
         when: &Guard,
-        branch: &Effects,
+        branch: (&Effects, &GraphNode),
         incoming: &Flow,
-    ) -> bool {
+    ) -> BTreeMap<SelectorKey, CompletionPredicate> {
+        let (_, racer) = branch;
+        let mut owned = BTreeSet::new();
+        collect_names(racer, &mut owned);
         guard_selector_uses(when)
             .into_iter()
-            .all(|(selector, map_aggregate)| {
-                incoming.available.contains(&selector.name)
-                    || branch.definite_nodes.contains(&selector.name)
-                    || (map_aggregate
-                        && self
-                            .map_owner(&selector.name)
-                            .is_some_and(|owner| branch.definite_nodes.contains(owner)))
+            .filter_map(|(selector, aggregate)| {
+                let owner = if aggregate {
+                    self.map_owner(&selector.name)?
+                } else {
+                    &selector.name
+                };
+                let presence = if incoming.available.contains(owner) {
+                    CompletionPredicate::Always
+                } else if owned.contains(owner) {
+                    self.conditional_candidate_presence(owner, racer.name())?
+                } else {
+                    return None;
+                };
+                Some((SelectorKey::from(selector), presence))
             })
+            .collect()
+    }
+
+    fn conditional_candidate_presence(
+        &self,
+        target: &NodeName,
+        racer: &NodeName,
+    ) -> Option<CompletionPredicate> {
+        let path = &self.nodes.get(target)?.path;
+        let names = path
+            .iter()
+            .filter_map(|segment| match segment {
+                DiagnosticPathSegment::Node { name } => Some(name),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let start = names.iter().position(|name| *name == racer)?;
+        let mut guards = Vec::new();
+        for name in names[start..].iter().filter(|name| **name != target) {
+            if let Some(presence) = candidate_parent_presence(self.nodes.get(*name)?.node, &names)?
+            {
+                guards.push(presence);
+            }
+        }
+        Some(CompletionPredicate::all(guards))
+    }
+}
+
+fn candidate_choice_route(choice: &ChoiceNode, names: &[&NodeName]) -> Option<CompletionPredicate> {
+    let branch = choice
+        .branches
+        .as_slice()
+        .iter()
+        .position(|branch| names.contains(&branch.node.name()));
+    match branch {
+        Some(index) => choice_branch_completion_predicates(choice)
+            .get(index)
+            .cloned(),
+        None => Some(choice_otherwise_completion_predicate(choice)),
+    }
+}
+
+fn candidate_parent_presence(
+    node: &GraphNode,
+    names: &[&NodeName],
+) -> Option<Option<CompletionPredicate>> {
+    match node {
+        GraphNode::Par(group) => {
+            let index = group
+                .branches
+                .as_slice()
+                .iter()
+                .position(|branch| names.contains(&branch.name()))?;
+            Some(Some(retention_guard(group, index)?))
+        }
+        GraphNode::Choice(choice) => Some(Some(candidate_choice_route(choice, names)?)),
+        _ => Some(None),
     }
 }

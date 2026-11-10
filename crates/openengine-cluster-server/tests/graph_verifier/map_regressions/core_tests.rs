@@ -19,16 +19,8 @@ async fn k_of_map_counts_group_controls_across_the_enclosing_map() {
 }
 
 #[tokio::test]
-async fn mapped_parallel_controls_preserve_per_item_branch_correlation() {
-    let error = ProductionGraphVerifier::new(registry())
-        .verify(&mapped_parallel_control_correlation_graph(2, 1))
-        .await
-        .assert_error();
-    let codes = rejection_codes(error);
-    assert!(
-        codes.contains(&GraphDiagnosticCode::ChoiceExhaustiveness),
-        "unexpected rejection codes: {codes:?}"
-    );
+async fn mapped_parallel_controls_allow_more_items_than_concurrency() {
+    assert_graph_accepted(&mapped_parallel_control_correlation_graph(2, 1)).await;
 }
 #[tokio::test]
 async fn mapped_parallel_controls_allow_jointly_possible_item_counts() {
@@ -39,14 +31,6 @@ async fn mapped_parallel_controls_allow_jointly_possible_item_counts() {
 }
 
 #[tokio::test]
-async fn mapped_parallel_controls_correlate_dependencies_omitted_from_outer_guard() {
-    let error = ProductionGraphVerifier::new(registry())
-        .verify(&mapped_parallel_multicontrol_correlation_graph())
-        .await
-        .assert_error();
-    let codes = rejection_codes(error);
-    assert!(
-        codes.contains(&GraphDiagnosticCode::ChoiceExhaustiveness),
-        "unexpected rejection codes: {codes:?}"
-    );
+async fn mapped_parallel_controls_allow_counts_requiring_three_items() {
+    assert_graph_accepted(&mapped_parallel_multicontrol_correlation_graph()).await;
 }

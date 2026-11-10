@@ -63,6 +63,7 @@ impl ControlRecord {
             map_indices: trace.map_indices,
             visit_id,
             state: match trace.state {
+                StructuralTraceState::Queued => "queued",
                 StructuralTraceState::Entered => "entered",
                 StructuralTraceState::Completed => "completed",
                 StructuralTraceState::Succeeded => "succeeded",
@@ -269,6 +270,7 @@ impl ControlReplay {
             diagnostics: Vec::new(),
         };
         let traced = FullV1Reducer::native_v2(&verified)
+            .with_dispatch_limit(0)
             .reduce_with_trace(ReductionInput {
                 initial_input: &self.admitted.initial_input,
                 executions: &executions,
@@ -322,7 +324,7 @@ impl ControlReplay {
             .current
             .values()
             .filter(|record| {
-                record.state == "entered"
+                matches!(record.state.as_str(), "entered" | "queued")
                     && present.is_none_or(|ids| !ids.contains(&record.visit_id))
             })
             .cloned()

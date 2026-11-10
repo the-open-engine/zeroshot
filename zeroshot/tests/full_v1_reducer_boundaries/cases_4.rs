@@ -93,6 +93,7 @@ async fn assert_no_satisfier_control() {
             "when":{"kind":"in","value":{"name":"first","source":"group","field":"raced"},"labels":["no_satisfier"]},
             "node":succeed("no_winner")
         }],
+        "otherwise":{"kind":"fail","name":"unexpected_winner","reason":"unexpected_winner"},
         "promotedStatePaths":[]
     });
     let graph = verified(seq(vec![first, raced_route]), json!({"a":1,"b":1})).await;

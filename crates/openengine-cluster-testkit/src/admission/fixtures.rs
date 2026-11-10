@@ -34,6 +34,7 @@ pub fn compiled_from_graph_fixture(graph: &GraphSpec) -> CompiledGraphIr {
         policy: graph.policy.clone(),
         root: graph.root.clone(),
         bounds: StructuralBounds {
+            work_enforcement: openengine_cluster_protocol::WorkEnforcement::Static,
             termination: TerminationWitness::Acyclic {
                 order: NonEmptyVec::new(vec![node.clone()])
                     .assert_value_with("fixture has one named node"),

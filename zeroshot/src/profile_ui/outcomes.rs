@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use openengine_cluster_protocol::{
     ChoiceBranch, ChoiceNode, ControlSelector, ControlSource, EnumLabel, FailNode, FailReason,
-    FieldName, GraphNode, GraphSpec, Guard, Join, NodeName, NonEmptyEnumSet, NonEmptyVec,
-    PayloadType, PositiveInteger, SeqNode, SucceedNode,
+    GraphNode, GraphSpec, Guard, Join, NodeName, NonEmptyEnumSet, NonEmptyVec, PayloadType,
+    PositiveInteger, SeqNode, SucceedNode,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -314,18 +314,6 @@ fn standard_atoms(guard: &Guard, names: &mut BTreeSet<(NodeName, &'static str)>)
             names.insert((value.name.clone(), "error"));
             true
         }
-        Guard::In { value, labels }
-            if value.source == ControlSource::Group
-                && value
-                    .field
-                    .as_ref()
-                    .is_some_and(|field| field.as_str() == "overflow")
-                && labels.values().len() == 1
-                && labels.values()[0].as_str() == "overflow" =>
-        {
-            names.insert((value.name.clone(), "overflow"));
-            true
-        }
         _ => false,
     }
 }
@@ -349,15 +337,6 @@ fn protected_errors(node: &GraphNode) -> Result<Guard, ApiError> {
     }
     let mut guards = Vec::new();
     if let GraphNode::Map(map) = node {
-        guards.push(Guard::In {
-            value: ControlSelector {
-                name: map.name.clone(),
-                source: ControlSource::Group,
-                field: Some(FieldName::new("overflow").map_err(value_error)?),
-            },
-            labels: NonEmptyEnumSet::new(vec![EnumLabel::new("overflow").map_err(value_error)?])
-                .map_err(value_error)?,
-        });
         collect_errors(&map.body, true, &mut guards)?;
     } else if let GraphNode::Loop(group) = node {
         collect_errors(&group.body, false, &mut guards)?;

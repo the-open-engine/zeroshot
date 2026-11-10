@@ -14,7 +14,8 @@
           "count"
         ]
       ]
-    }
+    },
+    "workEnforcement": "static"
   },
   "initialInput": {
     "fields": {},

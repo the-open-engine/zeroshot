@@ -634,3 +634,41 @@ fn response_contract_rejects_every_artifact_reference() {
 }
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};
+
+#[tokio::test]
+async fn primary_and_auxiliary_executions_share_one_limit_and_auxiliary_waits_cancel() {
+    let mut admitted = admitted();
+    admitted.runtime.max_concurrency =
+        Some(openengine_cluster_protocol::PositiveInteger::new(1).assert_value());
+    let driver = Arc::new(FakeDriver::default());
+    let runner = NativeNodeRunner::new(&admitted, driver.clone(), Arc::new(FakeFactory::default()))
+        .assert_value();
+    let mut primary = runner
+        .start(request("shared", "left", (1, 131074)))
+        .await
+        .assert_value();
+    let factory = runner.auxiliary_factory();
+    let auxiliary = factory.fork(&admitted).assert_value();
+    let queued = tokio::spawn({
+        let auxiliary = auxiliary.clone();
+        async move {
+            auxiliary
+                .start(request("shared", "right", (1065537, 1065537)))
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    assert!(!queued.is_finished());
+    primary.completion().await.assert_value();
+    let mut started = queued.await.assert_value().assert_value();
+    started.completion().await.assert_value();
+    assert_eq!(driver.concurrency.max_readers.load(Ordering::SeqCst), 1);
+    assert!(
+        driver
+            .slots
+            .lock()
+            .assert_value()
+            .iter()
+            .all(|(_, slot)| *slot <= MAX_PROCESS_SLOTS)
+    );
+}

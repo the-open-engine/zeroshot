@@ -1,295 +1,155 @@
 use super::*;
 
-impl<'a> Analyzer<'a> {
+impl Analyzer<'_> {
     pub(super) fn fold_node(&mut self, node: &GraphNode) -> Option<Fold> {
         let path = self.node_path(node.name());
-        let fold = match node {
-            GraphNode::Step(_) | GraphNode::Verifier(_) => Fold {
+        match node {
+            GraphNode::Step(_) | GraphNode::Verifier(_) => Some(Fold {
                 executions: 1,
                 concurrency: 1,
-                loop_entries: 0,
-            },
-            GraphNode::Succeed(_) | GraphNode::Fail(_) => Fold::default(),
-            _ => self.fold_group_node(node, &path)?,
-        };
-        self.check_fold_limits(fold, &path)
-    }
-
-    pub(super) fn fold_group_node(
-        &mut self,
-        node: &GraphNode,
-        path: &[DiagnosticPathSegment],
-    ) -> Option<Fold> {
-        match node {
-            GraphNode::Seq(group) => self.fold_seq(group, path),
+                ..Fold::default()
+            }),
+            GraphNode::Succeed(_) | GraphNode::Fail(_) => Some(Fold::default()),
+            GraphNode::Seq(group) => self.fold_children(group.children.as_slice(), false, &path),
+            GraphNode::Par(group) => self.fold_children(group.branches.as_slice(), true, &path),
             GraphNode::Choice(group) => self.fold_choice(group),
-            GraphNode::Par(group) => self.fold_par(group, path),
-            GraphNode::Map(group) => self.fold_map(group, path),
-            GraphNode::Loop(group) => self.fold_loop(group, path),
-            GraphNode::Step(_)
-            | GraphNode::Verifier(_)
-            | GraphNode::Succeed(_)
-            | GraphNode::Fail(_) => None,
+            GraphNode::Map(group) => self.fold_map(group),
+            GraphNode::Loop(group) => self.fold_loop(group, &path),
         }
     }
 
-    pub(super) fn fold_seq(
-        &mut self,
-        group: &SeqNode,
-        path: &[DiagnosticPathSegment],
-    ) -> Option<Fold> {
-        let children = group
-            .children
-            .as_slice()
-            .iter()
-            .filter_map(|child| self.fold_node(child))
-            .collect::<Vec<_>>();
-        Some(Fold {
-            executions: self.checked_sum(
-                children.iter().map(|fold| fold.executions),
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_NODE_EXECUTIONS,
-                    path,
-                    field: "children",
-                    label: "node executions",
-                },
-            )?,
-            concurrency: children
-                .iter()
-                .map(|fold| fold.concurrency)
-                .max()
-                .unwrap_or(0),
-            loop_entries: self.checked_sum(
-                children.iter().map(|fold| fold.loop_entries),
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_LOOP_ENTRIES,
-                    path,
-                    field: "children",
-                    label: "loop entries",
-                },
-            )?,
-        })
-    }
-
-    pub(super) fn fold_choice(&mut self, group: &ChoiceNode) -> Option<Fold> {
-        let mut children = group
-            .branches
-            .as_slice()
-            .iter()
-            .filter_map(|branch| self.fold_node(&branch.node))
-            .collect::<Vec<_>>();
-        if let Some(otherwise) = &group.otherwise {
-            children.push(self.fold_node(otherwise)?);
-        }
-        Some(Fold {
-            executions: children
-                .iter()
-                .map(|fold| fold.executions)
-                .max()
-                .unwrap_or(0),
-            concurrency: children
-                .iter()
-                .map(|fold| fold.concurrency)
-                .max()
-                .unwrap_or(0),
-            loop_entries: children
-                .iter()
-                .map(|fold| fold.loop_entries)
-                .max()
-                .unwrap_or(0),
-        })
-    }
-
-    pub(super) fn fold_par(
-        &mut self,
-        group: &ParNode,
-        path: &[DiagnosticPathSegment],
-    ) -> Option<Fold> {
+    fn fold_choice(&mut self, group: &ChoiceNode) -> Option<Fold> {
         let children = group
             .branches
             .as_slice()
             .iter()
-            .filter_map(|branch| self.fold_node(branch))
-            .collect::<Vec<_>>();
+            .map(|branch| &branch.node)
+            .chain(group.otherwise.as_deref());
+        let mut result = Fold::default();
+        for child in children {
+            let fold = self.fold_node(child)?;
+            result.executions = result.executions.max(fold.executions);
+            result.concurrency = result.concurrency.max(fold.concurrency);
+            result.loop_entries = result.loop_entries.max(fold.loop_entries);
+            result.dynamic |= fold.dynamic;
+        }
+        Some(result)
+    }
+
+    fn fold_map(&mut self, group: &MapNode) -> Option<Fold> {
+        let body = self.fold_node(&group.body)?;
         Some(Fold {
-            executions: self.checked_sum(
-                children.iter().map(|fold| fold.executions),
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_NODE_EXECUTIONS,
-                    path,
-                    field: "branches",
-                    label: "node executions",
-                },
-            )?,
-            concurrency: self.checked_sum(
-                children.iter().map(|fold| fold.concurrency),
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_PEAK_CONCURRENCY,
-                    path,
-                    field: "branches",
-                    label: "peak concurrency",
-                },
-            )?,
-            loop_entries: self.checked_sum(
-                children.iter().map(|fold| fold.loop_entries),
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_LOOP_ENTRIES,
-                    path,
-                    field: "branches",
-                    label: "loop entries",
-                },
-            )?,
+            executions: if body.executions == 0 {
+                0
+            } else {
+                FULL_V1_MAX_NODE_EXECUTIONS
+            },
+            loop_entries: if body.loop_entries == 0 {
+                0
+            } else {
+                FULL_V1_MAX_LOOP_ENTRIES
+            },
+            concurrency: group
+                .max_items
+                .get()
+                .saturating_mul(body.concurrency)
+                .min(FULL_V1_MAX_PEAK_CONCURRENCY),
+            dynamic: true,
         })
     }
 
-    pub(super) fn fold_map(
+    fn fold_loop(
         &mut self,
-        group: &MapNode,
+        group: &openengine_cluster_protocol::LoopNode,
         path: &[DiagnosticPathSegment],
     ) -> Option<Fold> {
         let body = self.fold_node(&group.body)?;
+        let path = with_field(path, "maxIterations");
         Some(Fold {
-            executions: self.checked_product(
-                group.max_items.get(),
-                body.executions,
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_NODE_EXECUTIONS,
-                    path,
-                    field: "maxItems",
-                    label: "node executions",
-                },
+            executions: self.work_bound(
+                (
+                    body.executions.saturating_mul(group.max_iterations.get()),
+                    body.dynamic,
+                ),
+                FULL_V1_MAX_NODE_EXECUTIONS,
+                &path,
             )?,
-            concurrency: self.checked_product(
-                group.max_items.get(),
-                body.concurrency,
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_PEAK_CONCURRENCY,
-                    path,
-                    field: "maxItems",
-                    label: "peak concurrency",
-                },
-            )?,
-            loop_entries: self.checked_product(
-                group.max_items.get(),
-                body.loop_entries,
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_LOOP_ENTRIES,
-                    path,
-                    field: "maxItems",
-                    label: "loop entries",
-                },
-            )?,
-        })
-    }
-
-    pub(super) fn fold_loop(
-        &mut self,
-        group: &LoopNode,
-        path: &[DiagnosticPathSegment],
-    ) -> Option<Fold> {
-        let body = self.fold_node(&group.body)?;
-        let entries = body.loop_entries.checked_add(1).or_else(|| {
-            self.ceiling(path, "maxIterations", "loop-entry arithmetic overflow");
-            None
-        })?;
-        Some(Fold {
-            executions: self.checked_product(
-                group.max_iterations.get(),
-                body.executions,
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_NODE_EXECUTIONS,
-                    path,
-                    field: "maxIterations",
-                    label: "node executions",
-                },
+            loop_entries: self.work_bound(
+                (
+                    body.loop_entries
+                        .saturating_add(1)
+                        .saturating_mul(group.max_iterations.get()),
+                    body.dynamic,
+                ),
+                FULL_V1_MAX_LOOP_ENTRIES,
+                &path,
             )?,
             concurrency: body.concurrency,
-            loop_entries: self.checked_product(
-                group.max_iterations.get(),
-                entries,
-                FoldLimitContext {
-                    ceiling: FULL_V1_MAX_LOOP_ENTRIES,
-                    path,
-                    field: "maxIterations",
-                    label: "loop entries",
-                },
-            )?,
+            dynamic: body.dynamic,
         })
     }
 
-    pub(super) fn check_fold_limits(
+    fn fold_children(
         &mut self,
-        fold: Fold,
+        children: &[GraphNode],
+        parallel: bool,
         path: &[DiagnosticPathSegment],
     ) -> Option<Fold> {
-        if fold.executions > FULL_V1_MAX_NODE_EXECUTIONS {
-            self.ceiling(path, "kind", "node executions exceed full-v1 ceiling");
-            return None;
+        let mut folds = Vec::new();
+        for child in children {
+            folds.push(self.fold_node(child)?);
         }
-        if fold.concurrency > FULL_V1_MAX_PEAK_CONCURRENCY {
-            self.ceiling(path, "kind", "peak concurrency exceeds full-v1 ceiling");
-            return None;
-        }
-        if fold.loop_entries > FULL_V1_MAX_LOOP_ENTRIES {
-            self.ceiling(path, "kind", "loop entries exceed full-v1 ceiling");
-            return None;
-        }
-        Some(fold)
+        let dynamic = folds.iter().any(|fold| fold.dynamic);
+        Some(Fold {
+            executions: self.work_bound(
+                (
+                    folds
+                        .iter()
+                        .fold(0_u64, |total, fold| total.saturating_add(fold.executions)),
+                    dynamic,
+                ),
+                FULL_V1_MAX_NODE_EXECUTIONS,
+                path,
+            )?,
+            loop_entries: self.work_bound(
+                (
+                    folds
+                        .iter()
+                        .fold(0_u64, |total, fold| total.saturating_add(fold.loop_entries)),
+                    dynamic,
+                ),
+                FULL_V1_MAX_LOOP_ENTRIES,
+                path,
+            )?,
+            concurrency: if parallel {
+                folds
+                    .iter()
+                    .fold(0_u64, |total, fold| total.saturating_add(fold.concurrency))
+                    .min(FULL_V1_MAX_PEAK_CONCURRENCY)
+            } else {
+                folds.iter().map(|fold| fold.concurrency).max().unwrap_or(0)
+            },
+            dynamic,
+        })
     }
 
-    pub(super) fn checked_sum(
+    fn work_bound(
         &mut self,
-        values: impl Iterator<Item = u64>,
-        context: FoldLimitContext<'_>,
-    ) -> Option<u64> {
-        let mut total = 0_u64;
-        for value in values {
-            total = match total.checked_add(value) {
-                Some(total) if total <= context.ceiling => total,
-                _ => {
-                    self.ceiling(
-                        context.path,
-                        context.field,
-                        format!("{} exceed {}", context.label, context.ceiling),
-                    );
-                    return None;
-                }
-            };
-        }
-        Some(total)
-    }
-
-    pub(super) fn checked_product(
-        &mut self,
-        left: u64,
-        right: u64,
-        context: FoldLimitContext<'_>,
-    ) -> Option<u64> {
-        match left.checked_mul(right) {
-            Some(product) if product <= context.ceiling => Some(product),
-            _ => {
-                self.ceiling(
-                    context.path,
-                    context.field,
-                    format!("{} exceed {}", context.label, context.ceiling),
-                );
-                None
-            }
-        }
-    }
-
-    pub(super) fn ceiling(
-        &mut self,
+        work: (u64, bool),
+        bound: u64,
         path: &[DiagnosticPathSegment],
-        field: &str,
-        message: impl Into<String>,
-    ) {
+    ) -> Option<u64> {
+        let (actual, dynamic) = work;
+        if actual <= bound || dynamic {
+            return Some(actual.min(bound));
+        }
         emit_diagnostic!(
             self,
             GraphDiagnosticCode::CeilingExceeded,
-            message,
-            with_field(path, field),
-            Vec::new(),
+            format!("static work exceeds run ceiling {bound}"),
+            path.to_vec(),
+            Vec::new()
         );
+        None
     }
 }

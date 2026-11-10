@@ -385,14 +385,6 @@ function standardErrorAtoms(guard: any): Set<string> | undefined {
       canonical(['crash', 'malformed', 'refusal', 'timeout'])
   )
     return new Set([errorAtom(value.name)]);
-  if (
-    guard.kind === 'in' &&
-    value.source === 'group' &&
-    value.field === 'overflow' &&
-    labels.length === 1 &&
-    labels[0] === 'overflow'
-  )
-    return new Set([errorAtom(value.name, 'overflow')]);
   return undefined;
 }
 
@@ -435,7 +427,6 @@ function continuationAllowsProtection(node: GraphNode, suffix: GraphNode[]): boo
       });
   } else {
     const errors = new Set(workerNames(node).map((name) => errorAtom(name)));
-    if (node.kind === 'map') errors.add(errorAtom(node.name, 'overflow'));
     expected.push({ conditions: [], errors });
   }
   expected.forEach((term) => {

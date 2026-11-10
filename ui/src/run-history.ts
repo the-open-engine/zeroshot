@@ -356,6 +356,13 @@ export function projectHistory(
     const latest = new Map<string, (typeof controls)[number]>();
     for (const visit of visits) latest.set(JSON.stringify(visit.mapIndices), visit);
     const current = [...latest.values()];
+    const leaf = allNodes(document.graph.root).find((node) => node.name === name);
+    if (leaf && ['step', 'verifier'].includes(leaf.kind)) {
+      const queued = current.filter((visit) => visit.state === 'queued').length;
+      if (queued && nodes[name]?.state !== 'running')
+        nodes[name] = { ...nodes[name], state: 'queued', detail: `${queued} queued` };
+      continue;
+    }
     const states = new Set(current.map((visit) => controlState(visit.state)));
     const state =
       (['running', 'failed', 'skipped', 'recorded'] as const).find((next) => states.has(next)) ??
