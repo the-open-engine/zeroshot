@@ -280,19 +280,6 @@ async fn assert_identity_replacement(detached: bool) {
     git(
         &case.workspace(),
         &[
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "source",
-        ],
-    );
-    git(
-        &case.workspace(),
-        &[
             "remote",
             "add",
             "origin",

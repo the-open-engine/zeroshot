@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
+use tokio::time::Instant;
 
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use openengine_cluster_protocol::{NodeName, WorkerOutcome};
@@ -28,11 +27,17 @@ pub(super) struct PostmortemExecution<'a> {
     pub(super) context: &'a ProposalContext<'a>,
     pub(super) cancellation: watch::Receiver<bool>,
     pub(super) attempt: u64,
+    pub(super) deadline: Instant,
+}
+
+/// One host-validated specialist transaction, sealed only after every batch completes.
+pub(super) struct CompletedSpecialist {
+    pub(super) mutations: Vec<LessonMutation>,
 }
 
 pub(super) async fn run(
     execution: PostmortemExecution<'_>,
-) -> Result<(PostmortemReport, Vec<LessonMutation>), PostmortemError> {
+) -> Result<(PostmortemReport, Vec<CompletedSpecialist>), PostmortemError> {
     let (stop, stopping) = watch::channel(false);
     let mut cancellation = execution.cancellation.clone();
     let mut work = FuturesUnordered::new();
@@ -42,18 +47,10 @@ pub(super) async fn run(
             work.push(run_role(&execution, role, index, stopping.clone()));
         }
     }
-    let deadline = tokio::time::sleep(Duration::from_millis(u64::from(
-        execution
-            .request
-            .admitted
-            .runtime
-            .global_agents()
-            .postmortem
-            .timeout_ms,
-    )));
+    let deadline = tokio::time::sleep_until(execution.deadline);
     tokio::pin!(deadline);
     let mut report = PostmortemReport::default();
-    let mut mutations = BTreeMap::new();
+    let mut units = Vec::new();
     let mut cleanup_failed = false;
     while !work.is_empty() {
         tokio::select! {
@@ -61,14 +58,14 @@ pub(super) async fn run(
             _ = wait_cancelled(&mut cancellation), if !report.cancelled => {
                 report.cancelled=true; stop.send_replace(true);
             },
-            () = &mut deadline, if !report.cancelled => {
-                report.cancelled=true; stop.send_replace(true);
+            () = &mut deadline, if !report.cancelled && !report.timed_out => {
+                report.timed_out=true; stop.send_replace(true);
             },
             result = work.next() => if let Some(result)=result {
                 match result {
                     Ok(proposals) => {
                         report.completed_roles+=1;
-                        for proposal in proposals { mutations.entry(proposal.id().to_owned()).or_insert(proposal); }
+                        units.push(CompletedSpecialist {mutations: proposals});
                     },
                     Err(PostmortemError::CleanupUnconfirmed) => {
                         cleanup_failed=true; stop.send_replace(true); report.failed_roles+=1;
@@ -82,9 +79,9 @@ pub(super) async fn run(
         return Err(PostmortemError::CleanupUnconfirmed);
     }
     if report.cancelled {
-        mutations.clear();
+        units.clear();
     }
-    Ok((report, mutations.into_values().collect()))
+    Ok((report, units))
 }
 
 async fn run_role(
@@ -146,7 +143,13 @@ async fn run_role_batches(
         };
         let output = run_role_inner(execution, &batch, cancellation).await?;
         match execution.context.mutations(role, input, output) {
-            Ok(proposals) => mutations.extend(proposals),
+            Ok(proposals) => {
+                // A specialist seals one transaction only after ALL batches validate before cutoff.
+                if *cancellation.borrow() || Instant::now() >= execution.deadline {
+                    return Err(PostmortemError::Preparation);
+                }
+                mutations.extend(proposals);
+            }
             Err(reason) => {
                 let _ = log(
                     execution.request,
@@ -165,7 +168,7 @@ async fn run_role_inner(
     batch: &RoleBatch<'_>,
     cancellation: &mut watch::Receiver<bool>,
 ) -> Result<Value, PostmortemError> {
-    if *cancellation.borrow() {
+    if *cancellation.borrow() || Instant::now() >= execution.deadline {
         return Err(PostmortemError::Preparation);
     }
     log(
@@ -174,32 +177,8 @@ async fn run_role_inner(
     )
     .await?;
     let invocation = invocation(execution, batch)?;
-    let environment = tokio::select! {
-        biased;
-        ()=wait_cancelled(cancellation)=>return Err(PostmortemError::Preparation),
-        result=execution.request.environment.resolve(&invocation.binding)=>result.map_err(|_|PostmortemError::Preparation)?,
-    };
-    if *cancellation.borrow() {
-        return Err(PostmortemError::Preparation);
-    }
-    let request = NodeRunRequest {
-        dispatch: Default::default(),
-        invocation,
-        environment,
-    };
-    let mut handle = tokio::select! {
-        biased;
-        result=execution.runner.start(request)=>result.map_err(PostmortemError::from)?,
-        ()=wait_cancelled(cancellation)=>return Err(PostmortemError::Preparation),
-    };
-    let Some(output) = handle.take_initial_output() else {
-        handle.cancel();
-        let completion = handle.completion().await;
-        if completion == Err(NodeRunnerError::CleanupUnconfirmed) {
-            return Err(PostmortemError::CleanupUnconfirmed);
-        }
-        return Err(PostmortemError::Preparation);
-    };
+    let mut handle = start_role(execution, invocation, cancellation).await?;
+    let output = initial_output(&mut handle).await?;
     let completion = observe(
         &mut handle,
         bridge(execution.request, batch.role, output),
@@ -209,6 +188,44 @@ async fn run_role_inner(
     match completion.outcome {
         WorkerOutcome::Verifier { output, .. } => Ok(output),
         _ => Err(PostmortemError::Preparation),
+    }
+}
+
+async fn initial_output(handle: &mut NodeHandle) -> Result<DurableOutput, PostmortemError> {
+    if let Some(output) = handle.take_initial_output() {
+        return Ok(output);
+    }
+    handle.cancel();
+    if handle.completion().await == Err(NodeRunnerError::CleanupUnconfirmed) {
+        Err(PostmortemError::CleanupUnconfirmed)
+    } else {
+        Err(PostmortemError::Preparation)
+    }
+}
+
+async fn start_role(
+    execution: &PostmortemExecution<'_>,
+    invocation: NodeInvocation,
+    cancellation: &mut watch::Receiver<bool>,
+) -> Result<NodeHandle, PostmortemError> {
+    let environment = tokio::select! {
+        biased;
+        () = wait_cancelled(cancellation) => return Err(PostmortemError::Preparation),
+        result = execution.request.environment.resolve(&invocation.binding) => result.map_err(|_| PostmortemError::Preparation)?,
+    };
+    if *cancellation.borrow() || Instant::now() >= execution.deadline {
+        return Err(PostmortemError::Preparation);
+    }
+    let request = NodeRunRequest {
+        dispatch: Default::default(),
+        invocation,
+        environment,
+    };
+    tokio::select! {
+        biased;
+        () = wait_cancelled(cancellation) => Err(PostmortemError::Preparation),
+        () = tokio::time::sleep_until(execution.deadline) => Err(PostmortemError::Preparation),
+        result = execution.runner.start(request) => result.map_err(PostmortemError::from),
     }
 }
 

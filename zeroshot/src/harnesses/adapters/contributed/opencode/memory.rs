@@ -10,7 +10,12 @@ pub(super) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
     let home = capability
         .parent()
         .ok_or_else(|| io::Error::other("memory capability has no private parent"))?;
-    let source = PLUGIN.replace("CAPABILITY_PATH", &serde_json::to_string(capability)?);
+    let source = PLUGIN
+        .replace("CAPABILITY_PATH", &serde_json::to_string(capability)?)
+        .replace(
+            "MAX_CONTEXT_BYTES",
+            &crate::active_memory::MAX_INJECTION_BYTES.to_string(),
+        );
     let plugin = write_provider_file(home, "active-memory-opencode.mjs", source.as_bytes())?;
     super::plugin::append(command, &plugin)
 }
@@ -20,6 +25,7 @@ pub(super) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
 const PLUGIN: &str = r#"import fs from 'node:fs';
 import net from 'node:net';
 const capabilityPath = CAPABILITY_PATH;
+const maxContextBytes = MAX_CONTEXT_BYTES;
 function retrieve(event) {
   return new Promise((resolve) => {
     let socket, timer;
@@ -43,10 +49,10 @@ function retrieve(event) {
       socket.on('error', fail); socket.on('end', fail);
       socket.on('data', (chunk) => {
         data = Buffer.concat([data,chunk]);
-        if (data.length > 32772) return fail();
+        if (data.length > maxContextBytes + 4) return fail();
         if (data.length < 4) return;
         const length = data.readUInt32BE();
-        if (length > 32768) return fail();
+        if (length > maxContextBytes) return fail();
         if (data.length < length + 4) return;
         const context = data.subarray(4,length+4).toString('utf8');
         if (!context) return fail();

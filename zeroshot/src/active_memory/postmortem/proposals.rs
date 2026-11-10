@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use super::evidence::FrozenEvidence;
 use super::plan::Role;
 use super::{BuiltinPostmortemConfig, MainRunFacts};
+use crate::active_memory::source_guard::{SourceGuard, source_bound};
 use crate::active_memory::{
     Lesson, LessonDraft, LessonEvidence, LessonMutation, LessonScope, MAX_STORE_BYTES,
     SuppliedMemoryManifest,
@@ -47,6 +48,8 @@ pub(super) enum ProposalRejection {
     Evidence,
     #[error("current repository source does not verify the proposed associations")]
     Source,
+    #[error("source-dependent maintenance deferred: source provenance is unknown or incompatible")]
+    SourceAuthority,
     #[error("invalid lesson scope")]
     Scope,
     #[error("invalid lesson card: {0}")]
@@ -65,6 +68,8 @@ pub(super) struct ProposalContext<'a> {
     initial_proposals: BTreeMap<String, LessonMutation>,
     previous_proposals: BTreeMap<String, LessonMutation>,
     publication_retry: bool,
+    definition_file: Option<std::path::PathBuf>,
+    source: Option<&'a SourceGuard>,
 }
 
 impl<'a> ProposalContext<'a> {
@@ -111,6 +116,8 @@ impl<'a> ProposalContext<'a> {
             initial_proposals: BTreeMap::new(),
             previous_proposals: BTreeMap::new(),
             publication_retry: false,
+            definition_file: None,
+            source: None,
         }
     }
 
@@ -192,7 +199,20 @@ impl<'a> ProposalContext<'a> {
             .lessons
             .iter()
             .find(|lesson| lesson.id == id);
-        json!({"before":before,"current":after,"run_finding":self.findings.get(id),"initial_proposal":self.initial_proposals.get(id),"previous_proposal":self.previous_proposals.get(id),"worker_received":before.is_some_and(|lesson| self.supplied.as_ref().is_some_and(|manifest| manifest.lessons.contains(&lesson.version())))})
+        let source_change_allowed = self.supplied_lessons.get(id).is_some_and(|lesson| {
+            !source_bound(&lesson.scope) || self.source.is_some_and(|source| source.permits(lesson))
+        });
+        json!({"before":before,"current":after,"run_finding":self.findings.get(id),"initial_proposal":self.initial_proposals.get(id),"previous_proposal":self.previous_proposals.get(id),"worker_received":before.is_some_and(|lesson| self.supplied.as_ref().is_some_and(|manifest| manifest.lessons.contains(&lesson.version()))),"source_change_allowed":source_change_allowed})
+    }
+
+    pub(super) fn with_source(mut self, source: &'a SourceGuard) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    pub(super) fn with_definition_file(mut self, path: Option<&std::path::Path>) -> Self {
+        self.definition_file = path.map(std::path::Path::to_path_buf);
+        self
     }
 
     pub(super) fn role_enabled(&self, role: Role) -> bool {
@@ -206,11 +226,16 @@ impl<'a> ProposalContext<'a> {
     }
 
     pub(super) fn inputs(&self, role: Role) -> Result<Vec<Value>, ()> {
+        let mut evidence = self.evidence.document.clone();
+        if let Some(path) = &self.definition_file {
+            super::definition::reference(&mut evidence, path);
+        }
         let mut input = super::context_budget::base(json!({
             "role":role.name(), "repository":self.config.repository, "graph_hash":self.config.graph_hash,
             "scope_controls":{"repository":self.request.admitted.runtime.active_memory().repository,
                 "graph":self.request.admitted.runtime.active_memory().graph},
             "manifest_known":self.supplied.is_some(),
+            "source_basis":self.source.and_then(SourceGuard::reference),
             "publication_retry":self.publication_retry,
             "lesson_changes":{},
             "supplied_lessons":{},
@@ -219,8 +244,13 @@ impl<'a> ProposalContext<'a> {
             "known_lesson_count":self.config.snapshot.lessons.iter().filter(|lesson| role.accepts_scope(&lesson.scope)).count(),
             "existing_lessons_truncated":false,
             "existing_lessons":[],
-            "evidence":self.evidence.document,
+            "evidence":evidence,
         }));
+        if super::context_budget::encoded_size(&input)
+            > super::context_budget::MAX_INPUT_BYTES - 4096
+        {
+            return Err(());
+        }
         if role.is_maintenance() {
             self.maintenance_inputs(role, input)
         } else {
@@ -447,6 +477,40 @@ impl<'a> ProposalContext<'a> {
         role: Role,
         candidate: Candidate,
     ) -> Result<LessonMutation, ProposalRejection> {
+        self.discovery_evidence(role, &candidate)?;
+        let scope = canonical_scope(
+            &self
+                .discovery_scope(role, &candidate)
+                .map_err(|()| ProposalRejection::Scope)?,
+        );
+        let encoded = serde_json::to_vec(&(&scope, normalize(&candidate.recommendation)))
+            .map_err(|_| ProposalRejection::Output)?;
+        let digest = Sha256::digest(encoded);
+        let mut draft = LessonDraft {
+            id: format!("lesson-{:x}", digest),
+            scope,
+            title: candidate.title,
+            recommendation: candidate.recommendation,
+            evidence: LessonEvidence {
+                run_id: self.request.run_id.as_str().to_owned(),
+                node_id: candidate.node_id,
+                references: candidate.references,
+                costly_recurring_reason: candidate.costly_recurring_reason,
+            },
+        };
+        self.stamp_discovery(&mut draft, role)?;
+        validate_advice(&draft).map_err(ProposalRejection::Card)?;
+        Ok(LessonMutation::Upsert {
+            expected_revision: None,
+            draft: Box::new(draft),
+        })
+    }
+
+    fn discovery_evidence(
+        &self,
+        role: Role,
+        candidate: &Candidate,
+    ) -> Result<(), ProposalRejection> {
         if !self.role_enabled(role) || !self.actual_nodes.contains(&candidate.node_id) {
             return Err(ProposalRejection::Node);
         }
@@ -462,34 +526,37 @@ impl<'a> ProposalContext<'a> {
             return Err(ProposalRejection::Evidence);
         }
         if role == Role::Repository {
-            self.repository_discovery_source(&candidate)
+            self.repository_discovery_source(candidate)
                 .map_err(|()| ProposalRejection::Source)?;
         }
-        let scope = canonical_scope(
-            &self
-                .discovery_scope(role, &candidate)
-                .map_err(|()| ProposalRejection::Scope)?,
-        );
-        let encoded = serde_json::to_vec(&(&scope, normalize(&candidate.recommendation)))
-            .map_err(|_| ProposalRejection::Output)?;
-        let digest = Sha256::digest(encoded);
-        let draft = LessonDraft {
-            id: format!("lesson-{:x}", digest),
-            scope,
-            title: candidate.title,
-            recommendation: candidate.recommendation,
-            evidence: LessonEvidence {
-                run_id: self.request.run_id.as_str().to_owned(),
-                node_id: candidate.node_id,
-                references: candidate.references,
-                costly_recurring_reason: candidate.costly_recurring_reason,
-            },
+        Ok(())
+    }
+
+    fn stamp_discovery(
+        &self,
+        draft: &mut LessonDraft,
+        role: Role,
+    ) -> Result<(), ProposalRejection> {
+        let Some(source) = self.source else {
+            return Ok(());
         };
-        validate_advice(&draft).map_err(ProposalRejection::Card)?;
-        Ok(LessonMutation::Upsert {
-            expected_revision: None,
-            draft: Box::new(draft),
-        })
+        let node = draft.evidence.node_id.clone();
+        let scope = draft.scope.clone();
+        source
+            .stamp(draft, |references| {
+                self.references(references).is_ok()
+                    && self
+                        .evidence
+                        .impact
+                        .episodes
+                        .get(&node)
+                        .is_some_and(|episode| episode.allows(references))
+                    && (role != Role::Repository
+                        || self
+                            .repository_associated_source(&scope, references)
+                            .is_ok())
+            })
+            .map_err(ProposalRejection::Card)
     }
 
     fn discovery_scope(&self, role: Role, candidate: &Candidate) -> Result<LessonScope, ()> {
@@ -538,6 +605,14 @@ impl<'a> ProposalContext<'a> {
             || !self.scope_enabled(&original.scope)
         {
             return Err(ProposalRejection::Maintenance);
+        }
+        if matches!(decision.action.as_str(), "adapt" | "retire")
+            && source_bound(&original.scope)
+            && !self.source.is_some_and(|source| source.permits(original))
+        {
+            // Fail this complete specialist, never partially retire a duplicate whose canonical
+            // adaptation was deferred (possibly in another maintenance batch).
+            return Err(ProposalRejection::SourceAuthority);
         }
         self.maintenance_action(role, original, decision)
     }
@@ -609,6 +684,14 @@ impl<'a> ProposalContext<'a> {
             costly_recurring_reason: decision.reason,
         };
         draft.scope = canonical_scope(&draft.scope);
+        if let Some(source) = self.source {
+            source
+                .stamp(&mut draft, |references| {
+                    self.references(references).is_ok()
+                        && self.has_current_source(&original.scope, references)
+                })
+                .map_err(ProposalRejection::Card)?;
+        }
         validate_advice(&draft).map_err(ProposalRejection::Card)?;
         Ok(LessonMutation::Upsert {
             expected_revision: Some(original.revision),
@@ -687,21 +770,45 @@ impl<'a> ProposalContext<'a> {
 
     fn repository_file(&self, reference: &str) -> Result<std::fs::File, ()> {
         let relative = reference.strip_prefix("repository:").ok_or(())?;
+        if self.source.is_some_and(|source| {
+            source.reference().is_some() && !source.permits_file(self.config.workspace, relative)
+        }) {
+            return Err(());
+        }
         super::source_file::open(self.config.workspace, relative).map_err(|_| ())
     }
 
     fn repository_discovery_source(&self, candidate: &Candidate) -> Result<(), ()> {
-        for reference in &candidate.references {
+        self.repository_associated_source(
+            &self.discovery_scope(Role::Repository, candidate)?,
+            &candidate.references,
+        )
+    }
+
+    fn repository_associated_source(
+        &self,
+        scope: &LessonScope,
+        references: &[String],
+    ) -> Result<(), ()> {
+        let LessonScope::Repository {
+            files,
+            folders,
+            identifiers,
+            ..
+        } = scope
+        else {
+            return Err(());
+        };
+        for reference in references {
             let Some(relative) = reference.strip_prefix("repository:") else {
                 continue;
             };
             let file = self.repository_file(reference)?;
-            if candidate.files.iter().any(|file| file == relative)
-                || candidate
-                    .folders
+            if files.iter().any(|file| file == relative)
+                || folders
                     .iter()
                     .any(|folder| std::path::Path::new(relative).starts_with(folder))
-                || super::source_file::has_identifier(file, &candidate.identifiers)
+                || super::source_file::has_identifier(file, identifiers)
             {
                 return Ok(());
             }

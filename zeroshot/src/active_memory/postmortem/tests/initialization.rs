@@ -255,7 +255,8 @@ async fn initialization_does_not_publish_deferred_or_retired_new_lessons() {
 #[tokio::test]
 async fn initialization_rejects_stale_source_and_stale_response_digests() {
     let case = case().await;
-    let review = case.stage().await;
+    case.stage().await;
+    let review = case.advance().await;
     case.maintenance(&review, "keep");
     std::fs::write(
         case.workspace().join("src/provider.rs"),
@@ -263,7 +264,7 @@ async fn initialization_rejects_stale_source_and_stale_response_digests() {
     )
     .assert_value();
     assert!(initialize::commit(&case.session).await.is_err());
-    let updated = initialize::review(&case.session).await.assert_value();
+    let updated = case.advance().await;
     assert_ne!(review["source_digest"], updated["source_digest"]);
     assert!(
         initialize::commit(&case.session).await.is_err(),
@@ -736,6 +737,8 @@ async fn refreshed_maintenance_can_retire_a_staged_lesson_after_its_source_was_r
         case.workspace().join("src/current.rs"),
     )
     .assert_value();
+    // Retirement compares a clean committed descendant of the discovery source.
+    fixture_source(&case.workspace());
     let refreshed = case.advance().await;
     assert_eq!(refreshed["phase"], "maintenance");
     assert_eq!(refreshed["staged_new_lessons"], 2);
@@ -771,6 +774,9 @@ mod global;
 
 #[path = "initialization/history_identity.rs"]
 mod history_identity;
+
+#[path = "initialization/source_basis.rs"]
+mod source_basis;
 
 #[tokio::test]
 async fn legacy_response_revisions_cannot_select_a_newer_version_or_publish_partially() {

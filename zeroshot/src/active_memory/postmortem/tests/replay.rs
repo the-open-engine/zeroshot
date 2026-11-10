@@ -6,11 +6,14 @@ use crate::v2_run_ledger::{
 };
 use openengine_cluster_protocol::{Cursor, UnixTimestampMillis};
 use tokio::sync::watch;
+use std::sync::atomic::AtomicBool;
 
 struct Replay {
     snapshot: RunSnapshot,
     events: Vec<StoredRunEvent>,
     reads: AtomicUsize,
+    stalled: AtomicBool,
+    entered: tokio::sync::Notify,
     cancel: Option<watch::Sender<bool>>,
 }
 
@@ -43,6 +46,10 @@ impl RunLedger for Replay {
         after: Option<&Cursor>,
     ) -> Result<SnapshotAndTail, RunLedgerError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        if self.stalled.load(Ordering::SeqCst) {
+            self.entered.notify_one();
+            return std::future::pending().await;
+        }
         if let Some(cancel) = &self.cancel {
             cancel.send_replace(true);
         }
@@ -99,6 +106,8 @@ async fn replay(cancel: Option<watch::Sender<bool>>) -> (PostmortemRequest, Arc<
         snapshot: request.snapshot.clone(),
         events,
         reads: AtomicUsize::new(0),
+        stalled: AtomicBool::new(false),
+        entered: tokio::sync::Notify::new(),
         cancel,
     });
     request.ledger = replay.clone();
@@ -163,4 +172,36 @@ async fn assert_cancelled(
             .is_none()
     );
     assert_eq!(replay.reads.load(Ordering::SeqCst), expected_reads);
+}
+
+#[tokio::test]
+async fn a_stalled_preparation_ledger_is_dropped_at_deadline_or_explicit_cancellation() {
+    for hard_stop in [false, true] {
+        let (request, replay) = replay(None).await;
+        replay.stalled.store(true, Ordering::SeqCst);
+        let (stop, stopping) = watch::channel(false);
+        let read = super::super::read_before_deadline(
+            evidence::collect_cancellable(&request, Vec::new(), &stopping),
+            &stopping,
+            tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+        );
+        tokio::pin!(read);
+        tokio::select! {
+            () = replay.entered.notified() => {},
+            _ = &mut read => panic!("the fixture must first stall inside a ledger read"),
+        }
+        if hard_stop {
+            stop.send_replace(true);
+        } else {
+            tokio::time::pause();
+            tokio::time::advance(std::time::Duration::from_millis(1001)).await;
+            tokio::time::resume();
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), read)
+            .await
+            .assert_value();
+        assert!(matches!(result, Err(PostmortemError::Cancelled)) == hard_stop);
+        assert!(matches!(result, Err(PostmortemError::TimedOut)) != hard_stop);
+        assert_eq!(replay.reads.load(Ordering::SeqCst), 1);
+    }
 }

@@ -99,7 +99,13 @@ pub(crate) async fn capture_sensitive(
     deadline: Duration,
     private_secrets: &[String],
 ) -> Result<GitCommandOutput, GitCommandFailure> {
-    capture_exchange(command, deadline, private_secrets, None).await
+    capture_exchange(
+        command,
+        deadline,
+        private_secrets,
+        CaptureOptions::default(),
+    )
+    .await
 }
 
 /// Sends bounded private request bytes concurrently with output and confirmed process cleanup.
@@ -109,15 +115,50 @@ pub(crate) async fn capture_sensitive_with_input(
     private_secrets: &[String],
     input: &[u8],
 ) -> Result<GitCommandOutput, GitCommandFailure> {
-    capture_exchange(command, deadline, private_secrets, Some(input)).await
+    capture_exchange(
+        command,
+        deadline,
+        private_secrets,
+        CaptureOptions {
+            input: Some(input),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// Local inspection can retain a larger bounded protocol response without changing printable diagnostics.
+pub(crate) async fn capture_sensitive_with_stdout_limit(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+    stdout_limit: usize,
+) -> Result<GitCommandOutput, GitCommandFailure> {
+    capture_exchange(
+        command,
+        deadline,
+        private_secrets,
+        CaptureOptions {
+            stdout_limit: Some(stdout_limit.min(8 * 1024 * 1024)),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+#[derive(Default)]
+struct CaptureOptions<'a> {
+    input: Option<&'a [u8]>,
+    stdout_limit: Option<usize>,
 }
 
 async fn capture_exchange(
     command: &mut Command,
     deadline: Duration,
     private_secrets: &[String],
-    input: Option<&[u8]>,
+    options: CaptureOptions<'_>,
 ) -> Result<GitCommandOutput, GitCommandFailure> {
+    let input = options.input;
     let mut secrets = command_secrets(command);
     secrets.extend_from_slice(private_secrets);
     let mut diagnostic = command_diagnostic(command, &secrets);
@@ -132,7 +173,9 @@ async fn capture_exchange(
     let retain = MAX_DIAGNOSTIC_BYTES + secrets.iter().map(String::len).max().unwrap_or(0);
     // The input exchange serves bounded forge JSON, whose private protocol bytes can be
     // larger than printable diagnostics. Existing Git captures retain their prior bound.
-    let stdout_retain = input.map_or(retain, |_| 8 * 1024 * 1024);
+    let stdout_retain = options
+        .stdout_limit
+        .unwrap_or_else(|| input.map_or(retain, |_| 8 * 1024 * 1024));
     let result = tokio::time::timeout(deadline, async {
         let completion = wait_and_cleanup(&mut child, &process_group, &mut diagnostic);
         let (status, (), (), sent) = tokio::join!(

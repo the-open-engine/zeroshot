@@ -12,6 +12,7 @@ _scope = ContextVar("zeroshot_hermes_tool", default=None)
 _installed = False
 _capability_path = None
 _emit_tool = None
+_MAX_CONTEXT_BYTES = 256000  # Shared Active Memory transport bound (64,000 tokens * 4).
 
 
 def _remaining(deadline):
@@ -69,7 +70,7 @@ def _retrieve(agent, ref):
         peer.settimeout(_remaining(deadline))
         peer.sendall(struct.pack("!I", len(body)) + body)
         length = struct.unpack("!I", _receive(peer, 4, deadline))[0]
-        if length > 32768:
+        if length > _MAX_CONTEXT_BYTES:
             return None
         context = _receive(peer, length, deadline).decode("utf-8")
         if not context or "\x00" in context:

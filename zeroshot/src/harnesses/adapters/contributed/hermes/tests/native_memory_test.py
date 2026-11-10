@@ -161,6 +161,15 @@ class NativeMemoryTest(unittest.TestCase):
         self.assertEqual(self.raw[0], raw)
         self.assertEqual(broker.acks, [b"\x01", b"\x01"])
 
+    def test_large_supported_recall_survives_native_bookkeeping(self):
+        context = b"r" * self.memory._MAX_CONTEXT_BYTES
+        broker = Broker(self.directory.name, response=context)
+        self.install(broker)
+        message = self.call()
+        broker.finish()
+        self.assertIn(context.decode(), message["content"])
+        self.assertEqual(broker.acks, [b"\x01"])
+
     def test_unknown_native_shape_stays_unmodified_without_ack(self):
         broker = Broker(self.directory.name)
         self.install(broker)
@@ -210,7 +219,7 @@ class NativeMemoryTest(unittest.TestCase):
         self.assertIsNone(self.memory._scope.get())
 
     def test_empty_oversized_invalid_utf8_and_nul_responses_fail_open(self):
-        for response in [b"", b"x" * 32769, b"\xff", b"invalid\x00context"]:
+        for response in [b"", b"x" * (self.memory._MAX_CONTEXT_BYTES + 1), b"\xff", b"invalid\x00context"]:
             with self.subTest(response_length=len(response)):
                 broker = Broker(self.directory.name, response=response)
                 self.install(broker)

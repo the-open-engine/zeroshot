@@ -40,7 +40,8 @@ fn source(budget: usize) -> RunMemorySource {
         })
         .unwrap(),
         workspace: workspace(),
-        budget,
+        node_budget: budget,
+        hook_budget: budget,
         repository_enabled: true,
         graph_enabled: false,
         nodes: BTreeSet::from(["worker".into()]),
@@ -254,7 +255,7 @@ fn fresh_execution_sessions_recall_repository_cards_while_reused_sessions_dedupl
 }
 
 #[test]
-fn graph_guidance_and_tool_callbacks_share_one_budget_with_the_configured_session_lifetime() {
+fn graph_and_hook_injections_use_independent_limits_and_conversation_deduplication() {
     use crate::execution::SessionScope;
     for scope in [SessionScope::Execution, SessionScope::NodeInstance] {
         let mut source = source(2048);
@@ -264,44 +265,123 @@ fn graph_guidance_and_tool_callbacks_share_one_budget_with_the_configured_sessio
             lessons: vec![repository_lesson(), graph_lesson()],
         })
         .unwrap();
-        source.budget = source
+        source.node_budget = source
             .index
             .graph_guidance("worker", 2048, &BTreeSet::new())
+            .bytes_used;
+        source.hook_budget = source
+            .index
+            .retrieve(&repository_retrieval(), 2048, &BTreeSet::new())
             .bytes_used;
         let source = Arc::new(source);
         let hooks = ActiveMemoryHooks::new(source.clone()).unwrap();
         let first = invocation(scope, 2);
         let guided = hooks.invocation(first.clone());
+        assert_eq!(guided.node.instructions, first.node.instructions);
         assert!(
             guided
-                .node
-                .instructions
+                .host_context
+                .as_deref()
                 .unwrap()
-                .as_str()
                 .contains("Check declared outputs")
         );
         let tool = json!({"tool_name":"Read", "tool_input":{"file_path":"src/guard.rs"}});
+        let recalled = hooks.tool_context(&first, &tool, &source.workspace);
+        assert!(recalled.contains("Preserve sibling guards"));
+        assert!(recalled.len() <= source.hook_budget);
         assert!(
             hooks
                 .tool_context(&first, &tool, &source.workspace)
                 .is_empty()
         );
-        let repeated = hooks.invocation(first);
-        assert!(
-            !repeated
-                .node
-                .instructions
-                .unwrap()
-                .as_str()
-                .contains("Check declared outputs")
-        );
+        assert!(hooks.invocation(first).host_context.is_none());
         let next = invocation(scope, 3);
-        let recalled = hooks.tool_context(&next, &tool, &source.workspace);
         assert_eq!(
-            recalled.contains("Preserve sibling guards"),
-            scope == SessionScope::Execution
+            hooks
+                .tool_context(&next, &tool, &source.workspace)
+                .contains("Preserve sibling guards"),
+            scope == SessionScope::Execution,
         );
     }
+}
+
+#[test]
+fn each_hook_has_a_fresh_limit_but_delivered_versions_stay_deduplicated() {
+    let mut source = source(2048);
+    let mut second = repository_lesson();
+    second.id = "runtime-recall-second".into();
+    source.index = MemoryIndex::new(MemorySnapshot {
+        generation: 1,
+        lessons: vec![repository_lesson(), second],
+    })
+    .unwrap();
+    source.hook_budget = source
+        .index
+        .retrieve(
+            &repository_retrieval(),
+            2048,
+            &BTreeSet::from([repository_lesson().version()]),
+        )
+        .bytes_used;
+    let first = source.tool_context(&query("same-conversation"));
+    let second = source.tool_context(&query("same-conversation"));
+    assert!(first.contains("[runtime-recall@1]"));
+    assert!(!first.contains("runtime-recall-second"));
+    assert!(second.contains("[runtime-recall-second@1]"));
+    assert!(first.len() <= source.hook_budget && second.len() <= source.hook_budget);
+    assert!(first.len() + second.len() > source.hook_budget);
+    assert!(source.tool_context(&query("same-conversation")).is_empty());
+    assert_eq!(source.manifest().unwrap().lessons.len(), 2);
+}
+
+#[test]
+fn graph_guidance_larger_than_authored_instruction_bound_uses_supplemental_context() {
+    let mut source = source(64_000);
+    source.graph_enabled = true;
+    let lessons = (0..50)
+        .map(|index| {
+            let mut lesson = graph_lesson();
+            lesson.id = format!("graph-guidance-{index:02}");
+            lesson.recommendation =
+                "Check the current source against every required output before returning. "
+                    .repeat(8)
+                    .trim()
+                    .to_owned();
+            lesson
+        })
+        .collect();
+    source.index = MemoryIndex::new(MemorySnapshot {
+        generation: 1,
+        lessons,
+    })
+    .unwrap();
+    let source = Arc::new(source);
+    let hooks = ActiveMemoryHooks::new(source.clone()).unwrap();
+    let mut original = invocation(crate::execution::SessionScope::NodeInstance, 2);
+    original.node.instructions = Some(
+        openengine_cluster_protocol::NodeInstructions::new(
+            "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES),
+        )
+        .unwrap(),
+    );
+    original.host_context = Some("Current shared resource context".into());
+    let augmented = hooks.invocation(original.clone());
+    assert_eq!(augmented.node.instructions, original.node.instructions);
+    let context = augmented.host_context.as_ref().unwrap();
+    assert!(context.starts_with("Current shared resource context"));
+    assert!(context.len() > openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES);
+    assert!(
+        augmented
+            .agent_prompt()
+            .unwrap()
+            .contains("[graph-guidance-49@1]")
+    );
+    assert_eq!(source.manifest().unwrap().lessons.len(), 50);
+    let repeated = hooks.invocation(original);
+    assert_eq!(
+        repeated.host_context.as_deref(),
+        Some("Current shared resource context")
+    );
 }
 
 #[test]
@@ -319,19 +399,16 @@ fn fresh_execution_sessions_receive_graph_guidance_again() {
         let first = hooks.invocation(invocation(scope, 2));
         assert!(
             first
-                .node
-                .instructions
+                .host_context
+                .as_deref()
                 .unwrap()
-                .as_str()
                 .contains("Check declared outputs")
         );
         let next = hooks.invocation(invocation(scope, 3));
         assert_eq!(
-            next.node
-                .instructions
-                .unwrap()
-                .as_str()
-                .contains("Check declared outputs"),
+            next.host_context
+                .as_deref()
+                .is_some_and(|context| context.contains("Check declared outputs")),
             scope == SessionScope::Execution
         );
     }
@@ -353,18 +430,31 @@ fn preparation_requires_host_storage_and_rejects_invalid_or_checkout_owned_paths
         .unwrap()
         .is_none()
     );
-    for budget in [0, crate::active_memory::MAX_INJECTION_BYTES as u32 + 1] {
-        admitted.runtime.active_memory_mut().budget_bytes = budget;
-        assert!(matches!(
+    for limit in [
+        0,
+        openengine_cluster_protocol::MAX_ACTIVE_MEMORY_INJECTION_TOKENS + 1,
+    ] {
+        admitted.runtime.active_memory_mut().node_injection_tokens = limit;
+        assert!(
             PreparedActiveMemory::prepare(MemoryPreparation {
                 admitted: &admitted,
                 workspace: &workspace,
-                storage: Some(&storage)
-            }),
-            Err(ActiveMemoryError::Invalid(_))
-        ));
+                storage: Some(&storage),
+            })
+            .is_err()
+        );
+        admitted.runtime.active_memory_mut().node_injection_tokens = 16_000;
+        admitted.runtime.active_memory_mut().hook_injection_tokens = limit;
+        assert!(
+            PreparedActiveMemory::prepare(MemoryPreparation {
+                admitted: &admitted,
+                workspace: &workspace,
+                storage: Some(&storage),
+            })
+            .is_err()
+        );
+        admitted.runtime.active_memory_mut().hook_injection_tokens = 8_000;
     }
-    admitted.runtime.active_memory_mut().budget_bytes = 2048;
     let unsafe_path = workspace.join("memory.sqlite3");
     assert!(matches!(
         PreparedActiveMemory::prepare(MemoryPreparation {
@@ -448,7 +538,7 @@ fn session_capacity_and_poisoned_state_abstain_without_claiming_complete_deliver
     {
         let mut state = source.state.lock().unwrap();
         state.sessions = (0..MAX_SESSIONS)
-            .map(|index| (format!("used-{index}"), SessionExposure::default()))
+            .map(|index| (format!("used-{index}"), BTreeSet::new()))
             .collect();
     }
     assert!(source.tool_context(&query("new-session")).is_empty());
@@ -577,4 +667,23 @@ async fn wrappers_preserve_runner_admission_and_postmortem_opt_out_without_model
         assert!(matches!(result, Err(PostmortemError::Unavailable(_))));
         unavailable.close_run(&run_id).await;
     }
+}
+
+fn repository_retrieval() -> RetrievalQuery {
+    RetrievalQuery {
+        workspace: workspace(),
+        paths: vec!["src/guard.rs".into()],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn native_compaction_does_not_reset_provider_conversation_deduplication() {
+    let source = source(2048);
+    let mut tool = query("retained-provider-conversation");
+    tool.native_session_id = Some("native-before-compaction".into());
+    assert!(!source.tool_context(&tool).is_empty());
+    tool.native_session_id = Some("native-after-compaction".into());
+    assert!(source.tool_context(&tool).is_empty());
+    assert_eq!(source.manifest().unwrap().lessons.len(), 1);
 }

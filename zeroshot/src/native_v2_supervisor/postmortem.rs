@@ -37,27 +37,36 @@ impl NativeV2Supervisor {
             ledger: self.ledger.clone(),
         };
         let (cancel, cancellation) = watch::channel(false);
-        let mut stopping = self.resolution_stop.subscribe();
+        let stopping = self.resolution_stop.subscribe();
         let work =
             std::panic::AssertUnwindSafe(postmortem.run(request, cancellation)).catch_unwind();
         tokio::pin!(work);
         let timeout = Duration::from_millis(u64::from(
             admitted.runtime.global_agents().postmortem.timeout_ms,
-        ));
+        )) + crate::active_memory::postmortem::SETTLEMENT_GRACE;
+        let mut watchdog_expired = false;
         let result = tokio::select! {
+            biased;
+            ()=stop_requested(stopping)=>{cancel.send_replace(true);work.await},
+            ()=tokio::time::sleep(timeout)=>{watchdog_expired=true;cancel.send_replace(true);work.await},
             result=&mut work=>result,
-            _=stopping.changed()=>{cancel.send_replace(true);work.await},
-            ()=tokio::time::sleep(timeout)=>{cancel.send_replace(true);work.await},
         };
         let result = result.unwrap_or(Err(PostmortemError::Preparation));
         let message = match result {
-            Ok(report) => format!(
-                "Active Memory postmortem completed: {} roles completed, {} failed, {} mutations published, cancelled={}",
-                report.completed_roles,
-                report.failed_roles,
-                report.published_mutations,
-                report.cancelled
-            ),
+            Ok(mut report) => {
+                report.timed_out |= watchdog_expired;
+                if watchdog_expired && !*self.resolution_stop.borrow() {
+                    report.cancelled = false;
+                }
+                format!(
+                    "Active Memory postmortem completed: {} roles completed, {} failed, {} mutations published, cancelled={}, timed_out={}",
+                    report.completed_roles,
+                    report.failed_roles,
+                    report.published_mutations,
+                    report.cancelled,
+                    report.timed_out
+                )
+            }
             Err(PostmortemError::CleanupUnconfirmed) => {
                 self.postmortem_log(
                     "Active Memory postmortem provider cleanup could not be confirmed".to_owned(),
@@ -86,6 +95,15 @@ impl NativeV2Supervisor {
                     }],
                 )
                 .await;
+        }
+    }
+}
+
+/// A subscription created after stop was requested must not wait for a second change.
+pub(super) async fn stop_requested(mut stopping: watch::Receiver<bool>) {
+    while !*stopping.borrow_and_update() {
+        if stopping.changed().await.is_err() {
+            break;
         }
     }
 }

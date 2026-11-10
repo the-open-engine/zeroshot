@@ -55,11 +55,9 @@ impl PreparedActiveMemory {
         let Some(storage) = enabled_storage(&request) else {
             return Ok(None);
         };
-        if config.budget_bytes == 0
-            || config.budget_bytes as usize > crate::active_memory::MAX_INJECTION_BYTES
-        {
-            return Err(ActiveMemoryError::Invalid("context budget".into()));
-        }
+        config
+            .validate()
+            .map_err(|_| ActiveMemoryError::Invalid("context token limits".into()))?;
         // Bootstrap/config paths are host-owned. Still reject accidental placement in the checkout.
         crate::native_v2_local::validate_workspace_state(request.workspace, storage)
             .map_err(|_| ActiveMemoryError::UnsafeStorage)?;
@@ -96,6 +94,9 @@ impl PreparedActiveMemory {
         if !config.enabled() {
             return Ok(None);
         }
+        config
+            .validate()
+            .map_err(|_| ActiveMemoryError::Invalid("context token limits".into()))?;
         let repository = Some(repository_key(request.admitted, request.workspace));
         let graph_hash = authored_graph_hash(request.admitted)?;
         let scope = ScopeQuery {
@@ -129,7 +130,10 @@ impl PreparedActiveMemory {
         let source = Arc::new(RunMemorySource {
             index: MemoryIndex::new(snapshot.clone())?,
             workspace: request.workspace.to_path_buf(),
-            budget: config.budget_bytes as usize,
+            node_budget: config.node_injection_tokens as usize
+                * crate::active_memory::ESTIMATED_BYTES_PER_TOKEN,
+            hook_budget: config.hook_injection_tokens as usize
+                * crate::active_memory::ESTIMATED_BYTES_PER_TOKEN,
             repository_enabled: config.repository,
             graph_enabled: config.graph,
             nodes: request
@@ -248,14 +252,8 @@ impl NodeRunner for MemoryNodeRunner {
 }
 
 #[derive(Default)]
-struct SessionExposure {
-    versions: BTreeSet<LessonVersion>,
-    bytes: usize,
-}
-
-#[derive(Default)]
 struct ExposureState {
-    sessions: BTreeMap<String, SessionExposure>,
+    sessions: BTreeMap<String, BTreeSet<LessonVersion>>,
     supplied: BTreeSet<LessonVersion>,
     unavailable: bool,
     observation_seq: u64,
@@ -266,7 +264,8 @@ struct ExposureState {
 struct RunMemorySource {
     index: MemoryIndex,
     workspace: PathBuf,
-    budget: usize,
+    node_budget: usize,
+    hook_budget: usize,
     repository_enabled: bool,
     graph_enabled: bool,
     nodes: BTreeSet<String>,
@@ -300,6 +299,7 @@ impl RunMemorySource {
     fn select(
         &self,
         session: &str,
+        budget: usize,
         select: impl FnOnce(usize, &BTreeSet<LessonVersion>) -> RetrievalResult,
     ) -> String {
         let Ok(mut state) = self.state.lock() else {
@@ -309,14 +309,10 @@ impl RunMemorySource {
             state.unavailable = true;
             return String::new();
         }
-        let exposure = state.sessions.entry(session.to_owned()).or_default();
-        let result = select(
-            self.budget.saturating_sub(exposure.bytes),
-            &exposure.versions,
-        );
-        exposure.bytes += result.bytes_used;
+        let delivered = state.sessions.entry(session.to_owned()).or_default();
+        let result = select(budget, delivered);
         let versions: Vec<_> = result.cards.into_iter().map(|card| card.version).collect();
-        exposure.versions.extend(versions.iter().cloned());
+        delivered.extend(versions.iter().cloned());
         state.supplied.extend(versions);
         result.context
     }
@@ -348,7 +344,7 @@ impl ActiveMemorySource for RunMemorySource {
         if !self.repository_enabled {
             return String::new();
         }
-        self.select(&query.session_key, |budget, delivered| {
+        self.select(&query.session_key, self.hook_budget, |budget, delivered| {
             self.index.retrieve(&retrieval, budget, delivered)
         })
     }
@@ -357,7 +353,7 @@ impl ActiveMemorySource for RunMemorySource {
         if !self.graph_enabled || !self.nodes.contains(node_id) {
             return String::new();
         }
-        self.select(session_key, |budget, delivered| {
+        self.select(session_key, self.node_budget, |budget, delivered| {
             self.index.graph_guidance(node_id, budget, delivered)
         })
     }

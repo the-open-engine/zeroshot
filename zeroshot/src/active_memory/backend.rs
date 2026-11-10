@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::RunId;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
+use tokio::time::Instant;
 use super::{
     ActiveMemoryError, LessonMutation, LessonVersion, MemorySnapshot, ScopeQuery,
     SharedActiveMemoryStore,
@@ -15,6 +16,37 @@ pub struct MemoryPublication {
     pub scope: ScopeQuery,
     pub reviewed: Vec<LessonVersion>,
     pub mutations: Vec<LessonMutation>,
+}
+
+/// Direct access to the original hard-stop signal and absolute publication deadline.
+/// Queued effects must check this again at their dispatch boundary; started writes drain.
+#[derive(Clone, Debug)]
+pub struct MemoryPublicationControl {
+    cancellation: watch::Receiver<bool>,
+    deadline: Instant,
+}
+
+impl MemoryPublicationControl {
+    pub fn new(cancellation: watch::Receiver<bool>, deadline: Instant) -> Self {
+        Self {
+            cancellation,
+            deadline,
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        *self.cancellation.borrow()
+            || self.cancellation.has_changed().is_err()
+            || Instant::now() >= self.deadline
+    }
+
+    pub async fn cancelled(&self) {
+        tokio::select! {
+            biased;
+            () = cancelled(self.cancellation.clone()) => {},
+            () = tokio::time::sleep_until(self.deadline) => {},
+        }
+    }
 }
 
 /// Hosts must enforce run identity and scope independently of caller-supplied fields.
@@ -31,7 +63,7 @@ pub trait ActiveMemoryBackend: Send + Sync {
         &self,
         run: &RunId,
         publication: MemoryPublication,
-        cancellation: watch::Receiver<bool>,
+        control: MemoryPublicationControl,
     ) -> Result<Vec<LessonVersion>, ActiveMemoryError>;
 }
 
@@ -54,31 +86,40 @@ impl ActiveMemoryBackend for SqliteMemoryBackend {
         &self,
         _: &RunId,
         publication: MemoryPublication,
-        cancellation: watch::Receiver<bool>,
+        control: MemoryPublicationControl,
     ) -> Result<Vec<LessonVersion>, ActiveMemoryError> {
         let mut store = tokio::select! {
             biased;
-            () = cancelled(cancellation.clone()) => return Err(ActiveMemoryError::Cancelled),
+            () = control.cancelled() => return Err(ActiveMemoryError::Cancelled),
             store = self.0.clone().lock_owned() => store,
         };
         tokio::task::spawn_blocking(move || {
-            if *cancellation.borrow() || cancellation.has_changed().is_err() {
-                return Err(ActiveMemoryError::Cancelled);
-            }
-            let expected = publication
-                .reviewed
-                .into_iter()
-                .map(|v| (v.id, Some(v.revision)))
-                .collect::<Vec<_>>();
-            if expected.is_empty() {
-                store.apply_batch(&publication.mutations)
-            } else {
-                store.apply_reviewed_batch(&publication.mutations, &expected)
-            }
+            dispatch_write(&control, || {
+                let expected = publication
+                    .reviewed
+                    .into_iter()
+                    .map(|v| (v.id, Some(v.revision)))
+                    .collect::<Vec<_>>();
+                if expected.is_empty() {
+                    store.apply_batch(&publication.mutations)
+                } else {
+                    store.apply_reviewed_batch(&publication.mutations, &expected)
+                }
+            })
         })
         .await
         .map_err(|_| ActiveMemoryError::Unavailable)?
     }
+}
+
+fn dispatch_write(
+    control: &MemoryPublicationControl,
+    write: impl FnOnce() -> Result<Vec<LessonVersion>, ActiveMemoryError>,
+) -> Result<Vec<LessonVersion>, ActiveMemoryError> {
+    if control.is_cancelled() {
+        return Err(ActiveMemoryError::Cancelled);
+    }
+    write()
 }
 
 impl SqliteMemoryBackend {
@@ -95,3 +136,6 @@ pub(super) async fn cancelled(mut cancellation: watch::Receiver<bool>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

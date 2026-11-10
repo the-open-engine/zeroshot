@@ -180,6 +180,14 @@ fn executable(name: &str, instruction: &str, verifier: bool) -> Value {
     node
 }
 
+fn worker_verifier_graph(worker: &str, verifier: &str) -> openengine_cluster_protocol::GraphSpec {
+    full_graph(vec![
+        executable("worker", worker, false),
+        executable("verifier", verifier, true),
+        success_node(),
+    ])
+}
+
 async fn completion(handle: &mut NodeHandle) -> crate::native_v2_contract::NodeCompletion {
     match tokio::time::timeout(std::time::Duration::from_secs(300), handle.completion()).await {
         Ok(result) => {
@@ -217,11 +225,7 @@ async fn registered_harness_live_memory_sessions_and_verifier_contract() {
     let admitted = NativeV2Admission
         .admit(RunSubmission {
             title: RunTitle::new("Explicit live harness contract").assert_value(),
-            graph: full_graph(vec![
-                executable("worker", &worker, false),
-                executable("verifier", &verifier, true),
-                success_node(),
-            ]),
+            graph: worker_verifier_graph(&worker, &verifier),
             initial_input: Value::Null,
             runtime: RuntimePlan::new(settings.lane.clone(), run_size("medium"), bindings.clone()),
             environment: None,
@@ -364,3 +368,5 @@ fn assert_recall(settings: &LiveSettings, memory: &RecalledMemory, artifact: &st
         settings.lane, settings.model
     );
 }
+
+mod active_memory_tests;

@@ -39,9 +39,12 @@ impl LoadedRun {
         super::super::proposals::ProposalContext::new(context, self.facts(), evidence, supplied)
     }
 
-    pub(super) fn export_graph(&self, directory: &Path) -> Result<PathBuf> {
-        let path = directory.join(format!("{}-graph.json", self.run_id.as_str()));
-        files::write(&path, &self.stored.admitted.graph)?;
+    pub(super) fn export_definition(&self, directory: &Path) -> Result<PathBuf> {
+        let path = directory.join(format!("{}-definition.json", self.run_id.as_str()));
+        files::write(
+            &path,
+            &super::super::definition::document(&self.stored.admitted),
+        )?;
         Ok(path)
     }
 
@@ -84,8 +87,8 @@ impl LoadedDiscovery {
             None,
         )
     }
-    pub(super) fn export_graph(&self, directory: &Path) -> Result<PathBuf> {
-        self.loaded.export_graph(directory)
+    pub(super) fn export_definition(&self, directory: &Path) -> Result<PathBuf> {
+        self.loaded.export_definition(directory)
     }
 }
 

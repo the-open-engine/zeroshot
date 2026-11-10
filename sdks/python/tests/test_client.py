@@ -45,12 +45,22 @@ def test_uniform_runtime_preserves_memory_controls_without_aliasing() -> None:
         harness="pi",
         provider="bedrock",
         model="caller-model",
-        active_memory={"repository": False, "graph": True, "budgetBytes": 512},
+        active_memory={
+            "repository": False,
+            "graph": True,
+            "nodeInjectionTokens": 512,
+            "hookInjectionTokens": 256,
+        },
         global_agents=settings,
         workspace_checkpoints=False,
     )
     encoded = selected.to_dict()
-    assert encoded["activeMemory"] == {"repository": False, "graph": True, "budgetBytes": 512}
+    assert encoded["activeMemory"] == {
+        "repository": False,
+        "graph": True,
+        "nodeInjectionTokens": 512,
+        "hookInjectionTokens": 256,
+    }
     assert encoded["workspaceCheckpoints"] is False
     assert encoded["globalAgents"] == settings
     settings["postmortem"]["enabled"] = True

@@ -15,13 +15,25 @@ pub(super) fn base(mut value: Value) -> Value {
     while encoded_size(&value) > BASE_BYTES {
         value["evidence"]["evidence_truncated"] = json!(true);
         let evidence = &mut value["evidence"];
-        if shrink_largest_evidence(evidence)
-            || shrink_string(evidence, "authored_graph")
-            || shrink_string(evidence, "initial_input")
-        {
+        if shrink_largest_evidence(evidence) || shrink_string(evidence, "initial_input") {
             continue;
         }
-        value["evidence"] = json!({"evidence_truncated":true,"omitted_reason":"serialized evidence exceeds the postmortem context budget"});
+        let mut retained = serde_json::Map::new();
+        for key in [
+            "authored_graph",
+            "authored_runtime",
+            "authored_definition_file",
+        ] {
+            if let Some(authority) = evidence.get(key) {
+                retained.insert(key.to_owned(), authority.clone());
+            }
+        }
+        retained.insert("evidence_truncated".to_owned(), json!(true));
+        retained.insert(
+            "omitted_reason".to_owned(),
+            json!("serialized evidence exceeds the postmortem context budget"),
+        );
+        value["evidence"] = Value::Object(retained);
         break;
     }
     value

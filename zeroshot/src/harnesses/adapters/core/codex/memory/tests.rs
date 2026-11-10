@@ -9,7 +9,7 @@ fn codex_trust_is_scoped_to_the_owned_session_handler_and_exact_definition() {
         "type":"command",
         "command":"'/opt/zeroshot' __active-memory-hook '/runtime/capability.json'",
         "timeout":1,
-        "additionalContextLimit":32768,
+        "additionalContextLimit":crate::active_memory::MAX_INJECTION_BYTES,
     });
     let configuration = super::codex_configuration(&handler).assert_value();
     assert_eq!(configuration[0], "--config");
@@ -23,7 +23,7 @@ fn codex_trust_is_scoped_to_the_owned_session_handler_and_exact_definition() {
     assert_eq!(
         configuration[3],
         format!(
-            "hooks.state={{{}={{\"trusted_hash\"=\"sha256:7a01b70421fb3d85a31fa6255d46a1a35f1d34043464aef81d33afb463d38ee8\"}}}}",
+            "hooks.state={{{}={{\"trusted_hash\"=\"sha256:08c944b755e378b8c30b5b332a85903ae2e4b824e432e35b8083cbbafacba447\"}}}}",
             serde_json::to_string(source).assert_value(),
         ),
     );
