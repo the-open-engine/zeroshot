@@ -455,6 +455,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Adapters own optional canonical review/commit receipt links and comment permalink validation.
   Provider-owned comment normalization runs before the publisher hashes and records its durable
   intent; canonicalized text must retain one exact publication marker.
+  GitLab owns idempotent literalization of slash-leading generated prose and ready, nonempty MR
+  titles bounded to 255 Unicode characters. Its same title normalizer supplies generated delivery
+  commit messages before preflight reconciliation or commit creation, preventing push-triggered drafts.
+  Shortened titles retain the original once inside the
+  generated description section. Metadata refresh preserves surrounding human text and later
+  human-applied draft status; comment literalization precedes hashing and durable publication intent.
   Capability admission rejects unsupported operations before credential resolution or workspace
   mutation. Pure remote identification uses each registered
   provider's `repository_from_remote` hook; CLI source selection has no separate forge catalog and

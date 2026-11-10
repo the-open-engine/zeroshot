@@ -228,6 +228,11 @@ pub enum SourceConflictOutcome {
 /// Target-owned, bounded source-provider effects. Implementations must bound every network operation.
 #[async_trait]
 pub trait SourceDeliveryAuthority: Send + Sync {
+    /// Pure provider-owned formatting before a generated title becomes a delivery commit message.
+    fn prepare_commit_message(&self, title: &str) -> String {
+        title.to_owned()
+    }
+
     /// Pure presentation of a review already bound to this scoped authority.
     fn review_links(
         &self,

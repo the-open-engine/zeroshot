@@ -10,6 +10,8 @@ mod ci_tests;
 mod feedback_tests;
 #[path = "http_fixture.rs"]
 mod http_fixture;
+#[path = "metadata_tests.rs"]
+mod metadata_tests;
 use http_fixture::{IntoResponse, Json, Response};
 
 const HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -610,16 +612,15 @@ async fn comment_post_get_and_pagination_use_validated_note_identity() {
 }
 
 #[tokio::test]
-async fn slash_commands_and_cross_instance_comments_fail_before_post() {
+async fn slash_commands_publish_literally_and_cross_instance_comments_fail_before_post() {
     let fixture = Fixture::new().await;
     let destination = destination();
-    assert!(
-        fixture
-            .authority
-            .create_comment(&destination, "Report\n/close", credential())
-            .await
-            .is_err()
-    );
+    let posted = fixture
+        .authority
+        .create_comment(&destination, "Report\n/close", credential())
+        .await
+        .unwrap();
+    assert_eq!(posted.body, "Report\n\\/close");
     let mut foreign = destination.clone();
     foreign.url = foreign.url.replace("gitlab.example", "other.example");
     assert!(
@@ -629,7 +630,7 @@ async fn slash_commands_and_cross_instance_comments_fail_before_post() {
             .await
             .is_err()
     );
-    assert_eq!(fixture.writes("/notes"), 0);
+    assert_eq!(fixture.writes("/notes"), 1);
 }
 
 #[tokio::test]
@@ -1049,7 +1050,7 @@ async fn null_discussion_iid_requires_the_fetched_global_merge_request_id() {
 }
 
 #[tokio::test]
-async fn comments_use_canonical_stored_text_and_refuse_quick_actions_after_cr_removal() {
+async fn comments_use_canonical_literal_text_after_cr_removal() {
     let fixture = Fixture::new().await;
     let input = "A finding.\r\nAnother finding.\r\n \t";
     assert_eq!(
@@ -1069,20 +1070,18 @@ async fn comments_use_canonical_stored_text_and_refuse_quick_actions_after_cr_re
             .unwrap(),
         posted.body
     );
-    assert!(
-        fixture
-            .authority
-            .prepare_comment_body("Report.\n/clo\rse")
-            .is_err()
+    let input = "Report.\n/clo\rse";
+    assert_eq!(
+        fixture.authority.prepare_comment_body(input).unwrap(),
+        "Report.\n\\/close"
     );
-    assert!(
-        fixture
-            .authority
-            .create_comment(&destination(), "Report.\n/clo\rse", credential())
-            .await
-            .is_err()
-    );
-    assert_eq!(fixture.writes("/notes"), 1);
+    let posted = fixture
+        .authority
+        .create_comment(&destination(), input, credential())
+        .await
+        .unwrap();
+    assert_eq!(posted.body, "Report.\n\\/close");
+    assert_eq!(fixture.writes("/notes"), 2);
 }
 
 #[tokio::test]
@@ -1105,19 +1104,14 @@ async fn review_metadata_normalizes_cr_before_marker_and_quick_action_validation
             "{DELIVERY_GENERATED_BODY_START}\nFirst finding.\nSecond finding.\n{DELIVERY_GENERATED_BODY_END}"
         )
     );
-    for invalid in [
-        DELIVERY_GENERATED_BODY_START.replace("zeroshot", "zero\rshot"),
-        "Report.\n/clo\rse".into(),
-    ] {
-        request.description = invalid;
-        assert!(
-            fixture
-                .authority
-                .open_or_update_review(&request, credential())
-                .await
-                .is_err()
-        );
-    }
+    request.description = DELIVERY_GENERATED_BODY_START.replace("zeroshot", "zero\rshot");
+    assert!(
+        fixture
+            .authority
+            .open_or_update_review(&request, credential())
+            .await
+            .is_err()
+    );
     assert_eq!(fixture.writes("/merge_requests"), 1);
     assert_eq!(fixture.writes("/merge_requests/17"), 0);
 }

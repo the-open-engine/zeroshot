@@ -107,8 +107,23 @@ including generic pre-receive hook messages, return to the repair loop.
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
-pipelines do not prove required CI for the captured head. Escape standalone GitLab slash commands
-in comments and MR descriptions.
+pipelines do not prove required CI for the captured head.
+
+The GitLab adapter makes slash-leading generated prose literal with a Markdown backslash escape,
+including endpoint descriptions such as `/health returns 200` and quick-action-looking text such as
+`/close`. Existing escapes remain unchanged. The same conservative escape applies to slash-leading
+lines inside code examples, without parsing Markdown or maintaining a command catalog. This normalization
+also applies to comments before publication hashing and durable intent; retries reuse the same
+write-once publication.
+
+Generated GitLab MR titles lose leading `Draft:`, `[Draft]`, and `(Draft)` prefixes (case-insensitively,
+including repeated prefixes). Empty results become `Zeroshot change`. Titles are limited to 255 Unicode
+characters; shortened titles retain the complete original once in the generated description section.
+The same title normalization runs before generated delivery commits, including repair commits pushed
+to an existing MR, so GitLab's push processing cannot mark it draft from Zeroshot's commit message.
+Creation, refresh, and confirmation use the same canonical metadata, including for custom graphs.
+Refresh replaces only the generated markers' contents and preserves surrounding human text. A draft
+deliberately applied after creation keeps its existing title and draft status during refresh.
 
 GitLab `--pr` readiness, human-review handoff and `--ship` merging use the same required-CI policy.
 When the project's **Pipelines must succeed** setting (`only_allow_merge_if_pipeline_succeeds`) is
