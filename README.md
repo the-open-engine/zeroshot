@@ -19,7 +19,7 @@ Single agents have a reliability ceiling. As context grows and complexity compou
 get buried, assumptions go unchallenged, and shortcuts start to accumulate. The agent will
 optimize for completion and lose track of what correctness requires.
 
-Independent, adversarial review fixes that. A reviewer starts with fresh
+Independent, adversarial review fixes that, because a reviewer starts with fresh
 context and looks for reasons the work should fail. Rejection turns those failures into concrete
 repair tasks. Each revision faces renewed scrutiny, allowing the system to recover from mistakes
 that would otherwise survive all the way to “done.”
