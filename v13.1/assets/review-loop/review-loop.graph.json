@@ -1,0 +1,382 @@
+{
+  "profile": "openengine.graph.full/v1",
+  "initialInput": {
+    "kind": "record",
+    "fields": {
+      "task": {
+        "type": {
+          "kind": "string"
+        },
+        "required": true
+      }
+    }
+  },
+  "policy": {
+    "policy": "policy.native-v2@1",
+    "default": "deny"
+  },
+  "root": {
+    "kind": "seq",
+    "name": "run",
+    "state": {
+      "kind": "record",
+      "fields": {
+        "acceptanceFeedback": {
+          "type": {
+            "kind": "string"
+          },
+          "required": true
+        },
+        "codeFeedback": {
+          "type": {
+            "kind": "string"
+          },
+          "required": true
+        },
+        "task": {
+          "type": {
+            "kind": "string"
+          },
+          "required": true
+        }
+      }
+    },
+    "children": [
+      {
+        "kind": "loop",
+        "name": "review_loop",
+        "state": {
+          "kind": "record",
+          "fields": {
+            "acceptanceFeedback": {
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            },
+            "codeFeedback": {
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            },
+            "task": {
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            }
+          }
+        },
+        "body": {
+          "kind": "seq",
+          "name": "review_iteration",
+          "state": {
+            "kind": "record",
+            "fields": {
+              "acceptanceFeedback": {
+                "type": {
+                  "kind": "string"
+                },
+                "required": true
+              },
+              "codeFeedback": {
+                "type": {
+                  "kind": "string"
+                },
+                "required": true
+              },
+              "task": {
+                "type": {
+                  "kind": "string"
+                },
+                "required": true
+              }
+            }
+          },
+          "children": [
+            {
+              "kind": "step",
+              "name": "worker",
+              "worker": "builtin.agent.software-worker@1",
+              "instructions": "Implement the requested change. If reviewer feedback is present, address both diagnostics before returning. Work in the shared repository and run focused checks.",
+              "input": {
+                "kind": "record",
+                "fields": {
+                  "acceptanceFeedback": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  },
+                  "codeFeedback": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  },
+                  "task": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  }
+                }
+              },
+              "output": {
+                "kind": "null"
+              },
+              "inputBindings": [
+                {
+                  "target": ["task"],
+                  "value": {
+                    "source": "state",
+                    "path": ["task"]
+                  }
+                },
+                {
+                  "target": ["acceptanceFeedback"],
+                  "value": {
+                    "source": "state",
+                    "path": ["acceptanceFeedback"]
+                  }
+                },
+                {
+                  "target": ["codeFeedback"],
+                  "value": {
+                    "source": "state",
+                    "path": ["codeFeedback"]
+                  }
+                }
+              ],
+              "writeBindings": [],
+              "attempts": 1
+            },
+            {
+              "kind": "par",
+              "name": "reviews",
+              "state": {
+                "kind": "record",
+                "fields": {
+                  "acceptanceFeedback": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  },
+                  "codeFeedback": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  },
+                  "task": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  }
+                }
+              },
+              "branches": [
+                {
+                  "kind": "verifier",
+                  "name": "acceptance",
+                  "worker": "builtin.agent.acceptance-verifier@1",
+                  "input": {
+                    "kind": "record",
+                    "fields": {
+                      "task": {
+                        "type": {
+                          "kind": "string"
+                        },
+                        "required": true
+                      }
+                    }
+                  },
+                  "output": {
+                    "kind": "null"
+                  },
+                  "inputBindings": [
+                    {
+                      "target": ["task"],
+                      "value": {
+                        "source": "state",
+                        "path": ["task"]
+                      }
+                    }
+                  ],
+                  "writeBindings": [
+                    {
+                      "value": {
+                        "node": "acceptance",
+                        "channel": "diagnostic",
+                        "path": ["message"]
+                      },
+                      "target": ["acceptanceFeedback"]
+                    }
+                  ],
+                  "attempts": 1,
+                  "signals": {
+                    "verdict": ["accepted", "rejected"]
+                  },
+                  "diagnostic": {
+                    "kind": "record",
+                    "fields": {
+                      "message": {
+                        "type": {
+                          "kind": "string"
+                        },
+                        "required": true
+                      }
+                    }
+                  },
+                  "instructions": "Check the implementation against the requested behavior. Do not edit files. Accept only with concrete evidence; otherwise return actionable feedback."
+                },
+                {
+                  "kind": "verifier",
+                  "name": "code",
+                  "worker": "builtin.agent.code-verifier@1",
+                  "input": {
+                    "kind": "record",
+                    "fields": {
+                      "task": {
+                        "type": {
+                          "kind": "string"
+                        },
+                        "required": true
+                      }
+                    }
+                  },
+                  "output": {
+                    "kind": "null"
+                  },
+                  "inputBindings": [
+                    {
+                      "target": ["task"],
+                      "value": {
+                        "source": "state",
+                        "path": ["task"]
+                      }
+                    }
+                  ],
+                  "writeBindings": [
+                    {
+                      "value": {
+                        "node": "code",
+                        "channel": "diagnostic",
+                        "path": ["message"]
+                      },
+                      "target": ["codeFeedback"]
+                    }
+                  ],
+                  "attempts": 1,
+                  "signals": {
+                    "verdict": ["accepted", "rejected"]
+                  },
+                  "diagnostic": {
+                    "kind": "record",
+                    "fields": {
+                      "message": {
+                        "type": {
+                          "kind": "string"
+                        },
+                        "required": true
+                      }
+                    }
+                  },
+                  "instructions": "Review correctness, safety, integration, and maintainability. Do not edit files. Return actionable feedback when rejecting."
+                }
+              ],
+              "promotedStatePaths": [["acceptanceFeedback"], ["codeFeedback"]],
+              "join": {
+                "kind": "all"
+              }
+            }
+          ],
+          "promotedStatePaths": [["acceptanceFeedback"], ["codeFeedback"]]
+        },
+        "until": {
+          "kind": "all",
+          "guards": [
+            {
+              "kind": "in",
+              "value": {
+                "name": "acceptance",
+                "source": "signal",
+                "field": "verdict"
+              },
+              "labels": ["accepted"]
+            },
+            {
+              "kind": "in",
+              "value": {
+                "name": "code",
+                "source": "signal",
+                "field": "verdict"
+              },
+              "labels": ["accepted"]
+            }
+          ]
+        },
+        "maxIterations": 4,
+        "promotedStatePaths": []
+      },
+      {
+        "kind": "choice",
+        "name": "loop_result",
+        "state": {
+          "kind": "record",
+          "fields": {
+            "acceptanceFeedback": {
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            },
+            "codeFeedback": {
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            },
+            "task": {
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            }
+          }
+        },
+        "branches": [
+          {
+            "when": {
+              "kind": "in",
+              "value": {
+                "name": "review_loop",
+                "source": "group",
+                "field": "terminated"
+              },
+              "labels": ["converged"]
+            },
+            "node": {
+              "kind": "succeed",
+              "name": "done",
+              "output": {
+                "kind": "null"
+              },
+              "bindings": []
+            }
+          }
+        ],
+        "otherwise": {
+          "kind": "fail",
+          "name": "review_attempts_exhausted",
+          "reason": "review_attempts_exhausted"
+        },
+        "promotedStatePaths": []
+      }
+    ],
+    "promotedStatePaths": []
+  }
+}
