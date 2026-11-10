@@ -2328,6 +2328,17 @@ requires exactly one decision per supplied ID. The host binds that ID to its fro
 revision and owns revision increments; agents do not manage version counters. Missing delivery evidence makes the
 specialists abstain. Missing or duplicate decisions fail that specialist's reconciliation instead
 of reporting success.</p>
+<p>Maintenance receives the complete original authored graph and nonsecret runtime, including node
+instructions, contracts and runtime bindings. Large definitions remain available in complete
+private files rather than being replaced by truncated prefixes.</p>
+<p>For repository-bound lessons, the host records the actual clean checkout commit, when available,
+in a <code>source:</code> evidence reference. New findings without a verified source basis remain unknown. Adaptation or retirement requires the previous source commit to be an ancestor
+of the current inspected commit, using local Git objects only, and the checkout must remain
+unchanged during review. No fetch, authority ref or additional checkout is required. Unknown legacy
+provenance, dirty or non-Git workspaces, filtered or submodule checkouts, missing commits and
+divergent or squash histories defer
+destructive changes; existing lessons remain readable. Such cards need trustworthy revalidation
+before automatic adaptation or retirement becomes possible.</p>
 <p>Maintenance also consolidates overlapping advice within the same repository or exact graph/node/
 repository-qualified scope. It keeps or adapts one canonical card and retires redundant paraphrases,
 while still deciding every supplied ID/revision. Distinct causes and operations remain separate.</p>
@@ -2363,10 +2374,18 @@ worker in graph order, then the first agent verifier. All four specialists inher
 model, effective harness/provider lane, effort and declared connections. They use separate sessions. Each scope's opt-out disables both its maintenance and discovery.
 A maintenance specialist cannot change the other scope even if its model returns a foreign ID.
 Only built-in global agents are accepted initially.</p>
-<p><code>budgetBytes</code> is a cumulative context budget per provider session, including card framing. It must
-be 1 through 16384; cards that do not fit remain undelivered. The postmortem's shared wall-clock
-budget is <code>timeoutMs</code>, from 1 through 600000. Provider startup, investigation and all maintenance batches consume that budget. An interrupted or
-failed maintenance pass never claims that the entire supplied manifest was reconciled.</p>
+<p><code>nodeInjectionTokens</code> limits graph guidance per node invocation (default 16000), and
+<code>hookInjectionTokens</code> limits repository recall per native tool callback (default 8000). Each accepts
+1 through 64000. These are approximate tokens: one token allows four UTF-8 bytes, including card
+framing. There is no model-specific tokenizer and no cumulative conversation or run budget. Complete
+cards that do not fit remain undelivered and eligible for a later matching injection.</p>
+<p><code>budgetBytes</code> is replaced by these two fields; remove it from saved runtime JSON when upgrading.</p>
+<p>The postmortem's shared work deadline is <code>timeoutMs</code>, from 1 through 600000, defaulting to ten minutes.
+Evidence collection, provider startup, investigation, all maintenance batches and conflict retries
+share that deadline. When it expires, unfinished specialists stop; complete, host-validated
+specialist results may publish during bounded settlement. A maintenance specialist's decisions
+publish together only after all its batches finish, preserving related replacements and retirements.
+Explicit cancellation fences new publication and drains writes already started.</p>
 <h2 id="indexing-and-retrieval">Indexing and retrieval<a class="headerlink" href="#indexing-and-retrieval" title="Permanent link">&para;</a></h2>
 <p>A run freezes an immutable, scoped snapshot. Matching uses resident inverted indexes and performs
 no model calls, network lookups or filesystem scans. Repository lessons can independently associate
@@ -2398,9 +2417,9 @@ with multiple literal files, folders, identifiers or groups of keywords.</p>
 </tbody>
 </table>
 <p>Each card gets its strongest independent match. Repeated words do not increase its score. Retrieval
-sorts by descending score, then lesson ID, and returns complete cards within the remaining budget.
+sorts by descending score, then lesson ID, and returns complete cards within the injection limit.
 Impact determines admission, so retrieval ranks by relevance alone. An ID/revision is supplied once
-per provider session. A new session can receive it again.</p>
+per provider conversation. Compaction does not reset this deduplication; a new conversation can receive it again.</p>
 <p>An identifier is a literal name such as <code>configure_bedrock</code> or <code>CLAUDE_CODE_USE_BEDROCK</code>. Matching
 preserves the whole name and also splits snake/camel names into topic words for keyword groups.
 Groups require two through four specific terms; individual broad words cannot retrieve a card.
@@ -2420,7 +2439,7 @@ paths can miss relevant cards. The matcher does not trace arbitrary program file
 and searches provide the most useful early triggers. Managed policy or disabled native hooks can
 prevent injection. Transport failures leave the task running; missing delivery evidence makes
 maintenance abstain. Hook receipts record returned context, not proof that the model followed it.</p>
-<p>Graph lessons enter the node's instructions after admission validation. Their scope is the authored
+<p>Graph lessons supplement the private provider prompt after admission validation, outside authored instructions. Their scope is the authored
 compiled graph hash plus node ID, optionally repository. Memory injection never changes that hash,
 the authored graph, permissions or output contracts. Authored graph changes create a new scope;
 this version does not transfer guidance across graph versions.</p>
@@ -2482,6 +2501,9 @@ local completion checkpoint; checkpoints use durable atomic file replacement bef
 removed. Source or lesson changes preserve staged findings for fresh maintenance work; digest-bound
 task responses prevent stale reuse. Deferred discoveries remain inactive. There is no findings count
 quota.</p>
+<p>Each response retains the source basis exported with its task. A known revision must still match
+the verified checkout when importing the answer; restore it or start a new session if it changed.
+Answers exported without a verified basis remain unknown even if the checkout later becomes clean.</p>
 <p>Current source includes tracked and nonignored untracked files and executable permissions. Ignored
 artifacts cannot be maintenance authority. Keep code stable during final review and publication;
 the filesystem and database cannot share a transaction. The CLI does not pull or change branches.
@@ -2502,8 +2524,9 @@ reinvokes maintenance while retaining validated discoveries, within the original
 time budget. A conflict followed by an unchanged visible lesson set stops rather than repeatedly
 retrying a hidden deletion tombstone. New findings deferred by maintenance remain unpublished.
 Ordinary transport failures are not revision conflicts.</p>
-<p>Storage reads and queued writes stop on cancellation. Backends check cancellation before starting
-publication and drain started writes within a bounded storage timeout before cleanup completes.</p>
+<p>Storage reads and queued writes stop on cancellation. Backends check the original hard-stop signal and absolute publication deadline immediately before
+dispatch. <code>MemoryPublicationControl</code> carries both without a forwarded signal. Started writes drain
+within a bounded storage timeout before cleanup completes.</p>
 <p>Embedding hosts may install an authenticated <code>ActiveMemoryBackend</code> through <code>ProductionHostingConfig</code>.
 Its snapshot and publication operations carry run identity; the backend must derive and enforce the
 accepted run's tenant, repository and graph scope independently of request fields. SQLite implements

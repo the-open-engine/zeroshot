@@ -34,18 +34,25 @@
     },
     "ActiveMemoryConfig": {
       "additionalProperties": false,
-      "description": "Retrieval controls. Repository cards and procedural graph guidance are independent.",
+      "description": "Independent per-injection limits; approximate tokens are UTF-8 bytes divided by four.\nRepository hook recall and graph node guidance never share cumulative session spend.",
       "properties": {
-        "budgetBytes": {
-          "default": 2048,
-          "format": "uint32",
-          "maximum": 16384,
-          "minimum": 1,
-          "type": "integer"
-        },
         "graph": {
           "default": true,
           "type": "boolean"
+        },
+        "hookInjectionTokens": {
+          "default": 8000,
+          "format": "uint32",
+          "maximum": 64000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "nodeInjectionTokens": {
+          "default": 16000,
+          "format": "uint32",
+          "maximum": 64000,
+          "minimum": 1,
+          "type": "integer"
         },
         "repository": {
           "default": true,
@@ -1110,7 +1117,7 @@
           "$ref": "#/$defs/PostmortemConfig",
           "default": {
             "enabled": true,
-            "timeoutMs": 120000
+            "timeoutMs": 600000
           }
         }
       },
@@ -4113,7 +4120,7 @@
           ]
         },
         "timeoutMs": {
-          "default": 120000,
+          "default": 600000,
           "format": "uint32",
           "maximum": 600000,
           "minimum": 1,

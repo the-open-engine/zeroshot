@@ -2298,27 +2298,33 @@ do not qualify as lessons.</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"activeMemory"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">"repository"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">"graph"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">"budgetBytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">2048</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">"globalAgents"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">"postmortem"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">      </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">      </span><span class="nt">"sourceNode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"worker"</span><span class="p">,</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">"timeoutMs"</span><span class="p">:</span><span class="w"> </span><span class="mi">120000</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="p">}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">"nodeInjectionTokens"</span><span class="p">:</span><span class="w"> </span><span class="mi">16000</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">"hookInjectionTokens"</span><span class="p">:</span><span class="w"> </span><span class="mi">8000</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">"globalAgents"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nt">"postmortem"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">      </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">"sourceNode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"worker"</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">"timeoutMs"</span><span class="p">:</span><span class="w"> </span><span class="mi">600000</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">}</span>
 </code></pre></div>
 <ul>
 <li>Set <code>repository</code> or <code>graph</code> to <code>false</code> to stop reading and collecting lessons for that scope.
   Set both to <code>false</code> to disable Active Memory.</li>
 <li>Set <code>postmortem.enabled</code> to <code>false</code> to keep reading saved lessons without updating them.</li>
-<li><code>budgetBytes</code> limits memory context per provider session, including formatting; the range is
-  1–16384 bytes.</li>
+<li><code>nodeInjectionTokens</code> limits graph guidance per node invocation; <code>hookInjectionTokens</code> limits
+  repository recall per tool callback. They default to 16000 and 8000 approximate tokens and each
+  accepts 1–64000. One approximate token permits four UTF-8 bytes, including formatting. There is
+  no cumulative conversation or run budget.</li>
 <li><code>sourceNode</code> selects the agent whose model, provider and connections the postmortem uses.
   Omit it to use the first worker, or the first agent verifier if there is no worker.</li>
-<li><code>timeoutMs</code> limits the postmortem to 1–600000 milliseconds, including startup and investigation.</li>
+<li><code>timeoutMs</code> defaults to ten minutes and accepts 1–600000 milliseconds. Startup, investigation and
+  all batches and retries share that deadline. Completed specialist work can publish after another
+  specialist times out; an incomplete maintenance specialist publishes none of its decisions.</li>
 </ul>
+<p><code>budgetBytes</code> is replaced by the two injection limits; remove it from saved runtime JSON when upgrading.</p>
 <p>These settings apply per run, so saved profiles can use different policies. Postmortem model usage
 counts toward the run total. An ordinary postmortem failure appears in the logs and does not change
 the main graph's result.</p>
@@ -2327,7 +2333,8 @@ the main graph's result.</p>
 to a particular compiled graph and node; changing the graph creates a new scope. Lessons do not
 transfer automatically across graph versions.</p>
 <p>Each run reads a snapshot of memory. New lessons become available to future runs. Matching makes
-no model calls. A lesson is supplied once per provider session, within the context budget.</p>
+no model calls. An ID/revision is supplied once per provider conversation; compaction does not reset
+this deduplication. Each matching injection gets its own context limit.</p>
 <p>Repository lessons arrive through harness hooks. Disabled hooks can prevent delivery; scripts that
 hide their file paths can miss matches. Advice cannot change a tool call already issued, and receipt
 of a lesson does not prove the model followed it. See the
