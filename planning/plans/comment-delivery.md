@@ -70,11 +70,11 @@ push/merge/none choices remain. Saved graphs retain their authored delivery.
 
 CLI/provider work used `the-open-engine/zeroshot-matrix-demo-20260812-3ebd`.
 
-| Case | Run | Observed result |
-| --- | --- | --- |
-| Issue 221 | `01a16a6e-a63b-7442-9cad-d7bd3b2c55f8` | [Posted review](https://github.com/the-open-engine/zeroshot-matrix-demo-20260812-3ebd/issues/221#issuecomment-6374021888), including a reproduced tenant-key collision. |
-| Docs PR 225 | `01a16d52-346d-7931-b991-aa382f8a8258` | Classifier skipped reproduction; [53-word comment](https://github.com/the-open-engine/zeroshot-matrix-demo-20260812-3ebd/pull/225#issuecomment-6382776639), including provenance. |
-| UI PR 224 | `01a16d9c-dcc0-7dc0-838b-1c747269e765` | Chromium against Node HTTP/SQLite reproduced two POSTs and persisted count 2 from one click; [113-word comment](https://github.com/the-open-engine/zeroshot-matrix-demo-20260812-3ebd/pull/224#issuecomment-6383576457), including provenance (99 report words). |
+| Case        | Run                                    | Observed result                                                                                                                                                                                                                                                  |
+| ----------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Issue 221   | `01a16a6e-a63b-7442-9cad-d7bd3b2c55f8` | [Posted review](https://github.com/the-open-engine/zeroshot-matrix-demo-20260812-3ebd/issues/221#issuecomment-6374021888), including a reproduced tenant-key collision.                                                                                          |
+| Docs PR 225 | `01a16d52-346d-7931-b991-aa382f8a8258` | Classifier skipped reproduction; [53-word comment](https://github.com/the-open-engine/zeroshot-matrix-demo-20260812-3ebd/pull/225#issuecomment-6382776639), including provenance.                                                                                |
+| UI PR 224   | `01a16d9c-dcc0-7dc0-838b-1c747269e765` | Chromium against Node HTTP/SQLite reproduced two POSTs and persisted count 2 from one click; [113-word comment](https://github.com/the-open-engine/zeroshot-matrix-demo-20260812-3ebd/pull/224#issuecomment-6383576457), including provenance (99 report words). |
 
 The latest UI run used head `d7c7b13e6abde5cd300c8758aaf3dd514485fe40` and linked issue 223.
 PR/issue text and the fixture README contained no review hints; saved input had no caller
@@ -85,17 +85,14 @@ script typo and reported no remaining startup/credential blockers. Coverage was 
 concurrent clients and storage failures remain untested.
 
 Receipt hashes matched GitHub comment bytes. Same-key retries returned the original runs with
-one matching marker each, and tracked checkouts stayed clean. Evidence lives under
-`/home/ec2-user/.cache/pr-review-acceptance-20261024/no-hints`, with docs-skip evidence in its parent;
-issue evidence is in `/home/ec2-user/.cache/comment-delivery-acceptance-20261023/final-acceptance.json`.
+one matching marker each, and tracked checkouts stayed clean.
 These runs cover local CLI execution. Hosted/direct live runs and a live fork PR remain untested;
 resolver and Git transport fixtures cover fork materialization.
 
 Post-rebase checks passed native all-targets/UI compilation, 415 UI tests/build, 68 Python SDK
 tests with lint/types/docs, and 67 tooling tests with ESLint/distribution checks. Final Rust workspace,
-Clippy and documentation checks remain release gates. Platform checks include PostgreSQL-backed
-resolver/CAS/migration tests and frontend integration using local native patches. PostgreSQL tests
-cover SQL. The legacy Sense scan reaches its fixed repository limit; structural coverage is incomplete.
+Clippy and documentation checks remain release gates. The legacy Sense scan reaches its fixed
+repository limit; structural coverage is incomplete.
 
 ## Remaining rollout order
 
