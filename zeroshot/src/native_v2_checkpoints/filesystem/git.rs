@@ -313,7 +313,9 @@ fn validate_git_metadata(path: &Path) -> io::Result<()> {
     if metadata.file_type().is_symlink() {
         return Err(invalid("Git metadata cannot contain symbolic links"));
     }
-    if path.ends_with("objects/info/alternates") || path.ends_with("objects/info/http-alternates") {
+    if (path.ends_with("objects/info/alternates") || path.ends_with("objects/info/http-alternates"))
+        && metadata.len() > 0
+    {
         return Err(invalid(
             "external Git object alternates are unsupported by workspace snapshots",
         ));
