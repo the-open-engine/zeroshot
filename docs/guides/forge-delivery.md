@@ -150,6 +150,13 @@ only if the project explicitly allows it. Missing or unknown policy cannot bypas
 conflicts, discussion policy, human approval for merging, and other forge gates still apply;
 merge submission remains SHA-guarded and requires authoritative confirmation of the merged revision.
 
+On fast-forward and semi-linear GitLab projects (`merge_method` `ff` or `rebase_merge`), a target
+branch that advances after the MR opens makes GitLab report `need_rebase`. Delivery then fetches the
+exact current target and merges it into the run branch locally, without asking GitLab to rebase, and
+the changed candidate returns through repair and review before it is published again. If GitLab still
+requires a rebase although the candidate already contains that target, delivery stops with a refusal
+naming the merge method and target revision.
+
 Resuming accepts intentional commits pushed to the run branch. If the complete restored candidate
 already matches its published tree and no merge is pending, delivery reuses that commit without another
 work round. Pending merges retain their normal reconciliation path. Different

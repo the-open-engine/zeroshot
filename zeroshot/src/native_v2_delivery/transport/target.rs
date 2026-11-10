@@ -61,6 +61,46 @@ pub(crate) async fn reconcile_target(
     })
 }
 
+/// Integrates the captured target into a published review. The workspace must still descend from
+/// the review head, and the review's fork point from the target bounds the deliverable mutation,
+/// so a clean workspace at the review head is integrated instead of reporting no mutation.
+pub(crate) async fn integrate_review_target(
+    transport: &GitTransport,
+    request: &SourceConflictRequest,
+    target_revision: &str,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<SourceReconciliationOutcome, SourceDeliveryError> {
+    let review_head = &request.review.head_revision;
+    if !valid_git_revision(target_revision) || !valid_git_revision(review_head) {
+        return Err(SourceDeliveryError::Rejected);
+    }
+    transport.fetch_exact(target_revision, credential).await?;
+    let deadline = transport.config().deadline;
+    let mut provenance = transport.command(&request.workspace);
+    provenance.args(["merge-base", "--is-ancestor", review_head, "HEAD"]);
+    bounded_status(provenance, deadline).await?;
+    let fork_point = bounded_git_output(
+        transport
+            .command(&request.workspace)
+            .args(["merge-base", review_head, target_revision]),
+        deadline,
+        128,
+    )
+    .await?;
+    let target = DeliveryTarget::new(
+        &request.review.repository,
+        &request.review.target_branch,
+        fork_point.trim(),
+    )
+    .map_err(|_| SourceDeliveryError::Rejected)?;
+    let request = SourceTargetReconciliation {
+        workspace: &request.workspace,
+        target: &target,
+        commit_message: "Integrate the captured target before another review",
+    };
+    integrate(TargetContext { transport, request }, target_revision).await
+}
+
 async fn integrate(
     context: TargetContext<'_>,
     target_revision: &str,
