@@ -62,3 +62,31 @@ fn projected_delivery_execution_ids_never_use_javascript_numbers() {
     super::super::project_event(&mut event);
     assert_eq!(event["delivery_execution"], json!(execution.to_string()));
 }
+
+#[test]
+fn projected_checkpoint_execution_ids_preserve_opaque_precision() {
+    let execution = 9_007_199_254_740_993_u64;
+    let node_instance = u64::MAX;
+    let mut event = json!({
+        "kind":"prior_execution",
+        "execution": {
+            "execution":execution,
+            "node_instance":node_instance,
+            "occurrence":{"node":"code","mapIndices":[]},
+            "state":{"Settled":{"outcome":{"status":"verifier","output":{"value":7}}}}
+        }
+    });
+    super::super::project_event(&mut event);
+    assert_eq!(
+        event["execution"]["execution"],
+        json!(execution.to_string())
+    );
+    assert_eq!(
+        event["execution"]["node_instance"],
+        json!(node_instance.to_string())
+    );
+    assert_eq!(
+        event["execution"]["state"]["Settled"]["outcome"]["output"]["value"],
+        json!(7)
+    );
+}
