@@ -541,7 +541,9 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -550,7 +552,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -812,7 +814,7 @@
   <span class="md-ellipsis">
     
   
-    Use Zeroshot through a plugin
+    Use zeroshot through a plugin
   
 
     
@@ -1969,7 +1971,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Platform
+    zeroshot Platform
   
 
     
@@ -2022,7 +2024,9 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -2031,7 +2035,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2122,7 +2126,7 @@
 
 
 <h1 id="how-execution-works">How execution works<a class="headerlink" href="#how-execution-works" title="Permanent link">&para;</a></h1>
-<p>Zeroshot keeps control flow separate from model behavior through a caller-authored graph. After
+<p>zeroshot keeps control flow separate from model behavior through a caller-authored graph. After
 admission, the engine runs an executable node and checks its typed output; state reduction records
 that output before choosing the next edge.</p>
 <h2 id="the-run-boundary">The run boundary<a class="headerlink" href="#the-run-boundary" title="Permanent link">&para;</a></h2>
@@ -2153,7 +2157,7 @@ that output before choosing the next edge.</p>
 </tr>
 </tbody>
 </table>
-<p>For inline graphs and built-in templates, Zeroshot completes admission before it starts a local
+<p>For inline graphs and built-in templates, zeroshot completes admission before it starts a local
 controller or contacts a target. The CLI first fetches a target-stored profile, then sends its graph
 and runtime through the same checks. Those checks cover schema shape, graph semantics, bounds,
 runtime bindings, and the initial input; <code>--validate-only</code> runs them without creating a run.</p>
@@ -2207,7 +2211,7 @@ delivery alongside any other executable node, including reviewers, and delivery 
 have multiple items. A delivery receipt can certify run success only when every other executable
 settled before that delivery execution started.</p>
 <h2 id="state-reduction-chooses-the-next-step">State reduction chooses the next step<a class="headerlink" href="#state-reduction-chooses-the-next-step" title="Permanent link">&para;</a></h2>
-<p>An agent returns a value through a declared output channel. Zeroshot checks that value, applies
+<p>An agent returns a value through a declared output channel. zeroshot checks that value, applies
 authored bindings, and records the new state before it evaluates another node. Model output cannot
 add an edge or raise a bound.</p>
 <p>Inside a repair loop, a reviewer emits a finite signal with a typed diagnostic. The graph routes that
@@ -2217,7 +2221,7 @@ continue.</p>
 <p>Each run has a public ID backed by a SQLite ledger. Status and safe-log events carry opaque cursors
 for strict resume, so detaching a client, losing a terminal, or cancelling a Python <code>await</code> does not
 stop the controller.</p>
-<p>When a run closes, Zeroshot atomically closes its execution activity; a late process cannot appear
+<p>When a run closes, zeroshot atomically closes its execution activity; a late process cannot appear
 after the terminal result. <a href="../../guides/observe-and-control/">Observe and control runs</a> covers the
 read and stop commands.</p>
 <p>On Linux, each local command has a private supervisor that also owns descendants which detach with
@@ -2243,7 +2247,7 @@ stops without merging. <code>--ship</code> uses the same feedback loop before it
 policy and confirms the merged revision. Missing approval doesn't block <code>--pr</code>; it still blocks
 <code>--ship</code> when GitHub requires it.</p>
 <p>For local <code>--pr</code> and <code>--ship</code> runs, the target branch is the current branch's upstream when one is
-configured; otherwise, Zeroshot uses the local branch name. Preparation verifies that the selected
+configured; otherwise, zeroshot uses the local branch name. Preparation verifies that the selected
 remote contains this target before agent execution. To target <code>main</code> from a fresh worktree,
 run <code>git branch --set-upstream-to=origin/main</code>, or create the worktree from <code>origin/main</code> so Git
 sets the tracking branch automatically. If the remote cannot be reached or authenticated,
@@ -2311,7 +2315,7 @@ Failed or incomplete permission lookups stop delivery or use its existing retry 
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-08">8 November 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
@@ -2491,6 +2495,8 @@ Failed or incomplete permission lookups stop delivery or use its existing retry 
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/command-wrap.js"></script>
       
     
   </body>

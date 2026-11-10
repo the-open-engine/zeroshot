@@ -699,7 +699,7 @@
   <span class="md-ellipsis">
     
   
-    Use Zeroshot through a plugin
+    Use zeroshot through a plugin
   
 
     
@@ -1018,7 +1018,9 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -1027,7 +1029,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -1936,7 +1938,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Platform
+    zeroshot Platform
   
 
     
@@ -1989,7 +1991,9 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -1998,7 +2002,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2060,7 +2064,7 @@
 Agent Client Protocol (ACP) agent. Each ACP prompt runs the complete graph once, while the ACP
 session keeps the working folder and node provider sessions alive between prompts. Plain folders
 are accepted; a folder inside a Git checkout resolves to its root. The working folder must be disjoint
-from the active Zeroshot state directory.</p>
+from the active zeroshot state directory.</p>
 <h2 id="profile-contract">Profile contract<a class="headerlink" href="#profile-contract" title="Permanent link">&para;</a></h2>
 <p>The ACP preview accepts a deliberately narrow profile:</p>
 <ul>
@@ -2184,9 +2188,9 @@ check is skipped.</p>
 <p>ACP owns standard input and standard output for the lifetime of the process. Diagnostics go to
 standard error. The process accepts one active ACP session, doesn't implement session loading, and
 rejects MCP servers or extra workspace directories.</p>
-<p>The client sends one nonempty ACP text block per prompt. Zeroshot maps it to <code>{"task":"..."}</code> and
+<p>The client sends one nonempty ACP text block per prompt. zeroshot maps it to <code>{"task":"..."}</code> and
 streams the successful <code>response</code> as an agent message. The prompt response includes
-Zeroshot-specific metadata with the durable run ID and raw graph output:</p>
+zeroshot-specific metadata with the durable run ID and raw graph output:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">"zeroshot"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">"runId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01..."</span><span class="p">,</span>
@@ -2194,7 +2198,7 @@ Zeroshot-specific metadata with the durable run ID and raw graph output:</p>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">}</span>
 </code></pre></div>
-<p><code>rawOutput</code> is Zeroshot's JSON form of the graph's terminal result, before ACP turns it into an
+<p><code>rawOutput</code> is zeroshot's JSON form of the graph's terminal result, before ACP turns it into an
 agent message. Success is <code>{"response":"..."}</code>; an authored fail node is <code>{"failed":"REASON"}</code>.</p>
 <p>Use that run ID with the ordinary read commands:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot status RUN_ID</span>
@@ -2235,7 +2239,7 @@ error and write the safe diagnostic to standard error.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-30">30 October 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
@@ -2415,6 +2419,8 @@ error and write the safe diagnostic to standard error.</p>
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/command-wrap.js"></script>
       
     
   </body>

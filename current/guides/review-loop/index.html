@@ -699,7 +699,7 @@
   <span class="md-ellipsis">
     
   
-    Use Zeroshot through a plugin
+    Use zeroshot through a plugin
   
 
     
@@ -850,7 +850,9 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -859,7 +861,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2013,7 +2015,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Platform
+    zeroshot Platform
   
 
     
@@ -2066,7 +2068,9 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -2075,7 +2079,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2216,7 +2220,7 @@ reviewers' feedback. The run succeeds when both accept, and fails after four pas
 <p>The built-in <code>software-change</code> template already does this with more recovery paths. Build the loop
 yourself when you want to change the reviewers, their instructions, or the bounds.</p>
 <h2 id="before-you-start">Before you start<a class="headerlink" href="#before-you-start" title="Permanent link">&para;</a></h2>
-<p>This guide assumes you have completed <a href="../../getting-started/first-run/">Run a first task</a>: Zeroshot
+<p>This guide assumes you have completed <a href="../../getting-started/first-run/">Run a first task</a>: zeroshot
 is installed, the Codex CLI is signed in, and you have a folder with an HTTP service to
 change.</p>
 <div class="admonition warning">
@@ -2306,7 +2310,7 @@ a <code>verdict</code> signal and a diagnostic, and writes the diagnostic messag
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="p">]</span>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="p">}</span>
 </code></pre></div>
-<p>The <code>code</code> verifier has the same shape and writes <code>codeFeedback</code>. Zeroshot tells verifiers not to
+<p>The <code>code</code> verifier has the same shape and writes <code>codeFeedback</code>. zeroshot tells verifiers not to
 edit the material under review; that is an instruction, not a filesystem boundary.</p>
 <p>The <code>all</code> join waits for both reviewers. <code>reviews</code> promotes both feedback paths into the iteration
 state, and the iteration promotes them into the loop state, so the next worker pass can read them.</p>
@@ -2800,7 +2804,7 @@ termination, runtime coverage, and the initial input:</p>
 </code></pre></div>
 <p><a href="../observe-and-control/">Observe and control runs</a> covers status, logs, and stopping.</p>
 <p>The same files run on a target with <code>--target platform</code> (see
-<a href="../../getting-started/install/#connect-zeroshot-platform">Connect Zeroshot Platform</a>) or the name of a
+<a href="../../getting-started/install/#connect-zeroshot-platform">Connect zeroshot Platform</a>) or the name of a
 <a href="../../concepts/targets/#direct-target">direct target</a>. A target requires an exact Git source selected from
 the checkout or <a href="../../concepts/targets/#direct-target">source overrides</a>, and resolves <code>OPENAI_API_KEY</code> from the submission
 environment or its connection store. The graph has no delivery node, so a target run does not push
@@ -2846,7 +2850,7 @@ Code; the graph does not change:</p>
 Anthropic accepts. Pass the file to <code>--runtime-config</code> in <a href="#7-validate-then-run">step 7</a> in place of
 <code>review-loop.runtime.json</code>.</p>
 <p>A local run needs both the Codex CLI and Claude Code installed and signed in. Before the run starts,
-Zeroshot checks that <code>codex</code> and <code>claude</code> are on <code>PATH</code>; it does not check login state, so a missing
+zeroshot checks that <code>codex</code> and <code>claude</code> are on <code>PATH</code>; it does not check login state, so a missing
 Claude Code login fails at the first review. On a target, the run requires both <code>OPENAI_API_KEY</code> and
 <code>ANTHROPIC_API_KEY</code>, and the target must advertise <code>openengine.node-runtime-lanes/v1</code>. The CLI
 refuses to send the plan to a target that does not.</p>
@@ -2870,7 +2874,7 @@ refuses to send the plan to a target that does not.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-24">24 October 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
@@ -3050,6 +3054,8 @@ refuses to send the plan to a target that does not.</p>
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/command-wrap.js"></script>
       
     
   </body>

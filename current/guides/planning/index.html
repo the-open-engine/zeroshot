@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a Zeroshot run to build.">
+        <meta name="description" content="Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a zeroshot run to build.">
       
       
       
@@ -63,14 +63,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="Plan work before running it | zeroshot docs">
-    <meta property="og:description" content="Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a Zeroshot run to build.">
+    <meta property="og:description" content="Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a zeroshot run to build.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/guides/planning/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Plan work before running it | zeroshot docs">
-    <meta name="twitter:description" content="Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a Zeroshot run to build.">
+    <meta name="twitter:description" content="Plan work with your coding agent, agree on checkable acceptance criteria and hand the plan to a zeroshot run to build.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -699,7 +699,7 @@
   <span class="md-ellipsis">
     
   
-    Use Zeroshot through a plugin
+    Use zeroshot through a plugin
   
 
     
@@ -766,7 +766,9 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -775,7 +777,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -1947,7 +1949,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Platform
+    zeroshot Platform
   
 
     
@@ -2000,7 +2002,9 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -2009,7 +2013,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2078,15 +2082,15 @@
 
 
 <h1 id="plan-work-before-running-it">Plan work before running it<a class="headerlink" href="#plan-work-before-running-it" title="Permanent link">&para;</a></h1>
-<p>A Zeroshot run builds and checks a change against the task you give it, so the result is only as
+<p>A zeroshot run builds and checks a change against the task you give it, so the result is only as
 good as that task. A plan makes the task explicit before any build tokens are spent: what should
 change, how each part will be checked, and what must stay as it is.</p>
-<p>Plans are Markdown files in your repository, and a Zeroshot run builds them: its worker implements
+<p>Plans are Markdown files in your repository, and a zeroshot run builds them: its worker implements
 the plan and its verifiers judge the result against the criteria.</p>
 <h2 id="plan-with-your-coding-agent">Plan with your coding agent<a class="headerlink" href="#plan-with-your-coding-agent" title="Permanent link">&para;</a></h2>
 <p>The npm package installs the <code>zeroshot-plan</code> skill for Codex, GitHub Copilot, Pi and Claude Code
 next to the <code>zeroshot</code> skill (see <a href="../../getting-started/install/">Install</a>). Ask your agent to plan
-a change with Zeroshot, for example "plan this with zeroshot" or <code>/zeroshot-plan</code>, and it:</p>
+a change with zeroshot, for example "plan this with zeroshot" or <code>/zeroshot-plan</code>, and it:</p>
 <ol>
 <li>reads the request, your repository's agent guidance (<code>AGENTS.md</code>, <code>CLAUDE.md</code>), the relevant code
    and any linked issue;</li>
@@ -2097,18 +2101,18 @@ a change with Zeroshot, for example "plan this with zeroshot" or <code>/zeroshot
    are asked about when nothing applies;</li>
 <li>turns vague goals into checkable acceptance criteria, including what must keep working, and asks
    you about any number it picks, such as a performance threshold;</li>
-<li>keeps one plan, and splits off follow-up plans only when one Zeroshot run could not build and
+<li>keeps one plan, and splits off follow-up plans only when one zeroshot run could not build and
    verify everything well, for example when parts need different environments to check;</li>
 <li>writes the plan to <code>.zeroshot/plans/&lt;id&gt;.md</code>.</li>
 </ol>
 <p>A plan is as long as the work needs: a small, clear change gets a short plan with no questions. If
 the issue already has a plan in this format posted by a bot, the skill continues from it instead of
 starting over. The skill only plans: it does not edit code or start runs.</p>
-<p>The skill runs only when you ask for Zeroshot planning. Ordinary planning requests stay with your
-agent, and when you ask Zeroshot to build vague or large work, the <code>zeroshot</code> skill suggests
+<p>The skill runs only when you ask for zeroshot planning. Ordinary planning requests stay with your
+agent, and when you ask zeroshot to build vague or large work, the <code>zeroshot</code> skill suggests
 planning first and lets you choose. The skill is not your agent's plan mode. A plan mode prepares
 the edit the agent is about to make in the current session; the skill writes a plan file that
-outlives the session, so another agent or a Zeroshot run can build from it later.</p>
+outlives the session, so another agent or a zeroshot run can build from it later.</p>
 <h2 id="plan-format">Plan format<a class="headerlink" href="#plan-format" title="Permanent link">&para;</a></h2>
 <p>A plan has YAML frontmatter and fixed sections. Goal, Acceptance criteria and Constraints are
 required; other sections appear only when they have content.</p>
@@ -2270,7 +2274,7 @@ Context, Acceptance criteria, Constraints, Decided approach and Decisions, and w
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-05">5 November 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
@@ -2306,7 +2310,7 @@ Context, Acceptance criteria, Constraints, Decided approach and Decisions, and w
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../plugins/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Use Zeroshot through a plugin">
+          <a href="../plugins/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Use zeroshot through a plugin">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2316,7 +2320,7 @@ Context, Acceptance criteria, Constraints, Decided approach and Decisions, and w
                 Previous
               </span>
               <div class="md-ellipsis">
-                Use Zeroshot through a plugin
+                Use zeroshot through a plugin
               </div>
             </div>
           </a>
@@ -2450,6 +2454,8 @@ Context, Acceptance criteria, Constraints, Decided approach and Decisions, and w
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/command-wrap.js"></script>
       
     
   </body>

@@ -697,7 +697,7 @@
   <span class="md-ellipsis">
     
   
-    Use Zeroshot through a plugin
+    Use zeroshot through a plugin
   
 
     
@@ -1503,7 +1503,9 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -1512,7 +1514,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2104,7 +2106,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Platform
+    zeroshot Platform
   
 
     
@@ -2157,7 +2159,9 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -2166,7 +2170,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2442,7 +2446,7 @@ See <a href="../../guides/active-memory/">Active Memory</a> for budgets, provide
 <p><code>harness</code> and <code>provider</code> form the default lane. Every agent node runs on it unless its binding
 carries its own <a href="#per-node-lanes"><code>lane</code></a>. <code>size</code> applies to the whole run. Model, effort, context
 window, output limit, session scope, and connections are chosen per node.</p>
-<p><code>size</code> is a run-level resource class. Zeroshot records it with the run and reports it in run
+<p><code>size</code> is a run-level resource class. zeroshot records it with the run and reports it in run
 status; the hosting target decides what resources each class receives.</p>
 <p><code>nodes</code> keys are graph node names: 1 to 128 bytes matching <code>[A-Za-z_][A-Za-z0-9_.-]*</code>.</p>
 <p>This plan binds the three agent nodes of the built-in <code>software-change</code> template:</p>
@@ -2466,7 +2470,7 @@ pairs and where each adapter runs. The same compatibility rules apply to an agen
 need a connection.</p>
 <p>Pi, Copilot, OpenCode and Hermes gateway lanes carry <code>GATEWAY_BASE_URL</code>, <code>GATEWAY_API_KEY</code>, and <code>GATEWAY_API</code>. The last names the
 wire protocol as <code>openai-responses</code>, <code>openai-completions</code>, or <code>anthropic-messages</code>, so one lane
-selects the native transport and the model identifier stays opaque and caller-owned. Zeroshot
+selects the native transport and the model identifier stays opaque and caller-owned. zeroshot
 never infers the protocol from the identifier, and an unrecognized value fails before launch.
 Pi's gateway model entry carries a node's <code>contextWindow</code> and <code>maxTokens</code> only when the caller
 has declared them; omitted limits keep Pi's own defaults. Built-in-provider endpoint overrides
@@ -2476,7 +2480,7 @@ keep Pi's catalog and receive no synthesized model entry.</p>
 <code>ANTHROPIC_AUTH_TOKEN</code>, or <code>ANTHROPIC_OAUTH_TOKEN</code>); a local run also honors the invoking shell's
 <code>ANTHROPIC_BASE_URL</code>. The endpoint override interpolates the API key only when the connection
 supplies it, so a token keeps Pi's own environment authentication. Pi's <code>openai</code> lane likewise
-honors <code>OPENAI_BASE_URL</code> or <code>OPENAI_API_BASE</code>. Pi ignores these variables itself, so Zeroshot turns each into a provider
+honors <code>OPENAI_BASE_URL</code> or <code>OPENAI_API_BASE</code>. Pi ignores these variables itself, so zeroshot turns each into a provider
 override that keeps that provider's own protocol; the <code>openai</code> lane therefore needs a
 Responses-compatible endpoint, and any other protocol uses <code>pi/gateway</code>. A declared endpoint ends
 native-login reuse, so the stored login is never sent to that host.</p>
@@ -2491,14 +2495,14 @@ input and output. The step must omit <code>instructions</code>. This initial imp
 Named targets and contained placements reject script bindings.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"script"</span><span class="p">,</span><span class="w"> </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"python3"</span><span class="p">,</span><span class="w"> </span><span class="s2">"retrieve.py"</span><span class="p">],</span><span class="w"> </span><span class="nt">"connections"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
-<p><code>command</code> is an executable followed by literal arguments. Zeroshot does not invoke a shell.
+<p><code>command</code> is an executable followed by literal arguments. zeroshot does not invoke a shell.
 There must be 1 to 128 entries, each at most 8,192 bytes, with no NUL characters and at most
 65,536 bytes in total. The executable must be nonblank. Paths resolve from the run workspace.
 Scripts inherit a small process environment for executable lookup, the user's home directory,
 temporary files and locale. Public run variables and explicitly declared connection fields are
 added through the existing connection resolver. Other ambient credentials are not inherited.</p>
 <p>The program receives one JSON value on stdin, followed by EOF, and must exit zero with exactly
-one JSON value on stdout. Zeroshot validates that value against the step's output schema.
+one JSON value on stdout. zeroshot validates that value against the step's output schema.
 Process input and output are each bounded at 8 MiB. A result must also fit the ledger's
 1 MiB serialized completion event, including execution metadata. Complete stderr is retained
 as bounded diagnostics with resolved connection values redacted. Truncated stderr is omitted because its cut boundary
@@ -2562,7 +2566,7 @@ may keep indexes or models warm across script invocations. Service lifecycle is 
 </tr>
 </tbody>
 </table>
-<p>Zeroshot passes <code>model</code> and <code>effort</code> to the harness unchanged. It keeps no model catalog and does not
+<p>zeroshot passes <code>model</code> and <code>effort</code> to the harness unchanged. It keeps no model catalog and does not
 check whether a model supports the chosen effort. <code>contextWindow</code> and <code>maxTokens</code> are caller
 declarations, never inferences: they are validated at admission, emitted only into the
 <code>pi/gateway</code> model entry, and otherwise left unset for the provider to default. An absent value
@@ -2586,7 +2590,7 @@ retains the provider's own limit; a present value must be a positive integer in 
 </tr>
 </tbody>
 </table>
-<p>If a reused session is lost, Zeroshot fails that execution with <code>session_lost</code>. It does not open a
+<p>If a reused session is lost, zeroshot fails that execution with <code>session_lost</code>. It does not open a
 replacement session silently.</p>
 <h3 id="decision"><code>decision</code><a class="headerlink" href="#decision" title="Permanent link">&para;</a></h3>
 <p>A decision binding evaluates one categorical question on an existing <code>verifier</code>, using the
@@ -2748,7 +2752,7 @@ the output, signals, and diagnostic of its worker's fixed contract. <code>zerosh
 software-change --pr</code> prints a delivery node with the current contract.</p>
 <p>A graph can contain at most one delivery node, and no other executable node may run in parallel with
 it, either as a <code>par</code> sibling or inside a <code>map</code> that can have more than one item. A hosting service
-may require exactly one delivery node; Zeroshot Platform quick runs require one. See
+may require exactly one delivery node; zeroshot Platform quick runs require one. See
 <a href="../../concepts/execution/#concurrent-workspace-changes">concurrent workspace changes</a>.</p>
 <p><code>ignore</code> skips pull-request discussion. CI, conflict, freshness, and merge-policy checks still apply.</p>
 <h3 id="comment_delivery"><code>comment_delivery</code><a class="headerlink" href="#comment_delivery" title="Permanent link">&para;</a></h3>
@@ -2797,7 +2801,7 @@ model identifier and the reviewers need Anthropic ones.</p>
   one. It is still a <code>lane</code> field, so the <a href="#target-support">target support</a> check applies to it and
   older binaries reject it. Omit <code>lane</code> when a node should use the default lane.</li>
 </ul>
-<p>Zeroshot starts one harness adapter for each distinct effective lane, and each node runs on its own
+<p>zeroshot starts one harness adapter for each distinct effective lane, and each node runs on its own
 lane's CLI. Model, effort, session scope, and connections stay per node. Provider access defaults
 also come from each node's effective lane; see <a href="#connections">Connections</a>.</p>
 <h3 id="target-support">Target support<a class="headerlink" href="#target-support" title="Permanent link">&para;</a></h3>
@@ -2809,7 +2813,7 @@ reading the target's discovery document and before it requests an access token o
 </code></pre></div>
 <p>Plans without a <code>lane</code> do not require the per-node capability. Targets separately advertise enabled
 harness/provider pairs through <code>openengine.runtime-harnesses/v1</code>; see <a href="../../concepts/targets/">Targets</a>.
-Older Zeroshot binaries reject a plan that contains a <code>lane</code> field when they read it.</p>
+Older zeroshot binaries reject a plan that contains a <code>lane</code> field when they read it.</p>
 <p>Local profiles are saved together in one file in the configuration store (<code>ZEROSHOT_CONFIG_DIR</code>).
 Once any local profile carries a <code>lane</code>, an older binary cannot read that file at all. Every local
 profile command, <code>--profile local:NAME</code> run, and <code>zeroshot acp</code> session then fails, including for
@@ -2894,7 +2898,7 @@ is Pi-specific. Other lanes list only their own provider's fields.</p>
 <p>The per-run limit also counts the connection fields and variable names of an attached runtime
 environment. Each connection value must be 1 byte to 64 KiB with no NUL. The static connection
 values supplied for one run, counting each key and field name with its value, must fit in 256 KiB.</p>
-<p>When a node omits <code>connections</code>, Zeroshot derives provider access from that node's
+<p>When a node omits <code>connections</code>, zeroshot derives provider access from that node's
 <a href="#per-node-lanes">effective lane</a> for the execution placement. Local native logins need no
 declaration; contained targets and non-native providers receive the canonical requirements listed in
 <a href="../../concepts/runtimes-and-connections/#runtime-configuration-contains-names-not-secret-values">Runtimes and connections</a>.
@@ -3062,11 +3066,11 @@ Omitting it preserves existing behavior. Nodes sharing a lane can have different
 </table>
 <p>Argument strings are passed directly, without a shell. Native options retain native semantics:
 unknown JSON keys may be accepted or ignored, and native versions may behave differently.
-Zeroshot validates the envelope and reserved controls, not a catalog of native settings or tools.
+zeroshot validates the envelope and reserved controls, not a catalog of native settings or tools.
 This feature does not guarantee a read-only filesystem or protect <code>tests/</code> when an allowed native
 tool can write files.</p>
 <p><code>args</code> configures native options; positional task messages and unbound <code>@file</code> inputs are reserved
-for Zeroshot. Each CLI adapter recognizes its native separated option operands (including Claude's
+for zeroshot. Each CLI adapter recognizes its native separated option operands (including Claude's
 variadic tool lists and Pi's <code>--tools -read</code>). For other option syntax, bind a value explicitly with
 the harness's joined form, such as <code>--native-option=value</code>; unknown option names still reach the
 harness. Native values are not validated or translated. A bare value after a no-value switch is
@@ -3079,7 +3083,7 @@ configuration files are never edited. Changing a lane preserves the authored obj
 the new harness interprets it without translation. JSON import/export and saved profiles retain it.
 Python <code>RuntimePlan</code> mappings accept it unchanged; <code>UniformRuntime(harness_config=...)</code> supplies the
 same object to every generated agent binding.</p>
-<p>Zeroshot reserves model/provider selection and credentials, private state, workspace/session identity,
+<p>zeroshot reserves model/provider selection and credentials, private state, workspace/session identity,
 transport, prompt and response contracts, required hooks, and cleanup/cancellation. Conflicts identify
 the node, harness and configuration path or flag. Credentials must use declared connections. Opaque
 Claude <code>--settings</code> files and runtime-changing Codex profiles are excluded because they can replace
@@ -3127,7 +3131,7 @@ or ignored by the native harness have no effective-configuration acknowledgement
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-09">9 November 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
@@ -3307,6 +3311,8 @@ or ignored by the native harness have no effective-configuration acknowledgement
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/command-wrap.js"></script>
       
     
   </body>

@@ -38,7 +38,13 @@ def var(theme_block, name):
     return re.search(rf"--{name}:\s*([^;]+);", theme_block).group(1).strip()
 
 light = css[css.index(":root {"):]
-dark = css[css.index(':root[data-theme="dark"] {'):]
+# zeroshot.sh is light-only now. The docs and README still offer dark mode, so without a dark block
+# on the page, keep the dark colours from the previous freeze.
+if ':root[data-theme="dark"] {' in css:
+    dark = css[css.index(':root[data-theme="dark"] {'):]
+else:
+    previous = (repo / "docs/brand/diagram-sources/example-graph-wide.svg").read_text()
+    dark = re.search(r":root\[data-theme=dark\]\{[^}]*\}", previous).group(0).replace("}", ";}")
 names = ["paper", "marker-ink", "ink-2", "rust", "green"]
 style = "\n".join(
     [
@@ -67,3 +73,10 @@ for layout in ("wide", "tall"):
     dest = repo / "docs/brand/diagram-sources" / f"example-graph-{layout}.svg"
     dest.write_text(out)
     print(dest, len(out), box)
+    # The docs home draws the graph inline, as zeroshot.sh does, so it uses the page's fonts and
+    # colour scheme: keep the loop's rules and drop the standalone file's :root theme and font.
+    inline = head + "<style>" + "\n".join(rules + ["@media (prefers-reduced-motion: reduce){" + "".join(still) + "}"]) + "</style>" + body + "\n"
+    inline = re.sub(r"&(\w+);", lambda m: m.group(0) if m.group(1) in xml else htmllib.unescape(m.group(0)), inline)
+    dest = repo / "docs/overrides/partials" / f"example-graph-{layout}.svg"
+    dest.write_text(inline)
+    print(dest, len(inline))

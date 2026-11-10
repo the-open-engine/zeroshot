@@ -1,24 +1,31 @@
-/* Same paper, ink, marker pen and post-its as zeroshot.sh. Material's rem is
-   20px, rising to 22px on wide screens. Keep documentation sized for reading. */
+/* zeroshot docs. A plain reading surface; the brand lives at the edges: the crow and the
+   handwritten wordmark in the header, and the hand-drawn graphs.
+
+   One sans on one scale, at Material's 20px rem: 30 / 20 / 17 / 16 / 14 / 13 px, weights 400, 500
+   and 600. Colour is neutral warm grey; rust appears only in warnings and the graphs. Material's rem
+   rises to 22px on wide screens; --oe-reading-unit keeps article type steady there. */
 
 :root {
   --oe-reading-unit: 1rem;
-  --oe-paper: #faf7f1;
-  --oe-ink: #171411;
-  --oe-ink-2: #4a433a;
-  --oe-muted: #6f675a;
+  --oe-paper: #fdfcfa;
+  --oe-surface: #f5f3ef;
+  --oe-ink: #1c1917;
+  --oe-ink-2: #44403c;
+  --oe-muted: #78716c;
+  --oe-hairline: #e7e5e4;
+  --oe-rule: #d6d3d1;
   --oe-rust: #c2240c;
-  --oe-hairline: #e4ded3;
+  --oe-underline: rgb(28 25 23 / 28%);
+  --oe-highlight: #fdeb6d;
   --oe-marker-ink: #26221c;
-  --oe-field: rgb(255 255 255 / 45%);
-  --oe-tint: rgb(23 20 17 / 6%);
+  --oe-code-string: #8a4b08;
+  --oe-code-number: #b42318;
+  --oe-figure: #faf7f1;
   --oe-marker: 'Reenie Beanie', 'Bradley Hand', 'Marker Felt', cursive;
   --oe-sans: 'Spline Sans', system-ui, sans-serif;
   --oe-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', menlo, monospace;
 }
 
-/* Material enlarges its root above 1600px and 2000px. Keep article typography
-   steady at those breakpoints while retaining user font-size and zoom scaling. */
 @media screen and (min-width: 100em) {
   :root {
     --oe-reading-unit: calc(1rem / 1.1);
@@ -32,38 +39,50 @@
 }
 
 [data-md-color-scheme='slate'] {
-  --oe-paper: #14110e;
-  --oe-ink: #faf7f1;
-  --oe-ink-2: #cbc5bb;
-  --oe-muted: #a39c91;
+  --oe-paper: #141210;
+  --oe-surface: #1f1c19;
+  --oe-ink: #f5f5f4;
+  --oe-ink-2: #d6d3d1;
+  --oe-muted: #a8a29e;
+  --oe-hairline: #2a2623;
+  --oe-rule: #3d3833;
   --oe-rust: #ed6b55;
-  --oe-hairline: #302a24;
+  --oe-underline: rgb(245 245 244 / 35%);
+  --oe-highlight: #6b5a14;
   --oe-marker-ink: #f1ece3;
-  --oe-field: rgb(250 247 241 / 4%);
-  --oe-tint: rgb(250 247 241 / 8%);
+  --oe-code-string: #f2d36b;
+  --oe-code-number: #f2a58f;
+  --oe-figure: #171411;
 }
 
-/* Declared on the element that carries the scheme, so each token resolves to
-   that scheme's value. */
 [data-md-color-scheme] {
   --md-default-bg-color: var(--oe-paper);
   --md-default-fg-color: var(--oe-ink);
-  --md-default-fg-color--light: var(--oe-muted);
+  --md-default-fg-color--light: var(--oe-ink-2);
   --md-default-fg-color--lighter: var(--oe-muted);
   --md-default-fg-color--lightest: var(--oe-hairline);
   --md-primary-fg-color: var(--oe-paper);
   --md-primary-bg-color: var(--oe-ink);
   --md-primary-bg-color--light: var(--oe-muted);
-  --md-accent-fg-color: var(--oe-rust);
+  --md-accent-fg-color: var(--oe-ink);
   --md-typeset-a-color: var(--oe-ink);
   --md-typeset-table-color: var(--oe-hairline);
-  --md-code-bg-color: var(--oe-tint);
+  --md-code-bg-color: var(--oe-surface);
   --md-code-fg-color: var(--oe-ink);
-  --md-code-hl-generic-color: var(--oe-ink);
-  --md-code-hl-variable-color: var(--oe-ink-2);
-  --md-code-hl-operator-color: var(--oe-ink-2);
-  --md-code-hl-punctuation-color: var(--oe-ink-2);
   --md-code-font-family: var(--oe-mono);
+  --md-code-hl-color: rgb(253 235 109 / 35%);
+  --md-code-hl-keyword-color: var(--oe-ink);
+  --md-code-hl-name-color: var(--oe-ink);
+  --md-code-hl-function-color: var(--oe-ink);
+  --md-code-hl-variable-color: var(--oe-ink);
+  --md-code-hl-generic-color: var(--oe-ink);
+  --md-code-hl-string-color: var(--oe-code-string);
+  --md-code-hl-number-color: var(--oe-code-number);
+  --md-code-hl-constant-color: var(--oe-code-number);
+  --md-code-hl-special-color: var(--oe-code-number);
+  --md-code-hl-operator-color: var(--oe-muted);
+  --md-code-hl-punctuation-color: var(--oe-muted);
+  --md-code-hl-comment-color: var(--oe-muted);
   --md-footer-bg-color: var(--oe-paper);
   --md-footer-bg-color--dark: var(--oe-paper);
   --md-footer-fg-color: var(--oe-ink);
@@ -82,33 +101,11 @@ input {
 }
 
 ::selection {
-  background: var(--oe-rust);
-  color: var(--oe-paper);
+  background: var(--oe-highlight);
+  color: var(--oe-ink);
 }
 
-/* Paper grain, as on the landing page. */
-body::after {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  content: '';
-  inset: 0;
-  mix-blend-mode: multiply;
-  opacity: 0.05;
-  pointer-events: none;
-  position: fixed;
-  z-index: 10;
-}
-
-[data-md-color-scheme='slate']::after {
-  display: none;
-}
-
-@media print {
-  body::after {
-    display: none;
-  }
-}
-
-/* Masthead: the crow, the product name in marker, a mono label. */
+/* Header: the crow and the handwritten wordmark, then plain text. */
 .md-header,
 .md-header--shadow {
   border-bottom: 1px solid var(--oe-hairline);
@@ -116,8 +113,7 @@ body::after {
 }
 
 .md-header__button.md-logo img {
-  height: 1.8rem;
-  transform: rotate(-2deg);
+  height: 1.7rem;
   width: auto;
 }
 
@@ -126,131 +122,191 @@ body::after {
 }
 
 .md-header__topic:first-child {
-  align-items: center;
+  align-items: baseline;
   font-weight: 400;
 }
 
 .md-header__topic:first-child > .md-ellipsis {
   color: var(--oe-marker-ink);
   font-family: var(--oe-marker);
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   overflow: visible;
   text-transform: lowercase;
-  transform: rotate(-1.5deg);
 }
 
 .md-header__topic:first-child::after {
   color: var(--oe-muted);
   content: 'docs';
-  font-family: var(--oe-mono);
-  font-size: 0.55rem;
-  letter-spacing: 0.14em;
-  margin-left: 0.9rem;
-  text-transform: uppercase;
+  font-size: 0.7rem;
+  margin-left: 0.45rem;
+}
+
+.md-header__topic + .md-header__topic {
+  font-size: 0.7rem;
+  font-weight: 500;
 }
 
 .md-version {
+  margin-right: 0.6rem;
   order: 1;
 }
 
 .md-version__current {
-  color: var(--oe-ink-2);
-  font-family: var(--oe-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
+  color: var(--oe-muted);
+  font-size: 0.65rem;
+  margin-left: 1rem;
 }
 
 .md-version__list {
   border: 1px solid var(--oe-hairline);
-  border-radius: 0.28rem;
+  border-radius: 0.3rem;
   box-shadow: none;
 }
 
 .md-source {
-  font-family: var(--oe-mono);
-  font-size: 0.55rem;
+  font-size: 0.65rem;
 }
 
 .md-header__button:hover,
 .md-source:hover {
-  color: var(--oe-rust);
-  opacity: 1;
+  opacity: 0.7;
 }
 
 @media screen and (min-width: 60em) {
   .md-search__form {
-    background-color: var(--oe-field);
+    background-color: var(--oe-surface);
     border: 1px solid var(--oe-hairline);
-    border-radius: 0.28rem;
+    border-radius: 0.3rem;
+    height: 1.8rem;
   }
 
   .md-search__form:hover {
-    background-color: var(--oe-field);
-    border-color: var(--oe-ink-2);
+    background-color: var(--oe-surface);
+    border-color: var(--oe-rule);
+  }
+
+  .md-search__input {
+    font-size: 0.7rem;
   }
 }
 
-/* Navigation: mono labels over plain links, rust for where you are. */
+/* Navigation and "On this page": 14px text, quiet section names, a grey pill for where you are. */
+.md-nav {
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.md-nav__link {
+  color: var(--oe-ink-2);
+  margin-top: 0.15rem;
+}
+
+.md-nav__link:is(:hover, :focus) {
+  color: var(--oe-ink);
+}
+
+.md-sidebar--primary .md-nav__link--active,
+.md-sidebar--primary .md-nav__link--active code {
+  color: var(--oe-ink);
+  font-weight: 500;
+}
+
 @media screen and (min-width: 76.25em) {
-  .md-nav__item--section > .md-nav__link,
-  .md-nav--primary > .md-nav__title,
-  .md-nav--secondary .md-nav__title {
-    color: var(--oe-muted);
-    font-family: var(--oe-mono);
-    font-size: 0.55rem;
-    font-weight: 400;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+  .md-sidebar--primary .md-nav__item > .md-nav__link {
+    border-radius: 0.3rem;
+    margin-block: 0;
+    margin-inline: -0.5rem;
+    padding: 0.28rem 0.5rem;
   }
-}
 
-.md-nav__item .md-nav__link--active,
-.md-nav__item .md-nav__link--active code {
-  color: var(--oe-rust);
+  .md-sidebar--primary .md-nav__link--active {
+    background: var(--oe-surface);
+  }
+
+  .md-sidebar--primary .md-nav__item--section > .md-nav__link,
+  .md-nav--secondary .md-nav__title {
+    background: none;
+    color: var(--oe-muted);
+    font-size: 0.65rem;
+    font-weight: 500;
+    margin-top: 0;
+    padding-block: 0 0.2rem;
+  }
+
+  .md-sidebar--primary .md-nav__item--section {
+    margin-top: 1.1rem;
+  }
+
+  .md-sidebar--primary .md-nav--primary > .md-nav__title {
+    display: none;
+  }
+
+  /* "On this page": muted links on a hairline rail, the current section in ink. */
+  .md-nav--secondary .md-nav__list {
+    border-left: 1px solid var(--oe-hairline);
+  }
+
+  .md-nav--secondary .md-nav__link {
+    color: var(--oe-muted);
+    font-size: 0.65rem;
+    margin: 0;
+    padding: 0.25rem 0 0.25rem 0.7rem;
+  }
+
+  .md-nav--secondary .md-nav__link--active,
+  .md-nav--secondary .md-nav__link:is(:hover, :focus) {
+    color: var(--oe-ink);
+  }
+
+  .md-nav--secondary .md-nav__link--active {
+    box-shadow: -1px 0 0 var(--oe-ink);
+  }
+
+  .md-nav--secondary .md-nav__list .md-nav__list {
+    border-left: 0;
+  }
+
+  .md-nav--secondary .md-nav__list .md-nav__list .md-nav__link {
+    padding-left: 1.3rem;
+  }
 }
 
 /* Page text. Headings are scoped to the page so search results keep theirs. */
 .md-content .md-typeset {
+  color: var(--oe-ink);
   font-size: calc(0.8 * var(--oe-reading-unit));
-  line-height: 1.625;
+  line-height: 1.65;
 }
 
-.md-content .md-typeset h1 {
-  color: var(--oe-marker-ink);
-  font-family: var(--oe-marker);
-  font-size: calc(2 * var(--oe-reading-unit));
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.1;
-  margin-bottom: 0.45em;
-}
-
-.md-content .md-typeset :is(h2, h3, h4, h5, h6) {
+.md-content .md-typeset :is(h1, h2, h3, h4, h5, h6) {
   color: var(--oe-ink);
   font-family: var(--oe-sans);
   font-weight: 600;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
   line-height: 1.3;
   text-transform: none;
 }
 
+.md-content .md-typeset h1 {
+  font-size: calc(1.5 * var(--oe-reading-unit));
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0 0 0.5em;
+}
+
 .md-content .md-typeset h2 {
-  border-top: 1px solid var(--oe-hairline);
-  font-size: calc(1.3 * var(--oe-reading-unit));
-  margin-top: 1.3em;
-  padding-top: 0.55em;
+  font-size: calc(1 * var(--oe-reading-unit));
+  margin: 2em 0 0.6em;
 }
 
 .md-content .md-typeset h3 {
-  font-size: var(--oe-reading-unit);
-}
-
-.md-content .md-typeset h4 {
-  font-size: calc(0.9 * var(--oe-reading-unit));
-}
-
-.md-content .md-typeset :is(h5, h6) {
   font-size: calc(0.8 * var(--oe-reading-unit));
+  margin: 1.8em 0 0.4em;
+}
+
+.md-content .md-typeset :is(h4, h5, h6) {
+  font-size: calc(0.8 * var(--oe-reading-unit));
+  margin: 1.5em 0 0.4em;
 }
 
 .md-content .md-typeset :is(h1, h2, h3, h4, h5, h6) code {
@@ -260,7 +316,8 @@ body::after {
 
 /* Generated API headings contain complete signatures, not just names. */
 .md-content .md-typeset .doc-heading {
-  font-size: calc(0.75 * var(--oe-reading-unit));
+  font-size: calc(0.7 * var(--oe-reading-unit));
+  letter-spacing: 0;
   line-height: 1.6;
 }
 
@@ -268,23 +325,274 @@ body::after {
   font-size: 1em;
 }
 
+/* The lede: the page's point, a step up from body text and a shade lighter. */
+.md-content .md-typeset .docs-lede {
+  color: var(--oe-ink-2);
+  font-size: calc(0.85 * var(--oe-reading-unit));
+  line-height: 1.6;
+  margin: 0 0 1.5em;
+  max-width: 38em;
+}
+
+.md-content .md-typeset p,
+.md-content .md-typeset :is(ul, ol) {
+  margin-block: 0 1em;
+}
+
+.md-content .md-typeset li {
+  margin-bottom: 0.35em;
+}
+
 .md-content .md-typeset a:not(.md-button, .headerlink) {
   text-decoration: underline;
+  text-decoration-color: var(--oe-underline);
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
 }
 
-.md-typeset .docs-kicker {
-  color: var(--oe-rust);
-  font-family: var(--oe-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.14em;
-  margin-bottom: 0.7rem;
-  text-transform: uppercase;
+.md-content .md-typeset a:not(.md-button, .headerlink):is(:hover, :focus) {
+  color: var(--oe-ink);
+  text-decoration-color: currentcolor;
 }
 
-/* The overview graph is drawn twice, wide and tall for phones, like the
-   landing page's. Each links to its full-size file. */
-.md-typeset .docs-graph-wide {
+.md-typeset .headerlink {
+  color: var(--oe-rule);
+}
+
+/* Code: one quiet surface for inline code and blocks, with a hairline around blocks. */
+.md-content .md-typeset code {
+  border-radius: 0.2rem;
+  font-size: 0.875em;
+}
+
+.md-content .md-typeset td code {
+  font-size: 0.93em;
+}
+
+.md-content .md-typeset pre {
+  font-size: calc(0.675 * var(--oe-reading-unit));
+  margin: 1em 0 1.2em;
+}
+
+/* Long commands wrap instead of scrolling out of view; docs/javascripts/command-wrap.js keeps each
+   word whole. Copying still yields the original single line. */
+.md-content .md-typeset pre > code {
+  border: 1px solid var(--oe-hairline);
+  border-radius: 0.4rem;
+  font-size: 1em;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  padding: 0.85em 2.8em 0.85em 1.1em;
+  white-space: pre-wrap;
+}
+
+.md-typeset pre .docs-word {
+  white-space: nowrap;
+}
+
+.md-typeset pre .md-clipboard {
+  color: var(--oe-muted);
+}
+
+.md-typeset pre .md-clipboard:is(:hover, :focus) {
+  color: var(--oe-ink);
+}
+
+.md-code__nav {
+  background: none;
+}
+
+.md-typeset .highlight span.filename {
+  background: var(--oe-surface);
+  border: 1px solid var(--oe-hairline);
+  border-bottom: 1px solid var(--oe-hairline);
+  border-radius: 0.4rem 0.4rem 0 0;
+  color: var(--oe-muted);
+  font-family: var(--oe-mono);
+  font-size: calc(0.625 * var(--oe-reading-unit));
+  font-weight: 400;
+  margin-top: 1em;
+  padding: 0.55em 1.1em;
+}
+
+.md-typeset .highlight span.filename + pre {
+  margin-top: 0;
+}
+
+.md-typeset .highlight span.filename + pre > code {
+  border-radius: 0 0 0.4rem 0.4rem;
+  border-top: 0;
+}
+
+/* Tabs pick between equivalent examples. */
+.md-typeset .tabbed-set {
+  margin: 1em 0;
+}
+
+.md-content .md-typeset .tabbed-labels a {
+  text-decoration: none;
+}
+
+.md-typeset .tabbed-labels > label {
+  color: var(--oe-muted);
+  font-size: calc(0.7 * var(--oe-reading-unit));
+  font-weight: 500;
+  padding: 0.6em 1.2em 0.55em 0;
+}
+
+.md-typeset .tabbed-content .highlight span.filename {
+  margin-top: 0.8em;
+}
+
+/* Tables: rules, no box, at the nav's size. */
+.md-typeset table:not([class]) {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: calc(0.7 * var(--oe-reading-unit));
+  line-height: 1.55;
+}
+
+.md-typeset table:not([class]) th {
+  background: none;
+  border-bottom: 1px solid var(--oe-rule);
+  color: var(--oe-ink);
+  font-weight: 600;
+  padding: 0.55em 1.4em 0.55em 0;
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--oe-hairline);
+  padding: 0.65em 1.4em 0.65em 0;
+  vertical-align: top;
+}
+
+.md-typeset table:not([class]) tr:first-child td {
+  border-top: 0;
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+  background: none;
+  box-shadow: none;
+}
+
+.md-typeset table:not([class]) :is(td, th):first-child {
+  white-space: nowrap;
+}
+
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--oe-hairline);
+  border-radius: 0.4rem;
+  box-shadow: none;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--oe-rule);
+  box-shadow: none;
+}
+
+.md-typeset .md-button {
+  border: 1px solid var(--oe-rule);
+  border-radius: 0.3rem;
+  color: var(--oe-ink);
+  font-weight: 500;
+}
+
+.md-typeset .md-button:is(:hover, :focus) {
+  background: none;
+  border-color: var(--oe-ink);
+  color: var(--oe-ink);
+}
+
+.md-typeset .md-button--primary {
+  background: var(--oe-ink);
+  border-color: var(--oe-ink);
+  color: var(--oe-paper);
+}
+
+.md-typeset .md-button--primary:is(:hover, :focus) {
+  background: var(--oe-ink-2);
+  border-color: var(--oe-ink-2);
+  color: var(--oe-paper);
+}
+
+/* Notes: text beside a rule, at body size. Warnings take the rust rule. */
+.md-typeset .admonition {
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--oe-rule);
+  border-radius: 0;
+  box-shadow: none;
+  font-size: inherit;
+  margin: 1.2em 0;
+  padding: 0.1em 0 0.1em 1em;
+}
+
+.md-typeset .admonition:focus-within {
+  box-shadow: none;
+}
+
+.md-typeset .admonition > .admonition-title {
+  background: none;
+  border: 0;
+  color: var(--oe-ink);
+  font-weight: 600;
+  margin: 0 0 0.2em;
+  padding: 0;
+}
+
+.md-typeset .admonition > .admonition-title::before {
+  display: none;
+}
+
+.md-typeset .admonition > .admonition-title + * {
+  margin-top: 0;
+}
+
+.md-typeset .admonition > :last-child {
+  margin-bottom: 0;
+}
+
+.md-typeset :is(.warning, .danger, .failure, .bug).admonition {
+  border-left-color: var(--oe-rust);
+}
+
+/* Collapsed blocks hold long listings, so they stay plain boxes. */
+.md-typeset details[class] {
+  background: none;
+  border: 1px solid var(--oe-hairline);
+  border-radius: 0.4rem;
+  box-shadow: none;
+  font-size: inherit;
+}
+
+.md-typeset details[class] > summary {
+  background: none;
+  border: 0;
+  font-weight: 500;
+  padding-left: 0.8rem;
+}
+
+.md-typeset details[class] > summary::before {
+  display: none;
+}
+
+.md-typeset details[class] > summary::after {
+  color: var(--oe-muted);
+}
+
+/* Hand-drawn graphs sit in one kind of frame: the brand's paper, a hairline, a small radius. The
+   built-in diagram is drawn twice, wide and tall for phones, like the landing page's. */
+.md-typeset :is(.docs-graph-wide, .docs-graph-tall) {
+  background: var(--oe-figure);
+  border: 1px solid var(--oe-hairline);
+  border-radius: 0.5rem;
+  display: block;
+  margin: 1.4em 0 1.8em;
+  overflow: hidden;
+}
+
+.md-typeset :is(.docs-graph-wide, .docs-graph-tall) img {
   display: block;
 }
 
@@ -304,212 +612,112 @@ body::after {
   }
 }
 
-.md-typeset .docs-lede {
-  font-size: calc(0.9 * var(--oe-reading-unit));
-  line-height: 1.65;
-  max-width: 48rem;
-}
+/* The docs home's example graph: zeroshot.sh's drawing and run, inline as on the page, frozen by
+   docs/brand/freeze-example-graph.py. Wide on screens, tall on phones, in a plain frame. */
+.md-typeset .docs-example-graph {
+  --paper: var(--oe-paper);
+  --marker-ink: var(--oe-marker-ink);
+  --ink-2: var(--oe-ink-2);
+  --rust: var(--oe-rust);
+  --green: #2a7d3f;
+  --hand: 'Caveat', 'Bradley Hand', 'Marker Felt', cursive;
 
-.md-content .md-typeset code {
-  font-size: calc(0.75 * var(--oe-reading-unit));
-}
-
-.md-typeset pre > code {
-  background-color: var(--oe-field);
+  background: var(--oe-figure);
   border: 1px solid var(--oe-hairline);
-  border-radius: 0.28rem;
-  line-height: 1.6;
+  border-radius: 0.5rem;
+  margin: 0 0 2em;
+  padding: 1.2em 1.6em 1em;
 }
 
-.md-code__nav {
-  background: none;
+[data-md-color-scheme='slate'] .md-typeset .docs-example-graph {
+  --green: #6fc287;
 }
 
-.md-typeset .highlight span.filename {
-  background: none;
-  border: 1px solid var(--oe-hairline);
-  border-bottom: 0;
-  border-radius: 0.28rem 0.28rem 0 0;
-  color: var(--oe-muted);
-  font-family: var(--oe-mono);
-  font-size: 0.6rem;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  margin-top: 1em;
+@media (prefers-reduced-motion: no-preference) {
+  .docs-example-graph .loop .pulse path,
+  .docs-example-graph .loop .mark {
+    animation-play-state: running;
+  }
 }
 
-.md-typeset .highlight span.filename + pre > code {
-  border-radius: 0 0 0.28rem 0.28rem;
+.md-typeset .docs-example-graph svg {
+  display: block;
+  height: auto;
+  overflow: visible;
+  width: 100%;
 }
 
-.md-typeset table:not([class]) {
-  border: 1px solid var(--oe-hairline);
-  border-radius: 0.28rem;
-  box-shadow: none;
+/* zeroshot.sh's frames leave room under the drawing (wide: 118 of 692 units, tall: 122 of 892).
+   Pull the caption up to 16 units below it; percentages are of the frame, as wide as the SVG. */
+.md-typeset .docs-example-graph .loop--wide {
+  margin-bottom: -8.9%;
 }
 
-.md-typeset table:not([class]) th {
-  color: var(--oe-muted);
-  font-family: var(--oe-mono);
-  font-size: 0.55rem;
-  font-weight: 400;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.md-typeset table:not([class]) th code {
-  text-transform: none;
-}
-
-.md-typeset .grid.cards > ul > li {
-  border: 1px solid var(--oe-hairline);
-  border-radius: 0.28rem;
-  box-shadow: none;
-}
-
-.md-typeset .grid.cards > ul > li:hover {
-  border-color: var(--oe-rust);
-  box-shadow: none;
-}
-
-.md-typeset .md-button {
-  border: 1px solid var(--oe-hairline);
-  border-radius: 0.28rem;
-  color: var(--oe-ink);
-  font-weight: 400;
-}
-
-.md-typeset .md-button:is(:hover, :focus) {
-  background: none;
-  border-color: var(--oe-rust);
-  color: var(--oe-rust);
-}
-
-.md-typeset .md-button--primary {
-  background: var(--oe-ink);
-  border-color: var(--oe-ink);
-  color: var(--oe-paper);
-}
-
-.md-typeset .md-button--primary:is(:hover, :focus) {
-  background: var(--oe-rust);
-  border-color: var(--oe-rust);
-  color: var(--oe-paper);
-}
-
-/* Admonitions are post-its. They stay yellow in both schemes, so they carry
-   the light scheme's ink. */
-.md-typeset .admonition {
-  --oe-rust: #c2240c;
-  --md-typeset-a-color: #c2240c;
-  --md-accent-fg-color: #171411;
-  --md-code-bg-color: rgb(255 255 255 / 50%);
-  --md-code-fg-color: #171411;
-
-  background:
-    linear-gradient(
-      180deg,
-      rgb(23 20 17 / 7.5%) 0,
-      rgb(23 20 17 / 3.5%) 0.7rem,
-      rgb(23 20 17 / 0%) 1.35rem
-    ),
-    linear-gradient(165deg, #fff7a1 0%, #fdeb6d 48%, #f5da4c 100%);
-  border: 0;
-  border-radius: 0;
-  box-shadow:
-    0 1px 1px rgb(23 20 17 / 6%),
-    1px 4px 8px -3px rgb(23 20 17 / 18%),
-    6px 16px 26px -12px rgb(23 20 17 / 38%);
-  color: #3a3120;
-  font-size: 0.74rem;
-  max-width: 26rem;
-  padding: 0.9rem 0.8rem 0.3rem;
-  transform: rotate(-0.6deg);
-}
-
-.md-typeset .admonition:focus-within {
-  box-shadow:
-    0 1px 1px rgb(23 20 17 / 6%),
-    1px 4px 8px -3px rgb(23 20 17 / 18%),
-    6px 16px 26px -12px rgb(23 20 17 / 38%);
-}
-
-.md-typeset .admonition > .admonition-title {
-  background: none;
-  border: 0;
-  color: #26221c;
-  font-family: var(--oe-marker);
-  font-size: 1.3rem;
-  font-weight: 400;
-  line-height: 1.08;
-  margin: 0;
-  padding: 0;
-  text-transform: uppercase;
-}
-
-.md-typeset .admonition > .admonition-title::before {
+.md-typeset .docs-example-graph .loop--tall {
   display: none;
+  margin-bottom: -18.8%;
 }
 
-.md-typeset :is(.warning, .danger, .failure, .bug) > .admonition-title {
-  color: #c2240c;
+@media screen and (max-width: 40em) {
+  .md-typeset .docs-example-graph {
+    margin-inline: auto;
+    max-width: 24rem;
+    padding: 0.8em 0.8em 0.7em;
+  }
+
+  .md-typeset .docs-example-graph .loop--wide {
+    display: none;
+  }
+
+  .md-typeset .docs-example-graph .loop--tall {
+    display: block;
+  }
 }
 
-/* Collapsed blocks hold long listings, so they stay plain boxes. */
-.md-typeset details[class] {
-  background: none;
-  border: 1px solid var(--oe-hairline);
-  border-radius: 0.28rem;
-  box-shadow: none;
-}
-
-.md-typeset details[class] > summary {
-  background: none;
-  border: 0;
-  font-family: var(--oe-mono);
-  font-weight: 400;
-  padding-left: 0.6rem;
-}
-
-.md-typeset details[class] > summary::before {
-  display: none;
-}
-
-.md-typeset details[class] > summary::after {
+.md-typeset .docs-example-graph figcaption {
+  border-top: 1px solid var(--oe-hairline);
   color: var(--oe-muted);
+  font-size: calc(0.65 * var(--oe-reading-unit));
+  font-style: normal;
+  line-height: 1.55;
+  margin: 0.9em 0 0;
+  max-width: none;
+  padding-top: 0.8em;
+  text-align: left;
 }
 
-/* When the page last changed: a mono label, no icon. */
+/* Small print: when the page changed, the footer. */
 .md-source-file {
   color: var(--oe-muted);
-  font-family: var(--oe-mono);
-  font-size: 0.55rem;
-  letter-spacing: 0.14em;
-  margin-top: 2.4rem;
-  text-transform: uppercase;
+  font-size: 0.65rem;
+  margin-top: 2.5rem;
 }
 
 .md-source-file__fact .md-icon {
   display: none;
 }
 
-/* Footer: a hairline and mono labels, no ink bar. */
+.md-typeset .docs-note {
+  color: var(--oe-muted);
+  font-size: calc(0.65 * var(--oe-reading-unit));
+}
+
 .md-footer {
   border-top: 1px solid var(--oe-hairline);
 }
 
 .md-footer__direction {
   color: var(--oe-muted);
-  font-family: var(--oe-mono);
-  font-size: 0.55rem;
-  letter-spacing: 0.14em;
+  font-size: 0.6rem;
   opacity: 1;
-  text-transform: uppercase;
+}
+
+.md-footer__title {
+  font-size: 0.75rem;
 }
 
 .md-footer__link:is(:hover, :focus) {
-  color: var(--oe-rust);
-  opacity: 1;
+  opacity: 0.7;
 }
 
 .md-footer-meta {
@@ -518,14 +726,11 @@ body::after {
 
 .md-copyright {
   color: var(--oe-muted);
-  font-family: var(--oe-mono);
-  font-size: 0.55rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 0.6rem;
 }
 
 .md-footer-meta.md-typeset .md-social__link:is(:hover, :focus) {
-  color: var(--oe-rust);
+  color: var(--oe-ink);
 }
 
 .md-top {

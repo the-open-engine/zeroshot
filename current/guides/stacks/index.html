@@ -699,7 +699,7 @@
   <span class="md-ellipsis">
     
   
-    Use Zeroshot through a plugin
+    Use zeroshot through a plugin
   
 
     
@@ -962,7 +962,9 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -971,7 +973,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -1975,7 +1977,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Platform
+    zeroshot Platform
   
 
     
@@ -2028,7 +2030,9 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -2037,7 +2041,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -2249,7 +2253,7 @@ the conflicting run itself in its own checkout and delivery loop. The stack succ
 has merged.</p>
 <h2 id="stacked-pull-requests">Stacked pull requests<a class="headerlink" href="#stacked-pull-requests" title="Permanent link">&para;</a></h2>
 <p>With <code>"delivery": "stacked_pull_requests"</code>, the stack is always one line. When you validate or
-submit it, Zeroshot puts the runs in dependency order, breaking ties by run name, and replaces each
+submit it, zeroshot puts the runs in dependency order, breaking ties by run name, and replaces each
 run's <code>needs</code> with just the run before it. A run therefore never starts before anything it needed.
 <code>zeroshot stack validate</code> prints the order. For the manifest above:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"valid"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"order"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"api"</span><span class="p">,</span><span class="w"> </span><span class="s2">"client"</span><span class="p">,</span><span class="w"> </span><span class="s2">"docs"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
@@ -2258,10 +2262,10 @@ run's <code>needs</code> with just the run before it. A run therefore never star
 <code>client</code>. The first run starts from the base branch and opens a pull request against it. Each later
 run starts from the branch of the run before it, which its status reports as <code>sourceBranch</code>, and
 opens its pull request against that branch, so each pull request shows only its own run's changes.
-A run's work is done when its pull request is open and its required checks pass; Zeroshot does not
+A run's work is done when its pull request is open and its required checks pass; zeroshot does not
 merge it. The stack is complete once every pull request is open.</p>
 <h3 id="review-and-merge-the-chain">Review and merge the chain<a class="headerlink" href="#review-and-merge-the-chain" title="Permanent link">&para;</a></h3>
-<p>Review and merge the pull requests from the bottom of the stack up. Zeroshot and the hosted target
+<p>Review and merge the pull requests from the bottom of the stack up. zeroshot and the hosted target
 never retarget a pull request; GitHub does:</p>
 <ul>
 <li>When a parent pull request merges and its branch is deleted, GitHub moves the next pull request
@@ -2306,7 +2310,7 @@ must finish first. When plans depend on each other, the skill offers to write a 
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-05">5 November 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
@@ -2486,6 +2490,8 @@ must finish first. When plans depend on each other, the skill offers to write a 
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/command-wrap.js"></script>
       
     
   </body>
