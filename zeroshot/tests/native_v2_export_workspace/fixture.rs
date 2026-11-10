@@ -1,3 +1,4 @@
+use std::io;
 use std::process::Output;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,6 +17,7 @@ pub const ORGANIZATION: &str = "00000000-0000-4000-8000-000000000001";
 pub enum Reply {
     Length,
     Chunked(&'static str),
+    RejectedChunked(&'static str),
     Status,
     Redirect,
     WrongType,
@@ -104,12 +106,34 @@ impl Fixture {
                         "application/json",
                         discovery.as_bytes(),
                     )
-                    .await;
+                    .await
+                    .unwrap();
                 } else {
                     if matches!(reply, Reply::Race) {
                         std::fs::write(&destination, b"racing destination").unwrap();
                     }
-                    export_reply(&mut socket, reply, &contents).await;
+                    if let Err(error) = export_reply(&mut socket, reply, &contents).await {
+                        // These responses are rejected at their headers, so the CLI may close
+                        // the connection before the fixture finishes sending the body.
+                        assert!(
+                            matches!(
+                                reply,
+                                Reply::Status
+                                    | Reply::Redirect
+                                    | Reply::WrongType
+                                    | Reply::Partial
+                                    | Reply::LengthAndTransferEncoding(_)
+                                    | Reply::RejectedChunked(_)
+                                    | Reply::CloseDelimited
+                            ) && matches!(
+                                error.kind(),
+                                io::ErrorKind::BrokenPipe
+                                    | io::ErrorKind::ConnectionReset
+                                    | io::ErrorKind::ConnectionAborted
+                            ),
+                            "unexpected export response failure: {error}"
+                        );
+                    }
                     notified.notify_one();
                     #[cfg(unix)]
                     if matches!(reply, Reply::StallHeaders | Reply::StallBody) {
@@ -264,20 +288,25 @@ async fn read_request(socket: &mut TcpStream) -> Request {
     }
 }
 
-async fn respond(socket: &mut TcpStream, status: &str, content_type: &str, body: &[u8]) {
+async fn respond(
+    socket: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+) -> io::Result<()> {
     let headers = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nContent-Disposition: attachment; filename=untrusted.tar\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    socket.write_all(headers.as_bytes()).await.unwrap();
-    socket.write_all(body).await.unwrap();
-    socket.shutdown().await.unwrap();
+    socket.write_all(headers.as_bytes()).await?;
+    socket.write_all(body).await?;
+    socket.shutdown().await
 }
 
-async fn export_reply(socket: &mut TcpStream, reply: Reply, archive: &[u8]) {
+async fn export_reply(socket: &mut TcpStream, reply: Reply, archive: &[u8]) -> io::Result<()> {
     match reply {
         Reply::Length | Reply::Race => {
-            respond(socket, "200 OK", "application/x-tar", archive).await
+            respond(socket, "200 OK", "application/x-tar", archive).await?
         }
         Reply::Status => respond(
             socket,
@@ -285,13 +314,13 @@ async fn export_reply(socket: &mut TcpStream, reply: Reply, archive: &[u8]) {
             "application/json",
             br#"{"code":"export_failed","message":"exporter unavailable export-fixture-secret"}"#,
         )
-        .await,
+        .await?,
         Reply::Redirect => {
-            socket.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:1/leak\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            socket.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:1/leak\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await?;
         }
-        Reply::WrongType => respond(socket, "200 OK", "application/json", archive).await,
+        Reply::WrongType => respond(socket, "200 OK", "application/json", archive).await?,
         Reply::Partial => {
-            respond(socket, "206 Partial Content", "application/x-tar", archive).await
+            respond(socket, "206 Partial Content", "application/x-tar", archive).await?
         }
         Reply::TruncatedLength | Reply::LengthAndTransferEncoding(_) => {
             let encoding = match reply {
@@ -300,13 +329,14 @@ async fn export_reply(socket: &mut TcpStream, reply: Reply, archive: &[u8]) {
                 }
                 _ => String::new(),
             };
-            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\n{encoding}Content-Length: {}\r\nConnection: close\r\n\r\n", archive.len() + 100).as_bytes()).await.unwrap();
-            socket.write_all(archive).await.unwrap();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\n{encoding}Content-Length: {}\r\nConnection: close\r\n\r\n", archive.len() + 100).as_bytes()).await?;
+            socket.write_all(archive).await?;
         }
         Reply::Chunked(encoding)
+        | Reply::RejectedChunked(encoding)
         | Reply::TruncatedChunks(encoding)
         | Reply::ExporterFailure(encoding) => {
-            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nTransfer-Encoding: {encoding}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nTransfer-Encoding: {encoding}\r\nConnection: close\r\n\r\n").as_bytes()).await?;
             let length = if matches!(reply, Reply::TruncatedChunks(_)) {
                 archive.len() + 100
             } else {
@@ -314,33 +344,32 @@ async fn export_reply(socket: &mut TcpStream, reply: Reply, archive: &[u8]) {
             };
             socket
                 .write_all(format!("{length:x}\r\n").as_bytes())
-                .await
-                .unwrap();
-            socket.write_all(archive).await.unwrap();
+                .await?;
+            socket.write_all(archive).await?;
             if !matches!(reply, Reply::TruncatedChunks(_)) {
-                socket.write_all(b"\r\n").await.unwrap();
+                socket.write_all(b"\r\n").await?;
             }
-            if matches!(reply, Reply::Chunked(_)) {
-                socket.write_all(b"0\r\n\r\n").await.unwrap();
+            if matches!(reply, Reply::Chunked(_) | Reply::RejectedChunked(_)) {
+                socket.write_all(b"0\r\n\r\n").await?;
             }
         }
         Reply::CloseDelimited => {
-            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nConnection: close\r\n\r\n").await.unwrap();
-            socket.write_all(archive).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nConnection: close\r\n\r\n").await?;
+            socket.write_all(archive).await?;
         }
         #[cfg(unix)]
         Reply::StallHeaders => {}
         #[cfg(unix)]
         Reply::StallBody => {
-            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nTransfer-Encoding: chunked\r\n\r\n").await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nTransfer-Encoding: chunked\r\n\r\n").await?;
             socket
                 .write_all(format!("{:x}\r\n", archive.len()).as_bytes())
-                .await
-                .unwrap();
-            socket.write_all(archive).await.unwrap();
-            socket.write_all(b"\r\n").await.unwrap();
+                .await?;
+            socket.write_all(archive).await?;
+            socket.write_all(b"\r\n").await?;
         }
     }
+    Ok(())
 }
 
 fn archive() -> Vec<u8> {

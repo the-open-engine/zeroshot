@@ -1495,6 +1495,8 @@ python -m mkdocs build --strict
   Linux coverage maps LLVM counters continuously with runtime counter relocation so post-fork
   helpers ending in `_exit` retain coverage without a profile-runtime call in the child. Profile
   filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
+  Tests limiting a child's file size direct only that child's `LLVM_PROFILE_FILE` to `/dev/null`
+  so the intentional write failure cannot corrupt collected profiles.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.

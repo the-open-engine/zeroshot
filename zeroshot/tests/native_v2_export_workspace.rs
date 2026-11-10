@@ -211,17 +211,30 @@ async fn built_cli_accepts_case_insensitive_chunked_only_after_complete_http_fra
 
 #[tokio::test]
 async fn built_cli_never_uses_length_when_transfer_encoding_is_present() {
-    for encoding in ["identity", "gzip", "chunked\r\nTransfer-Encoding: identity"] {
-        let fixture = Fixture::new(Reply::LengthAndTransferEncoding(encoding), capability()).await;
+    for reply in [
+        Reply::LengthAndTransferEncoding("identity"),
+        Reply::LengthAndTransferEncoding("gzip"),
+        Reply::LengthAndTransferEncoding("chunked\r\nTransfer-Encoding: identity"),
+        Reply::RejectedChunked("gzip, chunked"),
+        Reply::RejectedChunked("chunked\r\nTransfer-Encoding: identity"),
+    ] {
+        let fixture = Fixture::new(reply, capability()).await;
         let output = fixture.export(false).await;
-        assert!(!output.status.success(), "accepted {encoding}");
-        assert!(String::from_utf8_lossy(&output.stderr).contains("requires explicit HTTP framing"));
-        assert!(!fixture.output.exists());
-        fixture.assert_clean();
-    }
-    for encoding in ["gzip, chunked", "chunked\r\nTransfer-Encoding: identity"] {
-        let fixture = Fixture::new(Reply::Chunked(encoding), capability()).await;
-        assert!(!fixture.export(false).await.status.success());
+        // Check the server task only after its body write has settled, including an early
+        // disconnect, rather than letting fixture teardown hide a late write panic.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            fixture.started.notified(),
+        )
+        .await
+        .unwrap();
+        assert!(!output.status.success());
+        if matches!(reply, Reply::LengthAndTransferEncoding(_)) {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("requires explicit HTTP framing")
+            );
+        }
+        assert!(output.stdout.is_empty());
         assert!(!fixture.output.exists());
         fixture.assert_clean();
     }
@@ -290,6 +303,9 @@ async fn built_cli_refuses_windows_directory_links_without_replacement() {
 async fn built_cli_cleans_up_when_the_final_background_disk_write_fails() {
     let fixture = Fixture::new(Reply::Length, capability()).await;
     let mut command = fixture.export_command();
+    // The intentional file-size limit must not truncate this child's LLVM coverage profile.
+    // Keep profiling enabled for the parent and every other CLI child in this suite.
+    command.env("LLVM_PROFILE_FILE", "/dev/null");
     unsafe {
         command.pre_exec(|| {
             libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
