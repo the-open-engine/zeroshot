@@ -633,6 +633,13 @@ input {
   --green: #6fc287;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .docs-example-graph .loop .pulse path,
+  .docs-example-graph .loop .mark {
+    animation-play-state: running;
+  }
+}
+
 .md-typeset .docs-example-graph svg {
   display: block;
   height: auto;

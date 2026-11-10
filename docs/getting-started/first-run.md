@@ -132,8 +132,11 @@ error records, then the `zeroshot logs` command that shows the rest.
 
 ## Next
 
-- **Open a pull request instead.** Replace `--delivery none` with `--pr`. That needs a committed Git
-  checkout with a remote.
+- **Open a pull request instead.** Replace `--delivery none` with `--pr`. This needs a clean Git
+  checkout with a commit, a remote and [forge access](../guides/forge-delivery.md#local-setup).
+  Move `input.json` and `runtime.json` outside the checkout first, and update `--input` and
+  `--uniform-runtime-config` to their new paths. Commit or stash any changes left by your first
+  run, then check `git status --short` for remaining changes before starting the PR run.
 - **See the graph you ran.** `zeroshot template show software-change --delivery none` prints it as
   a tree. Names marked `*` need runtime bindings. Add `--json` to export the `GraphSpec` that
   `--graph` and the Python SDK accept.
