@@ -91,6 +91,10 @@ impl Drop for DefinitionFile {
         #[cfg(windows)]
         if let Ok(metadata) = std::fs::metadata(&self.path) {
             let mut permissions = metadata.permissions();
+            #[expect(
+                clippy::permissions_set_readonly_false,
+                reason = "Windows-only: ACL permissions remain unchanged"
+            )]
             permissions.set_readonly(false);
             let _ = std::fs::set_permissions(&self.path, permissions);
         }
