@@ -22,8 +22,8 @@ commit or ZIP checksum and observed client receipts. Keep credentials outside pa
 
 ## MCP and publication
 
-Check runtime/workflow changes against the hosted MCP tools in zero-cloud. Coordinate skill and
-tool changes across both repos; deploy required backend support before offering a package.
+Check runtime/workflow changes against the published MCP contract. Coordinate skill and tool
+releases; required service support must be available before offering a package.
 Keep published tool contracts and older cached skills working while replacements propagate.
 GitHub installs cache versioned copies; merging doesn't update every installed client immediately.
 

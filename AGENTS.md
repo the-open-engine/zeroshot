@@ -11,6 +11,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Never use git commands inside validator prompts; validators inspect files and observable outputs.
 - Agents are non-interactive. Make autonomous, scoped decisions rather than asking runtime questions.
 - Never edit `CLAUDE.md` unless the user explicitly requests it.
+- Keep private service implementation, deployment details and acceptance records out of public docs.
 - `main` is the only development and release trunk. Normal PRs target `main`.
 - Pull request titles are Conventional Commit headers because squash merge makes the title the
   released commit.
@@ -1396,12 +1397,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
   Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
   remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
-- Visual tokens/fonts follow `zero-cloud/frontend/VISUAL_DESIGN.md`; bundle all runtime assets.
+- Visual tokens/fonts live in `ui/src/styles.css` and `ui/src/theme.ts`; bundle all runtime assets.
   `embed.html` mounts the same editor/viewer without standalone menus. Its version-1 bridge
   validates the parent window and exact origin, binds workspace authority, and correlates document
   generations and save snapshots. Host service URLs remain same-origin; optional CSRF configuration
-  carries cookie/header names only. Platform owns menus, authentication, profile CAS and live/archive
-  adapters ([zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301)).
+  carries cookie/header names only. The embedding host owns menus, authentication, conditional
+  profile saves and live/archive adapters.
 - Shared fetch-based SSE preserves HTTP and stream problem codes, accepted execution cursors,
   bounded frame buffering and owned reader cancellation. A host source change must preserve the
   viewer's history prefix and playback position; it never changes native graph projection.
