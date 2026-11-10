@@ -165,6 +165,15 @@ pub fn build_native_v2_candidate_with_github_token(
     )
 }
 
+/// Host composition with private delivery capabilities, never authored runtime fields.
+pub(crate) fn build_hosted_native_v2_candidate(
+    admitted: &AdmittedRun,
+    config: NativeV2CandidateConfig,
+    trusted: TrustedDeliveryCapabilities,
+) -> Result<NativeNodeRunner, NativeV2CandidateError> {
+    build_candidate(admitted, config, CandidatePlacement::Capsule, trusted)
+}
+
 /// Builds the same candidate with child processes running as the invoking local user.
 pub fn build_local_native_v2_candidate(
     admitted: &AdmittedRun,

@@ -661,3 +661,45 @@ async fn cancellation_withdraws_a_live_queue_before_releasing_the_run() {
     assert!(!harness.authority.queue_live.load(Ordering::SeqCst));
     assert_eq!(harness.authority.withdrawn_reviews.lock().unwrap().len(), 1);
 }
+
+fn discard_fixture_change(harness: &ValidationHarness) {
+    git(
+        &harness.repo.workspace,
+        &["reset", "--hard", &harness.repo.base],
+    );
+    fs::remove_file(harness.repo.workspace.join("result.txt")).unwrap();
+}
+
+#[tokio::test]
+async fn unchanged_candidate_reaches_host_validation_without_publication() {
+    let harness = ValidationHarness::new(
+        Script::NoCi,
+        "printf '%s' '{\"verdict\":\"repair\",\"reason\":\"Independently confirm the already-satisfied task\"}'",
+    );
+    discard_fixture_change(&harness);
+    let outcome = harness.run().await.unwrap();
+    assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    harness.assert_no_publication();
+    let requests = harness.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["stage"], "publish");
+    assert_eq!(requests[0]["headRevision"], harness.repo.base);
+    assert_eq!(
+        requests[0]["tree"],
+        git_output(&harness.repo.workspace, &["rev-parse", "HEAD^{tree}"])
+    );
+    assert_eq!(
+        git_output(&harness.repo.workspace, &["rev-parse", "HEAD"]),
+        harness.repo.base
+    );
+}
+
+#[tokio::test]
+async fn accepting_an_unchanged_candidate_still_cannot_publish_it() {
+    let harness = ValidationHarness::new(Script::NoCi, "printf '%s' '{\"verdict\":\"accepted\"}'");
+    discard_fixture_change(&harness);
+    let outcome = harness.run().await.unwrap();
+    assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    harness.assert_no_publication();
+    assert_eq!(harness.requests().len(), 1);
+}
