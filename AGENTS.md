@@ -1193,6 +1193,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Search titles and social titles share the same template. Sitemap `lastmod` uses the verified
   content-change date from Git and is omitted when history cannot establish it.
   Fonts are self-hosted in `docs/assets/fonts/` with their licenses.
+  The docs template loads the shared consent-gated analytics entry from zeroshot.sh;
+  it only activates when the docs are served on that origin.
   The docs home draws zeroshot.sh's example graph inline from `docs/overrides/partials/example-graph-*.svg`;
   regenerate those with `docs/brand/freeze-example-graph.py`, never by hand. `docs/javascripts/command-wrap.js`
   keeps wrapped commands breaking only at spaces; it does not change copied text.
