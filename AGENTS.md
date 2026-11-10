@@ -441,7 +441,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. GitLab readiness, approval handoff and merge share
+  merges; required merge trains remain pending. `need_rebase` merges the captured target into a
+  workspace descending from the MR head, bounded by their fork point rather than the MR head, then
+  returns repair; a candidate already containing the target is refused naming the merge method and
+  target revision. GitLab readiness, approval handoff and merge share
   required-CI policy: explicit `only_allow_merge_if_pipeline_succeeds: false` yields `NotRequired`
   regardless of head-pipeline presence or status, never `Passed`. Required or unknown policy needs
   captured-head CI evidence; absent/running CI stays pending and failure/skipped rules still apply.

@@ -1331,3 +1331,7 @@ async fn run_branch_review_outside_the_target_is_refused() {
     assert!(!error.retryable_operation(), "{error}");
     assert_eq!(fixture.writes("/merge_requests"), 0);
 }
+
+#[cfg(unix)]
+#[path = "rebase_tests.rs"]
+mod rebase_tests;

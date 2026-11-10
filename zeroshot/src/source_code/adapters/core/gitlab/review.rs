@@ -776,34 +776,23 @@ pub(super) async fn integrate_rebase(
     target_revision: &str,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceConflictOutcome, SourceDeliveryError> {
-    let target = DeliveryTarget::new(
-        &request.review.repository,
-        &request.review.target_branch,
-        &request.review.head_revision,
-    )
-    .map_err(|_| SourceDeliveryError::Rejected)?;
-    let integrated = transport::reconcile_target(
-        authority.git()?,
-        SourceTargetReconciliation {
-            workspace: &request.workspace,
-            target: &target,
-            commit_message: "Integrate the captured GitLab target before another review",
-        },
-        target_revision,
-        credential,
-    )
-    .await?;
-    let SourceTargetIntegration::Integrated { outcome, .. } = integrated else {
-        return Err(SourceDeliveryError::Rejected);
-    };
+    let git = authority.git()?;
+    let project = authority
+        .project(&request.review.repository, credential)
+        .await?;
+    let outcome =
+        transport::integrate_review_target(git, request, target_revision, credential).await?;
     match outcome {
         SourceReconciliationOutcome::NeedsWork(diagnostic) => {
             Err(SourceDeliveryError::repairable(diagnostic))
         }
         SourceReconciliationOutcome::Unchanged | SourceReconciliationOutcome::Adopted => {
-            Err(SourceDeliveryError::identity(
-                "GitLab requires rebasing but the candidate already contains the target; the configured merge method requires manual resolution",
-            ))
+            Err(SourceDeliveryError::identity(format!(
+                "GitLab merge method {} requires rebasing onto {} revision {target_revision}, \
+                 but the candidate already contains that revision; the merge request requires \
+                 manual resolution",
+                project.merge_method, request.review.target_branch,
+            )))
         }
         SourceReconciliationOutcome::Refused(diagnostic) => {
             Err(SourceDeliveryError::identity(diagnostic))
