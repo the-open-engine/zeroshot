@@ -634,6 +634,17 @@ fn refuses_external_git_objects() {
     assert!(capture(&fixture.workspace, &fixture.snapshots, &()).is_err());
 }
 
+#[test]
+fn tolerates_empty_alternates_placeholder() {
+    let fixture = Fixture::new();
+    fixture.initialize_git();
+    let alternates = fixture.workspace.join(".git/objects/info/alternates");
+    fs::write(&alternates, "").assert_value();
+    let http_alternates = fixture.workspace.join(".git/objects/info/http-alternates");
+    fs::write(&http_alternates, "").assert_value();
+    assert!(capture(&fixture.workspace, &fixture.snapshots, &()).is_ok());
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn unsupported_fifo_is_rejected_without_opening_or_publishing_it() {
