@@ -1,10 +1,11 @@
-//! Trusted local delivery validation, separate from graph-owned agents and credentials.
+//! Trusted delivery validation, separate from graph-owned agents and credentials.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::execution::WorkspaceAccessMode;
@@ -25,10 +26,27 @@ const MAX_REASON_BYTES: usize = 8 * 1024;
 pub struct TrustedDeliveryValidator {
     path: PathBuf,
     workspace: PathBuf,
+    resource: Option<std::sync::Arc<dyn DeliveryValidationResource>>,
     active: std::sync::Arc<tokio::sync::Mutex<Option<ValidationTask>>>,
 }
 
 type ValidationTask = tokio::task::JoinHandle<Result<DeliveryValidationDecision, NodeRunnerError>>;
+
+/// Controller-owned auxiliary work whose cleanup must precede delivery handoff.
+///
+/// A host may retain a private command broker here. Its drain waits for any repository command
+/// and confirmed process cleanup, without destroying resources needed by a later repair round.
+#[async_trait]
+pub trait DeliveryValidationResource: Send + Sync {
+    /// Starts or reopens private resources before a helper invocation. Repeated preparation is
+    /// idempotent. Any work started before cancellation remains owned until `drain` confirms it.
+    async fn prepare(&self) -> Result<(), NodeRunnerError> {
+        Ok(())
+    }
+
+    /// Stops accepting work and awaits every accepted command and its process cleanup.
+    async fn drain(&self) -> Result<(), NodeRunnerError>;
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -102,8 +120,23 @@ impl TrustedDeliveryValidator {
         Ok(Self {
             path,
             workspace,
+            resource: None,
             active: std::sync::Arc::default(),
         })
+    }
+
+    /// Retains host-owned resources until every validation and its cleanup have settled.
+    #[must_use]
+    pub fn with_resource(
+        mut self,
+        resource: std::sync::Arc<dyn DeliveryValidationResource>,
+    ) -> Self {
+        self.resource = Some(resource);
+        self
+    }
+
+    pub(crate) fn workspace(&self) -> &Path {
+        &self.workspace
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -122,6 +155,12 @@ impl TrustedDeliveryValidator {
         if active.is_some() {
             return Err(failure("previous execution has not settled"));
         }
+        if cancellation.is_cancelled() {
+            return Err(NodeRunnerError::Cancelled);
+        }
+        if let Some(resource) = &self.resource {
+            resource.prepare().await?;
+        }
         // The adapter can drop its operation future on cancellation. Retain the owned helper
         // task so its process-tree cleanup is awaited before delivery releases the workspace.
         *active = Some(tokio::spawn(async move {
@@ -137,15 +176,27 @@ impl TrustedDeliveryValidator {
 
     pub(crate) async fn drain(&self) -> Result<(), NodeRunnerError> {
         let mut active = self.active.lock().await;
-        if let Some(task) = active.take() {
+        let validation = if let Some(task) = active.take() {
             match task.await {
                 Err(_) | Ok(Err(NodeRunnerError::CleanupUnconfirmed)) => {
-                    return Err(NodeRunnerError::CleanupUnconfirmed);
+                    Err(NodeRunnerError::CleanupUnconfirmed)
                 }
-                Ok(_) => {}
+                Ok(_) => Ok(()),
             }
-        }
-        Ok(())
+        } else {
+            Ok(())
+        };
+        // Auxiliary commands can outlive a failed helper exchange. Always drain them, including
+        // when the helper itself could not confirm cleanup.
+        let resource = if let Some(resource) = &self.resource {
+            resource
+                .drain()
+                .await
+                .map_err(|_| NodeRunnerError::CleanupUnconfirmed)
+        } else {
+            Ok(())
+        };
+        validation.and(resource)
     }
 
     async fn validate_frame(

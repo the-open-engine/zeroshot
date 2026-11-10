@@ -77,6 +77,110 @@ mod subprocess {
         }
     }
 
+    struct Resource {
+        drains: std::sync::atomic::AtomicUsize,
+        refuse_cleanup: bool,
+    }
+
+    #[async_trait]
+    impl DeliveryValidationResource for Resource {
+        async fn drain(&self) -> Result<(), NodeRunnerError> {
+            self.drains
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.refuse_cleanup {
+                Err(NodeRunnerError::Driver)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn hosted_resources_are_retained_and_drained_before_handoff() {
+        let (_root, validator) =
+            fixture("/bin/cat >/dev/null\nprintf '{\"verdict\":\"accepted\"}'");
+        let resource = std::sync::Arc::new(Resource {
+            drains: std::sync::atomic::AtomicUsize::new(0),
+            refuse_cleanup: false,
+        });
+        let weak = std::sync::Arc::downgrade(&resource);
+        let validator = validator.with_resource(resource.clone());
+        drop(resource);
+        assert_eq!(
+            run(&validator).await.unwrap(),
+            DeliveryValidationDecision::Accepted
+        );
+        validator.drain().await.unwrap();
+        assert_eq!(
+            weak.upgrade()
+                .unwrap()
+                .drains
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        drop(validator);
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[tokio::test]
+    async fn ordinary_resource_cleanup_error_is_not_repairable() {
+        let (_root, validator) =
+            fixture("/bin/cat >/dev/null\nprintf '{\"verdict\":\"accepted\"}'");
+        let validator = validator.with_resource(std::sync::Arc::new(Resource {
+            drains: std::sync::atomic::AtomicUsize::new(0),
+            refuse_cleanup: true,
+        }));
+        assert_eq!(
+            run(&validator).await.unwrap(),
+            DeliveryValidationDecision::Accepted
+        );
+        assert!(matches!(
+            validator.drain().await,
+            Err(NodeRunnerError::CleanupUnconfirmed)
+        ));
+    }
+
+    #[tokio::test]
+    async fn hosted_resources_drain_even_when_the_helper_panicked() {
+        let (_root, validator) = fixture("exit 0");
+        let resource = std::sync::Arc::new(Resource {
+            drains: std::sync::atomic::AtomicUsize::new(0),
+            refuse_cleanup: false,
+        });
+        let validator = validator.with_resource(resource.clone());
+        *validator.active.lock().await = Some(tokio::spawn(async { panic!("fixture failure") }));
+        assert!(matches!(
+            validator.drain().await,
+            Err(NodeRunnerError::CleanupUnconfirmed)
+        ));
+        assert_eq!(resource.drains.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    struct FailedPreparation;
+
+    #[async_trait]
+    impl DeliveryValidationResource for FailedPreparation {
+        async fn prepare(&self) -> Result<(), NodeRunnerError> {
+            Err(NodeRunnerError::Driver)
+        }
+
+        async fn drain(&self) -> Result<(), NodeRunnerError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_host_resource_preparation_never_launches_the_helper() {
+        let (root, validator) = fixture("printf launched > \"$0.started\"");
+        let validator = validator.with_resource(std::sync::Arc::new(FailedPreparation));
+        assert!(matches!(
+            run(&validator).await,
+            Err(NodeRunnerError::Driver)
+        ));
+        validator.drain().await.unwrap();
+        assert!(!root.path().join("validator.sh.started").exists());
+    }
+
     fn captured_request(root: &Path) -> serde_json::Value {
         serde_json::from_slice(&std::fs::read(root.join("validator.sh.request")).unwrap()).unwrap()
     }

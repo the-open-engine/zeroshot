@@ -394,6 +394,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
         storage_root: root.path("live-target"),
         operator_diagnostic_output: None,
         workspace_storage: None,
+        delivery_validation: None,
         copilot_executable: PathBuf::from("/usr/local/bin/copilot"),
         codex_executable,
         claude_executable,

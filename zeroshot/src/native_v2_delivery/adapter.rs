@@ -667,9 +667,11 @@ impl NativeV2DeliveryAdapter {
         let input = delivery_input(&preparation.invocation.node.input)?;
         let commit_message = self.authority.prepare_commit_message(&input.title);
         self.preflight(&mut preparation, &commit_message).await?;
-        let head_revision = self
+        let revision = self
             .prepare_head(preparation.session, preparation.control, &commit_message)
             .await?;
+        let unchanged = revision.is_none();
+        let head_revision = revision.unwrap_or_else(|| self.config.target.base_revision.clone());
         let review_request = SourceReviewRequest {
             target: self.config.target.clone(),
             head_branch: delivery_head_branch(&self.config.delivery_run_id),
@@ -685,12 +687,17 @@ impl NativeV2DeliveryAdapter {
             head_branch: review_request.head_branch.clone(),
             head_revision: review_request.head_revision.clone(),
         };
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .intended_push = Some(review_request.head_revision.clone());
+        if !unchanged {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .intended_push = Some(review_request.head_revision.clone());
+        }
         self.validate_before_publication(&preparation, &review_request, &pending)
             .await?;
+        if unchanged {
+            return Err(recovery::git_failure(git::GitError::NoMutation));
+        }
         self.publish_review_head(&mut preparation, &review_request, &pending)
             .await?;
         if !mode.creates_review() {
@@ -748,16 +755,22 @@ impl NativeV2DeliveryAdapter {
         session: &DeliverySession,
         control: &DriverControl,
         commit_message: &str,
-    ) -> Result<String, DeliveryStop> {
+    ) -> Result<Option<String>, DeliveryStop> {
         emit(control, "delivery: preparing workspace revision").await?;
-        self.git
+        match self
+            .git
             .prepare_revision(
                 &session.workspace,
                 &self.config.target.base_revision,
                 commit_message,
             )
             .await
-            .map_err(recovery::git_failure)
+        {
+            // A host may prove an already-satisfied task without manufacturing a commit. It
+            // still cannot publish an unchanged candidate, even when validation accepts it.
+            Err(git::GitError::NoMutation) if self.trusted_delivery_validator.is_some() => Ok(None),
+            result => result.map(Some).map_err(recovery::git_failure),
+        }
     }
 
     async fn stage_workspace(

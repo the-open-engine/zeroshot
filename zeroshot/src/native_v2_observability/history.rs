@@ -208,27 +208,33 @@ pub(crate) fn created_at(id: &RunId) -> Option<u64> {
 
 // Execution identifiers are opaque strings in the browser. Native u64 values must never pass
 // through a JavaScript number, even though current short runs usually have small identities.
-fn stringify_reference(reference: &mut Value) {
-    for key in ["execution", "nodeInstance"] {
-        if let Some(id) = reference[key].as_u64() {
-            reference[key] = Value::String(id.to_string());
+fn stringify_identifiers(value: &mut Value, keys: &[&str]) {
+    for key in keys {
+        if let Some(id) = value[key].as_u64() {
+            value[key] = Value::String(id.to_string());
         }
     }
 }
 
 fn project_event(event: &mut Value) {
     match event["kind"].as_str() {
-        Some("node_started" | "execution_voided") => stringify_reference(&mut event["reference"]),
-        Some("node_completed") => stringify_reference(&mut event["completion"]["reference"]),
+        Some("node_started" | "execution_voided") => {
+            stringify_identifiers(&mut event["reference"], &["execution", "nodeInstance"]);
+        }
+        Some("node_completed") => {
+            stringify_identifiers(
+                &mut event["completion"]["reference"],
+                &["execution", "nodeInstance"],
+            );
+        }
+        Some("prior_execution") => {
+            stringify_identifiers(&mut event["execution"], &["execution", "node_instance"]);
+        }
         Some("primary_graph_completed") => {
-            if let Some(id) = event["delivery_execution"].as_u64() {
-                event["delivery_execution"] = Value::String(id.to_string());
-            }
+            stringify_identifiers(event, &["delivery_execution"]);
         }
         Some("safe_log" | "token_usage_observed") => {
-            if let Some(id) = event["execution"].as_u64() {
-                event["execution"] = Value::String(id.to_string());
-            }
+            stringify_identifiers(event, &["execution"]);
         }
         _ => {}
     }

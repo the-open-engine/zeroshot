@@ -896,6 +896,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   need `GH_TOKEN` fail early without it. The local branch-tip lookup for an omitted `--revision`
   still reads `GH_TOKEN` and never sends it. Local controllers keep reading explicit `GH_TOKEN`.
   The Python SDK opts in with `Client(forward_github_token=True)`.
+- Hosting embedders may install `HostedDeliveryValidationFactory` through
+  `ProductionHostingConfig.delivery_validation`. Allocation supplies the exact admitted run,
+  delivery lineage, workspace and process pool before agents start, only for Git-delivery graphs.
+  The host selects a private executable outside the checkout; authored profiles cannot select it.
+  Repository commands use the allocated writer containment, never the controller identity.
+  `DeliveryValidationResource` retains host-owned auxiliary work and confirms its cleanup before
+  delivery hands the workspace back to agents. Hook code and credentials remain host-owned.
+  Clean candidates equal to the admitted base also reach validation before `NoMutation`; a hook
+  may return repair without creating a commit, run branch or review, but cannot authorize an empty
+  publication. Runs without a host validator preserve the ordinary no-mutation refusal.
 - `ZEROSHOT_DELIVERY_CHECK_COMMAND` selects one private absolute executable outside the checkout
   for trusted local publication, review observation and merge validation. Its capability travels only through the consumed
   private bootstrap, never provider context or recovery metadata; resume selects it freshly. The

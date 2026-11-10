@@ -1,4 +1,5 @@
 mod comment;
+mod delivery;
 mod environment_hooks;
 use environment_hooks::HookContext;
 mod identity_leases;
@@ -23,10 +24,8 @@ use tokio::sync::{Mutex, watch};
 use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
 use crate::native_v2_admission::writer_nodes;
 use crate::native_v2_candidate::{
-    NativeV2CandidateConfig, NativeV2CandidateCommentDelivery, NativeV2CandidateDelivery,
-    build_native_v2_candidate_with_github_token,
+    NativeV2CandidateConfig, NativeV2CandidateCommentDelivery, build_hosted_native_v2_candidate,
 };
-use crate::source_code_provider::adapters::core::SourceDeliveryFactoryRequest;
 use crate::native_v2_capsule::{
     CapsuleFilesystem, CapsuleFilesystemSpec, NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner,
     prepare_capsule_filesystem,
@@ -38,7 +37,6 @@ use crate::native_v2_platform::{
     RetainedAllocationUnavailable,
 };
 use crate::native_v2_contract::AdmittedRun;
-use crate::native_v2_delivery::{DeliveryLineage, NativeV2DeliveryConfig};
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::native_v2_supervisor::checkpoints::{
@@ -369,7 +367,8 @@ impl ProductionCapsuleAllocator {
         request: &CapsuleBuildRequest<'_>,
         prepared: PreparedCapsule,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let delivery = self.candidate_delivery(request, &pending, &prepared)?;
+        let delivery::PreparedDelivery { delivery, trusted } =
+            self.prepare_delivery(request, &pending, &prepared).await?;
         let comment_delivery = self.candidate_comment_delivery(request, &pending, &prepared)?;
         let PendingCapsule {
             run_id,
@@ -397,7 +396,7 @@ impl ProductionCapsuleAllocator {
             .ok()
             .and_then(|memory| memory.as_ref())
             .map(|memory| memory.hooks.clone());
-        let candidate = build_native_v2_candidate_with_github_token(
+        let candidate = build_hosted_native_v2_candidate(
             request.admitted,
             NativeV2CandidateConfig {
                 active_memory: hooks,
@@ -406,7 +405,7 @@ impl ProductionCapsuleAllocator {
                 workspace: filesystem.workspace.clone(),
                 delivery,
             },
-            request.github_token.map(Arc::<str>::from),
+            trusted,
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let candidate = candidate.with_agent_context(self.config.agent_context.clone());
@@ -445,68 +444,6 @@ impl ProductionCapsuleAllocator {
             checkpoints: Some(hosted_workspace.checkpoints),
             execution_seed: hosted_workspace.execution_seed,
         })
-    }
-
-    fn candidate_delivery(
-        &self,
-        request: &CapsuleBuildRequest<'_>,
-        pending: &PendingCapsule<'_>,
-        prepared: &PreparedCapsule,
-    ) -> Result<Option<NativeV2CandidateDelivery>, CapsuleAllocationUnavailable> {
-        let delivery_run_id = pending
-            .state
-            .restored_delivery_run_id
-            .get()
-            .unwrap_or(request.delivery_run_id);
-        let capabilities =
-            crate::native_v2_admission::delivery_capabilities(&request.admitted.graph.root);
-        if capabilities.is_empty() {
-            Ok(None)
-        } else {
-            let source = request
-                .admitted
-                .source
-                .as_ref()
-                .ok_or(CapsuleAllocationUnavailable::Runtime)?;
-            let mode = crate::native_v2_admission::delivery_mode(&request.admitted.graph.root)
-                .ok_or(CapsuleAllocationUnavailable::Runtime)?;
-            let target = crate::native_v2_delivery::source_target(source, mode)
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            let config = NativeV2DeliveryConfig {
-                commit_identity: request.commit_identity.cloned(),
-                commit_co_author: request.commit_co_author.cloned(),
-                ..NativeV2DeliveryConfig::for_hosted_workspace(
-                    DeliveryLineage::new(
-                        delivery_run_id.clone(),
-                        request.adopt_existing_delivery || delivery_run_id != pending.run_id,
-                    ),
-                    prepared.filesystem.workspace.clone(),
-                    target,
-                    pending.git_identity,
-                )
-            };
-            NativeV2CandidateDelivery::new(
-                config,
-                SourceDeliveryFactoryRequest {
-                    source,
-                    workspace: &prepared.filesystem.workspace,
-                    git_program: &self.config.git_program,
-                    gh_program: &self.config.gh_program,
-                    home_directory: &prepared.paths.runtime_home,
-                    private_directory: &prepared.paths.runtime_home,
-                    git_identity: Some(pending.git_identity),
-                    local_environment: None,
-                    required_capabilities: &capabilities,
-                    operator_diagnostics: Some((
-                        request.run_id.clone(),
-                        self.operator_diagnostics.clone(),
-                    )),
-                },
-                request.git_credentials.cloned(),
-            )
-            .map(Some)
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)
-        }
     }
 
     async fn prepare_hosted_workspace(

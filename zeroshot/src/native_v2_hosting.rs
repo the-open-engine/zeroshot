@@ -7,6 +7,7 @@
 
 mod allocator;
 mod connections;
+mod delivery_validation;
 mod environment;
 mod repository;
 mod workspaces;
@@ -19,6 +20,7 @@ pub use crate::active_memory::{
 pub use crate::active_memory::runtime::{repository_key, authored_graph_hash};
 
 pub use workspaces::{HostedWorkspace, HostedWorkspaceRequest, HostedWorkspaceStorage};
+pub use delivery_validation::{HostedDeliveryValidationFactory, HostedDeliveryValidationRequest};
 
 #[cfg(test)]
 mod tests;
@@ -105,6 +107,8 @@ pub struct ProductionHostingConfig {
     /// Private diagnostics collection; the host owns the receiver and durable storage.
     pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
     pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
+    /// Optional private delivery authority installed by the host, never selected by run input.
+    pub delivery_validation: Option<Arc<dyn HostedDeliveryValidationFactory>>,
     pub storage_root: PathBuf,
     pub copilot_executable: PathBuf,
     pub codex_executable: PathBuf,
@@ -456,6 +460,7 @@ impl Default for ProductionHostingConfig {
             memory_backend: None,
             operator_diagnostic_output: None,
             workspace_storage: None,
+            delivery_validation: None,
             storage_root: PathBuf::from("/var/lib/zeroshot/native-v2"),
             copilot_executable: PathBuf::from("/usr/local/bin/copilot"),
             codex_executable: PathBuf::from("/usr/local/bin/codex"),

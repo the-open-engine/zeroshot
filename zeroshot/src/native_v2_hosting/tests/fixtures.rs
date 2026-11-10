@@ -95,6 +95,7 @@ pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
         memory_backend: None,
         operator_diagnostic_output: None,
         workspace_storage: None,
+        delivery_validation: None,
         storage_root,
         copilot_executable: PathBuf::from("/usr/bin/false"),
         codex_executable: PathBuf::from("/usr/bin/false"),

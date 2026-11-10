@@ -29,6 +29,7 @@ use super::allocator::{ProductionCapsuleAllocator, monitor_workspace_identity, p
 use super::repository::{RepositoryInstall, install_repository, path_source};
 
 mod checkout;
+mod delivery_validation;
 pub(super) mod fixtures;
 mod harnesses;
 
