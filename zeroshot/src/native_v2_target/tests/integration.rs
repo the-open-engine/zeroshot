@@ -288,6 +288,38 @@ fn file_registry_is_private_on_creation() {
     );
 }
 
+#[test]
+fn interrupted_saves_do_not_keep_an_abandoned_target_registry() {
+    let root = temp_root();
+    let path = root.path("config/targets.json");
+    let registry = FileTargetRegistry::new(path.clone());
+    registry.get("platform").assert_value();
+    // `target add abandoned` was killed after writing its registry and before the rename.
+    let mut interrupted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).assert_value()).assert_value();
+    let mut abandoned = hosted_target("abandoned", "https://abandoned.example");
+    abandoned.access = TargetAccess::Hosted {
+        device_token: "33333333-3333-4333-8333-333333333333".to_owned(),
+    };
+    interrupted["targets"]["abandoned"] = serde_json::to_value(abandoned).assert_value();
+    std::fs::write(
+        path.with_extension("tmp-0123456789abcdef"),
+        serde_json::to_vec_pretty(&interrupted).assert_value(),
+    )
+    .assert_value();
+
+    registry.insert(target()).assert_value();
+    let mut retained = Vec::new();
+    for entry in std::fs::read_dir(root.path("config")).assert_value() {
+        let path = entry.assert_value().path();
+        let stored = std::fs::read_to_string(&path).assert_value();
+        if stored.contains("33333333-3333-4333-8333-333333333333") {
+            retained.push(path);
+        }
+    }
+    assert_eq!(retained, Vec::<std::path::PathBuf>::new());
+}
+
 #[tokio::test]
 async fn connector_preserves_add_login_and_target_scoped_connect() {
     let registry = MemoryRegistry::default();

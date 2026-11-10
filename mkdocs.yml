@@ -151,6 +151,9 @@ extra:
     - icon: fontawesome/solid/globe
       link: https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
       name: zeroshot.sh
+    - icon: fontawesome/solid/pen-nib
+      link: https://zeroshot.sh/blog/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
+      name: Research blog
     - icon: fontawesome/brands/github
       link: https://github.com/the-open-engine/zeroshot
     - icon: fontawesome/brands/discord
@@ -158,4 +161,6 @@ extra:
     - icon: fontawesome/brands/linkedin
       link: https://www.linkedin.com/company/the-open-engine-company
     - icon: fontawesome/brands/x-twitter
-      link: https://x.com/OpenEngineCo
+      link: https://x.com/OpenEngineHQ
+    - icon: fontawesome/brands/instagram
+      link: https://www.instagram.com/theopenengine/

@@ -62,3 +62,37 @@ fn temporary_cleanup_removes_only_failed_writes() {
     cleanup_temporary(Ok(()), &successful).assert_value();
     assert_eq!(fs::read(successful).assert_value(), b"complete");
 }
+
+#[test]
+fn abandoned_temporary_removal_matches_only_the_store_temporary_names() {
+    let root = TestDirectory::new("cli-abandoned");
+    let id = uuid::Uuid::now_v7();
+    let abandoned = root.child(&format!("connections.{id}.tmp"));
+    fs::write(&abandoned, b"stale").assert_value();
+    // A case-insensitive filesystem would resolve the uppercase spelling of `id` to `abandoned`.
+    let other = uuid::Uuid::now_v7();
+    let kept = [
+        "connections.json".to_owned(),
+        "connections.lock".to_owned(),
+        "connections.tmp".to_owned(),
+        "connections.backup.tmp".to_owned(),
+        format!("connections.{}.tmp", id.simple()),
+        format!("connections.{}.tmp", id.braced()),
+        format!(
+            "connections.{}.tmp",
+            other.hyphenated().to_string().to_uppercase()
+        ),
+        format!("connections.{id}.tmp.bak"),
+        format!("profiles.{id}.tmp"),
+        format!("other-connections.{id}.tmp"),
+    ];
+    for name in &kept {
+        fs::write(root.child(name), b"kept").assert_value();
+    }
+
+    remove_abandoned_temporaries(root.path(), "connections").assert_value();
+    assert!(!abandoned.exists());
+    for name in &kept {
+        assert!(root.child(name).exists(), "{name} was removed");
+    }
+}
