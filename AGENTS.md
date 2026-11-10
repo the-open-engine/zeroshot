@@ -35,13 +35,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `zeroshot update`; only the exact value `1` enables it. Executables still install/update, existing
   skills stay untouched, and updates skip skill downloads. Keep default managed-copy protections
   when the opt-out is unset.
-- The remote OpenAI and Claude plugin packages under `plugins/zeroshot-*` contain unchanged copies
-  of the canonical run, plan, and graph-design skills. `npm run plugins:generate` owns those folders
-  and both marketplace catalogs; never edit generated files. Keep each skill self-contained so npm
-  installation, native self-update, and the four existing skill release assets keep their formats.
-  `plugins/metadata.json` owns one plugin content version for both client packages. Increase it when
-  emitted package content changes; `plugins:check -- --base SHA` verifies the fetched exact PR base
-  and fails on missing history. This client-cache version adds no runtime release tag or workflow.
+- For runtime/workflow, shared skill, or remote plugin changes, check MCP impact using
+  [plugins/AGENTS.md](plugins/AGENTS.md).
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
