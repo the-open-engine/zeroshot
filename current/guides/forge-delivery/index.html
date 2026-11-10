@@ -2148,6 +2148,19 @@ connection fields their own bindings declare.</p>
 <p>GitHub.com-only features include <code>--task-from</code>, Platform repository browsing and App/OAuth setup,
 inbound commands, and hosted <a href="../stacks/">stacks</a>. For GHE or GitLab comments, supply the graph input
 directly.</p>
+<p>Before first publication, GitHub delivery reads merge-queue policy for the exact repository and
+configured target branch. A confirmed queue owns integration with newer target commits, so delivery
+publishes the reviewed candidate without a local target merge or a review round caused only by target
+motion. Missing, malformed or failed policy reads never confirm a queue. Without a queue, delivery
+fetches and integrates the exact current target and returns changed candidates through repair and review.
+Push delivery and other forges retain their existing behavior.</p>
+<p>Later GitHub gates refresh policy, required checks and reviews on the exact head. If the queue was
+removed, current base/head ancestry routes an outdated head through ordinary authorized reconciliation,
+even when nonstrict protection reports <code>CLEAN</code>. This also works after recovery without a saved queue
+assumption. Adding a queue after ordinary integration permits queue admission only after that integration
+has been reviewed. Deferred integration never advances <code>reviewBaseRevision</code>; <code>sourceRevision</code> remains
+the admitted source. Queue admission still uses the exact reviewed head and success requires an observed
+merged revision.</p>
 <p>When the forge refuses the run-branch push because of branch protection or missing push permission,
 delivery stops with a policy refusal naming the run branch and the forge's message, without another
 agent round. Local work is preserved: let delivery push its run branch, then
