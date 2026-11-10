@@ -172,3 +172,80 @@ fn local_store_rejects_org_scope() {
     assert!(error.to_string().contains("hosted target"));
     assert!(!root.0.exists());
 }
+
+/// What a save killed after writing and before its rename leaves: the complete store it was
+/// committing, under the producer's temporary name and private file creation.
+fn leave_interrupted_save(root: &Path, connections: &StoredConnections) {
+    let mut encoded = serde_json::to_vec(connections).assert_value();
+    encoded.push(b'\n');
+    let mut file = private_file(&temporary_path(root), FileAccess::CreateNew).assert_value();
+    std::io::Write::write_all(&mut file, &encoded).assert_value();
+}
+
+#[track_caller]
+fn assert_stored_only_in(root: &Path, value: &str, expected: &[&str]) {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(root).assert_value() {
+        let path = entry.assert_value().path();
+        let stored = std::fs::read_to_string(&path).assert_value();
+        if stored.contains(value) {
+            found.push(path);
+        }
+    }
+    let expected: Vec<_> = expected.iter().map(|name| root.join(name)).collect();
+    assert_eq!(found, expected, "files that still contain {value}");
+}
+
+fn set_token(store: &LocalConnectionStore, name: &str, token: &str) {
+    store
+        .set(ConnectionSetRequest {
+            key: key(name),
+            scope: ConnectionScope::User,
+            values: values(&[("TOKEN", token)]),
+        })
+        .assert_value();
+}
+
+fn delete(store: &LocalConnectionStore, name: &str) -> bool {
+    store
+        .delete(ConnectionDeleteRequest {
+            key: key(name),
+            scope: ConnectionScope::User,
+        })
+        .assert_value()
+        .deleted
+}
+
+#[test]
+fn interrupted_saves_do_not_keep_a_deleted_connection_secret() {
+    let root = TestRoot::new();
+    let store = LocalConnectionStore::new(root.0.clone());
+    set_token(&store, "c0", "deleted-c0-secret");
+    set_token(&store, "c1", "kept-c1-secret");
+    // `connection set killed` was killed while committing a store that still held c0.
+    let mut interrupted = store.read().assert_value();
+    interrupted.insert(key("killed"), values(&[("TOKEN", "uncommitted")]));
+    leave_interrupted_save(&root.0, &interrupted);
+
+    assert!(delete(&store, "c0"));
+    assert_stored_only_in(&root.0, "deleted-c0-secret", &[]);
+
+    // A state directory from a release without cleanup: c0 is already absent from the store, but
+    // an older interrupted save still holds it, so deleting c0 again must remove that copy.
+    leave_interrupted_save(&root.0, &interrupted);
+    assert!(!delete(&store, "c0"));
+    assert_stored_only_in(&root.0, "deleted-c0-secret", &[]);
+    assert_stored_only_in(&root.0, "kept-c1-secret", &[CONNECTIONS_FILE]);
+}
+
+#[test]
+fn interrupted_saves_do_not_keep_a_rotated_connection_value() {
+    let root = TestRoot::new();
+    let store = LocalConnectionStore::new(root.0.clone());
+    set_token(&store, "provider", "rotated-old-value");
+    leave_interrupted_save(&root.0, &store.read().assert_value());
+
+    set_token(&store, "provider", "rotated-new-value");
+    assert_stored_only_in(&root.0, "rotated-old-value", &[]);
+    assert_stored_only_in(&root.0, "rotated-new-value", &[CONNECTIONS_FILE]);
+}

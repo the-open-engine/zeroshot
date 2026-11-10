@@ -730,3 +730,36 @@ fn saved_profiles_preserve_workspace_checkpoint_opt_out() {
         .assert_value();
     assert!(!saved.runtime.workspace_checkpoints);
 }
+
+#[test]
+fn interrupted_saves_do_not_keep_a_replaced_profile() {
+    let (root, store) = temporary_store();
+    store
+        .set(profile_request("alpha", "retired", false))
+        .assert_value();
+    // `profile default alpha` was killed after writing its store and before the rename.
+    let mut interrupted = store.read().assert_value();
+    interrupted.default = Some(RunProfileName::new("alpha").assert_value());
+    let mut encoded = serde_json::to_vec(&interrupted).assert_value();
+    encoded.push(b'\n');
+    let mut file = owner_only_options()
+        .write(true)
+        .create_new(true)
+        .open(temporary_path(root.path()))
+        .assert_value();
+    std::io::Write::write_all(&mut file, &encoded).assert_value();
+    drop(file);
+
+    store
+        .set(profile_request("alpha", "implementer", false))
+        .assert_value();
+    let mut retained = Vec::new();
+    for entry in std::fs::read_dir(root.path()).assert_value() {
+        let path = entry.assert_value().path();
+        let stored = std::fs::read_to_string(&path).assert_value();
+        if stored.contains("retired") {
+            retained.push(path);
+        }
+    }
+    assert_eq!(retained, Vec::<PathBuf>::new());
+}
