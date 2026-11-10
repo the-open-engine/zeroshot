@@ -5,7 +5,7 @@ description: "Active Memory preserves lessons about costly mistakes and recurrin
 # Active Memory
 
 Active Memory preserves concise lessons about costly mistakes and non-obvious work likely to
-recur. Local runs use the local Zeroshot state directory. A direct Docker target owns one store
+recur. Local runs use the local zeroshot state directory. A direct Docker target owns one store
 shared by its submitters; repository scopes keep unrelated projects separate.
 
 Workers do not write lessons. After the main graph settles, the built-in postmortem runs inside
@@ -158,7 +158,7 @@ Executable and skill updates preserve this directory, as does normal run and wor
 A direct target uses `<target-storage>/active-memory/lessons.sqlite3`; preserve its storage volume
 when recreating the Docker container.
 
-Zeroshot does not create automatic backups. To back up or move memory, stop all Zeroshot processes
+zeroshot does not create automatic backups. To back up or move memory, stop all zeroshot processes
 using the store and copy the whole `active-memory/` directory, including any SQLite journal files.
 Restore it while those processes are stopped. Deleting the state directory or losing the storage
 volume loses its lessons unless you have a backup.

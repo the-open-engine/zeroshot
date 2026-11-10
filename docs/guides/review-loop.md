@@ -13,7 +13,7 @@ yourself when you want to change the reviewers, their instructions, or the bound
 
 ## Before you start
 
-This guide assumes you have completed [Run a first task](../getting-started/first-run.md): Zeroshot
+This guide assumes you have completed [Run a first task](../getting-started/first-run.md): zeroshot
 is installed, the Codex CLI is signed in, and you have a folder with an HTTP service to
 change.
 
@@ -105,7 +105,7 @@ a `verdict` signal and a diagnostic, and writes the diagnostic message into its 
 }
 ```
 
-The `code` verifier has the same shape and writes `codeFeedback`. Zeroshot tells verifiers not to
+The `code` verifier has the same shape and writes `codeFeedback`. zeroshot tells verifiers not to
 edit the material under review; that is an instruction, not a filesystem boundary.
 
 The `all` join waits for both reviewers. `reviews` promotes both feedback paths into the iteration
@@ -225,7 +225,7 @@ zeroshot run \
 [Observe and control runs](observe-and-control.md) covers status, logs, and stopping.
 
 The same files run on a target with `--target platform` (see
-[Connect Zeroshot Platform](../getting-started/install.md#connect-zeroshot-platform)) or the name of a
+[Connect zeroshot Platform](../getting-started/install.md#connect-zeroshot-platform)) or the name of a
 [direct target](../concepts/targets.md#direct-target). A target requires an exact Git source selected from
 the checkout or [source overrides](../concepts/targets.md#direct-target), and resolves `OPENAI_API_KEY` from the submission
 environment or its connection store. The graph has no delivery node, so a target run does not push
@@ -248,7 +248,7 @@ Anthropic accepts. Pass the file to `--runtime-config` in [step 7](#7-validate-t
 `review-loop.runtime.json`.
 
 A local run needs both the Codex CLI and Claude Code installed and signed in. Before the run starts,
-Zeroshot checks that `codex` and `claude` are on `PATH`; it does not check login state, so a missing
+zeroshot checks that `codex` and `claude` are on `PATH`; it does not check login state, so a missing
 Claude Code login fails at the first review. On a target, the run requires both `OPENAI_API_KEY` and
 `ANTHROPIC_API_KEY`, and the target must advertise `openengine.node-runtime-lanes/v1`. The CLI
 refuses to send the plan to a target that does not.

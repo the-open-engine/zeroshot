@@ -75,7 +75,7 @@ redirect: GitHub Pages cannot redirect JSON clients with its HTML redirect pages
 an exact historical patch manifest must use the site's Git history. Do not treat a minor manifest
 as proof that the docs match an older patch exactly.
 
-## Linking from Zeroshot Platform
+## Linking from zeroshot Platform
 
 For a deployed product version `X.Y.Z`, fetch `vX.Y/manifest.json` and require schema 2. Confirm that
 `productVersion` belongs to the deployed major/minor line, then resolve a logical route against

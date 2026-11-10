@@ -1168,6 +1168,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Search titles and social titles share the same template. Sitemap `lastmod` uses the verified
   content-change date from Git and is omitted when history cannot establish it.
   Fonts are self-hosted in `docs/assets/fonts/` with their licenses.
+  The docs home draws zeroshot.sh's example graph inline from `docs/overrides/partials/example-graph-*.svg`;
+  regenerate those with `docs/brand/freeze-example-graph.py`, never by hand. `docs/javascripts/command-wrap.js`
+  keeps wrapped commands breaking only at spaces; it does not change copied text.
 - The public documentation site is the root `mkdocs.yml`. Python API pages are generated from the
   curated SDK exports and docstrings. Do not restore a second SDK-only MkDocs site.
 - Keep `docs/reference/python/*.md` out of Prettier; its Markdown formatter removes the indentation

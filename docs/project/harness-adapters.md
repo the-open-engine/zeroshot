@@ -25,7 +25,7 @@ through `openengine.runtime-harnesses/v1`; installing a CLI doesn't enable its a
 lanes require positive advertisement, while older targets without the extension retain legacy core
 submissions.
 
-Core adapters receive product maintenance. Contributors maintain their adapters; Zeroshot doesn't
+Core adapters receive product maintenance. Contributors maintain their adapters; zeroshot doesn't
 guarantee contributed-harness compatibility with native releases. Both groups must implement the same
 full execution, session and Active Memory contracts. Each runtime names its harness, provider and
 model explicitly. Model identifiers remain provider-owned strings.
@@ -86,7 +86,7 @@ inspection launches retain the dispatch metadata; spawning a process never advan
 Auxiliary agents use their own run, node and execution identities, iteration `0` outside authored
 loops, and attempt `1` unless the host request explicitly represents a retry of that visit.
 
-Zeroshot applies these labels after environment merges, replacing stale incoming values, with
+zeroshot applies these labels after environment merges, replacing stale incoming values, with
 case-insensitive names on Windows. It never changes the controller's process environment or puts
 labels in credential connections. Descendant tools and hooks may inherit them subject to native
 harness filtering; remote tool backends retain their own environment policies. Descendants can keep

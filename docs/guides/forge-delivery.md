@@ -135,7 +135,7 @@ Generated GitLab MR titles lose leading `Draft:`, `[Draft]`, and `(Draft)` prefi
 including repeated prefixes). Empty results become `Zeroshot change`. Titles are limited to 255 Unicode
 characters; shortened titles retain the complete original once in the generated description section.
 The same title normalization runs before generated delivery commits, including repair commits pushed
-to an existing MR, so GitLab's push processing cannot mark it draft from Zeroshot's commit message.
+to an existing MR, so GitLab's push processing cannot mark it draft from zeroshot's commit message.
 Creation, refresh, and confirmation use the same canonical metadata, including for custom graphs.
 Refresh replaces only the generated markers' contents and preserves surrounding human text. A draft
 deliberately applied after creation keeps its existing title and draft status during refresh.

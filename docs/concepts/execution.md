@@ -4,7 +4,7 @@ description: 'Learn how zeroshot admits a graph, executes its nodes, checks type
 
 # How execution works
 
-Zeroshot keeps control flow separate from model behavior through a caller-authored graph. After
+zeroshot keeps control flow separate from model behavior through a caller-authored graph. After
 admission, the engine runs an executable node and checks its typed output; state reduction records
 that output before choosing the next edge.
 
@@ -19,7 +19,7 @@ A submission contains four pieces of caller-owned data:
 | Initial input | The unchanged value checked against the graph's declared input type        |
 | Runtime plan  | Harness, provider, model, session scope, and named connection requirements |
 
-For inline graphs and built-in templates, Zeroshot completes admission before it starts a local
+For inline graphs and built-in templates, zeroshot completes admission before it starts a local
 controller or contacts a target. The CLI first fetches a target-stored profile, then sends its graph
 and runtime through the same checks. Those checks cover schema shape, graph semantics, bounds,
 runtime bindings, and the initial input; `--validate-only` runs them without creating a run.
@@ -56,7 +56,7 @@ settled before that delivery execution started.
 
 ## State reduction chooses the next step
 
-An agent returns a value through a declared output channel. Zeroshot checks that value, applies
+An agent returns a value through a declared output channel. zeroshot checks that value, applies
 authored bindings, and records the new state before it evaluates another node. Model output cannot
 add an edge or raise a bound.
 
@@ -70,7 +70,7 @@ Each run has a public ID backed by a SQLite ledger. Status and safe-log events c
 for strict resume, so detaching a client, losing a terminal, or cancelling a Python `await` does not
 stop the controller.
 
-When a run closes, Zeroshot atomically closes its execution activity; a late process cannot appear
+When a run closes, zeroshot atomically closes its execution activity; a late process cannot appear
 after the terminal result. [Observe and control runs](../guides/observe-and-control.md) covers the
 read and stop commands.
 
@@ -105,7 +105,7 @@ policy and confirms the merged revision. Missing approval doesn't block `--pr`; 
 `--ship` when GitHub requires it.
 
 For local `--pr` and `--ship` runs, the target branch is the current branch's upstream when one is
-configured; otherwise, Zeroshot uses the local branch name. Preparation verifies that the selected
+configured; otherwise, zeroshot uses the local branch name. Preparation verifies that the selected
 remote contains this target before agent execution. To target `main` from a fresh worktree,
 run `git branch --set-upstream-to=origin/main`, or create the worktree from `origin/main` so Git
 sets the tracking branch automatically. If the remote cannot be reached or authenticated,
