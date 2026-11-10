@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state.">
+        <meta name="description" content="Choose local execution, a self-hosted Docker target or zeroshot Platform. Connect a target and prepare its source and credentials.">
       
       
       
@@ -63,14 +63,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="Targets | zeroshot docs">
-    <meta property="og:description" content="Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state.">
+    <meta property="og:description" content="Choose local execution, a self-hosted Docker target or zeroshot Platform. Connect a target and prepare its source and credentials.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/concepts/targets/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Targets | zeroshot docs">
-    <meta name="twitter:description" content="Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state.">
+    <meta name="twitter:description" content="Choose local execution, a self-hosted Docker target or zeroshot Platform. Connect a target and prepare its source and credentials.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -616,12 +616,12 @@
   <a href="#local-controller" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Local controller
+        Run locally
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Local controller">
+    <nav class="md-nav" aria-label="Run locally">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -644,12 +644,12 @@
   <a href="#direct-target" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Direct target
+        Run a Docker target
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Direct target">
+    <nav class="md-nav" aria-label="Run a Docker target">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -672,12 +672,12 @@
   <a href="#hosted-target" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hosted target
+        Use a hosted target
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Hosted target">
+    <nav class="md-nav" aria-label="Use a hosted target">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -704,6 +704,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizes-and-supported-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizes and supported agents
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1198,6 +1209,8 @@
       
         
       
+        
+      
     
     
     
@@ -1288,8 +1301,6 @@
       
         
       
-        
-      
     
     
     
@@ -1310,7 +1321,7 @@
   <span class="md-ellipsis">
     
   
-    Python API
+    Implementation details
   
 
     
@@ -1323,6 +1334,187 @@
         
         <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Implementation details
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation and updates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/target-runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Target runtime
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/execution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution and delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/active-memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1515,10 +1707,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_4" >
         
           
-          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
             
   
   
@@ -1536,8 +1728,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_3">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2083,12 +2275,12 @@
   <a href="#local-controller" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Local controller
+        Run locally
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Local controller">
+    <nav class="md-nav" aria-label="Run locally">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2111,12 +2303,12 @@
   <a href="#direct-target" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Direct target
+        Run a Docker target
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Direct target">
+    <nav class="md-nav" aria-label="Run a Docker target">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2139,12 +2331,12 @@
   <a href="#hosted-target" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hosted target
+        Use a hosted target
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Hosted target">
+    <nav class="md-nav" aria-label="Use a hosted target">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2171,6 +2363,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizes-and-supported-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizes and supported agents
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2206,326 +2409,158 @@
 
 
 <h1 id="targets">Targets<a class="headerlink" href="#targets" title="Permanent link">&para;</a></h1>
-<p>A target owns source preparation and the processes that execute graph nodes; it also stores durable
-run state and resolves connections. The graph protocol stays the same when the target changes.</p>
-<p>Targets advertise their enabled harness/provider pairs through the
-<code>openengine.runtime-harnesses/v1</code> discovery extension. The CLI checks every selected lane before
-requesting an access token or submitting a run or profile, and the target enforces its catalog
-again during admission. Older targets without this extension accept only the established core
-harnesses through client preflight.</p>
-<p>Sizes are target-owned identifiers of 1–128 non-control Unicode characters. A target advertises
-its catalog through <code>extensions.run_size_catalog</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.run-sizes/v2"</span><span class="p">,</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">"default"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standard"</span><span class="p">,</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">"sizes"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standard"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4 vCPU, 16 GiB RAM, 128 GiB disk"</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"big-box"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"32 vCPU, 128 GiB RAM, 1024 GiB disk"</span><span class="w"> </span><span class="p">}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">}</span>
-</code></pre></div>
-<p>List a named target's identifiers and descriptions with <code>zeroshot target sizes NAME</code>.
-The default output is a table that wraps to terminal width; add <code>--json</code> for the structured catalog.
-Hosted targets may return the current organization's enabled catalog through authenticated discovery.</p>
-<p>The CLI and SDK forward an explicitly requested identifier unchanged. They do not maintain size
-names or reject a request because a discovery list is missing, empty, or stale. The target decides
-availability and rejects unsupported or disabled sizes. An omitted or null size selects the target's
-default at admission; the accepted run stores that concrete size. Requests retain their original
-identity, so an exact retry still returns the accepted run after a catalog/default change.</p>
-<p>An empty catalog offers no sizes and has no default. Local execution and <code>target serve</code> offer <code>host</code>,
-which uses the current host's CPU, memory and storage. Private capsules preserve the concrete size
-already admitted by their host. The descriptor extension uses its own key so older string-based size
-advertisements cannot break unrelated discovery operations. Size is shared by the graph's agents,
-independently of their harness/provider lanes; zeroshot defines no AWS shapes or billing prices.</p>
-<p>Official local builds include contributed adapters; Platform and the default target image enable
-only core adapters. See <a href="../../project/harness-adapters/">Harness adapters</a> for availability and
-provider support.</p>
-<h2 id="local-controller">Local controller<a class="headerlink" href="#local-controller" title="Permanent link">&para;</a></h2>
-<p>Omit <code>--target</code> to work in an existing local folder. <code>--cwd FOLDER</code> selects the folder for one run;
-the default is the invoking folder. Input, graph, runtime, and environment file arguments remain
-relative to the invoking folder. A folder inside a Git checkout resolves to its canonical checkout
-root. Resume uses the original stored workspace.</p>
-<p>A run without Git delivery also accepts plain folders, remoteless repositories, detached checkouts,
-and unborn repositories. zeroshot starts a detached controller and keeps the ledger under the local
-state directory, where later CLI invocations can list, watch, or stop the run. It does not initialize
-Git to run in a plain folder.</p>
-<p>The workspace and active zeroshot state directory must be disjoint, including symlink aliases.
-If either contains the other, select another folder or set <code>ZEROSHOT_STATE_DIR</code> outside the workspace.
-Existing inactive state folders do not impose a separate admission rule. Disjoint workspaces can
-run concurrently. Aliases share one lease; a folder and its subtree cannot run at the same time. Reusing a submission key for
-another folder returns a conflict rather than a run from the first folder.</p>
-<p>Local execution is the only mode that mutates the caller's existing folder; each selected
-installed harness runs as the current user. A plan with
-<a href="../../reference/runtime-plan/#per-node-lanes">per-node lanes</a> needs every lane's CLI installed. The
-adapter declares whether its lane can reuse the CLI's native login; otherwise it needs the provider's
-<a href="../../reference/runtime-plan/#connections">connection values</a>. Declared credentials take precedence
-over native login state. Before the controller starts,
-<code>zeroshot run</code> and <code>zeroshot resume</code> check that each lane's executable is on <code>PATH</code>; they do not
-check login state, so a missing login fails at that lane's first turn.</p>
-<p>Local Codex runs with <code>provider: "openai"</code> use the model provider and transport configured in the
-user's Codex configuration, including OpenAI-compatible proxies such as LiteLLM. zeroshot supplies
-the runtime's model and any explicit reasoning effort, but leaves web search and sandbox network
-access to Codex's configuration. Explicit <code>openrouter</code>, <code>bedrock</code>, <code>foundry</code>, and <code>gateway</code> selections configure
-those providers; hosted targets use their own isolated provider setup.</p>
-<p>Local Claude runs use the current user's home and <code>CLAUDE_CONFIG_DIR</code>, when set. Local runs
-also inherit the shell's endpoint variables, including <code>OPENAI_BASE_URL</code>
-for Codex and <code>ANTHROPIC_BASE_URL</code> for Claude. Declared connection values take precedence over these
-shell defaults. Hosted adapters receive declared connection values without inheriting the host's
-shell settings. Explicit gateway selections use their <code>GATEWAY_BASE_URL</code> connection value. Local
-<code>anthropic</code> runs also inherit Claude's shell provider-selection flags. Explicit <code>openrouter</code>,
-<code>bedrock</code>, <code>foundry</code>, and <code>gateway</code> selections retain their provider setup and reject declared transport flags
-that would route to an incompatible provider.</p>
-<p>Local Copilot runs use the current user's <code>COPILOT_HOME</code> and system credential store. Ambient
-<code>COPILOT_GITHUB_TOKEN</code>, <code>GH_TOKEN</code>, or <code>GITHUB_TOKEN</code> values are selected in native precedence and
-sent through private RPC rather than the Copilot process or its tools. Copilot endpoint, proxy,
-certificate, and custom-provider environment settings are inherited locally. Static BYOK endpoint,
-credential, header, wire, and model-mapping settings are materialized into the private Copilot RPC
-session and removed from agent tool environments. <code>COPILOT_PROVIDER_API_KEY_COMMAND</code> crosses the
-singular private provider contract, which lets the pinned CLI refresh rotating keys for each request.
-Eligible helper-only invoking-shell fields are all marked through Copilot's <code>--secret-env-vars</code>, so
-they remain available to the internal provider command but are not inherited by agent shell or MCP
-environments. Runtime, auth, provider, and parent-process loader controls are excluded.
-That filtering is not a separate OS identity boundary against adversarial same-UID processes.
-A bounded <code>COPILOT_PROVIDERS_CONFIG</code> or default <code>COPILOT_HOME/providers.json</code> registry crosses as
-protocol provider/model values because the headless server does not import that path into sessions;
-a nonempty registry wins over legacy provider variables. An explicit declared token suppresses
-ambient BYOK and offline controls. Declared endpoint and credential fields cannot accidentally retain
-ambient credentials for a different route. The runtime model remains the process-level registry
-selection while provider <code>modelId</code> capability and wire-model mappings stay intact. A registry
-command translated to the singular RPC contract uses its authored <code>modelId</code> as that session's model.
-Contained targets use a private Copilot home and require the canonical <code>COPILOT_GITHUB_TOKEN</code>
-connection instead.</p>
-<p>Local Pi runs use the current user's <code>~/.pi/agent</code> for a <code>pi/anthropic</code>, <code>pi/openai</code> or <code>pi/github</code> lane, which
-reuses a stored Pi login. Any other Pi lane, a declared credential, or a caller-owned endpoint
-instead receives a private agent directory so no ambient catalog or credential is inherited. A
-declared or ambient <code>ANTHROPIC_BASE_URL</code>, <code>OPENAI_BASE_URL</code>, or <code>OPENAI_API_BASE</code> becomes a Pi
-provider override that keeps that provider's own protocol, and <code>pi/gateway</code> carries
-<code>GATEWAY_BASE_URL</code>, <code>GATEWAY_API_KEY</code>, and an authored <code>GATEWAY_API</code> wire protocol. Pi exposes no
-permission control, so Pi runs add no bypass flag; containment remains the boundary.</p>
-<p>The local target intentionally has the same-user trust boundary as running the harness CLI directly:
-native config, user files, and credential-store access remain subject to that harness's own sandbox
-and tool policy. zeroshot transfers the invoking shell through a private, one-shot bootstrap and
-deletes it before the controller performs run effects; the detached controller itself receives only
-minimal platform environment. A later local CLI startup removes a bootstrap orphaned beyond the
-controller handoff window. This snapshot is never written to a run ledger or sent to a hosted target.</p>
-<p>Hosted Codex and Claude workers and verifiers always run with
-<code>--dangerously-bypass-approvals-and-sandbox</code> or <code>--dangerously-skip-permissions</code>, respectively.
-zeroshot does not inspect the harness's native permission policy for hosted turns; the disposable
-capsule is the isolation boundary.</p>
-<p>Local Codex and Claude workers and verifiers use those flags only when no permission policy is
-configured. Before each local turn, zeroshot queries the harness's resolved settings without sending
-a model prompt. Explicit approval, sandbox, permission rules, and managed restrictions take
-precedence, so zeroshot adds no bypass flag in those cases. Claude shell permission controls are
-inherited locally too. If inspection fails or the CLI does not support it, the harness keeps its
-native permission behavior. Inspection adds one CLI startup per local turn and is bounded to sixty
-seconds. Whenever inspection is unavailable, for example because the CLI cannot start, exits early,
-returns an error or an incomplete or oversized answer, or exceeds the sixty seconds, <code>zeroshot logs</code>
-shows an error-level line for that node naming the harness and a bounded, redacted cause, and
-stating that zeroshot is continuing without its automatic permission bypass. That line does not
-change the node's outcome: the turn still runs with native permissions and its own result decides
-success. Native overrides and configured policy are not inspection failures and are not reported.
-The probe must finish cleanup before the model turn starts; unconfirmed cleanup stops the run and
-identifies configuration inspection in its diagnostic. Inspection does not rewrite settings files,
-though the CLI may update its own startup state.</p>
-<p>Every agent verifier node, including those in custom profiles, uses the same permission handling as
-workers. zeroshot automatically adds instructions to inspect without modifying source, tests,
-configuration, or other material under review or implementing repairs. Verifiers may run checks and
-create temporary files and generated artifacts, and must report failed or unavailable checks accurately.
-The built-in acceptance verifier also tries to run the repository's pre-commit checks and reports
-the results.</p>
-<p>Local and hosted verifiers operate directly on the candidate: the restriction on edits is instruction
-guidance, not a filesystem boundary. Hosted nodes share the prepared workspace and its owner identity.
-They retain separate session homes and process cleanup markers, so ending one node does not terminate
-another node or the run's startup services.</p>
-<p>Hosting applications can supply nonsecret machine facts and operating guidance through
-<code>ProductionHostingConfig.agent_context</code>, using an <code>AgentContextProvider</code>. zeroshot samples this
-context before every agent execution, including resumed attempts and auxiliary agents, and adds
-it to the prompt for every harness. The context is transient: it does not change the saved graph,
-runtime plan, or durable invocation. Local and direct targets attach no host context by default.</p>
-<p>zeroshot controls the response format and session continuation. Web search follows Codex's
-configuration: by default it uses live search with full access and cached search otherwise. For local
-runs, an explicit <code>web_search="cached"</code> prevents zeroshot from adding bypass because Codex can
-otherwise promote cached search to live search under full access. Hosted turns always use maximum
-bypass inside the disposable capsule, so Codex may promote cached search to live. Command network
-access follows the selected sandbox policy locally; hosted command isolation comes from the capsule.</p>
-<p>For local Codex, zeroshot reads the active provider's <code>env_key</code> and environment-based header names
-from Codex's resolved configuration, then forwards only those values from the invoking shell to the
-model process. This lets custom OpenAI-compatible gateways keep using their existing Codex setup.
-Declared connection values take precedence, and a declared <code>OPENAI_API_KEY</code> remains available under
-that name. zeroshot also supplies <code>CODEX_API_KEY</code> for native OpenAI authentication when needed.
-Values discovered from local configuration are not persisted or sent to hosted targets. See
-<a href="../runtimes-and-connections/">Runtimes and connections</a>.</p>
+<p>A target is where your agents run and their run history is stored. Choose it independently of the
+graph and models.</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Use it for</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Local</td>
+<td>Work in a folder on your machine</td>
+<td>Your existing files, including uncommitted changes</td>
+</tr>
+<tr>
+<td>Direct Docker</td>
+<td>Run on infrastructure you manage</td>
+<td>An exact committed Git revision</td>
+</tr>
+<tr>
+<td>Hosted</td>
+<td>Use a service such as zeroshot Platform</td>
+<td>An exact committed Git revision</td>
+</tr>
+</tbody>
+</table>
+<p>The model provider still receives the code and context its agent needs. Self-hosting the target
+does not make model processing local.</p>
+<h2 id="local-controller">Run locally<a class="headerlink" href="#local-controller" title="Permanent link">&para;</a></h2>
+<p>Omit <code>--target</code> for a local run. Add <code>--cwd FOLDER</code> to choose the workspace; otherwise zeroshot uses
+the invoking folder. A folder inside a Git checkout resolves to its root. Input and configuration
+file paths remain relative to where you invoked the command.</p>
+<p>Local agents edit this workspace as your user. With <code>--delivery none</code>, Git is optional. Install and
+sign in to every agent CLI your runtime plan uses. zeroshot checks for executables before starting;
+a missing login fails at the agent's first turn.</p>
+<p>Keep the workspace separate from the active zeroshot state directory. Independent workspaces can
+run concurrently, but overlapping folders cannot. Set <code>ZEROSHOT_STATE_DIR</code> outside the workspace
+if needed.</p>
+<p>Local Codex and Claude runs respect configured permission policies. When none is configured,
+zeroshot may add permission-bypass flags. Reviewers share the workspace; their instruction not to
+edit reviewed files is not filesystem isolation. See
+<a href="../../reference/target-runtime/#local-workspace-and-authentication">local authentication and permissions</a>
+for each harness's behavior.</p>
 <h3 id="workspace-snapshot-disk-usage">Workspace snapshot disk usage<a class="headerlink" href="#workspace-snapshot-disk-usage" title="Permanent link">&para;</a></h3>
-<p>Workspace snapshots recursively copy entries without applying <code>.gitignore</code>, including generated
-directories such as <code>target/</code> and <code>node_modules/</code>.</p>
-<p>zeroshot tries filesystem cloning or reflinks where supported. Otherwise, each capture needs space
-for another full workspace copy during staging, in addition to Restic checkpoint storage. Concurrent
-runs increase peak disk usage and can fail with <code>no space left on device</code>.</p>
-<p>On tight disks, clean unnecessary build artifacts or keep large generated directories outside the
-workspace where practical.</p>
-<p>Restic progress streams are drained with bounded memory, retaining the final snapshot summary.
-Large progress output does not abort a backup. Failures identify the operation and failure stage
-or exit status without exposing private child output; the previous published checkpoint remains
-available when a later backup fails.</p>
-<h2 id="direct-target">Direct target<a class="headerlink" href="#direct-target" title="Permanent link">&para;</a></h2>
-<p>A direct target exposes zeroshot's HTTP and OECP contracts without application-level authentication.
-The released container includes zeroshot plus the pinned core harness CLIs listed in
-<a href="../../project/harness-adapters/">Harness adapters</a>.
-A run can mix their lanes; its connection requirements are then the union over its nodes, such as
-<code>OPENAI_API_KEY</code> and <code>ANTHROPIC_API_KEY</code> for a Codex worker with Claude Code reviewers.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">docker run --detach --restart unless-stopped --name zeroshot-target \</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">  -p 127.0.0.1:8080:8080 \</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">  -v zeroshot-data:/var/lib/zeroshot \</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">  ghcr.io/the-open-engine/zeroshot-target:latest</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">zeroshot target add local-target \</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">  --url http://127.0.0.1:8080 \</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="go">  --direct</span>
+<p>Snapshots include ignored files such as <code>node_modules/</code> and <code>target/</code>. Where filesystem cloning is
+unavailable, staging needs another full workspace copy as well as checkpoint storage. Concurrent
+runs increase peak usage. Remove unnecessary build artifacts or keep large generated directories
+outside the workspace when disk space is tight.</p>
+<p>Restic failures report the operation and failure stage or exit status without exposing private
+child output. A failed backup leaves the previous published checkpoint available.</p>
+<h2 id="direct-target">Run a Docker target<a class="headerlink" href="#direct-target" title="Permanent link">&para;</a></h2>
+<p>The Docker image includes zeroshot and its core agent CLIs. It is published for <code>linux/amd64</code>.
+Start a persistent target and register it with your CLI:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">docker run --detach --restart unless-stopped --name zeroshot-target \</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">  -p 127.0.0.1:8080:8080 \</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">  -v zeroshot-data:/var/lib/zeroshot \</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">  ghcr.io/the-open-engine/zeroshot-target:latest</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">zeroshot target add local-target \</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">  --url http://127.0.0.1:8080 \</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">  --direct</span>
 </code></pre></div>
-<p>The target keeps running between runs. Docker restarts it after a reboot or unexpected exit with
-<code>--restart unless-stopped</code>; manually stopping it keeps it stopped until <code>docker start zeroshot-target</code>.
-Docker itself must be running. Stopping the target stops its runtime; restart retains history and
-marks interrupted runs as lost. When recovery data is available, start a successor with
-<code>zeroshot resume RUN_ID --target local-target</code>.</p>
-<p>The image's <code>target serve</code> process also serves the UI at <code>http://127.0.0.1:8080/ui/</code>.
-Profiles and run history persist under <code>--storage</code> in the named <code>zeroshot-data</code> volume, including
-when you recreate a container previously started with <code>--rm</code>. If you change the published port or
-use a proxy, set <code>--public-origin</code> to the exact browser origin.</p>
 <div class="admonition danger">
-<p class="admonition-title">Direct means unauthenticated</p>
-<p>Keep the published port on loopback or a trusted private network. Put an authenticated reverse
-proxy with WebSocket forwarding in front of it before broader exposure.</p>
+<p class="admonition-title">Direct targets have no authentication</p>
+<p>Keep the port on loopback or a trusted private network. Before broader exposure, add an
+authenticated reverse proxy that forwards WebSockets.</p>
 </div>
-<p>Use <code>--target local-target</code> on run and observation commands to select it. Docker and hosted targets
-require a Git source with an exact committed revision. <code>--cwd</code> selects the client checkout inspected
-for source selection; targets receive the remote revision, not that local folder or its uncommitted
-files. The attached upstream takes precedence; otherwise select the unique eligible HTTPS or SSH
-remote. Ambiguous remotes require an upstream or an explicit <code>--repository</code> selection.</p>
-<p><code>--repository</code> accepts a credential-free HTTPS/SSH clone URL or the existing GitHub <code>owner/name</code>
-shorthand. <code>--branch</code> overrides the branch, and <code>--revision</code> supplies an exact commit instead of
-resolving the remote branch tip. Detached worktrees require repository and branch overrides.
-Generic transport and credentials require a target advertising <code>openengine.git-transport/v1</code>;
-the CLI rejects an older target before submitting the request or acquiring an access token.</p>
-<p>If a proxy, VPN or tunnel loses the reply to a direct or hosted target submission, the CLI resends
-the identical submission with the same submission key, and the target returns the run it already
-admitted. If the outcome still cannot be confirmed, the error says so and names the key. Check
-<code>zeroshot list --target NAME</code>, or rerun the same command with <code>--submission-key KEY</code> to get that
-run instead of starting a second one.</p>
+<p>Add <code>--target local-target</code> to run and observation commands. Open <code>http://127.0.0.1:8080/ui/</code> for
+profiles and run history. The <code>zeroshot-data</code> volume preserves both when the container is recreated.
+If you change the browser origin, set <code>--public-origin</code> to match it.</p>
+<p>Docker must be running. The restart policy recovers from reboots and unexpected exits; after a
+manual stop, use <code>docker start zeroshot-target</code>. Interrupted runs are marked lost. If recovery data
+exists, start a successor with <code>zeroshot resume RUN_ID --target local-target</code>.</p>
+<p>Docker and hosted runs use the remote Git revision, not your uncommitted files. <code>--cwd</code> chooses the
+client checkout used to select that source. Its upstream takes precedence; otherwise zeroshot
+selects the unique eligible HTTPS or SSH remote. For ambiguous remotes, set an upstream or pass
+<code>--repository</code> with a credential-free clone URL or GitHub <code>owner/name</code>. Use <code>--branch</code> and
+<code>--revision</code> to select a branch and exact commit. Detached worktrees need repository and branch
+overrides. Generic Git transport requires a target advertising <code>openengine.git-transport/v1</code>.</p>
+<p>If a submission reply is lost, zeroshot retries with the same submission key. If it still cannot
+confirm the result, check <code>zeroshot list --target NAME</code> or rerun with the reported
+<code>--submission-key KEY</code> to recover the same run.</p>
 <h3 id="image-tags-and-remote-hosts">Image tags and remote hosts<a class="headerlink" href="#image-tags-and-remote-hosts" title="Permanent link">&para;</a></h3>
-<p>The image is published for <code>linux/amd64</code> only. Each release publishes a version tag such as
-<code>ghcr.io/the-open-engine/zeroshot-target:X.Y.Z</code> and a <code>sha-COMMIT</code> tag. <code>latest</code> moves to each newer
-release, so pin a version tag or an image digest when a host must keep the same image.</p>
-<p>To use a target on another machine, keep the published port on that host's loopback interface, as in
-the command above, and open an SSH tunnel from your workstation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">ssh -N -L 8080:127.0.0.1:8080 USER@HOST</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot target add remote-target --url http://127.0.0.1:8080 --direct</span>
+<p>Pin <code>ghcr.io/the-open-engine/zeroshot-target:X.Y.Z</code> or an image digest for a stable deployment.
+<code>latest</code> advances with releases; <code>sha-COMMIT</code> tags identify their source.</p>
+<p>For a remote machine, keep its port on loopback and open an SSH tunnel:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">ssh -N -L 8080:127.0.0.1:8080 USER@HOST</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot target add remote-target --url http://127.0.0.1:8080 --direct</span>
 </code></pre></div>
-<p>Keep the tunnel open while you use the target. If a local target already uses port 8080, forward
-another local port and start the remote target with <code>--public-origin</code> set to that local origin,
-such as <code>http://127.0.0.1:18080</code>; the target advertises its endpoint from that origin. The
-<a href="https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md">target image README</a>
-covers reverse proxies, Docker access for runs, and building the image.</p>
-<h2 id="hosted-target">Hosted target<a class="headerlink" href="#hosted-target" title="Permanent link">&para;</a></h2>
-<p>A hosted target adds discovery and user authentication around the same native contracts:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot target login production</span>
+<p>Keep the tunnel open. If port 8080 is taken locally, forward another port and set the target's
+<code>--public-origin</code> to that origin, such as <code>http://127.0.0.1:18080</code>.
+The <a href="https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md">target image README</a>
+covers proxies, Docker access and image builds.</p>
+<h2 id="hosted-target">Use a hosted target<a class="headerlink" href="#hosted-target" title="Permanent link">&para;</a></h2>
+<p>For zeroshot Platform, run <code>zeroshot target login platform</code>, then use <code>--target platform</code>.
+To register another hosting service:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot target login production</span>
 </code></pre></div>
-<p>The hosting service owns login, source authorization, organization-scoped connections, queue policy,
-and capacity. zeroshot's CLI and protocol do not prescribe those product policies.</p>
-<p>Follow the <a href="https://app.zeroshot.sh/docs">Platform documentation</a> for zeroshot Platform. Its pages
-should link to the version of these core docs that matches the deployed target, as described in
-<a href="../../project/versioning/">Documentation versions</a>.</p>
+<p>The service manages login, source access, organization connections, queues and capacity.
+See the <a href="https://app.zeroshot.sh/docs">Platform docs</a> for its setup.</p>
 <h3 id="api-keys">API keys<a class="headerlink" href="#api-keys" title="Permanent link">&para;</a></h3>
-<p>Hosted targets that advertise API key authentication support machine delegations. Sign in as a
-human to create one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot target login platform</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot delegation create ci</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
+<p>For CI, sign in as a human and create a delegation:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target login platform</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot delegation create ci</span>
 </code></pre></div>
-<p>Any user can delegate their own current permissions. Organization owners and admins can create
-organization delegations. Creation prints an <code>api_key</code> once; store it as <code>ZEROSHOT_API_KEY</code> in your
-CI secret store. Keys expire after 90 days by default; <code>--expires-in-days</code> accepts 1–365.</p>
-<p>With the key set, use the normal CLI with <code>--target platform</code>, including connections, profiles, merge
-plans, live sessions, and resume. For a user key, set <code>ZEROSHOT_ORGANIZATION</code> to the organization
-UUID when organization selection is needed. Organization keys stay in their own organization.
-Omitted connection and profile scopes follow the owner's scope.</p>
-<p>Delegation management requires human login. Unset <code>ZEROSHOT_API_KEY</code> before managing keys:</p>
+<p>Store the one-time <code>api_key</code> as <code>ZEROSHOT_API_KEY</code> in your CI secret store. It carries your current
+permissions. Keys expire after 90 days by default; <code>--expires-in-days</code> accepts 1–365.
+Set <code>ZEROSHOT_ORGANIZATION</code> to the organization UUID when a user key needs organization selection.</p>
+<p>Organization owners and admins can create an organization delegation instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
+</code></pre></div>
+<p>Organization keys stay in their organization. Omitted profile and connection scopes follow the
+owner's scope. Keep provider and source credentials in their usual connections.</p>
+<p>Unset <code>ZEROSHOT_API_KEY</code> and use human login to manage delegations. Create a replacement key before
+revoking the old one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot delegation list</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
 </code></pre></div>
-<p>Create the replacement before revoking the old key. Revoking a key blocks further calls while
-accepted runs continue. API keys authenticate the CLI; keep provider and source credentials in
-their usual connections.</p>
+<p>Revocation blocks further calls; already accepted runs continue.</p>
 <h3 id="workspace-export-protocol">Workspace export protocol<a class="headerlink" href="#workspace-export-protocol" title="Permanent link">&para;</a></h3>
-<p>Hosted targets can advertise workspace downloads independently of resume/checkpoints. Add this
-outer discovery extension alongside the existing <code>hosted_runs</code> extension:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">"workspace_export"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-export/v1"</span><span class="p">,</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">"route_template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/native-v2/runs/{run_id}/export-workspace"</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="p">}</span>
-</code></pre></div>
-<p><code>TargetWorkspaceExportDiscovery</code> is the authoritative Rust type. The extension object is strict;
-unknown outer extension keys remain compatible with older clients. Do not add export fields to
-<code>zeroshot.hosted-runs/v1</code> or <code>openengine.hosted-workspace-recovery/v1</code>. Export requires the exact
-kind above; an absent or unfamiliar kind disables it without a fallback operation.</p>
-<p>The route uses the same-origin <code>hosted_runs.base_url</code>, including any installation path prefix,
-just like hosted recovery routes. It must contain exactly one <code>{run_id}</code> path segment, no other
-variables, query, fragment, traversal, or origin. The client escapes the run identity as one segment
-and never follows redirects.</p>
-<p>The client sends an authenticated POST with <code>Accept: application/x-tar</code>, <code>Cache-Control: no-store</code>,
-and a strict JSON <code>RunExportWorkspaceParams</code> body:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"runId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RUN_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"fromCheckpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CHECKPOINT_ID"</span><span class="w"> </span><span class="p">}</span>
-</code></pre></div>
-<p>Omit <code>fromCheckpoint</code> for the latest retained workspace. Path and body run identity must agree.
-Checkpoint IDs select entry snapshots and remain opaque. The server owns authorization, retention,
-checkpoint selection and storage/decryption credentials. The request accepts no storage URLs,
-paths, repository prefixes or export filters. Existing hosted OAuth session organization selection
-and API-key <code>X-Zeroshot-Organization</code> handling apply unchanged.</p>
-<p>Success is <code>200 OK</code>, <code>Content-Type: application/x-tar</code>, <code>Cache-Control: no-store</code>, with raw streamed
-tar bytes. HTTP/1 transfers need a Content-Length without Transfer-Encoding, or a single chunked
-transfer coding (case-insensitive). Transfer-Encoding takes precedence over Content-Length;
-the CLI rejects unsupported codings. Close-delimited responses cannot prove exporter success and
-are rejected. See <a href="https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3">RFC 9112 framing</a>.
-HTTP/2 uses its native stream completion. The server must finish HTTP framing only after its
-exporter exits successfully and retained-state availability
-is rechecked. An exporter/storage failure after bytes were emitted must abort the transfer, even
-when those bytes already form a complete tar. Failures before streaming use the existing bounded
-<code>TargetHttpProblem</code> response and a non-success status.</p>
-<p>The client consumes the entire transfer before publishing a private file without replacement;
-HTTP/body errors, truncated framing and cancellation remove temporary output. It does not trust a
-server filename, extract files, resume a run or receive storage keys. This is an HTTP streaming
-contract, not a new OECP method. The generated protocol schema includes its request body.</p>
+<p>To download files, see <a href="../../guides/observe-and-control/#download-a-retained-workspace">Download a retained workspace</a>.
+For hosting integrations, see the <a href="../../reference/target-runtime/#workspace-export-protocol">workspace export contract</a>.</p>
+<h2 id="sizes-and-supported-agents">Sizes and supported agents<a class="headerlink" href="#sizes-and-supported-agents" title="Permanent link">&para;</a></h2>
+<p>Run <code>zeroshot target sizes NAME</code> to list available sizes; add <code>--json</code> for structured output.
+Omitting a size uses the target's default. Local execution and direct targets offer <code>host</code>, using
+the machine's resources. The target decides which other sizes are available.</p>
+<p>Official local builds include contributed adapters; Platform and the default Docker image include
+core adapters only. Check <a href="../../project/harness-adapters/">harness support</a> before choosing a runtime.
+<a href="../../reference/target-runtime/#discovery-and-sizes">Target discovery</a> specifies size and adapter negotiation.</p>
 <h2 id="source-and-delivery-credentials">Source and delivery credentials<a class="headerlink" href="#source-and-delivery-credentials" title="Permanent link">&para;</a></h2>
-<p>Git checkout and push use shared HTTPS or SSH transport. A local push needs an attached, committed branch
-and an eligible remote; it uses the invoking user's native Git configuration and authentication when
-no source connection is selected. PR and merge support GitHub (including Enterprise) and GitLab;
-see <a href="../../guides/forge-delivery/">forge setup</a> for supported versions and authentication.
-Other Git hosts support checkout and push.</p>
-<p>For local PR and merge delivery, the target branch is the current branch's upstream when configured;
-otherwise, zeroshot uses the local branch name. Preparation verifies that the selected remote
-contains the target before agent execution. A fresh worktree may not have an upstream configured. To
-target <code>main</code>, run <code>git branch --set-upstream-to=origin/main</code> in the worktree, or create it from
-<code>origin/main</code> so Git configures the tracking branch. A missing branch is reported separately from a
-remote access or authentication failure.</p>
-<p><code>--source-connection KEY</code> selects private transport authority without granting it to agent nodes.
-HTTPS connections declare <code>GIT_USERNAME</code> and <code>GIT_PASSWORD</code>; SSH connections declare
-<code>GIT_SSH_PRIVATE_KEY</code> and <code>GIT_SSH_KNOWN_HOSTS</code>. Explicit SSH authentication uses those pinned hosts
-and its private key. Contained runs inherit no host Git login state.</p>
-<p>Named runs never send the invoking shell's <code>GH_TOKEN</code> unless you pass <code>--forward-gh-token</code> to <code>run</code>,
-<code>resume</code>, or <code>stack submit</code>. Without the flag, the target resolves GitHub access from its own stored
-<code>github</code> connection, even when <code>GH_TOKEN</code> is set locally. With the flag, the CLI sends <code>GH_TOKEN</code>
-for GitHub.com checkout and delivery, to fill a declared <code>GH_TOKEN</code> connection field, and for a
-direct target's <code>--task-from</code> review resolution, and fails when it is unset. That token is not automatically applied to another Git host. A model provider
-receives a connection field only when its own runtime binding declares it. Transport values stay out
-of source records, ledgers, observations, and checkpoint snapshots. Direct-target resume reuses the
-original source connection authorization and resolves fresh values.</p>
-<p>After admission, the CLI reports the target, repository, branch, exact revision, and whether the
-client checkout is dirty before emitting the receipt. Uncommitted files stay on the client.
-See <a href="../../project/source-code-adapters/">Source-code adapters</a> for the contribution boundary.</p>
+<p>Local Git operations can reuse your Git authentication. PR and merge delivery support GitHub and
+GitLab; other Git hosts support checkout and push. See <a href="../../guides/forge-delivery/">forge setup</a>.</p>
+<p>For local PR and merge runs, the target branch is the current branch's upstream, or its local name
+when no upstream is set. To target <code>main</code> from a fresh worktree, run
+<code>git branch --set-upstream-to=origin/main</code>, or create the worktree from <code>origin/main</code>. zeroshot
+verifies that the remote contains the branch before starting agents.</p>
+<p>Contained targets do not inherit your Git login. <code>--source-connection KEY</code> selects transport
+credentials: <code>GIT_USERNAME</code> and <code>GIT_PASSWORD</code> for HTTPS, or <code>GIT_SSH_PRIVATE_KEY</code> and
+<code>GIT_SSH_KNOWN_HOSTS</code> for SSH. These credentials are separate from agent model connections.</p>
+<p>Named targets normally resolve GitHub access from their stored <code>github</code> connection. To forward
+local <code>GH_TOKEN</code> for GitHub.com checkout and delivery, pass <code>--forward-gh-token</code> to <code>run</code>, <code>resume</code>
+or <code>stack submit</code>. The flag fails if the token is unset and does not apply it to another Git host.
+It can also fill a declared <code>GH_TOKEN</code> connection field and support direct-target <code>--task-from</code>
+resolution. Model nodes receive credentials only through their declared connections.</p>
+<p>Transport secrets stay out of source records, history and checkpoints. Direct-target resume keeps
+the original source authorization and resolves fresh values. The submission receipt reports the
+selected repository, branch and revision; uncommitted files stay on the client.</p>
 
 
 

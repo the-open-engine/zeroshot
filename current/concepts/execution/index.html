@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Learn how zeroshot admits a graph, executes its nodes, checks typed output and chooses the next edge independently of model behavior.">
+        <meta name="description" content="Your graph decides what runs next. Learn how zeroshot checks results, routes review feedback and enforces retry limits.">
       
       
       
@@ -63,14 +63,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="How execution works | zeroshot docs">
-    <meta property="og:description" content="Learn how zeroshot admits a graph, executes its nodes, checks typed output and chooses the next edge independently of model behavior.">
+    <meta property="og:description" content="Your graph decides what runs next. Learn how zeroshot checks results, routes review feedback and enforces retry limits.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/concepts/execution/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="How execution works | zeroshot docs">
-    <meta name="twitter:description" content="Learn how zeroshot admits a graph, executes its nodes, checks typed output and chooses the next edge independently of model behavior.">
+    <meta name="twitter:description" content="Your graph decides what runs next. Learn how zeroshot checks results, routes review feedback and enforces retry limits.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -560,7 +560,7 @@
   <a href="#the-run-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The run boundary
+        Before a run starts
       
     </span>
   </a>
@@ -579,10 +579,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#concurrent-workspace-changes" class="md-nav__link">
+  <a href="#state-reduction-chooses-the-next-step" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Concurrent workspace changes
+        How results choose the next step
       
     </span>
   </a>
@@ -590,10 +590,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#state-reduction-chooses-the-next-step" class="md-nav__link">
+  <a href="#concurrent-workspace-changes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        State reduction chooses the next step
+        Working in parallel
       
     </span>
   </a>
@@ -604,7 +604,7 @@
   <a href="#durable-run-state" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Durable run state
+        Run history and cleanup
       
     </span>
   </a>
@@ -1158,6 +1158,8 @@
       
         
       
+        
+      
     
     
     
@@ -1248,8 +1250,6 @@
       
         
       
-        
-      
     
     
     
@@ -1270,7 +1270,7 @@
   <span class="md-ellipsis">
     
   
-    Python API
+    Implementation details
   
 
     
@@ -1283,6 +1283,187 @@
         
         <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Implementation details
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation and updates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/target-runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Target runtime
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/execution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution and delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/active-memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1475,10 +1656,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_4" >
         
           
-          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
             
   
   
@@ -1496,8 +1677,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_3">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2043,7 +2224,7 @@
   <a href="#the-run-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The run boundary
+        Before a run starts
       
     </span>
   </a>
@@ -2062,10 +2243,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#concurrent-workspace-changes" class="md-nav__link">
+  <a href="#state-reduction-chooses-the-next-step" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Concurrent workspace changes
+        How results choose the next step
       
     </span>
   </a>
@@ -2073,10 +2254,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#state-reduction-chooses-the-next-step" class="md-nav__link">
+  <a href="#concurrent-workspace-changes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        State reduction chooses the next step
+        Working in parallel
       
     </span>
   </a>
@@ -2087,7 +2268,7 @@
   <a href="#durable-run-state" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Durable run state
+        Run history and cleanup
       
     </span>
   </a>
@@ -2126,11 +2307,13 @@
 
 
 <h1 id="how-execution-works">How execution works<a class="headerlink" href="#how-execution-works" title="Permanent link">&para;</a></h1>
-<p>zeroshot keeps control flow separate from model behavior through a caller-authored graph. After
-admission, the engine runs an executable node and checks its typed output; state reduction records
-that output before choosing the next edge.</p>
-<h2 id="the-run-boundary">The run boundary<a class="headerlink" href="#the-run-boundary" title="Permanent link">&para;</a></h2>
-<p>A submission contains four pieces of caller-owned data:</p>
+<p>Your graph decides what runs next. After each step, zeroshot validates the result, updates the
+shared state and follows the graph's rules. Agents cannot add steps or increase retry limits.</p>
+<p>For example, a graph can send a worker's change to two reviewers, return rejected work for repair
+and stop after four attempts. The reviewers judge the change; zeroshot enforces the route and limit.
+<a href="../../guides/review-loop/">Build a review loop</a> implements that example.</p>
+<h2 id="the-run-boundary">Before a run starts<a class="headerlink" href="#the-run-boundary" title="Permanent link">&para;</a></h2>
+<p>A run needs four inputs:</p>
 <table>
 <thead>
 <tr>
@@ -2141,28 +2324,27 @@ that output before choosing the next edge.</p>
 <tbody>
 <tr>
 <td>Title</td>
-<td>Human-readable identity for lists and status output</td>
+<td>Identifies the run in lists and status output</td>
 </tr>
 <tr>
 <td>Graph</td>
-<td>Nodes, state, transitions, bounds, and terminal results</td>
+<td>Defines steps, shared state, routes, limits and results</td>
 </tr>
 <tr>
 <td>Initial input</td>
-<td>The unchanged value checked against the graph's declared input type</td>
+<td>Supplies the task in the format the graph expects</td>
 </tr>
 <tr>
 <td>Runtime plan</td>
-<td>Harness, provider, model, session scope, and named connection requirements</td>
+<td>Chooses each agent's harness, provider, model and connections</td>
 </tr>
 </tbody>
 </table>
-<p>For inline graphs and built-in templates, zeroshot completes admission before it starts a local
-controller or contacts a target. The CLI first fetches a target-stored profile, then sends its graph
-and runtime through the same checks. Those checks cover schema shape, graph semantics, bounds,
-runtime bindings, and the initial input; <code>--validate-only</code> runs them without creating a run.</p>
+<p>Before starting a local controller or submitting to a target, zeroshot checks the graph, runtime
+bindings and input. For a target-stored profile, it fetches the profile first and applies the same
+checks. <code>--validate-only</code> runs these checks without starting a run.</p>
 <h2 id="graph-nodes">Graph nodes<a class="headerlink" href="#graph-nodes" title="Permanent link">&para;</a></h2>
-<p>Executable nodes are <code>step</code> and <code>verifier</code>. Groups compose them:</p>
+<p><code>step</code> and <code>verifier</code> nodes do the work. Groups control their execution:</p>
 <table>
 <thead>
 <tr>
@@ -2173,23 +2355,23 @@ runtime bindings, and the initial input; <code>--validate-only</code> runs them 
 <tbody>
 <tr>
 <td><code>seq</code></td>
-<td>Evaluates children in order</td>
+<td>Runs children in order</td>
 </tr>
 <tr>
 <td><code>choice</code></td>
-<td>Selects an authored branch from typed control signals</td>
+<td>Selects a branch from the declared signals</td>
 </tr>
 <tr>
 <td><code>par</code></td>
-<td>Runs branches concurrently and joins them by an authored rule</td>
+<td>Runs branches concurrently and joins their results</td>
 </tr>
 <tr>
 <td><code>loop</code></td>
-<td>Provides a bounded do-while structure</td>
+<td>Repeats a body within a fixed limit</td>
 </tr>
 <tr>
 <td><code>map</code></td>
-<td>Applies a bounded body to array items</td>
+<td>Runs a bounded body for array items</td>
 </tr>
 <tr>
 <td><code>succeed</code> and <code>fail</code></td>
@@ -2197,104 +2379,101 @@ runtime bindings, and the initial input; <code>--validate-only</code> runs them 
 </tr>
 </tbody>
 </table>
-<p>Selectors, guards, and bindings are structured data. They are not snippets of JavaScript, JSONPath,
-shell code, or prompt text. Full field rules live in the
-<a href="../../reference/cluster/graph/">graph contract</a>, and <a href="../../guides/review-loop/">Build a review loop</a>
-builds a custom graph step by step.</p>
-<h2 id="concurrent-workspace-changes">Concurrent workspace changes<a class="headerlink" href="#concurrent-workspace-changes" title="Permanent link">&para;</a></h2>
-<p><code>par</code> branches and <code>map</code> items can run multiple writing agents at once. Writers share the run's
-workspace, including reviewers, so the graph and agent instructions must coordinate edits to the
-same files. Reviewers see the same installed dependencies, generated output, and services as workers.
-Place verification after the writers when it needs their completed changes.</p>
-<p>Sequence Git delivery after the writing branches or map have joined. Graph validation rejects
-delivery alongside any other executable node, including reviewers, and delivery in a map that can
-have multiple items. A delivery receipt can certify run success only when every other executable
-settled before that delivery execution started.</p>
-<h2 id="state-reduction-chooses-the-next-step">State reduction chooses the next step<a class="headerlink" href="#state-reduction-chooses-the-next-step" title="Permanent link">&para;</a></h2>
-<p>An agent returns a value through a declared output channel. zeroshot checks that value, applies
-authored bindings, and records the new state before it evaluates another node. Model output cannot
-add an edge or raise a bound.</p>
-<p>Inside a repair loop, a reviewer emits a finite signal with a typed diagnostic. The graph routes that
-signal to success or another iteration, and <code>maxIterations</code> still applies if an agent asks to
-continue.</p>
-<h2 id="durable-run-state">Durable run state<a class="headerlink" href="#durable-run-state" title="Permanent link">&para;</a></h2>
-<p>Each run has a public ID backed by a SQLite ledger. Status and safe-log events carry opaque cursors
-for strict resume, so detaching a client, losing a terminal, or cancelling a Python <code>await</code> does not
-stop the controller.</p>
-<p>When a run closes, zeroshot atomically closes its execution activity; a late process cannot appear
-after the terminal result. <a href="../../guides/observe-and-control/">Observe and control runs</a> covers the
-read and stop commands.</p>
-<p>On Linux, each local command has a private supervisor that also owns descendants which detach with
-<code>setsid</code>, change process group, or double-fork. It stops and reaps them when the command finishes,
-the run cancels, or the controller dies. Workspace ownership remains held through cleanup, so a
-successor cannot resume while that command's descendants can still write. This uses the kernel's
-subreaper support and procfs; it needs no root access or cgroup setup. Windows uses Job Objects.
-macOS retains process-group cleanup; descendants that detach can outlive the command there.</p>
+<p>Routes and conditions are structured data, not executable code or prompt instructions.
+The <a href="../../reference/cluster/graph/">graph contract</a> defines their fields.</p>
+<h2 id="state-reduction-chooses-the-next-step">How results choose the next step<a class="headerlink" href="#state-reduction-chooses-the-next-step" title="Permanent link">&para;</a></h2>
+<p>Each agent returns a value through its declared output channel. zeroshot validates that value,
+updates state using the graph's bindings, then evaluates what runs next.</p>
+<p>In a repair loop, a reviewer returns a decision and feedback. The graph routes an acceptance
+onward or a rejection back for repair. <code>maxIterations</code> still applies if an agent asks to continue.</p>
+<h2 id="concurrent-workspace-changes">Working in parallel<a class="headerlink" href="#concurrent-workspace-changes" title="Permanent link">&para;</a></h2>
+<p>Parallel agents share a workspace. Coordinate writers so they do not overwrite each other's
+changes, and place reviewers after the writers when they need the finished result. Reviewers see
+the same dependencies, generated files and services as workers.</p>
+<p>Put Git delivery after all writing and review branches have joined. Graph validation rejects
+concurrent delivery alongside another executable node, or inside a map that can have multiple items.</p>
+<h2 id="durable-run-state">Run history and cleanup<a class="headerlink" href="#durable-run-state" title="Permanent link">&para;</a></h2>
+<p>Each run has an ID and a SQLite ledger. Closing the terminal, disconnecting a client or cancelling
+a Python <code>await</code> does not stop the controller. Reconnect to inspect the run or stop it explicitly;
+see <a href="../../guides/observe-and-control/">Observe and control runs</a>.</p>
+<p>The controller cleans up execution activity when the run ends. Cleanup guarantees differ by OS;
+<a href="../../reference/execution/#process-cleanup">process cleanup</a> describes detached child processes.</p>
 <h2 id="built-in-templates-are-ordinary-graphs">Built-in templates are ordinary graphs<a class="headerlink" href="#built-in-templates-are-ordinary-graphs" title="Permanent link">&para;</a></h2>
-<p>The executable contains <code>single-worker</code>, <code>software-change</code>, <code>auto-research</code>, <code>issue-review</code>,
-<code>pr-review</code>, and <code>code-review</code>. Each produces the public <code>GraphSpec</code> that custom submissions use:</p>
+<p>Use a built-in graph as it is, or export it to make your own:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">zeroshot template list</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">zeroshot template show software-change</span>
 </code></pre></div>
-<p>In a terminal, <code>template show</code> prints a tree and marks executable node names with <code>*</code>.
-Use <code>--json</code> or redirect stdout to export the complete <code>GraphSpec</code>.</p>
-<p>The review templates post their report as an issue or PR comment. See
-<a href="../../guides/review/">Review an issue or PR</a> and <a href="../../guides/code-review/">Review a PR in depth</a>.</p>
-<p><code>software-change</code> has four delivery choices and opens a pull request by default. <code>--delivery none</code>
-keeps the accepted change local. <code>--push</code> publishes the managed run branch without opening a pull
-request. <code>--pr</code>, the default, opens or updates a pull request, processes visible review feedback, waits for required CI and a conflict-free head, then
-stops without merging. <code>--ship</code> uses the same feedback loop before it follows the repository's merge
-policy and confirms the merged revision. Missing approval doesn't block <code>--pr</code>; it still blocks
-<code>--ship</code> when GitHub requires it.</p>
-<p>For local <code>--pr</code> and <code>--ship</code> runs, the target branch is the current branch's upstream when one is
-configured; otherwise, zeroshot uses the local branch name. Preparation verifies that the selected
-remote contains this target before agent execution. To target <code>main</code> from a fresh worktree,
-run <code>git branch --set-upstream-to=origin/main</code>, or create the worktree from <code>origin/main</code> so Git
-sets the tracking branch automatically. If the remote cannot be reached or authenticated,
-preparation reports that the target branch could not be verified.</p>
-<p><code>auto-research</code> runs ten iterations by default. Optional run input <code>options.iterations</code> selects a
-positive count bound at admission, subject to the engine's general execution and loop budgets.
-Each normal round has five model executions:</p>
-<ol>
-<li>Three independent read-only scouts propose exploration, synthesis, and challenge directions.</li>
-<li>One researcher selects the parent and experiment, verifies/restores candidate bytes, runs the
-   experiment, and prepares a supported retained result with compact evidence.</li>
-<li>A fresh read-only reviewer accepts the proposed disposition, requests concrete corrections, or
-   approves a justified early stop. A supported non-adoption can be accepted without replacing the
-   incumbent. Plateau alone does not justify stopping before the requested count.</li>
-</ol>
-<p>The scouts and researcher keep separate continuing sessions by default; the reviewer starts fresh.
-Required corrections return to the same researcher without repeating scouting or consuming another
-research round, then receive fresh review. This work/review cycle has a 64-pass safety limit.
-Routine file, tool, or archive errors can be repaired by the researcher. Missing optional historical
-archives and cosmetic bookkeeping issues are advisory when the current result and retained state
-are supported. Native reviewer outcomes establish approval; no separate file audit counter is
-required. There are no bootstrap, staging, finalization, or extra audit model passes.</p>
-<p>Records live under <code>.zeroshot/research</code> at the shared workspace root, including for tasks in
-subdirectories. The researcher keeps the charter, current summary, backlog, round evidence, and
-restorable candidate source there. After two accepted non-adoptions, or diminishing returns across
-<code>max(1, ceil(iterationLimit / 10))</code> accepted rounds on one approach, it explicitly reconsiders a new
-mechanism, an archived parent, and a discriminating measurement. These are reasoned alternatives,
-not a mandatory parent switch or a fixed gain threshold.</p>
-<p>The template supports local results and <code>--push</code>. With <code>--push</code>, the reviewer supplies title and
-description and one trusted Git delivery node publishes each accepted round. Research agents never
-use Git. Exhausted review, unrecovered execution errors, delivery errors, and delivery repair
-requests stop the run explicitly; unreviewed work is never published. Existing saved profiles and
-admitted runs keep their stored graph and runtime.</p>
-<p>PR and merge delivery consider feedback by default. Use <code>--no-pr-feedback</code> to ignore PR discussion;
-the <a href="../../reference/runtime-plan/#git_delivery"><code>git_delivery</code> binding</a> describes the runtime
-setting.</p>
-<p>Automatic repairs accept feedback only from current writers on the target repository. GitHub
-confirms effective write or admin permission for issue comments, submitted reviews (including
-unwritten change requests), inline comments and replies. GitLab confirms active Developer-or-higher
-project membership, including inherited and invited membership, for discussion notes. The account
-must be active. Enterprise Edition also requires active <code>membership_state</code>; awaiting membership is
-ignored. Community Edition omits that field, so its response is accepted only after instance metadata
-confirms the edition. Unknown or malformed membership status fails the feedback read. Permissions
-are checked again on each inspection and bound to the author's stable numeric identity. Organization
-association, PR authorship, requested-reviewer status and bot status grant no exception. Confirmed
-read-only access or nonmembership is ignored and does not start another worker/reviewer round.
-Failed or incomplete permission lookups stop delivery or use its existing retry handling.</p>
+<p><code>template show</code> prints a tree, marking executable nodes with <code>*</code>. Add <code>--json</code> or redirect stdout
+to export the complete <code>GraphSpec</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Template</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>software-change</code></td>
+<td>Implement, review, repair and deliver a change</td>
+</tr>
+<tr>
+<td><code>single-worker</code></td>
+<td>Run one agent without a review loop</td>
+</tr>
+<tr>
+<td><code>pr-review</code></td>
+<td>Review a PR and post a concise comment</td>
+</tr>
+<tr>
+<td><code>code-review</code></td>
+<td>Review a PR in depth and post verified findings</td>
+</tr>
+<tr>
+<td><code>issue-review</code></td>
+<td>Review an issue proposal</td>
+</tr>
+<tr>
+<td><code>auto-research</code></td>
+<td>Run experiments and retain results accepted by a reviewer</td>
+</tr>
+</tbody>
+</table>
+<p><code>software-change</code> opens a PR by default. Choose delivery with:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--delivery none</code></td>
+<td>Keep the accepted change local</td>
+</tr>
+<tr>
+<td><code>--push</code></td>
+<td>Push the run branch without opening a PR</td>
+</tr>
+<tr>
+<td><code>--pr</code></td>
+<td>Open or update a PR, address feedback and wait for CI; leave merging to you</td>
+</tr>
+<tr>
+<td><code>--ship</code></td>
+<td>Follow the same review loop, then merge under the repository's policy</td>
+</tr>
+</tbody>
+</table>
+<p>Required approval blocks <code>--ship</code>, but not <code>--pr</code>. For local PR and merge runs, the target branch
+is the current branch's upstream, or its local name when no upstream is set. See
+<a href="../targets/#source-and-delivery-credentials">source and delivery setup</a>.</p>
+<p>PR feedback is enabled by default and restricted to repository writers. <code>--no-pr-feedback</code>
+disables it; <a href="../../reference/execution/#delivery-feedback">feedback rules</a> cover permission checks.</p>
+<p><code>auto-research</code> runs ten rounds by default; <code>options.iterations</code> changes the count. Results stay in
+<code>.zeroshot/research</code>; <code>--push</code> publishes each accepted round. See
+<a href="../../reference/execution/#auto-research">research rounds and repair</a> for the full behavior.</p>
 
 
 
