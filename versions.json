@@ -1,166 +1,171 @@
 [
   {
+    "version": "current",
+    "title": "Current",
     "aliases": [
       "dev"
-    ],
-    "title": "Current",
-    "version": "current"
+    ]
   },
   {
+    "version": "v14.1",
+    "title": "v14.1",
     "aliases": [
       "stable"
-    ],
+    ]
+  },
+  {
+    "version": "v14.0",
     "title": "v14.0",
-    "version": "v14.0"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v13.1",
     "title": "v13.1",
-    "version": "v13.1"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v13.0",
     "title": "v13.0",
-    "version": "v13.0"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v12.0",
     "title": "v12.0",
-    "version": "v12.0"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v11.1",
     "title": "v11.1",
-    "version": "v11.1"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v11.0",
     "title": "v11.0",
-    "version": "v11.0"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.25",
     "title": "v10.25",
-    "version": "v10.25"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.24",
     "title": "v10.24",
-    "version": "v10.24"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.23",
     "title": "v10.23",
-    "version": "v10.23"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.22",
     "title": "v10.22",
-    "version": "v10.22"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.21",
     "title": "v10.21",
-    "version": "v10.21"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.20",
     "title": "v10.20",
-    "version": "v10.20"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.19",
     "title": "v10.19",
-    "version": "v10.19"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.18",
     "title": "v10.18",
-    "version": "v10.18"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.17",
     "title": "v10.17",
-    "version": "v10.17"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.16",
     "title": "v10.16",
-    "version": "v10.16"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.15",
     "title": "v10.15",
-    "version": "v10.15"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.14",
     "title": "v10.14",
-    "version": "v10.14"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.13",
     "title": "v10.13",
-    "version": "v10.13"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.12",
     "title": "v10.12",
-    "version": "v10.12"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.11",
     "title": "v10.11",
-    "version": "v10.11"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.10",
     "title": "v10.10",
-    "version": "v10.10"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.9",
     "title": "v10.9",
-    "version": "v10.9"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.7",
     "title": "v10.7",
-    "version": "v10.7"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.6",
     "title": "v10.6",
-    "version": "v10.6"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.5",
     "title": "v10.5",
-    "version": "v10.5"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.4",
     "title": "v10.4",
-    "version": "v10.4"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.3",
     "title": "v10.3",
-    "version": "v10.3"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.2",
     "title": "v10.2",
-    "version": "v10.2"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.1",
     "title": "v10.1",
-    "version": "v10.1"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.0",
     "title": "v10.0",
-    "version": "v10.0"
+    "aliases": []
   }
 ]
