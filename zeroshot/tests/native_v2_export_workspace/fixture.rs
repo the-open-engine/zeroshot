@@ -138,8 +138,20 @@ impl Fixture {
                     #[cfg(unix)]
                     if matches!(reply, Reply::StallHeaders | Reply::StallBody) {
                         let mut buf = [0; 1];
-                        // Cancellation must drop the actual response/connection.
-                        assert_eq!(socket.read(&mut buf).await.unwrap(), 0);
+                        // Cancellation must drop the actual response/connection. A client
+                        // can close cleanly or reset/abort a socket with unread response bytes.
+                        match socket.read(&mut buf).await {
+                            Ok(0) => {}
+                            Err(error)
+                                if matches!(
+                                    error.kind(),
+                                    io::ErrorKind::ConnectionReset
+                                        | io::ErrorKind::ConnectionAborted
+                                ) => {}
+                            result => {
+                                panic!("expected cancelled export connection to close: {result:?}")
+                            }
+                        }
                     }
                 }
             }
