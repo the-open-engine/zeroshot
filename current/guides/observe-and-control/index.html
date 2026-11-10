@@ -1070,6 +1070,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#download-a-retained-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Download a retained workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#restart-or-resume-a-failed-run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2124,6 +2135,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#download-a-retained-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Download a retained workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#restart-or-resume-a-failed-run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2239,14 +2261,31 @@ durable replay preserves it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot attach RUN_ID EXECUTION_REF</span>
 </code></pre></div>
 <p>Closing the attachment stream does not cancel the execution.</p>
+<h2 id="download-a-retained-workspace">Download a retained workspace<a class="headerlink" href="#download-a-retained-workspace" title="Permanent link">&para;</a></h2>
+<p>Download the latest retained files without starting another run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot export-workspace RUN_ID --target platform --output workspace.tar</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot export-workspace RUN_ID --target platform --from-checkpoint CHECKPOINT_ID --output checkpoint.tar</span>
+</code></pre></div>
+<p>Use <code>zeroshot checkpoints RUN_ID --target platform</code> to find an entry checkpoint ID. Omit
+<code>--from-checkpoint</code> to export the latest retained workspace. The target authorizes access and
+checks whether the retained state is still available. Other named hosted targets work the same way,
+using their existing device login or <code>ZEROSHOT_API_KEY</code> and organization selection.</p>
+<p>The target must advertise <a href="../../concepts/targets/#workspace-export-protocol">workspace export</a>.
+An older target without this capability returns a clear unsupported error. Local and direct-target
+exports are unavailable.</p>
+<p><code>--output</code> is required and must name a UTF-8 path that does not exist, including directories and dangling
+symlinks. The CLI streams the raw tar into a private temporary file beside that path and publishes it
+atomically without overwriting a competing file. It waits for the entire HTTP transfer, including
+its framing, even after a complete tar has arrived. Transfer failures and Ctrl-C remove temporary
+output and fail the command. The archive is never extracted and its contents are never executed.</p>
 <h2 id="restart-or-resume-a-failed-run">Restart or resume a failed run<a class="headerlink" href="#restart-or-resume-a-failed-run" title="Permanent link">&para;</a></h2>
 <p>Failed local runs and direct targets retain their workspace. Restart the original graph using its
 latest files with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot resume RUN_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot resume RUN_ID</span>
 </code></pre></div>
 <p>To resume at an earlier node, list its available input checkpoints and select one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID</span>
 </code></pre></div>
 <p>Add <code>--target NAME</code> to both commands for a named target. Checkpoint listings are paginated; use
 <code>--after CHECKPOINT_ID</code> with the returned <code>nextAfter</code> value to fetch the next page.</p>
@@ -2281,7 +2320,7 @@ export <code>GH_TOKEN</code> again and pass <code>--forward-gh-token</code> when
 instead of the target's stored <code>github</code> connection.</p>
 <h2 id="stop-only-with-explicit-intent">Stop only with explicit intent<a class="headerlink" href="#stop-only-with-explicit-intent" title="Permanent link">&para;</a></h2>
 <p><code>force-stop</code> is the destructive run-lifetime command:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot force-stop RUN_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">zeroshot force-stop RUN_ID</span>
 </code></pre></div>
 <p>The command asks the controller to stop active work and writes the resulting status as JSON. Read
 status first if another operator may already have stopped the run, or if it may have completed.</p>
@@ -2307,7 +2346,7 @@ status first if another operator may already have stopped the run, or if it may 
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-09">9 November 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
