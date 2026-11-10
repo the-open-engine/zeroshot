@@ -1,160 +1,110 @@
 ---
-description: 'Learn how zeroshot admits a graph, executes its nodes, checks typed output and chooses the next edge independently of model behavior.'
+description: 'Your graph decides what runs next. Learn how zeroshot checks results, routes review feedback and enforces retry limits.'
 ---
 
 # How execution works
 
-zeroshot keeps control flow separate from model behavior through a caller-authored graph. After
-admission, the engine runs an executable node and checks its typed output; state reduction records
-that output before choosing the next edge.
+Your graph decides what runs next. After each step, zeroshot validates the result, updates the
+shared state and follows the graph's rules. Agents cannot add steps or increase retry limits.
 
-## The run boundary
+For example, a graph can send a worker's change to two reviewers, return rejected work for repair
+and stop after four attempts. The reviewers judge the change; zeroshot enforces the route and limit.
+[Build a review loop](../guides/review-loop.md) implements that example.
 
-A submission contains four pieces of caller-owned data:
+## Before a run starts { #the-run-boundary }
 
-| Input         | Purpose                                                                    |
-| ------------- | -------------------------------------------------------------------------- |
-| Title         | Human-readable identity for lists and status output                        |
-| Graph         | Nodes, state, transitions, bounds, and terminal results                    |
-| Initial input | The unchanged value checked against the graph's declared input type        |
-| Runtime plan  | Harness, provider, model, session scope, and named connection requirements |
+A run needs four inputs:
 
-For inline graphs and built-in templates, zeroshot completes admission before it starts a local
-controller or contacts a target. The CLI first fetches a target-stored profile, then sends its graph
-and runtime through the same checks. Those checks cover schema shape, graph semantics, bounds,
-runtime bindings, and the initial input; `--validate-only` runs them without creating a run.
+| Input         | Purpose                                                       |
+| ------------- | ------------------------------------------------------------- |
+| Title         | Identifies the run in lists and status output                 |
+| Graph         | Defines steps, shared state, routes, limits and results       |
+| Initial input | Supplies the task in the format the graph expects             |
+| Runtime plan  | Chooses each agent's harness, provider, model and connections |
+
+Before starting a local controller or submitting to a target, zeroshot checks the graph, runtime
+bindings and input. For a target-stored profile, it fetches the profile first and applies the same
+checks. `--validate-only` runs these checks without starting a run.
 
 ## Graph nodes
 
-Executable nodes are `step` and `verifier`. Groups compose them:
+`step` and `verifier` nodes do the work. Groups control their execution:
 
-| Group                | Behavior                                                      |
-| -------------------- | ------------------------------------------------------------- |
-| `seq`                | Evaluates children in order                                   |
-| `choice`             | Selects an authored branch from typed control signals         |
-| `par`                | Runs branches concurrently and joins them by an authored rule |
-| `loop`               | Provides a bounded do-while structure                         |
-| `map`                | Applies a bounded body to array items                         |
-| `succeed` and `fail` | End the graph                                                 |
+| Group                | Behavior                                           |
+| -------------------- | -------------------------------------------------- |
+| `seq`                | Runs children in order                             |
+| `choice`             | Selects a branch from the declared signals         |
+| `par`                | Runs branches concurrently and joins their results |
+| `loop`               | Repeats a body within a fixed limit                |
+| `map`                | Runs a bounded body for array items                |
+| `succeed` and `fail` | End the graph                                      |
 
-Selectors, guards, and bindings are structured data. They are not snippets of JavaScript, JSONPath,
-shell code, or prompt text. Full field rules live in the
-[graph contract](../reference/cluster/graph.md), and [Build a review loop](../guides/review-loop.md)
-builds a custom graph step by step.
+Routes and conditions are structured data, not executable code or prompt instructions.
+The [graph contract](../reference/cluster/graph.md) defines their fields.
 
-## Concurrent workspace changes
+## How results choose the next step { #state-reduction-chooses-the-next-step }
 
-`par` branches and `map` items can run multiple writing agents at once. Writers share the run's
-workspace, including reviewers, so the graph and agent instructions must coordinate edits to the
-same files. Reviewers see the same installed dependencies, generated output, and services as workers.
-Place verification after the writers when it needs their completed changes.
+Each agent returns a value through its declared output channel. zeroshot validates that value,
+updates state using the graph's bindings, then evaluates what runs next.
 
-Sequence Git delivery after the writing branches or map have joined. Graph validation rejects
-delivery alongside any other executable node, including reviewers, and delivery in a map that can
-have multiple items. A delivery receipt can certify run success only when every other executable
-settled before that delivery execution started.
+In a repair loop, a reviewer returns a decision and feedback. The graph routes an acceptance
+onward or a rejection back for repair. `maxIterations` still applies if an agent asks to continue.
 
-## State reduction chooses the next step
+## Working in parallel { #concurrent-workspace-changes }
 
-An agent returns a value through a declared output channel. zeroshot checks that value, applies
-authored bindings, and records the new state before it evaluates another node. Model output cannot
-add an edge or raise a bound.
+Parallel agents share a workspace. Coordinate writers so they do not overwrite each other's
+changes, and place reviewers after the writers when they need the finished result. Reviewers see
+the same dependencies, generated files and services as workers.
 
-Inside a repair loop, a reviewer emits a finite signal with a typed diagnostic. The graph routes that
-signal to success or another iteration, and `maxIterations` still applies if an agent asks to
-continue.
+Put Git delivery after all writing and review branches have joined. Graph validation rejects
+concurrent delivery alongside another executable node, or inside a map that can have multiple items.
 
-## Durable run state
+## Run history and cleanup { #durable-run-state }
 
-Each run has a public ID backed by a SQLite ledger. Status and safe-log events carry opaque cursors
-for strict resume, so detaching a client, losing a terminal, or cancelling a Python `await` does not
-stop the controller.
+Each run has an ID and a SQLite ledger. Closing the terminal, disconnecting a client or cancelling
+a Python `await` does not stop the controller. Reconnect to inspect the run or stop it explicitly;
+see [Observe and control runs](../guides/observe-and-control.md).
 
-When a run closes, zeroshot atomically closes its execution activity; a late process cannot appear
-after the terminal result. [Observe and control runs](../guides/observe-and-control.md) covers the
-read and stop commands.
-
-On Linux, each local command has a private supervisor that also owns descendants which detach with
-`setsid`, change process group, or double-fork. It stops and reaps them when the command finishes,
-the run cancels, or the controller dies. Workspace ownership remains held through cleanup, so a
-successor cannot resume while that command's descendants can still write. This uses the kernel's
-subreaper support and procfs; it needs no root access or cgroup setup. Windows uses Job Objects.
-macOS retains process-group cleanup; descendants that detach can outlive the command there.
+The controller cleans up execution activity when the run ends. Cleanup guarantees differ by OS;
+[process cleanup](../reference/execution.md#process-cleanup) describes detached child processes.
 
 ## Built-in templates are ordinary graphs
 
-The executable contains `single-worker`, `software-change`, `auto-research`, `issue-review`,
-`pr-review`, and `code-review`. Each produces the public `GraphSpec` that custom submissions use:
+Use a built-in graph as it is, or export it to make your own:
 
 ```console
 zeroshot template list
 zeroshot template show software-change
 ```
 
-In a terminal, `template show` prints a tree and marks executable node names with `*`.
-Use `--json` or redirect stdout to export the complete `GraphSpec`.
+`template show` prints a tree, marking executable nodes with `*`. Add `--json` or redirect stdout
+to export the complete `GraphSpec`.
 
-The review templates post their report as an issue or PR comment. See
-[Review an issue or PR](../guides/review.md) and [Review a PR in depth](../guides/code-review.md).
+| Template          | Purpose                                                   |
+| ----------------- | --------------------------------------------------------- |
+| `software-change` | Implement, review, repair and deliver a change            |
+| `single-worker`   | Run one agent without a review loop                       |
+| `pr-review`       | Review a PR and post a concise comment                    |
+| `code-review`     | Review a PR in depth and post verified findings           |
+| `issue-review`    | Review an issue proposal                                  |
+| `auto-research`   | Run experiments and retain results accepted by a reviewer |
 
-`software-change` has four delivery choices and opens a pull request by default. `--delivery none`
-keeps the accepted change local. `--push` publishes the managed run branch without opening a pull
-request. `--pr`, the default, opens or updates a pull request, processes visible review feedback, waits for required CI and a conflict-free head, then
-stops without merging. `--ship` uses the same feedback loop before it follows the repository's merge
-policy and confirms the merged revision. Missing approval doesn't block `--pr`; it still blocks
-`--ship` when GitHub requires it.
+`software-change` opens a PR by default. Choose delivery with:
 
-For local `--pr` and `--ship` runs, the target branch is the current branch's upstream when one is
-configured; otherwise, zeroshot uses the local branch name. Preparation verifies that the selected
-remote contains this target before agent execution. To target `main` from a fresh worktree,
-run `git branch --set-upstream-to=origin/main`, or create the worktree from `origin/main` so Git
-sets the tracking branch automatically. If the remote cannot be reached or authenticated,
-preparation reports that the target branch could not be verified.
+| Option            | Result                                                                      |
+| ----------------- | --------------------------------------------------------------------------- |
+| `--delivery none` | Keep the accepted change local                                              |
+| `--push`          | Push the run branch without opening a PR                                    |
+| `--pr`            | Open or update a PR, address feedback and wait for CI; leave merging to you |
+| `--ship`          | Follow the same review loop, then merge under the repository's policy       |
 
-`auto-research` runs ten iterations by default. Optional run input `options.iterations` selects a
-positive count bound at admission, subject to the engine's general execution and loop budgets.
-Each normal round has five model executions:
+Required approval blocks `--ship`, but not `--pr`. For local PR and merge runs, the target branch
+is the current branch's upstream, or its local name when no upstream is set. See
+[source and delivery setup](targets.md#source-and-delivery-credentials).
 
-1. Three independent read-only scouts propose exploration, synthesis, and challenge directions.
-2. One researcher selects the parent and experiment, verifies/restores candidate bytes, runs the
-   experiment, and prepares a supported retained result with compact evidence.
-3. A fresh read-only reviewer accepts the proposed disposition, requests concrete corrections, or
-   approves a justified early stop. A supported non-adoption can be accepted without replacing the
-   incumbent. Plateau alone does not justify stopping before the requested count.
+PR feedback is enabled by default and restricted to repository writers. `--no-pr-feedback`
+disables it; [feedback rules](../reference/execution.md#delivery-feedback) cover permission checks.
 
-The scouts and researcher keep separate continuing sessions by default; the reviewer starts fresh.
-Required corrections return to the same researcher without repeating scouting or consuming another
-research round, then receive fresh review. This work/review cycle has a 64-pass safety limit.
-Routine file, tool, or archive errors can be repaired by the researcher. Missing optional historical
-archives and cosmetic bookkeeping issues are advisory when the current result and retained state
-are supported. Native reviewer outcomes establish approval; no separate file audit counter is
-required. There are no bootstrap, staging, finalization, or extra audit model passes.
-
-Records live under `.zeroshot/research` at the shared workspace root, including for tasks in
-subdirectories. The researcher keeps the charter, current summary, backlog, round evidence, and
-restorable candidate source there. After two accepted non-adoptions, or diminishing returns across
-`max(1, ceil(iterationLimit / 10))` accepted rounds on one approach, it explicitly reconsiders a new
-mechanism, an archived parent, and a discriminating measurement. These are reasoned alternatives,
-not a mandatory parent switch or a fixed gain threshold.
-
-The template supports local results and `--push`. With `--push`, the reviewer supplies title and
-description and one trusted Git delivery node publishes each accepted round. Research agents never
-use Git. Exhausted review, unrecovered execution errors, delivery errors, and delivery repair
-requests stop the run explicitly; unreviewed work is never published. Existing saved profiles and
-admitted runs keep their stored graph and runtime.
-
-PR and merge delivery consider feedback by default. Use `--no-pr-feedback` to ignore PR discussion;
-the [`git_delivery` binding](../reference/runtime-plan.md#git_delivery) describes the runtime
-setting.
-
-Automatic repairs accept feedback only from current writers on the target repository. GitHub
-confirms effective write or admin permission for issue comments, submitted reviews (including
-unwritten change requests), inline comments and replies. GitLab confirms active Developer-or-higher
-project membership, including inherited and invited membership, for discussion notes. The account
-must be active. Enterprise Edition also requires active `membership_state`; awaiting membership is
-ignored. Community Edition omits that field, so its response is accepted only after instance metadata
-confirms the edition. Unknown or malformed membership status fails the feedback read. Permissions
-are checked again on each inspection and bound to the author's stable numeric identity. Organization
-association, PR authorship, requested-reviewer status and bot status grant no exception. Confirmed
-read-only access or nonmembership is ignored and does not start another worker/reviewer round.
-Failed or incomplete permission lookups stop delivery or use its existing retry handling.
+`auto-research` runs ten rounds by default; `options.iterations` changes the count. Results stay in
+`.zeroshot/research`; `--push` publishes each accepted round. See
+[research rounds and repair](../reference/execution.md#auto-research) for the full behavior.

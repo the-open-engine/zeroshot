@@ -69,6 +69,11 @@ nav:
       - Python SDK: guides/python-sdk.md
   - Reference:
       - CLI: zeroshot-cli.md
+      - Implementation details:
+          - Installation and updates: reference/installation.md
+          - Target runtime: reference/target-runtime.md
+          - Execution and delivery: reference/execution.md
+          - Memory lifecycle: reference/active-memory.md
       - Python API:
           - API overview: reference/python.md
           - Client and run handle: reference/python/client.md
