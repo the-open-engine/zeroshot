@@ -4,7 +4,7 @@
 
 **A multi-agent orchestration engine that keeps coding agents from grading their own work.**
 
-[zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
+[zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Docs](https://zeroshot.sh/docs/) · [Research blog](https://zeroshot.sh/blog/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord)
 
 </div>
 
@@ -161,6 +161,10 @@ shows validation and execution.
 
 Run locally, [self-host with Docker](docker/zeroshot-target/README.md), or share graphs and run
 on [zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API keys.
+
+## Community
+
+[The Open Engine](https://theopenengine.com/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Research blog](https://zeroshot.sh/blog/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [X](https://x.com/OpenEngineHQ) · [LinkedIn](https://www.linkedin.com/company/the-open-engine-company/) · [Instagram](https://www.instagram.com/theopenengine/)
 
 ## Contributing
 
