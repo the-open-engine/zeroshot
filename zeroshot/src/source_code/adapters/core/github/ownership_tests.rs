@@ -100,6 +100,7 @@ printf 'candidate\n' > conflict.txt
             &format!(
                 r#"#!/bin/sh
 case "$*" in
+  *mergeQueue*) printf '%s\n' '{{"data":{{"repository":{{"nameWithOwner":"acme/project","mergeQueue":null}}}}}}' ;;
   *repos/acme/project/pulls*) printf '[]\n' ;;
   *git/ref/heads/zeroshot/*) printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1 ;;
   *) printf '%s\n' '{reference}' ;;
@@ -282,11 +283,15 @@ async fn root_target_integration_preserves_contained_writer_ownership() {
         )
         .await
         .assert_value();
-    assert_eq!(result.target_revision, fixture.target);
-    assert!(matches!(
-        result.outcome,
-        SourceReconciliationOutcome::NeedsWork(_)
-    ));
+    let SourceTargetIntegration::Integrated {
+        target_revision,
+        outcome,
+    } = result
+    else {
+        panic!("ordinary target must be integrated");
+    };
+    assert_eq!(target_revision, fixture.target);
+    assert!(matches!(outcome, SourceReconciliationOutcome::NeedsWork(_)));
     fixture.repair_and_redeliver().await;
 }
 

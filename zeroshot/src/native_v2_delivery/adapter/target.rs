@@ -63,12 +63,28 @@ impl NativeV2DeliveryAdapter {
         before: &(String, bool),
         preparation: &DeliveryPreparation<'_, '_>,
     ) -> Result<(), DeliveryStop> {
-        if !valid_revision(&integration.target_revision) {
+        let SourceTargetIntegration::Integrated {
+            target_revision,
+            outcome,
+        } = integration
+        else {
+            // A retry may observe forge ownership after an earlier local integration. Such a
+            // mutation still needs review, even though the latest policy no longer requires it.
+            return match self
+                .reconciliation_result(SourceReconciliationOutcome::Unchanged, before)
+                .await?
+            {
+                SourceReconciliationOutcome::Unchanged => Ok(()),
+                SourceReconciliationOutcome::NeedsWork(diagnostic) => {
+                    Err(recovery::repair(diagnostic))
+                }
+                _ => Err(DeliveryStop::Outcome(WorkerOutcome::malformed())),
+            };
+        };
+        if !valid_revision(&target_revision) {
             return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
         }
-        let outcome = self
-            .reconciliation_result(integration.outcome, before)
-            .await?;
+        let outcome = self.reconciliation_result(outcome, before).await?;
         if let SourceReconciliationOutcome::Refused(diagnostic) = outcome {
             return self
                 .refuse_delivery(
@@ -81,8 +97,8 @@ impl NativeV2DeliveryAdapter {
         let baseline_changed = previous
             .as_deref()
             .unwrap_or(&self.config.target.base_revision)
-            != integration.target_revision;
-        self.record_review_base(Some(integration.target_revision));
+            != target_revision;
+        self.record_review_base(Some(target_revision));
         match outcome {
             SourceReconciliationOutcome::Unchanged if !baseline_changed => Ok(()),
             SourceReconciliationOutcome::NeedsWork(diagnostic) => Err(recovery::repair(diagnostic)),

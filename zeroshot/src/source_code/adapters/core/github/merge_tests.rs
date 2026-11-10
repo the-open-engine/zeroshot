@@ -140,6 +140,52 @@ async fn merge_submission_rechecks_terminal_approval_queue_and_freshness_state()
 
 #[cfg(unix)]
 #[tokio::test]
+async fn queue_removal_between_inspection_and_submission_requires_fresh_reconciliation() {
+    let root = tempfile::tempdir().assert_value();
+    let mut page = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    base_ref(&mut page)["compare"]["behindBy"] = json!(2);
+    page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
+    let current_policy = root.path().join("policy.json");
+    std::fs::write(&current_policy, json!([page.clone()]).to_string()).assert_value();
+    let program = root.path().join("gh-current-policy");
+    write_executable(
+        &program,
+        "#!/bin/sh\ncase \"$2\" in\n\
+         graphql) cat \"$HOME/policy.json\" ;;\n\
+         'repos/acme/project/rules/branches/main?per_page=100') printf '[[]]\\n' ;;\n\
+         *) printf '%s\\n' \"$@\" >> \"$HOME/unexpected-write\"; exit 19 ;;\nesac\n"
+            .to_owned(),
+    );
+    let authority = authority(program, root.path());
+    let credential = SourceDeliveryCredential::token("test-token");
+    let inspected = authority
+        .inspect_review(&review(), credential)
+        .await
+        .assert_value();
+    assert!(!inspected.head_update_required);
+
+    page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(false);
+    std::fs::write(&current_policy, json!([page]).to_string()).assert_value();
+    // Both the existing authority and a recovered one must use current ancestry/policy.
+    for authority in [
+        authority.clone(),
+        GhCliDeliveryAuthority::new(authority.config.clone()),
+    ] {
+        for _ in 0..2 {
+            assert_eq!(
+                authority
+                    .request_merge(&review(), credential)
+                    .await
+                    .assert_value(),
+                SourceMergeRequestOutcome::HeadUpdateRequired
+            );
+        }
+    }
+    assert!(!root.path().join("unexpected-write").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn permanent_merge_rejection_preserves_diagnostics_and_cannot_become_pending_or_git_repair() {
     let ready = policy_page_with_merge_capabilities(true, true, true);
     for after in [

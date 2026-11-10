@@ -248,7 +248,8 @@ pub trait SourceDeliveryAuthority: Send + Sync {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceDeliverySnapshot, SourceDeliveryError>;
 
-    /// Integrates an exact current target revision before the run branch is first published.
+    /// Reconciles the current target, or explicitly defers integration to the forge.
+    /// Deferred integration requires fresh forge policy at later delivery gates.
     async fn reconcile_delivery_target(
         &self,
         request: SourceTargetReconciliation<'_>,
@@ -438,9 +439,13 @@ pub struct SourceTargetReconciliation<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SourceTargetIntegration {
-    pub target_revision: String,
-    pub outcome: SourceReconciliationOutcome,
+pub enum SourceTargetIntegration {
+    Integrated {
+        target_revision: String,
+        outcome: SourceReconciliationOutcome,
+    },
+    /// Authoritative forge policy owns integration. No local baseline was established.
+    Deferred,
 }
 
 pub(crate) fn valid_delivery_repository(value: &str) -> bool {

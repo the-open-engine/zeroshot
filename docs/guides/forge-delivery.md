@@ -98,6 +98,21 @@ GitHub.com-only features include `--task-from`, Platform repository browsing and
 inbound commands, and hosted [stacks](stacks.md). For GHE or GitLab comments, supply the graph input
 directly.
 
+Before first publication, GitHub delivery reads merge-queue policy for the exact repository and
+configured target branch. A confirmed queue owns integration with newer target commits, so delivery
+publishes the reviewed candidate without a local target merge or a review round caused only by target
+motion. Missing, malformed or failed policy reads never confirm a queue. Without a queue, delivery
+fetches and integrates the exact current target and returns changed candidates through repair and review.
+Push delivery and other forges retain their existing behavior.
+
+Later GitHub gates refresh policy, required checks and reviews on the exact head. If the queue was
+removed, current base/head ancestry routes an outdated head through ordinary authorized reconciliation,
+even when nonstrict protection reports `CLEAN`. This also works after recovery without a saved queue
+assumption. Adding a queue after ordinary integration permits queue admission only after that integration
+has been reviewed. Deferred integration never advances `reviewBaseRevision`; `sourceRevision` remains
+the admitted source. Queue admission still uses the exact reviewed head and success requires an observed
+merged revision.
+
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results

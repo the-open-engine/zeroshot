@@ -55,7 +55,7 @@ pub(crate) async fn reconcile_target(
     let context = TargetContext { transport, request };
     transport.fetch_exact(target_revision, credential).await?;
     let outcome = integrate(context, target_revision).await?;
-    Ok(SourceTargetIntegration {
+    Ok(SourceTargetIntegration::Integrated {
         target_revision: target_revision.to_owned(),
         outcome,
     })

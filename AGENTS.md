@@ -883,7 +883,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Authoritative merged/closed observations settle before hooks or late feedback; a completed remote
   merge cannot become a new repair merely because main now contains the fix.
 - Before first publication, delivery captures and fetches the exact current target revision and
-  merges it while preserving candidate history and dirty work. Any changed candidate returns through
+  merges it while preserving candidate history and dirty work, except when GitHub authoritatively
+  confirms a merge queue on the exact repository and configured target branch. That explicit deferred
+  result preserves the reviewed candidate and baseline; target motion alone cannot delay publication.
+  GitHub rechecks current queue policy at later gates. Without a queue, current base/head comparison
+  routes missing target ancestry through ordinary authorized head reconciliation, including after
+  recovery or queue removal with a nonstrict `CLEAN` status. No cached queue decision grants merge
+  authority. Other forges and push delivery keep their existing behavior. Any locally changed candidate returns through
   the authored repair/review loop before push. Delivery feedback distinguishes immutable
   `sourceRevision` provenance from the captured `reviewBaseRevision`; verifiers and repairs preserve
   upstream changes. Unconfirmed baselines after external branch updates are explicitly unavailable.

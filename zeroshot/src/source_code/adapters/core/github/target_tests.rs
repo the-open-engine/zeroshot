@@ -49,6 +49,11 @@ impl TargetFixture {
             target_revision: String::new(),
             git_program,
         };
+        fs::write(
+            fixture.repository.root.child("queue-policy.json"),
+            r#"{"data":{"repository":{"nameWithOwner":"acme/project","mergeQueue":null}}}"#,
+        )
+        .assert_value();
         fixture.advance_target(".github/workflows/ci.yml", "new workflow\n");
         fixture
     }
@@ -68,12 +73,19 @@ impl TargetFixture {
         });
         self.repository.root.write_executable(
             "gh-target-ref",
-            &format!("#!/bin/sh\n/usr/bin/printf '%s\\n' '{reference}'\n"),
+            &format!("#!/bin/sh\ncase \"$*\" in\n*mergeQueue*) /usr/bin/cat '{}' ;;\n*) /usr/bin/printf '%s\\n' '{reference}' ;;\nesac\n", self.repository.root.child("queue-policy.json").display()),
         );
     }
 
-    async fn reconcile(&self) -> SourceTargetIntegration {
-        self.try_reconcile().await.assert_value()
+    async fn reconcile(&self) -> (String, SourceReconciliationOutcome) {
+        let SourceTargetIntegration::Integrated {
+            target_revision,
+            outcome,
+        } = self.try_reconcile().await.assert_value()
+        else {
+            panic!("ordinary target must be integrated");
+        };
+        (target_revision, outcome)
     }
 
     async fn try_reconcile(&self) -> Result<SourceTargetIntegration, SourceDeliveryError> {
@@ -102,9 +114,9 @@ async fn exact_target_integration_preserves_upstream_workflow_and_dirty_candidat
     git(&fixture.external, &["push", "origin", "main"]);
     let source = fixture.repository.base.clone();
     let outcome = fixture.reconcile().await;
-    assert_eq!(outcome.target_revision, captured);
+    assert_eq!(outcome.0, captured);
     assert!(matches!(
-        outcome.outcome,
+        outcome.1,
         SourceReconciliationOutcome::NeedsWork(_)
     ));
     assert_eq!(
@@ -151,7 +163,7 @@ async fn target_integration_completes_despite_inherited_merge_preferences() {
         let integration = fixture.reconcile().await;
 
         assert!(matches!(
-            integration.outcome,
+            integration.1,
             SourceReconciliationOutcome::NeedsWork(_)
         ));
         for revision in [&fixture.repository.base, &fixture.target_revision] {
@@ -171,7 +183,7 @@ async fn target_integration_completes_despite_inherited_merge_preferences() {
         );
         assert_eq!(git_output(workspace, &["config", key]), value);
         assert_eq!(
-            fixture.reconcile().await.outcome,
+            fixture.reconcile().await.1,
             SourceReconciliationOutcome::Unchanged,
             "completed integration must progress beyond the review loop"
         );
@@ -295,7 +307,7 @@ exec /usr/bin/git "${{arguments[@]}}""#
 async fn an_already_integrated_target_does_not_commit_new_dirty_work() {
     let fixture = TargetFixture::new();
     assert!(matches!(
-        fixture.reconcile().await.outcome,
+        fixture.reconcile().await.1,
         SourceReconciliationOutcome::NeedsWork(_)
     ));
     let head = git_output(&fixture.repository.workspace, &["rev-parse", "HEAD"]);
@@ -305,7 +317,7 @@ async fn an_already_integrated_target_does_not_commit_new_dirty_work() {
     )
     .assert_value();
     assert_eq!(
-        fixture.reconcile().await.outcome,
+        fixture.reconcile().await.1,
         SourceReconciliationOutcome::Unchanged
     );
     assert_eq!(
@@ -336,7 +348,7 @@ async fn divergent_target_changes_leave_real_conflicts_and_delivery_identity() {
         &["config", "user.email", "worker@example.invalid"],
     );
     let outcome = fixture.reconcile().await;
-    let SourceReconciliationOutcome::NeedsWork(diagnostic) = outcome.outcome else {
+    let SourceReconciliationOutcome::NeedsWork(diagnostic) = outcome.1 else {
         panic!("expected conflict repair");
     };
     assert!(diagnostic.contains("CONFLICT"));
@@ -390,7 +402,7 @@ async fn host_commit_identity_authors_target_integration_and_configures_repairs(
 
     let outcome = fixture.reconcile().await;
     assert!(matches!(
-        outcome.outcome,
+        outcome.1,
         SourceReconciliationOutcome::NeedsWork(_)
     ));
     assert_eq!(
@@ -463,10 +475,10 @@ async fn explicit_source_pins_can_be_ahead_of_or_diverge_from_the_target() {
         .assert_value();
         let outcome = fixture.reconcile().await;
         if target_is_ancestor {
-            assert_eq!(outcome.outcome, SourceReconciliationOutcome::Unchanged);
+            assert_eq!(outcome.1, SourceReconciliationOutcome::Unchanged);
         } else {
             assert!(matches!(
-                outcome.outcome,
+                outcome.1,
                 SourceReconciliationOutcome::NeedsWork(_)
             ));
         }
@@ -628,6 +640,132 @@ fn assert_transport_is_scoped(fixture: &TargetFixture) {
         assert!(
             !config.contains(secret),
             "delivery credential persisted: {secret}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn queue_confirmation_preserves_candidate_despite_repeated_target_movement() {
+    let mut fixture = TargetFixture::new();
+    fs::write(fixture.repository.root.child("queue-policy.json"),
+        r#"{"data":{"repository":{"nameWithOwner":"acme/project","mergeQueue":{"id":"MQ_exact"}}}}"#).assert_value();
+    let before = git_output(&fixture.repository.workspace, &["rev-parse", "HEAD"]);
+    let status = git_output(&fixture.repository.workspace, &["status", "--porcelain=v1"]);
+    for index in 0..3 {
+        fixture.advance_target("later.txt", &format!("advance {index}\n"));
+        assert_eq!(
+            fixture.try_reconcile().await.assert_value(),
+            SourceTargetIntegration::Deferred
+        );
+        assert_eq!(
+            git_output(&fixture.repository.workspace, &["rev-parse", "HEAD"]),
+            before
+        );
+        assert_eq!(
+            git_output(&fixture.repository.workspace, &["status", "--porcelain=v1"]),
+            status
+        );
+        assert!(!fixture.repository.workspace.join("later.txt").exists());
+    }
+    // A new read must observe removal rather than reusing earlier positive evidence.
+    fs::write(
+        fixture.repository.root.child("queue-policy.json"),
+        r#"{"data":{"repository":{"nameWithOwner":"acme/project","mergeQueue":null}}}"#,
+    )
+    .assert_value();
+    assert!(matches!(
+        fixture.try_reconcile().await.assert_value(),
+        SourceTargetIntegration::Integrated {
+            outcome: SourceReconciliationOutcome::NeedsWork(_),
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn queue_lookup_binds_exact_nondefault_branch_and_repository() {
+    let fixture = TargetFixture::new();
+    fixture.repository.root.write_executable("gh-target-ref", r#"#!/bin/sh
+for arg in "$@"; do printf '%s\n' "$arg"; done > "$HOME/target-queue-args"
+printf '%s\n' '{"data":{"repository":{"nameWithOwner":"acme/project","mergeQueue":{"id":"MQ_release"}}}}'
+"#);
+    let target = DeliveryTarget::new(
+        "acme/project",
+        "release/exact-case",
+        &fixture.repository.base,
+    )
+    .assert_value();
+    assert_eq!(
+        fixture
+            .authority
+            .reconcile_delivery_target(
+                SourceTargetReconciliation {
+                    workspace: &fixture.repository.workspace,
+                    target: &target,
+                    commit_message: "candidate",
+                },
+                SourceDeliveryCredential::token("test-token")
+            )
+            .await
+            .assert_value(),
+        SourceTargetIntegration::Deferred
+    );
+    let args =
+        fs::read_to_string(fixture.repository.root.child("target-queue-args")).assert_value();
+    for expected in [
+        "owner=acme",
+        "name=project",
+        "branch=release/exact-case",
+        "mergeQueue(branch: $branch)",
+    ] {
+        assert!(args.contains(expected), "{args}");
+    }
+    assert!(!args.contains("defaultBranch"));
+}
+
+#[tokio::test]
+async fn incomplete_unknown_and_mismatched_queue_policy_never_skips_integration() {
+    let fixture = TargetFixture::new();
+    for response in [
+        serde_json::json!({}),
+        serde_json::json!({"data": {"repository": null}}),
+        serde_json::json!({"data": {"repository": {"nameWithOwner":"acme/project"}}}),
+        serde_json::json!({"data": {"repository": {"nameWithOwner":"other/project","mergeQueue":{"id":"MQ"}}}}),
+        serde_json::json!({"data": {"repository": {"nameWithOwner":"acme/project","mergeQueue":true}}}),
+        serde_json::json!({"data": {"repository": {"nameWithOwner":"acme/project","mergeQueue":{}}}}),
+        serde_json::json!({"data": {"repository": {"nameWithOwner":"acme/project","mergeQueue":{"id":" "}}}}),
+        serde_json::json!({"data": {"repository": {"nameWithOwner":"acme/project","mergeQueue":{"id":"MQ"}}}, "errors":[{"message":"unavailable"}]}),
+    ] {
+        fs::write(
+            fixture.repository.root.child("queue-policy.json"),
+            response.to_string(),
+        )
+        .assert_value();
+        assert!(fixture.try_reconcile().await.is_err(), "{response}");
+        assert_eq!(
+            git_output(&fixture.repository.workspace, &["rev-parse", "HEAD"]),
+            fixture.repository.base
+        );
+    }
+}
+
+#[tokio::test]
+async fn queue_policy_permission_and_transient_errors_keep_existing_retry_classification() {
+    let fixture = TargetFixture::new();
+    for (status, retryable) in [(403, false), (503, true)] {
+        fixture.repository.root.write_executable(
+            "gh-target-ref",
+            &format!("#!/bin/sh\nprintf 'gh: unavailable (HTTP {status})\\n' >&2\nexit 1\n"),
+        );
+        let error = fixture
+            .try_reconcile()
+            .await
+            .expect_err("failed policy is not queue evidence");
+        assert_eq!(error.api_status(), Some(status));
+        assert_eq!(error.retryable_operation(), retryable);
+        assert_eq!(
+            git_output(&fixture.repository.workspace, &["rev-parse", "HEAD"]),
+            fixture.repository.base
         );
     }
 }

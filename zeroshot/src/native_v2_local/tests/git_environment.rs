@@ -212,6 +212,7 @@ fn advance_github_target(fixture: &mut GitFixture, remote: &Path) {
             r#"#!/bin/sh
 test -z "${{GIT_CONFIG_NOSYSTEM-}}${{XDG_CONFIG_HOME-}}" || exit 91
 case "$2" in
+  graphql) printf '%s\n' '{{"data":{{"repository":{{"nameWithOwner":"fixture/project","mergeQueue":null}}}}}}' ;;
   repos/fixture/project/pulls) printf '[]\n' ;;
   repos/fixture/project/git/ref/heads/main) printf '%s\n' '{reference}' ;;
   *) printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1 ;;
