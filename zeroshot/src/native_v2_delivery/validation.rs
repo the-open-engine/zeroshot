@@ -189,7 +189,10 @@ impl TrustedDeliveryValidator {
         // Auxiliary commands can outlive a failed helper exchange. Always drain them, including
         // when the helper itself could not confirm cleanup.
         let resource = if let Some(resource) = &self.resource {
-            resource.drain().await
+            resource
+                .drain()
+                .await
+                .map_err(|_| NodeRunnerError::CleanupUnconfirmed)
         } else {
             Ok(())
         };

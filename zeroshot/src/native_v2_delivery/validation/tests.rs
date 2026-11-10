@@ -88,7 +88,7 @@ mod subprocess {
             self.drains
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if self.refuse_cleanup {
-                Err(NodeRunnerError::CleanupUnconfirmed)
+                Err(NodeRunnerError::Driver)
             } else {
                 Ok(())
             }
@@ -123,7 +123,7 @@ mod subprocess {
     }
 
     #[tokio::test]
-    async fn unconfirmed_hosted_resource_cleanup_is_not_success() {
+    async fn ordinary_resource_cleanup_error_is_not_repairable() {
         let (_root, validator) =
             fixture("/bin/cat >/dev/null\nprintf '{\"verdict\":\"accepted\"}'");
         let validator = validator.with_resource(std::sync::Arc::new(Resource {
