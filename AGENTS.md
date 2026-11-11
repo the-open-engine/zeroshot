@@ -1244,6 +1244,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   identity stays private and unredacted for exact watch matching; its printable message is redacted.
   ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
   context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
+- After opening observation, `run`, `watch`, `logs` and `attach` on direct or hosted named targets
+  announce the first connection loss once on stderr and state that the run continues there.
+  Reconnects back off from 100 ms to a five-second cap, preserving durable watch/log cursors.
+  Ten continuous minutes without reconnecting ends the command with exit 1, the transport error
+  and `zeroshot watch RUN_ID --target NAME`. Reconnect requests share that deadline. Ctrl-C
+  detaches during requests and waits; neither detachment nor giving up stops the target run.
+  Local controller observation keeps its existing lifetime; no reconnect setting is exposed.
+  Named-target OECP observation opens only after the subscription acknowledgement, and dropping
+  setup aborts its task. Python accepts a complete JSON error or the final stderr line after
+  notices, preserving typed diagnostics; an earlier diagnostic never overrides the terminal line.
 - Graph verification errors display their first safe diagnostic, its path and the count of further
   diagnostics through the shared verifier error, so local validation and hosted rejection report the
   same cause. Within the 1,024-byte target problem message bound, the count and then the path's

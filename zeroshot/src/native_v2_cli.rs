@@ -529,6 +529,15 @@ pub enum NativeV2CliError {
     #[error("Zeroshot observation transport disconnected")]
     Disconnected,
     #[error(
+        "could not reconnect to target {target:?} for 10 minutes: {source}. \
+         The run continues there; pick it up with `zeroshot watch {run_id} --target {target}`"
+    )]
+    FollowConnectionLost {
+        target: String,
+        run_id: String,
+        source: Box<NativeV2CliError>,
+    },
+    #[error(
         "cannot communicate with target {name:?} at {origin}: {message}. \
          Check the target address and that the server is running; \
          for Docker targets, check Docker and the target container"

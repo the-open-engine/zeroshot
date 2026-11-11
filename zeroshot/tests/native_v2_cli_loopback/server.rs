@@ -56,6 +56,13 @@ impl LoopbackHost {
     }
 
     pub(crate) async fn start_with_factory(factory: Arc<dyn TargetControllerFactory>) -> Self {
+        Self::start_with_observation_loss(factory, false).await
+    }
+
+    pub(crate) async fn start_with_observation_loss(
+        factory: Arc<dyn TargetControllerFactory>,
+        drop_observation: bool,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
         let address = listener.local_addr().assert_value();
         let origin = format!("http://{address}");
@@ -94,6 +101,12 @@ impl LoopbackHost {
                                 ),
                                 "hosted run route failed: {error}"
                             );
+                        }
+                    } else if drop_observation && path == "/native-v2/oecp" {
+                        // Repeatedly drop an established transport while the target run stays live.
+                        tokio::select! {
+                            result = native.serve_connection(stream) => { result.assert_value(); }
+                            () = tokio::time::sleep(Duration::from_millis(250)) => {}
                         }
                     } else {
                         native.serve_connection(stream).await.assert_value();
