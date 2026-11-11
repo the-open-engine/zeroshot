@@ -2,6 +2,24 @@ use std::io;
 
 use tokio::task::JoinError;
 
+const MAX_PROGRAM_PREVIEW_BYTES: usize = 256;
+
+pub(super) fn spawn_error_detail(program: &str, error: &io::Error) -> String {
+    let mut preview = String::new();
+    for character in program.chars() {
+        let escaped = character.escape_debug().to_string();
+        if preview.len() + escaped.len() > MAX_PROGRAM_PREVIEW_BYTES {
+            preview.push_str("...");
+            break;
+        }
+        preview.push_str(&escaped);
+    }
+    format!(
+        "{}; program=\"{preview}\"",
+        io_error_detail("process spawn failed", error)
+    )
+}
+
 pub(crate) fn io_error_detail(operation: &'static str, error: &io::Error) -> String {
     let raw_os_error = error
         .raw_os_error()
