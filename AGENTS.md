@@ -1189,7 +1189,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Unknown target names and registry workspace-recovery authorization refusals use
   `invalid_request` / `request.invalid`; transport failures retain `target.unavailable`.
   The Python SDK consumes the explicit failed-run diagnostic without inferring failure from a
-  target error or rereading status; public failed-result exceptions remain opt-in.
+  target error or rereading status; public failed-result exceptions remain opt-in. Failed-run
+  identity stays private and unredacted for exact watch matching; its printable message is redacted.
 - Graph verification errors display their first safe diagnostic, its path and the count of further
   diagnostics through the shared verifier error, so local validation and hosted rejection report the
   same cause. Within the 1,024-byte target problem message bound, the count and then the path's

@@ -40,6 +40,21 @@ def test_failed_run_diagnostic_preserves_identity_and_redacts_message(tmp_path: 
     assert str(error) == "run failed: <redacted>"
 
 
+@pytest.mark.parametrize("secret", ["1", "provider-secret-1", "run.failed"])
+def test_failed_run_identity_is_not_redacted(tmp_path: Path, secret: str) -> None:
+    run_id = "provider-secret-1"
+    native = NativeProcess(
+        Path("zeroshot"), cwd=tmp_path, environment={}, secrets=("provider-secret", secret)
+    )
+
+    error = native._error(diagnostic(details={"runId": run_id}), 1)
+
+    assert isinstance(error, _RunFailed)
+    assert error.run_id == run_id
+    assert str(error) == "run failed: <redacted>"
+    assert run_id not in repr(error)
+
+
 @pytest.mark.parametrize("details", [{}, {"runId": None}, {"runId": 42}, {"runId": ""}])
 def test_failed_run_diagnostic_requires_a_run_identity(tmp_path: Path, details: object) -> None:
     error = native_process(tmp_path)._error(diagnostic(details=details), 1)

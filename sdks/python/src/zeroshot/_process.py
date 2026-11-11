@@ -155,6 +155,12 @@ class NativeProcess:
         except json.JSONDecodeError:
             value = None
         if isinstance(value, dict) and value.get("schema") == _ERROR_SCHEMA:
+            if value.get("kind") == "run_failed":
+                # Keep the private run identity intact for the watcher's equality check.
+                message = value.get("message")
+                if isinstance(message, str):
+                    value["message"] = _redact_text(message, self._secrets)
+                return _project_diagnostic(value, exit_code)
             redacted = _redact_value(value, self._secrets)
             assert isinstance(redacted, dict)
             return _project_diagnostic(redacted, exit_code)

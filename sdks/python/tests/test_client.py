@@ -682,16 +682,27 @@ def test_hosted_stack_watch_propagates_unexpected_failure_after_success(
     ("failure", "phases"),
     [("terminal", ["running", "finished"]), ("early", ["running"])],
 )
+@pytest.mark.parametrize("secret", [None, "1"])
 def test_run_watch_ends_normally_when_the_cli_reports_a_failed_run(
     fake_native: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
     phases: list[str],
+    secret: str | None,
 ) -> None:
     monkeypatch.setenv("FAKE_WATCH_FAILURE", failure)
+    environment = (
+        {
+            "CI": secret,
+            "FAKE_WATCH_FAILURE": failure,
+            "FAKE_ZEROSHOT_LOG": str(fake_native),
+        }
+        if secret is not None
+        else None
+    )
 
     async def exercise() -> None:
-        async with Client() as client:
+        async with Client(environment=environment) as client:
             run = client.get_run("01900000-0000-7000-8000-000000000001")
             statuses = [status async for status in run.watch()]
             assert [status.phase for status in statuses] == phases
@@ -736,6 +747,23 @@ def test_run_watch_rejects_a_failure_for_another_run(
 
     async def exercise() -> None:
         async with Client() as client:
+            with pytest.raises(ProtocolError, match="different run"):
+                async for _ in client.get_run("requested-run").watch():
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_run_watch_rejects_different_ids_that_redact_to_the_same_value(fake_native: Path) -> None:
+    async def exercise() -> None:
+        async with Client(
+            environment={
+                "REQUESTED_ID": "requested-run",
+                "REPORTED_ID": "another-run",
+                "FAKE_WATCH_FAILURE": "wrong_run",
+                "FAKE_ZEROSHOT_LOG": str(fake_native),
+            }
+        ) as client:
             with pytest.raises(ProtocolError, match="different run"):
                 async for _ in client.get_run("requested-run").watch():
                     pass
