@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Installer verification, update behavior, managed skills and building the workspace UI.">
+        <meta name="description" content="Installer verification, update behavior, network access, managed skills and building the workspace UI.">
       
       
       
@@ -63,14 +63,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="Installation and updates | zeroshot docs">
-    <meta property="og:description" content="Installer verification, update behavior, managed skills and building the workspace UI.">
+    <meta property="og:description" content="Installer verification, update behavior, network access, managed skills and building the workspace UI.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/reference/installation/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Installation and updates | zeroshot docs">
-    <meta name="twitter:description" content="Installer verification, update behavior, managed skills and building the workspace UI.">
+    <meta name="twitter:description" content="Installer verification, update behavior, network access, managed skills and building the workspace UI.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -1271,6 +1271,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#network-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#managed-skills" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2246,6 +2257,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#network-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#managed-skills" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2348,6 +2370,42 @@ the package's <code>bin/native</code> directory without changing <code>package.j
 <code>zeroshot --version</code> reports the updated executable. A later npm install uses its selected package
 version to replace the executables again. To synchronize npm's records with the CLI, reinstall the
 desired version with <code>npm install --global @the-open-engine-company/zeroshot@X.Y.Z</code>.</p>
+<h2 id="network-access">Network access<a class="headerlink" href="#network-access" title="Permanent link">&para;</a></h2>
+<p>zeroshot has no telemetry, analytics or crash reporting. The CLI makes network requests only for
+these:</p>
+<table>
+<thead>
+<tr>
+<th>When</th>
+<th>What it contacts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>npm install</td>
+<td>GitHub release downloads, for the platform executable</td>
+</tr>
+<tr>
+<td><code>zeroshot update</code></td>
+<td>The GitHub API for the latest release, then its downloads. Requests are anonymous. Nothing checks in the background</td>
+</tr>
+<tr>
+<td>A run</td>
+<td>The model providers, gateways and connections in your runtime plan, through the agents and scripts it starts</td>
+</tr>
+<tr>
+<td>Delivery and review</td>
+<td>The GitHub or GitLab host of the repository</td>
+</tr>
+<tr>
+<td><code>--target</code> or <code>zeroshot target login</code></td>
+<td>That target only, self-hosted or zeroshot Platform</td>
+</tr>
+</tbody>
+</table>
+<p>zeroshot starts Pi with <code>PI_TELEMETRY=0</code> and Copilot with session telemetry off. Claude Code and
+Codex follow their own settings. Agents and scripts can also reach whatever their own tools reach.
+<code>zeroshot ui</code> serves the workspace UI from your machine and loads nothing from other hosts.</p>
 <h2 id="managed-skills">Managed skills<a class="headerlink" href="#managed-skills" title="Permanent link">&para;</a></h2>
 <p>The package installs the <code>zeroshot</code>, <code>zeroshot-memory-init</code>, <code>zeroshot-graph-design</code>, and
 <a href="../../guides/planning/"><code>zeroshot-plan</code></a> skills for Codex, GitHub Copilot, and Pi under
