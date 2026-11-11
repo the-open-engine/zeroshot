@@ -136,6 +136,11 @@ The probe must finish cleanup before the model turn starts; unconfirmed cleanup 
 identifies configuration inspection in its diagnostic. Inspection does not rewrite settings files,
 though the CLI may update its own startup state.
 
+When a Claude Code result reports tool calls that its permission settings or hooks denied, in local
+or hosted runs, `zeroshot logs` shows an error-level line for that node with the denied tool names
+and counts, never the calls' inputs. Denied calls do not change the node's outcome: its result and
+the graph's verifiers decide.
+
 ### Reviewer access
 
 Every agent verifier node, including those in custom profiles, uses the same permission handling as
