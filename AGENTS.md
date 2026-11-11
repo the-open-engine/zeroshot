@@ -680,7 +680,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `subagent_stats.killed.system` above zero (subagents Claude Code stopped itself) fails it. Usage
   is the sum of each result's `model_usage_since_last_result` plus streamed message usage after the
   last result; an absent or malformed value leaves it unknown. Session-total `modelUsage` and
-  main-thread `usage` never stand in.
+  main-thread `usage` never stand in. Each result's `permission_denials` lists that turn's denied
+  calls; the transcript reports calls no earlier result listed, by `tool_use_id`, as one redacted,
+  bounded error-stream record of tool names and counts without a failure diagnostic. It never
+  reads `tool_input`, and denials never change the attempt; verifiers judge completion.
 - Provider stdin and stdout are concurrent and bounded so large prompts and early output cannot
   deadlock. Incomplete stdin is fatal, while parsed identity, usage, retry, and diagnostics survive
   either I/O completion order.

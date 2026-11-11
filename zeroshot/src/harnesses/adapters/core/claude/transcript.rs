@@ -1,25 +1,32 @@
 use crate::native_v2_capsule::{
     provider_json_lines::{ProviderJsonLine, ProviderJsonLines},
-    provider_process::{text::ProviderText, turn::ProviderTranscript, ProviderProcessFailure},
+    provider_process::{
+        text::{LIVE_CHUNK_BYTES, ProviderText},
+        turn::ProviderTranscript,
+        ProviderProcessFailure,
+    },
 };
 use serde_json::Value;
 
 use crate::native_v2_contract::TokenUsageDelta;
-use crate::native_v2_runner::{LiveOutputStream, NodeRunnerError};
+use crate::native_v2_runner::{LiveOutputStream, NodeRunnerError, bounded_log_text};
 
 #[path = "transcript/diagnostic.rs"]
 mod diagnostic;
+#[path = "transcript/permission_denials.rs"]
+mod permission_denials;
 #[path = "transcript/session_id.rs"]
 mod session_id;
 #[path = "transcript/usage.rs"]
 mod usage;
 
 use diagnostic::{combine_failure_detail, error_list, record_count};
+use permission_denials::PermissionDenials;
 use session_id::record_session_id;
 use usage::{ProvisionalUsage, ResultUsage, UsageKeys, message_identity, parse_usage_snapshot};
 
 #[cfg(test)]
-use crate::native_v2_capsule::provider_process::text::{LIVE_CHUNK_BYTES, LIVE_LINE_BYTES, utf8_chunks};
+use crate::native_v2_capsule::provider_process::text::{LIVE_LINE_BYTES, utf8_chunks};
 
 pub(super) use crate::native_v2_capsule::provider_process::{
     ProviderResult as ClaudeResult, ProviderTurnFailure as ClaudeFailure,
@@ -47,6 +54,7 @@ pub(super) struct ClaudeTranscript {
     active_stream_message: Option<String>,
     malformed_records: usize,
     oversized_records: usize,
+    permission_denials: PermissionDenials,
     pending: ProviderText,
 }
 
@@ -64,6 +72,7 @@ impl ClaudeTranscript {
             active_stream_message: None,
             malformed_records: 0,
             oversized_records: 0,
+            permission_denials: PermissionDenials::default(),
             pending: ProviderText::new(&redactions),
         }
     }
@@ -234,7 +243,7 @@ impl ClaudeTranscript {
             "stream_event" => self.parse_stream_event(object, emissions),
             "assistant" => self.parse_assistant(object, emissions),
             "rate_limit_event" => self.parse_rate_limit_event(object, emissions),
-            "result" => self.parse_result(object),
+            "result" => self.parse_result(object, emissions),
             _ => {}
         }
     }
@@ -437,7 +446,28 @@ impl ClaudeTranscript {
         }
     }
 
-    fn parse_result(&mut self, event: &serde_json::Map<String, Value>) {
+    /// Redacts before bounding so truncation cannot split a credential; one record per result.
+    fn report_permission_denials(
+        &mut self,
+        event: &serde_json::Map<String, Value>,
+        emissions: &mut Vec<ClaudeEmission>,
+    ) {
+        if let Some(summary) = self
+            .permission_denials
+            .summarize(event.get("permission_denials"))
+        {
+            let summary = bounded_log_text(self.pending.redact(&summary), LIVE_CHUNK_BYTES);
+            self.pending
+                .emit(emissions, LiveOutputStream::Error, &summary);
+        }
+    }
+
+    fn parse_result(
+        &mut self,
+        event: &serde_json::Map<String, Value>,
+        emissions: &mut Vec<ClaudeEmission>,
+    ) {
+        self.report_permission_denials(event, emissions);
         self.result_usage
             .record(event.get("model_usage_since_last_result"));
         self.provisional_usage = ProvisionalUsage::default();

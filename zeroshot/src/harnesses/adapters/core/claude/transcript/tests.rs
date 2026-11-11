@@ -535,6 +535,62 @@ fn every_record_is_read_and_the_last_result_is_authoritative() {
     assert_eq!(completed_response(decoded.attempt), json!("final"));
 }
 
+fn denied(mut result: Value, calls: &[(&str, &str)]) -> Value {
+    result["permission_denials"] = calls
+        .iter()
+        .map(|(id, tool)| json!({"tool_name":tool,"tool_use_id":id,"tool_input":{"secret":id}}))
+        .collect();
+    result
+}
+
+#[test]
+fn denied_calls_are_reported_once_per_process_and_never_decide_the_attempt() {
+    let mut bytes = Vec::new();
+    let first = success(json!("first"), "session-1");
+    append_event(
+        &mut bytes,
+        denied(first, &[("t1", "Write"), ("t2", "Bash"), ("t3", "Write")]),
+    );
+    // Claude Code lists each turn's own denials; a repeated call is still reported only once.
+    let last = success(json!("last"), "session-1");
+    append_event(&mut bytes, denied(last, &[("t1", "Write"), ("t4", "Edit")]));
+    append_event(
+        &mut bytes,
+        denied(success(json!("final"), "session-1"), &[]),
+    );
+
+    let decoded = decode(&bytes, 11, None);
+    assert_eq!(completed_response(decoded.attempt), json!("final"));
+    assert_eq!(
+        emitted(&decoded.emissions),
+        [
+            (
+                LiveOutputStream::Error,
+                "Claude Code denied permission for 3 tool calls: Write (2), Bash (1). Denied calls do not change the node's outcome."
+            ),
+            (
+                LiveOutputStream::Error,
+                "Claude Code denied permission for 1 tool call: Edit (1). Denied calls do not change the node's outcome."
+            ),
+        ]
+    );
+
+    let mut failed = Vec::new();
+    append_event(
+        &mut failed,
+        denied(
+            failure("authoritative failure", "session-1"),
+            &[("t1", "Bash")],
+        ),
+    );
+    let decoded = decode(&failed, failed.len(), None);
+    assert_eq!(decoded.emissions.len(), 1);
+    assert_eq!(
+        failed_attempt(decoded.attempt).diagnostic,
+        "authoritative failure"
+    );
+}
+
 #[test]
 fn subagents_claude_code_stopped_fail_the_result_they_were_missing_from() {
     let mut bytes = Vec::new();

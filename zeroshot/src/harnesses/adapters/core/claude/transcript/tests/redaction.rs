@@ -232,3 +232,20 @@ fn empty_assistant_blocks_do_not_accumulate_held_parts() {
         ]
     );
 }
+
+#[test]
+fn denied_tool_names_are_redacted_before_the_summary_is_bounded() {
+    let mut result = success(json!("done"), "session-1");
+    result["permission_denials"] = json!([{
+        "tool_name": format!("{VALUE}-").repeat(2_000),
+        "tool_use_id": "toolu_1",
+        "tool_input": {}
+    }]);
+    let emissions = push_events(&mut redacting(), vec![result]);
+    assert_eq!(emissions.len(), 1);
+    let summary = &emissions[0];
+    assert_eq!(summary.stream, LiveOutputStream::Error);
+    assert!(summary.text.len() <= LIVE_CHUNK_BYTES);
+    assert!(summary.text.contains("[REDACTED]-[REDACTED]"));
+    assert!(!summary.text.contains("sk-"), "{}", summary.text);
+}
