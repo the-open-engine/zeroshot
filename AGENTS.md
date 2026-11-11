@@ -779,10 +779,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
   milliseconds and remain unchanged across durable replay.
 - Each run records its executing Zeroshot version before preparation or dispatch logs; resumed
-  successors record their own build. Adapters log accepted CLI versions through the existing output
+  successors record their own build. The supervisor serializes version initialization across drive
+  and force-stop. Force-stop stops live work before version logging and request persistence, and
+  skips ledger reads once version initialization completes.
+  Adapters log accepted CLI versions through the existing output
   bridge once per run and lane when they read them; Claude serializes its initial version check
-  for each run even when ACP reuses the adapter. ACP records its build at run creation before
-  publishing the supervisor to cancellation.
+  for each run even when ACP reuses the adapter. After invocations drain, `NodeDriver::close_run`
+  releases that run's check state; lane routing forwards the hook to its adapters. ACP records its
+  build at run creation before publishing the supervisor to cancellation.
 - Runner start reserves an execution and returns its handle before asynchronous provider startup.
   Pending start waits are cancellable; accepted startup failures settle through the owned handle.
   Pending remote starts reread connection loss after a close notification so failed closure cannot
