@@ -114,7 +114,8 @@ impl Fixture {
                 command.env(name, value);
             }
         }
-        #[cfg(unix)]
+        // macOS lowers RLIMIT_STACK only from the main thread, and test spawns fork from another.
+        #[cfg(target_os = "linux")]
         {
             use std::os::unix::process::CommandExt;
 
