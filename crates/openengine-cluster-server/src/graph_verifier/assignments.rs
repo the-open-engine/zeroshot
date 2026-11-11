@@ -73,13 +73,6 @@ pub(super) struct DimensionInputs<'a, 'graph> {
     pub(super) execution_correlations: &'a BTreeMap<NodeName, MapExecutionCorrelation>,
 }
 
-pub(super) fn build_dimensions(
-    selectors: &[ControlSelector],
-    inputs: DimensionInputs<'_, '_>,
-) -> Option<Vec<Vec<Assignment>>> {
-    scoped::dimensions(selectors, inputs)
-}
-
 pub(super) fn enumerate_assignments(
     dimensions: Vec<Vec<Assignment>>,
     budget: &ProofWork,
@@ -126,6 +119,7 @@ mod retention;
 mod scoped;
 
 use aggregate::*;
+pub(super) use scoped::build_assignments;
 pub(super) use outcomes::*;
 pub(super) use retention::{
     retention_index, retention_guard, proof_group_domain, retained_selection_matches,

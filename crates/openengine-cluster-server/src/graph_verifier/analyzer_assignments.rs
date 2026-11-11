@@ -80,7 +80,7 @@ impl<'a> Analyzer<'a> {
             self.assignment_ceiling(path);
             return None;
         }
-        let Some(dimensions) = build_dimensions(
+        let Some(mut assignments) = build_assignments(
             &selectors,
             DimensionInputs {
                 count_limits: &count_limits,
@@ -92,10 +92,6 @@ impl<'a> Analyzer<'a> {
                 execution_correlations: &self.map_execution_correlations,
             },
         ) else {
-            self.assignment_ceiling(path);
-            return None;
-        };
-        let Some(mut assignments) = enumerate_assignments(dimensions, &self.proof_work) else {
             self.assignment_ceiling(path);
             return None;
         };

@@ -192,14 +192,16 @@ test('run concurrency drafts retain their document owner, bounds, and optional c
   assert.equal(drafts.pending(), false, 'explicit runtime replacement owns the new numeric value');
 });
 
-test('runtime draft checks and discard leave inspector numbers alone', () => {
-  const drafts = createNumericDrafts();
-  drafts.set({ node: 'worker', field: 'timeoutMs', text: '-', base: 1000 });
-  assert.equal(drafts.pending(['maxConcurrency', 'minProbability']), false);
-  drafts.set({ node: 'judge', field: 'minProbability', text: '.', base: 0.5 });
-  assert.equal(drafts.pending(['maxConcurrency', 'minProbability']), true);
-  drafts.clear(undefined, 'maxConcurrency');
-  drafts.clear(undefined, 'minProbability');
-  assert.equal(drafts.pending(['maxConcurrency', 'minProbability']), false);
-  assert.equal(drafts.pending(), true);
+test('runtime draft checks and discard leave inspector numbers alone', (t) => {
+  const inspector = createNumericDrafts();
+  const runtime = createNumericDrafts();
+  t.after(() => { inspector.clear(); runtime.clear(); });
+  inspector.set({ node: 'worker', field: 'timeoutMs', text: '-', base: 1000 });
+  assert.equal(runtime.pending(), false);
+  runtime.set({ node: 'judge', field: 'minProbability', text: '.', base: 0.5 });
+  assert.equal(runtime.pending(), true);
+  runtime.clear();
+  assert.equal(runtime.pending(), false);
+  assert.equal(inspector.pending(), true);
+  assert.equal(inspector.get('worker', 'timeoutMs')?.text, '-');
 });

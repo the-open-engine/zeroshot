@@ -331,7 +331,6 @@ export function parallelSiblingCandidates(document: Document, name: string): Gra
 }
 
 type ProtectionTerm = { conditions: unknown[]; errors: Set<string> };
-const errorAtom = (name: string, channel = 'error') => JSON.stringify([name, channel]);
 const canonical = (value: unknown): string =>
   JSON.stringify(value, (_, entry) =>
     entry && typeof entry === 'object' && !Array.isArray(entry)
@@ -384,7 +383,7 @@ function standardErrorAtoms(guard: any): Set<string> | undefined {
     canonical([...new Set(labels)].sort()) ===
       canonical(['crash', 'malformed', 'refusal', 'timeout'])
   )
-    return new Set([errorAtom(value.name)]);
+    return new Set([value.name]);
   return undefined;
 }
 
@@ -416,21 +415,21 @@ function continuationAllowsProtection(node: GraphNode, suffix: GraphNode[]): boo
       if (continues(branch.node))
         expected.push({
           conditions: [...prior, branch.when],
-          errors: new Set(workerNames(branch.node).map((name) => errorAtom(name))),
+          errors: new Set(workerNames(branch.node)),
         });
       prior.push({ kind: 'not', guard: branch.when });
     }
     if (node.otherwise && continues(node.otherwise))
       expected.push({
         conditions: prior,
-        errors: new Set(workerNames(node.otherwise).map((name) => errorAtom(name))),
+        errors: new Set(workerNames(node.otherwise)),
       });
   } else {
-    const errors = new Set(workerNames(node).map((name) => errorAtom(name)));
+    const errors = new Set(workerNames(node));
     expected.push({ conditions: [], errors });
   }
   expected.forEach((term) => {
-    term.errors.forEach((atom) => watched.add(JSON.parse(atom)[0]));
+    term.errors.forEach((name) => watched.add(name));
     term.conditions.flatMap(guardSources).forEach((name) => watched.add(name));
   });
   const first = suffix[0];

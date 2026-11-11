@@ -28,12 +28,7 @@ impl Engine<'_> {
                     .contains(&(selector.name.clone(), scope.to_vec()))
             })
         };
-        available.then(|| {
-            self.control_values(selector, context, indices)
-                .iter()
-                .filter(|value| labels.iter().any(|label| label.as_str() == *value))
-                .count() as u64
-        })
+        available.then(|| self.control_count(context, indices, (selector, labels)))
     }
 
     fn aggregate_owner_at_scope<'a>(
@@ -62,62 +57,19 @@ impl Engine<'_> {
         )
     }
 
-    pub(super) fn guard(
-        &self,
-        guard: &Guard,
-        context: &Context,
-        map_indices: &[u64],
-    ) -> Result<bool, ReducerError> {
-        match guard {
-            Guard::In { value, labels } => Ok(self
-                .control_values(value, context, map_indices)
-                .iter()
-                .any(|actual| labels.values().iter().any(|label| label.as_str() == actual))),
-            Guard::All { guards } => guards.as_slice().iter().try_fold(true, |matches, guard| {
-                Ok(matches && self.guard(guard, context, map_indices)?)
-            }),
-            Guard::Any { guards } => guards.as_slice().iter().try_fold(false, |matches, guard| {
-                Ok(matches || self.guard(guard, context, map_indices)?)
-            }),
-            Guard::Not { guard } => Ok(!self.guard(guard, context, map_indices)?),
-            Guard::KOfN {
-                count,
-                values,
-                labels,
-            } => Ok(values
-                .as_slice()
-                .iter()
-                .filter(|selector| {
-                    self.control_values(selector, context, map_indices)
-                        .iter()
-                        .any(|actual| labels.values().iter().any(|label| label.as_str() == actual))
-                })
-                .count() as u64
-                >= count.get()),
-            Guard::KOfMap {
-                count,
-                value,
-                labels,
-            } => Ok(self
-                .control_values(value, context, map_indices)
-                .iter()
-                .filter(|actual| {
-                    labels
-                        .values()
-                        .iter()
-                        .any(|label| label.as_str() == *actual)
-                })
-                .count() as u64
-                >= count.get()),
-        }
+    pub(super) fn guard(&self, guard: &Guard, context: &Context, map_indices: &[u64]) -> bool {
+        openengine_cluster_protocol::evaluate_partial_guard(guard, &|selector, labels, _| {
+            Some(self.control_count(context, map_indices, (selector, labels)))
+        }) == openengine_cluster_protocol::GuardTruth::True
     }
 
-    pub(super) fn control_values(
+    fn control_count(
         &self,
-        selector: &ControlSelector,
         context: &Context,
         map_indices: &[u64],
-    ) -> Vec<String> {
+        query: (&ControlSelector, &[EnumLabel]),
+    ) -> u64 {
+        let (selector, labels) = query;
         let depth = self.map_depths.get(&selector.name).copied().unwrap_or(0);
         let aggregate = depth > map_indices.len();
         context
@@ -135,8 +87,8 @@ impl Engine<'_> {
                             .is_some_and(|indices| key.map_indices == indices)
                     }
             })
-            .map(|(_, value)| value.clone())
-            .collect()
+            .filter(|(_, value)| labels.iter().any(|label| label.as_str() == *value))
+            .count() as u64
     }
 
     pub(super) fn set_control(&self, context: &mut Context, update: ControlUpdate<'_>) {
@@ -188,7 +140,7 @@ impl Engine<'_> {
         cutoff.reason
     }
 
-    pub(super) fn void_active_descendants(&mut self, node: &GraphNode, scope: VoidScope<'_>) {
+    pub(super) fn void_descendants(&mut self, node: &GraphNode, scope: VoidScope<'_>) {
         if scope.mode == EvalMode::Probe {
             return;
         }
@@ -204,6 +156,9 @@ impl Engine<'_> {
                         .occurrence
                         .map_indices
                         .starts_with(scope.map_indices)
+                    && scope.excluded_scope.is_none_or(|excluded| {
+                        !execution.occurrence.map_indices.starts_with(excluded)
+                    })
                     && !matches!(execution.state, DurableExecutionState::Settled { .. })
             })
             .map(|execution| {
@@ -218,46 +173,6 @@ impl Engine<'_> {
         for (_, execution, active) in losers {
             let reason = self.record_void_cutoff(execution, scope.cutoff, scope.reason);
             if active && scope.mode == EvalMode::Decide {
-                self.push_void_decision(execution, reason);
-            }
-        }
-    }
-
-    pub(super) fn void_map_losers(&mut self, body: &GraphNode, scope: MapVoidScope<'_>) {
-        if scope.common.mode == EvalMode::Probe {
-            return;
-        }
-        let descendants = descendant_names(body);
-        let mut losers = self
-            .executions
-            .iter()
-            .filter(|execution| {
-                self.consumed_executions.contains(&execution.execution)
-                    && execution.dispatch_position <= scope.common.cutoff
-                    && descendants.contains(&execution.occurrence.node)
-                    && execution
-                        .occurrence
-                        .map_indices
-                        .starts_with(scope.common.map_indices)
-                    && !execution
-                        .occurrence
-                        .map_indices
-                        .starts_with(scope.winner_scope)
-                    && !matches!(execution.state, DurableExecutionState::Settled { .. })
-            })
-            .map(|execution| {
-                (
-                    execution.dispatch_position,
-                    execution.execution,
-                    matches!(execution.state, DurableExecutionState::Active),
-                )
-            })
-            .collect::<Vec<_>>();
-        losers.sort_unstable();
-        for (_, execution, active) in losers {
-            let reason =
-                self.record_void_cutoff(execution, scope.common.cutoff, scope.common.reason);
-            if active && scope.common.mode == EvalMode::Decide {
                 self.push_void_decision(execution, reason);
             }
         }

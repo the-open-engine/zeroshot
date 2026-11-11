@@ -196,9 +196,7 @@ impl<'history> Engine<'history> {
             let converged = group
                 .until
                 .as_ref()
-                .map(|guard| self.guard(guard, &local, traversal.map_indices))
-                .transpose()?
-                .unwrap_or(false);
+                .is_some_and(|guard| self.guard(guard, &local, traversal.map_indices));
             if converged {
                 return self.finish_loop(LoopFinishRequest {
                     group,
@@ -584,6 +582,9 @@ impl<'history> Engine<'history> {
         node: &NodeName,
         traversal: Traversal<'_>,
     ) -> Result<bool, ReducerError> {
+        if traversal.cutoff != HistoryPosition::MAX {
+            return Ok(false);
+        }
         if !self.pending_leaf(node, traversal) {
             return Ok(false);
         }

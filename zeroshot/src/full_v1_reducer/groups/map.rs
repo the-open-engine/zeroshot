@@ -17,24 +17,24 @@ impl Engine<'_> {
             .as_array()
             .ok_or(ReducerError::InvalidDurableValue)?;
         let item_count = items.len();
+        let frontier = self.pending_frontier.clone();
         let checkpoint = self.trace_checkpoint();
-        let probes = self.evaluate_map_items(
-            MapItemsEvaluation {
-                evaluation: GroupEvaluation {
-                    group,
-                    context: &*context,
-                    traversal: Traversal {
-                        record_evidence: false,
-                        ..traversal
-                    },
+        let probes = self.evaluate_map_items(MapItemsEvaluation {
+            evaluation: GroupEvaluation {
+                group,
+                context: &*context,
+                traversal: Traversal {
+                    mode: EvalMode::Probe,
+                    record_evidence: false,
+                    ..traversal
                 },
-                items,
             },
-            EvalMode::Probe,
-        )?;
+            items,
+        })?;
         let probe_trace = self.take_trace_since(checkpoint);
         if let Some((terminal_index, terminal)) = earliest_terminal(&probes) {
-            if traversal.mode == EvalMode::Probe && !traversal.record_evidence {
+            self.pending_frontier = frontier;
+            if traversal.mode == EvalMode::Probe {
                 let scope = &probes[terminal_index].scope;
                 self.restore_trace(
                     probe_trace
@@ -57,22 +57,19 @@ impl Engine<'_> {
                 },
             );
         }
-        let results = if traversal.mode == EvalMode::Probe && !traversal.record_evidence {
+        let results = if traversal.mode == EvalMode::Probe {
             self.restore_trace(probe_trace)?;
             probes
         } else {
             drop(probes);
-            self.evaluate_map_items(
-                MapItemsEvaluation {
-                    evaluation: GroupEvaluation {
-                        group,
-                        context: &*context,
-                        traversal,
-                    },
-                    items,
+            self.evaluate_map_items(MapItemsEvaluation {
+                evaluation: GroupEvaluation {
+                    group,
+                    context: &*context,
+                    traversal,
                 },
-                traversal.mode,
-            )?
+                items,
+            })?
         };
         let pending = results.len() < item_count
             || results
@@ -111,7 +108,6 @@ impl Engine<'_> {
     fn evaluate_map_items(
         &mut self,
         evaluation: MapItemsEvaluation<'_>,
-        mode: EvalMode,
     ) -> Result<Vec<MapItemResult>, ReducerError> {
         let MapItemsEvaluation {
             evaluation:
@@ -147,7 +143,6 @@ impl Engine<'_> {
                 Traversal {
                     map_indices: &scope,
                     item: Some(item),
-                    mode,
                     ..traversal
                 },
             )?;
@@ -180,65 +175,52 @@ impl Engine<'_> {
             .get(selected.index)
             .ok_or(ReducerError::InconsistentHistory)?
             .scope;
-        // Replay every started item through the same terminal boundary. Their execution
-        // progress is independent of which item's values and controls survive.
+        if traversal.mode == EvalMode::Probe {
+            return Ok(selected.terminal);
+        }
+        // Discovery already selected the terminal prefix. Validate every started item once;
+        // only the selected item's values, diagnostics and public decisions survive.
         let window = Traversal {
             cutoff: selected.terminal.position().max(traversal.after),
             ..traversal
         };
-        let checkpoint = self.trace_checkpoint();
-        self.evaluate_map_items(
-            MapItemsEvaluation {
-                evaluation: GroupEvaluation {
-                    group,
-                    context,
-                    traversal: Traversal {
-                        mode: if traversal.mode == EvalMode::Probe {
-                            EvalMode::Probe
-                        } else {
-                            EvalMode::Replay
-                        },
-                        record_evidence: false,
-                        ..window
+        let mut terminal = selected.terminal;
+        for item in selected.probes {
+            let selected_item = &item.scope == terminal_scope;
+            let checkpoint = self.trace_checkpoint();
+            let mut local = context.clone();
+            let status = self.probe(
+                &group.body,
+                &mut local,
+                Traversal {
+                    map_indices: &item.scope,
+                    item: Some(&selected.items[item.scope[traversal.map_indices.len()] as usize]),
+                    mode: if selected_item {
+                        traversal.mode
+                    } else {
+                        EvalMode::Replay
                     },
+                    record_evidence: selected_item && traversal.record_evidence,
+                    ..window
                 },
-                items: selected.items,
-            },
-            if traversal.mode == EvalMode::Probe {
-                EvalMode::Probe
+            )?;
+            if !matches!(status, Status::Pending) {
+                self.confirm_work(&local, &group.name)?;
+            }
+            if selected_item {
+                terminal = status;
             } else {
-                EvalMode::Replay
-            },
-        )?;
-        drop(self.take_trace_since(checkpoint));
-        let mut terminal_context = context.clone();
-        let terminal = self.eval(
-            &group.body,
-            &mut terminal_context,
-            Traversal {
-                map_indices: terminal_scope,
-                item: Some(
-                    &selected.items[*terminal_scope
-                        .last()
-                        .ok_or(ReducerError::InconsistentHistory)?
-                        as usize],
-                ),
-                ..window
-            },
-        )?;
-        if traversal.mode != EvalMode::Probe {
-            self.confirm_work(&terminal_context, &group.name)?;
+                drop(self.take_trace_since(checkpoint));
+            }
         }
-        self.void_map_losers(
+        self.void_descendants(
             &group.body,
-            MapVoidScope {
-                common: VoidScope {
-                    map_indices: traversal.map_indices,
-                    cutoff: terminal.position(),
-                    reason: ExecutionVoidReason::MapTerminal,
-                    mode: traversal.mode,
-                },
-                winner_scope: terminal_scope,
+            VoidScope {
+                map_indices: traversal.map_indices,
+                cutoff: terminal.position(),
+                reason: ExecutionVoidReason::MapTerminal,
+                mode: traversal.mode,
+                excluded_scope: Some(terminal_scope),
             },
         );
         Ok(terminal)

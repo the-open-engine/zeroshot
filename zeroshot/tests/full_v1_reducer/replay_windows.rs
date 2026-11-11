@@ -452,3 +452,42 @@ async fn complete_history_replays_at_the_supported_visit_ceiling() {
             .any(|decision| matches!(decision, Decision::Dispatch { .. }))
     );
 }
+
+#[tokio::test]
+async fn a_discarded_retry_cannot_occupy_the_next_maps_ready_frontier() {
+    let state = window_empty();
+    let group = window_par(
+        "race",
+        &state,
+        vec![step("winner", 1), step("retry_loser", 2)],
+        json!({"kind":"any"}),
+    );
+    let mapped = json!({"kind":"map","name":"fresh_map","state":state,
+        "over":{"source":"state","path":["empty"]},"maxItems":1,
+        "promotedStatePaths":[],"body":step("fresh",1)});
+    let graph = window_graph(
+        &state,
+        window_seq("root", &state, vec![group, mapped, succeed("done")]),
+    )
+    .await;
+    let history = [
+        settled(
+            SettledSpec::new(1, 1, "winner").dispatched(1).position(4),
+            success(1),
+        ),
+        settled(
+            SettledSpec::new(2, 2, "retry_loser")
+                .dispatched(2)
+                .position(3),
+            WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash),
+        ),
+    ];
+    let reduction = window_run(&graph, &json!({"empty":[null]}), &history, 1).unwrap();
+    assert!(reduction.decisions.iter().any(|decision| matches!(decision,
+        Decision::Dispatch { occurrence, .. }
+            if occurrence.node.as_str() == "fresh" && occurrence.map_indices == [0])));
+    assert!(
+        !reduction.decisions.iter().any(|decision| matches!(decision,
+        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "retry_loser"))
+    );
+}

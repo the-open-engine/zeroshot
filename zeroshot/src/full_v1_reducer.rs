@@ -342,13 +342,10 @@ struct GroupControlUpdate<'a> {
     map_indices: &'a [u64],
 }
 
-struct MapVoidScope<'a> {
-    common: VoidScope<'a>,
-    winner_scope: &'a [u64],
-}
-
 struct VoidScope<'a> {
     map_indices: &'a [u64],
+    // A map terminal retains the selected item's subtree.
+    excluded_scope: Option<&'a [u64]>,
     cutoff: HistoryPosition,
     reason: ExecutionVoidReason,
     mode: EvalMode,

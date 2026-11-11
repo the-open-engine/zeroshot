@@ -90,18 +90,7 @@ impl<'a> Analyzer<'a> {
         branches: &[Effects],
         context: ParallelMergeContext<'_>,
     ) -> Effects {
-        if matches!(group.join, Join::First { .. }) {
-            return self.merge_first_parallel(
-                group,
-                branches,
-                ParallelMergeContext {
-                    incoming: context.incoming,
-                    path: context.path,
-                },
-            );
-        }
-        let join = &group.join;
-        let required = parallel_required_completions(join, branches.len());
+        let required = parallel_required_completions(&group.join, branches.len());
         if required > u64::try_from(branches.len()).unwrap_or(u64::MAX) {
             // Shape validation owns the invalid quorum diagnostic. Assume continuation so
             // terminal analysis does not cascade it into a misleading reachability error.
@@ -115,13 +104,11 @@ impl<'a> Analyzer<'a> {
         else {
             return self.unknown_parallel(context.path);
         };
+        let qualifying = correlation.retention().branches.clone();
         self.parallel_join_correlations
             .insert(group.name.clone(), correlation);
 
-        let predicates = branches
-            .iter()
-            .map(|branch| &branch.completion)
-            .collect::<Vec<_>>();
+        let predicates = qualifying.iter().collect::<Vec<_>>();
         let Some(assignments) = self
             .assignments_for_completion_predicates(&predicates, &with_field(context.path, "join"))
         else {
@@ -135,11 +122,11 @@ impl<'a> Analyzer<'a> {
         let scenarios = assignments
             .iter()
             .filter_map(|assignment| {
-                let completing = branches
+                let completing = qualifying
                     .iter()
                     .enumerate()
-                    .filter_map(|(index, branch)| {
-                        branch.completion.evaluate(assignment).then_some(index)
+                    .filter_map(|(index, predicate)| {
+                        predicate.evaluate(assignment).then_some(index)
                     })
                     .collect::<BTreeSet<_>>();
                 (u64::try_from(completing.len()).unwrap_or(u64::MAX) >= required)
@@ -148,62 +135,7 @@ impl<'a> Analyzer<'a> {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
-        let mut merged = merge_parallel_scenarios(branches, required, &scenarios);
-        if assignments.iter().any(|assignment| {
-            (branches
-                .iter()
-                .filter(|branch| branch.completion.evaluate(assignment))
-                .count() as u64)
-                < required
-        }) {
-            merged.exit_failed.insert(group.name.clone());
-        }
-        // Both reached and impossible joins return normally; controls retain success eligibility.
-        merged.falls_through = true;
-        merged.completion = CompletionPredicate::Always;
-        merged
-    }
-
-    fn merge_first_parallel(
-        &mut self,
-        group: &ParNode,
-        branches: &[Effects],
-        context: ParallelMergeContext<'_>,
-    ) -> Effects {
-        let Some(correlation) = self.correlation_for_effects(group, branches, context.incoming)
-        else {
-            return self.unknown_parallel(context.path);
-        };
-        let satisfiers = correlation.retention().branches.clone();
-        let satisfaction = CompletionPredicate::any(satisfiers.clone());
-        self.parallel_join_correlations
-            .insert(group.name.clone(), correlation);
-        let predicates = vec![&satisfaction];
-        let Some(assignments) = self
-            .assignments_for_completion_predicates(&predicates, &with_field(context.path, "join"))
-        else {
-            return Effects {
-                falls_through: true,
-                completion: CompletionPredicate::Always,
-                ..merge_parallel_scenarios(branches, 1, &[])
-            };
-        };
-        let scenarios = assignments
-            .iter()
-            .filter_map(|assignment| {
-                let satisfying = satisfiers
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, predicate)| {
-                        predicate.evaluate(assignment).then_some(index)
-                    })
-                    .collect::<BTreeSet<_>>();
-                (!satisfying.is_empty()).then_some(satisfying)
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        if scenarios.is_empty() {
+        if scenarios.is_empty() && matches!(group.join, Join::First { .. }) {
             emit_diagnostic!(
                 self,
                 GraphDiagnosticCode::InvalidGraphShape,
@@ -212,13 +144,17 @@ impl<'a> Analyzer<'a> {
                 vec![group.name.clone()]
             );
         }
-        let mut merged = merge_parallel_scenarios(branches, 1, &scenarios);
-        if assignments
-            .iter()
-            .any(|assignment| !satisfaction.evaluate(assignment))
-        {
+        let mut merged = merge_parallel_scenarios(branches, required, &scenarios);
+        if assignments.iter().any(|assignment| {
+            (qualifying
+                .iter()
+                .filter(|predicate| predicate.evaluate(assignment))
+                .count() as u64)
+                < required
+        }) {
             merged.exit_failed.insert(group.name.clone());
         }
+        // Both reached and impossible joins return normally; controls retain success eligibility.
         merged.falls_through = true;
         merged.completion = CompletionPredicate::Always;
         merged

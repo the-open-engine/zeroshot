@@ -1,7 +1,7 @@
 import type { EnvironmentDefinition } from './environment-store';
 import type { FailureContext } from './failure-context';
 import type { HistoryObservation } from './history-contract';
-import { allNodes, children, isGroup, pathTo, type Document, type GraphNode } from './domain';
+import { allNodes, children, executable, isGroup, pathTo, type Document, type GraphNode } from './domain';
 import {
   controlState,
   projectControlHistory,
@@ -314,41 +314,23 @@ export function projectHistory(
   }
   const nodes: Record<string, WorkflowNodeObservation> = Object.create(null);
   for (const node of allNodes(document.graph.root)) {
-    const descendants = new Set(allNodes(node).map((child) => child.name));
-    const executions = invocations.filter((invocation) => descendants.has(invocation.node));
-    // A settled descendant does not prove a group finished: more branches, map items or
-    // loop visits may follow. Only active descendants provide a current group observation.
-    // Structural terminal nodes have no dispatch record, so do not label them unreached.
-    if (isGroup(node)) {
-      if (executions.some((invocation) => invocation.state === 'running')) {
+    const visits = byControlNode.get(node.name) ?? [];
+    if (executable(node)) {
+      nodes[node.name] = leafObservation(
+        invocations.filter((invocation) => invocation.node === node.name),
+        visits
+      );
+    } else if (visits.length) {
+      nodes[node.name] = controlObservation(visits);
+    } else if (isGroup(node)) {
+      // Without a structural record, only active descendants establish a current group state.
+      const descendants = new Set(allNodes(node).map((child) => child.name));
+      const executions = invocations.filter((invocation) => descendants.has(invocation.node));
+      if (executions.some((invocation) => invocation.state === 'running'))
         nodes[node.name] = { state: 'running', count: executions.length };
-      } else if (executions.length) {
+      else if (executions.length)
         nodes[node.name] = { state: 'recorded', count: executions.length };
-      }
-      continue;
     }
-    if (!['step', 'verifier'].includes(node.kind)) continue;
-    nodes[node.name] = leafObservation(executions, byControlNode.get(node.name) ?? []);
-  }
-  for (const [name, visits] of byControlNode) {
-    const latest = new Map<string, (typeof controls)[number]>();
-    for (const visit of visits) latest.set(JSON.stringify(visit.mapIndices), visit);
-    const current = [...latest.values()];
-    const leaf = allNodes(document.graph.root).find((node) => node.name === name);
-    if (leaf && ['step', 'verifier'].includes(leaf.kind)) {
-      continue;
-    }
-    const states = new Set(current.map((visit) => controlState(visit.state)));
-    const state =
-      (['running', 'failed', 'skipped', 'recorded'] as const).find((next) => states.has(next)) ??
-      'succeeded';
-    const visit = current.reduce((a, b) => (a.updated > b.updated ? a : b));
-    nodes[name] = {
-      state,
-      count: visits.length,
-      countUnit: 'visit',
-      detail: visit.branch ? `Selected: ${humanize(visit.branch)}` : visit.detail,
-    };
   }
   if (terminal)
     nodes[document.graph.root.name] = {
@@ -514,6 +496,22 @@ export function observedRoutes(node: GraphNode, invocations: readonly Invocation
 
 export function descendantNames(node: GraphNode): Set<string> {
   return new Set([node.name, ...children(node).flatMap((child) => [...descendantNames(child)])]);
+}
+
+function controlObservation(visits: readonly ControlVisit[]): WorkflowNodeObservation {
+  const latest = new Map(visits.map((visit) => [JSON.stringify(visit.mapIndices), visit]));
+  const current = [...latest.values()];
+  const states = new Set(current.map((visit) => controlState(visit.state)));
+  const state =
+    (['running', 'failed', 'skipped', 'recorded'] as const).find((next) => states.has(next)) ??
+    'succeeded';
+  const visit = current.reduce((a, b) => (a.updated > b.updated ? a : b));
+  return {
+    state,
+    count: visits.length,
+    countUnit: 'visit',
+    detail: visit.branch ? `Selected: ${humanize(visit.branch)}` : visit.detail,
+  };
 }
 
 function leafObservation(

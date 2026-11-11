@@ -263,3 +263,36 @@ async fn queue_observation_is_bounded_independently_of_dispatch_and_keeps_item_l
             .any(|decision| matches!(decision, Decision::Dispatch { .. }))
     );
 }
+
+#[tokio::test]
+async fn nested_completed_joins_reuse_discovery_and_replay_each_branch_once() {
+    for join in [
+        json!({"kind":"all"}),
+        json!({"kind":"any"}),
+        json!({"kind":"quorum","count":2}),
+    ] {
+        let depth = 24_u64;
+        let mut nested = step("leaf_0", 1);
+        for level in 1..=depth {
+            nested = json!({"kind":"par","name":format!("nested_{level}"),
+                "state":{"kind":"record","fields":{}},
+                "branches":[nested,step(&format!("leaf_{level}"),1)],
+                "join":join,"promotedStatePaths":[]});
+        }
+        let graph = observed_graph(sequence("root", vec![nested, succeed("done")])).await;
+        let history = (0..=depth)
+            .map(|index| {
+                settled(
+                    SettledSpec::new(index + 1, index + 1, &format!("leaf_{index}"))
+                        .dispatched(index + 1)
+                        .position(depth + index + 2),
+                    success(1),
+                )
+            })
+            .collect::<Vec<_>>();
+        let observed = trace(&graph, &json!({}), &history);
+        assert_eq!(observed.len(), depth as usize + 2);
+        assert!(observed.iter().any(|record| record.node.as_str() == "done"
+            && record.state == StructuralTraceState::Succeeded));
+    }
+}

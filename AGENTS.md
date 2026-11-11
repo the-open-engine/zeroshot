@@ -192,10 +192,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
-  Shared three-valued guard evaluation preserves candidate-local first-join eligibility.
+  Shared short-circuiting three-valued guard evaluation preserves candidate-local first-join eligibility.
   Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
   branches on join settlement, consuming only executions owned by that visit window and preserving
   earlier cancellation causes. Later-round executions never belong to an earlier join's losers.
+  Read-only probes reuse discovered results. Settled parallel groups and terminal maps validate
+  each owned branch/item once through the actual cutoff; winners supply the same traversal's values.
+  Closed-window replay never contributes pending work; terminal maps discard their queued siblings.
   Static aggregate proofs check private qualification before exporting retained controls, clip only
   queried label classes at their own thresholds, and charge shared-guard expansion before allocation.
   Aggregate guards can use nested map facts when an enclosing map dominates their scope.

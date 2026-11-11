@@ -91,14 +91,14 @@ impl Engine<'_> {
                     .take_while(move |(occurrence, _)| {
                         occurrence.node == *name && occurrence.map_indices.starts_with(scope)
                     })
-                    .flat_map(|(_, executions)| executions.iter())
+                    .filter_map(|(_, executions)| executions.last())
             })
             .map(|execution| execution.dispatch_position)
             .max()
             .unwrap_or(HistoryPosition::ZERO)
     }
 
-    // Visit markers survive loop rounds; an old index alone is never current-round history.
+    // Only starts inside this visit window belong to the current map item.
     pub(super) fn item_has_history(
         &self,
         names: &BTreeSet<NodeName>,
@@ -117,11 +117,13 @@ impl Engine<'_> {
                     occurrence.node == *name && occurrence.map_indices.starts_with(scope)
                 })
                 .any(|(_, executions)| {
-                    executions.iter().any(|execution| {
-                        (traversal.after == HistoryPosition::ZERO
-                            || execution.dispatch_position > traversal.after)
-                            && execution.dispatch_position <= traversal.cutoff
-                    })
+                    let first = executions.partition_point(|execution| {
+                        traversal.after != HistoryPosition::ZERO
+                            && execution.dispatch_position <= traversal.after
+                    });
+                    executions
+                        .get(first)
+                        .is_some_and(|execution| execution.dispatch_position <= traversal.cutoff)
                 })
         })
     }

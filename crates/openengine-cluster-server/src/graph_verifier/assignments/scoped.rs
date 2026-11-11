@@ -9,10 +9,10 @@ struct ScopePlan<'a> {
     keys: BTreeSet<SelectorKey>,
 }
 
-pub(super) fn dimensions(
+pub(in crate::graph_verifier) fn build_assignments(
     selectors: &[ControlSelector],
     inputs: DimensionInputs<'_, '_>,
-) -> Option<Vec<Vec<Assignment>>> {
+) -> Option<Vec<Assignment>> {
     let mut plan = ScopePlan::default();
     for selector in selectors {
         inputs.budget.charge(
@@ -26,7 +26,7 @@ pub(super) fn dimensions(
         insert_key(&mut plan, &chain, key);
     }
     sort_maps(&mut plan, inputs);
-    Some(vec![scope_outcomes(&plan, inputs, &Assignment::new())?])
+    scope_outcomes(&plan, inputs, &Assignment::new())
 }
 
 fn map_chain<'a>(key: &SelectorKey, inputs: DimensionInputs<'_, 'a>) -> Vec<&'a MapNode> {

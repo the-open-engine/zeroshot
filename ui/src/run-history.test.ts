@@ -543,3 +543,22 @@ test('a queued retry and a stopped unstarted visit supersede prior attempts', ()
     'skipped'
   );
 });
+
+test('one node projection preserves structural details and authoritative leaf outcomes', () => {
+  const doc = document(sequence('run', {
+    kind: 'par', name: 'reviews', join: { kind: 'any' }, branches: [step('worker'), step('peer')],
+  }, { kind: 'succeed', name: 'done' }));
+  const history = events({ kind: 'run_started' }, start(), complete());
+  const projection = projectHistory(doc, history, 2, [
+    { cursor: 'v2:1', node: 'worker', mapIndices: [], visitId: 'worker', state: 'queued' },
+    { cursor: 'v2:2', node: 'reviews', mapIndices: [], visitId: 'reviews', state: 'entered' },
+    { cursor: 'v2:3', node: 'reviews', mapIndices: [], visitId: 'reviews', state: 'completed', detail: 'reached' },
+    { cursor: 'v2:3', node: 'done', mapIndices: [], visitId: 'done', state: 'succeeded', detail: 'Delivered' },
+  ]);
+  assert.equal(projection.nodes.worker.state, 'succeeded');
+  assert.equal(projection.nodes.worker.count, 1);
+  assert.equal(projection.nodes.worker.countUnit, undefined);
+  assert.deepEqual(projection.nodes.reviews, { state: 'recorded', count: 1, countUnit: 'visit', detail: 'reached' });
+  assert.deepEqual(projection.nodes.done, { state: 'succeeded', count: 1, countUnit: 'visit', detail: 'Delivered' });
+  assert.equal(projection.nodes.peer.state, 'idle');
+});
