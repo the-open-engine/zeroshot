@@ -2323,19 +2323,31 @@ selects the newest GitHub release for the current platform, verifies its archive
 against that release's <code>SHA256SUMS</code>, and verifies the new executable before replacing the old one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">zeroshot update</span>
 </code></pre></div>
-<p>The update does not elevate privileges; the current executable must be writable by the caller.
+<p>The update does not elevate privileges. Before downloading release assets for a newer version,
+it checks that the installation directory is writable. A current executable still reports
+<code>"updated":false</code> when that directory is unwritable; managed skills are refreshed separately.
 Updates of one installation replace it one at a time. An update that waited for another one and
 finds the same release already installed reports <code>"updated":false</code>. Before installing a newer
 release, an update also removes the files that interrupted updates left next to the executable.
 A download fails with a timeout once the server has sent nothing for 30 seconds; a slow download
 that keeps receiving data is never cut off. Failures name their cause, such as an unreachable or
 refusing proxy, an untrusted certificate, or GitHub's explanation of a rate limit.
+An unwritable installation or rejected archive ends with an npm reinstall command pinned to the
+release being installed. A release lookup refused with HTTP 403 or 429 instead names
+<code>npm install --global @the-open-engine-company/zeroshot@latest</code>, because no release version was
+resolved. The updater uses anonymous GitHub requests.
 Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, Pi, and Claude
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.</p>
 <p>Older updaters install only the skills they know. If <code>zeroshot-graph-design</code> or <code>zeroshot-plan</code> is
 missing after an executable upgrade, run <code>zeroshot update</code> again. The current updater refreshes all
 managed skills even when the executable version is already current.</p>
+<p>An in-place update of a writable npm installation is supported. It replaces the executables under
+the package's <code>bin/native</code> directory without changing <code>package.json</code> or npm's installation records.
+<code>npm list --global</code> therefore reports the npm package version originally installed, while
+<code>zeroshot --version</code> reports the updated executable. A later npm install uses its selected package
+version to replace the executables again. To synchronize npm's records with the CLI, reinstall the
+desired version with <code>npm install --global @the-open-engine-company/zeroshot@X.Y.Z</code>.</p>
 <h2 id="managed-skills">Managed skills<a class="headerlink" href="#managed-skills" title="Permanent link">&para;</a></h2>
 <p>The package installs the <code>zeroshot</code>, <code>zeroshot-memory-init</code>, <code>zeroshot-graph-design</code>, and
 <a href="../../guides/planning/"><code>zeroshot-plan</code></a> skills for Codex, GitHub Copilot, and Pi under
@@ -2396,7 +2408,7 @@ names contain the release version and target triple.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-10">10 November 2026</time>
+    Last updated <time datetime="2026-11-11">11 November 2026</time>
   </span>
 
     
