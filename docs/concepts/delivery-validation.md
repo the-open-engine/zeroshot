@@ -27,3 +27,81 @@ Forge confirmation remains authoritative: accepting or queuing a merge is not a 
 The published-stage notification precedes the first policy/status read, so a caller can durably record
 the actual PR even when a subsequent inspection fails. Terminal merged/closed observations settle before
 review-stage hooks or late feedback. A completed remote merge cannot become another repair.
+
+## Example
+
+This check runs the test suite on the exact candidate before it is pushed and again before the
+merge request, in a scratch copy so the checkout stays clean. It needs `jq`.
+
+```sh
+#!/bin/sh
+# Run the tests on the exact candidate in a scratch copy, so the checkout stays clean.
+# The check starts with only LANG=C, so it sets PATH and HOME itself.
+export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+export HOME=/Users/you # npm keeps its cache here
+
+request=$(cat)
+stage=$(printf '%s' "$request" | jq -r .stage)
+head=$(printf '%s' "$request" | jq -r .headRevision)
+
+case "$stage" in
+  publish | merge) ;;
+  *) echo '{"verdict":"accepted"}'; exit 0 ;;
+esac
+
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+git archive "$head" | tar -x -C "$scratch"
+if (cd "$scratch" && npm ci && npm test) >/dev/null 2>&1; then
+  echo '{"verdict":"accepted"}'
+else
+  jq -cn --arg head "$head" '{verdict: "repair",
+    reason: "npm test failed on \($head[0:7]). Run npm test in the checkout to see the failures."}'
+fi
+```
+
+Install it outside the checkout, private to you, and point zeroshot at it:
+
+```sh
+mkdir -p ~/.local/bin
+install -m 700 delivery-check.sh ~/.local/bin/zeroshot-delivery-check
+export ZEROSHOT_DELIVERY_CHECK_COMMAND="$HOME/.local/bin/zeroshot-delivery-check"
+```
+
+It receives a request like this on stdin:
+
+```json
+{
+  "kind": "openengine.delivery-validation/v1",
+  "stage": "publish",
+  "repository": "acme/shop",
+  "targetBranch": "main",
+  "headBranch": "zeroshot/run-4225",
+  "headRevision": "3412f26ed5fb9ed72c59b582de15fe6d5e2be7b2",
+  "tree": "8d1e5f0c4b2a7e9d3f6c1b0a5e8d2c7f4a9b3e6d",
+  "reviewBaseRevision": null,
+  "title": "Stop retried webhooks from booking twice",
+  "description": "Deduplicates webhook deliveries by event id before booking.",
+  "reviewId": null
+}
+```
+
+and prints exactly one of these verdicts:
+
+```json
+{"verdict": "accepted"}
+{"verdict": "pending"}
+{"verdict": "repair", "reason": "npm test failed on 3412f26. Run npm test in the checkout to see the failures."}
+{"verdict": "refused", "reason": "Changes under infra/ need a human owner."}
+```
+
+- The setting is one absolute path to an executable file outside the checkout, owned by you, with no
+  group or other permissions (`chmod 700`). It is not a shell command, takes no arguments and cannot
+  be a symlink.
+- The check runs in the checkout. On macOS and Linux its environment holds only `LANG=C`, so it sets
+  `PATH`, `HOME` and anything else it needs.
+- It prints one JSON object of at most 1 MiB and exits 0, including for `repair` and `refused`. A
+  non-zero exit, malformed JSON or an unknown field stops the execution.
+- A `reason` is non-empty, at most 8 KiB, with no control characters other than newline and tab.
+  Keep it public-safe.
+- An accepting check leaves the checkout clean and unchanged.

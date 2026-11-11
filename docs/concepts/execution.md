@@ -42,6 +42,13 @@ checks. `--validate-only` runs these checks without starting a run.
 Routes and conditions are structured data, not executable code or prompt instructions.
 The [graph contract](../reference/cluster/graph.md) defines their fields.
 
+## Which checks are deterministic
+
+Every `step` and `verifier` is an agent. The engine enforces the order, routes and retry limits,
+and the verdicts are model judgement. Deterministic checks sit outside the graph, in your CI and
+required checks, which delivery waits on and cannot override, and for local runs in a
+[delivery check command](delivery-validation.md) you own.
+
 ## How results choose the next step { #state-reduction-chooses-the-next-step }
 
 Each agent returns a value through its declared output channel. zeroshot validates that value,
