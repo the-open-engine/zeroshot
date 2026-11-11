@@ -163,6 +163,120 @@ async fn lost_creation_keeps_the_original_failure() {
     );
     assert_eq!(error.api_status(), None, "{text}");
     assert!(!error.retryable_operation(), "{text}");
+    assert!(!error.retryable_review_sync(), "{text}");
+}
+
+#[tokio::test]
+async fn only_missing_source_branch_validation_retries_creation_within_review_sync() {
+    for (body, retry) in [
+        (json!({"message":["source_branch does not exist"]}), true),
+        (json!({"message":"Source branch does not exist"}), true),
+        (
+            json!({"message":{"source_branch":["does not exist"]}}),
+            true,
+        ),
+        (json!({"message":{"title":["is too long"]}}), false),
+        (json!({"message":["target_branch does not exist"]}), false),
+        (
+            json!({"message":["source_branch does not exist", "title is too long"]}),
+            false,
+        ),
+        (
+            json!({"message":{"source_branch":["does not exist"],"title":["is too long"]}}),
+            false,
+        ),
+        (
+            json!({"message":"policy mentions source_branch does not exist"}),
+            false,
+        ),
+        (json!({"message":[]}), false),
+        (json!({"message":{"source_branch":[]}}), false),
+    ] {
+        let fixture = Fixture::new().await;
+        fixture.response(
+            "POST",
+            "/merge_requests",
+            (StatusCode::BAD_REQUEST, body.clone()),
+        );
+        let error = fixture
+            .authority
+            .open_or_update_review(&request(), credential())
+            .await
+            .unwrap_err();
+        assert_eq!(error.api_status(), Some(400), "{body}: {error}");
+        assert_eq!(error.retryable_review_sync(), retry, "{body}: {error}");
+        assert!(!error.retryable_operation(), "{body}: {error}");
+        if retry {
+            assert!(
+                error.to_string().contains(&request().head_branch),
+                "{error}"
+            );
+        }
+        assert_eq!(
+            error
+                .with_context("synchronizing review")
+                .retryable_review_sync(),
+            retry
+        );
+    }
+}
+
+#[tokio::test]
+async fn missing_branch_text_on_other_resources_does_not_enable_review_sync_retries() {
+    for (method, suffix) in [("GET", PROJECT), ("PUT", "/merge_requests/17")] {
+        let fixture = Fixture::new().await;
+        if method == "PUT" {
+            fixture.open_review();
+        }
+        fixture.response(
+            method,
+            suffix,
+            (
+                StatusCode::BAD_REQUEST,
+                json!({"message":["source_branch does not exist"]}),
+            ),
+        );
+        let mut request = request();
+        request.title = "Updated title".into();
+        let error = fixture
+            .authority
+            .open_or_update_review(&request, credential())
+            .await
+            .unwrap_err();
+        assert_eq!(error.api_status(), Some(400));
+        assert!(!error.retryable_review_sync(), "{error}");
+        assert!(!error.retryable_operation(), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn missing_branch_context_redacts_credentials() {
+    let fixture = Fixture::new().await;
+    let mut request = request();
+    request.head_branch = "test-private-token".into();
+    fixture.response(
+        "GET",
+        "/repository/branches/test-private-token",
+        (
+            StatusCode::OK,
+            json!({"name":request.head_branch,"commit":{"id":HEAD}}),
+        ),
+    );
+    fixture.response(
+        "POST",
+        "/merge_requests",
+        (
+            StatusCode::BAD_REQUEST,
+            json!({"message":["source_branch does not exist"]}),
+        ),
+    );
+    let error = fixture
+        .authority
+        .open_or_update_review(&request, credential())
+        .await
+        .unwrap_err();
+    assert!(error.retryable_review_sync(), "{error}");
+    assert!(!error.to_string().contains("test-private-token"), "{error}");
 }
 
 async fn rejected_resource(
