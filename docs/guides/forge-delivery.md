@@ -164,3 +164,8 @@ local content is preserved and returns to the review loop. Discovery checks ever
 branch before validating its target; retargeted or ambiguous reviews are refused rather than duplicated.
 GitLab briefly rechecks a lagging merge-request head against the branch ref. Persistent disagreement
 stops with both revisions in the diagnostic instead of polling indefinitely.
+
+If a worker rewrites local history after publication, delivery refuses further publication; list
+checkpoints with `zeroshot checkpoints RUN_ID`, then run
+`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` using a checkpoint taken before the rewrite
+to continue with the existing published branch and review.

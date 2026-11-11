@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{WorkerErrorCode, WorkerOutcome};
-use serde_json::json;
 
 use super::stateless::StatelessSession;
 
@@ -19,9 +18,7 @@ use crate::native_v2_capsule::provider_process::{
     LocalHarnessEnvironment, apply_execution_environment, current_process_environment,
     safe_provider_text, send_process_input,
 };
-use crate::native_v2_contract::{
-    NodeCompletion, NodeInvocation, NodeRuntimeBinding, parse_token_usage_delta,
-};
+use crate::native_v2_contract::{NodeCompletion, NodeInvocation, NodeRuntimeBinding, TokenUsageDelta};
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver,
     NodeResponseContract, NodeRunnerError, NodeSession, ResolvedEnvironment, SessionFactory,
@@ -342,11 +339,12 @@ impl NodeDriver for ScriptAdapter {
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         control
-            .record_token_usage(parse_token_usage_delta(
-                Some(&json!({"input_tokens": 0, "output_tokens": 0})),
-                None,
-                None,
-            ))
+            .record_token_usage(Some(TokenUsageDelta {
+                input_tokens: Default::default(),
+                output_tokens: Default::default(),
+                cache_read_input_tokens: Some(Default::default()),
+                cache_creation_input_tokens: Some(Default::default()),
+            }))
             .await?;
         let timer = super::timing::ExecutionTiming::start()?;
         let outcome = self.execute(&invocation, &control).await;

@@ -1,4 +1,4 @@
-//! The cause of a failed run that foreground `run` or `watch` followed.
+//! The cause of a failed run reported by foreground `run`, `watch`, or ACP.
 //!
 //! The follow keeps the structured context from the terminal status. Older runs without context
 //! fall back to durable error logs within a deadline and the caller's Ctrl-C signal.
@@ -82,7 +82,7 @@ impl RunFailure {
         &self.run_id
     }
 
-    pub(super) fn from_context(
+    pub(in crate::native_v2_cli) fn from_context(
         run_id: RunId,
         target: Option<&str>,
         context: (EnumLabel, Box<FailureContext>),

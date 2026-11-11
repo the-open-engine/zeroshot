@@ -26,7 +26,9 @@ use crate::native_v2_admission::{
 };
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_cli::local::{create_local_run_storage, local_workspace_lease_path};
-use crate::native_v2_cli::{default_local_state_root, LocalRunProfileStore, NativeV2CliError};
+use crate::native_v2_cli::{
+    default_local_state_root, LocalRunProfileStore, NativeV2CliError, RunFailure,
+};
 use crate::native_v2_platform::{submission_digest, NativeV2PlatformError};
 use crate::native_v2_contract::{AdmittedRun, NodeRuntimeBinding};
 use crate::native_v2_local::{
@@ -810,12 +812,21 @@ impl TurnResult {
                 raw_output: output,
                 stop_reason: acp::StopReason::EndTurn,
             }),
-            TerminalResult::Failed { reason, .. } => Ok(Self {
-                run_id,
-                raw_output: json!({ "failed": reason.as_str() }),
-                message: Some(format!("Zeroshot run failed: {}", reason.as_str())),
-                stop_reason: acp::StopReason::EndTurn,
-            }),
+            TerminalResult::Failed { reason, context } => {
+                let message = match context {
+                    Some(context) => {
+                        RunFailure::from_context(run_id.clone(), None, (reason.clone(), context))
+                            .to_string()
+                    }
+                    None => format!("Zeroshot run failed: {}", reason.as_str()),
+                };
+                Ok(Self {
+                    run_id,
+                    raw_output: json!({ "failed": reason.as_str() }),
+                    message: Some(message),
+                    stop_reason: acp::StopReason::EndTurn,
+                })
+            }
         }
     }
 

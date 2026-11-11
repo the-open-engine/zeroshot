@@ -1,6 +1,98 @@
 use super::*;
 
 #[tokio::test]
+async fn missing_source_branch_can_create_after_rechecking_the_published_head() {
+    let fixture = Fixture::new().await;
+    fixture.response(
+        "POST",
+        "/merge_requests",
+        (
+            StatusCode::BAD_REQUEST,
+            json!({"message":["source_branch does not exist"]}),
+        ),
+    );
+    let error = fixture
+        .authority
+        .open_or_update_review(&request(), credential())
+        .await
+        .unwrap_err();
+    assert!(error.retryable_review_sync(), "{error}");
+    fixture.state.lock().unwrap().responses.clear();
+    let observed = fixture
+        .authority
+        .open_or_update_review(&request(), credential())
+        .await
+        .unwrap();
+    assert_eq!(observed, receipt());
+    assert_eq!(fixture.writes("/merge_requests"), 2);
+    let state = fixture.state.lock().unwrap();
+    let calls: Vec<_> = state
+        .calls
+        .iter()
+        .filter_map(|(method, path, _)| {
+            if method == "POST" {
+                Some("create")
+            } else if path.ends_with("/repository/branches/zeroshot%2Ftest") {
+                Some("branch")
+            } else if path.ends_with("/merge_requests") {
+                Some("find")
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            "find", "branch", "create", "find", "find", "branch", "create"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn missing_source_branch_retry_refuses_a_changed_or_missing_published_head() {
+    for revision in [Some(MERGED), None] {
+        let fixture = Fixture::new().await;
+        fixture.response(
+            "POST",
+            "/merge_requests",
+            (
+                StatusCode::BAD_REQUEST,
+                json!({"message":["source_branch does not exist"]}),
+            ),
+        );
+        assert!(
+            fixture
+                .authority
+                .open_or_update_review(&request(), credential())
+                .await
+                .unwrap_err()
+                .retryable_review_sync()
+        );
+        fixture.state.lock().unwrap().responses.clear();
+        match revision {
+            Some(revision) => fixture.move_branch_to(revision),
+            None => fixture.response(
+                "GET",
+                "/repository/branches/zeroshot%2Ftest",
+                (StatusCode::NOT_FOUND, Value::Null),
+            ),
+        }
+        let error = fixture
+            .authority
+            .open_or_update_review(&request(), credential())
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("not the published candidate"),
+            "{error}"
+        );
+        assert!(!error.retryable_review_sync());
+        assert_eq!(fixture.writes("/merge_requests"), 1);
+    }
+}
+
+#[tokio::test]
 async fn explicit_create_rejection_releases_the_fence_but_ambiguous_failure_does_not() {
     let fixture = Fixture::new().await;
     fixture.response(
@@ -40,6 +132,49 @@ async fn explicit_create_rejection_releases_the_fence_but_ambiguous_failure_does
         .unwrap_err();
     assert!(error.to_string().contains("creation remains uncertain"));
     assert_eq!(fixture.writes("/merge_requests"), 2);
+}
+
+#[tokio::test]
+async fn server_errors_and_lost_creation_responses_never_authorize_another_post() {
+    for status in [
+        Some(StatusCode::INTERNAL_SERVER_ERROR),
+        Some(StatusCode::SERVICE_UNAVAILABLE),
+        None,
+    ] {
+        let fixture = Fixture::new().await;
+        if let Some(status) = status {
+            fixture.response(
+                "POST",
+                "/merge_requests",
+                (status, json!({"message":["source_branch does not exist"]})),
+            );
+        } else {
+            fixture.state.lock().unwrap().disconnect_create = true;
+        }
+        let error = fixture
+            .authority
+            .open_or_update_review(&request(), credential())
+            .await
+            .unwrap_err();
+        assert!(!error.retryable_review_sync(), "{error}");
+        assert!(!error.retryable_operation(), "{error}");
+        assert!(
+            error.to_string().contains("creation response was lost"),
+            "{error}"
+        );
+        fixture.state.lock().unwrap().responses.clear();
+        fixture.state.lock().unwrap().disconnect_create = false;
+        let error = fixture
+            .authority
+            .open_or_update_review(&request(), credential())
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("creation remains uncertain"),
+            "{error}"
+        );
+        assert_eq!(fixture.writes("/merge_requests"), 1);
+    }
 }
 
 #[tokio::test]
