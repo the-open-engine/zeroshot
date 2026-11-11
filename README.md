@@ -12,18 +12,16 @@
 npm install -g @the-open-engine-company/zeroshot
 ```
 
-Single agents have a reliability ceiling. As context grows and complexity compounds, requirements
-get buried, assumptions go unchallenged, and shortcuts start to accumulate. The agent will
-optimize for completion and lose track of what correctness requires.
+Do you still look at the code? We don't. We built zeroshot so we wouldn't have to.
 
-Independent, adversarial review fixes that, because a reviewer starts with fresh
-context and looks for reasons the work should fail. Rejection turns those failures into concrete
-repair tasks. Each revision faces renewed scrutiny, allowing the system to recover from mistakes
-that would otherwise survive all the way to “done.”
+One agent gets sloppy and biases itself as its context fills up. It forgets requirements, stops
+questioning its own assumptions, and calls it done. The agent that wrote the code shouldn't be
+the one that says it works.
 
-zeroshot is a multi-agent framework built around this cycle. Define your graph topology, choose
-your agents and models, and make independent approval a requirement for delivery. The engine
-enforces the process.
+So you draw your team's process as a graph (who writes, who reviews with fresh context, what must
+pass, where failures go back), pick the agent and model for each step, and the engine runs every
+task through it. Agents can't skip a step, and what happens after a review is up to the graph,
+not the agent.
 
 ## How it works
 
@@ -61,6 +59,13 @@ Save your graph as a [reusable profile](docs/zeroshot-cli.md#zeroshot-profile-se
 and run the same process across tasks.
 
 See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
+
+Why not a skill? A skill asks for a review, and the agent can skip it, whereas a zeroshot graph
+enforces it in code.
+
+Do loops work? Yes, even a simple one. In our benchmark, a build-and-check loop lifted a small
+model to a big model's score, at 58% of the cost. Just asking the agent to check its own work
+didn't help. [Read the study](https://zeroshot.sh/blog/review-loop/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot).
 
 ## Get started
 
