@@ -235,7 +235,10 @@ impl Api {
         }
         let resource = format!("{} {}", request.method, &url[..Position::AfterPath]);
         let creating_review = request.method == Method::POST
-            && matches!(request.segments, ["projects", _, "merge_requests"]);
+            && matches!(
+                request.path,
+                ApiPath::Rest(["projects", _, "merge_requests"])
+            );
         let mut builder = self
             .client
             .request(request.method, url)
