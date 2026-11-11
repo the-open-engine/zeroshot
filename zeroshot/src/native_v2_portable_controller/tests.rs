@@ -26,6 +26,8 @@ use crate::native_v2_runner::{NodeHandle, NodeRunRequest, NodeRunnerError};
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::v2_run_ledger::{CreateRun, CreateRunOutcome, RunLedger};
 
+#[path = "tests/delivery_cleanup.rs"]
+mod delivery_cleanup;
 #[path = "tests/primary_restart.rs"]
 mod primary_restart;
 
@@ -105,7 +107,9 @@ async fn runtime_cleanup_preserves_checkpoint_bytes_until_terminal_policy_runs()
             )
             .assert_value();
         }
-        cleanup.destroy_or_confirm_absent(exit).await.assert_value();
+        for _ in 0..2 {
+            cleanup.destroy_or_confirm_absent(exit).await.assert_value();
+        }
 
         let retained = matches!(
             exit,

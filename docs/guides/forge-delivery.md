@@ -124,6 +124,38 @@ reporting a merge. Comment retries reuse the original publication; captured MR s
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
 pipelines do not prove required CI for the captured head.
 
+Delivery checks unresolved review conversations before requesting merge. Human feedback requires
+fresh repository write/admin access on GitHub or active Developer-or-higher membership on GitLab.
+GitHub App bot feedback is authorized by GitHub's API actor type and stable identity on the bound
+repository when posted; removing the app later does not invalidate it. App actions attributed to a
+human follow that human's permission rule. Names, bot suffixes and comment text confer no authority.
+
+Authorized findings return through the existing worker and both reviewers. The worker supplies each
+addressed conversation's exact ID and revision, a disposition (`addressed` or `declined`) and a concise
+response. After both reviewers accept, trusted delivery posts the response and resolves only that
+unchanged conversation, then confirms resolution with the forge. Edits or new replies require
+reassessment. Forwarding a finding once never counts as resolving it. Unauthorized blocking
+conversations require a repository maintainer; delivery explains the blocker without dispatching
+repair or resolving it. Interrupted confirmation retains the exact reply receipt and approved
+revision: delivery rechecks resolved conversations too and confirms reopening any changed thread
+before repair can proceed. Failed receipt persistence or confirmation keeps resolution and merge blocked. Ignoring PR feedback suppresses
+automated repair and responses while retaining these conversation gates and all forge protections.
+Earlier verified conversation revisions remain checked during later repairs, including CI repairs
+whose worker returns no conversation responses.
+
+Trusted execution checkpoints preserve the exact reply and verified conversation revision across
+controller recovery, including when a later CI repair returns an empty response list. Restarting or
+rewinding graph work retains the latest owned conversation evidence, even with workspace
+snapshots disabled. Before resolving a conversation, delivery waits for durable acknowledgement of
+the exact reply and approved revision, then records confirmation as the effect settles. These receipts
+remain recoverable while delivery waits on CI or approvals. Delivery rechecks these retained conversations before feedback and merge
+admission. Recovery reconciles receipts acknowledged before a runtime or controller failure before
+starting a successor. Compact receipt storage is bounded across repair rounds; reaching its limit stops
+further automated replies and resolution with a maintainer intervention diagnostic.
+
+When a reviewed response is replayed after recovery, an unrecognized resolved revision requires
+reassessment through the same repair loop.
+
 The GitLab adapter makes slash-leading generated prose literal with a Markdown backslash escape,
 including endpoint descriptions such as `/health returns 200` and quick-action-looking text such as
 `/close`. Existing escapes remain unchanged. The same conservative escape applies to slash-leading

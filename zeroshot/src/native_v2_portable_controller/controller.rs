@@ -352,13 +352,12 @@ fn configure_workspace_checkpoints(
     bootstrap: &PortableControllerBootstrap,
     mut runtime: PortableRuntime,
 ) -> Result<PortableRuntime, PortableControllerError> {
-    runtime.checkpoints = None;
+    runtime.cleanup = Arc::new(PortableCheckpointCleanup {
+        inner: runtime.cleanup,
+        directory: prepared.paths.storage().join("checkpoints"),
+        repository: bootstrap.checkpoint_repository.clone(),
+    });
     if prepared.admitted.runtime.workspace_checkpoints {
-        runtime.cleanup = Arc::new(PortableCheckpointCleanup {
-            inner: runtime.cleanup,
-            directory: prepared.paths.storage().join("checkpoints"),
-            repository: bootstrap.checkpoint_repository.clone(),
-        });
         runtime.checkpoints = Some(Arc::new(
             crate::native_v2_supervisor::checkpoints::ResticCheckpointStore::new(
                 prepared.paths.storage().join("checkpoints"),
@@ -367,6 +366,12 @@ fn configure_workspace_checkpoints(
                 crate::native_v2_admission::writer_nodes(&prepared.admitted),
             )
             .map_err(|error| PortableControllerError::Io(error.0))?,
+        ));
+    } else {
+        runtime.checkpoints = Some(Arc::new(
+            crate::native_v2_supervisor::checkpoints::DeliveryCheckpointStore::new(
+                bootstrap.checkpoint_repository.clone(),
+            ),
         ));
     }
     Ok(runtime)

@@ -115,7 +115,7 @@ pub(super) fn accepted_review_history(delivery: TemplateDelivery) -> Vec<Durable
                 node_instance: 2,
                 node: "acceptance",
                 settled_at: 2,
-                input: json!({"task":"repair checkout","deliveryFeedback":""}),
+                input: json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]}),
             },
             ACCEPTED_LABEL,
             "requirements met",
@@ -143,7 +143,8 @@ pub(super) fn delivery_input() -> serde_json::Value {
     json!({
         "title": CHANGE_TITLE,
         "description": CHANGE_DESCRIPTION,
-        "issueNumber": "208"
+        "issueNumber": "208",
+        "reviewResponses": []
     })
 }
 
@@ -151,7 +152,8 @@ pub(super) fn repaired_delivery_input() -> serde_json::Value {
     json!({
         "title": REPAIRED_CHANGE_TITLE,
         "description": REPAIRED_CHANGE_DESCRIPTION,
-        "issueNumber": "208"
+        "issueNumber": "208",
+        "reviewResponses": []
     })
 }
 
@@ -172,7 +174,7 @@ pub(super) fn settled_agent(spec: SettledExecutionSpec<'_>) -> DurableExecution 
     settled_execution(
         spec,
         WorkerOutcome::Verified {
-            output: serde_json::Value::Null,
+            output: json!({"reviewResponses":[]}),
             artifacts: Vec::new(),
         },
     )
@@ -207,7 +209,7 @@ pub(super) fn settled_review(
             node_instance: execution,
             node,
             settled_at: execution,
-            input: json!({"task":"repair checkout","deliveryFeedback":""}),
+            input: json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]}),
         },
         verdict,
         diagnostic,
@@ -339,6 +341,7 @@ fn settled_execution(spec: SettledExecutionSpec<'_>, outcome: WorkerOutcome) -> 
         outcome,
     };
     DurableExecution {
+        delivery_state: None,
         dispatch_position,
         node_instance,
         execution,

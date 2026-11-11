@@ -79,6 +79,7 @@ impl<'a> ExecutionSpec<'a> {
 
 fn execution(spec: ExecutionSpec<'_>, outcome: WorkerOutcome) -> DurableExecution {
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(spec.settled_at - 1).assert_value(),
         node_instance: NodeInstanceId::new(spec.node_instance).assert_value(),
         execution: ExecutionId::new(spec.id).assert_value(),

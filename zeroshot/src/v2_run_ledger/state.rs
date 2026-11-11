@@ -117,6 +117,15 @@ fn apply_event_kind(
             },
             sequence,
         ),
+        RunEvent::DeliveryState { execution, state } => {
+            require_active_execution(snapshot, *execution)?;
+            let node = snapshot
+                .executions
+                .get_mut(execution)
+                .ok_or(RunLedgerError::InvalidEvent("unknown delivery execution"))?;
+            node.delivery_state = Some(state.clone());
+            Ok(())
+        }
         RunEvent::NodeCompleted { completion } => {
             apply_node_completed(snapshot, completion, sequence)
         }
@@ -207,6 +216,7 @@ fn apply_node_started(
     snapshot.executions.insert(
         reference.execution,
         NodeSnapshot {
+            delivery_state: None,
             reference: reference.clone(),
             occurrence: occurrence.clone(),
             attempt,

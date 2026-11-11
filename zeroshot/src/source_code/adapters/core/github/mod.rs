@@ -28,6 +28,7 @@ mod instance;
 pub(crate) use comment::{comment_destination, comment_destination_at, validate_comment_review_scope};
 pub(super) use comment::valid_github_permalink as valid_comment_permalink;
 mod conflict;
+pub(crate) mod conversations;
 mod feedback;
 mod metadata;
 mod observation;
@@ -73,6 +74,8 @@ pub struct GhCliDeliveryAuthority {
     operator_diagnostics: Option<OperatorDiagnosticReporter>,
     transport: Option<crate::native_v2_delivery::transport::GitTransport>,
     queue_effects: queue::QueueEffects,
+    resolutions: conversations::PendingResolutions,
+    published_replies: super::review_responses::PublishedReplies,
     base_url: openengine_cluster_protocol::SourceForgeBaseUrl,
     instance_verified: Arc<tokio::sync::OnceCell<()>>,
 }
@@ -91,6 +94,8 @@ impl GhCliDeliveryAuthority {
             operator_diagnostics: None,
             transport: None,
             queue_effects: queue::QueueEffects::default(),
+            resolutions: conversations::PendingResolutions::default(),
+            published_replies: super::review_responses::PublishedReplies::default(),
             base_url: openengine_cluster_protocol::SourceForgeBaseUrl::new("https://github.com")
                 .expect("static base URL"),
             instance_verified: Arc::new(tokio::sync::OnceCell::new()),
@@ -355,6 +360,19 @@ impl GhCliDeliveryAuthority {
             return Err(failure.clone());
         }
         let snapshot = self.policy_snapshot(review, credential).await?;
+        if !failure.authentication_failed()
+            && matches!(failure.api_status(), None | Some(405 | 409 | 422))
+            && failure
+                .to_string()
+                .contains("A conversation must be resolved")
+            && !matches!(
+                snapshot.state,
+                SourceReviewState::Merged { .. } | SourceReviewState::Closed
+            )
+            && conversations::has_blocker(self, review, credential).await?
+        {
+            return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+        }
         let permanent_response = !failure.retryable_operation();
         match snapshot.state {
             SourceReviewState::Merged { .. } => Ok(SourceMergeRequestOutcome::Accepted),
@@ -374,6 +392,19 @@ impl GhCliDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
+    async fn review_conversation_state(
+        &self,
+    ) -> Result<Option<serde_json::Value>, SourceDeliveryError> {
+        conversations::checkpoint(self).await
+    }
+
+    async fn restore_review_conversation_state(
+        &self,
+        state: serde_json::Value,
+    ) -> Result<(), SourceDeliveryError> {
+        conversations::restore(self, state).await
+    }
+
     fn review_links(
         &self,
         review: &SourceReviewReceipt,
@@ -458,11 +489,22 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
         feedback::inspect(self, review, credential).await
     }
 
+    async fn resolve_review_conversation(
+        &self,
+        request: crate::source_code_provider::SourceReviewResolutionRequest<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<crate::source_code_provider::SourceReviewResolution, SourceDeliveryError> {
+        conversations::resolve(self, request, credential).await
+    }
+
     async fn request_merge(
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
+        if conversations::reconcile_resolutions(self, review, credential).await? {
+            return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+        }
         let snapshot = self.policy_snapshot(review, credential).await?;
         let pull_request_id = snapshot.pull_request_id.clone();
         let queued = match merge_action(snapshot)? {

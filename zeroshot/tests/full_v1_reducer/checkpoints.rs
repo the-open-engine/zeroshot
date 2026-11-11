@@ -92,6 +92,7 @@ fn settle(
     for (node_instance, execution, occurrence, attempt, input) in dispatches.take(limit) {
         let position = u64::try_from(history.len()).assert_value() * 2 + 1;
         history.push(DurableExecution {
+            delivery_state: None,
             dispatch_position: HistoryPosition::new(position).assert_value(),
             node_instance: *node_instance,
             execution: *execution,

@@ -738,6 +738,7 @@ async fn protected_result_loop() -> VerifiedGraph {
 
 fn settled_round(id: u64, outcome: WorkerOutcome) -> DurableExecution {
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(id * 2 - 1).assert_value(),
         node_instance: NodeInstanceId::new(1).assert_value(),
         execution: ExecutionId::new(id).assert_value(),

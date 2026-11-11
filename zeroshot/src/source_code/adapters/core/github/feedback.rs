@@ -5,10 +5,12 @@ use super::*;
 
 const MAX_FEEDBACK_ITEMS: usize = 100_000;
 
-#[derive(Clone, Debug, Deserialize)]
-struct UserWire {
-    id: u64,
-    login: String,
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+pub(super) struct UserWire {
+    pub(super) id: u64,
+    pub(super) login: String,
+    #[serde(default, rename = "type")]
+    pub(super) kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -27,7 +29,7 @@ enum BasePermission {
     Admin,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 struct IssueCommentWire {
     id: u64,
     updated_at: String,
@@ -35,7 +37,7 @@ struct IssueCommentWire {
     body: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 struct ReviewWire {
     id: u64,
     state: String,
@@ -45,17 +47,17 @@ struct ReviewWire {
     body: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct ReviewCommentWire {
-    id: u64,
-    updated_at: String,
-    user: UserWire,
-    body: String,
-    path: Option<String>,
-    line: Option<u64>,
-    original_line: Option<u64>,
-    commit_id: Option<String>,
-    in_reply_to_id: Option<u64>,
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+pub(super) struct ReviewCommentWire {
+    pub(super) id: u64,
+    pub(super) updated_at: String,
+    pub(super) user: UserWire,
+    pub(super) body: String,
+    pub(super) path: Option<String>,
+    pub(super) line: Option<u64>,
+    pub(super) original_line: Option<u64>,
+    pub(super) commit_id: Option<String>,
+    pub(super) in_reply_to_id: Option<u64>,
 }
 
 struct FeedbackItemDraft<'a> {
@@ -71,6 +73,7 @@ pub(super) async fn inspect(
     review: &SourceReviewReceipt,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
+    super::conversations::reconcile_resolutions(authority, review, credential).await?;
     let before = authority.pull_request(review, credential).await?;
     require_review_identity(&before, review)?;
 
@@ -102,14 +105,23 @@ pub(super) async fn inspect(
     )
     .await?;
 
+    let threads =
+        super::conversations::read(authority, review, &review_comments, credential).await?;
     let mut permissions = BTreeMap::new();
     let mut items = Vec::new();
-    for (author, item) in collect_items(issue_comments, reviews, review_comments)? {
-        let allowed = match permissions.get(&author.id) {
+    for (author, item) in collect_items(
+        issue_comments,
+        reviews,
+        review_comments
+            .into_iter()
+            .filter(|comment| !threads.comment_ids.contains(&comment.id))
+            .collect(),
+    )? {
+        let allowed = match permissions.get(&(author.id, author.kind.clone())) {
             Some(allowed) => *allowed,
             None => {
                 let allowed = can_repair(authority, review, &author, credential).await?;
-                permissions.insert(author.id, allowed);
+                permissions.insert((author.id, author.kind.clone()), allowed);
                 allowed
             }
         };
@@ -124,10 +136,14 @@ pub(super) async fn inspect(
             .with_context("GitHub PR identity changed while feedback was paginated")
     })?;
 
-    Ok(SourceReviewFeedback { items })
+    items.extend(threads.items);
+    Ok(SourceReviewFeedback {
+        items,
+        conversations: threads.conversations,
+    })
 }
 
-async fn can_repair(
+pub(super) async fn can_repair(
     authority: &GhCliDeliveryAuthority,
     review: &SourceReviewReceipt,
     author: &UserWire,
@@ -137,6 +153,12 @@ async fn can_repair(
         return Err(SourceDeliveryError::identity(
             "GitHub feedback author is invalid",
         ));
+    }
+    // GitHub's authenticated Bot account type identifies app-installation actions.
+    // User-to-server app actions retain a User author and require fresh write permission.
+    // Posting on this bound repository proves the app's authority at publication time.
+    if author.kind.as_deref() == Some("Bot") {
+        return Ok(true);
     }
     let username: String = url::form_urlencoded::byte_serialize(author.login.as_bytes()).collect();
     let value = match authority
@@ -200,6 +222,14 @@ fn collect_items(
         let author = comment.user.clone();
         review_comment_item(comment).map(|item| (author, item))
     }));
+    for (author, item) in &mut items {
+        item.version = format!(
+            "{:x}",
+            Sha256::digest(
+                format!("{}\0{:?}\0{}", author.id, author.kind, item.version).as_bytes()
+            )
+        );
+    }
     items.sort_by(|left, right| left.1.key.cmp(&right.1.key));
     Ok(items)
 }
@@ -254,7 +284,7 @@ fn review_comment_item(comment: ReviewCommentWire) -> Option<SourceReviewFeedbac
     }))
 }
 
-async fn pages<T: serde::de::DeserializeOwned>(
+pub(super) async fn pages<T: serde::de::DeserializeOwned>(
     authority: &GhCliDeliveryAuthority,
     endpoint: String,
     credential: SourceDeliveryCredential<'_>,

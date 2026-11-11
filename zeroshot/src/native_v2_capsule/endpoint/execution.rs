@@ -45,6 +45,7 @@ struct LocalOutputContext<'a> {
 #[derive(Default)]
 pub(super) struct TerminalMetadata {
     known_usage: Option<TokenUsageDelta>,
+    delivery_state: Option<crate::native_v2_contract::DeliveryCheckpoint>,
     errors: Vec<CapsuleNodeEvent>,
     incomplete: bool,
     overflowed: bool,
@@ -64,6 +65,10 @@ impl TerminalMetadata {
 
     fn retain(&mut self, event: CapsuleNodeEvent) {
         let usage = match event {
+            CapsuleNodeEvent::DeliveryState { state } => {
+                self.delivery_state = Some(state);
+                return;
+            }
             CapsuleNodeEvent::TokenUsage { usage } => usage,
             event @ CapsuleNodeEvent::Output {
                 output:
@@ -118,7 +123,10 @@ impl TerminalMetadata {
         completion: Result<NodeCompletion, NodeRunnerError>,
     ) -> Vec<CapsuleNodeEvent> {
         let mut events = self.errors;
-        events.reserve(4);
+        events.reserve(5);
+        if let Some(state) = self.delivery_state {
+            events.push(CapsuleNodeEvent::DeliveryState { state });
+        }
         if let Some(usage) = self.known_usage {
             events.push(CapsuleNodeEvent::TokenUsage { usage: Some(usage) });
         }
@@ -251,6 +259,7 @@ async fn apply_local_output(
             output: output.into(),
             timestamp,
         },
+        DurableNodeEvent::DeliveryState(state) => CapsuleNodeEvent::DeliveryState { state },
         DurableNodeEvent::TokenUsage(usage) => CapsuleNodeEvent::TokenUsage { usage },
     };
     if *context.consumer_gone {
@@ -314,3 +323,36 @@ pub(super) async fn remove_endpoint_execution(
 #[cfg(test)]
 #[path = "execution/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_retains_latest_delivery_receipts_before_terminal_failure() {
+        let mut metadata = TerminalMetadata::default();
+        metadata.retain(CapsuleNodeEvent::DeliveryState {
+            state: crate::native_v2_runner::test_support::delivery_checkpoint(
+                serde_json::json!({"revision":"old"}),
+                1,
+            ),
+        });
+        let latest = crate::native_v2_runner::test_support::delivery_checkpoint(
+            serde_json::json!({"revision":"verified", "reply":7}),
+            2,
+        );
+        metadata.retain(CapsuleNodeEvent::DeliveryState {
+            state: latest.clone(),
+        });
+        let events = metadata.into_events(Err(NodeRunnerError::Cancelled));
+        assert_eq!(
+            events,
+            vec![
+                CapsuleNodeEvent::DeliveryState { state: latest },
+                CapsuleNodeEvent::Failed {
+                    failure: CapsuleNodeFailure::Cancelled
+                }
+            ]
+        );
+    }
+}

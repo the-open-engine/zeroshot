@@ -66,6 +66,7 @@ async fn boundary_contract_pre_cancelled_reservation_fails_without_starting_prov
     let (done, done_receiver) = watch::channel(false);
     let (cancel, _) = watch::channel(false);
     endpoint.state.lock().await.active.push(EndpointExecution {
+        delivery_ack: None,
         reference: reference.clone(),
         cancel,
         done: done_receiver,

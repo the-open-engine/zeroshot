@@ -6,6 +6,8 @@ use super::*;
 
 #[path = "ci_tests.rs"]
 mod ci_tests;
+#[path = "conversation_tests.rs"]
+mod conversation_tests;
 #[path = "feedback_tests.rs"]
 mod feedback_tests;
 #[path = "http_fixture.rs"]
@@ -29,6 +31,11 @@ struct StateData {
     note_pages: BTreeMap<u32, Vec<Value>>,
     note_headers: BTreeMap<u32, Vec<String>>,
     discussion_note: Value,
+    conversation: Option<Value>,
+    conversation_race: Option<String>,
+    confirmation_failures: usize,
+    lose_resolve_response: bool,
+    lose_reopen_response: bool,
     calls: Vec<(String, String, Value)>,
     lose_create: bool,
     disconnect_create: bool,
@@ -62,6 +69,11 @@ impl Fixture {
             note_pages: BTreeMap::new(),
             note_headers: BTreeMap::new(),
             discussion_note: note(1, "Please test the edge case."),
+            conversation: None,
+            conversation_race: None,
+            confirmation_failures: 0,
+            lose_resolve_response: false,
+            lose_reopen_response: false,
             calls: Vec::new(),
             lose_create: false,
             disconnect_create: false,
@@ -252,6 +264,9 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
         overridden_response(&state, &method, path).or_else(|| simple_response(&state, path))
     {
         return response;
+    }
+    if state.conversation.is_some() && path.contains("/discussions") {
+        return conversation_tests::conversation_response(&mut state, &method, path, body);
     }
     if path.ends_with("/merge_requests") {
         return list_or_create(&mut state, &method, body, query);

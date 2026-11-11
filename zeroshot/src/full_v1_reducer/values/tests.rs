@@ -77,6 +77,7 @@ fn execution(
     state: DurableExecutionState,
 ) -> DurableExecution {
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(dispatch_position).expect("valid position"),
         node_instance: NodeInstanceId::new(NODE_INSTANCE).expect("valid node instance"),
         execution: ExecutionId::new(execution).expect("valid execution"),

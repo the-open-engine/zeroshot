@@ -72,6 +72,19 @@ impl RecordingCheckpointStore {
 
 #[async_trait]
 impl RunCheckpointStore for RecordingCheckpointStore {
+    async fn retain_delivery_state(
+        &self,
+        _state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+
+    async fn delivery_state(
+        &self,
+    ) -> Result<Option<crate::native_v2_contract::DeliveryCheckpoint>, CheckpointError> {
+        Ok(None)
+    }
+
     async fn enter(
         &self,
         boundary: &ExecutionBoundary,

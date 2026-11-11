@@ -18,6 +18,7 @@ struct EndpointState {
 }
 
 struct EndpointExecution {
+    delivery_ack: Option<crate::native_v2_runner::DeliveryStateAcknowledgement>,
     reference: ExecutionRef,
     cancel: watch::Sender<bool>,
     done: watch::Receiver<bool>,
@@ -115,6 +116,16 @@ impl NativeCapsuleNodeEndpoint {
                 .await;
             return;
         };
+        {
+            let mut state = self.state.lock().await;
+            if let Some(entry) = state
+                .active
+                .iter_mut()
+                .find(|entry| entry.reference == reserved.reference)
+            {
+                entry.delivery_ack = Some(durable.delivery_acknowledgement());
+            }
+        }
         serve_local_execution(LocalExecutionTask {
             handle,
             durable,
@@ -193,6 +204,7 @@ impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
                 ));
             }
             state.active.push(EndpointExecution {
+                delivery_ack: None,
                 reference: reference.clone(),
                 cancel,
                 done,
@@ -214,6 +226,29 @@ impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
             receiver,
             terminal_receiver,
         ))
+    }
+
+    async fn acknowledge_delivery_state(
+        &self,
+        reference: &ExecutionRef,
+        generation: u64,
+    ) -> Result<(), CapsuleConnectionError> {
+        let state = self.state.lock().await;
+        if let Some(entry) = state
+            .active
+            .iter()
+            .find(|entry| entry.reference == *reference)
+        {
+            entry
+                .delivery_ack
+                .as_ref()
+                .ok_or(CapsuleConnectionError::Lost)?
+                .acknowledge(generation)
+                .map_err(|_| CapsuleConnectionError::Lost)?;
+        }
+        // Terminal metadata can arrive after cancellation has removed its execution.
+        // Such metadata has no waiting producer and cannot authorize further effects.
+        Ok(())
     }
 
     async fn cancel(&self, reference: &ExecutionRef) -> Result<(), CapsuleConnectionError> {

@@ -34,6 +34,7 @@ pub(super) fn request(run: &str, execution: u64) -> NodeRunRequest {
     };
     let environment = ResolvedEnvironment::exact(&binding, BTreeMap::new()).assert_value();
     NodeRunRequest {
+        delivery_state: None,
         dispatch: Default::default(),
         invocation: NodeInvocation {
             reference: ExecutionRef {
@@ -66,6 +67,7 @@ struct TestRunner {
 impl NodeRunner for TestRunner {
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {
         self.requests.lock().assert_value().push(request.clone());
+        let delivery_state = request.delivery_state;
         let reference = request.invocation.reference;
         let (handle, mut bridge) = remote_node_handle(reference.clone());
         let proceed = self.proceed.clone();
@@ -99,6 +101,9 @@ impl NodeRunner for TestRunner {
                         }))
                         .await
                         .assert_value();
+                    if let Some(state) = delivery_state {
+                        bridge.checkpoint_delivery_state(state).await.assert_value();
+                    }
                     bridge.finish(Ok(NodeCompletion {
                         reference,
                         outcome: WorkerOutcome::Verified {
@@ -136,6 +141,7 @@ async fn proxy_preserves_durable_live_and_normalized_completion() {
 
     let (durable_output, timestamp) = match durable.recv().await.assert_value() {
         DurableNodeEvent::Output { output, timestamp } => (output, timestamp),
+        DurableNodeEvent::DeliveryState(_) => panic!("unexpected delivery receipts"),
         DurableNodeEvent::TokenUsage(_) => None.assert_value(),
     };
     let live_output = live.recv().await.assert_value();
@@ -567,3 +573,48 @@ mod filesystem;
 mod start_close;
 
 use openengine_cluster_testkit::assertions::{AssertValue, AssertError};
+
+#[tokio::test]
+async fn private_capsule_roundtrip_preserves_delivery_checkpoint_state_without_live_output() {
+    let local = Arc::new(TestRunner::default());
+    let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(local.clone()));
+    let proxy = RemoteCapsuleNodeRunner::new(endpoint);
+    let state = crate::native_v2_runner::test_support::delivery_checkpoint(
+        json!({"github":[], "replies":[]}),
+        1,
+    );
+    let mut visit = request("delivery-receipts", 1);
+    visit.delivery_state = Some(state.clone());
+    let mut handle = proxy.start(visit).await.assert_value();
+    let mut durable = handle.take_initial_output().assert_value();
+    let mut live = handle.attach();
+    local.proceed.notify_one();
+    assert!(matches!(
+        durable.recv().await.assert_value(),
+        DurableNodeEvent::Output { .. }
+    ));
+    assert!(matches!(
+        durable.recv().await.assert_value(),
+        DurableNodeEvent::TokenUsage(_)
+    ));
+    assert_eq!(
+        durable.recv().await.assert_value(),
+        DurableNodeEvent::DeliveryState(state.clone())
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), handle.completion())
+            .await
+            .is_err(),
+        "capsule delivery must wait for durable host acknowledgement"
+    );
+    durable
+        .acknowledge_delivery_state(state.generation.get())
+        .unwrap();
+    handle.completion().await.assert_value();
+    assert_eq!(
+        local.requests.lock().assert_value()[0].delivery_state,
+        Some(state)
+    );
+    assert_eq!(live.recv().await.assert_value().text, "working");
+    assert!(live.recv().await.is_err());
+}

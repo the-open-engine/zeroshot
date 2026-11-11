@@ -620,7 +620,23 @@ pub(super) async fn merge(
             credential,
         )
         .await;
-    settle_merge(authority, (receipt, &project, &key), result)
+    let rejection = result.as_ref().err().cloned();
+    let settled = settle_merge(authority, (receipt, &project, &key), result);
+    if rejection
+        .as_ref()
+        .is_some_and(|error| matches!(error.api_status(), Some(405 | 409 | 422)))
+    {
+        let refreshed = authority.merge_request(receipt, credential).await?;
+        if refreshed.detailed_merge_status == "discussions_not_resolved"
+            && !feedback(authority, receipt, credential)
+                .await?
+                .conversations
+                .is_empty()
+        {
+            return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+        }
+    }
+    settled
 }
 
 fn settle_merge(
@@ -691,6 +707,15 @@ pub(super) async fn feedback(
     receipt: &SourceReviewReceipt,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
+    super::conversations::reconcile_resolutions(authority, receipt, credential).await?;
+    feedback_snapshot(authority, receipt, credential).await
+}
+
+pub(super) async fn feedback_snapshot(
+    authority: &GitLabDeliveryAuthority,
+    receipt: &SourceReviewReceipt,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<SourceReviewFeedback, SourceDeliveryError> {
     let review = authority.merge_request(receipt, credential).await?;
     let discussions: Vec<Discussion> = authority
         .api
@@ -707,10 +732,32 @@ pub(super) async fn feedback(
         .await?;
     let project = authority.project(&receipt.repository, credential).await?;
     let mut items = Vec::new();
+    let mut conversations = Vec::new();
     let mut permissions = BTreeMap::new();
     for discussion in discussions {
+        if discussion.id.is_empty() {
+            return Err(SourceDeliveryError::identity(
+                "GitLab returned an empty discussion ID",
+            ));
+        }
+        let unresolved = discussion
+            .notes
+            .iter()
+            .any(|note| note.resolvable && note.resolved == Some(false));
+        let resolvable = discussion.notes.iter().any(|note| note.resolvable);
+        let version = super::conversations::version(&discussion.notes, None)?;
+        let mut authorized = true;
+        let mut authorized_notes = Vec::new();
+        let mut body = String::new();
         for note in discussion.notes {
             super::comment::require_review_note_scope(&note, &review, project.id)?;
+            if authority.published_replies.matches(
+                receipt,
+                &discussion.id,
+                (note.id, &note.body),
+            )? {
+                continue;
+            }
             if !note.system && !note.body.trim().is_empty() {
                 let allowed = match permissions.get(&note.author.id) {
                     Some(allowed) => *allowed,
@@ -721,18 +768,44 @@ pub(super) async fn feedback(
                         allowed
                     }
                 };
-                if allowed {
+                authorized &= allowed;
+                if unresolved && allowed {
+                    authorized_notes.push(note.clone());
+                    body.push_str(&format!(
+                        "\nAuthor id={} note={}:\n{}\n",
+                        note.author.id, note.id, note.body
+                    ));
+                } else if allowed && !resolvable {
                     items.push(feedback_item(&discussion.id, note));
                 }
             }
         }
+        if unresolved {
+            if !body.trim().is_empty() {
+                items.push(SourceReviewFeedbackItem {
+                    key: format!("conversation:{}", discussion.id),
+                    version: super::conversations::version(&authorized_notes, None)?,
+                    author: "discussion participants".into(),
+                    location: Some(discussion.id.clone()),
+                    body,
+                });
+            }
+            conversations.push(SourceReviewConversation {
+                id: discussion.id,
+                version,
+                authorized,
+            });
+        }
     }
     authority.merge_request(receipt, credential).await?;
     items.sort_by(|a, b| a.key.cmp(&b.key));
-    Ok(SourceReviewFeedback { items })
+    Ok(SourceReviewFeedback {
+        items,
+        conversations,
+    })
 }
 
-async fn can_repair(
+pub(super) async fn can_repair(
     authority: &GitLabDeliveryAuthority,
     receipt: &SourceReviewReceipt,
     author: u64,

@@ -35,9 +35,22 @@ use filesystem::SnapshotId;
 #[error("workspace checkpoint is unavailable: {0}")]
 pub struct CheckpointError(#[from] pub std::io::Error);
 
-/// The supervisor calls this port only at an engine-defined boundary with no live executions.
+/// Workspace operations run only at an engine-defined boundary with no live executions.
+/// Delivery receipt retention is independent of workspace capture and graph history.
 #[async_trait]
 pub trait RunCheckpointStore: Send + Sync {
+    /// Reconcile acknowledged delivery facts before recovery, without capturing workspace bytes.
+    /// Reject conflicting generations and never replace a newer retained generation.
+    async fn retain_delivery_state(
+        &self,
+        state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), CheckpointError>;
+
+    /// Latest owned delivery facts across the recovery lineage, independent of selected history.
+    async fn delivery_state(
+        &self,
+    ) -> Result<Option<crate::native_v2_contract::DeliveryCheckpoint>, CheckpointError>;
+
     async fn enter(
         &self,
         boundary: &ExecutionBoundary,
@@ -49,6 +62,97 @@ pub trait RunCheckpointStore: Send + Sync {
     /// Best-effort post-terminal garbage collection. A failure must not change run truth.
     async fn discard(&self) -> Result<(), CheckpointError> {
         Ok(())
+    }
+}
+
+/// Recovery-lineage facts remain durable even when workspace snapshots are disabled.
+/// This store never discovers Restic or reads/copies workspace contents.
+pub(crate) struct DeliveryCheckpointStore {
+    repository: PathBuf,
+    lock: Mutex<()>,
+}
+
+impl DeliveryCheckpointStore {
+    #[must_use]
+    pub(crate) fn new(repository: PathBuf) -> Self {
+        Self {
+            repository,
+            lock: Mutex::new(()),
+        }
+    }
+
+    fn read(
+        &self,
+    ) -> Result<Option<crate::native_v2_contract::DeliveryCheckpoint>, CheckpointError> {
+        match catalog::read(&self.repository.join("delivery-state.json")) {
+            Ok(state) => Ok(Some(state)),
+            Err(CheckpointError(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn retain(
+        &self,
+        checkpoints: impl IntoIterator<Item = crate::native_v2_contract::DeliveryCheckpoint>,
+    ) -> Result<(), CheckpointError> {
+        let mut retained = self.read()?;
+        let original = retained.clone();
+        for checkpoint in checkpoints {
+            retained =
+                crate::native_v2_contract::DeliveryCheckpoint::latest(retained, Some(checkpoint))
+                    .map_err(catalog::invalid)?;
+        }
+        if retained != original
+            && let Some(retained) = retained
+        {
+            crate::execution::platform::private_directory(&self.repository)?;
+            catalog::write_atomic(&self.repository.join("delivery-state.json"), &retained)?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl RunCheckpointStore for DeliveryCheckpointStore {
+    async fn retain_delivery_state(
+        &self,
+        state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), CheckpointError> {
+        let _guard = self.lock.lock().await;
+        self.retain([state.clone()])
+    }
+
+    async fn delivery_state(
+        &self,
+    ) -> Result<Option<crate::native_v2_contract::DeliveryCheckpoint>, CheckpointError> {
+        let _guard = self.lock.lock().await;
+        self.read()
+    }
+
+    async fn enter(
+        &self,
+        _boundary: &ExecutionBoundary,
+        history: &[DurableExecution],
+    ) -> Result<(), CheckpointError> {
+        self.finish(history).await
+    }
+
+    async fn finish(&self, history: &[DurableExecution]) -> Result<(), CheckpointError> {
+        let _guard = self.lock.lock().await;
+        self.retain(
+            history
+                .iter()
+                .filter_map(|execution| execution.delivery_state.clone()),
+        )
+    }
+
+    async fn discard(&self) -> Result<(), CheckpointError> {
+        let _guard = self.lock.lock().await;
+        match std::fs::remove_file(self.repository.join("delivery-state.json")) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
@@ -178,6 +282,7 @@ pub struct ResticCheckpointStore {
     workspace: PathBuf,
     writers: BTreeSet<NodeName>,
     state: Arc<Mutex<CaptureState>>,
+    delivery: DeliveryCheckpointStore,
 }
 
 #[cfg(test)]
@@ -203,6 +308,7 @@ impl ResticCheckpointStore {
             restic::ResticProgram::fake(&repository)
         });
         Ok(Self {
+            delivery: DeliveryCheckpointStore::new(repository.clone()),
             directory,
             repository,
             program: program?,
@@ -215,6 +321,7 @@ impl ResticCheckpointStore {
     #[cfg(test)]
     pub(crate) fn with_program(config: ResticCheckpointStoreTestConfig) -> Self {
         Self {
+            delivery: DeliveryCheckpointStore::new(config.repository.clone()),
             directory: config.directory,
             repository: config.repository,
             program: config.program,
@@ -313,12 +420,26 @@ fn publish_storage_configuration(
 
 #[async_trait]
 impl RunCheckpointStore for ResticCheckpointStore {
+    async fn retain_delivery_state(
+        &self,
+        state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), CheckpointError> {
+        self.delivery.retain_delivery_state(state).await
+    }
+
+    async fn delivery_state(
+        &self,
+    ) -> Result<Option<crate::native_v2_contract::DeliveryCheckpoint>, CheckpointError> {
+        self.delivery.delivery_state().await
+    }
+
     async fn enter(
         &self,
         boundary: &ExecutionBoundary,
         history: &[DurableExecution],
     ) -> Result<(), CheckpointError> {
         let mut state = self.state.lock().await;
+        self.delivery.finish(history).await?;
         if state.boundary.as_ref() == Some(boundary) {
             return Ok(());
         }
@@ -340,6 +461,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
     async fn finish(&self, history: &[DurableExecution]) -> Result<(), CheckpointError> {
         let last_writer = self.last_writer(history)?;
         let mut state = self.state.lock().await;
+        self.delivery.finish(history).await?;
         let snapshot = self.capture_if_changed(&mut state, last_writer).await?;
         catalog::write_atomic(&self.directory.join("latest.json"), &snapshot)?;
         Ok(())

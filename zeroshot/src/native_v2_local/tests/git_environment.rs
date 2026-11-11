@@ -131,6 +131,7 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
         let binding = admitted.runtime.nodes().get(&name).assert_value().clone();
         let mut handle = runner
             .start(NodeRunRequest {
+                delivery_state: None,
                 dispatch: Default::default(),
                 environment: ResolvedEnvironment::exact(&binding, BTreeMap::new()).assert_value(),
                 invocation: NodeInvocation {

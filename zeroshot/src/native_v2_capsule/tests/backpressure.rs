@@ -325,6 +325,7 @@ async fn assert_ordered_cancelled_output(mut durable: DurableOutput) {
                 assert_eq!(output.text, outputs.to_string());
                 outputs += 1;
             }
+            DurableNodeEvent::DeliveryState(_) => panic!("unexpected delivery receipts"),
             DurableNodeEvent::TokenUsage(observed) => {
                 assert!(usage.is_none(), "terminal usage was duplicated");
                 usage = observed;

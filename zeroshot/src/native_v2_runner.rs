@@ -35,7 +35,7 @@ mod response;
 
 pub use handle::NodeHandle;
 pub use output::{AttachReceiveError, DurableOutput, LiveOutputSource, ReadOnlyAttach};
-pub(crate) use output::bounded_log_text;
+pub(crate) use output::{bounded_log_text, DeliveryStateAcknowledgement};
 use output::{DurableEventSender, durable_event_channel, durable_output_event};
 pub use response::{render_agent_prompt, NodeResponseContract};
 pub(crate) use response::ProviderSchemaDialect;
@@ -85,6 +85,8 @@ impl Default for NodeDispatchMetadata {
 
 #[derive(Clone, Debug)]
 pub struct NodeRunRequest {
+    /// Trusted provider state restored from the run's bound delivery authority.
+    pub delivery_state: Option<crate::native_v2_contract::DeliveryCheckpoint>,
     pub dispatch: NodeDispatchMetadata,
     pub invocation: NodeInvocation,
     pub environment: ResolvedEnvironment,
@@ -134,6 +136,7 @@ pub enum DurableNodeEvent {
         timestamp: UnixTimestampMillis,
     },
     TokenUsage(Option<TokenUsageDelta>),
+    DeliveryState(crate::native_v2_contract::DeliveryCheckpoint),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -247,14 +250,85 @@ impl DriverInvocation {
     }
 }
 
+#[derive(Default)]
+struct DeliveryPublication {
+    generation: u64,
+    acknowledged: Option<serde_json::Value>,
+}
+
 #[derive(Clone)]
 pub struct DriverControl {
+    delivery_publication: Arc<Mutex<DeliveryPublication>>,
+    delivery_state: Option<crate::native_v2_contract::DeliveryCheckpoint>,
     cancellation: watch::Receiver<bool>,
     live_output: broadcast::Sender<LiveOutput>,
     durable_output: DurableEventSender,
 }
 
 impl DriverControl {
+    pub(crate) fn delivery_state(&self) -> Option<&serde_json::Value> {
+        self.delivery_state
+            .as_ref()
+            .map(|checkpoint| &checkpoint.state)
+    }
+
+    /// Enqueue final metadata while cancellation cleanup continues draining output.
+    pub(crate) async fn record_delivery_state(
+        &self,
+        state: serde_json::Value,
+    ) -> Result<(), NodeRunnerError> {
+        self.publish_delivery_state(state, false).await
+    }
+
+    /// A forge effect may proceed only after the trusted ledger writer acknowledges this state.
+    pub(crate) async fn checkpoint_delivery_state(
+        &self,
+        state: serde_json::Value,
+    ) -> Result<(), NodeRunnerError> {
+        self.publish_delivery_state(state, true).await
+    }
+
+    async fn publish_delivery_state(
+        &self,
+        state: serde_json::Value,
+        wait: bool,
+    ) -> Result<(), NodeRunnerError> {
+        let mut publication = self.delivery_publication.lock().await;
+        if wait && self.is_cancelled() {
+            return Err(NodeRunnerError::Cancelled);
+        }
+        if wait && publication.acknowledged.as_ref() == Some(&state) {
+            return Ok(());
+        }
+        publication.generation = publication
+            .generation
+            .checked_add(1)
+            .ok_or(NodeRunnerError::Driver)?;
+        publication.acknowledged = None;
+        let acknowledged = wait.then(|| state.clone());
+        let checkpoint = crate::native_v2_contract::DeliveryCheckpoint {
+            generation: openengine_cluster_protocol::PositiveInteger::new(publication.generation)
+                .map_err(|_| NodeRunnerError::Driver)?,
+            state,
+        };
+        self.durable_output
+            .send_terminal(
+                DurableNodeEvent::DeliveryState(checkpoint),
+                self.cancellation.clone(),
+            )
+            .await?;
+        if wait {
+            let mut cancellation = self.cancellation.clone();
+            tokio::select! {
+                biased;
+                _ = wait_for_cancellation(&mut cancellation) => return Err(NodeRunnerError::Cancelled),
+                result = self.durable_output.wait_delivery_ack(publication.generation) => result?,
+            }
+            publication.acknowledged = acknowledged;
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         *self.cancellation.borrow()
@@ -596,6 +670,19 @@ async fn execute(
             .provider_session_slot(&task.request.invocation, task.provider_session_slot)?,
     };
     let control = DriverControl {
+        delivery_publication: Arc::new(Mutex::new(DeliveryPublication {
+            generation: task
+                .request
+                .delivery_state
+                .as_ref()
+                .map_or(0, |state| state.generation.get()),
+            acknowledged: task
+                .request
+                .delivery_state
+                .as_ref()
+                .map(|state| state.state.clone()),
+        })),
+        delivery_state: task.request.delivery_state,
         cancellation: task.cancellation.clone(),
         live_output: task.output,
         durable_output: task.durable_output,

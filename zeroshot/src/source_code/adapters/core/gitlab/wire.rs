@@ -157,7 +157,7 @@ impl MergeRequest {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 pub(super) struct Actor {
     pub id: u64,
 }
@@ -194,7 +194,8 @@ pub(super) enum MembershipState {
     Unreported,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+#[serde(remote = "Self")]
 pub(super) struct Note {
     pub id: u64,
     pub author: Actor,
@@ -212,6 +213,26 @@ pub(super) struct Note {
     pub position: Option<serde_json::Value>,
     #[serde(default)]
     pub resolved: Option<bool>,
+    #[serde(default)]
+    pub resolvable: bool,
+}
+
+impl<'de> serde::Deserialize<'de> for Note {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let note = Self::deserialize(deserializer)?;
+        if note.resolvable && note.resolved.is_none() {
+            return Err(serde::de::Error::custom(
+                "GitLab resolvable note has no resolution status",
+            ));
+        }
+        Ok(note)
+    }
+}
+
+impl serde::Serialize for Note {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

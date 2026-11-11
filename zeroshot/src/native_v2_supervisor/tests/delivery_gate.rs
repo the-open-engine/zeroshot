@@ -198,6 +198,7 @@ fn snapshot(
         snapshot.executions.insert(
             reference.execution,
             NodeSnapshot {
+                delivery_state: None,
                 failure_diagnostic: false,
                 reference: reference.clone(),
                 occurrence: StructuralOccurrence {
@@ -934,5 +935,78 @@ async fn repeated_delivery_uses_the_final_visit_and_never_falls_back_to_an_older
             recorded.delivery_receipt(),
             successful.then(|| last.clone())
         );
+    }
+}
+
+#[tokio::test]
+async fn only_git_delivery_can_record_trusted_checkpoint_receipts() {
+    use crate::v2_run_ledger::{RunLedger, RunEvent};
+    for node in ["worker", "deliver"] {
+        let run_id = RunId::new(format!("receipt-owner-{node}"));
+        let admitted = admitted_with_delivery().await;
+        let ledger = std::sync::Arc::new(super::FakeRunLedger::new());
+        ledger
+            .create_or_get(super::CreateRun {
+                run_id: run_id.clone(),
+                submission_key: IdempotencyKey::new(format!("receipt-owner-{node}")).assert_value(),
+                submission_digest: openengine_cluster_protocol::Sha256Digest::new("a".repeat(64))
+                    .assert_value(),
+                admitted,
+            })
+            .await
+            .assert_value();
+        let reference = ExecutionRef {
+            run_id: run_id.clone(),
+            node: NodeName::new(node).assert_value(),
+            node_instance: NodeInstanceId::new(1).assert_value(),
+            execution: ExecutionId::new(1).assert_value(),
+        };
+        ledger
+            .append(
+                &run_id,
+                vec![
+                    RunEvent::RunStarted,
+                    crate::native_v2_runner::test_support::node_started(&reference, Value::Null),
+                ],
+            )
+            .await
+            .assert_value();
+        let (mut handle, bridge) = crate::native_v2_runner::remote_node_handle(reference.clone());
+        let durable = handle.take_initial_output().assert_value();
+        let receipts = crate::native_v2_runner::test_support::delivery_checkpoint(
+            json!({"github":[], "replies":[]}),
+            1,
+        );
+        bridge
+            .record_delivery_state(receipts.clone())
+            .await
+            .assert_value();
+        bridge.finish(Ok(crate::native_v2_contract::NodeCompletion {
+            reference: reference.clone(),
+            outcome: WorkerOutcome::Verified {
+                output: Value::Null,
+                artifacts: Vec::new(),
+            },
+        }));
+        let result = super::super::bridge_durable_events(
+            ledger.clone(),
+            run_id.clone(),
+            reference.execution,
+            durable,
+        )
+        .await;
+        assert_eq!(result.is_ok(), node == "deliver");
+        let stored = ledger.get(&run_id).await.assert_value().assert_value();
+        let snapshot = stored
+            .snapshot
+            .executions
+            .get(&reference.execution)
+            .assert_value();
+        assert_eq!(
+            snapshot.delivery_state,
+            (node == "deliver").then_some(receipts)
+        );
+        assert!(!snapshot.failure_diagnostic);
+        handle.completion().await.assert_value();
     }
 }

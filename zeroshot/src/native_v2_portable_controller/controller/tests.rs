@@ -617,10 +617,37 @@ async fn workspace_checkpoint_store_follows_runtime_policy() {
         .assert_value()
         .runtime
         .assert_value();
-        assert_eq!(runtime.checkpoints.is_some(), enabled);
+        let store = runtime.checkpoints.as_ref().assert_value();
         if !enabled {
             assert!(!bootstrap.checkpoint_repository.exists());
             assert!(!prepared.paths.storage().join("checkpoints").exists());
+            let state = serde_json::json!({"owned":"verified conversation receipt"});
+            store
+                .finish(&crate::native_v2_runner::test_support::delivery_history(
+                    state.clone(),
+                ))
+                .await
+                .assert_value();
+            let recovered =
+                configure_workspace_checkpoints(&prepared, &bootstrap, runtime).assert_value();
+            assert_eq!(
+                recovered
+                    .checkpoints
+                    .assert_value()
+                    .delivery_state()
+                    .await
+                    .assert_value()
+                    .assert_value()
+                    .state,
+                state
+            );
+            assert!(!prepared.paths.storage().join("checkpoints").exists());
+            assert_eq!(
+                std::fs::read_dir(&bootstrap.checkpoint_repository)
+                    .assert_value()
+                    .count(),
+                1
+            );
         }
     }
 }

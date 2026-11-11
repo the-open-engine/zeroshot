@@ -138,6 +138,7 @@ async fn durable_output_records(label: &str, events: Vec<Value>) -> Vec<String> 
         loop {
             match output.recv().await {
                 Ok(DurableNodeEvent::Output { output, .. }) => records.push(output.text),
+                Ok(DurableNodeEvent::DeliveryState(_)) => panic!("unexpected delivery receipts"),
                 Ok(DurableNodeEvent::TokenUsage(_)) => {}
                 Err(_) => return records,
             }

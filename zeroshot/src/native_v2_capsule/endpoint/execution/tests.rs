@@ -151,11 +151,13 @@ async fn boundary_contract_completion_and_reservation_helpers_fail_closed_withou
     let state = Mutex::new(EndpointState {
         active: vec![
             EndpointExecution {
+                delivery_ack: None,
                 reference: reference.clone(),
                 cancel: first_cancel,
                 done: first_receiver,
             },
             EndpointExecution {
+                delivery_ack: None,
                 reference: reference.clone(),
                 cancel: second_cancel,
                 done: second_receiver,

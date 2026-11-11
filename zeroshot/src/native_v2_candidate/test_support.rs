@@ -110,6 +110,7 @@ impl NodeRequestFixture<'_> {
         let environment = ResolvedEnvironment::exact(&self.binding, self.environment)
             .assert_value_with("resolve test environment");
         NodeRunRequest {
+            delivery_state: None,
             dispatch: Default::default(),
             invocation: NodeInvocation {
                 reference: ExecutionRef {

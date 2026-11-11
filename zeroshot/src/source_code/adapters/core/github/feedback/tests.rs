@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 fn user(login: &str) -> UserWire {
     UserWire {
         id: 1,
+        kind: Some("User".to_owned()),
         login: login.to_owned(),
     }
 }
@@ -65,6 +66,7 @@ fn write_fixture(root: &Path, second_review_head: &str, pages: FeedbackPages) ->
            printf '%s\\n' \"$username\" >> \"$0.permission-calls\"\n\
            if [ -f \"$0.$username.error\" ]; then cat \"$0.$username.error\" >&2; exit 1; fi\n\
            cat \"$0.$username.permission\" ;;\n\
+         graphql) printf '%s\\n' {} ;;\n\
          *) exit 19 ;;\n\
          esac\n",
         shell_literal(&review_wire(HEAD).to_string()),
@@ -72,6 +74,10 @@ fn write_fixture(root: &Path, second_review_head: &str, pages: FeedbackPages) ->
         shell_literal(&pages.issue_comments.to_string()),
         shell_literal(&pages.reviews.to_string()),
         shell_literal(&pages.review_comments.to_string()),
+        shell_literal(&json!([{"data":{"repository":{"nameWithOwner":"acme/project","pullRequest":{
+            "number":17,"baseRefName":"main","headRefName":"zeroshot/v2-test","headRefOid":HEAD,
+            "reviewThreads":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}
+        }}}}]).to_string()),
     );
     write_executable(&program, source);
     for surface in [
@@ -106,7 +112,7 @@ fn all_surfaces(authors: &[(u64, &str)]) -> FeedbackPages {
     let mut reviews = Vec::new();
     let mut inline = Vec::new();
     for (id, login) in authors {
-        let user = json!({"id":id,"login":login,"type":"Bot"});
+        let user = json!({"id":id,"login":login,"type":"User"});
         issues.push(json!({
             "id":id*10,"updated_at":"one","user":user,"body":"Check the edge case.",
             "author_association":"MEMBER"
@@ -300,6 +306,7 @@ fn visible_feedback_surfaces_are_normalized_sorted_and_sanitized() {
     )
     .assert_value();
     let feedback = SourceReviewFeedback {
+        conversations: Vec::new(),
         items: items.into_iter().map(|(_, item)| item).collect(),
     };
 
@@ -441,4 +448,44 @@ async fn feedback_pagination_rejects_malformed_pages_and_identity_changes() {
     assert!(matches!(malformed, SourceDeliveryError::Api(_)));
     assert!(!malformed.retryable_operation());
     assert!(malformed.to_string().contains("expected a sequence"));
+}
+
+#[tokio::test]
+async fn app_bot_actions_on_every_surface_are_authorized_without_current_installation_or_permission()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let mut pages = all_surfaces(&[(71, "app-without-a-bot-suffix")]);
+    for surface in [
+        &mut pages.issue_comments,
+        &mut pages.reviews,
+        &mut pages.review_comments,
+    ] {
+        for entry in surface
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .flat_map(|page| page.as_array_mut().unwrap())
+        {
+            entry["user"]["type"] = json!("Bot");
+        }
+    }
+    let program = write_fixture(root.path(), HEAD, pages);
+    // Any permission or installation lookup is a fixture failure.
+    std::fs::write(
+        format!("{}.app-without-a-bot-suffix.error", program.display()),
+        "gh: Not Found (HTTP 404)\n",
+    )
+    .unwrap();
+    let authority = authority(program.clone(), root.path());
+    for _ in 0..2 {
+        let feedback = inspect(
+            &authority,
+            &receipt(),
+            SourceDeliveryCredential::token("test-token"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(feedback.items.len(), 5);
+    }
+    assert!(!std::path::Path::new(&format!("{}.permission-calls", program.display())).exists());
 }

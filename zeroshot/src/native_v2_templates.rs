@@ -102,10 +102,14 @@ fn software_worker(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTempl
              upstream changes. sourceRevision is original provenance, reviewBaseRevision the \
              captured target. Do not restore files merely to match sourceRevision. Run relevant \
              checks after repairs. Delivery owns remote publication; do not push branches or weaken \
-             forge restrictions.",
+             forge restrictions. For each delivery conversation you address, return reviewResponses with \
+             its exact threadId and version, disposition addressed or declined, and a concise response \
+             explaining the fix or reason. Return an empty array when no conversation was addressed. \
+             Both independent reviewers verify these responses before trusted delivery posts them and \
+             resolves those exact unchanged threads. Never resolve threads yourself.",
         )?),
         input: software_worker_input_type(delivery)?,
-        output: PayloadType::Null,
+        output: software_worker_output_type()?,
         input_bindings: [
             TASK_FIELD,
             PHASE_FIELD,
@@ -116,7 +120,11 @@ fn software_worker(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTempl
         .into_iter()
         .map(|field| state_input(field, field))
         .collect::<Result<_, _>>()?,
-        write_bindings: Vec::new(),
+        write_bindings: vec![output_write(
+            "worker",
+            "reviewResponses",
+            "reviewResponses",
+        )?],
         timeout_ms: None,
         attempts: positive(1)?,
     }))
@@ -238,7 +246,7 @@ fn parallel_reviewers(
             "Verify the change independently against the user's request and observable behavior. \
              Try to run the repository's pre-commit checks and report the results. \
              Reject repairs that publish outside delivery or weaken forge restrictions. \
-             When delivery feedback is present, verify that the repair addresses it. \
+             When delivery feedback is present, verify that the repair addresses it and independently verify every reviewResponses disposition, response, thread identity and version before accepting. \
              Accept only with concrete evidence; otherwise return actionable feedback. Provide \
              an accurate, informative prospective pull request title and description for the \
              complete change under review regardless of the verdict. Follow the repository's pull \
@@ -251,7 +259,7 @@ fn parallel_reviewers(
             "Verify the change independently against the user's request and observable behavior. \
              Try to run the repository's pre-commit checks and report the results. \
              Reject repairs that publish outside delivery or weaken forge restrictions. \
-             When delivery feedback is present, verify that the repair addresses it. \
+             When delivery feedback is present, verify that the repair addresses it and independently verify every reviewResponses disposition, response, thread identity and version before accepting. \
              Accept only with concrete evidence; otherwise return actionable feedback."
         },
         feedback_target: ACCEPTANCE_FEEDBACK_FIELD,
@@ -270,7 +278,7 @@ fn parallel_reviewers(
              Reject repairs that publish outside delivery or weaken forge restrictions. \
              Do not reject for style-only preferences. \
              When delivery feedback is present, verify that the repair \
-             addresses it. Return actionable feedback when rejecting.",
+             addresses it. Independently verify every reviewResponses disposition, response, thread identity and version before accepting. Return actionable feedback when rejecting.",
         feedback_target: CODE_FEEDBACK_FIELD,
         output: PayloadType::Null,
         write_bindings: Vec::new(),
@@ -320,6 +328,7 @@ fn review_verifier(spec: ReviewVerifierSpec<'_>) -> Result<GraphNode, BuiltinTem
         input_bindings: vec![
             state_input(TASK_FIELD, TASK_FIELD)?,
             state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
+            state_input("reviewResponses", "reviewResponses")?,
         ],
         write_bindings,
         timeout_ms: None,
@@ -473,6 +482,7 @@ fn named_delivery_node(name: &str, mode: DeliveryMode) -> Result<GraphNode, Buil
             state_input(TITLE_FIELD, TITLE_FIELD)?,
             state_input(DESCRIPTION_FIELD, DESCRIPTION_FIELD)?,
             state_input(ISSUE_NUMBER_FIELD, ISSUE_NUMBER_FIELD)?,
+            state_input("reviewResponses", "reviewResponses")?,
         ],
         write_bindings,
         timeout_ms: None,

@@ -8,6 +8,7 @@ use crate::source_code_provider::*;
 
 mod api;
 mod comment;
+mod conversations;
 mod review;
 mod wire;
 
@@ -28,6 +29,8 @@ pub struct GitLabDeliveryAuthority {
     // Retain validated identity for links; every API operation reads fresh project policy.
     projects: Arc<Mutex<BTreeMap<String, Project>>>,
     effects: Arc<Mutex<Effects>>,
+    resolutions: conversations::PendingResolutions,
+    published_replies: super::review_responses::PublishedReplies,
 }
 
 #[derive(Default)]
@@ -57,6 +60,8 @@ impl GitLabDeliveryAuthority {
             transport,
             projects: Arc::new(Mutex::new(BTreeMap::new())),
             effects: Arc::new(Mutex::new(Effects::default())),
+            resolutions: conversations::PendingResolutions::default(),
+            published_replies: super::review_responses::PublishedReplies::default(),
         })
     }
 
@@ -138,6 +143,19 @@ impl GitLabDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
+    async fn review_conversation_state(
+        &self,
+    ) -> Result<Option<serde_json::Value>, SourceDeliveryError> {
+        conversations::checkpoint(self).await
+    }
+
+    async fn restore_review_conversation_state(
+        &self,
+        state: serde_json::Value,
+    ) -> Result<(), SourceDeliveryError> {
+        conversations::restore(self, state).await
+    }
+
     fn prepare_commit_message(&self, title: &str) -> String {
         review::normalized_title(title).0
     }
@@ -213,11 +231,22 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         review::feedback(self, receipt, credential).await
     }
 
+    async fn resolve_review_conversation(
+        &self,
+        request: crate::source_code_provider::SourceReviewResolutionRequest<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<crate::source_code_provider::SourceReviewResolution, SourceDeliveryError> {
+        conversations::resolve(self, request, credential).await
+    }
+
     async fn request_merge(
         &self,
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
+        if conversations::reconcile_resolutions(self, receipt, credential).await? {
+            return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+        }
         review::merge(self, receipt, credential).await
     }
 

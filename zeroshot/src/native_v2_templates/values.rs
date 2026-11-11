@@ -120,11 +120,21 @@ pub(super) fn delivery_input_type() -> Result<PayloadType, BuiltinTemplateError>
         (TITLE_FIELD, PayloadType::String, true),
         (DESCRIPTION_FIELD, PayloadType::String, true),
         (ISSUE_NUMBER_FIELD, PayloadType::String, false),
+        ("reviewResponses", review_responses_type()?, false),
     ])
+}
+
+pub(super) fn review_responses_type() -> Result<PayloadType, BuiltinTemplateError> {
+    static_value(crate::native_v2_delivery::contract::review_responses_schema())
+}
+
+pub(super) fn software_worker_output_type() -> Result<PayloadType, BuiltinTemplateError> {
+    record_type(vec![("reviewResponses", review_responses_type()?, true)])
 }
 
 pub(super) fn review_input_type() -> Result<PayloadType, BuiltinTemplateError> {
     record_type(vec![
+        ("reviewResponses", review_responses_type()?, true),
         (TASK_FIELD, PayloadType::String, true),
         (DELIVERY_FEEDBACK_FIELD, PayloadType::String, true),
     ])
@@ -154,6 +164,10 @@ pub(super) fn software_state(
     delivery: TemplateDelivery,
 ) -> Result<PayloadType, BuiltinTemplateError> {
     let mut fields = BTreeMap::from([
+        (
+            field_name("reviewResponses")?,
+            required(review_responses_type()?),
+        ),
         (field_name(TASK_FIELD)?, required(PayloadType::String)),
         (field_name(PHASE_FIELD)?, required(phase_type(delivery)?)),
         (
@@ -185,6 +199,10 @@ pub(super) fn add_delivery_state_fields(
     fields: &mut BTreeMap<FieldName, RecordField>,
     mode: DeliveryMode,
 ) -> Result<(), BuiltinTemplateError> {
+    fields.insert(
+        field_name("reviewResponses")?,
+        required(review_responses_type()?),
+    );
     fields.insert(field_name(TITLE_FIELD)?, required(PayloadType::String));
     fields.insert(
         field_name(DESCRIPTION_FIELD)?,

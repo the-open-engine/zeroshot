@@ -344,3 +344,59 @@ async fn review_observation_and_queue_submission_do_not_read_direct_merge_policy
         }
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn conversation_merge_rejection_race_refreshes_blockers_without_masking_other_failures() {
+    use super::super::conversations::test_support::{fixture, save, state};
+    let root = tempfile::tempdir().unwrap();
+    let program = fixture(root.path(), &review(), "Bot");
+    let mut data = state(&program);
+    let mut policy = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    policy["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
+    data["policy"] = policy;
+    data["threads"][0]["resolved"] = json!(true);
+    save(&program, &data);
+    let provider = authority(program.clone(), root.path());
+    let credential = SourceDeliveryCredential::token("test-token");
+    assert!(
+        provider
+            .inspect_review_feedback(&review(), credential)
+            .await
+            .unwrap()
+            .conversations
+            .is_empty()
+    );
+    assert_eq!(
+        provider.request_merge(&review(), credential).await.unwrap(),
+        SourceMergeRequestOutcome::ReviewBlocked
+    );
+    assert_eq!(
+        provider
+            .withdraw_merge_request(&review(), credential)
+            .await
+            .unwrap(),
+        SourceMergeWithdrawal::Withdrawn
+    );
+    assert_eq!(
+        provider
+            .inspect_review_feedback(&review(), credential)
+            .await
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    for failure in [
+        SourceDeliveryError::api(Some(403), "Resource not accessible"),
+        SourceDeliveryError::api(None, "Unknown schema field"),
+        SourceDeliveryError::api(Some(401), "A conversation must be resolved"),
+    ] {
+        assert!(
+            provider
+                .classify_rejected_merge(&review(), credential, &failure)
+                .await
+                .is_err()
+        );
+    }
+}

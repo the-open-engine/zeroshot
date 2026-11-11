@@ -36,6 +36,7 @@ async fn gitlab_normalizes_commit_messages_before_pushing_repairs_to_an_existing
         )
         .assert_value();
         let request = NodeRunRequest {
+            delivery_state: None,
             dispatch: Default::default(),
             invocation: NodeInvocation {
                 reference: ExecutionRef {

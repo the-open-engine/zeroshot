@@ -78,3 +78,28 @@ fn rejects_partial_manifests_noncanonical_issues_and_unknown_fields() {
         assert!(delivery_input(&malformed).is_err());
     }
 }
+
+#[test]
+fn verified_conversation_responses_are_bounded_unique_and_revision_bound() {
+    let response = json!({"threadId":"THREAD_1","version":"a".repeat(64),"disposition":"declined","response":"The requested behavior is already covered; verified the existing regression."});
+    let manifest = |responses: Value| json!({"title":"fix: repair checkout","description":"Repair checkout.","reviewResponses":responses});
+    assert_eq!(
+        delivery_input(&manifest(json!([response.clone()])))
+            .assert_value()
+            .review_responses
+            .len(),
+        1
+    );
+    assert!(delivery_input(&manifest(json!([response.clone(), response.clone()]))).is_err());
+    for (field, value) in [
+        ("threadId", json!("")),
+        ("version", json!("stale")),
+        ("disposition", json!("resolve_all")),
+        ("response", json!(" ")),
+        ("response", json!("x".repeat(64 * 1024 + 1))),
+    ] {
+        let mut bad = response.clone();
+        bad[field] = value;
+        assert!(delivery_input(&manifest(json!([bad]))).is_err(), "{field}");
+    }
+}

@@ -494,6 +494,13 @@ impl NativeV2PlatformController {
             commit_co_author,
         } = params;
         let source = self.recoverable_resume_source(&run_id).await?;
+        // Reconcile before claiming/moving the workspace or creating a successor. A hard exit
+        // may leave acknowledged ledger receipts newer than the last workspace boundary.
+        if let Some(state) = source.snapshot.delivery_checkpoint()? {
+            self.allocator
+                .retain_delivery_state(&run_id, &state)
+                .await?;
+        }
         let (submission_key, submission_digest) =
             retained_submission_identity(&run_id, &successor_run_id)?;
         let mut admitted = source.admitted.clone();

@@ -131,6 +131,9 @@ impl CapsuleNodeFailure {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum CapsuleNodeEvent {
+    DeliveryState {
+        state: crate::native_v2_contract::DeliveryCheckpoint,
+    },
     Output {
         output: CapsuleOutput,
         timestamp: UnixTimestampMillis,
@@ -205,6 +208,18 @@ pub trait CapsuleNodeChannel: Send + Sync {
         &self,
         request: NodeRunRequest,
     ) -> Result<CapsuleExecutionStream, CapsuleConnectionError>;
+
+    /// Confirms that the host durably stored a delivered receipt generation. Capsule-side
+    /// delivery must not resolve a conversation before this acknowledgement returns.
+    async fn acknowledge_delivery_state(
+        &self,
+        _reference: &ExecutionRef,
+        _generation: u64,
+    ) -> Result<(), CapsuleConnectionError> {
+        Err(CapsuleConnectionError::Rejected(
+            CapsuleNodeFailure::ExecutionFailed,
+        ))
+    }
 
     async fn cancel(&self, reference: &ExecutionRef) -> Result<(), CapsuleConnectionError>;
 
