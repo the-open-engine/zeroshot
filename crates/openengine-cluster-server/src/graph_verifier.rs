@@ -157,7 +157,7 @@ enum CompletionPredicate {
     Shared(std::sync::Arc<Self>),
     CandidateGuard {
         guard: std::sync::Arc<Guard>,
-        available: BTreeMap<SelectorKey, CompletionPredicate>,
+        available: std::sync::Arc<BTreeMap<SelectorKey, CompletionPredicate>>,
     },
     Not(Box<Self>),
     All(Vec<Self>),

@@ -260,8 +260,9 @@ impl<'a> Analyzer<'a> {
                         completion.clone(),
                         CompletionPredicate::CandidateGuard {
                             guard: shared_guard.clone(),
-                            available: self
-                                .first_guard_available_on_branch(when, racer, incoming)?,
+                            available: std::sync::Arc::new(
+                                self.first_guard_available_on_branch(when, racer, incoming)?,
+                            ),
                         },
                     ]))
                 })

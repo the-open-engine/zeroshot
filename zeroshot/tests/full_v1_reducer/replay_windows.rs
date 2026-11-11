@@ -241,8 +241,32 @@ async fn incoming_controls_preserve_join_retention() {
         json!({"kind":"first","when":when}),
     );
     let route = json!({"kind":"choice","name":"outcome","state":s,"branches":[{"when":{"kind":"in","value":{"name":"next","source":"group","field":"raced"},"labels":["satisfied"]},"node":succeed("done")}],"promotedStatePaths":[]});
-    let result = window_verification(&s, window_seq("root", &s, vec![prior, next, route])).await;
-    assert!(result.is_err(), "unsafe continuation must be rejected");
+    let mut root = window_seq("root", &s, vec![prior, next, route]);
+    assert!(
+        window_verification(&s, root.clone()).await.is_err(),
+        "unsafe continuation must be rejected"
+    );
+    root["children"][2]["otherwise"] =
+        json!({"kind":"fail","name":"no_controls","reason":"no_retained_controls"});
+    let safe = window_verification(&s, root).await.unwrap();
+    let history = [
+        settled(
+            SettledSpec::new(1, 1, "priorVerify").position(2),
+            verdict("rejected"),
+        ),
+        settled(
+            SettledSpec::new(2, 2, "gate").position(4),
+            verdict("rejected"),
+        ),
+        settled(
+            SettledSpec::new(3, 3, "current").position(6),
+            verdict("accepted"),
+        ),
+    ];
+    let reduced = window_run(&safe, &json!({"empty":[]}), &history, 1).unwrap();
+    assert!(
+        matches!(reduced.terminal, Some(TerminalProjection::Failed { reason, .. }) if reason.as_str() == "no_retained_controls")
+    );
 }
 #[tokio::test]
 async fn mapped_writes_require_join_retention() {
@@ -266,8 +290,54 @@ async fn mapped_writes_require_join_retention() {
     let map = json!({"kind":"map","name":"mapped","state":s,"over":{"source":"state","path":["items"]},"maxItems":1,"promotedStatePaths":[["results"]],"body":body});
     let read = json!({"kind":"succeed","name":"read","output":required_array_record(&[("results","integer")]),"bindings":[{"target":["results"],"value":{"source":"state","path":["results"]}}]});
     let route = json!({"kind":"choice","name":"outcome","state":s,"branches":[{"when":{"kind":"not","guard":{"kind":"k_of_map","count":1,"value":{"name":"writer","source":"error","field":null},"labels":["timeout","crash","malformed","refusal"]}},"node":read}],"otherwise":{"kind":"fail","name":"bad_writer","reason":"bad_writer"},"promotedStatePaths":[]});
-    let result = window_verification(&s, window_seq("root", &s, vec![map, route])).await;
-    assert!(result.is_err(), "unsafe continuation must be rejected");
+    let mut root = window_seq("root", &s, vec![map, route]);
+    assert!(
+        window_verification(&s, root.clone()).await.is_err(),
+        "unsafe continuation must be rejected"
+    );
+    let writer_ok = root["children"][1]["branches"][0]["when"].take();
+    root["children"][1]["branches"][0]["when"] = json!({"kind":"all","guards":[writer_ok,
+        {"kind":"not","guard":window_kmap("joined","group",Some("joined"),vec!["quorum_unreachable"])}]});
+    let safe = window_verification(&s, root).await.unwrap();
+    let input = json!({"items":[null],"empty":[]});
+    for label in ["accepted", "rejected"] {
+        let history = [
+            settled(
+                SettledSpec::new(1, 1, "writer")
+                    .position(2)
+                    .map_indices(vec![0]),
+                success(7),
+            ),
+            settled(
+                SettledSpec::new(2, 2, "gate")
+                    .position(4)
+                    .map_indices(vec![0]),
+                verdict(label),
+            ),
+        ];
+        let reduced = window_run(&safe, &input, &history, 1).unwrap();
+        if label == "accepted" {
+            assert_eq!(
+                reduced.terminal,
+                Some(TerminalProjection::Succeeded {
+                    output: json!({"results":[7]})
+                })
+            );
+        } else {
+            assert!(matches!(
+                reduced.terminal,
+                Some(TerminalProjection::Failed { .. })
+            ));
+        }
+    }
+    assert_eq!(
+        window_run(&safe, &json!({"items":[],"empty":[]}), &[], 1)
+            .unwrap()
+            .terminal,
+        Some(TerminalProjection::Succeeded {
+            output: json!({"results":[]})
+        })
+    );
 }
 async fn window_verification(
     state: &Value,

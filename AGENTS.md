@@ -183,15 +183,19 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   imply auxiliary work. Auxiliary metadata IDs start beyond the genuine primary visit/attempt ceiling,
   independently of contained cleanup reservations. Uncertain cleanup quarantines those slots and capacity. Logical visits and loop entries each
   have a separate run ceiling of 65,536, reconstructed from ledger/checkpoint history.
-  Admission retains the established structural-bounds wire shape; dynamic work uses runtime ceilings. Correlated aggregate verification uses
-  saturated joint counts and one deterministic 8 Mi count-cell proof-work bound.
+  Admission retains the established structural-bounds wire shape; dynamic work uses runtime ceilings.
+  One scoped assignment traversal owns flat and nested map proofs, preserving shared item populations
+  and applying enclosing retention after candidate qualification. Incoming controls and lifted writes
+  retain their conditions. Choice routes and candidate availability are shared immutable proofs.
+  Correlated aggregate verification uses saturated joint counts and one deterministic 8 Mi count-cell
+  proof-work bound; an exhausted proof budget stays exhausted through admission.
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
   Shared three-valued guard evaluation preserves candidate-local first-join eligibility.
   Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
-  branches on join settlement while preserving only history-backed visit markers through that join
-  and earlier cancellation causes. Later-round executions never belong to an earlier join's losers.
+  branches on join settlement, consuming only executions owned by that visit window and preserving
+  earlier cancellation causes. Later-round executions never belong to an earlier join's losers.
   Static aggregate proofs check private qualification before exporting retained controls, clip only
   queried label classes at their own thresholds, and charge shared-guard expansion before allocation.
   Aggregate guards can use nested map facts when an enclosing map dominates their scope.
@@ -208,8 +212,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   error leaves an incomplete collection unchanged while its controls remain available to authored
   guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
 - Each full-v1 loop round starts with fresh error, signal, group, and output-channel facts for its
-  body at that map scope. Caller state persists across rounds; internal visit markers persist for
-  durable replay. Final-round facts replace older facts when the loop returns to its parent.
+  body at that map scope. Caller state persists across rounds; dispatch-ordered history identifies
+  visits during replay. Final-round facts replace older facts when the loop returns to its parent.
 - Harness integration lives in `harnesses/`: one registry supplies pure descriptors, provider
   requirements, executable lookup and factories for every adapter. Maintained implementations live
   in `harnesses/adapters/core`; contributions live in `harnesses/adapters/contributed` and register
