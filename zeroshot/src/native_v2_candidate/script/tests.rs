@@ -106,19 +106,97 @@ async fn script_exchanges_large_json_preserves_literal_arguments_and_redacts_std
     assert_eq!(output["result"], format!("{data}{literal}"));
     assert!(!directory.child("must-not-exist").exists());
     assert_eq!(
-        durable
-            .recv_usage()
-            .await
-            .unwrap()
-            .unwrap()
-            .input_tokens
-            .get(),
-        0
+        durable.recv_usage().await.unwrap(),
+        Some(crate::native_v2_contract::TokenUsageDelta {
+            input_tokens: Default::default(),
+            output_tokens: Default::default(),
+            cache_read_input_tokens: Some(Default::default()),
+            cache_creation_input_tokens: Some(Default::default()),
+        })
     );
     let log = durable.recv_output().await.unwrap();
     assert!(!log.text.contains("private-script-fixture-key"));
     assert!(!log.text.contains("fixture-key"));
     assert!(log.text.contains("[REDACTED]"));
+}
+
+#[tokio::test]
+async fn script_usage_preserves_agent_cache_totals_in_the_run_ledger() {
+    use openengine_cluster_protocol::{IdempotencyKey, Sha256Digest, TokenCount, TokenUsage};
+    use crate::native_v2_contract::TokenUsageDelta;
+    use crate::native_v2_runner::test_support::{admitted, node_started, request};
+    use crate::v2_run_ledger::{CreateRun, RunLedger, sqlite::SqliteRunLedger};
+
+    let directory = TestDirectory::new("script-usage");
+    let (adapter, invocation) = prepared(&directory, "print('{\"result\":\"ok\"}')\n").await;
+    let script_reference = invocation.node.reference.clone();
+    let run_id = script_reference.run_id.clone();
+    let (outcome, mut durable) = run_script(&adapter, invocation).await;
+    assert!(matches!(outcome, WorkerOutcome::Verified { .. }));
+    let script_usage = durable.recv_usage().await.unwrap();
+    let agent_reference = request(run_id.as_str(), "worker", (2, 2))
+        .invocation
+        .reference;
+    let agent_usage = TokenUsageDelta {
+        input_tokens: TokenCount::new(13).unwrap(),
+        output_tokens: TokenCount::new(5).unwrap(),
+        cache_read_input_tokens: Some(TokenCount::new(8).unwrap()),
+        cache_creation_input_tokens: Some(TokenCount::new(3).unwrap()),
+    };
+    let ledger = SqliteRunLedger::open_in_memory().unwrap();
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: IdempotencyKey::new("script-usage").unwrap(),
+            submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
+            admitted: admitted(),
+        })
+        .await
+        .unwrap();
+    let stored = ledger
+        .append(
+            &run_id,
+            vec![
+                RunEvent::RunStarted,
+                node_started(&agent_reference, Value::Null),
+                RunEvent::TokenUsageObserved {
+                    execution: agent_reference.execution,
+                    usage: Some(agent_usage),
+                },
+                RunEvent::NodeCompleted {
+                    completion: NodeCompletion {
+                        reference: agent_reference,
+                        outcome: WorkerOutcome::Verified {
+                            output: Value::Null,
+                            artifacts: vec![],
+                        },
+                    },
+                },
+                node_started(&script_reference, json!({})),
+                RunEvent::TokenUsageObserved {
+                    execution: script_reference.execution,
+                    usage: script_usage,
+                },
+                RunEvent::NodeCompleted {
+                    completion: NodeCompletion {
+                        reference: script_reference,
+                        outcome,
+                    },
+                },
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        stored.snapshot.token_usage,
+        Some(TokenUsage {
+            input_tokens: agent_usage.input_tokens,
+            output_tokens: agent_usage.output_tokens,
+            cache_read_input_tokens: agent_usage.cache_read_input_tokens,
+            cache_creation_input_tokens: agent_usage.cache_creation_input_tokens,
+            complete: true,
+        })
+    );
 }
 
 #[tokio::test]
