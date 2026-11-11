@@ -56,6 +56,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   none is installed, and reports `updated: false` when the executable and sidecar already hold the
   release's bytes. It installs or refreshes only unchanged managed skill copies and preserves
   conflicts.
+  A newer release probes installation-directory writability before downloading any asset; a current
+  installation skips that probe. Unwritable installs and archive rejections end with the shared
+  version-pinned npm reinstall command; release-lookup HTTP 403/429 uses `@latest` because no version
+  was resolved. In-place updates preserve npm's recorded package version. The exact two-executable
+  archive layout is a compatibility contract: adding entries strands released updaters.
   Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
   whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
   bounded, control-safe `message`, never request URLs.
@@ -453,7 +458,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. `need_rebase` merges the captured target into a
+  merges; required merge trains remain pending. GitLab's complete HTTP 400 missing-source-branch
+  creation validation retries only within the existing review-sync batch, rechecking the published
+  candidate before each POST; uncertain creation responses retain their at-most-once fence.
+  `need_rebase` merges the captured target into a
   workspace descending from the MR head, bounded by their fork point rather than the MR head, then
   returns repair; a candidate already containing the target is refused naming the merge method and
   target revision. GitLab readiness, approval handoff and merge share
@@ -669,9 +677,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   After an accepted answer, a valid `session.detach` refusal or peer EOF is logged and keeps the
   outcome, including a closed stdin pipe during that request. Malformed RPC replies/events, other
   RPC writes, cancellation, durable output and cleanup failures still fail closed.
-- Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
+- Provider JSONL readers do not cap cumulative output. They share the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
   validating provider-owned fields, and continue draining after the first valid terminal event.
+  Their shared decoder replaces invalid UTF-8 and unpaired Unicode surrogate escapes with U+FFFD
+  before adapter parsing and redaction; all other malformed JSON retains each reader's rejection policy.
 - Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
   turn it runs the selected executable with `--version` through that turn's launch path and
   environment. One `--print` process can write several results while background subagents or
@@ -752,6 +762,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Hosted failed runs likewise collect checkpoint staging as best effort after process cleanup;
   retained recovery still requires runtime cleanup, workspace ownership transfer, and durable
   recovery metadata. Force-stop and explicit discard retain authoritative lineage deletion.
+  Local force-stop stays destructive for the whole lineage and retains no checkpoints: after
+  confirmed runtime cleanup it reuses `discard_lineage` to remove every catalog naming the shared
+  repository, predecessor and successor alike, before the repository. A catalog removal failure
+  keeps the repository and reports cleanup unavailable. Other lineages are untouched.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
@@ -1191,6 +1205,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   The Python SDK consumes the explicit failed-run diagnostic without inferring failure from a
   target error or rereading status; public failed-result exceptions remain opt-in. Failed-run
   identity stays private and unredacted for exact watch matching; its printable message is redacted.
+  ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
+  context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
 - Graph verification errors display their first safe diagnostic, its path and the count of further
   diagnostics through the shared verifier error, so local validation and hosted rejection report the
   same cause. Within the 1,024-byte target problem message bound, the count and then the path's

@@ -1,5 +1,5 @@
 use crate::native_v2_capsule::{
-    provider_json_lines::{ProviderJsonLine, ProviderJsonLines},
+    provider_json_lines::{ProviderJsonLine, ProviderJsonLines, parse_provider_json},
     provider_process::{
         text::{LIVE_CHUNK_BYTES, ProviderText},
         turn::ProviderTranscript,
@@ -201,7 +201,7 @@ impl ClaudeTranscript {
         if line.iter().all(u8::is_ascii_whitespace) {
             return;
         }
-        let Ok(event) = serde_json::from_slice::<Value>(&line) else {
+        let Ok(event) = parse_provider_json(&line) else {
             self.malformed_records = self.malformed_records.saturating_add(1);
             return;
         };
