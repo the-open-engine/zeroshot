@@ -467,6 +467,25 @@ function useProfileEffects(
   }, [doc, selected, numericDrafts]);
 }
 
+function closeEditorModal(state: ReturnType<typeof useAppState>) {
+  const { busy, modal, modalDirty, numericDrafts, setModal, setConfirm } = state;
+  if (busy) return;
+  const close = () => {
+    if (modal === 'runtime') numericDrafts.clear(undefined, 'maxConcurrency');
+    setModal(null);
+  };
+  if (modalDirty || (modal === 'runtime' && numericDrafts.get(undefined, 'maxConcurrency')))
+    setConfirm({
+      title: modal === 'runtime' ? 'Discard runtime changes?' : 'Discard JSON changes?',
+      body:
+        modal === 'runtime'
+          ? 'Changes in Runtime settings have not been applied.'
+          : 'Changes in this JSON editor have not been applied.',
+      action: close,
+    });
+  else close();
+}
+
 function createWorkflowEditor(
   { services, bootstrap }: AppProps,
   state: ReturnType<typeof useAppState>
@@ -479,15 +498,12 @@ function createWorkflowEditor(
     setJsonTarget,
     setModalError,
     setModal,
-    modal,
     busy,
-    modalDirty,
     runtimeView,
     setRuntimeView,
     runtimeDraft,
     setRuntimeDraft,
     setRuntimeInitial,
-    setConfirm,
     jsonTarget,
     json,
     numericDrafts,
@@ -542,6 +558,11 @@ function createWorkflowEditor(
     if (!doc || !runtimeDraft) return;
     try {
       const runtime = runtimeView === 'json' ? parseRuntime(json) : runtimeDraft;
+      numericDrafts.prune(doc.graph.root, runtime);
+      if (numericDrafts.pending())
+        throw new Error(
+          'Finish or cancel the pending field edits before applying Runtime settings.'
+        );
       const next = { ...clone(doc), runtime: clone(runtime) };
       assertDocument(next);
       apply(next);
@@ -561,19 +582,7 @@ function createWorkflowEditor(
     setModalError('');
     setModal('json');
   }
-  function closeModal() {
-    if (busy) return;
-    if (modalDirty)
-      setConfirm({
-        title: modal === 'runtime' ? 'Discard runtime changes?' : 'Discard JSON changes?',
-        body:
-          modal === 'runtime'
-            ? 'Changes in Runtime settings have not been applied.'
-            : 'Changes in this JSON editor have not been applied.',
-        action: () => setModal(null),
-      });
-    else setModal(null);
-  }
+  const closeModal = () => closeEditorModal(state);
   function applyJson() {
     if (!doc) return;
     try {

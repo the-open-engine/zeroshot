@@ -5,12 +5,6 @@ struct ParallelMergeContext<'a> {
     path: &'a [DiagnosticPathSegment],
 }
 
-struct FirstParallelMergeContext<'a> {
-    incoming: &'a Flow,
-    path: &'a [DiagnosticPathSegment],
-    when: &'a Guard,
-}
-
 impl<'a> Analyzer<'a> {
     pub(super) fn validate_par(
         &mut self,
@@ -84,14 +78,13 @@ impl<'a> Analyzer<'a> {
         branches: &[Effects],
         context: ParallelMergeContext<'_>,
     ) -> Effects {
-        if let Join::First { when } = &group.join {
+        if matches!(group.join, Join::First { .. }) {
             return self.merge_first_parallel(
                 group,
                 branches,
-                FirstParallelMergeContext {
+                ParallelMergeContext {
                     incoming: context.incoming,
                     path: context.path,
-                    when,
                 },
             );
         }
@@ -106,26 +99,9 @@ impl<'a> Analyzer<'a> {
                 ..merge_parallel_scenarios(branches, required, &[])
             };
         }
-        let completion = CompletionPredicate::at_least(
-            required,
-            branches
-                .iter()
-                .map(|branch| branch.completion.clone())
-                .collect(),
-        );
-        self.parallel_join_correlations.insert(
-            group.name.clone(),
-            ParallelJoinCorrelation::Joined {
-                completion: completion.clone(),
-                retention: ParallelRetention {
-                    branches: branches
-                        .iter()
-                        .map(|branch| branch.completion.clone())
-                        .collect(),
-                    required,
-                },
-            },
-        );
+        let correlation = self.correlation_for_effects(group, branches, context.incoming);
+        self.parallel_join_correlations
+            .insert(group.name.clone(), correlation);
 
         let predicates = branches
             .iter()
@@ -167,37 +143,13 @@ impl<'a> Analyzer<'a> {
         &mut self,
         group: &ParNode,
         branches: &[Effects],
-        context: FirstParallelMergeContext<'_>,
+        context: ParallelMergeContext<'_>,
     ) -> Effects {
-        let satisfiers = branches
-            .iter()
-            .zip(group.branches.as_slice())
-            .map(|(branch, node)| {
-                let available = self.first_guard_available_on_branch(
-                    context.when,
-                    (branch, node),
-                    context.incoming,
-                );
-                CompletionPredicate::all([
-                    branch.completion.clone(),
-                    CompletionPredicate::CandidateGuard {
-                        guard: context.when.clone(),
-                        available,
-                    },
-                ])
-            })
-            .collect::<Vec<_>>();
+        let correlation = self.correlation_for_effects(group, branches, context.incoming);
+        let satisfiers = correlation.retention().branches.clone();
         let satisfaction = CompletionPredicate::any(satisfiers.clone());
-        self.parallel_join_correlations.insert(
-            group.name.clone(),
-            ParallelJoinCorrelation::First {
-                satisfaction: satisfaction.clone(),
-                retention: ParallelRetention {
-                    branches: satisfiers.clone(),
-                    required: 1,
-                },
-            },
-        );
+        self.parallel_join_correlations
+            .insert(group.name.clone(), correlation);
         let predicates = vec![&satisfaction];
         let Some(assignments) = self
             .assignments_for_completion_predicates(&predicates, &with_field(context.path, "join"))
@@ -238,24 +190,88 @@ impl<'a> Analyzer<'a> {
         merged
     }
 
-    fn first_guard_available_on_branch(
+    fn correlation_for_effects(
+        &self,
+        group: &ParNode,
+        branches: &[Effects],
+        incoming: &Flow,
+    ) -> ParallelJoinCorrelation {
+        let completions = branches
+            .iter()
+            .map(|branch| branch.completion.clone())
+            .collect::<Vec<_>>();
+        self.parallel_correlation(group, &completions, &incoming.available)
+    }
+
+    pub(super) fn parallel_correlation(
+        &self,
+        group: &ParNode,
+        completions: &[CompletionPredicate],
+        incoming: &BTreeSet<NodeName>,
+    ) -> ParallelJoinCorrelation {
+        let required = parallel_required_completions(&group.join, completions.len());
+        let branches = if let Join::First { when } = &group.join {
+            completions
+                .iter()
+                .zip(group.branches.as_slice())
+                .map(|(completion, racer)| {
+                    CompletionPredicate::all([
+                        completion.clone(),
+                        CompletionPredicate::CandidateGuard {
+                            guard: when.clone(),
+                            available: self.first_guard_available_on_branch(when, racer, incoming),
+                        },
+                    ])
+                })
+                .collect::<Vec<_>>()
+        } else {
+            completions.to_vec()
+        };
+        let retention = ParallelRetention {
+            branches: branches.clone(),
+            required,
+        };
+        match &group.join {
+            Join::First { .. } => ParallelJoinCorrelation::First {
+                satisfaction: CompletionPredicate::any(branches),
+                retention,
+            },
+            _ => ParallelJoinCorrelation::Joined {
+                completion: CompletionPredicate::at_least(required, branches),
+                retention,
+            },
+        }
+    }
+
+    pub(super) fn first_guard_available_on_branch(
         &self,
         when: &Guard,
-        branch: (&Effects, &GraphNode),
-        incoming: &Flow,
+        racer: &GraphNode,
+        incoming: &BTreeSet<NodeName>,
     ) -> BTreeMap<SelectorKey, CompletionPredicate> {
-        let (_, racer) = branch;
         let mut owned = BTreeSet::new();
         collect_names(racer, &mut owned);
         guard_selector_uses(when)
             .into_iter()
             .filter_map(|(selector, aggregate)| {
                 let owner = if aggregate {
-                    self.map_owner(&selector.name)?
+                    self.nodes
+                        .get(&selector.name)
+                        .and_then(|info| {
+                            info.path.iter().find_map(|part| {
+                                let DiagnosticPathSegment::Node { name } = part else {
+                                    return None;
+                                };
+                                (matches!(self.nodes.get(name)?.node, GraphNode::Map(_))
+                                    && (owned.contains(name) || incoming.contains(name)))
+                                .then_some(name)
+                            })
+                        })
+                        .unwrap_or(&selector.name)
                 } else {
                     &selector.name
                 };
-                let presence = if incoming.available.contains(owner) {
+                let presence = if incoming.contains(owner) {
                     CompletionPredicate::Always
                 } else if owned.contains(owner) {
                     self.conditional_candidate_presence(owner, racer.name())?
@@ -267,7 +283,7 @@ impl<'a> Analyzer<'a> {
             .collect()
     }
 
-    fn conditional_candidate_presence(
+    pub(super) fn conditional_candidate_presence(
         &self,
         target: &NodeName,
         racer: &NodeName,

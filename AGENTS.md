@@ -181,11 +181,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   independently of contained cleanup reservations. Uncertain cleanup quarantines those slots and capacity. Logical visits and loop entries each
   have a separate run ceiling of 65,536, reconstructed from ledger/checkpoint history.
   Dynamic maps receive runtime-enforced work certificates. Correlated aggregate verification uses
-  saturated joint counts and one deterministic 8 Mi count-cell proof-work bound. First joins use
-  shared three-valued guard evaluation and joint retained-branch witnesses, so nested subset joins
-  cannot fabricate loser evidence. A completed map makes its aggregates available before a
-  pending branch tail. Graph-bearing JSON boundaries scan a 512-container envelope before decoding
-  depth-64 graphs and their payload/transport wrappers.
+  saturated joint counts and one deterministic 8 Mi count-cell proof-work bound.
+  Joins use actual settled outcomes and completed candidate facts. Pending candidates remain
+  potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
+  Shared three-valued guard evaluation preserves candidate-local first-join eligibility.
+  Cancel or void losers after an actual join or terminal decision through confirmed cleanup.
+  Do not predict future writes, map cardinalities, choice routes, convergence or loop exits.
+  Extra execution while an outcome remains unknown is permitted. Enforce work ceilings at
+  the next actual visit or loop entry, without forecasting or precharging unstarted work.
+  Map replay retains compact item-scoped facts and promoted values, discarding caller state
+  and temporary probe results. Graph-bearing JSON boundaries scan a 512-container envelope
+  before decoding depth-64 graphs and their payload/transport wrappers.
 - Map reduction collects a promoted field only when every item wrote it in that item scope. A worker
   error leaves an incomplete collection unchanged while its controls remain available to authored
   guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
@@ -1642,7 +1648,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   publication so accepted writes remain readable; unchanged entries stay opaque. Shared store envelope
   corruption still fails closed. Checked saves decode the selected profile for its revision.
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
-  generation; imports carry no foreign revision. Pending numeric text belongs to the document,
+  generation; imports carry no foreign revision. Pending numeric text, including run-wide concurrency, belongs to the document,
   survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
   Hosted workspaces use the `platform` kind with their existing opaque workspace IDs. The tag
   rename starts a new browser storage namespace; earlier drafts and preferences are not imported.

@@ -61,6 +61,24 @@ For `first`, a completed candidate uses its own available results and pre-parall
 Other racers remain unknown. Short-circuit truth allows either accepted reviewer to establish
 `any(a.accepted, b.accepted)`; conditional controls contribute only on their selected route.
 The guard must reference a racer and at least one candidate must be able to establish it.
+Viability follows the selected remaining flow: skipped producers cannot qualify a candidate, while
+unfinished loop rounds may replace provisional controls. Future predicates share legal joint
+outcomes, so one verdict cannot satisfy incompatible labels or both signal and error predicates.
+Partial maps preserve settled item contributions while expanding future outcomes through the same
+choice-presence and retained-branch correlations used at admission. Finishing an unrelated item tail
+does not make a settled verdict replaceable. Loop revisits replace final-round controls, preserving
+a known map cardinality when remaining visible writes cannot change its selected collection.
+Selector projections use each suspended group's local state and respect write order and promotion
+boundaries. A guaranteed loop exit prevents another round from replacing its settled controls.
+Known map lengths require exactly that many item outcomes; a nonempty map can complete its racer
+only when every selected body can finish normally under the same joint outcomes.
+Nested aggregate folds preserve every enclosing map cardinality and full item index scope. Choice
+conditions stay attached to future collection writes, and completion predicates share the actual
+aggregate counts of other maps. Impossible joins retain settled prefix evidence during terminal
+replay even when a disqualified racer still has pending work.
+Map count predicates respect those cardinality constraints. Speculative oversized maps
+can lose a race without triggering a work-limit failure; work that starts still consumes the
+actual run ceilings.
 Once no unfinished candidate can qualify, the join reports `no_satisfier` and stops unnecessary
 work. Other impossible joins report `quorum_unreachable`; their queued eligible branches remain
 potential contributors until control proves otherwise. Voided or unstarted losers provide no
@@ -244,6 +262,10 @@ The full-graph profile has fixed ceilings:
 | Total loop-body entries       |  65,536 |
 | Run execution concurrency     |  65,536 |
 
+Completed-item replay retains scoped runtime facts and promoted values rather than full caller
+state per item. Probe results are released before decision replay; collections still require every
+item to write the promoted path and retain input ordering.
+
 Maps process their complete input. `maxItems` limits the number of items whose complete bodies
 are active, including nested work. Waiting parents consume no leaf execution slot. Runtime
 `maxConcurrency` defaults to 64 on every OS and placement and accepts positive overrides through
@@ -338,3 +360,8 @@ schemas, but defines no additional protocol method. Files under
 Their Rust parser and JSON Schema checks are fixture validation only. Exact production-verifier
 success and rejection envelopes live under `protocol/openengine-cluster/v1/fixtures/verifier/` and
 are generated through the reusable server verifier.
+
+Nested map guards count only item occurrences on selected choice routes. A queued item keeps
+known immutable child-collection sizes, and settled aggregates from before a race remain
+available to its completion guards. These facts let impossible races settle before unrelated
+queued work starts.

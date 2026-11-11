@@ -1,17 +1,26 @@
-use std::cell::Cell;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 /// 8 Mi count-cell operations bound all correlated assignment expansion for one verification.
+/// Clones share the same accounting owner across residual alternatives.
 /// This is an engine engineering limit, not an authored budget or elapsed-time timeout.
-#[derive(Default)]
-pub(in crate::graph_verifier) struct ProofWork(Cell<u64>);
+#[derive(Clone, Default)]
+pub struct ProofWork(Arc<AtomicU64>);
 impl ProofWork {
-    pub(in crate::graph_verifier) const LIMIT: u64 = 8 * 1024 * 1024;
-    pub(in crate::graph_verifier) fn charge(&self, cells: usize) -> Option<()> {
-        let next = self.0.get().checked_add(cells as u64)?;
-        if next > Self::LIMIT {
-            return None;
-        }
-        self.0.set(next);
+    pub const LIMIT: u64 = 8 * 1024 * 1024;
+    /// Charge the shared structural rule before cloning a runtime predicate.
+    pub fn charge_guard(&self, guard: &super::Guard) -> Option<()> {
+        self.charge(1 + super::guard_node_count(guard) as usize)
+    }
+    pub fn charge(&self, cells: usize) -> Option<()> {
+        self.0
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                used.checked_add(cells as u64)
+                    .filter(|next| *next <= Self::LIMIT)
+            })
+            .ok()?;
         Some(())
     }
 }

@@ -17,6 +17,11 @@ impl Engine<'_> {
             .as_array()
             .ok_or(ReducerError::InvalidDurableValue)?;
         self.check_map_work(group, items, (context, traversal))?;
+        let item_count = items.len();
+        context.map_sizes.insert(
+            (group.name.clone(), traversal.map_indices.to_vec()),
+            MapCardinality::fixed(item_count as u64),
+        );
         let checkpoint = self.trace_checkpoint();
         let probes = self.evaluate_map_items(
             MapItemsEvaluation {
@@ -61,6 +66,7 @@ impl Engine<'_> {
             self.restore_trace(probe_trace)?;
             probes
         } else {
+            drop(probes);
             self.evaluate_map_items(
                 MapItemsEvaluation {
                     evaluation: GroupEvaluation {
@@ -73,21 +79,82 @@ impl Engine<'_> {
                 traversal.mode,
             )?
         };
-        if results.len() < items.len()
+        let pending = results.len() < item_count
             || results
                 .iter()
-                .any(|result| matches!(result.status, Status::Pending))
-        {
-            return Ok(Status::Pending);
+                .any(|result| matches!(result.status, Status::Pending));
+        let projected = pending.then(|| {
+            self.project_queued_item_maps(
+                &group.body,
+                items,
+                (traversal.map_indices, results.len()),
+            )
+        });
+        let evaluation = GroupMutation {
+            group,
+            context,
+            traversal,
+        };
+        if let Some(projected) = projected {
+            self.finish_pending_map(evaluation, &results, (item_count, projected));
+            Ok(Status::Pending)
+        } else {
+            self.finish_map(evaluation, &results)
         }
-        self.finish_map(
+    }
+
+    fn finish_pending_map(
+        &self,
+        evaluation: GroupMutation<'_, MapNode>,
+        results: &[MapItemResult],
+        pending: (usize, MapSizes),
+    ) {
+        let GroupMutation {
+            group,
+            context,
+            traversal,
+        } = evaluation;
+        self.mark_pending_map(
             GroupMutation {
                 group,
                 context,
                 traversal,
             },
-            &results,
-        )
+            results,
+            pending.0,
+        );
+        context.map_sizes.extend(pending.1);
+    }
+
+    fn mark_pending_map(
+        &self,
+        evaluation: GroupMutation<'_, MapNode>,
+        results: &[MapItemResult],
+        item_count: usize,
+    ) {
+        let GroupMutation {
+            group,
+            context,
+            traversal,
+        } = evaluation;
+        let names = descendant_names(&group.body);
+        for item in results {
+            merge_scoped_runtime_facts(&item.context, context, &names, &item.scope);
+        }
+        if results.len() < item_count {
+            self.mark_future_flow(
+                GroupMutation {
+                    group: &group.body,
+                    context,
+                    traversal: Traversal {
+                        item: None,
+                        ..traversal
+                    },
+                },
+                &mut FutureWrites::default(),
+                None,
+            );
+        }
     }
 
     fn evaluate_map_items(
@@ -105,6 +172,7 @@ impl Engine<'_> {
             items,
         } = evaluation;
         let base = self.prospective_loops.clone();
+        let body_names = descendant_names(&group.body);
         let mut results = Vec::new();
         let mut pending = 0_u64;
         for (index, item) in items.iter().enumerate() {
@@ -137,8 +205,9 @@ impl Engine<'_> {
             if matches!(status, Status::Pending) {
                 pending += 1;
             }
+            compact_map_context(&mut item_context, group, (&body_names, &scope))?;
             results.push(MapItemResult {
-                prospective: self.prospective_loops.clone(),
+                prospective: self.map_probe_work(mode, &scope),
                 status,
                 context: item_context,
                 scope,
@@ -146,6 +215,14 @@ impl Engine<'_> {
         }
         self.prospective_loops = base;
         Ok(results)
+    }
+
+    fn map_probe_work(&self, mode: EvalMode, scope: &[u64]) -> LoopWork {
+        if mode == EvalMode::Probe {
+            self.prospective_loops.scoped(scope)
+        } else {
+            LoopWork::default()
+        }
     }
 
     fn finish_terminal_map_item(
@@ -178,7 +255,12 @@ impl Engine<'_> {
                     item: Some(
                         selected
                             .items
-                            .get(selected.index)
+                            .get(
+                                *terminal_scope
+                                    .last()
+                                    .ok_or(ReducerError::InconsistentHistory)?
+                                    as usize,
+                            )
                             .ok_or(ReducerError::InconsistentHistory)?,
                     ),
                     cutoff: selected.terminal.position(),
@@ -264,4 +346,47 @@ impl Engine<'_> {
         }
         Ok(())
     }
+}
+
+// Retain only item-owned facts and promoted values, never a copy of the full caller input.
+fn compact_map_context(
+    context: &mut Context,
+    group: &MapNode,
+    scope: (&BTreeSet<NodeName>, &[u64]),
+) -> Result<(), ReducerError> {
+    let (names, indices) = scope;
+    let mut state = Value::Object(Map::new());
+    let writes = promoted_write_paths(&context.local_writes, &group.promoted_state_paths);
+    for path in &group.promoted_state_paths {
+        if !promoted_write_paths(&context.local_writes, std::slice::from_ref(path)).is_empty() {
+            set_path(&mut state, path, select(&context.state, path)?.clone())?;
+        }
+    }
+    context
+        .pending_writes
+        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
+    context
+        .map_sizes
+        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
+    context
+        .loop_exits
+        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
+    context
+        .revisitable
+        .retain(|(name, scope)| names.contains(name) && scope.starts_with(indices));
+    context
+        .retained
+        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
+    context.state = state;
+    context.local_writes = writes.into_iter().collect();
+    context
+        .completed
+        .retain(|(name, scope)| names.contains(name) && scope.starts_with(indices));
+    context
+        .channels
+        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
+    context
+        .controls
+        .retain(|key, _| names.contains(&key.node) && key.map_indices.starts_with(indices));
+    Ok(())
 }

@@ -10,18 +10,7 @@ impl Engine<'_> {
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
-        let group_boundary = if traversal.boundary.is_none()
-            && matches!(node, GraphNode::Par(_) | GraphNode::Map(_))
-        {
-            Some(ExecutionBoundary {
-                node: node.name().clone(),
-                map_indices: traversal.map_indices.to_vec(),
-                loop_iterations: traversal.loop_iterations.to_vec(),
-                attempt: 0,
-            })
-        } else {
-            None
-        };
+        let group_boundary = group_boundary(node, traversal);
         let traversal = Traversal {
             boundary: traversal.boundary.or(group_boundary.as_ref()),
             ..traversal
@@ -156,6 +145,9 @@ impl Engine<'_> {
                     position = position.max(child_position);
                 }
                 other => {
+                    if matches!(other, Status::Pending) {
+                        self.project_sequence_tail((group, index), &mut local, traversal);
+                    }
                     merge_runtime_facts(&local, context);
                     return Ok(other.after(position));
                 }
@@ -266,6 +258,15 @@ impl Engine<'_> {
         ));
         let result = self.eval(&group.body, context, traversal);
         self.active_loops.pop();
+        if matches!(result, Ok(Status::Pending))
+            && traversal
+                .loop_iterations
+                .last()
+                .is_some_and(|round| *round < group.max_iterations.get())
+            && self.loop_may_reenter((group, None), context, traversal)
+        {
+            self.project_loop_reentry(group, context, traversal);
+        }
         result
     }
 
@@ -749,9 +750,23 @@ fn record_completed(
     traversal: Traversal<'_>,
     status: &Status,
 ) {
-    if matches!(status, Status::Continue { .. }) {
+    if let Status::Continue { position } = status {
+        context.evidence_position = context.evidence_position.max(*position);
         context
             .completed
             .insert((node.name().clone(), traversal.map_indices.to_vec()));
+    }
+}
+
+fn group_boundary(node: &GraphNode, traversal: Traversal<'_>) -> Option<ExecutionBoundary> {
+    if traversal.boundary.is_none() && matches!(node, GraphNode::Par(_) | GraphNode::Map(_)) {
+        Some(ExecutionBoundary {
+            node: node.name().clone(),
+            map_indices: traversal.map_indices.to_vec(),
+            loop_iterations: traversal.loop_iterations.to_vec(),
+            attempt: 0,
+        })
+    } else {
+        None
     }
 }

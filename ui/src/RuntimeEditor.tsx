@@ -3,6 +3,7 @@ import { DecisionControls } from './DecisionControls';
 import { useState } from 'react';
 import { allNodes, bindingFor, clone, executable, type Document, type Runtime } from './domain';
 import { Field } from './Field';
+import { NumberField } from './NumberField';
 import { ModelPicker } from './ModelPicker';
 import { modelGroups } from './models';
 import { effectiveLane } from './runtime-readiness';
@@ -128,23 +129,20 @@ export function RuntimeEditor(p: {
           ))}
         </select>
       </Field>
-      <Field label="Maximum concurrent executions">
-        <input
-          type="number"
-          min={1}
-          max={65536}
-          step={1}
-          placeholder="64"
-          value={doc.runtime.maxConcurrency ?? ''}
-          aria-invalid={invalid('maxConcurrency', settingChanged('maxConcurrency'))}
-          onChange={(event) => {
-            const next = clone(doc);
-            if (event.target.value === '') delete next.runtime.maxConcurrency;
-            else next.runtime.maxConcurrency = Number(event.target.value);
-            p.edit(next, 'runtime.maxConcurrency');
-          }}
-        />
-      </Field>
+      <NumberField
+        label="Maximum concurrent executions"
+        field="maxConcurrency"
+        optional
+        placeholder="64"
+        value={doc.runtime.maxConcurrency}
+        invalid={invalid('maxConcurrency', settingChanged('maxConcurrency'))}
+        onChange={(value) => {
+          const next = clone(doc);
+          if (value === undefined) delete next.runtime.maxConcurrency;
+          else next.runtime.maxConcurrency = value;
+          p.edit(next, 'runtime.maxConcurrency');
+        }}
+      />
       <RunSizePicker
         value={doc.runtime.size ?? undefined}
         runSizes={p.runSizes}

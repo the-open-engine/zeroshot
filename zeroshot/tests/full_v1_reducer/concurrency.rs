@@ -371,3 +371,6 @@ fn root_with_join(branches: Vec<Value>, join: Value, state: &Value) -> Value {
     let race = json!({"kind":"par","name":"race","state":state,"branches":branches,"join":join,"promotedStatePaths":[]});
     json!({"kind":"seq","name":"run","state":state,"children":[race,succeed("done")],"promotedStatePaths":[]})
 }
+
+#[path = "viability.rs"]
+mod viability;

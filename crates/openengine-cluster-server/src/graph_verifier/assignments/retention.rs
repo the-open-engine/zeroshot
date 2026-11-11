@@ -11,7 +11,13 @@ pub(in crate::graph_verifier) fn retention_guard(
     group: &ParNode,
     index: usize,
 ) -> Option<CompletionPredicate> {
-    Some(CompletionPredicate::Guard(Guard::In {
+    retained_branch_guard(group, index).map(CompletionPredicate::Guard)
+}
+
+/// The same private retained-branch witness used by admission and residual write analysis.
+pub fn retained_branch_guard(group: &ParNode, index: usize) -> Option<Guard> {
+    group.branches.as_slice().get(index)?;
+    Some(Guard::In {
         value: ControlSelector {
             name: group.name.clone(),
             source: ControlSource::Group,
@@ -19,13 +25,21 @@ pub(in crate::graph_verifier) fn retention_guard(
         },
         labels: openengine_cluster_protocol::NonEmptyEnumSet::new(vec![enum_label("retained")?])
             .ok()?,
-    }))
+    })
 }
 
 pub(in crate::graph_verifier) fn proof_group_domain(
     node: &GraphNode,
     field: Option<&FieldName>,
 ) -> Option<Vec<EnumLabel>> {
+    if is_map_item_predicate_field(field) {
+        return Some(
+            ["complete", "blocked"]
+                .into_iter()
+                .filter_map(enum_label)
+                .collect(),
+        );
+    }
     if let Some(index) = retention_index(field) {
         let GraphNode::Par(group) = node else {
             return None;
@@ -90,4 +104,48 @@ pub(in crate::graph_verifier) fn retained_selection_matches(
     selected_eligible
         && selected <= retention.required
         && selected + remaining >= retention.required
+}
+
+// Private per-item normal-completion witness. It is derived jointly from the body's real controls,
+// then counted with the same cardinality and saturation as authored aggregate selectors.
+pub(in crate::graph_verifier) fn is_map_item_predicate(key: &SelectorKey) -> bool {
+    key.source == ControlSourceKey::Group && is_map_item_predicate_field(key.field.as_ref())
+}
+
+fn is_map_item_predicate_field(field: Option<&FieldName>) -> bool {
+    field.is_some_and(|field| {
+        field.as_str() == "__map_body_completed" || map_write_index(Some(field)).is_some()
+    })
+}
+
+pub(in crate::graph_verifier) fn map_completion_predicate(
+    map: &MapNode,
+) -> Option<CompletionPredicate> {
+    map_item_guard(map, FieldName::new("__map_body_completed").ok()?)
+        .map(CompletionPredicate::Guard)
+}
+
+pub(in crate::graph_verifier) fn map_write_index(field: Option<&FieldName>) -> Option<usize> {
+    field?.as_str().strip_prefix("__map_write.")?.parse().ok()
+}
+
+/// A complete collection requires every item to produce this authored promoted path.
+pub fn map_write_guard(map: &MapNode, index: usize) -> Option<Guard> {
+    map.promoted_state_paths.get(index)?;
+    map_item_guard(map, FieldName::new(format!("__map_write.{index}")).ok()?)
+}
+
+fn map_item_guard(map: &MapNode, field: FieldName) -> Option<Guard> {
+    Some(Guard::Not {
+        guard: Box::new(Guard::KOfMap {
+            count: PositiveInteger::new(1).ok()?,
+            value: ControlSelector {
+                name: map.body.name().clone(),
+                source: ControlSource::Group,
+                field: Some(field),
+            },
+            labels: openengine_cluster_protocol::NonEmptyEnumSet::new(vec![enum_label("blocked")?])
+                .ok()?,
+        }),
+    })
 }

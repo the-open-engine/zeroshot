@@ -156,3 +156,38 @@ test('decision probability drafts follow their runtime binding through edits and
     'Worker replacement removes an irrelevant probability draft'
   );
 });
+
+test('run concurrency drafts retain their document owner, bounds, and optional clearing', (t) => {
+  const drafts = createNumericDrafts();
+  t.after(() => drafts.clear());
+  const doc = document();
+  doc.runtime.maxConcurrency = 1;
+  const base = { field: 'maxConcurrency' as const, base: 1 };
+  const commit = () =>
+    drafts.commit(undefined, 'maxConcurrency', true, (value) => {
+      if (value === undefined) delete doc.runtime.maxConcurrency;
+      else doc.runtime.maxConcurrency = value;
+    });
+  for (const text of ['1e', '1e-', '0', '1.5', '65537']) {
+    drafts.set({ ...base, text });
+    drafts.prune({ ...doc.graph.root, name: 'renamed' }, doc.runtime);
+    drafts.rename('worker', 'other');
+    assert.equal(drafts.get(undefined, 'maxConcurrency')?.text, text);
+    assert.equal(commit(), false);
+    assert.equal(doc.runtime.maxConcurrency, 1);
+    assert.throws(
+      () => snapshotProfileSave(doc, { name: doc.name, generation: 1, pending: hasPendingEdits() }),
+      /pending field edits/
+    );
+  }
+  drafts.set({ ...base, text: '1e3' });
+  assert.equal(commit(), true);
+  assert.equal(doc.runtime.maxConcurrency, 1000);
+  drafts.set({ field: 'maxConcurrency', base: 1000, text: '' });
+  assert.equal(commit(), true);
+  assert.equal(Object.hasOwn(doc.runtime, 'maxConcurrency'), false);
+  drafts.set({ field: 'maxConcurrency', base: undefined, text: '1e' });
+  doc.runtime.maxConcurrency = 3;
+  drafts.prune(doc.graph.root, doc.runtime);
+  assert.equal(drafts.pending(), false, 'explicit runtime replacement owns the new numeric value');
+});

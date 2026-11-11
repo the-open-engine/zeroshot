@@ -126,6 +126,10 @@ impl Engine<'_> {
         runtime: (&Context, Traversal<'_>),
     ) -> Result<(), ReducerError> {
         let (context, traversal) = runtime;
+        // A speculative racer can still be discarded by its join. Charge its actual leaves only.
+        if traversal.mode == EvalMode::Probe || !traversal.necessary {
+            return Ok(());
+        }
         // A mandatory leaf per item proves overflow before any of that map's work starts.
         if matches!(*group.body, GraphNode::Step(_) | GraphNode::Verifier(_)) {
             let mut fresh = 0_u64;
@@ -201,6 +205,16 @@ impl LoopWork {
         self.spans.insert(key, previous.max(round));
         self.total = total;
         Ok(())
+    }
+    pub(super) fn scoped(&self, scope: &[u64]) -> Self {
+        let spans = self
+            .spans
+            .iter()
+            .filter(|((_, indices, _), _)| indices.starts_with(scope))
+            .map(|(key, round)| (key.clone(), *round))
+            .collect::<BTreeMap<_, _>>();
+        let total = spans.values().sum();
+        Self { spans, total }
     }
     pub(super) fn merge(&mut self, other: &Self) -> Result<(), ()> {
         for (key, round) in &other.spans {

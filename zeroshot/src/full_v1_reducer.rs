@@ -8,6 +8,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+mod future;
+use future::FutureWrites;
 mod history;
 mod trace;
 
@@ -25,6 +27,7 @@ use openengine_cluster_protocol::{
     WorkerErrorCode, WorkerOutcome, WorkerRef,
 };
 use openengine_cluster_server::admission::VerifiedGraph;
+use openengine_cluster_server::graph_verifier::{MapCardinality, CollectionWrite};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -204,6 +207,7 @@ impl<'a> FullV1Reducer<'a> {
                 cutoff: HistoryPosition::MAX,
                 accepted_prefix: false,
                 record_evidence: true,
+                necessary: true,
             },
         )?;
         engine.ensure_history_consumed()?;
@@ -248,23 +252,43 @@ struct Channels {
     diagnostic: Option<Value>,
 }
 
+struct GroupMutation<'a, G> {
+    group: &'a G,
+    context: &'a mut Context,
+    traversal: Traversal<'a>,
+}
+
+type MapSizes = BTreeMap<(NodeName, Vec<u64>), MapCardinality>;
+
 #[derive(Clone)]
 struct Context {
     state: Value,
+    evidence_position: HistoryPosition,
     controls: BTreeMap<ControlKey, String>,
     channels: BTreeMap<(NodeName, Vec<u64>), Channels>,
     local_writes: BTreeSet<FieldPath>,
     completed: BTreeSet<(NodeName, Vec<u64>)>,
+    map_sizes: MapSizes,
+    loop_exits: BTreeMap<(NodeName, Vec<u64>), Vec<future::LoopExit>>,
+    pending_writes: BTreeMap<(NodeName, Vec<u64>), future::FutureWrites>,
+    revisitable: BTreeSet<(NodeName, Vec<u64>)>,
+    retained: BTreeMap<(NodeName, Vec<u64>), BTreeSet<usize>>,
 }
 
 impl Context {
     fn new(state: Value) -> Self {
         Self {
             state,
+            evidence_position: HistoryPosition::ZERO,
             controls: BTreeMap::new(),
             channels: BTreeMap::new(),
             local_writes: BTreeSet::new(),
             completed: BTreeSet::new(),
+            map_sizes: BTreeMap::new(),
+            loop_exits: BTreeMap::new(),
+            pending_writes: BTreeMap::new(),
+            revisitable: BTreeSet::new(),
+            retained: BTreeMap::new(),
         }
     }
 }
@@ -293,6 +317,7 @@ struct Traversal<'a> {
     cutoff: HistoryPosition,
     accepted_prefix: bool,
     record_evidence: bool,
+    necessary: bool,
 }
 
 struct ExecutableSpec<'a> {
@@ -401,6 +426,8 @@ struct VoidCutoff {
 }
 
 struct Engine<'a> {
+    root: &'a GraphNode,
+    selector_work: openengine_cluster_server::graph_verifier::ProofWork,
     boundary: Option<ExecutionBoundary>,
     dispatch_remaining: usize,
     frontier_limit: usize,
@@ -427,7 +454,7 @@ struct Engine<'a> {
 impl<'a> Engine<'a> {
     fn new(
         input: ReductionInput<'a>,
-        root: &GraphNode,
+        root: &'a GraphNode,
         execution_mode: ExecutionMode,
     ) -> Result<Self, ReducerError> {
         validate_history_for_mode(input.executions, execution_mode)?;
@@ -469,6 +496,8 @@ impl<'a> Engine<'a> {
             return Err(ReducerError::InconsistentHistory);
         }
         Ok(Self {
+            root,
+            selector_work: Default::default(),
             boundary: None,
             dispatch_remaining: 0,
             frontier_limit: 1,

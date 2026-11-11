@@ -43,6 +43,8 @@ impl WorkerRegistry for TestWorkers {
                 "a":{"type":{"kind":"integer"},"required":true},
                 "b":{"type":{"kind":"integer"},"required":true}
             }})
+        } else if worker.as_str() == "worker.record-array@1" {
+            json!({"kind":"record","fields":{"value":{"type":records_array_type(),"required":true}}})
         } else {
             json!({"kind":"record","fields":{"value":{"type":{"kind":"integer"},"required":true}}})
         };
@@ -83,7 +85,12 @@ pub async fn verified_graph(
     ProductionGraphVerifier::new(TestWorkers { rich_outputs })
         .verify(&graph)
         .await
-        .assert_value()
+        .unwrap_or_else(|error| panic!("graph verification failed: {error:?}"))
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+pub fn records_array_type() -> Value {
+    json!({"kind":"array","items":{"kind":"record","fields":{
+        "children":{"type":{"kind":"array","items":{"kind":"null"}},"required":true}}}})
+}

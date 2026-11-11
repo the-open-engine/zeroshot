@@ -31,58 +31,92 @@ pub(in crate::graph_verifier) struct AggregateCounts<'a> {
     pub(super) outcomes: &'a [Assignment],
     pub(super) saturation: u64,
     pub(super) budget: &'a ProofWork,
+    pub(super) exact_occurrences: Option<u64>,
 }
 
 pub(in crate::graph_verifier) fn aggregate_assignments_from_outcomes(
     context: AggregateCounts<'_>,
 ) -> Option<Vec<Assignment>> {
-    let AggregateCounts {
-        keys,
-        outcomes,
-        saturation,
-        budget,
-    } = context;
+    let keys = context.keys;
+    let exact_occurrences = context.exact_occurrences;
     let empty = keys
         .iter()
         .cloned()
         .map(|key| (key, assigned_control(None, 0)))
         .collect::<Assignment>();
-    // Cardinality is caller-owned. Close over clipped joint states, independent of map concurrency
-    // or leaf ceilings: zero-work structural bodies may still emit arbitrarily many controls.
+    // Exact cardinality advances complete item layers. Once a saturated layer is a fixed point,
+    // every remaining item preserves it. Unknown cardinality instead closes over all finite layers.
     let mut states = BTreeSet::from([empty.clone()]);
-    let mut pending = std::collections::VecDeque::from([empty]);
-    while let Some(state) = pending.pop_front() {
-        for outcome in outcomes {
-            budget.charge(
-                2 * (1
-                    + state.len()
-                    + state
-                        .values()
-                        .map(|control| control.counts.len())
-                        .sum::<usize>())
-                    + outcome
-                        .values()
-                        .map(|control| control.counts.len())
-                        .sum::<usize>(),
-            )?;
-            let mut next = state.clone();
-            for (key, control) in outcome {
-                let target = next.get_mut(key)?;
-                for (label, count) in &control.counts {
-                    let previous = target.counts.entry(label.clone()).or_default();
-                    *previous = previous.saturating_add(*count).min(saturation);
-                }
+    let mut frontier = BTreeSet::from([empty]);
+    let mut occurrences = 0;
+    loop {
+        if exact_occurrences == Some(occurrences) {
+            return Some(frontier.into_iter().collect());
+        }
+        let next = next_aggregate_layer(
+            &frontier,
+            exact_occurrences.is_none().then_some(&states),
+            &context,
+        )?;
+        if exact_occurrences.is_some() {
+            if next == frontier {
+                return Some(next.into_iter().collect());
             }
-            if !states.contains(&next) {
-                if states.len() as u64 >= FULL_V1_MAX_GUARD_ASSIGNMENTS {
-                    return None;
-                }
-                states.insert(next.clone());
-                pending.push_back(next);
+        } else {
+            if next.is_empty() {
+                return Some(states.into_iter().collect());
             }
+            if states.len().checked_add(next.len())? as u64 > FULL_V1_MAX_GUARD_ASSIGNMENTS {
+                return None;
+            }
+            states.extend(next.iter().cloned());
+        }
+        frontier = next;
+        occurrences += 1;
+    }
+}
+
+fn next_aggregate_layer(
+    frontier: &BTreeSet<Assignment>,
+    excluded: Option<&BTreeSet<Assignment>>,
+    context: &AggregateCounts<'_>,
+) -> Option<BTreeSet<Assignment>> {
+    let mut next = BTreeSet::new();
+    for state in frontier {
+        for outcome in context.outcomes {
+            let candidate =
+                add_aggregate_outcome(state, outcome, context.saturation, context.budget)?;
+            if excluded.is_some_and(|seen| seen.contains(&candidate)) {
+                continue;
+            }
+            if !next.contains(&candidate) && next.len() as u64 >= FULL_V1_MAX_GUARD_ASSIGNMENTS {
+                return None;
+            }
+            next.insert(candidate);
         }
     }
-    Some(states.into_iter().collect())
+    Some(next)
+}
+
+fn add_aggregate_outcome(
+    state: &Assignment,
+    outcome: &Assignment,
+    saturation: u64,
+    budget: &ProofWork,
+) -> Option<Assignment> {
+    budget.charge(
+        2 * (1 + state.len() + state.values().map(|c| c.counts.len()).sum::<usize>())
+            + outcome.values().map(|c| c.counts.len()).sum::<usize>(),
+    )?;
+    let mut next = state.clone();
+    for (key, control) in outcome {
+        let target = next.get_mut(key)?;
+        for (label, count) in &control.counts {
+            let previous = target.counts.entry(label.clone()).or_default();
+            *previous = previous.saturating_add(*count).min(saturation);
+        }
+    }
+    Some(next)
 }
 
 pub(in crate::graph_verifier) fn assignment_matches_parallel_join_correlation(
@@ -439,4 +473,29 @@ pub(in crate::graph_verifier) fn signal_path_type(
         .get(field)
         .cloned()
         .map(|values| PayloadType::Enum { values })
+}
+
+// Check before item aggregation: different map items may terminate differently, but a single
+// final body verdict and its loop label must describe the same legal outcome.
+pub(super) fn loop_outcome_matches(group: &LoopNode, assignment: &Assignment) -> bool {
+    let key = SelectorKey {
+        name: group.name.clone(),
+        source: ControlSourceKey::Group,
+        field: FieldName::new("terminated").ok(),
+    };
+    let Some(control) = assignment.get(&key) else {
+        return true;
+    };
+    let converged = group
+        .until
+        .as_ref()
+        .is_some_and(|until| evaluate_guard(until, assignment));
+    control.counts.iter().all(|(label, count)| {
+        *count == 0
+            || match label.as_str() {
+                "converged" => converged,
+                "exhausted" => !converged,
+                _ => false,
+            }
+    })
 }

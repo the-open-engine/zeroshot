@@ -279,7 +279,7 @@ impl<'a> Analyzer<'a> {
         context: &LocatedNodeValidationContext<'_>,
     ) -> Effects {
         if let Some(path) = &group.max_iterations_input {
-            if path_type(&self.graph.initial_input, path) != Some(&PayloadType::Integer) {
+            if path_type(self.graph.initial_input, path) != Some(&PayloadType::Integer) {
                 emit_diagnostic!(
                     self,
                     GraphDiagnosticCode::SchemaSafety,

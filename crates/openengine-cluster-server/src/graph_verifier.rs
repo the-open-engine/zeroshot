@@ -189,12 +189,22 @@ struct ParallelRetention {
 struct MapExecutionCorrelation {
     owner: NodeName,
     presence: CompletionPredicate,
+    item_predicates: BTreeMap<FieldName, CompletionPredicate>,
 }
 
 #[derive(Clone)]
 struct ChoiceExecutionCorrelation {
     owner: NodeName,
     presence: CompletionPredicate,
+}
+
+impl MapExecutionCorrelation {
+    fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
+        self.presence.collect_guards(guards);
+        for completion in self.item_predicates.values() {
+            completion.collect_guards(guards);
+        }
+    }
 }
 
 impl ParallelJoinCorrelation {
@@ -288,7 +298,10 @@ impl CompletionPredicate {
                     &|selector, labels, _| {
                         available
                             .get(&SelectorKey::from(selector))
-                            .filter(|presence| presence.evaluate(assignment))
+                            .filter(|presence| {
+                                assignment.contains_key(&SelectorKey::from(selector))
+                                    && presence.evaluate(assignment)
+                            })
                             .map(|_| selector_occurrences(selector, labels, assignment))
                     },
                 ) == openengine_cluster_protocol::GuardTruth::True
@@ -475,8 +488,14 @@ struct Fold {
     dynamic: bool,
 }
 
+struct GraphView<'a> {
+    profile: GraphProfile,
+    initial_input: &'a PayloadType,
+    root: &'a GraphNode,
+}
+
 struct Analyzer<'a> {
-    graph: &'a GraphSpec,
+    graph: GraphView<'a>,
     proof_work: ProofWork,
     nodes: BTreeMap<NodeName, NodeInfo<'a>>,
     authored: Vec<NodeName>,
@@ -518,6 +537,10 @@ mod analyzer_parallel;
 mod analyzer_parallel_flow;
 mod analyzer_terminal;
 mod assignments;
+pub use assignments::{
+    ProofWork, ControlSnapshot, MapCardinality, CollectionWrite, MapProgress,
+    loop_reentry_possible, guard_has_possible_future, retained_branch_guard, map_write_guard,
+};
 mod choice;
 mod contexts;
 mod diagnostics;

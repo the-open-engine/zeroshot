@@ -4,6 +4,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ModelPicker } from './ModelPicker';
 import { RuntimeEditor } from './RuntimeEditor';
+import { NumericDraftProvider, createNumericDrafts } from './numeric-drafts';
 import { assertDocument, type Document } from './domain';
 
 function elements(value: ReactNode): ReactElement<any>[] {
@@ -19,7 +20,14 @@ function within(view: () => ReactNode, inspect: (tree: ReactElement<any>[]) => v
     inspect(elements(tree));
     return tree;
   }
-  renderToStaticMarkup(createElement(Probe));
+  const drafts = createNumericDrafts();
+  try {
+    renderToStaticMarkup(
+      createElement(NumericDraftProvider, { value: drafts }, createElement(Probe))
+    );
+  } finally {
+    drafts.clear();
+  }
 }
 
 function document(harness: string, provider: string): Document {

@@ -712,3 +712,6 @@ async fn scripts_require_a_step_without_instructions() {
 
 #[path = "tests/join_regressions.rs"]
 mod join_regressions;
+
+#[path = "tests/loop_limits.rs"]
+mod input_loop_limits;

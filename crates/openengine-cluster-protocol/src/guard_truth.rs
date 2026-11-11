@@ -40,13 +40,11 @@ fn threshold(count: u64, values: impl IntoIterator<Item = u8>) -> u8 {
 fn possibilities(
     guard: &Guard,
     select: &impl Fn(&ControlSelector, &[EnumLabel], bool) -> Option<u64>,
-    future: &impl Fn(&ControlSelector, bool) -> bool,
 ) -> u8 {
     let compare =
         |value, labels: &[EnumLabel], aggregate, count| match select(value, labels, aggregate) {
             Some(actual) if actual >= count => TRUE,
             Some(_) => FALSE,
-            None if future(value, aggregate) => TRUE | FALSE,
             None => UNKNOWN,
         };
     match guard {
@@ -72,17 +70,17 @@ fn possibilities(
             guards
                 .as_slice()
                 .iter()
-                .map(|guard| possibilities(guard, select, future)),
+                .map(|guard| possibilities(guard, select)),
         ),
         Guard::Any { guards } => threshold(
             1,
             guards
                 .as_slice()
                 .iter()
-                .map(|guard| possibilities(guard, select, future)),
+                .map(|guard| possibilities(guard, select)),
         ),
         Guard::Not { guard } => {
-            let value = possibilities(guard, select, future);
+            let value = possibilities(guard, select);
             ((value & TRUE) << 1) | ((value & FALSE) >> 1) | (value & UNKNOWN)
         }
     }
@@ -93,19 +91,9 @@ pub fn evaluate_partial_guard(
     guard: &Guard,
     select: &impl Fn(&ControlSelector, &[EnumLabel], bool) -> Option<u64>,
 ) -> GuardTruth {
-    match possibilities(guard, select, &|_, _| false) {
+    match possibilities(guard, select) {
         TRUE => GuardTruth::True,
         FALSE => GuardTruth::False,
         _ => GuardTruth::Unknown,
     }
-}
-
-/// Conservative viability: only a candidate's own future controls can become available.
-/// Correlated unknowns may retain work, but cannot eliminate a possible winner.
-pub fn guard_can_become_true(
-    guard: &Guard,
-    select: &impl Fn(&ControlSelector, &[EnumLabel], bool) -> Option<u64>,
-    future: &impl Fn(&ControlSelector, bool) -> bool,
-) -> bool {
-    possibilities(guard, select, future) & TRUE != 0
 }

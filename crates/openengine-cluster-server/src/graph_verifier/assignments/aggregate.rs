@@ -21,7 +21,8 @@ pub(super) fn aggregate_scope_dimensions(
         return component_dimensions(&context, &components, &Assignment::new());
     }
 
-    let shared_dimensions = dimensions_for_keys(inputs.nodes, &shared_keys, inputs.budget)?;
+    let shared_dimensions =
+        dimensions_for_keys(inputs.nodes, &shared_keys, inputs.budget, inputs.runtime)?;
     if !dimension_product_is_bounded(&shared_dimensions) {
         return None;
     }
@@ -70,11 +71,9 @@ fn correlate_join_components(
         if !correlation_is_available_to_scope(name, correlation, scope_keys, available_keys) {
             continue;
         }
-        let mut correlated = BTreeSet::from([name.clone()]);
         let mut guards = Vec::new();
         correlation.collect_guards(&mut guards);
-        correlated.extend(scoped_guard_names(guards, scope_keys));
-        merge_assignment_components(components, correlated);
+        merge_guard_component(name, guards, scope_keys, components);
     }
 }
 
@@ -100,12 +99,21 @@ fn correlate_execution_components(
         if !scope_nodes.contains_key(name) {
             continue;
         }
-        let mut correlated = BTreeSet::from([name.clone()]);
         let mut guards = Vec::new();
-        correlation.presence.collect_guards(&mut guards);
-        correlated.extend(scoped_guard_names(guards, scope_keys));
-        merge_assignment_components(components, correlated);
+        correlation.collect_guards(&mut guards);
+        merge_guard_component(name, guards, scope_keys, components);
     }
+}
+
+fn merge_guard_component(
+    name: &NodeName,
+    guards: Vec<&Guard>,
+    scope_keys: &BTreeSet<SelectorKey>,
+    components: &mut Vec<BTreeSet<NodeName>>,
+) {
+    let mut correlated = BTreeSet::from([name.clone()]);
+    correlated.extend(scoped_guard_names(guards, scope_keys));
+    merge_assignment_components(components, correlated);
 }
 
 fn scoped_guard_names<'a>(
@@ -196,77 +204,15 @@ pub(super) fn aggregate_component_dimension(
     context: &AggregateComponentContext<'_, '_>,
     component: &BTreeSet<NodeName>,
 ) -> Option<Vec<Assignment>> {
-    let keys = component
-        .iter()
-        .flat_map(|name| context.scope_nodes.get(name).into_iter().flatten())
-        .cloned()
-        .collect::<Vec<_>>();
-    let key_set = keys.iter().cloned().collect::<BTreeSet<_>>();
-    let mut item_dimensions = Vec::new();
-    for name in component {
-        let node_keys = context.scope_nodes.get(name)?;
-        let node = context.inputs.nodes.get(name)?.node;
-        let mut outcome_keys = node_keys.clone();
-        if context.inputs.execution_correlations.contains_key(name) {
-            outcome_keys.push(execution_key(name));
-        }
-        let mut outcomes = per_execution_outcomes(node, &outcome_keys, context.inputs.budget)?;
-        outcomes.push(empty_outcome(&outcome_keys));
-        item_dimensions.push(
-            outcomes
-                .into_iter()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect(),
-        );
-    }
-    if !dimension_product_is_bounded(&item_dimensions) {
-        return None;
-    }
-    let mut item_outcomes = enumerate_assignments(item_dimensions, context.inputs.budget)?;
-    item_outcomes.retain(|assignment| {
-        if assignment_is_empty(assignment) {
-            return false;
-        }
-        let mut correlated = context.shared_assignment.clone();
-        correlated.extend(assignment.clone());
-        context
-            .inputs
-            .join_correlations
-            .iter()
-            .all(|(name, correlation)| {
-                !correlation_is_available_to_scope(
-                    name,
-                    correlation,
-                    &key_set,
-                    context.available_keys,
-                ) || assignment_matches_parallel_join_correlation(&correlated, name, correlation)
-            })
-            && component.iter().all(|name| {
-                context
-                    .inputs
-                    .execution_correlations
-                    .get(name)
-                    .is_none_or(|correlation| {
-                        assignment_matches_map_execution_correlation(&correlated, name, correlation)
-                    })
-            })
-    });
-    for assignment in &mut item_outcomes {
-        assignment.retain(|key, _| key.source != ControlSourceKey::Execution);
-    }
+    let keys = component_keys(context.scope_nodes, component);
+    let mut item_outcomes = component_item_outcomes(context, component, None)?;
     item_outcomes.retain(|assignment| !assignment_is_empty(assignment));
-    normalize_outcome_labels(&mut item_outcomes, context.inputs.label_classes)?;
-    item_outcomes = item_outcomes
-        .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
     aggregate_assignments_from_outcomes(AggregateCounts {
         keys: &keys,
         outcomes: &item_outcomes,
         saturation: context.inputs.saturation,
         budget: context.inputs.budget,
+        exact_occurrences: None,
     })
 }
 
@@ -279,6 +225,20 @@ fn assignment_matches_map_execution_correlation(
         .get(&execution_key(name))
         .is_some_and(|control| control.counts.values().any(|count| *count > 0));
     executed == correlation.presence.evaluate(assignment)
+        && correlation
+            .item_predicates
+            .iter()
+            .all(|(field, predicate)| {
+                assignment
+                    .get(&SelectorKey {
+                        name: name.clone(),
+                        source: ControlSourceKey::Group,
+                        field: Some(field.clone()),
+                    })
+                    .is_none_or(|control| {
+                        control_reports_completion(control, predicate.evaluate(assignment))
+                    })
+            })
 }
 
 fn execution_key(name: &NodeName) -> SelectorKey {
@@ -289,7 +249,7 @@ fn execution_key(name: &NodeName) -> SelectorKey {
     }
 }
 
-fn empty_outcome(keys: &[SelectorKey]) -> Assignment {
+pub(super) fn empty_outcome(keys: &[SelectorKey]) -> Assignment {
     keys.iter()
         .cloned()
         .map(|key| (key, assigned_control(None, 0)))
@@ -345,7 +305,7 @@ pub(super) fn correlation_is_available_to_scope(
         .all(|key| available_keys.contains(&key))
 }
 
-fn normalize_outcome_labels(
+pub(super) fn normalize_outcome_labels(
     outcomes: &mut [Assignment],
     classes: &BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
 ) -> Option<()> {
@@ -362,4 +322,177 @@ fn normalize_outcome_labels(
         }
     }
     Some(())
+}
+
+fn component_item_outcomes(
+    context: &AggregateComponentContext<'_, '_>,
+    component: &BTreeSet<NodeName>,
+    runtime: Option<RuntimeScope<'_>>,
+) -> Option<Vec<Assignment>> {
+    let keys = component_keys(context.scope_nodes, component);
+    let key_set = keys.iter().cloned().collect::<BTreeSet<_>>();
+    let mut item_dimensions = Vec::new();
+    for name in component {
+        item_dimensions.push(item_node_dimension(context, name, runtime)?);
+    }
+    if !dimension_product_is_bounded(&item_dimensions) {
+        return None;
+    }
+    let mut item_outcomes = enumerate_assignments(item_dimensions, context.inputs.budget)?;
+    item_outcomes
+        .retain(|assignment| item_assignment_matches(context, component, &key_set, assignment));
+    for assignment in &mut item_outcomes {
+        assignment.retain(|key, _| key.source != ControlSourceKey::Execution);
+    }
+    normalize_outcome_labels(&mut item_outcomes, context.inputs.label_classes)?;
+    item_outcomes = item_outcomes
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    Some(item_outcomes)
+}
+
+pub(super) fn add_count_dimensions(
+    left: &[Assignment],
+    right: &[Assignment],
+    inputs: DimensionInputs<'_, '_>,
+) -> Option<Vec<Assignment>> {
+    let mut results = BTreeSet::new();
+    for prefix in left {
+        for suffix in right {
+            inputs.budget.charge(
+                1 + prefix.len()
+                    + suffix
+                        .values()
+                        .map(|control| 1 + control.counts.len())
+                        .sum::<usize>(),
+            )?;
+            let mut next = prefix.clone();
+            for (key, control) in suffix {
+                let target = next
+                    .entry(key.clone())
+                    .or_insert_with(|| assigned_control(None, 0));
+                for (label, count) in &control.counts {
+                    let value = target.counts.entry(label.clone()).or_default();
+                    *value = value.saturating_add(*count).min(inputs.saturation);
+                }
+            }
+            if !results.contains(&next) && results.len() as u64 >= FULL_V1_MAX_GUARD_ASSIGNMENTS {
+                return None;
+            }
+            results.insert(next);
+        }
+    }
+    Some(results.into_iter().collect())
+}
+
+pub(super) fn item_node_dimension(
+    context: &AggregateComponentContext<'_, '_>,
+    name: &NodeName,
+    runtime: Option<RuntimeScope<'_>>,
+) -> Option<Vec<Assignment>> {
+    let node_keys = context.scope_nodes.get(name)?;
+    let node = context.inputs.nodes.get(name)?.node;
+    let mut outcome_keys = node_keys.clone();
+    if context.inputs.execution_correlations.contains_key(name) {
+        outcome_keys.push(execution_key(name));
+    }
+    let markers = outcome_keys
+        .iter()
+        .filter(|key| is_map_item_predicate(key))
+        .cloned()
+        .collect::<Vec<_>>();
+    outcome_keys.retain(|key| !is_map_item_predicate(key));
+    let mut outcomes =
+        if let Some(fixed) = runtime.and_then(|scope| fixed_outcome(name, &outcome_keys, scope)) {
+            vec![fixed]
+        } else {
+            unfixed_item_outcomes(context, name, &outcome_keys)?
+        };
+    for marker in markers {
+        context
+            .inputs
+            .budget
+            .charge(outcomes.len().checked_mul(2 * (1 + outcome_keys.len()))?)?;
+        outcomes = cartesian_emitted_outcomes(
+            outcomes,
+            &marker,
+            &proof_group_domain(node, marker.field.as_ref())?,
+        );
+    }
+    Some(
+        outcomes
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    )
+}
+
+pub(super) fn item_assignment_matches(
+    context: &AggregateComponentContext<'_, '_>,
+    component: &BTreeSet<NodeName>,
+    key_set: &BTreeSet<SelectorKey>,
+    assignment: &Assignment,
+) -> bool {
+    let mut correlated = context.shared_assignment.clone();
+    correlated.extend(assignment.clone());
+    context
+        .inputs
+        .join_correlations
+        .iter()
+        .all(|(name, correlation)| {
+            !correlation_is_available_to_scope(name, correlation, key_set, context.available_keys)
+                || assignment_matches_parallel_join_correlation(&correlated, name, correlation)
+        })
+        && component.iter().all(|name| {
+            let loop_matches = match context.inputs.nodes.get(name).map(|info| info.node) {
+                Some(GraphNode::Loop(group)) => loop_outcome_matches(group, &correlated),
+                _ => true,
+            };
+            loop_matches
+                && context
+                    .inputs
+                    .execution_correlations
+                    .get(name)
+                    .is_none_or(|correlation| {
+                        assignment_matches_map_execution_correlation(&correlated, name, correlation)
+                    })
+        })
+}
+
+fn component_keys(
+    scope_nodes: &BTreeMap<NodeName, Vec<SelectorKey>>,
+    component: &BTreeSet<NodeName>,
+) -> Vec<SelectorKey> {
+    component
+        .iter()
+        .flat_map(|name| scope_nodes.get(name).into_iter().flatten())
+        .cloned()
+        .collect()
+}
+
+fn control_reports_completion(control: &AssignedControl, complete: bool) -> bool {
+    let expected = if complete { "complete" } else { "blocked" };
+    control
+        .counts
+        .iter()
+        .any(|(label, count)| label.as_str() == expected && *count > 0)
+}
+
+fn unfixed_item_outcomes(
+    context: &AggregateComponentContext<'_, '_>,
+    name: &NodeName,
+    keys: &[SelectorKey],
+) -> Option<Vec<Assignment>> {
+    let mut outcomes = per_execution_outcomes(
+        context.inputs.nodes.get(name)?.node,
+        keys,
+        context.inputs.budget,
+    )?;
+    if context.inputs.execution_correlations.contains_key(name) {
+        outcomes.push(empty_outcome(keys));
+    }
+    Some(outcomes)
 }

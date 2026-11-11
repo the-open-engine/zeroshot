@@ -5,17 +5,30 @@ impl Engine<'_> {
         &self,
         context: &Context,
         indices: &[u64],
-        query: (&ControlSelector, &[EnumLabel], bool),
+        query: (&ControlSelector, &[EnumLabel], bool, bool),
     ) -> Option<u64> {
-        let (selector, labels, aggregate) = query;
+        let (selector, labels, aggregate, frozen) = query;
+        // Private proof controls are derived from correlated outcomes, not runtime control labels.
+        if selector.source == ControlSource::Group
+            && selector
+                .field
+                .as_ref()
+                .is_some_and(|field| !matches!(field.as_str(), "joined" | "raced" | "terminated"))
+        {
+            return None;
+        }
+        if !frozen && self.provisional(context, &selector.name, indices) {
+            return None;
+        }
         let depth = *self.map_depths.get(&selector.name)?;
         let available = if aggregate {
-            self.map_owners.get(&selector.name).is_some_and(|owner| {
-                let owner_depth = self.map_depths[owner];
-                indices.get(..owner_depth).is_some_and(|scope| {
-                    context.completed.contains(&(owner.clone(), scope.to_vec()))
+            self.aggregate_owner_at_scope(&selector.name, indices)
+                .is_some_and(|owner| {
+                    let depth = self.map_depths[owner];
+                    context
+                        .completed
+                        .contains(&(owner.clone(), indices[..depth].to_vec()))
                 })
-            })
         } else {
             indices.get(..depth).is_some_and(|scope| {
                 context
@@ -31,6 +44,18 @@ impl Engine<'_> {
         })
     }
 
+    fn aggregate_owner_at_scope<'a>(
+        &'a self,
+        name: &NodeName,
+        indices: &[u64],
+    ) -> Option<&'a NodeName> {
+        let mut owner = self.map_owners.get(name)?;
+        while self.map_depths[owner] > indices.len() {
+            owner = self.map_owners.get(owner)?;
+        }
+        Some(owner)
+    }
+
     pub(super) fn candidate_guard(
         &self,
         guard: &Guard,
@@ -40,7 +65,7 @@ impl Engine<'_> {
         openengine_cluster_protocol::evaluate_partial_guard(
             guard,
             &|selector, labels, aggregate| {
-                self.candidate_count(context, indices, (selector, labels, aggregate))
+                self.candidate_count(context, indices, (selector, labels, aggregate, false))
             },
         )
     }
@@ -49,25 +74,88 @@ impl Engine<'_> {
         &self,
         guard: &Guard,
         context: &Context,
-        scope: (&GraphNode, &[u64]),
+        scope: (&GraphNode, Traversal<'_>),
     ) -> bool {
-        let (branch, indices) = scope;
-        let owned = descendant_names(branch);
-        openengine_cluster_protocol::guard_can_become_true(
-            guard,
-            &|selector, labels, aggregate| {
-                self.candidate_count(context, indices, (selector, labels, aggregate))
-            },
-            &|selector, aggregate| {
-                if aggregate {
-                    self.map_owners
-                        .get(&selector.name)
-                        .is_some_and(|owner| owned.contains(owner))
-                } else {
-                    owned.contains(&selector.name)
-                }
-            },
+        let (branch, traversal) = scope;
+        let mut snapshot = ResidualSnapshot::new(self, context);
+        if self.selector_work.charge(self.map_depths.len()).is_none() {
+            return true;
+        }
+        let names = descendant_names(branch);
+        let alternatives = context
+            .loop_exits
+            .iter()
+            .filter(|((name, scope), _)| {
+                (traversal.map_indices.starts_with(scope)
+                    || scope.starts_with(traversal.map_indices))
+                    && names.contains(name)
+            })
+            .map(|(key, exits)| (key, exits.as_slice()))
+            .collect::<Vec<_>>();
+        snapshot
+            .possible_exits((branch, guard, traversal.map_indices), &alternatives)
+            .unwrap_or(true)
+    }
+
+    pub(super) fn loop_may_reenter(
+        &self,
+        selected: (&openengine_cluster_protocol::LoopNode, Option<&Guard>),
+        context: &Context,
+        traversal: Traversal<'_>,
+    ) -> bool {
+        let (group, write) = selected;
+        let snapshot = ResidualSnapshot::new(self, context);
+        openengine_cluster_server::graph_verifier::loop_reentry_possible(
+            &group.body,
+            (group.until.as_ref(), write),
+            &snapshot,
+            traversal.map_indices,
         )
+    }
+
+    pub(super) fn loop_may_converge(
+        &self,
+        group: &openengine_cluster_protocol::LoopNode,
+        context: &Context,
+        traversal: Traversal<'_>,
+    ) -> bool {
+        let Some(until) = &group.until else {
+            return false;
+        };
+        if self.selector_work.charge_guard(until).is_none() {
+            return true;
+        }
+        let negated = Guard::Not {
+            guard: Box::new(until.clone()),
+        };
+        let snapshot = ResidualSnapshot::new(self, context);
+        openengine_cluster_server::graph_verifier::loop_reentry_possible(
+            &group.body,
+            (Some(&negated), None),
+            &snapshot,
+            traversal.map_indices,
+        )
+    }
+
+    pub(super) fn provisional(&self, context: &Context, name: &NodeName, indices: &[u64]) -> bool {
+        self.provisional_except(context, (name, indices), &[])
+    }
+
+    fn provisional_except(
+        &self,
+        context: &Context,
+        subject: (&NodeName, &[u64]),
+        fixed: &[(&(NodeName, Vec<u64>), &future::LoopExit)],
+    ) -> bool {
+        let (name, indices) = subject;
+        context.revisitable.iter().any(|(loop_name, scope)| {
+            !fixed
+                .iter()
+                .any(|(key, exit)| exit.current && key.0 == *loop_name && key.1 == *scope)
+                && indices.starts_with(scope)
+                && find_descendant(self.root, loop_name)
+                    .is_some_and(|node| descendant_names(node).contains(name))
+        })
     }
 
     pub(super) fn guard(
@@ -262,4 +350,220 @@ impl Engine<'_> {
             }
         }
     }
+}
+
+fn find_descendant<'a>(node: &'a GraphNode, name: &NodeName) -> Option<&'a GraphNode> {
+    if node.name() == name {
+        return Some(node);
+    }
+    openengine_cluster_server::graph_verifier::graph_node_children(node)
+        .into_iter()
+        .find_map(|child| find_descendant(child, name))
+}
+
+type LoopExitAlternatives<'a> = (&'a (NodeName, Vec<u64>), &'a [future::LoopExit]);
+
+struct ResidualSnapshot<'a, 'run> {
+    engine: &'a Engine<'run>,
+    context: &'a Context,
+    exits: Vec<(&'a (NodeName, Vec<u64>), &'a future::LoopExit)>,
+}
+
+impl<'a, 'run> ResidualSnapshot<'a, 'run> {
+    fn new(engine: &'a Engine<'run>, context: &'a Context) -> Self {
+        Self {
+            engine,
+            context,
+            exits: vec![],
+        }
+    }
+    fn provisional(&self, name: &NodeName, scope: &[u64]) -> bool {
+        self.engine
+            .provisional_except(self.context, (name, scope), &self.exits)
+    }
+    fn map_size(&self, key: &(NodeName, Vec<u64>)) -> Option<&MapCardinality> {
+        self.exits
+            .iter()
+            .rev()
+            .find_map(|(_, exit)| exit.sizes.get(key))
+            .or_else(|| self.context.map_sizes.get(key))
+    }
+    fn projected_scopes<'s>(
+        &'s self,
+        name: &'s NodeName,
+        scope: &'s [u64],
+    ) -> impl Iterator<Item = &'s Vec<u64>> {
+        std::iter::once(&self.context.map_sizes)
+            .chain(self.exits.iter().map(|(_, exit)| &exit.sizes))
+            .flat_map(move |sizes| {
+                sizes
+                    .range((name.clone(), scope.to_vec())..)
+                    .take_while(move |((node, indices), _)| {
+                        node == name && indices.starts_with(scope)
+                    })
+                    .map(|((_, indices), _)| indices)
+            })
+    }
+
+    fn possible_exits(
+        &mut self,
+        query: (&GraphNode, &Guard, &[u64]),
+        alternatives: &[LoopExitAlternatives<'a>],
+    ) -> Option<bool> {
+        self.engine.selector_work.charge(1 + alternatives.len())?;
+        let mut positions = vec![0_usize; alternatives.len()];
+        loop {
+            self.engine.selector_work.charge(1 + alternatives.len())?;
+            self.exits = positions
+                .iter()
+                .zip(alternatives)
+                .filter_map(|(position, (key, exits))| {
+                    position.checked_sub(1).map(|index| (*key, &exits[index]))
+                })
+                .collect();
+            if openengine_cluster_server::graph_verifier::guard_has_possible_future(
+                query.0, query.1, self, query.2,
+            ) {
+                return Some(true);
+            }
+            if !advance_exit_selection(&mut positions, alternatives) {
+                return Some(false);
+            }
+        }
+    }
+}
+
+impl openengine_cluster_server::graph_verifier::ControlSnapshot for ResidualSnapshot<'_, '_> {
+    fn proof_work(&self) -> openengine_cluster_server::graph_verifier::ProofWork {
+        self.engine.selector_work.clone()
+    }
+    fn is_fixed(&self, node: &NodeName, scope: &[u64]) -> bool {
+        let depth = self.engine.map_depths.get(node).copied().unwrap_or(0);
+        !self.provisional(node, scope)
+            && scope.get(..depth).is_some_and(|scope| {
+                self.context
+                    .completed
+                    .contains(&(node.clone(), scope.to_vec()))
+            })
+    }
+
+    fn retained(&self, node: &NodeName, scope: &[u64], index: usize) -> Option<bool> {
+        let depth = *self.engine.map_depths.get(node)?;
+        self.context
+            .retained
+            .get(&(node.clone(), scope.get(..depth)?.to_vec()))
+            .map(|selected| selected.contains(&index))
+    }
+
+    fn fixed_count(
+        &self,
+        query: (&ControlSelector, &[EnumLabel], bool),
+        scope: &[u64],
+    ) -> Option<u64> {
+        self.engine.candidate_count(
+            self.context,
+            scope,
+            (
+                query.0,
+                query.1,
+                query.2,
+                !self.provisional(&query.0.name, scope),
+            ),
+        )
+    }
+
+    fn label(&self, selector: &ControlSelector, scope: &[u64]) -> Option<EnumLabel> {
+        let depth = *self.engine.map_depths.get(&selector.name)?;
+        self.context
+            .controls
+            .get(&ControlKey {
+                node: selector.name.clone(),
+                source: selector.source,
+                field: selector
+                    .field
+                    .as_ref()
+                    .map(|field| field.as_str().to_owned()),
+                map_indices: scope.get(..depth)?.to_vec(),
+            })
+            .and_then(|label| label.parse().ok())
+    }
+
+    fn selection_guards(&self) -> Box<dyn Iterator<Item = &Guard> + '_> {
+        Box::new(
+            self.context
+                .map_sizes
+                .keys()
+                .chain(self.exits.iter().flat_map(|(_, exit)| exit.sizes.keys()))
+                .filter_map(|key| self.map_size(key))
+                .flat_map(|cardinality| {
+                    cardinality
+                        .writes
+                        .iter()
+                        .filter_map(|write| write.condition.as_ref())
+                })
+                .chain(self.exits.iter().map(|(_, exit)| &exit.convergence)),
+        )
+    }
+
+    fn scoped_guards<'s>(&'s self, scope: &'s [u64]) -> Box<dyn Iterator<Item = &'s Guard> + 's> {
+        Box::new(
+            self.exits
+                .iter()
+                .filter(move |(key, _)| key.1 == scope)
+                .map(|(_, exit)| &exit.convergence),
+        )
+    }
+
+    fn map_progress(
+        &self,
+        map: &MapNode,
+        scope: &[u64],
+    ) -> openengine_cluster_server::graph_verifier::MapProgress {
+        let provisional = self.provisional(&map.name, scope);
+        let cardinality = (0..=scope.len())
+            .rev()
+            .find_map(|depth| self.map_size(&(map.name.clone(), scope[..depth].to_vec())))
+            .cloned()
+            .unwrap_or_default();
+        let names = descendant_names(&map.body);
+        let known_items = if provisional {
+            vec![]
+        } else {
+            names
+                .iter()
+                .flat_map(|name| {
+                    let start = (name.clone(), scope.to_vec());
+                    self.context
+                        .completed
+                        .range(start.clone()..)
+                        .take_while(move |(node, indices)| {
+                            node == name && indices.starts_with(scope)
+                        })
+                        .map(|(_, indices)| indices)
+                        .chain(self.projected_scopes(name, scope))
+                })
+                .filter_map(|indices| indices.get(scope.len()).copied())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        };
+        openengine_cluster_server::graph_verifier::MapProgress {
+            cardinality,
+            known_items,
+        }
+    }
+}
+
+fn advance_exit_selection(
+    positions: &mut [usize],
+    alternatives: &[LoopExitAlternatives<'_>],
+) -> bool {
+    for (position, (_, exits)) in positions.iter_mut().zip(alternatives).rev() {
+        if *position < exits.len() {
+            *position += 1;
+            return true;
+        }
+        *position = 0;
+    }
+    false
 }

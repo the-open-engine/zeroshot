@@ -251,6 +251,7 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
       harness: 'codex',
       provider: 'openai',
       size: 'large',
+      maxConcurrency: 1,
       nodes: {
         plan: { kind: 'agent', model: 'model-a', effort: 'high' },
         build: { kind: 'agent', model: 'model-b' },
@@ -388,6 +389,18 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
   await click(button(dialog()!, 'Cancel'));
   assert.equal(dialog(), null);
   assert.equal(confirmDialog(), null);
+
+  await checkConcurrencyDrafts({
+    openRuntime,
+    type,
+    model,
+    click,
+    button,
+    dialog,
+    runtimeJson,
+    key,
+    confirmDialog,
+  });
 
   // Target-owned IDs pass through JSON unchanged; Target default keeps size omitted.
   await openRuntime();
@@ -746,3 +759,38 @@ test(
     assert.match(container.textContent ?? '', /Profile saved/);
   }
 );
+
+async function checkConcurrencyDrafts(actions: {
+  openRuntime: () => Promise<void>;
+  type: (element: HTMLInputElement | HTMLTextAreaElement, value: string) => Promise<void>;
+  model: (label: string) => HTMLInputElement;
+  click: (element: HTMLElement) => Promise<void>;
+  button: (scope: ParentNode, text: string) => HTMLButtonElement;
+  dialog: () => HTMLDialogElement | null;
+  runtimeJson: () => Promise<{ editor: HTMLTextAreaElement; value: any }>;
+  key: (element: HTMLElement, key: string) => Promise<void>;
+  confirmDialog: () => HTMLDialogElement | null;
+}) {
+  const { openRuntime, type, model, click, button, dialog, runtimeJson, key, confirmDialog } =
+    actions;
+  // Unfinished concurrency text remains document-owned, including across Form/JSON navigation.
+  await openRuntime();
+  await type(model('Maximum concurrent executions'), '1e');
+  await click(button(dialog()!, 'Apply changes'));
+  assert.ok(dialog(), 'Apply must retain an incomplete concurrency draft');
+  assert.equal(model('Maximum concurrent executions').value, '1e');
+  assert.equal(model('Maximum concurrent executions').getAttribute('aria-invalid'), 'true');
+  assert.equal((await runtimeJson()).value.maxConcurrency, 1, 'the authored limit is unchanged');
+  await click(button(dialog()!, 'Form'));
+  assert.equal(model('Maximum concurrent executions').value, '1e');
+  await click(button(dialog()!, 'Cancel'));
+  assert.ok(confirmDialog(), 'discarding unfinished runtime text requires explicit cancellation');
+  await click(button(confirmDialog()!, 'Discard'));
+  assert.equal(dialog(), null);
+  await openRuntime();
+  assert.equal(model('Maximum concurrent executions').value, '1');
+  await type(model('Maximum concurrent executions'), '1e');
+  await key(model('Maximum concurrent executions'), 'Escape');
+  assert.equal(model('Maximum concurrent executions').value, '1');
+  await click(button(dialog()!, 'Cancel'));
+}

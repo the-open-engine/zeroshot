@@ -17,12 +17,6 @@ struct GroupEvaluation<'a, G> {
     traversal: Traversal<'a>,
 }
 
-struct GroupMutation<'a, G> {
-    group: &'a G,
-    context: &'a mut Context,
-    traversal: Traversal<'a>,
-}
-
 impl Engine<'_> {
     pub(super) fn eval_choice(
         &mut self,
@@ -45,6 +39,14 @@ impl Engine<'_> {
             .ok_or(ReducerError::MissingChoiceRoute)?;
         self.trace_branch(&group.name, selected.name());
         let result = self.eval(selected, &mut local, traversal);
+        if matches!(result, Ok(Status::Pending)) {
+            let writes = self.future_writes(selected, &local, traversal);
+            self.record_pending_writes(
+                (&group.name, &group.promoted_state_paths),
+                (writes, &mut local),
+                traversal,
+            );
+        }
         merge_runtime_facts(&local, context);
         let status = result?;
         if let Status::Continue { position } = status {
@@ -221,36 +223,21 @@ impl Engine<'_> {
             .probes
             .iter()
             .zip(group.branches.as_slice())
-            .filter(|((status, candidate), branch)| {
-                matches!(status, Status::Pending)
-                    && match &group.join {
-                        Join::First { when } => {
-                            self.candidate_viable(when, candidate, (branch, traversal.map_indices))
-                        }
-                        _ => true,
-                    }
+            .filter(|((status, _), branch)| {
+                matches!(status, Status::Pending) && !irrelevant.contains(branch.name())
             })
             .count();
         let settled = summary.completed + potential < summary.required;
         if !settled {
-            if traversal.mode == EvalMode::Decide {
-                let mut branches = group
-                    .branches
-                    .as_slice()
-                    .iter()
-                    .enumerate()
-                    .collect::<Vec<_>>();
-                branches.sort_by_key(|(index, branch)| {
-                    (self.last_service(branch, traversal.map_indices), *index)
-                });
-                for (_, branch) in branches {
-                    if irrelevant.contains(branch.name()) {
-                        continue;
-                    }
-                    let mut local = context.clone();
-                    let _ = self.eval(branch, &mut local, traversal)?;
-                }
-            }
+            self.continue_parallel_candidates(
+                GroupMutation {
+                    group,
+                    context,
+                    traversal,
+                },
+                summary,
+                &irrelevant,
+            )?;
             return Ok(Some(Status::Pending));
         }
         for branch in group.branches.as_slice() {
@@ -276,11 +263,57 @@ impl Engine<'_> {
         let position = summary
             .probes
             .iter()
-            .map(|(status, _)| status.position())
-            .filter(|position| *position != HistoryPosition::MAX)
+            .map(|(status, candidate)| match status {
+                Status::Pending => candidate.evidence_position,
+                _ => status.position().max(candidate.evidence_position),
+            })
             .max()
             .unwrap_or(HistoryPosition::ZERO);
         Ok(Some(Status::Continue { position }))
+    }
+
+    fn continue_parallel_candidates(
+        &mut self,
+        evaluation: GroupMutation<'_, ParNode>,
+        summary: ParallelProbeSummary<'_>,
+        irrelevant: &BTreeSet<NodeName>,
+    ) -> Result<(), ReducerError> {
+        let GroupMutation {
+            group,
+            context,
+            traversal,
+        } = evaluation;
+        for ((status, candidate), branch) in summary.probes.iter().zip(group.branches.as_slice()) {
+            if matches!(status, Status::Pending) && !irrelevant.contains(branch.name()) {
+                context.map_sizes.extend(candidate.map_sizes.clone());
+            }
+        }
+        if traversal.mode == EvalMode::Decide {
+            let mut branches = group
+                .branches
+                .as_slice()
+                .iter()
+                .enumerate()
+                .collect::<Vec<_>>();
+            branches.sort_by_key(|(index, branch)| {
+                (self.last_service(branch, traversal.map_indices), *index)
+            });
+            for (_, branch) in branches {
+                if irrelevant.contains(branch.name()) {
+                    continue;
+                }
+                let mut local = context.clone();
+                let _ = self.eval(
+                    branch,
+                    &mut local,
+                    Traversal {
+                        necessary: traversal.necessary && summary.required == summary.probes.len(),
+                        ..traversal
+                    },
+                )?;
+            }
+        }
+        Ok(())
     }
 
     fn prune_ineligible_first(
@@ -295,7 +328,7 @@ impl Engine<'_> {
         if let Join::First { when } = &group.join {
             for ((status, candidate), branch) in probes.iter().zip(group.branches.as_slice()) {
                 if matches!(status, Status::Pending)
-                    && !self.candidate_viable(when, candidate, (branch, traversal.map_indices))
+                    && !self.candidate_viable(when, candidate, (branch, traversal))
                 {
                     irrelevant.extend(descendant_names(branch));
                     self.void_active_descendants(
@@ -388,6 +421,10 @@ impl Engine<'_> {
         join.joined
             .local_writes
             .extend(context.local_writes.clone());
+        join.joined.retained.insert(
+            (group.name.clone(), traversal.map_indices.to_vec()),
+            join.winners.clone(),
+        );
         *context = join.joined;
         self.record_parallel_control(
             GroupMutation {
@@ -428,6 +465,12 @@ impl Engine<'_> {
             context,
             traversal,
         } = evaluation;
+        if matches!(result, ParallelControlResult::Unreachable) {
+            context.retained.insert(
+                (group.name.clone(), traversal.map_indices.to_vec()),
+                BTreeSet::new(),
+            );
+        }
         let first = matches!(group.join, Join::First { .. });
         let label = match (first, result) {
             (true, ParallelControlResult::Reached) => "satisfied",
