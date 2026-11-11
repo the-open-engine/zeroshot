@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 use crate::source_code_provider::adapters::core::review_responses;
 
@@ -118,7 +119,7 @@ async fn gitlab_large_verified_responses_retain_compact_receipts_across_repair_r
         }
         let feedback = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         let mut response = response(&feedback);
@@ -156,7 +157,7 @@ async fn gitlab_large_verified_responses_retain_compact_receipts_across_repair_r
         .unwrap();
     assert!(
         recovered
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap()
             .items
@@ -166,7 +167,7 @@ async fn gitlab_large_verified_responses_retain_compact_receipts_across_repair_r
         json!("Another substantive edit.");
     assert_eq!(
         recovered
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::ReviewBlocked
@@ -202,7 +203,7 @@ async fn gitlab_accumulated_receipt_limit_rejects_before_posting_or_resolving() 
     review_responses::assert_fits_ledger(retained.clone());
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(
@@ -240,7 +241,7 @@ async fn gitlab_replayed_response_after_reconstruction_reopens_unproven_resolved
         prepare(&fixture);
         let before = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         let expected = response(&before);
@@ -283,7 +284,7 @@ async fn gitlab_replayed_response_after_reconstruction_reopens_unproven_resolved
             SourceReviewResolution::Changed
         );
         let after = recovered
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(after.conversations.len(), 1);
@@ -299,7 +300,7 @@ async fn gitlab_confirmed_response_replays_without_duplicate_effects_and_reasses
     prepare(&fixture);
     let before = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     let expected = response(&before);
@@ -361,7 +362,7 @@ async fn check_restart_receipts(interrupted: bool) {
         prepare(&fixture);
         let before = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(
@@ -382,7 +383,7 @@ async fn check_restart_receipts(interrupted: bool) {
         assert!(
             fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap()
                 .conversations
@@ -417,7 +418,7 @@ async fn check_restart_receipts(interrupted: bool) {
             .unwrap();
         assert!(
             recovered
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap()
                 .items
@@ -438,14 +439,14 @@ async fn check_restart_receipts(interrupted: bool) {
         if merge_gate {
             assert_eq!(
                 recovered
-                    .request_merge(&repaired, credential())
+                    .request_merge(&repaired, credential(), &TestReviewCheckpoint)
                     .await
                     .unwrap(),
                 SourceMergeRequestOutcome::ReviewBlocked
             );
         }
         let after = recovered
-            .inspect_review_feedback(&repaired, credential())
+            .inspect_review_feedback(&repaired, credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(after.conversations.len(), 1);
@@ -471,7 +472,7 @@ async fn gitlab_untrusted_reply_during_confirmation_does_not_create_repair_feedb
     prepare(&fixture);
     let before = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     fixture.state.lock().unwrap().confirmation_failures = 1;
@@ -510,7 +511,7 @@ async fn gitlab_untrusted_reply_during_confirmation_does_not_create_repair_feedb
     );
     let after = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(!after.conversations[0].authorized);
@@ -526,7 +527,7 @@ async fn gitlab_untrusted_reply_during_confirmation_does_not_create_repair_feedb
     assert_eq!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         after
@@ -544,7 +545,7 @@ async fn gitlab_interrupted_confirmation_retains_exact_pending_resolution_until_
             prepare(&fixture);
             let feedback = fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap();
             let expected = response(&feedback);
@@ -599,7 +600,7 @@ async fn gitlab_interrupted_confirmation_retains_exact_pending_resolution_until_
             );
             let after = fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap();
             assert_eq!(after.conversations.is_empty(), !changed);
@@ -610,7 +611,7 @@ async fn gitlab_interrupted_confirmation_retains_exact_pending_resolution_until_
                 assert_eq!(
                     fixture
                         .authority
-                        .request_merge(&receipt(), credential())
+                        .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                         .await
                         .unwrap(),
                     SourceMergeRequestOutcome::Accepted
@@ -627,7 +628,7 @@ async fn gitlab_pending_confirmation_gates_feedback_and_merge_until_reopening_is
         prepare(&fixture);
         let before = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         {
@@ -653,13 +654,13 @@ async fn gitlab_pending_confirmation_gates_feedback_and_merge_until_reopening_is
             assert!(
                 fixture
                     .authority
-                    .inspect_review_feedback(&receipt(), credential())
+                    .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                     .await
                     .is_err()
             );
             let after = fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap();
             assert_eq!(after.conversations.len(), 1);
@@ -668,14 +669,14 @@ async fn gitlab_pending_confirmation_gates_feedback_and_merge_until_reopening_is
             assert!(
                 fixture
                     .authority
-                    .request_merge(&receipt(), credential())
+                    .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                     .await
                     .is_err()
             );
             assert_eq!(
                 fixture
                     .authority
-                    .request_merge(&receipt(), credential())
+                    .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                     .await
                     .unwrap(),
                 SourceMergeRequestOutcome::ReviewBlocked
@@ -696,7 +697,7 @@ async fn gitlab_unresolved_discussion_repairs_and_resolves_exact_verified_revisi
     prepare(&fixture);
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -719,7 +720,7 @@ async fn gitlab_unresolved_discussion_repairs_and_resolves_exact_verified_revisi
     );
     let after = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(after.conversations.is_empty());
@@ -727,7 +728,7 @@ async fn gitlab_unresolved_discussion_repairs_and_resolves_exact_verified_revisi
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Accepted
@@ -762,7 +763,7 @@ async fn gitlab_edits_and_new_replies_invalidate_the_verified_disposition() {
         prepare(&fixture);
         let feedback = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         {
@@ -797,7 +798,7 @@ async fn gitlab_edits_and_new_replies_invalidate_the_verified_disposition() {
         assert!(
             !fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap()
                 .conversations
@@ -823,7 +824,7 @@ async fn gitlab_bot_metadata_never_bypasses_project_membership_for_blocking_disc
     );
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(feedback.items.is_empty());
@@ -875,14 +876,14 @@ async fn gitlab_merge_rejection_race_refreshes_an_authoritative_discussion_block
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::ReviewBlocked
     );
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -905,7 +906,7 @@ async fn gitlab_incomplete_discussion_resolution_status_is_an_api_schema_failure
         }
         let error = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap_err();
         assert!(matches!(error, SourceDeliveryError::Api(_)), "{error:?}");
@@ -921,7 +922,7 @@ async fn gitlab_checkpoint_recovery_settles_interrupted_confirmation_without_res
         prepare(&fixture);
         let before = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         {
@@ -959,7 +960,7 @@ async fn gitlab_checkpoint_recovery_settles_interrupted_confirmation_without_res
             .await
             .unwrap();
         let after = recovered
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(after.conversations.len(), usize::from(changed));
@@ -1056,7 +1057,7 @@ async fn gitlab_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
     prepare(&fixture);
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     let response = response(&feedback);
@@ -1081,14 +1082,14 @@ async fn gitlab_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -1120,7 +1121,7 @@ async fn gitlab_lost_reply_acknowledgement_reconciles_durable_intent_after_recov
             prepare(&fixture);
             let before = fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap();
             let response = response(&before);
@@ -1182,7 +1183,7 @@ async fn gitlab_lost_reply_acknowledgement_reconciles_durable_intent_after_recov
                 );
             }
             let after = current
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap();
             assert_eq!(after.items.len(), usize::from(changed));
@@ -1206,7 +1207,7 @@ async fn gitlab_uncertain_reply_requires_exact_actor_body_and_unique_identity() 
         prepare(&fixture);
         let before = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint::default();
@@ -1257,14 +1258,14 @@ async fn gitlab_uncertain_reply_requires_exact_actor_body_and_unique_identity() 
             .unwrap();
         assert!(
             recovered
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err(),
             "{defect}"
         );
         assert!(
             recovered
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err(),
             "{defect}"
@@ -1280,7 +1281,7 @@ async fn gitlab_reply_intent_must_be_acknowledged_before_posting() {
     prepare(&fixture);
     let before = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(
@@ -1324,7 +1325,7 @@ async fn gitlab_mixed_participants_keep_the_maintainer_blocker_despite_authorize
     );
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -1356,7 +1357,7 @@ async fn gitlab_authentication_rejection_retires_intent_before_refresh_or_recove
         prepare(&fixture);
         let before = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         fixture
@@ -1385,7 +1386,7 @@ async fn gitlab_authentication_rejection_retires_intent_before_refresh_or_recove
         }
         let before = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap();
         let response = response(&before);
@@ -1414,6 +1415,29 @@ async fn gitlab_authentication_rejection_retires_intent_before_refresh_or_recove
             GitLabDeliveryAuthority::new(fixture.authority.base_url.clone(), None).unwrap();
         recovered.api = fixture.authority.api.clone();
         if mode == "retirement_failure" {
+            assert_eq!(
+                fixture
+                    .authority
+                    .review_conversation_state()
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                states[0]
+            );
+            assert!(
+                fixture
+                    .authority
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &crate::source_code_provider::RefuseReviewCheckpoint,
+                        },
+                        credential(),
+                    )
+                    .await
+                    .is_err()
+            );
             assert!(!error.authentication_failed());
             assert_eq!(error.api_status(), None);
             recovered
@@ -1422,7 +1446,7 @@ async fn gitlab_authentication_rejection_retires_intent_before_refresh_or_recove
                 .unwrap();
             assert!(
                 recovered
-                    .inspect_review_feedback(&receipt(), credential())
+                    .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                     .await
                     .is_err()
             );
@@ -1455,7 +1479,7 @@ async fn gitlab_authentication_rejection_retires_intent_before_refresh_or_recove
             );
             assert!(
                 current
-                    .inspect_review_feedback(&receipt(), credential())
+                    .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                     .await
                     .unwrap()
                     .items
@@ -1478,5 +1502,317 @@ async fn gitlab_authentication_rejection_retires_intent_before_refresh_or_recove
             fixture.writes("/discussions/thread/notes"),
             2 + usize::from(finished)
         );
+    }
+}
+
+#[tokio::test]
+async fn gitlab_reconciliation_acknowledges_progress_at_feedback_and_merge_gates() {
+    use crate::source_code_provider::RecordingReviewCheckpoint;
+
+    for merge_gate in [false, true] {
+        for mode in [
+            "settled",
+            "changed",
+            "confirmation_error",
+            "checkpoint_error",
+        ] {
+            let fixture = Fixture::new().await;
+            prepare(&fixture);
+            let before = fixture
+                .authority
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
+                .await
+                .unwrap();
+            let initial = RecordingReviewCheckpoint::default();
+            fixture.state.lock().unwrap().lose_reply_response = true;
+            assert!(
+                fixture
+                    .authority
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response(&before),
+                            checkpoint: &initial,
+                        },
+                        credential(),
+                    )
+                    .await
+                    .is_err()
+            );
+            let intent = initial.states.lock().unwrap()[0].clone();
+            let mut recovered =
+                GitLabDeliveryAuthority::new(fixture.authority.base_url.clone(), None).unwrap();
+            recovered.api = fixture.authority.api.clone();
+            recovered
+                .restore_review_conversation_state(intent.clone())
+                .await
+                .unwrap();
+            {
+                let mut data = fixture.state.lock().unwrap();
+                data.review.as_mut().unwrap()["head_pipeline"]["status"] = json!("running");
+                if mode == "changed" {
+                    data.conversation.as_mut().unwrap()["notes"][0]["body"] =
+                        json!("Changed before settlement.");
+                }
+                if mode == "confirmation_error" {
+                    data.confirmation_failures = 1;
+                }
+            }
+            let checkpoint = RecordingReviewCheckpoint {
+                fail_at: (mode == "checkpoint_error").then_some(1),
+                ..Default::default()
+            };
+            let result = if merge_gate {
+                recovered
+                    .request_merge(&receipt(), credential(), &checkpoint)
+                    .await
+                    .map(|outcome| {
+                        assert_eq!(
+                            outcome,
+                            if mode == "changed" {
+                                SourceMergeRequestOutcome::ReviewBlocked
+                            } else {
+                                SourceMergeRequestOutcome::Pending
+                            }
+                        );
+                    })
+            } else {
+                recovered
+                    .inspect_review_feedback(&receipt(), credential(), &checkpoint)
+                    .await
+                    .map(|feedback| {
+                        assert_eq!(feedback.items.len(), usize::from(mode == "changed"));
+                    })
+            };
+            match mode {
+                "confirmation_error" => assert_eq!(result.unwrap_err().api_status(), Some(503)),
+                "checkpoint_error" => assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("test receipt persistence failed")
+                ),
+                _ => result.unwrap(),
+            }
+            let states = checkpoint.states.lock().unwrap().clone();
+            assert_eq!(states.len(), 1, "{merge_gate} {mode}");
+            assert_eq!(states[0]["replies"].as_array().unwrap().len(), 1);
+            if mode == "changed" {
+                assert!(states[0]["gitlab"].as_array().unwrap().is_empty());
+            } else {
+                assert!(states[0]["gitlab"][0][1]["reply"].is_u64());
+                assert_eq!(
+                    states[0]["gitlab"][0][1]["confirmed"],
+                    mode != "confirmation_error"
+                );
+            }
+            if mode == "checkpoint_error" {
+                assert_eq!(
+                    recovered
+                        .review_conversation_state()
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                    intent
+                );
+                assert!(
+                    recovered
+                        .inspect_review_feedback(
+                            &receipt(),
+                            credential(),
+                            &crate::source_code_provider::RefuseReviewCheckpoint
+                        )
+                        .await
+                        .is_err()
+                );
+                assert!(
+                    recovered
+                        .request_merge(
+                            &receipt(),
+                            credential(),
+                            &crate::source_code_provider::RefuseReviewCheckpoint
+                        )
+                        .await
+                        .is_err()
+                );
+            }
+            let mut successor =
+                GitLabDeliveryAuthority::new(fixture.authority.base_url.clone(), None).unwrap();
+            successor.api = fixture.authority.api.clone();
+            successor
+                .restore_review_conversation_state(if mode == "checkpoint_error" {
+                    intent
+                } else {
+                    states[0].clone()
+                })
+                .await
+                .unwrap();
+            fixture.state.lock().unwrap().conversation.as_mut().unwrap()["notes"][0]["body"] =
+                json!("Substantive edit after recovery.");
+            let feedback = successor
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
+                .await
+                .unwrap();
+            assert_eq!(feedback.items.len(), 1);
+            assert_eq!(feedback.conversations.len(), 1);
+            assert_eq!(
+                fixture.state.lock().unwrap().review.as_ref().unwrap()["blocking_discussions_resolved"],
+                false
+            );
+            assert_eq!(fixture.writes("/discussions/thread/notes"), 1);
+            assert_eq!(fixture.writes("/merge"), 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn gitlab_failed_last_receipt_removal_preserves_authority_until_acknowledged() {
+    use crate::source_code_provider::{
+        RefuseReviewCheckpoint, RecordingReviewCheckpoint, SourceReviewResolutionRequest,
+    };
+
+    for gate in ["feedback", "merge", "response"] {
+        let fixture = Fixture::new().await;
+        prepare(&fixture);
+        let authority = &fixture.authority;
+        let before = authority
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
+            .await
+            .unwrap();
+        let response = response(&before);
+        let checkpoint = RecordingReviewCheckpoint::default();
+        authority
+            .resolve_review_conversation(
+                SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response,
+                    checkpoint: &checkpoint,
+                },
+                credential(),
+            )
+            .await
+            .unwrap();
+        let acknowledged = checkpoint.states.lock().unwrap().last().unwrap().clone();
+        assert_eq!(acknowledged["gitlab"].as_array().unwrap().len(), 1);
+        fixture.state.lock().unwrap().conversation.as_mut().unwrap()["notes"][0]["body"] =
+            json!("Changed after the verified resolution.");
+
+        let refused = RecordingReviewCheckpoint {
+            fail_at: Some(if gate == "response" { 2 } else { 1 }),
+            ..Default::default()
+        };
+        let result = match gate {
+            "feedback" => authority
+                .inspect_review_feedback(&receipt(), credential(), &refused)
+                .await
+                .map(|_| ()),
+            "merge" => authority
+                .request_merge(&receipt(), credential(), &refused)
+                .await
+                .map(|_| ()),
+            _ => authority
+                .resolve_review_conversation(
+                    SourceReviewResolutionRequest {
+                        review: &receipt(),
+                        response: &response,
+                        checkpoint: &refused,
+                    },
+                    credential(),
+                )
+                .await
+                .map(|_| ()),
+        };
+        assert!(result.is_err(), "{gate}");
+        assert!(
+            refused.states.lock().unwrap().last().unwrap()["gitlab"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            authority
+                .review_conversation_state()
+                .await
+                .unwrap()
+                .unwrap(),
+            acknowledged
+        );
+        for _ in 0..2 {
+            assert!(
+                authority
+                    .inspect_review_feedback(&receipt(), credential(), &RefuseReviewCheckpoint)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                authority
+                    .request_merge(&receipt(), credential(), &RefuseReviewCheckpoint)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                authority
+                    .resolve_review_conversation(
+                        SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &RefuseReviewCheckpoint,
+                        },
+                        credential()
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                authority
+                    .review_conversation_state()
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                acknowledged,
+                "{gate}"
+            );
+        }
+
+        let checkpoint = RecordingReviewCheckpoint::default();
+        assert_eq!(
+            authority
+                .request_merge(&receipt(), credential(), &checkpoint)
+                .await
+                .unwrap(),
+            SourceMergeRequestOutcome::ReviewBlocked
+        );
+        let feedback = authority
+            .inspect_review_feedback(&receipt(), credential(), &checkpoint)
+            .await
+            .unwrap();
+        assert_eq!(feedback.items.len(), 1);
+        assert_eq!(feedback.conversations.len(), 1);
+        let states = checkpoint.states.lock().unwrap().clone();
+        assert_eq!(states.len(), 1);
+        assert!(states[0]["gitlab"].as_array().unwrap().is_empty());
+        assert_eq!(states[0]["replies"], acknowledged["replies"]);
+        assert_eq!(
+            authority
+                .review_conversation_state()
+                .await
+                .unwrap()
+                .unwrap(),
+            states[0]
+        );
+        assert_eq!(checkpoint.states.lock().unwrap().len(), 1);
+        assert_eq!(
+            fixture.state.lock().unwrap().review.as_ref().unwrap()["blocking_discussions_resolved"],
+            false
+        );
+        assert_eq!(
+            fixture.state.lock().unwrap().conversation.as_ref().unwrap()["notes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(fixture.writes("/discussions/thread/notes"), 1);
+        assert_eq!(fixture.writes("/merge"), 0);
     }
 }

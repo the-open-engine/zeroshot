@@ -1,4 +1,5 @@
 //! Abrupt runtime loss while the real delivery driver waits for CI, without final settlement.
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 use crate::native_v2_supervisor::checkpoints::{DeliveryCheckpointStore, RunCheckpointStore};
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
@@ -116,9 +117,10 @@ impl SourceDeliveryAuthority for PendingCiAuthority {
         &self,
         review: &SourceReviewReceipt,
         _: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
         self.forge
-            .inspect_review_feedback(review, self.fixture.credential())
+            .inspect_review_feedback(review, self.fixture.credential(), checkpoint)
             .await
     }
     async fn resolve_review_conversation(
@@ -134,6 +136,7 @@ impl SourceDeliveryAuthority for PendingCiAuthority {
         &self,
         _: &SourceReviewReceipt,
         _: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         panic!("delivery must still be waiting for CI")
     }
@@ -151,7 +154,7 @@ pub(crate) async fn assert_interrupted_conversation_driver(fixture: Arc<dyn Conv
     fixture.bind(&initial);
     let forge = fixture.authority();
     let feedback = forge
-        .inspect_review_feedback(&initial, fixture.credential())
+        .inspect_review_feedback(&initial, fixture.credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     let thread = &feedback.conversations[0];
@@ -296,13 +299,13 @@ pub(crate) async fn assert_interrupted_conversation_driver(fixture: Arc<dyn Conv
     // A later worker returns []; recovery must depend on the acknowledged receipt alone.
     assert_eq!(
         fresh
-            .request_merge(&review, fixture.credential())
+            .request_merge(&review, fixture.credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::ReviewBlocked
     );
     let feedback = fresh
-        .inspect_review_feedback(&review, fixture.credential())
+        .inspect_review_feedback(&review, fixture.credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);

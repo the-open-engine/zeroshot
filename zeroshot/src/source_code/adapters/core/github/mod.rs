@@ -485,7 +485,9 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
+        conversations::reconcile_resolutions(self, review, credential, checkpoint).await?;
         feedback::inspect(self, review, credential).await
     }
 
@@ -501,8 +503,9 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
-        if conversations::reconcile_resolutions(self, review, credential).await? {
+        if conversations::reconcile_resolutions(self, review, credential, checkpoint).await? {
             return Ok(SourceMergeRequestOutcome::ReviewBlocked);
         }
         let snapshot = self.policy_snapshot(review, credential).await?;

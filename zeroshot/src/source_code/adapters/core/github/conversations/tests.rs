@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 use super::test_support::*;
 use super::super::observation::test_support::{authority, receipt};
@@ -32,7 +33,7 @@ async fn large_verified_responses_retain_compact_receipts_across_repair_rounds()
     );
     save(&program, &data);
     let feedback = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     let responses: Vec<_> = feedback
@@ -81,7 +82,7 @@ async fn large_verified_responses_retain_compact_receipts_across_repair_rounds()
     // A subsequent repair has no responses. All earlier owned resolutions still revalidate.
     assert!(
         recovered
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap()
             .items
@@ -92,7 +93,7 @@ async fn large_verified_responses_retain_compact_receipts_across_repair_rounds()
     save(&program, &data);
     assert_eq!(
         recovered
-            .request_merge(&receipt(), credential)
+            .request_merge(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::ReviewBlocked
@@ -124,7 +125,7 @@ async fn accumulated_receipt_limit_rejects_before_posting_or_resolving() {
         .unwrap();
     review_responses::assert_fits_ledger(retained.clone());
     let feedback = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(
@@ -167,7 +168,7 @@ async fn replayed_response_after_authority_reconstruction_reopens_unproven_resol
         let first = authority(program.clone(), root.path());
         let credential = SourceDeliveryCredential::token("test-token");
         let before = first
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         let expected = response(&before);
@@ -207,7 +208,7 @@ async fn replayed_response_after_authority_reconstruction_reopens_unproven_resol
             SourceReviewResolution::Changed
         );
         let after = recovered
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(after.conversations.len(), 1);
@@ -231,7 +232,7 @@ async fn confirmed_response_replays_without_duplicate_effects_and_reassesses_lat
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let before = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     let expected = response(&before);
@@ -300,7 +301,7 @@ async fn check_restart_receipts(interrupted: bool) {
         let authority = authority(program.clone(), root.path());
         let credential = SourceDeliveryCredential::token("test-token");
         let before = authority
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(
@@ -319,7 +320,7 @@ async fn check_restart_receipts(interrupted: bool) {
         );
         assert!(
             authority
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .unwrap()
                 .conversations
@@ -351,7 +352,7 @@ async fn check_restart_receipts(interrupted: bool) {
             .unwrap();
         assert!(
             authority
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .unwrap()
                 .items
@@ -373,14 +374,14 @@ async fn check_restart_receipts(interrupted: bool) {
         if merge_gate {
             assert_eq!(
                 authority
-                    .request_merge(&repaired, credential)
+                    .request_merge(&repaired, credential, &TestReviewCheckpoint)
                     .await
                     .unwrap(),
                 SourceMergeRequestOutcome::ReviewBlocked
             );
         }
         let after = authority
-            .inspect_review_feedback(&repaired, credential)
+            .inspect_review_feedback(&repaired, credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(after.conversations.len(), 1);
@@ -414,7 +415,7 @@ async fn untrusted_reply_during_failed_confirmation_reopens_without_creating_rep
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let before = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     let mut data = state(&program);
@@ -435,7 +436,7 @@ async fn untrusted_reply_during_failed_confirmation_reopens_without_creating_rep
             .is_err()
     );
     let after = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(!after.conversations[0].authorized);
@@ -447,7 +448,7 @@ async fn untrusted_reply_during_failed_confirmation_reopens_without_creating_rep
     assert_eq!(state(&program)["threads"][0]["resolved"], false);
     assert_eq!(
         authority
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap(),
         after
@@ -470,7 +471,7 @@ async fn interrupted_confirmation_reconciles_resolved_revisions_without_duplicat
             let authority = authority(program.clone(), root.path());
             let credential = SourceDeliveryCredential::token("test-token");
             let before = authority
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .unwrap();
             let expected = response(&before);
@@ -529,7 +530,7 @@ async fn interrupted_confirmation_reconciles_resolved_revisions_without_duplicat
                 2
             );
             let after = authority
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .unwrap();
             assert_eq!(after.conversations.is_empty(), !changed);
@@ -548,7 +549,7 @@ async fn pending_confirmation_blocks_feedback_reads_and_merge_until_changed_thre
         let authority = authority(program.clone(), root.path());
         let credential = SourceDeliveryCredential::token("test-token");
         let before = authority
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         let mut data = state(&program);
@@ -571,12 +572,12 @@ async fn pending_confirmation_blocks_feedback_reads_and_merge_until_changed_thre
         if inspection {
             assert!(
                 authority
-                    .inspect_review_feedback(&receipt(), credential)
+                    .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                     .await
                     .is_err()
             );
             let after = authority
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .unwrap();
             assert_eq!(after.conversations.len(), 1);
@@ -584,13 +585,13 @@ async fn pending_confirmation_blocks_feedback_reads_and_merge_until_changed_thre
         } else {
             assert!(
                 authority
-                    .request_merge(&receipt(), credential)
+                    .request_merge(&receipt(), credential, &TestReviewCheckpoint)
                     .await
                     .is_err()
             );
             assert_eq!(
                 authority
-                    .request_merge(&receipt(), credential)
+                    .request_merge(&receipt(), credential, &TestReviewCheckpoint)
                     .await
                     .unwrap(),
                 SourceMergeRequestOutcome::ReviewBlocked
@@ -622,7 +623,7 @@ async fn pushed_head_positions_preserve_conversation_revision_and_full_comment_i
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let before = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     data = state(&program);
@@ -630,7 +631,7 @@ async fn pushed_head_positions_preserve_conversation_revision_and_full_comment_i
     data["threads"][0]["comments"][0]["line"] = json!(17);
     save(&program, &data);
     let after = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(before, after);
@@ -657,7 +658,7 @@ async fn app_feedback_conversation_needs_no_collaborator_or_installation_lookup(
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let feedback = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -679,7 +680,7 @@ async fn app_feedback_conversation_needs_no_collaborator_or_installation_lookup(
     );
     assert!(
         authority
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap()
             .conversations
@@ -710,7 +711,11 @@ async fn human_app_actions_require_current_write_and_bot_suffixes_have_no_author
         save(&program, &data);
         let authority = authority(program.clone(), root.path());
         let feedback = authority
-            .inspect_review_feedback(&receipt(), SourceDeliveryCredential::token("test-token"))
+            .inspect_review_feedback(
+                &receipt(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .unwrap();
         assert_eq!(feedback.items.is_empty(), permission == "read");
@@ -736,7 +741,7 @@ async fn stale_edits_replies_and_resolution_races_require_reassessment() {
         let authority = authority(program.clone(), root.path());
         let credential = SourceDeliveryCredential::token("test-token");
         let before = authority
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         let mut data = state(&program);
@@ -775,7 +780,7 @@ async fn a_response_never_resolves_a_different_thread_or_a_readers_blocker() {
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let feedback = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     let mut response = response(&feedback);
@@ -824,7 +829,7 @@ async fn unauthorized_replies_do_not_hide_authorized_findings_or_create_new_repa
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let before = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     let mut data = state(&program);
@@ -839,7 +844,7 @@ async fn unauthorized_replies_do_not_hide_authorized_findings_or_create_new_repa
         .push(reply);
     save(&program, &data);
     let after = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(after.items.len(), 1);
@@ -860,7 +865,7 @@ async fn checkpoint_recovery_settles_interrupted_confirmation_without_response_r
         let first = authority(program.clone(), root.path());
         let credential = SourceDeliveryCredential::token("test-token");
         let before = first
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         let mut data = state(&program);
@@ -890,7 +895,7 @@ async fn checkpoint_recovery_settles_interrupted_confirmation_without_response_r
             .await
             .unwrap();
         let after = recovered
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         assert_eq!(after.conversations.len(), usize::from(changed));
@@ -952,7 +957,7 @@ async fn github_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let feedback = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     let response = response(&feedback);
@@ -975,13 +980,13 @@ async fn github_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
     );
     assert!(
         authority
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .is_err()
     );
     assert!(
         authority
-            .request_merge(&receipt(), credential)
+            .request_merge(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -1025,7 +1030,7 @@ async fn lost_reply_acknowledgement_retains_intent_and_reconciles_exact_reply_af
             let first = authority(program.clone(), root.path());
             let credential = SourceDeliveryCredential::token("test-token");
             let before = first
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .unwrap();
             let response = response(&before);
@@ -1091,7 +1096,7 @@ async fn lost_reply_acknowledgement_retains_intent_and_reconciles_exact_reply_af
             }
             // Recovery has no worker response array: the durable intent owns reconciliation.
             let feedback = current
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .unwrap();
             assert_eq!(feedback.items.len(), usize::from(changed));
@@ -1123,7 +1128,7 @@ async fn uncertain_reply_requires_exact_authenticated_actor_body_and_unique_iden
         let first = authority(program.clone(), root.path());
         let credential = SourceDeliveryCredential::token("test-token");
         let before = first
-            .inspect_review_feedback(&receipt(), credential)
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
             .await
             .unwrap();
         let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint::default();
@@ -1170,14 +1175,14 @@ async fn uncertain_reply_requires_exact_authenticated_actor_body_and_unique_iden
             .unwrap();
         assert!(
             recovered
-                .inspect_review_feedback(&receipt(), credential)
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .is_err(),
             "{defect}"
         );
         assert!(
             recovered
-                .request_merge(&receipt(), credential)
+                .request_merge(&receipt(), credential, &TestReviewCheckpoint)
                 .await
                 .is_err(),
             "{defect}"
@@ -1203,7 +1208,7 @@ async fn github_reply_intent_must_be_acknowledged_before_posting() {
     let authority = authority(program.clone(), root.path());
     let credential = SourceDeliveryCredential::token("test-token");
     let before = authority
-        .inspect_review_feedback(&receipt(), credential)
+        .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(
@@ -1237,7 +1242,7 @@ async fn github_authentication_rejection_retires_intent_before_refresh_or_recove
         let first = authority(program.clone(), root.path());
         let token = SourceDeliveryCredential::token("test-token");
         let before = first
-            .inspect_review_feedback(&receipt(), token)
+            .inspect_review_feedback(&receipt(), token, &TestReviewCheckpoint)
             .await
             .unwrap();
         first
@@ -1258,7 +1263,7 @@ async fn github_authentication_rejection_retires_intent_before_refresh_or_recove
         data["require_fresh_reply"] = json!(true);
         save(&program, &data);
         let before = first
-            .inspect_review_feedback(&receipt(), token)
+            .inspect_review_feedback(&receipt(), token, &TestReviewCheckpoint)
             .await
             .unwrap();
         let response = response(&before);
@@ -1284,6 +1289,23 @@ async fn github_authentication_rejection_retires_intent_before_refresh_or_recove
         assert_eq!(states[1]["replies"], previous["replies"]);
         let recovered = authority(program.clone(), root.path());
         if mode == "retirement_failure" {
+            assert_eq!(
+                first.review_conversation_state().await.unwrap().unwrap(),
+                states[0]
+            );
+            assert!(
+                first
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &crate::source_code_provider::RefuseReviewCheckpoint,
+                        },
+                        token,
+                    )
+                    .await
+                    .is_err()
+            );
             // Never report the authentication error to refresh until retirement is durable.
             assert!(!error.authentication_failed());
             assert_eq!(error.api_status(), None);
@@ -1293,7 +1315,7 @@ async fn github_authentication_rejection_retires_intent_before_refresh_or_recove
                 .unwrap();
             assert!(
                 recovered
-                    .inspect_review_feedback(&receipt(), token)
+                    .inspect_review_feedback(&receipt(), token, &TestReviewCheckpoint)
                     .await
                     .is_err()
             );
@@ -1326,7 +1348,7 @@ async fn github_authentication_rejection_retires_intent_before_refresh_or_recove
             );
             assert!(
                 current
-                    .inspect_review_feedback(&receipt(), token)
+                    .inspect_review_feedback(&receipt(), token, &TestReviewCheckpoint)
                     .await
                     .unwrap()
                     .items
@@ -1349,5 +1371,327 @@ async fn github_authentication_rejection_retires_intent_before_refresh_or_recove
                 .count(),
             2 + usize::from(finished)
         );
+    }
+}
+
+#[tokio::test]
+async fn reconciliation_acknowledges_progress_at_feedback_and_merge_gates() {
+    use crate::source_code_provider::RecordingReviewCheckpoint;
+
+    for merge_gate in [false, true] {
+        for mode in [
+            "settled",
+            "changed",
+            "confirmation_error",
+            "checkpoint_error",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let program = fixture(root.path(), &receipt(), "Bot");
+            let first = authority(program.clone(), root.path());
+            let credential = SourceDeliveryCredential::token("test-token");
+            let before = first
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
+                .await
+                .unwrap();
+            let initial = RecordingReviewCheckpoint::default();
+            let mut data = state(&program);
+            data["lose_reply_response"] = json!(true);
+            save(&program, &data);
+            assert!(
+                first
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response(&before),
+                            checkpoint: &initial,
+                        },
+                        credential,
+                    )
+                    .await
+                    .is_err()
+            );
+            let intent = initial.states.lock().unwrap()[0].clone();
+            let recovered = authority(program.clone(), root.path());
+            recovered
+                .restore_review_conversation_state(intent.clone())
+                .await
+                .unwrap();
+            let mut data = state(&program);
+            let mut policy =
+                super::super::unit::policy_page("UNKNOWN", "UNKNOWN", None, (false, None));
+            policy["data"]["repository"]["pullRequest"]["headRefName"] =
+                json!(receipt().head_branch);
+            data["policy"] = policy;
+            if mode == "changed" {
+                data["threads"][0]["comments"][0]["body"] = json!("Changed before settlement.");
+            }
+            if mode == "confirmation_error" {
+                data["fail_confirmation_reads"] = json!(1);
+            }
+            save(&program, &data);
+            let checkpoint = RecordingReviewCheckpoint {
+                fail_at: (mode == "checkpoint_error").then_some(1),
+                ..Default::default()
+            };
+            let result = if merge_gate {
+                recovered
+                    .request_merge(&receipt(), credential, &checkpoint)
+                    .await
+                    .map(|outcome| {
+                        assert_eq!(
+                            outcome,
+                            if mode == "changed" {
+                                SourceMergeRequestOutcome::ReviewBlocked
+                            } else {
+                                SourceMergeRequestOutcome::Pending
+                            }
+                        );
+                    })
+            } else {
+                recovered
+                    .inspect_review_feedback(&receipt(), credential, &checkpoint)
+                    .await
+                    .map(|feedback| {
+                        assert_eq!(feedback.items.len(), usize::from(mode == "changed"));
+                    })
+            };
+            match mode {
+                "confirmation_error" => assert_eq!(result.unwrap_err().api_status(), Some(503)),
+                "checkpoint_error" => assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("test receipt persistence failed")
+                ),
+                _ => result.unwrap(),
+            }
+            let states = checkpoint.states.lock().unwrap().clone();
+            assert_eq!(states.len(), 1, "{merge_gate} {mode}");
+            assert_eq!(states[0]["replies"].as_array().unwrap().len(), 1);
+            if mode == "changed" {
+                assert!(states[0]["github"].as_array().unwrap().is_empty());
+            } else {
+                assert!(states[0]["github"][0][1]["reply"].is_u64());
+                assert_eq!(
+                    states[0]["github"][0][1]["confirmed"],
+                    mode != "confirmation_error"
+                );
+            }
+            if mode == "checkpoint_error" {
+                assert_eq!(
+                    recovered
+                        .review_conversation_state()
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                    intent
+                );
+                assert!(
+                    recovered
+                        .inspect_review_feedback(
+                            &receipt(),
+                            credential,
+                            &crate::source_code_provider::RefuseReviewCheckpoint
+                        )
+                        .await
+                        .is_err()
+                );
+                assert!(
+                    recovered
+                        .request_merge(
+                            &receipt(),
+                            credential,
+                            &crate::source_code_provider::RefuseReviewCheckpoint
+                        )
+                        .await
+                        .is_err()
+                );
+            }
+            // Restore only acknowledged authority, with no replay of worker responses.
+            let successor = authority(program.clone(), root.path());
+            successor
+                .restore_review_conversation_state(if mode == "checkpoint_error" {
+                    intent
+                } else {
+                    states[0].clone()
+                })
+                .await
+                .unwrap();
+            let mut data = state(&program);
+            data["threads"][0]["comments"][0]["body"] = json!("Substantive edit after recovery.");
+            save(&program, &data);
+            let feedback = successor
+                .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
+                .await
+                .unwrap();
+            assert_eq!(feedback.items.len(), 1);
+            assert_eq!(feedback.conversations.len(), 1);
+            let data = state(&program);
+            assert_eq!(data["threads"][0]["resolved"], false);
+            assert_eq!(
+                data["calls"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|call| call.to_string().contains("addPullRequestReviewThreadReply"))
+                    .count(),
+                1
+            );
+            assert!(!data["calls"].to_string().contains("enqueuePullRequest"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn github_failed_last_receipt_removal_preserves_authority_until_acknowledged() {
+    use crate::source_code_provider::{
+        RefuseReviewCheckpoint, RecordingReviewCheckpoint, SourceReviewResolutionRequest,
+    };
+
+    for gate in ["feedback", "merge", "response"] {
+        let root = tempfile::tempdir().unwrap();
+        let program = fixture(root.path(), &receipt(), "Bot");
+        let authority = authority(program.clone(), root.path());
+        let credential = SourceDeliveryCredential::token("test-token");
+        let before = authority
+            .inspect_review_feedback(&receipt(), credential, &TestReviewCheckpoint)
+            .await
+            .unwrap();
+        let response = response(&before);
+        let checkpoint = RecordingReviewCheckpoint::default();
+        authority
+            .resolve_review_conversation(
+                SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response,
+                    checkpoint: &checkpoint,
+                },
+                credential,
+            )
+            .await
+            .unwrap();
+        let acknowledged = checkpoint.states.lock().unwrap().last().unwrap().clone();
+        assert_eq!(acknowledged["github"].as_array().unwrap().len(), 1);
+        let mut data = state(&program);
+        data["threads"][0]["comments"][0]["body"] = json!("Changed after the verified resolution.");
+        save(&program, &data);
+
+        let refused = RecordingReviewCheckpoint {
+            fail_at: Some(if gate == "response" { 2 } else { 1 }),
+            ..Default::default()
+        };
+        let result = match gate {
+            "feedback" => authority
+                .inspect_review_feedback(&receipt(), credential, &refused)
+                .await
+                .map(|_| ()),
+            "merge" => authority
+                .request_merge(&receipt(), credential, &refused)
+                .await
+                .map(|_| ()),
+            _ => authority
+                .resolve_review_conversation(
+                    SourceReviewResolutionRequest {
+                        review: &receipt(),
+                        response: &response,
+                        checkpoint: &refused,
+                    },
+                    credential,
+                )
+                .await
+                .map(|_| ()),
+        };
+        assert!(result.is_err(), "{gate}");
+        assert!(
+            refused.states.lock().unwrap().last().unwrap()["github"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            authority
+                .review_conversation_state()
+                .await
+                .unwrap()
+                .unwrap(),
+            acknowledged
+        );
+        for _ in 0..2 {
+            assert!(
+                authority
+                    .inspect_review_feedback(&receipt(), credential, &RefuseReviewCheckpoint)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                authority
+                    .request_merge(&receipt(), credential, &RefuseReviewCheckpoint)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                authority
+                    .resolve_review_conversation(
+                        SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &RefuseReviewCheckpoint,
+                        },
+                        credential
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                authority
+                    .review_conversation_state()
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                acknowledged,
+                "{gate}"
+            );
+        }
+
+        let checkpoint = RecordingReviewCheckpoint::default();
+        assert_eq!(
+            authority
+                .request_merge(&receipt(), credential, &checkpoint)
+                .await
+                .unwrap(),
+            SourceMergeRequestOutcome::ReviewBlocked
+        );
+        let feedback = authority
+            .inspect_review_feedback(&receipt(), credential, &checkpoint)
+            .await
+            .unwrap();
+        assert_eq!(feedback.items.len(), 1);
+        assert_eq!(feedback.conversations.len(), 1);
+        let states = checkpoint.states.lock().unwrap().clone();
+        assert_eq!(states.len(), 1);
+        assert!(states[0]["github"].as_array().unwrap().is_empty());
+        assert_eq!(states[0]["replies"], acknowledged["replies"]);
+        assert_eq!(
+            authority
+                .review_conversation_state()
+                .await
+                .unwrap()
+                .unwrap(),
+            states[0]
+        );
+        assert_eq!(checkpoint.states.lock().unwrap().len(), 1);
+        let data = state(&program);
+        assert_eq!(data["threads"][0]["resolved"], false);
+        assert_eq!(data["threads"][0]["comments"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            data["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|call| call.to_string().contains("addPullRequestReviewThreadReply"))
+                .count(),
+            1
+        );
+        assert!(!data["calls"].to_string().contains("enqueuePullRequest"));
     }
 }

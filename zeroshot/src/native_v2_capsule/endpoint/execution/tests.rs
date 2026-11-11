@@ -339,3 +339,31 @@ fn verifier_system_evidence_survives_capsule_terminal_buffer_and_wire_validation
         Some(FailureDiagnosticKind::Verifier)
     );
 }
+
+#[test]
+fn cancellation_retains_latest_delivery_receipts_before_terminal_failure() {
+    let mut metadata = TerminalMetadata::default();
+    metadata.retain(CapsuleNodeEvent::DeliveryState {
+        state: crate::native_v2_runner::test_support::delivery_checkpoint(
+            serde_json::json!({"revision":"old"}),
+            1,
+        ),
+    });
+    let latest = crate::native_v2_runner::test_support::delivery_checkpoint(
+        serde_json::json!({"revision":"verified", "reply":7}),
+        2,
+    );
+    metadata.retain(CapsuleNodeEvent::DeliveryState {
+        state: latest.clone(),
+    });
+    let events = metadata.into_events(Err(NodeRunnerError::Cancelled));
+    assert_eq!(
+        events,
+        vec![
+            CapsuleNodeEvent::DeliveryState { state: latest },
+            CapsuleNodeEvent::Failed {
+                failure: CapsuleNodeFailure::Cancelled
+            }
+        ]
+    );
+}

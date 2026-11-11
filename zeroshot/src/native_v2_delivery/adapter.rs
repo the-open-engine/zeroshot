@@ -932,7 +932,11 @@ impl NativeV2DeliveryAdapter {
             ensure_active(drive.control)?;
             match self
                 .authority
-                .inspect_review_feedback(&drive.review, drive.credentials.current())
+                .inspect_review_feedback(
+                    &drive.review,
+                    drive.credentials.current(),
+                    &conversations::ConversationCheckpoint(drive.control.clone()),
+                )
                 .await
             {
                 Ok(feedback) => return Ok(feedback),
@@ -1193,7 +1197,11 @@ impl NativeV2DeliveryAdapter {
             ensure_active(drive.control)?;
             let result = self
                 .authority
-                .request_merge(&drive.review, drive.credentials.current())
+                .request_merge(
+                    &drive.review,
+                    drive.credentials.current(),
+                    &conversations::ConversationCheckpoint(drive.control.clone()),
+                )
                 .await;
             let Some(outcome) = self
                 .operation_result(

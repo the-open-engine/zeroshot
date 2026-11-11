@@ -348,6 +348,7 @@ impl SourceDeliveryAuthority for TransportAuthority {
         &self,
         _review: &SourceReviewReceipt,
         _credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         if self.update != Update::None && !self.updated.load(Ordering::SeqCst) {
             return Ok(SourceMergeRequestOutcome::HeadUpdateRequired);

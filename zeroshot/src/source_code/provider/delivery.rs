@@ -357,10 +357,13 @@ pub trait SourceDeliveryAuthority: Send + Sync {
     /// Return only feedback authorized by the forge on the bound repository.
     /// Authorization is provider-owned and rechecked per inspection, with stable author identity.
     /// Confirmed insufficient access is ignored; incomplete or failed lookups fail the read.
+    /// Acknowledge changed retained conversation receipts before returning, including partial
+    /// settlement on a forge error; failed acknowledgement prevents delivery from continuing.
     async fn inspect_review_feedback(
         &self,
         _review: &SourceReviewReceipt,
         _credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
         Ok(SourceReviewFeedback {
             items: Vec::new(),
@@ -386,10 +389,12 @@ pub trait SourceDeliveryAuthority: Send + Sync {
 
     /// Requests provider-native integration after the provider reports its merge policy ready.
     /// Acceptance is not proof; only a later merged observation confirms success.
+    /// Acknowledge conversation reconciliation before requesting any merge effect.
     async fn request_merge(
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError>;
 
     /// Confirms that no deferred merge can race a repair/error handoff, or reports an exact merge.

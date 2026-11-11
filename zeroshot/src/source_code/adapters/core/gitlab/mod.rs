@@ -268,8 +268,9 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         &self,
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
-        review::feedback(self, receipt, credential)
+        review::feedback(self, receipt, credential, checkpoint)
             .await
             .map_err(|error| {
                 api::delivery_context(error, review::merge_request_identity(receipt), credential)
@@ -293,12 +294,13 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         &self,
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         let result = async {
-            if conversations::reconcile_resolutions(self, receipt, credential).await? {
+            if conversations::reconcile_resolutions(self, receipt, credential, checkpoint).await? {
                 return Ok(SourceMergeRequestOutcome::ReviewBlocked);
             }
-            review::merge(self, receipt, credential).await
+            review::merge(self, receipt, credential, checkpoint).await
         }
         .await;
         result.map_err(|error| {

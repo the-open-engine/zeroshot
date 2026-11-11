@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 fn base_ref(page: &mut Value) -> &mut Value {
@@ -67,7 +68,11 @@ async fn merge_commands_use_the_selected_method_and_exact_head_without_bypass() 
         set_rules(&mut page, vec![method_rule(json!([method]))]);
         page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(method == "QUEUE");
         let outcome = merge_authority(root.path(), &page, &page, "exit 0")
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_value();
         assert_eq!(outcome, SourceMergeRequestOutcome::Accepted);
@@ -96,7 +101,11 @@ async fn unavailable_method_or_changed_head_never_invokes_merge() {
     for page in [unavailable, changed] {
         let root = tempfile::tempdir().assert_value();
         merge_authority(root.path(), &page, &page, "exit 0")
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_error();
         assert!(!root.path().join("merge-args").exists());
@@ -130,7 +139,11 @@ async fn merge_submission_rechecks_terminal_approval_queue_and_freshness_state()
     ] {
         let root = tempfile::tempdir().assert_value();
         let actual = merge_authority(root.path(), &page, &page, "exit 19")
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_value();
         assert_eq!(actual, expected);
@@ -174,7 +187,7 @@ async fn queue_removal_between_inspection_and_submission_requires_fresh_reconcil
         for _ in 0..2 {
             assert_eq!(
                 authority
-                    .request_merge(&review(), credential)
+                    .request_merge(&review(), credential, &TestReviewCheckpoint)
                     .await
                     .assert_value(),
                 SourceMergeRequestOutcome::HeadUpdateRequired
@@ -205,7 +218,11 @@ async fn permanent_merge_rejection_preserves_diagnostics_and_cannot_become_pendi
                 shell_literal(rejection)
             );
             let error = merge_authority(root.path(), &ready, &after, &action)
-                .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                .request_merge(
+                    &review(),
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint,
+                )
                 .await
                 .assert_error();
             assert_policy_error(&error);
@@ -228,7 +245,11 @@ async fn merge_transport_errors_preserve_authentication_and_retry_classification
             "printf '%s\\n' 'HTTP {status}: request failed (https://api.github.com/graphql)' >&2; exit 1"
         );
         let error = merge_authority(root.path(), &page, &page, &action)
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_error();
         assert_eq!(error.api_status(), Some(status));
@@ -251,7 +272,11 @@ async fn permanent_http_rejection_cannot_request_workspace_repair_or_head_update
                 "printf '%s\\n' 'HTTP {status}: request rejected (https://api.github.com/graphql)' >&2; exit 1"
             );
             let error = merge_authority(root.path(), &ready, &after, &action)
-                .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                .request_merge(
+                    &review(),
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint,
+                )
                 .await
                 .assert_error();
             assert!(matches!(error, SourceDeliveryError::Api(_)));
@@ -291,7 +316,11 @@ async fn merge_failure_reconciles_authoritative_success_conflict_and_freshness()
     ] {
         let root = tempfile::tempdir().assert_value();
         let outcome = merge_authority(root.path(), &ready, &after, action)
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_value();
         assert_eq!(outcome, expected);
@@ -336,7 +365,11 @@ async fn review_observation_and_queue_submission_do_not_read_direct_merge_policy
         if queued {
             assert_eq!(
                 authority
-                    .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                    .request_merge(
+                        &review(),
+                        SourceDeliveryCredential::token("test-token"),
+                        &TestReviewCheckpoint
+                    )
                     .await
                     .assert_value(),
                 SourceMergeRequestOutcome::Accepted
@@ -361,14 +394,17 @@ async fn conversation_merge_rejection_race_refreshes_blockers_without_masking_ot
     let credential = SourceDeliveryCredential::token("test-token");
     assert!(
         provider
-            .inspect_review_feedback(&review(), credential)
+            .inspect_review_feedback(&review(), credential, &TestReviewCheckpoint)
             .await
             .unwrap()
             .conversations
             .is_empty()
     );
     assert_eq!(
-        provider.request_merge(&review(), credential).await.unwrap(),
+        provider
+            .request_merge(&review(), credential, &TestReviewCheckpoint)
+            .await
+            .unwrap(),
         SourceMergeRequestOutcome::ReviewBlocked
     );
     assert_eq!(
@@ -380,7 +416,7 @@ async fn conversation_merge_rejection_race_refreshes_blockers_without_masking_ot
     );
     assert_eq!(
         provider
-            .inspect_review_feedback(&review(), credential)
+            .inspect_review_feedback(&review(), credential, &TestReviewCheckpoint)
             .await
             .unwrap()
             .items

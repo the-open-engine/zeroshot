@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 fn required_rule(contexts: &[&str]) -> Value {
@@ -305,7 +306,11 @@ async fn queue_waits_for_ruleset_required_check_before_enqueueing() {
     assert!(!observation.pull_request_ready);
     assert_eq!(
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint
+            )
             .await
             .assert_value(),
         SourceMergeRequestOutcome::Pending
@@ -313,7 +318,11 @@ async fn queue_waits_for_ruleset_required_check_before_enqueueing() {
     assert!(!root.path().join("mutations").exists());
     assert_eq!(
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint
+            )
             .await
             .assert_value(),
         SourceMergeRequestOutcome::Accepted
@@ -376,7 +385,11 @@ async fn branch_rules_errors_propagate_through_authority_without_enqueueing() {
             .await
             .assert_error();
         let request_error = provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_error();
         for error in [inspection_error, request_error] {

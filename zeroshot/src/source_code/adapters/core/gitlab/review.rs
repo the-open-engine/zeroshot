@@ -648,6 +648,7 @@ pub(super) async fn merge(
     authority: &GitLabDeliveryAuthority,
     receipt: &SourceReviewReceipt,
     credential: SourceDeliveryCredential<'_>,
+    checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
 ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
     let project = authority.project(&receipt.repository, credential).await?;
     let current = authority.merge_request(receipt, credential).await?;
@@ -729,7 +730,7 @@ pub(super) async fn merge(
     {
         let refreshed = authority.merge_request(receipt, credential).await?;
         if refreshed.detailed_merge_status == "discussions_not_resolved"
-            && !feedback(authority, receipt, credential)
+            && !feedback(authority, receipt, credential, checkpoint)
                 .await?
                 .conversations
                 .is_empty()
@@ -811,8 +812,9 @@ pub(super) async fn feedback(
     authority: &GitLabDeliveryAuthority,
     receipt: &SourceReviewReceipt,
     credential: SourceDeliveryCredential<'_>,
+    checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
 ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
-    super::conversations::reconcile_resolutions(authority, receipt, credential).await?;
+    super::conversations::reconcile_resolutions(authority, receipt, credential, checkpoint).await?;
     feedback_snapshot(authority, receipt, credential).await
 }
 

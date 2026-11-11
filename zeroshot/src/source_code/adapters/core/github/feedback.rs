@@ -75,7 +75,6 @@ pub(super) async fn inspect(
     review: &SourceReviewReceipt,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
-    super::conversations::reconcile_resolutions(authority, review, credential).await?;
     let before = authority.pull_request(review, credential).await?;
     require_review_identity(&before, review)?;
 

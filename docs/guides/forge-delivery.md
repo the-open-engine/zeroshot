@@ -155,7 +155,10 @@ or ask the worker to repair its own response. Missing or ambiguous publication e
 for a maintainer to reconcile. A definitive authentication rejection retires the unposted intent
 before delivery refreshes credentials and retries. These receipts
 remain recoverable while delivery waits on CI or approvals. Delivery rechecks these retained conversations before feedback and merge
-admission. Recovery reconciles receipts acknowledged before a runtime or controller failure before
+admission. Changes discovered there are durably acknowledged before delivery continues or requests
+a merge, including partial settlement when a forge read fails. Failed acknowledgement preserves the
+previous receipts, including when removing the last conversation, so subsequent feedback and merge
+attempts must retry that checkpoint. Recovery reconciles receipts acknowledged before a runtime or controller failure before
 starting a successor. Compact receipt storage is bounded across repair rounds; reaching its limit stops
 further automated replies and resolution with a maintainer intervention diagnostic.
 

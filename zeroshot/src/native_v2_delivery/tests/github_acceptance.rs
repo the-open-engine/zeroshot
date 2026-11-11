@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 use std::path::Path;
 
@@ -68,7 +69,7 @@ async fn production_gh_transport_uses_exact_args_and_a_clean_environment() {
         }
     );
     let merge_request = authority
-        .request_merge(&review, credential)
+        .request_merge(&review, credential, &TestReviewCheckpoint)
         .await
         .assert_value();
     assert_eq!(merge_request, SourceMergeRequestOutcome::Accepted);

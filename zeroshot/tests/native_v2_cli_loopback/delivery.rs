@@ -287,6 +287,7 @@ impl SourceDeliveryAuthority for DeliveryAuthority {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn zeroshot_engine::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         require_test_credential(credential)?;
         self.merge_requests.fetch_add(1, Ordering::SeqCst);

@@ -94,6 +94,58 @@ async fn acknowledge(
     Ok(())
 }
 
+/// Keep the installed receipt (including the last entry) until its removal is durable.
+async fn retire(
+    authority: &GhCliDeliveryAuthority,
+    state: (
+        &mut BTreeMap<ResolutionIdentity, PendingResolution>,
+        &ResolutionIdentity,
+    ),
+    checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
+) -> Result<(), SourceDeliveryError> {
+    let (pending, key) = state;
+    let mut proposed = pending.clone();
+    proposed.remove(key);
+    acknowledge(authority, &mut proposed, checkpoint).await?;
+    *pending = proposed;
+    Ok(())
+}
+
+/// Settlement may refine replies or remove receipts even when its final forge read fails.
+async fn settle_and_acknowledge(
+    authority: &GhCliDeliveryAuthority,
+    state: (
+        &SourceReviewReceipt,
+        &ResolutionIdentity,
+        &mut BTreeMap<ResolutionIdentity, PendingResolution>,
+    ),
+    credential: SourceDeliveryCredential<'_>,
+    checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
+) -> Result<SourceReviewResolution, SourceDeliveryError> {
+    let (review, key, pending) = state;
+    let before = receipt_checkpoint(authority, pending)?;
+    let mut proposed = pending.clone();
+    let mut staged = authority.clone();
+    staged.published_replies = authority.published_replies.fork()?;
+    let result = settle(
+        &staged,
+        (review, &key.4, proposed.get_mut(key).unwrap()),
+        credential,
+    )
+    .await;
+    if let Ok(result) = result {
+        settled(&mut proposed, key, result);
+    }
+    if receipt_checkpoint(&staged, &proposed)? != before {
+        acknowledge(&staged, &mut proposed, checkpoint).await?;
+        authority
+            .published_replies
+            .restore(staged.published_replies.checkpoint()?)?;
+        *pending = proposed;
+    }
+    result
+}
+
 fn settled(
     pending: &mut BTreeMap<ResolutionIdentity, PendingResolution>,
     key: &ResolutionIdentity,
@@ -121,6 +173,7 @@ pub(super) async fn reconcile_resolutions(
     authority: &GhCliDeliveryAuthority,
     review: &SourceReviewReceipt,
     credential: SourceDeliveryCredential<'_>,
+    checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
 ) -> Result<bool, SourceDeliveryError> {
     let mut pending = authority.resolutions.0.lock().await;
     let keys: Vec<_> = pending
@@ -136,14 +189,14 @@ pub(super) async fn reconcile_resolutions(
     }
     let mut changed = false;
     for key in keys {
-        let result = settle(
+        let result = settle_and_acknowledge(
             authority,
-            (review, &key.4, pending.get_mut(&key).unwrap()),
+            (review, &key, &mut pending),
             credential,
+            checkpoint,
         )
         .await?;
         changed |= result == SourceReviewResolution::Changed;
-        settled(&mut pending, &key, result);
     }
     Ok(changed)
 }
@@ -416,21 +469,19 @@ pub(super) async fn resolve(
     if let Some(attempt) = pending.get(&key) {
         if attempt.response_hash == response_hash || !attempt.confirmed {
             acknowledge(authority, &mut pending, checkpoint).await?;
-            let result = settle(
+            let result = settle_and_acknowledge(
                 authority,
-                (review, &key.4, pending.get_mut(&key).unwrap()),
+                (review, &key, &mut pending),
                 credential,
+                checkpoint,
             )
             .await?;
-            settled(&mut pending, &key, result);
-            acknowledge(authority, &mut pending, checkpoint).await?;
             if result == SourceReviewResolution::Changed
                 || pending[&key].response_hash == response_hash
             {
                 return Ok(result);
             }
         }
-        pending.remove(&key);
     }
     let before = fresh(authority, (review, None), credential).await?;
     if !matches_response(&before, response) {
@@ -496,8 +547,7 @@ pub(super) async fn resolve(
             if error.api_status() == Some(401) {
                 // A completed authentication refusal proves no reply was published.
                 // Retire its intent durably before allowing the normal credential retry.
-                pending.remove(&key);
-                acknowledge(authority, &mut pending, checkpoint).await?;
+                retire(authority, (&mut pending, &key), checkpoint).await?;
             }
             return Err(error);
         }
@@ -514,15 +564,13 @@ pub(super) async fn resolve(
     intent.reply = Some(reply);
     intent.checkpointed = false;
     acknowledge(authority, &mut pending, checkpoint).await?;
-    let result = settle(
+    settle_and_acknowledge(
         authority,
-        (review, &key.4, pending.get_mut(&key).unwrap()),
+        (review, &key, &mut pending),
         credential,
+        checkpoint,
     )
-    .await?;
-    settled(&mut pending, &key, result);
-    acknowledge(authority, &mut pending, checkpoint).await?;
-    Ok(result)
+    .await
 }
 
 async fn settle(

@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 fn discussions() -> Value {
@@ -60,7 +61,7 @@ async fn only_active_developers_including_inherited_members_can_supply_feedback(
     );
     let first = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(first.items.len(), 4);
@@ -84,7 +85,7 @@ async fn only_active_developers_including_inherited_members_can_supply_feedback(
     );
     let second = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(second.items.len(), 2);
@@ -157,7 +158,7 @@ async fn check_incomplete_membership(enterprise: bool) {
         assert!(
             fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err(),
             "accepted {value}"
@@ -172,7 +173,7 @@ async fn check_incomplete_membership(enterprise: bool) {
         fixture.response("GET", "/members/all/31", (status, Value::Null));
         let error = fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap_err();
         assert_eq!(error.api_status(), Some(status.as_u16()));
@@ -181,7 +182,7 @@ async fn check_incomplete_membership(enterprise: bool) {
     fixture.state.lock().unwrap().disconnect_membership = true;
     let error = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap_err();
     assert_eq!(error.api_status(), None);
@@ -224,7 +225,7 @@ async fn community_edition_membership_accepts_writers_and_ignores_read_only_auth
     );
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 4);
@@ -247,7 +248,7 @@ async fn community_edition_membership_accepts_writers_and_ignores_read_only_auth
     );
     let revoked = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(revoked.items.len(), 2);
@@ -299,7 +300,7 @@ async fn unreported_membership_requires_authoritative_community_edition_metadata
         assert!(
             fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err(),
             "accepted unreported membership with {metadata}"
@@ -336,7 +337,7 @@ async fn active_accounts_require_current_active_membership_for_every_note() {
     );
     let active = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(active.items.len(), 2);
@@ -355,7 +356,7 @@ async fn active_accounts_require_current_active_membership_for_every_note() {
     );
     let awaiting = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert!(awaiting.items.is_empty());
@@ -376,7 +377,7 @@ async fn active_accounts_require_current_active_membership_for_every_note() {
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap()
             .items
@@ -396,7 +397,7 @@ async fn active_accounts_require_current_active_membership_for_every_note() {
     );
     let restored = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(restored.items.len(), 1);
@@ -425,7 +426,7 @@ async fn denied_authors_still_require_the_exact_project_and_merge_request_scope(
         assert!(
             fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err()
         );

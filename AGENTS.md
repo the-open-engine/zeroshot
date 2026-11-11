@@ -1121,7 +1121,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   before returning the original authentication error to the existing credential refresh/retry path;
   failed retirement acknowledgement blocks that retry. Normal publication acknowledges the returned reply ID before resolution;
   recovery may derive that ID from the already acknowledged intent. Settlement updates
-  are acknowledged before delivery continues. Enqueueing or reading an event is not acknowledgement:
+  are acknowledged before delivery continues, including settlement or partial reply reconciliation
+  during feedback inspection and merge admission. Those operations receive the same host checkpoint
+  capability and stop if acknowledgement fails. Stage settlement and retirement changes, including
+  reply ownership, until acknowledgement succeeds; a failed acknowledgement preserves the previous
+  receipts even when the proposed update removes the final conversation. Enqueueing or reading an event is not acknowledgement:
   only the trusted supervisor acknowledges after ledger append, through the private capsule channel
   when applicable. Read-side reconciliation cannot resolve an unacknowledged in-memory receipt.
   Repeated identical acknowledgements reuse durable proof while polling; changed intermediate and

@@ -692,6 +692,7 @@ impl SourceDeliveryAuthority for FakeGitHub {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
         let read = self.feedback_reads.fetch_add(1, Ordering::SeqCst);
         if let Some((authority, program)) = &self.feedback_authority {
@@ -709,7 +710,7 @@ impl SourceDeliveryAuthority for FakeGitHub {
             return authority
                 .lock()
                 .await
-                .inspect_review_feedback(review, credential)
+                .inspect_review_feedback(review, credential, checkpoint)
                 .await;
         }
         if matches!(self.script, Script::FeedbackReadTransient) && read == 0 {
@@ -757,6 +758,7 @@ impl SourceDeliveryAuthority for FakeGitHub {
         &self,
         _review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         if matches!(self.script, Script::MergeFailed) {
             return Err(SourceDeliveryError::api(

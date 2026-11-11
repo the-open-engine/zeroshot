@@ -323,36 +323,3 @@ pub(super) async fn remove_endpoint_execution(
 #[cfg(test)]
 #[path = "execution/tests.rs"]
 mod tests;
-
-#[cfg(test)]
-mod receipt_tests {
-    use super::*;
-
-    #[test]
-    fn cancellation_retains_latest_delivery_receipts_before_terminal_failure() {
-        let mut metadata = TerminalMetadata::default();
-        metadata.retain(CapsuleNodeEvent::DeliveryState {
-            state: crate::native_v2_runner::test_support::delivery_checkpoint(
-                serde_json::json!({"revision":"old"}),
-                1,
-            ),
-        });
-        let latest = crate::native_v2_runner::test_support::delivery_checkpoint(
-            serde_json::json!({"revision":"verified", "reply":7}),
-            2,
-        );
-        metadata.retain(CapsuleNodeEvent::DeliveryState {
-            state: latest.clone(),
-        });
-        let events = metadata.into_events(Err(NodeRunnerError::Cancelled));
-        assert_eq!(
-            events,
-            vec![
-                CapsuleNodeEvent::DeliveryState { state: latest },
-                CapsuleNodeEvent::Failed {
-                    failure: CapsuleNodeFailure::Cancelled
-                }
-            ]
-        );
-    }
-}

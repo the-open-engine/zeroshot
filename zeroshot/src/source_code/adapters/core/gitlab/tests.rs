@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use reqwest::{Method, StatusCode};
@@ -531,7 +532,7 @@ async fn merges_only_the_exact_reviewed_head_and_confirms_integrated_revision() 
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Accepted
@@ -558,7 +559,7 @@ async fn changed_head_refuses_merge_before_any_effect() {
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -573,7 +574,7 @@ async fn lost_merge_response_is_reconciled_during_safe_handoff() {
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -615,7 +616,7 @@ async fn unknown_policy_and_manual_pipeline_never_authorize_merge() {
         assert_eq!(
             fixture
                 .authority
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap(),
             SourceMergeRequestOutcome::Pending
@@ -630,7 +631,7 @@ async fn unknown_policy_and_manual_pipeline_never_authorize_merge() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -672,7 +673,7 @@ async fn feedback_is_fenced_against_mid_read_head_changes() {
     fixture.open_review();
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -680,7 +681,7 @@ async fn feedback_is_fenced_against_mid_read_head_changes() {
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -804,7 +805,7 @@ async fn required_merge_trains_never_use_a_synchronous_merge_bypass() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -820,7 +821,7 @@ async fn unknown_merge_settlement_refuses_a_worker_handoff() {
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -834,7 +835,7 @@ async fn unknown_merge_settlement_refuses_a_worker_handoff() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending,
@@ -1068,7 +1069,7 @@ async fn synthetic_pipeline_success_does_not_prove_ci_for_the_captured_head() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -1130,7 +1131,7 @@ async fn null_discussion_iid_requires_the_fetched_global_merge_request_id() {
     fixture.state.lock().unwrap().discussion_note["noteable_iid"] = Value::Null;
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -1138,7 +1139,7 @@ async fn null_discussion_iid_requires_the_fetched_global_merge_request_id() {
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -1150,7 +1151,7 @@ async fn null_discussion_iid_requires_the_fetched_global_merge_request_id() {
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );

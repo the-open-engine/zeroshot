@@ -153,7 +153,7 @@ fn status_context(context: &str, state: &str, required: bool) -> Value {
     })
 }
 
-fn policy_page(
+pub(super) fn policy_page(
     mergeable: &str,
     merge_state_status: &str,
     contexts: Option<Vec<Value>>,

@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 #[test]
@@ -50,7 +51,11 @@ mod queued_handoff {
                 head_revision: "b".repeat(40),
             };
             authority
-                .request_merge(&review, SourceDeliveryCredential::token("test-token"))
+                .request_merge(
+                    &review,
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint,
+                )
                 .await
                 .unwrap();
             let adapter = NativeV2DeliveryAdapter::new(

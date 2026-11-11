@@ -1,6 +1,6 @@
 use super::*;
 
-struct ConversationCheckpoint(DriverControl);
+pub(super) struct ConversationCheckpoint(pub(super) DriverControl);
 
 #[async_trait]
 impl SourceReviewCheckpoint for ConversationCheckpoint {
