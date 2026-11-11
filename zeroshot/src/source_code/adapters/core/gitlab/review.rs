@@ -63,7 +63,18 @@ pub(super) async fn observe(
                 head_branch: request.head_branch.to_owned(),
                 head_revision: value.sha.clone(),
             };
-            Some(observation(&value, &receipt, &project)?)
+            let mut observed = observation(&value, &receipt, &project)?;
+            super::ci::include_failure_details(
+                authority,
+                super::ci::PipelineContext {
+                    head: value.head_pipeline.as_ref(),
+                    project: &project,
+                },
+                &mut observed,
+                credential,
+            )
+            .await?;
+            Some(observed)
         }
         None => None,
     };
@@ -411,7 +422,18 @@ pub(super) async fn inspect(
 ) -> Result<SourceReviewObservation, SourceDeliveryError> {
     let project = authority.project(&receipt.repository, credential).await?;
     let value = authority.merge_request(receipt, credential).await?;
-    observation(&value, receipt, &project)
+    let mut observed = observation(&value, receipt, &project)?;
+    super::ci::include_failure_details(
+        authority,
+        super::ci::PipelineContext {
+            head: value.head_pipeline.as_ref(),
+            project: &project,
+        },
+        &mut observed,
+        credential,
+    )
+    .await?;
+    Ok(observed)
 }
 
 fn integrated_revision(value: &MergeRequest) -> Result<String, SourceDeliveryError> {

@@ -461,6 +461,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   regardless of head-pipeline presence or status, never `Passed`. Required or unknown policy needs
   captured-head CI evidence; absent/running CI stays pending and failure/skipped rules still apply.
   Synthetic pipeline SHAs do not prove required captured-head CI. All non-CI gates remain authoritative.
+  Failed required GitLab pipelines include REST and GraphQL configuration errors, failed regular
+  and trigger job names/stages/reasons, and labelled, credential-redacted trace tails. GraphQL
+  error-message reads bind the captured project/pipeline/commit and use bounded cursor pagination.
+  Both forges share CI diagnostic bounds and excerpt formatting in
+  `source_code/adapters/core/ci_diagnostics`; unavailable traces retain the job list.
   Empty generated delivery bindings acquire the adapter's default connection only after source or
   comment destination selection. Managed GitHub.com token/file fallback never authorizes another instance.
   Adapters own optional canonical review/commit receipt links and comment permalink validation.

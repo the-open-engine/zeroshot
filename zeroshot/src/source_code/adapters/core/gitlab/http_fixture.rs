@@ -19,6 +19,15 @@ pub(super) struct Response {
 }
 
 impl Response {
+    pub(super) fn raw(body: Vec<u8>) -> Self {
+        Self {
+            status: StatusCode::OK,
+            body,
+            headers: Vec::new(),
+            disconnect: false,
+        }
+    }
+
     pub(super) fn disconnected() -> Self {
         Self {
             status: StatusCode::OK,
