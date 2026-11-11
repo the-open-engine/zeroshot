@@ -165,7 +165,7 @@ async fn assert_map_promotion() {
 }
 
 #[tokio::test]
-async fn late_parallel_losers_are_voided_in_canonical_dispatch_order() {
+async fn parallel_losers_are_voided_in_canonical_dispatch_order() {
     let graph = verified(
         sequence(
             "root",
@@ -181,10 +181,11 @@ async fn late_parallel_losers_are_voided_in_canonical_dispatch_order() {
         json!({"left":1,"middle":1,"winner":1}),
     )
     .await;
+    // The supervisor records a dispatch batch before any of its workers can settle.
     let history = [
-        active(1, 1, "left", 9),
+        active(1, 1, "left", 2),
         settled(SettledSpec::new(2, 2, "winner").position(4), success(7)),
-        active(3, 3, "middle", 6),
+        active(3, 3, "middle", 1),
     ];
     let reduction = reduce(&graph, &json!({}), &history);
     let voids = reduction

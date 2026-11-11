@@ -195,6 +195,7 @@ impl Engine<'_> {
             .iter()
             .filter(|execution| {
                 self.consumed_executions.contains(&execution.execution)
+                    && execution.dispatch_position <= scope.cutoff
                     && descendants.contains(&execution.occurrence.node)
                     && execution
                         .occurrence

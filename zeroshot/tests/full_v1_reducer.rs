@@ -273,11 +273,15 @@ async fn resolved_any_join_releases_losing_frontier_before_tail() {
     }
 }
 
+async fn repeated_race_graph() -> VerifiedGraph {
+    let condition = concurrency::accepted_race_guard();
+    verified(sequence("run", vec![json!({"kind":"loop","name":"repeat","state":{"kind":"record","fields":{}},"maxIterations":2,"promotedStatePaths":[],
+        "body":{"kind":"par","name":"race","state":{"kind":"record","fields":{}},"branches":[verifier("a",1),verifier("b",1)],"join":{"kind":"first","when":condition},"promotedStatePaths":[]}}), succeed("done")]), json!({})).await
+}
+
 #[tokio::test]
 async fn repeated_races_revisit_a_previously_voided_loser() {
-    let condition = concurrency::accepted_race_guard();
-    let graph = verified(sequence("run", vec![json!({"kind":"loop","name":"repeat","state":{"kind":"record","fields":{}},"maxIterations":2,"promotedStatePaths":[],
-        "body":{"kind":"par","name":"race","state":{"kind":"record","fields":{}},"branches":[verifier("a",1),verifier("b",1)],"join":{"kind":"first","when":condition},"promotedStatePaths":[]}}), succeed("done")]), json!({})).await;
+    let graph = repeated_race_graph().await;
     let mut loser = active(2, 2, "b", 2);
     loser.state = DurableExecutionState::Voided {
         position: HistoryPosition::new(4).unwrap(),
@@ -342,4 +346,69 @@ async fn impossible_parallel_join_preserves_an_earlier_map_terminal_cancellation
         reduced.terminal,
         Some(TerminalProjection::Failed { .. })
     ));
+}
+
+#[tokio::test]
+async fn repeated_race_does_not_revisit_or_cancel_a_later_rounds_first_execution() {
+    let graph = repeated_race_graph().await;
+    let mut history = vec![settled(
+        SettledSpec::new(1, 1, "a").position(2),
+        verdict("accepted"),
+    )];
+    let reduce = |history: &[DurableExecution], capacity| {
+        FullV1Reducer::native_v2(&graph)
+            .with_dispatch_limit(capacity)
+            .reduce(ReductionInput {
+                initial_input: &json!({}),
+                executions: history,
+                next_execution: history.len() as u64 + 1,
+                next_node_instance: history.len() as u64 + 1,
+            })
+            .unwrap()
+    };
+    let next = reduce(&history, 1);
+    let dispatches = next
+        .decisions
+        .iter()
+        .filter_map(|decision| match decision {
+            Decision::Dispatch {
+                iteration,
+                occurrence,
+                ..
+            } => Some((*iteration, occurrence)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0].0, 2);
+    assert_eq!(dispatches[0].1.node.as_str(), "b");
+    let mut later = active(2, 2, "b", 3);
+    history.push(later.clone());
+    let running = reduce(&history, 0);
+    assert!(running.terminal.is_none());
+    assert!(
+        !running.decisions.iter().any(|decision| matches!(
+            decision,
+            Decision::VoidLoser { .. } | Decision::Dispatch { .. }
+        )),
+        "later-round work must remain active: {:?}",
+        running.decisions
+    );
+    later.state = DurableExecutionState::Settled {
+        position: HistoryPosition::new(4).unwrap(),
+        outcome: verdict("accepted"),
+    };
+    history[1] = later;
+    let completed = reduce(&history, 1);
+    assert!(
+        matches!(
+            completed.terminal,
+            Some(TerminalProjection::Succeeded { .. })
+        ),
+        "accepted later-round work must complete the loop: {completed:?}"
+    );
+    assert!(!completed.decisions.iter().any(|decision| matches!(
+        decision,
+        Decision::VoidLoser { .. } | Decision::Dispatch { .. }
+    )));
 }

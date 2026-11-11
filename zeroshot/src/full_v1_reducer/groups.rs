@@ -102,7 +102,7 @@ impl Engine<'_> {
                     self.restore_trace(probe_trace)?;
                 }
                 self.pending_frontier = frontier;
-                merge_parallel_visits(&probes, context);
+                self.merge_parallel_visits(&probes, context, status.position());
             }
             return Ok(status);
         }
@@ -116,7 +116,7 @@ impl Engine<'_> {
             },
             &winners,
         )?;
-        merge_parallel_visits(&probes, &mut joined);
+        self.merge_parallel_visits(&probes, &mut joined, join_position);
         self.finish_parallel_join(
             GroupMutation {
                 group,
@@ -449,6 +449,47 @@ impl Engine<'_> {
         });
         Ok(())
     }
+    // Only dispatched history before this join may advance a losing branch's visit.
+    fn merge_parallel_visits(
+        &self,
+        probes: &[(Status, Context)],
+        target: &mut Context,
+        cutoff: HistoryPosition,
+    ) {
+        for (key, value) in probes
+            .iter()
+            .flat_map(|(_, context)| &context.controls)
+            .filter(|(key, _)| {
+                key.source == ControlSource::Group
+                    && key.field.as_deref() == Some("__reducer_visit")
+            })
+        {
+            let next = next_visit(&key.node, &key.map_indices, &target.controls);
+            let proposed = value.parse::<u64>().unwrap_or(0);
+            if proposed < next {
+                continue;
+            }
+            let occurrence = StructuralOccurrence {
+                node: key.node.clone(),
+                map_indices: key.map_indices.clone(),
+            };
+            let actual = self.by_occurrence.get(&occurrence).map_or(0, |history| {
+                history
+                    .iter()
+                    .filter(|execution| {
+                        execution.dispatch_position <= cutoff
+                            && (self.execution_mode == ExecutionMode::LegacyAttempts
+                                || execution.attempt.get() == 1)
+                    })
+                    .count() as u64
+            });
+            let visit = proposed.min(actual);
+            if visit >= next {
+                mark_visit(&key.node, &key.map_indices, &mut target.controls, visit);
+            }
+        }
+    }
+
     // Control and voiding operations live in the control companion module.
 }
 
@@ -459,11 +500,5 @@ fn parallel_join_required(join: &Join, branch_count: usize) -> Result<usize, Red
         Join::Quorum { count } => {
             usize::try_from(count.get()).map_err(|_| ReducerError::IdentityOutOfRange)
         }
-    }
-}
-
-fn merge_parallel_visits(probes: &[(Status, Context)], target: &mut Context) {
-    for (_, candidate) in probes {
-        merge_visit_markers(candidate, target);
     }
 }
