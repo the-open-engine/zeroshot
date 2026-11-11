@@ -97,3 +97,40 @@ async fn shutdown_keeps_a_durable_terminal_and_does_not_wait_for_a_first_connect
     assert_eq!(after.snapshot, before.snapshot);
     let _reclaimed = ControllerLease::acquire(paths.lease()).assert_value();
 }
+
+/// The ledger grants its one connection in request order, also to a request that nothing polls
+/// any more. The serving loop's terminal wait must not be such a request while the stop runs.
+#[tokio::test]
+async fn shutdown_is_not_queued_behind_the_terminal_wait_it_replaces() {
+    let root = tempfile::tempdir().assert_value();
+    let controller = terminal_controller(root.path()).await;
+    let paths = controller.paths().clone();
+    let run_id = controller.run_id().clone();
+    let server = controller.clone().bind().await.assert_value();
+
+    // An outside transaction keeps this read, and with it the ledger connection, busy.
+    let outside = rusqlite::Connection::open(paths.ledger()).assert_value();
+    outside.execute_batch("BEGIN EXCLUSIVE").assert_value();
+    let busy = tokio::spawn(async move {
+        controller
+            .inner
+            .status(openengine_cluster_protocol::RunStatusParams { run_id })
+            .await
+    });
+    tokio::task::yield_now().await;
+
+    let (stop, stopping) = tokio::sync::watch::channel(false);
+    let serving = tokio::spawn(server.serve_until_terminal(stopping));
+    // The terminal wait queues for the connection first, then the stop's own read behind it.
+    tokio::task::yield_now().await;
+    stop.send_replace(true);
+    tokio::task::yield_now().await;
+    outside.execute_batch("ROLLBACK").assert_value();
+
+    tokio::time::timeout(Duration::from_secs(5), serving)
+        .await
+        .assert_value_with("the stop waited behind a terminal wait that nothing polls")
+        .assert_value()
+        .assert_value();
+    busy.await.assert_value().assert_value();
+}

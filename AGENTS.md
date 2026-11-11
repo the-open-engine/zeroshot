@@ -702,6 +702,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   loss.
 - SQLite operations acquire the single connection asynchronously before running on a blocking
   thread; cancelling a caller does not release an in-flight database operation's ownership.
+  The connection is granted in request order, also to a pending request that is no longer
+  polled, which then blocks every later operation: drop such a request before awaiting other
+  ledger work in its place. The local controller's serving loop drops its terminal wait before
+  it runs a requested stop.
 - Live force-stop signals owned work before waiting for persistence. Local stop intent prevents
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;

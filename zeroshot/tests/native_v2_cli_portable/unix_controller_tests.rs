@@ -12,6 +12,11 @@ use super::{Fixture, process_exists, success};
 #[path = "unix_controller_work_tests.rs"]
 mod work;
 
+/// The controller bounds its own shutdown at 30 seconds. Waiting past that bound separates a stop
+/// that slow storage delayed from a controller that never settled: a test that expects a recorded
+/// stop asserts the terminal afterwards, which a shutdown that ran into the bound does not have.
+const STOP_LIMIT: Duration = Duration::from_secs(35);
+
 struct Run {
     fixture: Fixture,
     id: String,
@@ -97,7 +102,7 @@ fn unix_controller_sigterm_persists_stop_retains_checkpoints_and_resumes() {
         .count();
     assert!(catalog > 0);
     run.signal(libc::SIGTERM);
-    run.wait_closed(Duration::from_secs(20));
+    run.wait_closed(STOP_LIMIT);
     assert_eq!(run.terminal()["reason"], "force_stopped");
     assert!(run.storage.join("checkpoints").is_dir());
     assert_eq!(
@@ -136,7 +141,25 @@ fn unix_controller_repeated_sigterm_waits_for_durable_stop_after_slow_ledger() {
             .is_err()
     );
     ledger.execute_batch("ROLLBACK").unwrap();
-    run.wait_closed(Duration::from_secs(20));
+    run.wait_closed(STOP_LIMIT);
+    assert_eq!(run.terminal()["reason"], "force_stopped");
+}
+
+/// The provider reports a turn every 50 ms and each report is a ledger write. An outside
+/// transaction keeps the first such write, and with it the controller's ledger connection, busy,
+/// so the serving loop's next status read queues behind that write. The stop request finds the
+/// read there and has to record the stop all the same once the ledger is free again.
+#[test]
+fn unix_controller_sigterm_behind_a_busy_ledger_still_persists_the_stop() {
+    let run = Run::start();
+    let ledger = rusqlite::Connection::open(run.storage.join("runs.sqlite3")).unwrap();
+    ledger.execute_batch("BEGIN IMMEDIATE").unwrap();
+    // Several provider reports and status reads fall into each pause.
+    std::thread::sleep(Duration::from_millis(300));
+    run.signal(libc::SIGTERM);
+    std::thread::sleep(Duration::from_millis(300));
+    ledger.execute_batch("ROLLBACK").unwrap();
+    run.wait_closed(STOP_LIMIT);
     assert_eq!(run.terminal()["reason"], "force_stopped");
 }
 
@@ -146,7 +169,7 @@ fn unix_controller_blocked_ledger_has_bounded_shutdown_without_a_fabricated_stop
     let ledger = rusqlite::Connection::open(run.storage.join("runs.sqlite3")).unwrap();
     ledger.execute_batch("BEGIN IMMEDIATE").unwrap();
     run.signal(libc::SIGTERM);
-    let end = Instant::now() + Duration::from_secs(35);
+    let end = Instant::now() + STOP_LIMIT;
     let lock = File::open(run.storage.join("controller.lock")).unwrap();
     while lock.try_lock_exclusive().is_err() {
         assert!(
@@ -160,7 +183,7 @@ fn unix_controller_blocked_ledger_has_bounded_shutdown_without_a_fabricated_stop
         std::thread::sleep(Duration::from_millis(100));
     }
     drop(lock);
-    run.wait_closed(Duration::from_secs(35));
+    run.wait_closed(STOP_LIMIT);
     assert!(run.terminal().is_null());
     ledger.execute_batch("ROLLBACK").unwrap();
     assert_eq!(
@@ -220,8 +243,17 @@ fn unix_controller_detachment_preserves_terminal_closure_behavior() {
     assert_ne!(unsafe { libc::getsid(0) }, run.controller);
     drop(terminal);
     std::thread::sleep(Duration::from_millis(100));
-    assert!(run.terminal().is_null());
+    // Ownership and the live provider show that the run survived the closed terminal. The stop
+    // recorded below shows that nothing else had ended it.
+    assert!(
+        File::open(run.storage.join("controller.lock"))
+            .unwrap()
+            .try_lock_exclusive()
+            .is_err(),
+        "terminal closure ended the detached controller"
+    );
     assert!(process_exists(run.child));
     run.signal(libc::SIGTERM);
-    run.wait_closed(Duration::from_secs(20));
+    run.wait_closed(STOP_LIMIT);
+    assert_eq!(run.terminal()["reason"], "force_stopped");
 }

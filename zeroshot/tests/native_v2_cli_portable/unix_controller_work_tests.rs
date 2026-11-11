@@ -13,7 +13,9 @@ use zeroshot_engine::native_v2_portable_controller::{
 };
 use zeroshot_engine::native_v2_supervisor::RunEnvironment;
 
-use super::{Duration, File, FileExt, Fixture, Instant, Run, Value, process_exists, success};
+use super::{
+    Duration, File, FileExt, Fixture, Instant, Run, STOP_LIMIT, Value, process_exists, success,
+};
 
 struct NativeWork {
     process: u32,
@@ -112,7 +114,7 @@ fn unix_controller_sigterm_interrupts_checkpoint_backup_before_releasing_ownersh
     // The first checkpoint blocks before any worker can start.
     assert!(!run.fixture.workspace.join("mutation.txt").exists());
     run.signal(libc::SIGTERM);
-    run.wait_closed(Duration::from_secs(15));
+    run.wait_closed(STOP_LIMIT);
     work.assert_stopped();
     assert_eq!(run.terminal()["reason"], "force_stopped");
     assert!(run.storage.join("checkpoints").is_dir());
@@ -166,7 +168,7 @@ fn unix_controller_sigterm_interrupts_checkpoint_git_capture_before_releasing_ow
         run.child = work.child;
         assert!(!run.fixture.workspace.join("mutation.txt").exists());
         run.signal(libc::SIGTERM);
-        run.wait_closed(Duration::from_secs(15));
+        run.wait_closed(STOP_LIMIT);
         work.assert_stopped();
         assert_eq!(
             run.terminal()["reason"],
@@ -226,6 +228,8 @@ fn unix_controller_sigterm_interrupts_startup_review_fetch_before_releasing_work
         unsafe { libc::kill(controller.0.id() as i32, libc::SIGTERM) },
         0
     );
+    // No run exists yet whose terminal could tell a finished cancellation from the controller's
+    // own 30-second bound, so this limit stays below that bound.
     let end = Instant::now() + Duration::from_secs(15);
     while controller.0.try_wait().unwrap().is_none() {
         assert!(Instant::now() < end, "startup cancellation did not finish");

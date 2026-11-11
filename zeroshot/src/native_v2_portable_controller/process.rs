@@ -379,17 +379,17 @@ impl PortableControllerServer {
         let mut lifecycle = ServerLifecycle::default();
         let mut connections = tokio::task::JoinSet::new();
         let (shutdown, _) = tokio::sync::watch::channel(());
-        let result = {
+        let stop_requested = {
             // One wait spans every connection, so observers cannot restart its bound.
             let terminal = self.controller.wait_terminal();
             tokio::pin!(terminal);
             loop {
                 if lifecycle.is_complete() {
-                    break Ok(());
+                    break Ok(false);
                 }
                 tokio::select! {
                     Ok(()) = async { stopping.wait_for(|requested| *requested).await.map(|_| ()) } => {
-                        break self.controller.stop_for_shutdown().await;
+                        break Ok(true);
                     }
                     accepted = self.listener.accept() => {
                         let stream = match accepted {
@@ -411,6 +411,14 @@ impl PortableControllerServer {
                     }
                 }
             }
+        };
+        // The stop runs only now that the block above has dropped the terminal wait. The ledger
+        // grants its one connection in request order: left pending but unpolled beside the stop,
+        // that wait would keep its turn and every later ledger operation would queue behind it.
+        let result = match stop_requested {
+            Ok(true) => self.controller.stop_for_shutdown().await,
+            Ok(false) => Ok(()),
+            Err(error) => Err(error),
         };
         drop(self.listener);
         drop(shutdown);
