@@ -1040,6 +1040,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#token-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#failure-evidence-and-mapped-executions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2288,6 +2299,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#token-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#failure-evidence-and-mapped-executions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2403,6 +2425,44 @@ return after submission:</p>
 <p>A run ID belongs to the controller or target that created it. Pass <code>--target NAME</code> when reading one
 from a named target. Finished status separates graph-authored <code>terminalResult.output</code> from optional
 runtime-confirmed <code>metadata.deliveryReceipt</code>; graphs without delivery omit the receipt.</p>
+<h2 id="token-usage">Token usage<a class="headerlink" href="#token-usage" title="Permanent link">&para;</a></h2>
+<p><code>metadata.tokenUsage</code> contains run totals summed across agent invocations, including retries,
+correction turns and auxiliary agents such as postmortem specialists. Counters are summed as each
+harness reports them; input-token accounting can differ between harnesses.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inputTokens</code></td>
+<td>Input tokens reported by the harness.</td>
+</tr>
+<tr>
+<td><code>outputTokens</code></td>
+<td>Output tokens reported by the harness.</td>
+</tr>
+<tr>
+<td><code>cacheReadInputTokens</code></td>
+<td>Input tokens reported as read from a prompt cache.</td>
+</tr>
+<tr>
+<td><code>cacheCreationInputTokens</code></td>
+<td>Input tokens reported as written to a prompt cache.</td>
+</tr>
+<tr>
+<td><code>complete</code></td>
+<td>Whether every invocation reported usable token usage.</td>
+</tr>
+</tbody>
+</table>
+<p>When <code>complete</code> is <code>false</code>, the totals retain known usage but at least one invocation's usage is
+missing or unusable. An omitted cache counter means at least one invocation did not report that
+counter; its run total is unknown, not zero. Cache counters can be omitted even when <code>complete</code> is
+<code>true</code>. Script steps record zero for all four counters and preserve known cache totals.</p>
 <h2 id="failure-evidence-and-mapped-executions">Failure evidence and mapped executions<a class="headerlink" href="#failure-evidence-and-mapped-executions" title="Permanent link">&para;</a></h2>
 <p>Failed <code>terminalResult.context</code> separates the known runtime cause (<code>primary</code>) from recent recorded
 execution errors (<code>recorded</code>) and verifier results (<code>verifiers</code>). Each verifier result is the latest
