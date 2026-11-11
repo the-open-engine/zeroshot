@@ -116,6 +116,30 @@ ends, whatever the run's result. The [CLI reference](../zeroshot-cli.md) lists t
 The producer records each log timestamp as a positive JavaScript-safe Unix epoch millisecond, and
 durable replay preserves it.
 
+## JSON error codes
+
+Set `ZEROSHOT_ERROR_FORMAT=json` to receive a `zeroshot.error/v1` object on stderr when a CLI
+command fails. Successful stdout and NDJSON events keep their existing format. The object contains
+`kind`, `code`, `message`, optional `path` and `node` context, and an object-valued `details`.
+Use `code` to distinguish a failed run or a request that needs correction from a transport outage:
+
+| Condition                                                        | Kind              | Code                 | Details                          |
+| ---------------------------------------------------------------- | ----------------- | -------------------- | -------------------------------- |
+| A followed run failed (`run` or `watch`)                         | `run_failed`      | `run.failed`         | `runId`                          |
+| Unknown registered target name                                   | `invalid_request` | `request.invalid`    | `{}`                             |
+| Local registry has no workspace-recovery authorization           | `invalid_request` | `request.invalid`    | `{}`                             |
+| Workspace-recovery authorization does not match the original run | `invalid_request` | `request.invalid`    | `{}`                             |
+| Local workspace-recovery authorization is malformed              | `invalid_request` | `request.invalid`    | `{}`                             |
+| Target transport failed                                          | `target`          | `target.unavailable` | `target` and `origin` when known |
+
+`run.failed` reports a terminal outcome; retrying observation does not restart that run. Inspect its
+status and logs before selecting a recovery action. Correct the request or local registry state
+for the listed `request.invalid` refusals. Transport failures remain `target.unavailable`.
+
+The Python SDK maps `request.invalid` to `InvalidRequestError` and transport failures to
+`TargetError`. A failed run ends `Run.watch()` normally; `Run.wait()` returns its `RunResult`.
+Call `RunResult.raise_for_failure()` to opt into `RunFailedError`.
+
 ## Attach to an active execution
 
 Status can expose an active execution reference. Attach to its interactive event stream with:

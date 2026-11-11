@@ -36,6 +36,18 @@ def projection(run_id, status, cursor):
         "status": status,
     }
 
+def fail(kind, code, message, details):
+    print(json.dumps({
+        "schema": "zeroshot.error/v1",
+        "kind": kind,
+        "code": code,
+        "message": message,
+        "path": None,
+        "node": None,
+        "details": details,
+    }), file=sys.stderr)
+    raise SystemExit(1)
+
 def stack_projection(state):
     terminal = state in ("succeeded", "failed", "cancelled", "expired")
     run_state = state if state != "running" else "running"
@@ -144,7 +156,7 @@ elif args and args[0] == "list":
         )
     print(json.dumps({"runs": runs}))
 elif args and args[0] == "status":
-    if os.environ.get("FAKE_WATCH_FAILURE") == "early":
+    if os.environ.get("FAKE_WATCH_FAILURE") in ("early", "outage_failed_run"):
         print(json.dumps(projection(args[1], failed_status, "v2:2")))
     else:
         print(json.dumps(projection(args[1], {"phase": "admitted"}, "v2:0")))
@@ -161,13 +173,16 @@ elif args and args[0] == "watch":
     )
     running["cursor"] = running.pop("atCursor")
     print(json.dumps(running), flush=True)
-    if failure in ("early", "outage"):
-        message = "cannot reach target" if failure == "outage" else "run finished unsuccessfully"
-        print(f"zeroshot: {message}", file=sys.stderr)
-        raise SystemExit(1)
+    if failure in ("outage", "outage_failed_run"):
+        fail("target", "target.unavailable", "cannot reach target", {})
+    if failure in ("early", "wrong_run"):
+        run_id = "another-run" if failure == "wrong_run" else args[1]
+        fail("run_failed", "run.failed", "run finished unsuccessfully", {"runId": run_id})
+    if failure == "invalid_request":
+        fail("invalid_request", "request.invalid", "target unknown not found", {})
     finished = projection(
         args[1],
-        failed_status if failure == "terminal" else {
+        failed_status if failure in ("terminal", "outage_after_terminal") else {
             "phase": "finished",
             "terminalResult": {"status": "succeeded", "output": {"ok": True}},
         },
@@ -176,8 +191,12 @@ elif args and args[0] == "watch":
     finished["cursor"] = finished.pop("atCursor")
     print(json.dumps(finished), flush=True)
     if failure == "terminal":
-        print("zeroshot: run finished unsuccessfully: worker_failed", file=sys.stderr)
-        raise SystemExit(1)
+        fail(
+            "run_failed", "run.failed", "run finished unsuccessfully: worker_failed",
+            {"runId": args[1]},
+        )
+    if failure == "outage_after_terminal":
+        fail("target", "target.unavailable", "cannot reach target", {})
 elif args and args[0] == "logs":
     event = {
         "runId": args[1],

@@ -1219,6 +1219,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
+  JSON diagnostics use `run_failed` / `run.failed` with `details.runId` for that terminal outcome.
+  Unknown target names and registry workspace-recovery authorization refusals use
+  `invalid_request` / `request.invalid`; transport failures retain `target.unavailable`.
+  The Python SDK consumes the explicit failed-run diagnostic without inferring failure from a
+  target error or rereading status; public failed-result exceptions remain opt-in. Failed-run
+  identity stays private and unredacted for exact watch matching; its printable message is redacted.
   ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
   context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
 - Graph verification errors display their first safe diagnostic, its path and the count of further

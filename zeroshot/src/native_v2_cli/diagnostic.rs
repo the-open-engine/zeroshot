@@ -18,6 +18,7 @@ const CONNECTION_SET_HELP_COMMAND: &str = "zeroshot connection set --help";
 enum DiagnosticKind {
     InvalidRequest,
     Protocol,
+    RunFailed,
     RunNotFound,
     SubmissionConflict,
     Target,
@@ -221,6 +222,10 @@ fn admission_details(source: &NativeV2AdmissionError) -> Value {
 
 fn run_diagnostic(error: &NativeV2CliError) -> Option<NativeV2CliDiagnostic> {
     match error {
+        NativeV2CliError::RunFailed(failure) => Some(
+            NativeV2CliDiagnostic::new(DiagnosticKind::RunFailed, "run.failed", error.to_string())
+                .with_details(json!({"runId": failure.run_id().as_str()})),
+        ),
         NativeV2CliError::RunNotFound { run_id } => Some(
             NativeV2CliDiagnostic::new(
                 DiagnosticKind::RunNotFound,

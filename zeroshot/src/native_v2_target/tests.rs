@@ -4,6 +4,8 @@ mod authentication;
 mod connections;
 #[path = "tests/contracts.rs"]
 mod contracts;
+#[path = "tests/diagnostic.rs"]
+mod diagnostic;
 #[path = "tests/fixtures.rs"]
 mod fixtures;
 #[path = "tests/hosted_authority.rs"]

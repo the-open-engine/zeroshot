@@ -232,6 +232,7 @@ fn write_process_error(error: &ProcessError) {
 fn process_error_diagnostic(error: &ProcessError) -> NativeV2CliDiagnostic {
     match error {
         ProcessError::Cli(error) => error.diagnostic(),
+        ProcessError::Target(error) => error.to_cli_error().diagnostic(),
         error => NativeV2CliDiagnostic::target(error.to_string()),
     }
 }
