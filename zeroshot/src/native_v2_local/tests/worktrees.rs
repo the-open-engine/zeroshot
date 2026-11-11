@@ -232,6 +232,56 @@ fn detached_resume_reattaches_the_run_branch_without_rewinding_it() {
     );
 }
 
+#[tokio::test]
+async fn same_named_tags_preserve_the_admitted_branch_and_attached_or_detached_resume() {
+    for tag_before_admission in [false, true] {
+        let repo = TestGitRepository::candidate();
+        let branch = "feature/same";
+        let reference = format!("refs/heads/{branch}");
+        git(
+            &repo.workspace,
+            &["checkout", "-b", branch, "--track", "origin/main"],
+        );
+        if tag_before_admission {
+            git(&repo.workspace, &["tag", branch]);
+        }
+        let mut run = prepared(&repo, Some(crate::native_v2_delivery::DeliveryMode::Push));
+        prepare_branch_source(&mut run, None, Path::new("git"), &repo.root.child("state"))
+            .await
+            .assert_value();
+        assert_eq!(run.local_branch.as_deref(), Some(branch));
+        if !tag_before_admission {
+            git(&repo.workspace, &["tag", branch]);
+        }
+        let index = git_output(&repo.workspace, &["write-tree"]);
+        for detached in [false, true] {
+            if detached {
+                git(&repo.workspace, &["checkout", "--detach", &repo.base]);
+            }
+            attach_run_branch(
+                &repo.workspace,
+                Path::new("git"),
+                run.local_branch.as_deref().unwrap(),
+            )
+            .assert_value();
+            assert_eq!(
+                source::attached_branch(&repo.workspace, Path::new("git")).assert_value(),
+                branch
+            );
+            assert_eq!(
+                git_output(&repo.workspace, &["symbolic-ref", "HEAD"]),
+                reference
+            );
+            assert_eq!(
+                git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+                repo.base
+            );
+            assert_eq!(git_output(&repo.workspace, &["write-tree"]), index);
+            assert!(git_output(&repo.workspace, &["status", "--porcelain=v1"]).is_empty());
+        }
+    }
+}
+
 #[test]
 fn resume_refuses_a_branch_owned_by_another_checkout_without_changing_either() {
     for main_checkout in [false, true] {

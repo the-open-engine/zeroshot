@@ -294,37 +294,45 @@ fn private_home_followup_failures_retain_their_operation_and_os_cause() {
 
 #[tokio::test]
 #[cfg(target_os = "linux")]
-async fn spawn_failures_distinguish_enoent_eacces_and_e2big_without_command_values() {
+async fn spawn_failures_name_program_and_distinguish_os_causes_without_arguments_or_environment() {
     let missing_program = "/definitely/missing/zeroshot-sensitive-program";
-    let missing = spawn_failure(missing_program, Vec::new()).await;
+    let argument_marker = "SENSITIVE_ARG_VALUE";
+    let missing = spawn_failure(missing_program, vec![argument_marker.to_owned()]).await;
     assert_os_detail(&missing, "process spawn failed", libc::ENOENT);
-    assert!(!missing.contains(missing_program));
+    assert!(missing.contains(missing_program));
+    assert!(!missing.contains(argument_marker));
 
     let directory = TestDirectory::new("process-spawn-causes");
     let denied_program = directory.child("not-executable-sensitive");
     write_new_file(&denied_program, b"#!/bin/sh\nexit 0\n", 0o600).assert_value();
     let denied = spawn_failure(&denied_program.to_string_lossy(), Vec::new()).await;
     assert_os_detail(&denied, "process spawn failed", libc::EACCES);
-    assert!(!denied.contains(&denied_program.to_string_lossy().into_owned()));
+    assert!(denied.contains(&denied_program.to_string_lossy().into_owned()));
 
     let oversized_marker = "SENSITIVE_ARG_VALUE";
     let oversized = format!("{oversized_marker}{}", "x".repeat(256 * 1024));
     let too_big = spawn_failure("/bin/true", vec![oversized]).await;
     assert_os_detail(&too_big, "process spawn failed", libc::E2BIG);
+    assert!(too_big.contains("/bin/true"));
     assert!(!too_big.contains(oversized_marker));
 }
 
 #[cfg(target_os = "linux")]
 async fn spawn_failure(program: &str, argv: Vec<String>) -> String {
     let (cancel, cancellation) = tokio::sync::watch::channel(false);
+    let mut command = process_command(program, argv);
+    command.environment.insert(
+        "SENSITIVE_ENV_NAME".to_owned(),
+        "SENSITIVE_ENV_VALUE".to_owned(),
+    );
     let result = LocalProcessRunner::new()
-        .open(
-            process_command(program, argv),
-            DriverCancellation::new(cancellation),
-        )
+        .open(command, DriverCancellation::new(cancellation))
         .await;
     drop(cancel);
-    launch_detail(result.assert_error()).assert_value()
+    let detail = launch_detail(result.assert_error()).assert_value();
+    assert!(!detail.contains("SENSITIVE_ENV_NAME"));
+    assert!(!detail.contains("SENSITIVE_ENV_VALUE"));
+    detail
 }
 
 #[cfg(target_os = "linux")]

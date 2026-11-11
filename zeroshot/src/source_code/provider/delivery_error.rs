@@ -2,12 +2,20 @@ use std::fmt;
 
 pub const MAX_SOURCE_API_DIAGNOSTIC_BYTES: usize = 32 * 1024;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ApiRetry {
+    Status,
+    ReviewSync,
+    Operation,
+}
+
 /// Bounded provider-owned source API failure detail.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceApiFailure {
     status: Option<u16>,
     diagnostic: Box<str>,
-    transient: bool,
+    retry: ApiRetry,
+    authentication_failed: bool,
 }
 
 impl SourceApiFailure {
@@ -27,19 +35,20 @@ impl SourceApiFailure {
         Self {
             status,
             diagnostic: diagnostic.into_boxed_str(),
-            transient: false,
+            retry: ApiRetry::Status,
+            authentication_failed: status == Some(401),
         }
     }
 
     fn retryable_review_sync(&self) -> bool {
-        self.transient
+        self.retry != ApiRetry::Status
             || self
                 .status
                 .is_some_and(|status| matches!(status, 404 | 409 | 422 | 429 | 500..=599))
     }
 
     fn authentication_failed(&self) -> bool {
-        matches!(self.status, Some(401))
+        self.authentication_failed
     }
 }
 
@@ -106,7 +115,7 @@ impl SourceDeliveryError {
         match self {
             Self::Unavailable => true,
             Self::Api(failure) => {
-                failure.transient
+                failure.retry == ApiRetry::Operation
                     || failure
                         .status
                         .is_some_and(|status| matches!(status, 429 | 500..=599))
@@ -118,7 +127,25 @@ impl SourceDeliveryError {
 
     pub fn temporary(mut self) -> Self {
         if let Self::Api(failure) = &mut self {
-            failure.transient = true;
+            failure.retry = ApiRetry::Operation;
+        }
+        self
+    }
+
+    /// A successful authenticated read proved this API refusal is about permission.
+    pub(crate) fn permission_denied(mut self) -> Self {
+        if let Self::Api(failure) = &mut self {
+            failure.authentication_failed = false;
+        }
+        self
+    }
+
+    /// A visibility race may retry only within the existing review synchronization batch.
+    pub fn temporary_review_sync(mut self) -> Self {
+        if let Self::Api(failure) = &mut self
+            && failure.retry == ApiRetry::Status
+        {
+            failure.retry = ApiRetry::ReviewSync;
         }
         self
     }
@@ -132,7 +159,8 @@ impl SourceDeliveryError {
             Self::Api(failure) => {
                 let mut wrapped =
                     SourceApiFailure::new(failure.status, format!("{context}\n{failure}"));
-                wrapped.transient = failure.transient;
+                wrapped.retry = failure.retry;
+                wrapped.authentication_failed = failure.authentication_failed;
                 Self::Api(wrapped)
             }
             Self::Identity(detail) => Self::identity(format!("{context}\n{detail}")),

@@ -1,7 +1,8 @@
 use serde::Deserialize;
 use openengine_cluster_protocol::SourceForgeBaseUrl;
 use crate::source_code_provider::{
-    SourceDeliveryError, SourceReviewReceipt, SourceReviewRequest, valid_git_revision,
+    SourceDeliveryCredential, SourceDeliveryError, SourceReviewReceipt, SourceReviewRequest,
+    valid_git_branch, valid_git_revision,
 };
 
 #[derive(Deserialize)]
@@ -31,6 +32,7 @@ impl Project {
         &self,
         repository: &str,
         base: &SourceForgeBaseUrl,
+        credential: SourceDeliveryCredential<'_>,
     ) -> Result<(), SourceDeliveryError> {
         let matching = self.path_with_namespace == repository || self.id.to_string() == repository;
         let expected = format!(
@@ -45,8 +47,17 @@ impl Project {
             || self.web_url != expected
             || !matches!(self.merge_method.as_str(), "merge" | "rebase_merge" | "ff")
         {
-            return Err(SourceDeliveryError::identity(
-                "GitLab project response changed admitted identity",
+            return Err(super::api::identity_error(
+                format!(
+                    "GitLab project response changed admitted identity: expected project {repository}, observed project {} (ID {})",
+                    if path_valid {
+                        &self.path_with_namespace
+                    } else {
+                        "<invalid project path>"
+                    },
+                    self.id,
+                ),
+                credential,
             ));
         }
         Ok(())
@@ -83,6 +94,18 @@ pub(super) struct Pipeline {
     pub project_id: Option<u64>,
     pub sha: String,
     pub status: String,
+    #[serde(default)]
+    pub yaml_errors: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct Job {
+    pub id: u64,
+    pub name: String,
+    pub stage: String,
+    pub status: String,
+    pub failure_reason: Option<String>,
+    pub pipeline: Pipeline,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -122,9 +145,10 @@ impl MergeRequest {
         &self,
         request: &SourceReviewRequest,
         project: u64,
+        credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
         let receipt = SourceReviewReceipt::for_request(request, self.iid.to_string());
-        self.require_review(&receipt, project)?;
+        self.require_review(&receipt, project, credential)?;
         Ok(receipt)
     }
 
@@ -132,13 +156,28 @@ impl MergeRequest {
         &self,
         receipt: &SourceReviewReceipt,
         project: u64,
+        credential: SourceDeliveryCredential<'_>,
     ) -> Result<(), SourceDeliveryError> {
         if self.sha.is_empty() {
-            return Err(SourceDeliveryError::review_head_not_visible());
+            return Err(super::api::delivery_context(
+                SourceDeliveryError::review_head_not_visible(),
+                super::review::merge_request_identity(receipt),
+                credential,
+            ));
         }
         if !self.matches_review(receipt, project) {
-            return Err(SourceDeliveryError::identity(
-                "GitLab merge request changed the bound review/head",
+            return Err(super::api::identity_error(
+                format!(
+                    "GitLab {} changed the bound review/head: observed merge request !{} in source project {} and target project {}, source branch {}, target branch {}, head revision {}. Restore the bound review identity before resuming.",
+                    super::review::merge_request_identity(receipt),
+                    self.iid,
+                    self.source_project_id,
+                    self.target_project_id,
+                    branch_identity(&self.source_branch),
+                    branch_identity(&self.target_branch),
+                    revision_identity(&self.sha),
+                ),
+                credential,
             ));
         }
         Ok(())
@@ -154,6 +193,22 @@ impl MergeRequest {
             && self.target_branch == receipt.target_branch
             && self.sha == receipt.head_revision
             && valid_git_revision(&self.sha)
+    }
+}
+
+pub(super) fn branch_identity(value: &str) -> &str {
+    if valid_git_branch(value) {
+        value
+    } else {
+        "<invalid branch>"
+    }
+}
+
+pub(super) fn revision_identity(value: &str) -> &str {
+    if valid_git_revision(value) {
+        value
+    } else {
+        "<invalid revision>"
     }
 }
 

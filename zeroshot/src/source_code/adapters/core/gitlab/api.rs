@@ -4,11 +4,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use reqwest::{Client, Method, Url, redirect::Policy};
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 use url::Position;
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
 use super::wire::ServerMetadata;
+use super::super::ci_diagnostics::MAX_JOB_LOG_BYTES;
 
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 /// GitLab explains a rejection in a short JSON body; longer bodies keep only their prefix.
@@ -26,16 +27,22 @@ pub(super) struct Api {
 #[derive(Clone)]
 pub(super) struct ApiRequest<'a> {
     method: Method,
-    segments: &'a [&'a str],
+    path: ApiPath<'a>,
     query: Vec<(&'a str, String)>,
     body: Option<Value>,
+}
+
+#[derive(Clone)]
+enum ApiPath<'a> {
+    Rest(&'a [&'a str]),
+    Graphql,
 }
 
 impl<'a> ApiRequest<'a> {
     pub(super) fn get(segments: &'a [&'a str]) -> Self {
         Self {
             method: Method::GET,
-            segments,
+            path: ApiPath::Rest(segments),
             query: Vec::new(),
             body: None,
         }
@@ -44,9 +51,18 @@ impl<'a> ApiRequest<'a> {
     pub(super) fn write(segments: &'a [&'a str], method: Method, body: Value) -> Self {
         Self {
             method,
-            segments,
+            path: ApiPath::Rest(segments),
             query: Vec::new(),
             body: Some(body),
+        }
+    }
+
+    pub(super) fn graphql(query: &str, variables: Value) -> Self {
+        Self {
+            method: Method::POST,
+            path: ApiPath::Graphql,
+            query: Vec::new(),
+            body: Some(json!({"query":query,"variables":variables})),
         }
     }
 
@@ -164,7 +180,25 @@ impl Api {
         request: ApiRequest<'_>,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Vec<u8>, SourceDeliveryError> {
-        response_bytes(self.response(request, credential).await?, credential).await
+        response_bytes(
+            self.response(request, credential).await?,
+            credential,
+            RESPONSE_LIMIT,
+        )
+        .await
+    }
+
+    pub(super) async fn job_log(
+        &self,
+        segments: &[&str],
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<Vec<u8>, SourceDeliveryError> {
+        response_bytes(
+            self.response(ApiRequest::get(segments), credential).await?,
+            credential,
+            MAX_JOB_LOG_BYTES,
+        )
+        .await
     }
 
     /// Notes can be filtered after pagination, so item count cannot prove the final page.
@@ -180,7 +214,7 @@ impl Api {
         // Error statuses fail first, so a rejection without pagination headers keeps its status.
         let response = self.response(request, credential).await?;
         let has_more = notes_have_next_page(response.headers(), page)?;
-        let bytes = response_bytes(response, credential).await?;
+        let bytes = response_bytes(response, credential, RESPONSE_LIMIT).await?;
         let values: Vec<T> = serde_json::from_slice(&bytes)
             .map_err(|_| SourceDeliveryError::api(None, "GitLab returned invalid JSON"))?;
         if values.len() > PAGE_SIZE {
@@ -198,16 +232,31 @@ impl Api {
         request: ApiRequest<'_>,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<reqwest::Response, SourceDeliveryError> {
-        let mut url = self.endpoint.clone();
-        url.path_segments_mut()
-            .map_err(|_| SourceDeliveryError::Rejected)?
-            .pop_if_empty()
-            .extend(request.segments.iter().copied());
+        let mut url = match request.path {
+            ApiPath::Rest(segments) => {
+                let mut url = self.endpoint.clone();
+                url.path_segments_mut()
+                    .map_err(|_| SourceDeliveryError::Rejected)?
+                    .pop_if_empty()
+                    .extend(segments.iter().copied());
+                url
+            }
+            // Keep an installation prefix, the admitted host and the same bounded HTTP effects.
+            ApiPath::Graphql => self
+                .endpoint
+                .join("../graphql")
+                .map_err(|_| SourceDeliveryError::Rejected)?,
+        };
         if !request.query.is_empty() {
             url.query_pairs_mut()
                 .extend_pairs(request.query.iter().map(|(k, v)| (*k, v)));
         }
         let resource = format!("{} {}", request.method, &url[..Position::AfterPath]);
+        let creating_review = request.method == Method::POST
+            && matches!(
+                request.path,
+                ApiPath::Rest(["projects", _, "merge_requests"])
+            );
         let mut builder = self
             .client
             .request(request.method, url)
@@ -225,17 +274,18 @@ impl Api {
             )
         })?;
         if !response.status().is_success() {
-            return Err(rejection(&resource, response, credential).await);
+            return Err(rejection(&resource, response, credential, creating_review).await);
         }
         Ok(response)
     }
 }
 
-/// The status alone classifies the failure; the body only explains it.
+/// Only a complete missing-source-branch validation response can specialize the status policy.
 async fn rejection(
     resource: &str,
     mut response: reqwest::Response,
     credential: SourceDeliveryCredential<'_>,
+    creating_review: bool,
 ) -> SourceDeliveryError {
     let status = response.status().as_u16();
     let mut body = Vec::new();
@@ -257,10 +307,19 @@ async fn rejection(
         diagnostic.extend_from_slice(b": ");
         diagnostic.extend_from_slice(&body);
     }
-    SourceDeliveryError::api(
+    let retry_visibility = creating_review
+        && status == 400
+        && !truncated
+        && super::review::missing_source_branch(&body);
+    let error = SourceDeliveryError::api(
         Some(status),
         display_text(diagnostic, truncated, credential),
-    )
+    );
+    if retry_visibility {
+        error.temporary_review_sync()
+    } else {
+        error
+    }
 }
 
 fn transport_failure(
@@ -287,22 +346,62 @@ fn transport_failure(
 }
 
 /// Forge and transport text is redacted before truncation and kept on one control-free line.
-fn display_text(
+pub(super) fn display_text(
     bytes: Vec<u8>,
     truncated: bool,
     credential: SourceDeliveryCredential<'_>,
 ) -> String {
-    // Trim raw secret prefixes before UTF8 replacement can change their bytes.
-    let (text, truncated) =
-        crate::native_v2_delivery::command::diagnostic_text(bytes, truncated, credential.expose());
-    let encoded = credential_segment(credential.expose());
-    let (text, truncated) =
-        crate::native_v2_delivery::command::diagnostic_text(text.into_bytes(), truncated, &encoded);
+    use crate::native_v2_delivery::git_auth;
+    use crate::source_code_provider::SourceGitCredential;
+
+    let mut values = vec![credential.expose()];
+    values.extend(credential.github_git_token());
+    let mut secrets = Vec::new();
+    match credential.git() {
+        Some(SourceGitCredential::Https { username, password }) => {
+            values.extend([username, password]);
+            secrets.push(git_auth::encode_user_password(username, password));
+        }
+        Some(SourceGitCredential::Ssh {
+            private_key,
+            known_hosts,
+        }) => {
+            values.extend([private_key, known_hosts]);
+            values.extend(private_key.lines());
+        }
+        None => {}
+    }
+    for value in values.into_iter().filter(|value| !value.is_empty()) {
+        secrets.extend([
+            value.to_owned(),
+            credential_segment(value),
+            git_auth::encode_basic_credential(value),
+        ]);
+    }
+    // Redact every credential before any size bound or lossy UTF8 conversion can split it.
+    let (text, truncated) = crate::native_v2_delivery::command::diagnostic_text_with_secrets(
+        bytes, truncated, &secrets,
+    );
     let mut text = text.replace(char::is_control, " ");
     if truncated {
         text.push_str(" [truncated]");
     }
     text
+}
+
+pub(super) fn identity_error(
+    diagnostic: String,
+    credential: SourceDeliveryCredential<'_>,
+) -> SourceDeliveryError {
+    SourceDeliveryError::identity(display_text(diagnostic.into_bytes(), false, credential))
+}
+
+pub(super) fn delivery_context(
+    error: SourceDeliveryError,
+    context: String,
+    credential: SourceDeliveryCredential<'_>,
+) -> SourceDeliveryError {
+    error.with_context(display_text(context.into_bytes(), false, credential))
 }
 
 // Match the request encoder, including slash and percent escapes, without changing its URL.
@@ -317,10 +416,11 @@ fn credential_segment(token: &str) -> String {
 async fn response_bytes(
     mut response: reqwest::Response,
     credential: SourceDeliveryCredential<'_>,
+    maximum_bytes: usize,
 ) -> Result<Vec<u8>, SourceDeliveryError> {
     if response
         .content_length()
-        .is_some_and(|length| length > RESPONSE_LIMIT as u64)
+        .is_some_and(|length| length > maximum_bytes as u64)
     {
         return Err(SourceDeliveryError::api(
             None,
@@ -336,7 +436,7 @@ async fn response_bytes(
             credential,
         )
     })? {
-        if bytes.len().saturating_add(chunk.len()) > RESPONSE_LIMIT {
+        if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
             return Err(SourceDeliveryError::api(
                 None,
                 "GitLab response exceeded its byte bound",

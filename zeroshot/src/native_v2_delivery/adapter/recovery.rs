@@ -87,6 +87,29 @@ impl DeliveryStop {
 }
 
 impl NativeV2DeliveryAdapter {
+    pub(super) fn publication_diagnostic(&self) -> String {
+        let state = self.delivery_state();
+        let context = format!(
+            "Project: {}; source branch: {}; target branch: {}.",
+            self.config.target.repository,
+            self.config.head_branch(),
+            self.config.target.target_branch,
+        );
+        match state.publication {
+            Some(review) => format!(
+                "{context}\nAlready published (last confirmed): branch {}; head revision {}; review {}.",
+                review.head_branch,
+                review.head_revision,
+                if review.review_id.is_empty() {
+                    "not confirmed".to_owned()
+                } else {
+                    format!("{}#{}", review.repository, review.review_id)
+                },
+            ),
+            None => format!("{context}\nNo publication has been confirmed."),
+        }
+    }
+
     pub(super) async fn repair_outcome(
         &self,
         feedback: &DeliveryFeedback<'_, '_>,
@@ -108,12 +131,13 @@ impl NativeV2DeliveryAdapter {
             });
         let diagnostic = format!(
             "repository: {}\ntargetBranch: {}\nrunBranch: {}\nheadRevision: {}\n\
-             pullRequestId: {}\n{}",
+             pullRequestId: {}\n{}\n{}",
             review.repository,
             review.target_branch,
             review.head_branch,
             review.head_revision,
             review.review_id,
+            self.publication_diagnostic(),
             failure.diagnostic,
         );
         let diagnostic =
@@ -160,6 +184,7 @@ impl NativeV2DeliveryAdapter {
 
     pub(super) fn feedback_secrets(&self, credentials: &DeliveryCredentials<'_>) -> Vec<String> {
         let mut secrets = credentials.feedback_secrets();
+        secrets.extend(self.git.diagnostic_secrets());
         for token in [self.trusted_github_token.as_deref()].into_iter().flatten() {
             secrets.extend([token.to_owned(), git_auth::encode_basic_credential(token)]);
         }

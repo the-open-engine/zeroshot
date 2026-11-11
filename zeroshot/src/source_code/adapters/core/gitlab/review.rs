@@ -30,8 +30,18 @@ async fn find(
         matches.retain(|review| matches!(review.state.as_str(), "opened" | "locked"));
     }
     if matches.len() > 1 {
-        return Err(SourceDeliveryError::identity(
-            "Multiple GitLab merge requests match the run branch",
+        return Err(super::api::identity_error(
+            format!(
+                "Multiple GitLab merge requests match source branch {branch} in project {} targeting {}; review IDs: {}. Resolve the ambiguous reviews before resuming.",
+                target.repository,
+                target.target_branch,
+                matches
+                    .iter()
+                    .map(|value| format!("!{}", value.iid))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            credential,
         ));
     }
     let value = matches.pop();
@@ -43,7 +53,7 @@ async fn find(
             head_branch: branch.to_owned(),
             head_revision: value.sha.clone(),
         };
-        value.require_review(&identity, project.id)?;
+        value.require_review(&identity, project.id, credential)?;
     }
     Ok(value)
 }
@@ -66,7 +76,18 @@ pub(super) async fn observe(
                 head_branch: request.head_branch.to_owned(),
                 head_revision: value.sha.clone(),
             };
-            Some(observation(&value, &receipt, &project)?)
+            let mut observed = observation(&value, &receipt, &project)?;
+            super::ci::include_failure_details(
+                authority,
+                super::ci::PipelineContext {
+                    head: value.head_pipeline.as_ref(),
+                    project: &project,
+                },
+                &mut observed,
+                credential,
+            )
+            .await?;
+            Some(observed)
         }
         None => None,
     };
@@ -88,7 +109,12 @@ async fn consistent_review_ref(
             .branch_revision(&request.target.repository, request.head_branch, credential)
             .await?;
         if let Some(value) = &observed
-            && let Err(error) = require_consistent_ref(value, head_revision.as_deref())
+            && let Err(error) = require_consistent_ref(
+                value,
+                head_revision.as_deref(),
+                &request.target.repository,
+                credential,
+            )
         {
             if rechecks == 0 {
                 return Err(error);
@@ -113,7 +139,7 @@ async fn observed_review(
         .known_review
         .filter(|value| !value.review_id.is_empty())
     {
-        require_known_identity(request, known)?;
+        require_known_identity(request, known, credential)?;
         let value: MergeRequest = authority
             .api
             .json(
@@ -131,7 +157,7 @@ async fn observed_review(
             head_revision: value.sha.clone(),
             ..known.clone()
         };
-        value.require_review(&current, project.id)?;
+        value.require_review(&current, project.id, credential)?;
         Ok(Some(value))
     } else {
         find(authority, request, credential).await
@@ -141,16 +167,22 @@ async fn observed_review(
 fn require_consistent_ref(
     value: &MergeRequest,
     revision: Option<&str>,
+    repository: &str,
+    credential: SourceDeliveryCredential<'_>,
 ) -> Result<(), SourceDeliveryError> {
     if matches!(value.state.as_str(), "opened" | "locked") && revision != Some(value.sha.as_str()) {
-        return Err(SourceDeliveryError::identity(format!(
-            "GitLab merge request {} on branch {} still disagrees with its ref after rechecking: \
+        return Err(super::api::identity_error(
+            format!(
+                "GitLab merge request {repository}!{} on source branch {} targeting {} still disagrees with its ref after rechecking: \
              merge request head {}; branch head {}",
-            value.iid,
-            value.source_branch,
-            value.sha,
-            revision.unwrap_or("missing"),
-        )));
+                value.iid,
+                value.source_branch,
+                value.target_branch,
+                value.sha,
+                revision.unwrap_or("missing"),
+            ),
+            credential,
+        ));
     }
     Ok(())
 }
@@ -283,14 +315,20 @@ async fn create(
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
     let (request, description, project_id) = context;
-    if authority
+    let revision = authority
         .branch_revision(&request.target.repository, &request.head_branch, credential)
-        .await?
-        .as_deref()
-        != Some(&request.head_revision)
-    {
-        return Err(SourceDeliveryError::identity(
-            "GitLab review creation head is not the published candidate",
+        .await?;
+    if revision.as_deref() != Some(&request.head_revision) {
+        return Err(super::api::identity_error(
+            format!(
+                "GitLab review creation head is not the published candidate for project {}: source branch {} is at {}, expected {}; target branch {}",
+                request.target.repository,
+                request.head_branch,
+                revision.as_deref().unwrap_or("missing"),
+                request.head_revision,
+                request.target.target_branch,
+            ),
+            credential,
         ));
     }
     let key = effect_key(&request.target.repository, &request.head_branch);
@@ -306,8 +344,8 @@ async fn create(
         Err(error) => reconcile_creation(authority, request, error, credential).await,
     };
     let value = result?;
-    let receipt = value.receipt(request, project_id)?;
-    require_metadata(&value, &request.title, description)?;
+    let receipt = value.receipt(request, project_id, credential)?;
+    require_metadata(&value, &request.title, description, credential)?;
     authority
         .effects
         .lock()
@@ -336,6 +374,38 @@ fn begin_creation(
     Ok(())
 }
 
+pub(super) fn missing_source_branch(body: &[u8]) -> bool {
+    let Ok(Value::Object(mut body)) = serde_json::from_slice(body) else {
+        return false;
+    };
+    if body.len() != 1 {
+        return false;
+    }
+    let message_matches = |message: &str| {
+        message.eq_ignore_ascii_case("source_branch does not exist")
+            || message.eq_ignore_ascii_case("source branch does not exist")
+    };
+    match body.remove("message") {
+        Some(Value::String(message)) => message_matches(&message),
+        Some(Value::Array(messages)) => {
+            !messages.is_empty()
+                && messages
+                    .iter()
+                    .all(|message| message.as_str().is_some_and(message_matches))
+        }
+        Some(Value::Object(fields)) if fields.len() == 1 => fields
+            .get("source_branch")
+            .and_then(Value::as_array)
+            .is_some_and(|messages| {
+                !messages.is_empty()
+                    && messages
+                        .iter()
+                        .all(|message| message.as_str() == Some("does not exist"))
+            }),
+        _ => false,
+    }
+}
+
 async fn reconcile_creation(
     authority: &GitLabDeliveryAuthority,
     request: &SourceReviewRequest,
@@ -352,7 +422,20 @@ async fn reconcile_creation(
                 .map_err(|_| SourceDeliveryError::Unavailable)?
                 .creates
                 .remove(&key);
-            Err(original)
+            if original.api_status() == Some(400) && original.retryable_review_sync() {
+                let context = super::api::display_text(
+                    format!(
+                        "GitLab merge request creation for branch {}",
+                        request.head_branch
+                    )
+                    .into_bytes(),
+                    false,
+                    credential,
+                );
+                Err(original.with_context(context))
+            } else {
+                Err(original)
+            }
         }
         None => Err(SourceDeliveryError::api(
             None,
@@ -372,13 +455,35 @@ async fn update(
     let project = authority
         .project(&request.target.repository, credential)
         .await?;
-    let receipt = found.receipt(request, project.id)?;
     if found.state != "opened" {
-        return Err(SourceDeliveryError::identity(
-            "GitLab run review is no longer open",
+        let next = match found.state.as_str() {
+            "closed" => {
+                "was closed. Resume is refused while it is closed; reopen it with the same source and target branches to resume, or start a new run"
+            }
+            "merged" => {
+                "was already merged. Resume in merge mode requires a clean workspace at the exact reviewed head to confirm delivery; start a new run from the target branch for remaining work"
+            }
+            _ => {
+                "is not open. Resume requires an open merge request with the same source and target branches"
+            }
+        };
+        return Err(super::api::identity_error(
+            format!(
+                "GitLab merge request {}!{} (source branch {}, target branch {}, head revision {}) {next}",
+                request.target.repository,
+                found.iid,
+                found.source_branch,
+                found.target_branch,
+                found.sha,
+            ),
+            credential,
         ));
     }
-    let body = refresh_description(found.description.as_deref().unwrap_or(""), description)?;
+    let receipt = found.receipt(request, project.id, credential)?;
+    let body = refresh_description(found.description.as_deref().unwrap_or(""), description)
+        .map_err(|error| {
+            super::api::delivery_context(error, merge_request_identity(&receipt), credential)
+        })?;
     // A draft applied after creation belongs to its human author. Metadata refresh must not
     // mark it ready again, even when the generated description changes.
     let title = if found.draft {
@@ -408,8 +513,8 @@ async fn update(
             credential,
         )
         .await?;
-    value.require_review(&receipt, project.id)?;
-    require_metadata(&value, title, &body)?;
+    value.require_review(&receipt, project.id, credential)?;
+    require_metadata(&value, title, &body, credential)?;
     Ok(receipt)
 }
 
@@ -417,10 +522,15 @@ fn require_metadata(
     value: &MergeRequest,
     title: &str,
     description: &str,
+    credential: SourceDeliveryCredential<'_>,
 ) -> Result<(), SourceDeliveryError> {
     if value.title.as_deref() != Some(title) || value.description.as_deref() != Some(description) {
-        return Err(SourceDeliveryError::identity(
-            "GitLab did not confirm the generated review metadata",
+        return Err(super::api::identity_error(
+            format!(
+                "GitLab did not confirm the generated review metadata for merge request !{} (source branch {}, target branch {}, head revision {})",
+                value.iid, value.source_branch, value.target_branch, value.sha,
+            ),
+            credential,
         ));
     }
     Ok(())
@@ -433,7 +543,18 @@ pub(super) async fn inspect(
 ) -> Result<SourceReviewObservation, SourceDeliveryError> {
     let project = authority.project(&receipt.repository, credential).await?;
     let value = authority.merge_request(receipt, credential).await?;
-    observation(&value, receipt, &project)
+    let mut observed = observation(&value, receipt, &project)?;
+    super::ci::include_failure_details(
+        authority,
+        super::ci::PipelineContext {
+            head: value.head_pipeline.as_ref(),
+            project: &project,
+        },
+        &mut observed,
+        credential,
+    )
+    .await?;
+    Ok(observed)
 }
 
 fn integrated_revision(value: &MergeRequest) -> Result<String, SourceDeliveryError> {
@@ -597,18 +718,44 @@ pub(super) async fn merge(
             credential,
         )
         .await;
-    settle_merge(authority, (receipt, &project, &key), result)
+    let result = match result {
+        Err(error) if error.api_status() == Some(401) => {
+            // GitLab also uses 401 for a valid token without merge rights. Verify current
+            // authentication separately; an expired/rejected token must still request refresh.
+            let user = authority
+                .api
+                .json::<wire::Actor>(ApiRequest::get(&["user"]), credential)
+                .await;
+            let error = if matches!(user, Ok(user) if user.id > 0) {
+                super::api::delivery_context(
+                    error.permission_denied(),
+                    format!(
+                        "GitLab merge permission is missing for {}. Grant the token permission to merge into target branch {}, then resume.",
+                        merge_request_identity(receipt),
+                        receipt.target_branch,
+                    ),
+                    credential,
+                )
+            } else {
+                error
+            };
+            Err(error)
+        }
+        result => result,
+    };
+    settle_merge(authority, (receipt, &project, &key), result, credential)
 }
 
 fn settle_merge(
     authority: &GitLabDeliveryAuthority,
     context: (&SourceReviewReceipt, &Project, &str),
     result: Result<MergeRequest, SourceDeliveryError>,
+    credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
     let (receipt, project, key) = context;
     match result {
         Ok(value) => {
-            value.require_review(receipt, project.id)?;
+            value.require_review(receipt, project.id, credential)?;
             if value.state == "merged" {
                 integrated_revision(&value)?;
                 authority
@@ -657,7 +804,10 @@ pub(super) async fn withdraw(
     {
         return Err(SourceDeliveryError::api(
             None,
-            "GitLab merge settlement remains uncertain; no repair handoff is authorized",
+            super::api::display_text(format!(
+                "GitLab merge settlement remains uncertain for {}; no repair handoff is authorized",
+                merge_request_identity(receipt)
+            ).into_bytes(), false, credential),
         ));
     }
     Ok(SourceMergeWithdrawal::Withdrawn)
@@ -809,12 +959,17 @@ pub(super) async fn integrate_rebase(
             Err(SourceDeliveryError::repairable(diagnostic))
         }
         SourceReconciliationOutcome::Unchanged | SourceReconciliationOutcome::Adopted => {
-            Err(SourceDeliveryError::identity(format!(
-                "GitLab merge method {} requires rebasing onto {} revision {target_revision}, \
+            Err(super::api::identity_error(
+                format!(
+                    "{}: GitLab merge method {} requires rebasing onto {} revision {target_revision}, \
                  but the candidate already contains that revision; the merge request requires \
                  manual resolution",
-                project.merge_method, request.review.target_branch,
-            )))
+                    merge_request_identity(&request.review),
+                    project.merge_method,
+                    request.review.target_branch,
+                ),
+                credential,
+            ))
         }
         SourceReconciliationOutcome::Refused(diagnostic) => {
             Err(SourceDeliveryError::identity(diagnostic))
@@ -834,14 +989,33 @@ fn synchronous_merge_allowed(value: &MergeRequest, project: &Project) -> bool {
 fn require_known_identity(
     request: SourceDeliveryRead<'_>,
     known: &SourceReviewReceipt,
+    credential: SourceDeliveryCredential<'_>,
 ) -> Result<(), SourceDeliveryError> {
     if known.repository != request.target.repository
         || known.target_branch != request.target.target_branch
         || known.head_branch != request.head_branch
     {
-        return Err(SourceDeliveryError::identity(
-            "GitLab known review differs from the admitted delivery target",
+        return Err(super::api::identity_error(
+            format!(
+                "{} differs from the admitted project {}, source branch {}, target branch {}",
+                merge_request_identity(known),
+                request.target.repository,
+                request.head_branch,
+                request.target.target_branch,
+            ),
+            credential,
         ));
     }
     Ok(())
+}
+
+pub(super) fn merge_request_identity(receipt: &SourceReviewReceipt) -> String {
+    format!(
+        "merge request {}!{} (source branch {}, target branch {}, head revision {})",
+        receipt.repository,
+        receipt.review_id,
+        wire::branch_identity(&receipt.head_branch),
+        wire::branch_identity(&receipt.target_branch),
+        wire::revision_identity(&receipt.head_revision),
+    )
 }

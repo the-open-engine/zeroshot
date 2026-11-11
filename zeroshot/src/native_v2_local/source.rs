@@ -236,32 +236,33 @@ pub(super) fn attached_branch(
     workspace: &Path,
     git_program: &Path,
 ) -> Result<String, LocalCompositionError> {
-    git_line(
-        git_program,
-        workspace,
-        &["symbolic-ref", "--quiet", "--short", "HEAD"],
-    )
-    .map_err(|_| {
-        let branch = {
-            git_output(
-                git_program,
-                workspace,
-                &["reflog", "show", "-n", "32", "--format=%gs", "HEAD"],
-            )
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|line| line.strip_prefix("checkout: moving from "))
-            .filter_map(|line| line.split_once(" to "))
-            // A restored HEAD has no checkout event: prefer the last attached destination.
-            // An explicit detached checkout has a commit destination, so use its origin.
-            .flat_map(|(from, to)| [to, from])
-            .find(|name| verified_detached_branch(workspace, git_program, name))
-            .map(str::to_owned)
-        };
-        branch.map_or(LocalCompositionError::DetachedHeadUnknown, |branch| {
-            LocalCompositionError::DetachedHead { branch }
-        })
-    })
+    let reference = git_line(git_program, workspace, &["symbolic-ref", "--quiet", "HEAD"])
+        .map_err(|_| {
+            let branch = {
+                git_output(
+                    git_program,
+                    workspace,
+                    &["reflog", "show", "-n", "32", "--format=%gs", "HEAD"],
+                )
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| line.strip_prefix("checkout: moving from "))
+                .filter_map(|line| line.split_once(" to "))
+                // A restored HEAD has no checkout event: prefer the last attached destination.
+                // An explicit detached checkout has a commit destination, so use its origin.
+                .flat_map(|(from, to)| [to, from])
+                .find(|name| verified_detached_branch(workspace, git_program, name))
+                .map(str::to_owned)
+            };
+            branch.map_or(LocalCompositionError::DetachedHeadUnknown, |branch| {
+                LocalCompositionError::DetachedHead { branch }
+            })
+        })?;
+    reference
+        .strip_prefix("refs/heads/")
+        .filter(|branch| crate::source_code_provider::valid_git_branch(branch))
+        .map(str::to_owned)
+        .ok_or(LocalCompositionError::ResolvedSource)
 }
 
 /// Recovery hints must still name an existing descendant branch available to this checkout.

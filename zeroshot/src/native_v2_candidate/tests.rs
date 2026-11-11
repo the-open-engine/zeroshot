@@ -241,6 +241,7 @@ struct ScriptedAgent {
     workspace: PathBuf,
     sessions: Mutex<Vec<Arc<AgentSession>>>,
     runs: Mutex<Vec<ScriptedRun>>,
+    closed_runs: Mutex<Vec<RunId>>,
 }
 
 impl ScriptedAgent {
@@ -249,6 +250,7 @@ impl ScriptedAgent {
             workspace,
             sessions: Mutex::new(Vec::new()),
             runs: Mutex::new(Vec::new()),
+            closed_runs: Mutex::new(Vec::new()),
         }
     }
 
@@ -294,6 +296,10 @@ impl SessionFactory for ScriptedAgent {
 
 #[async_trait]
 impl NodeDriver for ScriptedAgent {
+    async fn close_run(&self, run_id: &RunId) {
+        self.closed_runs.lock().assert_value().push(run_id.clone());
+    }
+
     async fn run(
         &self,
         invocation: DriverInvocation,
@@ -568,6 +574,15 @@ async fn platform_oecp_candidate_runs_each_agent_node_on_its_own_lane_and_provid
         matches!(terminal, TerminalResult::Succeeded { .. }),
         "cross-lane candidate must succeed: {terminal:?}"
     );
+    for agent in [&codex, &claude] {
+        assert!(
+            agent
+                .closed_runs
+                .lock()
+                .assert_value()
+                .contains(&submitted.run_id)
+        );
+    }
     assert_eq!(
         codex.runs(),
         [scripted_run(

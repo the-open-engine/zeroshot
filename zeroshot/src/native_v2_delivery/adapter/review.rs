@@ -69,15 +69,45 @@ pub(super) fn failed_review(detail: &str) -> Result<ReviewStep, DeliveryStop> {
     ))
 }
 
+pub(super) fn review_identity(review: &SourceReviewReceipt) -> String {
+    format!(
+        "review {}#{} (source branch {}, target branch {}, head revision {})",
+        review.repository,
+        review.review_id,
+        review.head_branch,
+        review.target_branch,
+        review.head_revision,
+    )
+}
+
+pub(super) fn closed_review(review: &SourceReviewReceipt) -> String {
+    format!(
+        "{} was closed before delivery completed. Resume is refused while this review is closed; reopen it with the same source and target branches to resume, or start a new run.",
+        review_identity(review),
+    )
+}
+
+pub(super) fn merged_review(review: &SourceReviewReceipt, revision: &str) -> String {
+    format!(
+        "{} was already merged at {revision} before delivery completed. Resume in merge mode can confirm delivery only with a clean workspace at the exact reviewed head; start a new run from target branch {} for remaining work.",
+        review_identity(review),
+        review.target_branch,
+    )
+}
+
 pub(super) async fn review_completion(
     drive: &ReviewDrive<'_, '_>,
     label: &'static str,
     diagnostic: &str,
     merge_revision: Option<&str>,
 ) -> Result<ReviewStep, DeliveryStop> {
-    let diagnostic = drive
-        .adapter
-        .redact_feedback(drive.credentials, drive.adapter.review_context(diagnostic));
+    let diagnostic = drive.adapter.redact_feedback(
+        drive.credentials,
+        drive.adapter.review_context(&format!(
+            "{}\n{diagnostic}",
+            drive.adapter.publication_diagnostic()
+        )),
+    );
     emit(drive.control, &diagnostic).await?;
     validate_delivery_contract(drive.mode, drive.response).map_err(DeliveryStop::Runner)?;
     delivery_outcome(
@@ -321,11 +351,16 @@ impl NativeV2DeliveryAdapter {
         let original = match original {
             Err(error) => error.to_string(),
             Ok(WorkerOutcome::Verifier { diagnostic, .. }) => diagnostic.to_string(),
-            Ok(value) => format!("{value:?}"),
+            Ok(WorkerOutcome::Error { code, .. }) => {
+                format!("delivery failed with {}", code.as_str())
+            }
+            Ok(WorkerOutcome::Verified { .. }) => {
+                "delivery completed without a review diagnostic".to_owned()
+            }
         };
         NodeRunnerError::DriverDetail(self.redact_feedback(credentials, format!(
-            "Cannot confirm safe merge withdrawal for {}#{} into {} at {}. No repair handoff is authorized.\n{cause}\nOriginal delivery result: {original}",
-            review.repository, review.review_id, review.target_branch, review.head_revision,
+            "{}\nCannot confirm safe merge withdrawal for {}. No repair handoff is authorized.\n{cause}\nOriginal delivery result: {original}",
+            self.publication_diagnostic(), review_identity(review),
         )))
     }
 }

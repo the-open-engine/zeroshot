@@ -292,7 +292,10 @@ async fn spawn_contained_process(
     // finish killing/reaping its tree and to retain workspace ownership until then.
     child_command.kill_on_drop(!supervised);
     let child = child_command.spawn().map_err(|error| {
-        ProcessRunnerError::Launch(super::io_error_detail("process spawn failed", &error))
+        ProcessRunnerError::Launch(super::diagnostic::spawn_error_detail(
+            &command.program,
+            &error,
+        ))
     })?;
     recovery.capture(child);
     let Some(recovery_child) = recovery.child_mut() else {

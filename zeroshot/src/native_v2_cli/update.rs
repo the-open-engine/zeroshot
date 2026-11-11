@@ -96,11 +96,23 @@ struct ReleaseExecutables {
     restic_name: &'static str,
 }
 
+struct InstalledRelease<'a> {
+    executable: &'a Path,
+    version: ReleaseVersion,
+}
+
 pub(super) async fn execute(output: &mut impl Write) -> Result<CliOutcome, NativeV2CliError> {
     let current = installed_version()?;
     let client = http_client()?;
     let latest = latest_version(&client).await?;
-    let (updated, skill_updated) = apply_release(&client, current, latest).await?;
+    let executable = std::env::current_exe()
+        .map_err(|error| update_error(format!("could not locate this executable: {error}")))?;
+    let installation = InstalledRelease {
+        executable: &executable,
+        version: current,
+    };
+    let base_url = format!("{RELEASE_BASE_URL}/v{latest}");
+    let (updated, skill_updated) = apply_release(&client, installation, latest, &base_url).await?;
     write_result(
         output,
         UpdateResult {
@@ -115,15 +127,17 @@ pub(super) async fn execute(output: &mut impl Write) -> Result<CliOutcome, Nativ
 
 async fn apply_release(
     client: &reqwest::Client,
-    current: ReleaseVersion,
+    current: InstalledRelease<'_>,
     latest: ReleaseVersion,
+    base_url: &str,
 ) -> Result<(bool, bool), NativeV2CliError> {
-    if latest < current {
+    if latest < current.version {
         return Ok((false, false));
     }
-    let release = download_release(client, current, latest).await?;
+    check_installation(current.executable, current.version, latest)?;
+    let release = download_release_at(client, current.version, latest, base_url).await?;
     let updated = match &release.executables {
-        Some(executables) => install(executables, latest)?,
+        Some(executables) => install(current.executable, executables, latest)?,
         None => false,
     };
     let skill_updated = install_skills(&release.skills)?;
@@ -164,7 +178,20 @@ async fn latest_version_at(
     client: &reqwest::Client,
     url: &str,
 ) -> Result<ReleaseVersion, NativeV2CliError> {
-    let metadata = download(client, url, MAX_RELEASE_BYTES, "latest release").await?;
+    let response = fetch(client, url, "latest release").await?;
+    let status = response.status();
+    let metadata = download_response(response, MAX_RELEASE_BYTES, "latest release")
+        .await
+        .map_err(|error| {
+            if matches!(
+                status,
+                reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::TOO_MANY_REQUESTS
+            ) {
+                with_npm_hint(error, None)
+            } else {
+                error
+            }
+        })?;
     let release: LatestRelease = serde_json::from_slice(&metadata)
         .map_err(|error| update_error(format!("latest release metadata is invalid: {error}")))?;
     let tag_version = release
@@ -176,15 +203,6 @@ async fn latest_version_at(
         return Err(update_error("latest release tag is not canonical"));
     }
     Ok(latest)
-}
-
-async fn download_release(
-    client: &reqwest::Client,
-    current: ReleaseVersion,
-    latest: ReleaseVersion,
-) -> Result<ReleaseUpdate, NativeV2CliError> {
-    let base_url = format!("{RELEASE_BASE_URL}/v{latest}");
-    download_release_at(client, current, latest, &base_url).await
 }
 
 async fn download_release_at(
@@ -210,7 +228,7 @@ async fn download_release_at(
         let (target, executable, restic) = release_target()?;
         let filename = format!("zeroshot-v{latest}-{target}.tar.gz");
         let archive = release.download(&filename, MAX_ARCHIVE_BYTES).await?;
-        let mut extracted = extract_executables(&archive, &[executable, restic])?;
+        let mut extracted = extract_executables(&archive, &[executable, restic], latest)?;
         Some(ReleaseExecutables {
             zeroshot: extracted
                 .remove(executable)
@@ -315,9 +333,26 @@ async fn download(
     maximum: usize,
     label: &str,
 ) -> Result<Vec<u8>, NativeV2CliError> {
-    let response = client.get(url).send().await.map_err(|error| {
-        update_error(format!("could not fetch {label}: {}", http_failure(error)))
-    })?;
+    download_response(fetch(client, url, label).await?, maximum, label).await
+}
+
+async fn fetch(
+    client: &reqwest::Client,
+    url: &str,
+    label: &str,
+) -> Result<reqwest::Response, NativeV2CliError> {
+    client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| update_error(format!("could not fetch {label}: {}", http_failure(error))))
+}
+
+async fn download_response(
+    response: reqwest::Response,
+    maximum: usize,
+    label: &str,
+) -> Result<Vec<u8>, NativeV2CliError> {
     let status = response.status();
     if !status.is_success() {
         let explanation = github_message(response)
@@ -449,6 +484,14 @@ fn verify_checksum(
 fn extract_executables(
     archive: &[u8],
     expected: &[&str],
+    version: ReleaseVersion,
+) -> Result<std::collections::BTreeMap<String, Vec<u8>>, NativeV2CliError> {
+    extract_archive(archive, expected).map_err(|error| with_npm_hint(error, Some(version)))
+}
+
+fn extract_archive(
+    archive: &[u8],
+    expected: &[&str],
 ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, NativeV2CliError> {
     let expected = expected.iter().copied().collect::<BTreeSet<_>>();
     let decoder = GzDecoder::new(archive);
@@ -509,13 +552,12 @@ fn insert_archive_entry<R: Read>(
 
 /// Installs `executables` over the executable this process runs. Returns whether it replaced it.
 fn install(
+    current: &Path,
     executables: &ReleaseExecutables,
     version: ReleaseVersion,
 ) -> Result<bool, NativeV2CliError> {
-    let current = std::env::current_exe()
-        .map_err(|error| update_error(format!("could not locate this executable: {error}")))?;
     install_at(
-        &current,
+        current,
         executables,
         version,
         InstallOperations {
@@ -528,6 +570,33 @@ fn install(
             },
         },
     )
+    .map_err(|error| with_npm_hint(error, Some(version)))
+}
+
+/// Probe the directory before downloading any assets, without touching the installed pair.
+/// An already-current executable needs no replacement, even in a read-only installation.
+fn check_installation(
+    current: &Path,
+    current_version: ReleaseVersion,
+    latest: ReleaseVersion,
+) -> Result<(), NativeV2CliError> {
+    if latest <= current_version {
+        return Ok(());
+    }
+    let current = installed_path(current);
+    let parent = current
+        .parent()
+        .ok_or_else(|| update_error("this executable has no parent directory"))?;
+    // An unnamed probe cannot race with another updater's staged-file cleanup.
+    tempfile::tempfile_in(parent).map(drop).map_err(|error| {
+        with_npm_hint(
+            update_error(format!(
+                "cannot replace this installation in {}: {error}",
+                parent.display()
+            )),
+            Some(latest),
+        )
+    })
 }
 
 struct InstallOperations<Verify, VerifyRestic, Replace> {
@@ -828,6 +897,22 @@ fn write_result(output: &mut impl Write, result: UpdateResult) -> Result<(), Nat
 
 fn update_error(message: impl Into<String>) -> NativeV2CliError {
     NativeV2CliError::Update(message.into())
+}
+
+/// A failed lookup has no resolved version; npm can resolve its own latest release.
+fn npm_install_command(version: Option<ReleaseVersion>) -> String {
+    let version = version.map_or_else(|| "latest".to_owned(), |version| version.to_string());
+    format!("npm install --global @the-open-engine-company/zeroshot@{version}")
+}
+
+fn with_npm_hint(error: NativeV2CliError, version: Option<ReleaseVersion>) -> NativeV2CliError {
+    match error {
+        NativeV2CliError::Update(message) => update_error(format!(
+            "{message}; reinstall with: {}",
+            npm_install_command(version)
+        )),
+        error => error,
+    }
 }
 
 #[cfg(test)]

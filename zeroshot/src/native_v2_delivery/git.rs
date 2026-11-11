@@ -37,9 +37,13 @@ pub(crate) struct SystemGit {
 impl SystemGit {
     pub(crate) async fn attached_branch(&self, workspace: &Path) -> Result<String, GitError> {
         let output = self
-            .require_success(workspace, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .require_success(workspace, &["symbolic-ref", "--quiet", "HEAD"])
             .await?;
-        let branch = output.stdout().trim();
+        let branch = output
+            .stdout()
+            .trim()
+            .strip_prefix("refs/heads/")
+            .ok_or(GitError::InvalidRevision)?;
         if output.stdout_truncated() || !crate::source_code_provider::valid_git_branch(branch) {
             return Err(GitError::InvalidRevision);
         }
@@ -70,6 +74,20 @@ impl SystemGit {
     ) -> Self {
         self.local_environment = environment;
         self
+    }
+
+    pub(super) fn diagnostic_secrets(&self) -> Vec<String> {
+        self.local_environment
+            .iter()
+            .flat_map(|environment| environment.iter())
+            .filter(|(name, value)| command::native_credential_name(name) && !value.is_empty())
+            .flat_map(|(_, value)| {
+                [
+                    value.clone(),
+                    super::git_auth::encode_basic_credential(value),
+                ]
+            })
+            .collect()
     }
 
     pub(crate) fn with_commit_identity(

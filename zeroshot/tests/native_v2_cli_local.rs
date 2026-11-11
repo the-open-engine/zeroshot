@@ -400,6 +400,9 @@ async fn failed_local_run_restarts_from_its_latest_snapshot_with_fresh_connectio
     assert_eq!(resumed.assert_key("resumedFrom"), failed_run_id.as_str());
 
     let successor = fixture.wait_succeeded(&successor_run_id, "finish").await;
+    for run_id in [&failed_run_id, &successor_run_id] {
+        fixture.assert_version_log(run_id).await;
+    }
     assert_eq!(
         successor
             .assert_key("workspaceRecovery")

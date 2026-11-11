@@ -10,7 +10,9 @@ use tokio::time::{Instant, error::Elapsed, timeout_at};
 use crate::execution::process::{
     ProcessFrame, ProcessRunnerError, ProcessSessionCommand, ProcessSessionOutput, ProcessStdout,
 };
-use crate::native_v2_capsule::provider_json_lines::{ProviderJsonLine, ProviderJsonLines};
+use crate::native_v2_capsule::provider_json_lines::{
+    ProviderJsonLine, ProviderJsonLines, parse_provider_json,
+};
 use crate::native_v2_runner::{
     DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError, bounded_log_text,
 };
@@ -221,7 +223,7 @@ impl ConfigurationReader {
         };
         if !bytes.iter().all(u8::is_ascii_whitespace) {
             self.pending
-                .push_back(serde_json::from_slice(&bytes).map_err(|_| MALFORMED)?);
+                .push_back(parse_provider_json(&bytes).map_err(|_| MALFORMED)?);
         }
         Ok(())
     }

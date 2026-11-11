@@ -128,7 +128,7 @@ async fn timeout_and_cancellation_retain_the_confirmed_review_before_polling_com
 }
 
 #[tokio::test]
-async fn local_resume_confirms_an_identical_published_starting_commit_with_product_git() {
+async fn local_resume_confirms_an_identical_published_starting_commit_with_a_same_named_tag() {
     for worktree in [false, true] {
         let mut repo = TempRepo::delivery();
         git(&repo.workspace, &["checkout", "-b", "feature/committed"]);
@@ -154,6 +154,7 @@ async fn local_resume_confirms_an_identical_published_starting_commit_with_produ
         } else {
             "feature/committed".to_owned()
         };
+        git(&repo.workspace, &["tag", &branch]);
         let invoking_status = git_output(&invoking, &["status", "--porcelain=v1"]);
         let config = NativeV2DeliveryConfig {
             local_branch: Some(branch.clone()),
@@ -213,8 +214,15 @@ async fn local_resume_confirms_an_identical_published_starting_commit_with_produ
             );
             assert_eq!(git_output(&repo.remote, &["rev-parse", &branch]), repo.base);
             assert_eq!(
-                git_output(&repo.workspace, &["symbolic-ref", "--short", "HEAD"]),
-                branch
+                git_output(&repo.workspace, &["symbolic-ref", "HEAD"]),
+                format!("refs/heads/{branch}")
+            );
+            assert_eq!(
+                git_output(
+                    &repo.workspace,
+                    &["rev-parse", &format!("refs/tags/{branch}")]
+                ),
+                repo.base
             );
             assert_eq!(git_output(&invoking, &["rev-parse", "HEAD"]), repo.base);
             assert_eq!(

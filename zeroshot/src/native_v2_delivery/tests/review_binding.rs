@@ -122,6 +122,7 @@ async fn interrupted_target_reconciliation(interruption: Interruption) {
         Some("test-token"),
     )
     .await;
+    let mut durable = handle.take_initial_output().assert_value();
     tokio::time::timeout(Duration::from_secs(10), async {
         while authority.target_reconciliations.load(Ordering::SeqCst) == 0 {
             tokio::time::sleep(Duration::from_millis(1)).await;
@@ -149,6 +150,26 @@ async fn interrupted_target_reconciliation(interruption: Interruption) {
                 WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)
             );
         }
+    }
+    let mut diagnostics = Vec::new();
+    while let Ok(event) = durable.recv().await {
+        if let crate::native_v2_runner::DurableNodeEvent::Output { output, .. } = event {
+            diagnostics.push(output.text);
+        }
+    }
+    if !cancelling {
+        let diagnostic = diagnostics
+            .iter()
+            .find(|text| text.contains("Already published (last confirmed)"))
+            .assert_value();
+        for expected in [
+            branch,
+            saved["receipt"]["headRevision"].as_str().assert_value(),
+            "acme/project#17",
+        ] {
+            assert!(diagnostic.contains(expected), "{diagnostic}");
+        }
+        assert!(!diagnostic.contains(&delivery_head_branch(&config.delivery_run_id)));
     }
     let recovered =
         contract::review_from_recovery(saved, mode, &target(&repo), branch).assert_value();

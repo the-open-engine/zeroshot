@@ -370,7 +370,7 @@ fn sanitize(mut captured: CapturedBytes, secrets: &[String]) -> (String, bool) {
     (text, truncated)
 }
 
-pub(super) fn redact(value: &str, secrets: &[String]) -> String {
+pub(crate) fn redact(value: &str, secrets: &[String]) -> String {
     let mut secrets = secrets
         .iter()
         .filter(|secret| !secret.is_empty())
@@ -570,13 +570,22 @@ impl Drop for ProcessGroup {
 }
 
 pub(crate) fn diagnostic_text(bytes: Vec<u8>, truncated: bool, token: &str) -> (String, bool) {
-    sanitize(
-        CapturedBytes { bytes, truncated },
+    diagnostic_text_with_secrets(
+        bytes,
+        truncated,
         &[
             token.to_owned(),
             super::git_auth::encode_basic_credential(token),
         ],
     )
+}
+
+pub(crate) fn diagnostic_text_with_secrets(
+    bytes: Vec<u8>,
+    truncated: bool,
+    secrets: &[String],
+) -> (String, bool) {
+    sanitize(CapturedBytes { bytes, truncated }, secrets)
 }
 
 #[cfg(test)]

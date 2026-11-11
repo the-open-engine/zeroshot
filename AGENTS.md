@@ -56,6 +56,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   none is installed, and reports `updated: false` when the executable and sidecar already hold the
   release's bytes. It installs or refreshes only unchanged managed skill copies and preserves
   conflicts.
+  A newer release probes installation-directory writability before downloading any asset; a current
+  installation skips that probe. Unwritable installs and archive rejections end with the shared
+  version-pinned npm reinstall command; release-lookup HTTP 403/429 uses `@latest` because no version
+  was resolved. In-place updates preserve npm's recorded package version. The exact two-executable
+  archive layout is a compatibility contract: adding entries strands released updaters.
   Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
   whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
   bounded, control-safe `message`, never request URLs.
@@ -422,8 +427,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unlock on drop so fork-before-exec children cannot retain released ownership. Git metadata and
   transport commands discard ambient repository-selection variables before inspecting the selected folder.
 - Local delivery commits on HEAD and publishes that same attached branch, including earlier
-  unpushed commits. In-place runs never create managed run refs. PR/merge targets a different
-  upstream branch or the remote default, and refuses the target branch before agent launch with
+  unpushed commits. Read attached branch names from full `refs/heads/` symbolic refs; abbreviated
+  names change when a tag shares the branch name. In-place runs never create managed run refs.
+  PR/merge targets a different upstream branch or the remote default, and refuses the target
+  branch before agent launch with
   feature-branch/`--worktree` guidance. Explicit push may publish any branch. Never force-push;
   non-fast-forward and policy refusals stop without repair. `--worktree` prepares a retained Git
   worktree on a managed run branch before controller startup for all graphs/harnesses. Its local
@@ -487,7 +494,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. `need_rebase` merges the captured target into a
+  merges; required merge trains remain pending. GitLab's complete HTTP 400 missing-source-branch
+  creation validation retries only within the existing review-sync batch, rechecking the published
+  candidate before each POST; uncertain creation responses retain their at-most-once fence.
+  `need_rebase` merges the captured target into a
   workspace descending from the MR head, bounded by their fork point rather than the MR head, then
   returns repair; a candidate already containing the target is refused naming the merge method and
   target revision. GitLab readiness, approval handoff and merge share
@@ -495,6 +505,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   regardless of head-pipeline presence or status, never `Passed`. Required or unknown policy needs
   captured-head CI evidence; absent/running CI stays pending and failure/skipped rules still apply.
   Synthetic pipeline SHAs do not prove required captured-head CI. All non-CI gates remain authoritative.
+  Failed required GitLab pipelines include REST and GraphQL configuration errors, failed regular
+  and trigger job names/stages/reasons, and labelled, credential-redacted trace tails. GraphQL
+  error-message reads bind the captured project/pipeline/commit and use bounded cursor pagination.
+  Both forges share CI diagnostic bounds and excerpt formatting in
+  `source_code/adapters/core/ci_diagnostics`; unavailable traces retain the job list.
   Empty generated delivery bindings acquire the adapter's default connection only after source or
   comment destination selection. Managed GitHub.com token/file fallback never authorizes another instance.
   Adapters own optional canonical review/commit receipt links and comment permalink validation.
@@ -623,6 +638,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. Structured output receives at most two correction turns before `malformed`.
+  A Codex `turn.completed` with a final agent message preserves its answer and usage across later
+  process failures. Its remaining output and process wait share a 250 ms grace, followed by bounded
+  release and confirmed process-tree cleanup. Teardown failures are logged once without replacing
+  that answer; incomplete input, output delivery failures, cancellation and unconfirmed cleanup
+  retain their failure semantics. Reusable Codex session files survive this per-turn release.
 - Pi drives one `pi --mode json` process per turn, with the node prompt on stdin so a large input
   payload can never exceed the platform argument limit. Model identifiers stay caller-owned and Pi
   owns their resolution. Its provider lanes are `anthropic`, `openai`, `openrouter`, `bedrock`,
@@ -705,10 +725,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   After an accepted answer, a valid `session.detach` refusal or peer EOF is logged and keeps the
   outcome, including a closed stdin pipe during that request. Malformed RPC replies/events, other
   RPC writes, cancellation, durable output and cleanup failures still fail closed.
-- Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
+- Provider JSONL readers do not cap cumulative output. They share the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
-  validating provider-owned fields, and continue draining after the first valid terminal event.
-- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
+  validating provider-owned fields, and continue draining after the first valid terminal event
+  (Codex bounds that drain after a completed turn).
+  Their shared decoder replaces invalid UTF-8 and unpaired Unicode surrogate escapes with U+FFFD
+  before adapter parsing and redaction; all other malformed JSON retains each reader's rejection policy.
+- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before each run's first model
   turn it runs the selected executable with `--version` through that turn's launch path and
   environment. One `--print` process can write several results while background subagents or
   shells finish, so Claude parses every record through stdout EOF and the last result decides the
@@ -788,6 +811,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Hosted failed runs likewise collect checkpoint staging as best effort after process cleanup;
   retained recovery still requires runtime cleanup, workspace ownership transfer, and durable
   recovery metadata. Force-stop and explicit discard retain authoritative lineage deletion.
+  Local force-stop stays destructive for the whole lineage and retains no checkpoints: after
+  confirmed runtime cleanup it reuses `discard_lineage` to remove every catalog naming the shared
+  repository, predecessor and successor alike, before the repository. A catalog removal failure
+  keeps the repository and reports cleanup unavailable. Other lineages are untouched.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
@@ -808,6 +835,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   connection; control requests and ordinary observers keep their independent connections.
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
   milliseconds and remain unchanged across durable replay.
+- Each run records its executing Zeroshot version before preparation or dispatch logs; resumed
+  successors record their own build. The supervisor serializes version initialization across drive
+  and force-stop. Force-stop stops live work before version logging and request persistence, and
+  skips ledger reads once version initialization completes.
+  Adapters log accepted CLI versions through the existing output
+  bridge once per run and lane when they read them; Claude serializes its initial version check
+  for each run even when ACP reuses the adapter. After invocations drain, `NodeDriver::close_run`
+  releases that run's check state; lane routing forwards the hook to its adapters. ACP records its
+  build at run creation before publishing the supervisor to cancellation.
 - Runner start reserves an execution and returns its handle before asynchronous provider startup.
   Pending start waits are cancellable; accepted startup failures settle through the owned handle.
   Pending remote starts reread connection loss after a close notification so failed closure cannot
@@ -833,6 +869,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retains errors during draining; capsule terminal metadata preserves bounded error records too. Retries, corrections, and typed delivery
   outcomes log detail separately only when completion would lose it. Correction prompts stay out of
   diagnostics. Public error formatting is bounded and control-safe without suppressing causes.
+  Shared process spawn errors include the program as an escaped preview of at most 256 bytes plus
+  a truncation marker, alongside the OS cause; they never include arguments or environment values.
   These public summaries stay separate from private operator diagnostics.
   Existing Error output and safe-log records may carry `FailureDiagnosticKind` metadata; their text
   is the public-safe explanation. The ordinary ledger projection retains a bounded `FailureContext`
@@ -889,6 +927,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the unchanged candidate directly; other integrated remote changes return `repair_required` so the
   authored graph decides what work follows. Agents receive local refs and conflicts without the
   delivery credential. Closed PRs, identity changes and lost published ancestry stop delivery.
+  Failure diagnostics name the project, source/target branches and known review/head, including the
+  last confirmed publication. Diagnostic publication evidence is separate from reconciliation and
+  withdrawal authority: a repair push may advance it before review synchronization succeeds.
+  Recovered review receipts seed diagnostics before fresh observations; their saved publication
+  flag alone controls whether first-publication reconciliation has completed.
+  GitLab merge HTTP 401 is a missing merge permission only when a fresh authenticated user read
+  succeeds; rejected tokens retain authentication failure classification.
 - Hosted delivery Git runs as the pinned workspace writer UID/GID, matching source checkout, so
   fetched objects, commits, merges, and partial failures remain writable by subsequent repairs.
   Admission excludes overlapping writers and requires their process cleanup before delivery;
@@ -1003,7 +1048,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Workspace Git and forge reconciliation parse private protocol stdout separately from printable
   diagnostics, including when native credentials collide with object IDs or Git-directory paths;
   parsing and failure classification must preserve raw evidence before credential redaction. Final delivery feedback
-  also redacts the invocation's source credentials and its current refreshed issuance;
+  also redacts the invocation's source credentials, its current refreshed issuance, and captured
+  native Git credentials using the shared credential-name selector. GitLab object diagnostics redact
+  credentials before bounded source errors are constructed; malformed object fields are described
+  without interpolating their unbounded response text;
   unfamiliar failures use the existing optional `repair_required` signal. After exact-ref
   confirmation, only the exact forge-authored branch-protection and push-permission texts in
   `git_diagnostic.rs` (relayed `remote:` lines or GitHub's SSH `ERROR:` lines) become
@@ -1223,6 +1271,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
+  JSON diagnostics use `run_failed` / `run.failed` with `details.runId` for that terminal outcome.
+  Unknown target names and registry workspace-recovery authorization refusals use
+  `invalid_request` / `request.invalid`; transport failures retain `target.unavailable`.
+  The Python SDK consumes the explicit failed-run diagnostic without inferring failure from a
+  target error or rereading status; public failed-result exceptions remain opt-in. Failed-run
+  identity stays private and unredacted for exact watch matching; its printable message is redacted.
+  ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
+  context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
 - Graph verification errors display their first safe diagnostic, its path and the count of further
   diagnostics through the shared verifier error, so local validation and hosted rejection report the
   same cause. Within the 1,024-byte target problem message bound, the count and then the path's

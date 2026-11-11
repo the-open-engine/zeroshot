@@ -1,4 +1,4 @@
-//! The cause of a failed run that foreground `run` or `watch` followed.
+//! The cause of a failed run reported by foreground `run`, `watch`, or ACP.
 //!
 //! The follow keeps the structured context from the terminal status. Older runs without context
 //! fall back to durable error logs within a deadline and the caller's Ctrl-C signal.
@@ -78,7 +78,11 @@ impl<W: std::io::Write> DurableOutput for FailureOutput<'_, W> {
 }
 
 impl RunFailure {
-    pub(super) fn from_context(
+    pub(in crate::native_v2_cli) fn run_id(&self) -> &RunId {
+        &self.run_id
+    }
+
+    pub(in crate::native_v2_cli) fn from_context(
         run_id: RunId,
         target: Option<&str>,
         context: (EnumLabel, Box<FailureContext>),
@@ -94,7 +98,7 @@ impl RunFailure {
     }
 
     #[cfg(test)]
-    pub(super) fn read_for_test(run_id: RunId, target: Option<&str>) -> Self {
+    pub(in crate::native_v2_cli) fn read_for_test(run_id: RunId, target: Option<&str>) -> Self {
         Self {
             run_id,
             target: target.map(str::to_owned),

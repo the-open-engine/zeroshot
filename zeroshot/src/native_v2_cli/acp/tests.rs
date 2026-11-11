@@ -11,6 +11,9 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 
+#[path = "tests/versions.rs"]
+mod versions;
+
 #[test]
 fn prompt_requires_exactly_one_nonempty_text_block() {
     assert_eq!(task_from_prompt(vec!["work".into()]).unwrap(), "work");
@@ -37,6 +40,57 @@ fn terminal_metadata_preserves_raw_output() {
         Map::from_iter([(
             "zeroshot".to_owned(),
             json!({ "runId": run_id.as_str(), "rawOutput": output })
+        )])
+    );
+}
+
+#[test]
+fn failed_turn_reports_recorded_context_and_logs_command_in_its_message() {
+    let run_id = RunId::new("run-failed");
+    let terminal = serde_json::from_value(json!({
+        "status": "failed",
+        "reason": "runtime_failed",
+        "context": {
+            "primary": {"message": "Runtime cleanup failed"},
+            "recorded": [{
+                "message": "Provider request refused: insufficient credits",
+                "execution": {"execution": "v2:execution:1", "node": "writer"},
+                "cursor": "v2:4"
+            }],
+            "verifiers": [{
+                "message": "readiness=revise; missing boundary test",
+                "execution": {
+                    "execution": "v2:execution:2", "node": "assessor", "mapIndices": [1, 2]
+                },
+                "cursor": "v2:5"
+            }],
+            "exhaustedLoops": [{
+                "node": "refinement", "completedIterations": 3, "mapIndices": [1]
+            }],
+            "incomplete": true
+        }
+    }))
+    .assert_value();
+
+    let turn = TurnResult::new(run_id.clone(), terminal, false).assert_value();
+
+    assert_eq!(turn.stop_reason, acp::StopReason::EndTurn);
+    assert_eq!(
+        turn.message.as_deref(),
+        Some(
+            "run finished unsuccessfully: runtime_failed\nFailure:\n  Runtime cleanup failed\n\
+             Recorded failures:\n  writer: Provider request refused: insufficient credits (log v2:4)\n\
+             Recorded verifier results:\n  assessor[1][2]: readiness=revise; missing boundary test (log v2:5)\n\
+             Loop refinement[1] exhausted after 3 completed iterations\n\
+             Additional failure details may be missing; see the full run log.\n\
+             Full run log: zeroshot logs run-failed"
+        )
+    );
+    assert_eq!(
+        turn.meta(),
+        Map::from_iter([(
+            "zeroshot".to_owned(),
+            json!({"runId": run_id.as_str(), "rawOutput": {"failed": "runtime_failed"}})
         )])
     );
 }

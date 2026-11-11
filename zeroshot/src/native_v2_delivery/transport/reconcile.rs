@@ -167,9 +167,13 @@ async fn reconcile_workspace(
     }
     if !is_ancestor(context, &request.published.head_revision, &head).await? {
         return Ok(SourceReconciliationOutcome::Refused(format!(
-            "local history no longer contains published head {}; local head {head}; \
-             observed head {}; work was preserved",
-            request.published.head_revision, request.observed.head_revision,
+            "local history no longer contains published head {} on branch {}; local head {head}; \
+             observed head {}; work was preserved. List checkpoints with `zeroshot checkpoints RUN_ID`, \
+             then run `zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` with a checkpoint \
+             taken before the rewrite",
+            request.published.head_revision,
+            request.published.head_branch,
+            request.observed.head_revision,
         )));
     }
     if dirty {

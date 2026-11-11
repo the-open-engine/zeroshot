@@ -48,6 +48,9 @@ impl GitLayout {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
+        if metadata.is_file() && metadata.len() == 0 {
+            return Ok(None);
+        }
         let directory = git_directory(workspace, &marker, &metadata)?;
         let common = common_directory(&directory)?;
         let layout = Self { directory, common };

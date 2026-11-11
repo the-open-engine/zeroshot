@@ -21,6 +21,8 @@ mod process_start;
 mod retry;
 #[path = "tests/session_id.rs"]
 mod session_id;
+#[path = "tests/unicode.rs"]
+mod unicode;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

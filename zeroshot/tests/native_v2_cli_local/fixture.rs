@@ -212,6 +212,28 @@ impl LocalFixture {
         interrupt_after_observation(child, expected).await
     }
 
+    pub(super) async fn assert_version_log(&self, run_id: &str) {
+        let logs = self.output(&["logs", run_id], "finish").await;
+        assert_success(&logs, "finished run version logs");
+        let records = json_lines(&logs.stdout);
+        let expected = concat!("Zeroshot version: ", env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            records
+                .first()
+                .assert_value()
+                .assert_key("record")
+                .assert_key("message"),
+            expected
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|log| log.assert_key("record").assert_key("message") == expected)
+                .count(),
+            1
+        );
+    }
+
     pub(super) async fn assert_replay(&self, command: &str, run_id: &str, expected: &str) {
         let output = self.output(&[command, run_id], "block").await;
         assert_success(&output, "terminal observation replay");
@@ -442,7 +464,7 @@ async fn interrupt_after_observation(mut child: Child, expected: &str) -> Output
 }
 
 pub(super) async fn wait_for_exit(pid: u32) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + CLI_TIMEOUT;
     while process_exists(pid) {
         assert!(Instant::now() < deadline, "process {pid} did not exit");
         sleep(Duration::from_millis(20)).await;
@@ -725,11 +747,17 @@ mod harness_environment;
 #[path = "restic_selector.rs"]
 mod restic_selector;
 
+#[path = "script_spawn.rs"]
+mod script_spawn;
+
 #[path = "slow_checkpoint_restore.rs"]
 mod slow_checkpoint_restore;
 
 #[path = "resume_lane_executable.rs"]
 mod resume_lane_executable;
+
+#[path = "force_stop_lineage.rs"]
+mod force_stop_lineage;
 
 #[cfg(target_os = "linux")]
 #[path = "agent_tmpdir.rs"]

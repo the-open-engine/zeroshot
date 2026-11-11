@@ -41,13 +41,20 @@ async fn unconfirmed_delivery_cleanup_keeps_its_classification_and_never_waits_f
             github_git_token: String::new(),
             token_from_environment: false,
         };
+        let encoded = git_auth::encode_basic_credential("native-cleanup-token");
+        let adapter = adapter().with_local_git_environment(Some(BTreeMap::from([(
+            "GIT_PASSWORD".to_owned(),
+            "native-cleanup-token".to_owned(),
+        )])));
         let stop = DeliveryStop::Explained {
             result: Box::new(Err(NodeRunnerError::CleanupUnconfirmed)),
-            diagnostic: "original cleanup cause private-cleanup-token".to_owned(),
+            diagnostic: format!(
+                "original cleanup cause private-cleanup-token native-cleanup-token {encoded}"
+            ),
         };
         tokio::time::timeout(
             Duration::from_secs(1),
-            adapter().report_stop(
+            adapter.report_stop(
                 &stop,
                 DeliveryDiagnostic {
                     credentials: &credentials,
@@ -66,6 +73,8 @@ async fn unconfirmed_delivery_cleanup_keeps_its_classification_and_never_waits_f
                 panic!("no token usage was lost");
             };
             assert!(!output.text.contains("private-cleanup-token"));
+            assert!(!output.text.contains("native-cleanup-token"));
+            assert!(!output.text.contains(&encoded));
             outputs.push(output);
         }
         let last = outputs.last().assert_value();

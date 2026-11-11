@@ -160,6 +160,14 @@ reporting a merge. Comment retries reuse the original publication; captured MR s
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
 pipelines do not prove required CI for the captured head.
 
+Delivery failures name the project, source and target branches, and the review and head revision
+when known. They also list the last confirmed publication, so a failed `--ship` can still identify
+the branch and PR/MR already available on the forge. A closed review must be reopened with its
+original branches before resuming. An already merged review can confirm delivery in merge mode
+with a clean workspace at its exact reviewed head; remaining work needs a new run from the target
+branch. When GitLab rejects a merge with HTTP 401 but a fresh authenticated read succeeds, delivery
+reports missing merge permission; grant the token that permission before resuming.
+
 The GitLab adapter makes slash-leading generated prose literal with a Markdown backslash escape,
 including endpoint descriptions such as `/health returns 200` and quick-action-looking text such as
 `/close`. Existing escapes remain unchanged. The same conservative escape applies to slash-leading
@@ -203,3 +211,8 @@ branch across bounded complete pages before validating its target; retargeted or
 are refused rather than duplicated.
 GitLab briefly rechecks a lagging merge-request head against the branch ref. Persistent disagreement
 stops with both revisions in the diagnostic instead of polling indefinitely.
+
+If a worker rewrites local history after publication, delivery refuses further publication; list
+checkpoints with `zeroshot checkpoints RUN_ID`, then run
+`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` using a checkpoint taken before the rewrite
+to continue with the existing published branch and review.

@@ -1,11 +1,14 @@
 use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::time::{Instant, timeout_at};
 
 use crate::execution::process::{
     ProcessRunnerError, ProcessSessionCommand, ProcessSessionOutput, ProcessStdout,
 };
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
-    exchange_process_io, open_provider_process, process_failure_evidence,
+    open_provider_process, process_failure_evidence, send_process_input,
     provider_failure_diagnostic, report_cleanup_failure, require_process_cleanup,
     text::ProviderText,
 };
@@ -14,6 +17,8 @@ use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeR
 
 use super::output::{CodexOutput, CodexOutputDecoder};
 use super::session::CodexSession;
+
+const COMPLETED_TURN_GRACE: Duration = Duration::from_millis(250);
 
 pub(super) enum ProcessOpen {
     Ready(ProviderProcess),
@@ -30,6 +35,7 @@ struct CollectedOutput {
     output: CodexOutput,
     delivery_error: Option<NodeRunnerError>,
     usage: Option<TokenUsageDelta>,
+    completion_deadline: Option<Instant>,
 }
 
 pub(super) async fn open_process(
@@ -55,7 +61,13 @@ async fn collect_output(
 ) -> CollectedOutput {
     let mut decoder = CodexOutputDecoder::new();
     let mut delivery_error = None;
-    while let Some(chunk) = stdout.recv().await {
+    let mut completion_deadline = None;
+    loop {
+        let chunk = match completion_deadline {
+            Some(deadline) => timeout_at(deadline, stdout.recv()).await.unwrap_or(None),
+            None => stdout.recv().await,
+        };
+        let Some(chunk) = chunk else { break };
         for emission in decoder.push(chunk.as_slice()) {
             if delivery_error.is_some() {
                 continue;
@@ -65,8 +77,15 @@ async fn collect_output(
                 delivery_error = Some(error);
             }
         }
+        if completion_deadline.is_none() && decoder.is_completed() {
+            completion_deadline = Some(Instant::now() + COMPLETED_TURN_GRACE);
+        }
     }
-    finish_collection(decoder, delivery_error)
+    let mut collected = finish_collection(decoder, delivery_error);
+    if completion_deadline.is_some() {
+        collected.completion_deadline = completion_deadline;
+    }
+    collected
 }
 
 pub(super) async fn exchange_turn(
@@ -77,10 +96,10 @@ pub(super) async fn exchange_turn(
 ) -> Result<CodexOutput, NodeRunnerError> {
     let stdout = process.detach_stdout();
     let collected = collect_output(stdout, context.control, redactions);
-    let exchange = exchange_process_io(process, prompt.as_bytes(), collected).await;
+    let exchange = exchange_codex_io(process, prompt.as_bytes(), collected).await;
     let (collected, completion, input_error) = match exchange {
         ProcessExchange::Complete(collected) => {
-            let completion = finish_process(process, collected.delivery_error.is_none()).await;
+            let completion = finish_process(process, &collected).await;
             (collected, completion, None)
         }
         ProcessExchange::InputFailure(ProcessInputFailure {
@@ -115,6 +134,55 @@ pub(super) async fn exchange_turn(
     resolved
 }
 
+/// Unlike EOF, a completed Codex turn can arrive while stdin is still being written. Bound that
+/// remaining write as well as process teardown, while retaining explicit input failures.
+async fn exchange_codex_io(
+    process: &mut ProviderProcess,
+    bytes: &[u8],
+    output: impl std::future::Future<Output = CollectedOutput>,
+) -> ProcessExchange<CollectedOutput> {
+    let mut input = Box::pin(send_process_input(process, bytes));
+    let mut output = Box::pin(output);
+    let (collected, input_result) = tokio::select! {
+        // Preserve an already observable input failure even when output is also ready.
+        biased;
+        result = &mut input => {
+            drop(input);
+            match result {
+                Ok(()) => return ProcessExchange::Complete(output.await),
+                Err(input_error) => {
+                    let (completion, output) = tokio::join!(process.release(), output);
+                    return ProcessExchange::InputFailure(ProcessInputFailure {
+                        output, input_error, completion,
+                    });
+                }
+            }
+        }
+        collected = &mut output => {
+            let result = match collected.completion_deadline {
+                Some(deadline) => timeout_at(deadline, &mut input).await.unwrap_or_else(|_| {
+                    Err(ProcessRunnerError::Io(
+                        "provider process input did not finish after the completed turn".to_owned(),
+                    ))
+                }),
+                None => (&mut input).await,
+            };
+            (collected, result)
+        }
+    };
+    // Release the stdin borrow before asking the bounded process supervisor to stop it.
+    drop(input);
+    drop(output);
+    match input_result {
+        Ok(()) => ProcessExchange::Complete(collected),
+        Err(input_error) => ProcessExchange::InputFailure(ProcessInputFailure {
+            output: collected,
+            input_error,
+            completion: process.release().await,
+        }),
+    }
+}
+
 fn cleanup_failure_diagnostic(
     output: &Result<CodexOutput, NodeRunnerError>,
     completion: &Result<ProcessSessionOutput, ProcessRunnerError>,
@@ -122,6 +190,20 @@ fn cleanup_failure_diagnostic(
     redactions: &[String],
 ) -> Option<String> {
     if require_process_cleanup(completion).is_ok() {
+        if input_error.is_none()
+            && output.as_ref().is_ok_and(CodexOutput::is_completed)
+            && !completion.as_ref().is_ok_and(|process| process.cancelled)
+        {
+            let detail = completion_detail(completion, false)?;
+            return Some(provider_failure_diagnostic(
+                "Codex",
+                Some(&format!(
+                    "process teardown failed after the completed turn: {detail}"
+                )),
+                None,
+                redactions,
+            ));
+        }
         return None;
     }
     let mut details = match output {
@@ -146,10 +228,14 @@ fn finish_collection(
 ) -> CollectedOutput {
     let output = decoder.finish();
     let usage = output.token_usage();
+    let completion_deadline = output
+        .is_completed()
+        .then(|| Instant::now() + COMPLETED_TURN_GRACE);
     CollectedOutput {
         output,
         delivery_error: error,
         usage,
+        completion_deadline,
     }
 }
 
@@ -167,14 +253,20 @@ fn retain_delivery_evidence(
     }
 }
 
-pub(super) async fn finish_process(
+async fn finish_process(
     process: &mut ProviderProcess,
-    output_complete: bool,
+    collected: &CollectedOutput,
 ) -> Result<ProcessSessionOutput, ProcessRunnerError> {
-    if output_complete {
-        process.wait().await
+    if collected.delivery_error.is_some() {
+        return process.release().await;
+    }
+    if let Some(deadline) = collected.completion_deadline {
+        match timeout_at(deadline, process.wait()).await {
+            Ok(completion) => completion,
+            Err(_) => process.release().await,
+        }
     } else {
-        process.release().await
+        process.wait().await
     }
 }
 
@@ -184,6 +276,9 @@ pub(super) fn resolve_process_completion(
     cancelled: bool,
 ) -> Result<CodexOutput, NodeRunnerError> {
     check_process_completion(&output, &completion, cancelled)?;
+    if output.as_ref().is_ok_and(CodexOutput::is_completed) {
+        return output;
+    }
     let provider_output_failed = output
         .as_ref()
         .map_or(true, |output| output.failure_message().is_some());

@@ -37,6 +37,8 @@ impl<'environment> DeliveryCredentials<'environment> {
 pub(super) struct DeliveryState {
     pub(super) review_binding: Option<SourceReviewReceipt>,
     pub(super) published: Option<SourceReviewReceipt>,
+    // Diagnostic evidence only; never grants reconciliation or withdrawal authority.
+    pub(super) publication: Option<SourceReviewReceipt>,
     pub(super) intended_push: Option<String>,
     pub(super) pending_head: Option<head::PendingHead>,
     pub(super) review_base_revision: Option<String>,
@@ -56,6 +58,22 @@ impl NativeV2DeliveryAdapter {
     pub(super) fn include_terminal_reviews(&self) -> bool {
         self.config.local_branch.is_none() || self.delivery_state().known_review().is_some()
     }
+
+    pub(super) fn record_publication(&self, mut review: SourceReviewReceipt) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if review.review_id.is_empty()
+            && let Some(previous) = &state.publication
+            && previous.repository == review.repository
+            && previous.head_branch == review.head_branch
+        {
+            review.review_id.clone_from(&previous.review_id);
+        }
+        state.publication = Some(review);
+    }
+
     pub(super) fn delivery_state(&self) -> DeliveryState {
         self.state
             .lock()
@@ -65,6 +83,7 @@ impl NativeV2DeliveryAdapter {
 
     pub(super) fn record_published(&self, review: SourceReviewReceipt) -> Result<(), DeliveryStop> {
         self.record_review_binding(&review, true)?;
+        self.record_publication(review.clone());
         let mut state = self
             .state
             .lock()
@@ -154,10 +173,20 @@ impl NativeV2DeliveryAdapter {
             include_review: mode.creates_review(),
         };
         let snapshot = self.observe_before_delivery(request, preparation).await?;
-        if self.config.local_branch.is_some()
-            && let Some(review) = &snapshot.review
-        {
-            self.record_review_binding(&receipt_from_observation(review), false)?;
+        if let Some(review) = &snapshot.review {
+            let review = receipt_from_observation(review);
+            self.record_publication(review.clone());
+            if self.config.local_branch.is_some() {
+                self.record_review_binding(&review, false)?;
+            }
+        } else if let Some(revision) = &snapshot.head_revision {
+            self.record_publication(SourceReviewReceipt {
+                review_id: String::new(),
+                repository: self.config.target.repository.clone(),
+                target_branch: self.config.target.target_branch.clone(),
+                head_branch: branch.clone(),
+                head_revision: revision.clone(),
+            });
         }
         self.check_terminal_review(&snapshot, preparation).await?;
         self.stage_workspace(preparation).await?;
@@ -185,7 +214,11 @@ impl NativeV2DeliveryAdapter {
             return self
                 .refuse_delivery(
                     preparation.control,
-                    "the published run branch was deleted; work was preserved",
+                    &format!(
+                        "the published run branch was deleted: branch {} in project {}; work was preserved",
+                        self.config.head_branch(),
+                        self.config.target.repository,
+                    ),
                 )
                 .await;
         }
@@ -209,7 +242,7 @@ impl NativeV2DeliveryAdapter {
             commit_message,
         } = context;
         let published = self
-            .require_reconciliation_anchor(known, &observed, preparation.control)
+            .require_reconciliation_anchor(known, &observed, preparation)
             .await?;
         let authorized_update = known.pending_head.as_ref().is_some_and(|pending| {
             pending
@@ -268,7 +301,7 @@ impl NativeV2DeliveryAdapter {
         &self,
         known: &DeliveryState,
         observed: &SourceReviewReceipt,
-        control: &DriverControl,
+        preparation: &DeliveryPreparation<'_, '_>,
     ) -> Result<SourceReviewReceipt, DeliveryStop> {
         match reconciliation_anchor(
             known,
@@ -277,7 +310,11 @@ impl NativeV2DeliveryAdapter {
         ) {
             Ok(published) => Ok(published),
             Err(error) => {
-                emit(control, &format!("delivery: {error}")).await?;
+                emit(
+                    preparation.control,
+                    &self.redact_feedback(preparation.credentials, format!("delivery: {error}")),
+                )
+                .await?;
                 Err(error.into())
             }
         }
@@ -377,7 +414,7 @@ impl NativeV2DeliveryAdapter {
             SourceReviewState::Closed => {
                 self.refuse_delivery(
                     preparation.control,
-                    "the run PR was closed; no branch or PR mutation was attempted",
+                    &review::closed_review(&receipt_from_observation(review)),
                 )
                 .await
             }
@@ -404,7 +441,8 @@ impl NativeV2DeliveryAdapter {
         let mode = preparation_mode(preparation)?;
         if dirty || head != review.head_revision || !mode.is_merge() {
             return self.refuse_delivery(preparation.control,
-                "the run PR is already merged, but current local work is not confirmed delivered; work was preserved")
+                &format!("{} is already merged at {merge_revision}, but current local work is not confirmed delivered; work was preserved. Resume is refused because this review is merged. Resume can confirm delivery only in merge mode with a clean workspace at the exact reviewed head. Start a new run from target branch {} for remaining work.",
+                    review::review_identity(&receipt_from_observation(review)), review.target_branch))
                 .await;
         }
         let provenance = if self.config.local_branch.is_some() {
@@ -421,7 +459,8 @@ impl NativeV2DeliveryAdapter {
                 .refuse_delivery(
                     preparation.control,
                     &self.redact_feedback(preparation.credentials, format!(
-                        "the merged PR does not prove delivery of the admitted candidate: {error}",
+                        "{} is already merged at {merge_revision}, but does not prove delivery of the admitted candidate: {error}. Resume requires the exact delivered candidate in merge mode with a clean workspace; otherwise start a new run from target branch {}.",
+                        review::review_identity(&receipt_from_observation(review)), review.target_branch,
                     )),
                 )
                 .await;
@@ -592,8 +631,8 @@ fn reconciliation_anchor(
         return Ok(observed.clone());
     }
     Err(SourceDeliveryError::identity(format!(
-        "unexpected existing run branch at {}; no published candidate or pending push proves ownership",
-        observed.head_revision,
+        "unexpected existing run branch {} in project {} targeting {} at {}; no published candidate or pending push proves ownership",
+        observed.head_branch, observed.repository, observed.target_branch, observed.head_revision,
     )))
 }
 

@@ -202,7 +202,18 @@ async fn already_merged_pr_preserves_dirty_or_newer_local_work_without_republish
             );
         }
         let before = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
-        let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+        let execution = run_delivery_execution(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 3,
+                mode: DeliveryMode::Merge,
+                run_id: "delivery-run",
+                refresh: None,
+            },
+            authority.clone(),
+        )
+        .await;
+        let outcome = execution.outcome;
         assert_eq!(
             outcome,
             WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
@@ -226,6 +237,21 @@ async fn already_merged_pr_preserves_dirty_or_newer_local_work_without_republish
             "keep this work\n"
         );
         assert_eq!(authority.review_requests().len(), 1);
+        let diagnostic = execution
+            .output
+            .iter()
+            .rfind(|event| event.diagnostic == Some(FailureDiagnosticKind::Failure))
+            .assert_value();
+        for expected in [
+            "already merged",
+            "Resume is refused",
+            "Start a new run",
+            "acme/project#17",
+            "main",
+            published,
+        ] {
+            assert!(diagnostic.text.contains(expected), "{}", diagnostic.text);
+        }
     }
 }
 
@@ -292,6 +318,20 @@ async fn preflight_retries_reads_but_refuses_unowned_remote_lineage() {
             .text
             .contains("remote branch no longer has lineage-owned ancestry")
     }));
+    let diagnostic = refused
+        .output
+        .iter()
+        .rfind(|event| event.diagnostic == Some(FailureDiagnosticKind::Failure))
+        .assert_value();
+    for expected in [
+        "acme/project#17",
+        "main",
+        &branch,
+        &external_head,
+        "Already published",
+    ] {
+        assert!(diagnostic.text.contains(expected), "{}", diagnostic.text);
+    }
     assert_eq!(
         git_output(&repo.workspace, &["rev-parse", "HEAD"]),
         local_head
@@ -352,6 +392,14 @@ async fn published_branch_deletion_and_unexplained_existing_branch_fail_closed()
                 .iter()
                 .any(|event| event.text.contains(expected))
         );
+        let diagnostic = refused
+            .output
+            .iter()
+            .rfind(|event| event.diagnostic == Some(FailureDiagnosticKind::Failure))
+            .assert_value();
+        for expected in ["acme/project", "main", &branch] {
+            assert!(diagnostic.text.contains(expected), "{}", diagnostic.text);
+        }
         assert_eq!(authority.review_sync_attempts.load(Ordering::SeqCst), 1);
     }
 }
@@ -388,13 +436,26 @@ async fn retained_delivery_honors_terminal_review_state_before_any_new_mutation(
         let index_lock = repo.workspace.join(".git/index.lock");
         fs::write(&index_lock, "another process owns the index\n").assert_value();
 
-        let outcome = run_with_adapter(request(DeliveryMode::Merge), adapter)
-            .await
-            .outcome;
+        let execution = run_with_adapter(request(DeliveryMode::Merge), adapter).await;
+        let outcome = execution.outcome;
         if matches!(script, Script::PreflightMerged) {
             assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
         } else {
             assert_eq!(outcome, expected.assert_value());
+            let diagnostic = execution
+                .output
+                .iter()
+                .rfind(|event| event.diagnostic == Some(FailureDiagnosticKind::Failure))
+                .assert_value();
+            for expected in [
+                "was closed",
+                "Resume is refused",
+                "reopen it",
+                "acme/project#17",
+                "main",
+            ] {
+                assert!(diagnostic.text.contains(expected), "{}", diagnostic.text);
+            }
         }
         assert_eq!(authority.head_updates.load(Ordering::SeqCst), pushes);
         assert_eq!(

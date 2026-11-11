@@ -26,7 +26,9 @@ use crate::native_v2_admission::{
 };
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_cli::local::{create_local_run_storage, local_workspace_lease_path};
-use crate::native_v2_cli::{default_local_state_root, LocalRunProfileStore, NativeV2CliError};
+use crate::native_v2_cli::{
+    default_local_state_root, LocalRunProfileStore, NativeV2CliError, RunFailure,
+};
 use crate::native_v2_platform::{submission_digest, NativeV2PlatformError};
 use crate::native_v2_contract::{AdmittedRun, NodeRuntimeBinding};
 use crate::native_v2_local::{
@@ -42,7 +44,7 @@ use crate::native_v2_supervisor::{
     NativeV2Supervisor, NativeV2SupervisorError, RunEnvironment, RunEnvironmentError,
 };
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
-use crate::v2_run_ledger::{CreateRun, RunLedger, RunLedgerError};
+use crate::v2_run_ledger::{CreateRun, CreateRunOutcome, RunLedger, RunLedgerError};
 
 const ACP_ERROR_INVALID_PARAMS: i32 = -32602;
 const ACP_ERROR_INTERNAL: i32 = -32603;
@@ -642,13 +644,18 @@ impl AcpSession {
         let paths = PortableControllerPaths::new(storage);
         let leases = Arc::new(TurnLeases::acquire(&paths)?);
         let ledger = Arc::new(SqliteRunLedger::open(paths.ledger())?);
-        ledger
+        let mut stored = match ledger
             .create_or_get(CreateRun {
                 run_id: run_id.clone(),
                 submission_key,
                 submission_digest: digest,
                 admitted,
             })
+            .await?
+        {
+            CreateRunOutcome::Created(stored) | CreateRunOutcome::Existing(stored) => stored,
+        };
+        crate::native_v2_supervisor::logging::record_run_version(ledger.as_ref(), &mut stored)
             .await?;
         Ok(PreparedTurn {
             run_id,
@@ -812,12 +819,21 @@ impl TurnResult {
                 raw_output: output,
                 stop_reason: acp::StopReason::EndTurn,
             }),
-            TerminalResult::Failed { reason, .. } => Ok(Self {
-                run_id,
-                raw_output: json!({ "failed": reason.as_str() }),
-                message: Some(format!("Zeroshot run failed: {}", reason.as_str())),
-                stop_reason: acp::StopReason::EndTurn,
-            }),
+            TerminalResult::Failed { reason, context } => {
+                let message = match context {
+                    Some(context) => {
+                        RunFailure::from_context(run_id.clone(), None, (reason.clone(), context))
+                            .to_string()
+                    }
+                    None => format!("Zeroshot run failed: {}", reason.as_str()),
+                };
+                Ok(Self {
+                    run_id,
+                    raw_output: json!({ "failed": reason.as_str() }),
+                    message: Some(message),
+                    stop_reason: acp::StopReason::EndTurn,
+                })
+            }
         }
     }
 

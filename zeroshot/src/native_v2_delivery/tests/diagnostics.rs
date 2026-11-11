@@ -1,6 +1,312 @@
 use super::*;
 
 #[tokio::test]
+async fn resumed_delivery_reports_saved_publication_when_the_first_forge_read_fails() {
+    for published in [false, true] {
+        let repo = TempRepo::delivery();
+        let branch = "feature/recovered-publication";
+        git(&repo.workspace, &["checkout", "-b", branch]);
+        crate::native_v2_candidate::test_support::commit_all(&repo.workspace, "committed work");
+        git(&repo.workspace, &["push", "origin", branch]);
+        let head = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+        let authority = Arc::new(FakeGitHub::new(
+            repo.remote.clone(),
+            Script::PreflightRefusedAfterTransientRead,
+        ));
+        authority
+            .reviews
+            .lock()
+            .assert_value()
+            .push(SourceReviewRequest {
+                include_terminal_reviews: false,
+                known_review: None,
+                target: target(&repo),
+                head_branch: branch.to_owned(),
+                head_revision: head.clone(),
+                title: "Existing review".to_owned(),
+                description: "Committed work.".to_owned(),
+                source_issue: None,
+            });
+        let saved = SourceReviewReceipt {
+            review_id: "17".to_owned(),
+            repository: "acme/project".to_owned(),
+            target_branch: "main".to_owned(),
+            head_branch: branch.to_owned(),
+            head_revision: head.clone(),
+        };
+        let adapter = Arc::new(
+            NativeV2DeliveryAdapter::new(
+                NativeV2DeliveryConfig {
+                    local_branch: Some(branch.to_owned()),
+                    delivery_run_id: RunId::new("recovered-publication"),
+                    adopt_existing_delivery: true,
+                    git_identity: None,
+                    commit_identity: None,
+                    commit_co_author: None,
+                    workspace: repo.workspace.clone(),
+                    git_program: "/usr/bin/git".into(),
+                    target: target(&repo),
+                    poll: DeliveryPollPolicy::new(1, Duration::ZERO).assert_value(),
+                },
+                authority.clone(),
+            )
+            .with_recovered_review(Some(contract::RecoveredReview {
+                review: saved,
+                published,
+            })),
+        );
+        let request = || DeliveryRunRequest {
+            repo: &repo,
+            attempts: 1,
+            mode: DeliveryMode::PullRequestV2,
+            run_id: "recovered-publication",
+            refresh: None,
+        };
+        let failed = run_with_adapter(request(), adapter.clone()).await;
+        assert_eq!(
+            failed.outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)
+        );
+        assert_eq!(authority.delivery_reads.load(Ordering::SeqCst), 1);
+        assert_eq!(authority.target_reconciliations.load(Ordering::SeqCst), 0);
+        assert_eq!(authority.head_updates.load(Ordering::SeqCst), 0);
+        let diagnostic = failed
+            .output
+            .iter()
+            .rfind(|output| output.diagnostic == Some(FailureDiagnosticKind::Failure))
+            .assert_value();
+        for expected in [
+            "Already published",
+            "acme/project#17",
+            "main",
+            branch,
+            &head,
+        ] {
+            assert!(diagnostic.text.contains(expected), "{}", diagnostic.text);
+        }
+        assert!(
+            !diagnostic
+                .text
+                .contains("No publication has been confirmed")
+        );
+        assert!(!diagnostic.text.contains("test-token"));
+        assert_eq!(git_output(&repo.workspace, &["rev-parse", "HEAD"]), head);
+        assert_eq!(git_output(&repo.remote, &["rev-parse", branch]), head);
+
+        let resumed = run_with_adapter(request(), adapter).await;
+        assert_delivery_signal(&resumed.outcome, DELIVERY_READY_LABEL);
+        assert_eq!(
+            authority.target_reconciliations.load(Ordering::SeqCst),
+            usize::from(!published),
+            "restored diagnostics must not promote an observed review to completed publication",
+        );
+    }
+}
+
+#[tokio::test]
+async fn named_preflight_refusals_redact_credentials_even_when_they_match_the_branch() {
+    let repo = TempRepo::delivery();
+    let (authority, adapter) = scripted_adapter(
+        &repo,
+        Script::NoCi,
+        2,
+        DeliveryLineage::original("secret-branch"),
+    );
+    let request = || DeliveryRunRequest {
+        repo: &repo,
+        attempts: 2,
+        mode: DeliveryMode::PullRequest,
+        run_id: "secret-branch",
+        refresh: None,
+    };
+    let opened = run_with_adapter(request(), adapter).await.outcome;
+    assert_delivery_signal(&opened, DELIVERY_OPENED_LABEL);
+    let fresh = retained_adapter(
+        &repo,
+        authority,
+        DeliveryPollPolicy::new(2, Duration::ZERO).assert_value(),
+        DeliveryLineage::original("secret-branch"),
+    );
+    let branch = delivery_head_branch(&RunId::new("secret-branch"));
+    let refused = run_with_adapter_token(
+        request(),
+        fresh,
+        PullRequestFeedback::Consider,
+        Some(&branch),
+    )
+    .await;
+    assert_eq!(
+        refused.outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+    );
+    for output in refused.output {
+        assert!(!output.text.contains(&branch), "{}", output.text);
+    }
+}
+
+#[tokio::test]
+async fn named_refusals_redact_native_and_declared_git_credentials_without_node_connections() {
+    use openengine_cluster_protocol::GitTransportCredentials;
+
+    for native in [false, true] {
+        let repo = TempRepo::delivery();
+        let (authority, adapter) = scripted_adapter(
+            &repo,
+            Script::NoCi,
+            2,
+            DeliveryLineage::original("native-secret-branch"),
+        );
+        let request = || DeliveryRunRequest {
+            repo: &repo,
+            attempts: 2,
+            mode: DeliveryMode::PullRequest,
+            run_id: "native-secret-branch",
+            refresh: None,
+        };
+        assert_delivery_signal(
+            &run_with_adapter(request(), adapter).await.outcome,
+            DELIVERY_OPENED_LABEL,
+        );
+        let branch = delivery_head_branch(&RunId::new("native-secret-branch"));
+        let fresh = retained_adapter(
+            &repo,
+            authority,
+            DeliveryPollPolicy::new(2, Duration::ZERO).assert_value(),
+            DeliveryLineage::original("native-secret-branch"),
+        );
+        let fresh = (*fresh)
+            .clone()
+            .with_trusted_github_token(Some(Arc::from("test-token")));
+        let fresh = if native {
+            fresh.with_local_git_environment(Some(BTreeMap::from([
+                ("GIT_PASSWORD".to_owned(), branch.clone()),
+                ("PUBLIC_VALUE".to_owned(), "main".to_owned()),
+            ])))
+        } else {
+            fresh.with_git_credentials(Some(GitTransportCredentials::Https {
+                username: "native-user".to_owned(),
+                password: branch.clone(),
+            }))
+        };
+        let refused = run_with_adapter_token(
+            request(),
+            Arc::new(fresh),
+            PullRequestFeedback::Consider,
+            None,
+        )
+        .await;
+        assert_eq!(
+            refused.outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+        );
+        for output in &refused.output {
+            assert!(!output.text.contains(&branch), "{}", output.text);
+        }
+        let terminal = refused
+            .output
+            .iter()
+            .find(|output| output.diagnostic == Some(FailureDiagnosticKind::Failure))
+            .assert_value();
+        for expected in ["Already published", "[REDACTED]", "main", "acme/project#17"] {
+            assert!(terminal.text.contains(expected), "{}", terminal.text);
+        }
+    }
+}
+
+#[tokio::test]
+async fn failed_delivery_names_confirmed_publication_before_and_after_review_creation() {
+    for script in [Script::PolicyForbidden, Script::ReviewIdentityMismatch] {
+        let repo = TempRepo::delivery();
+        let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
+        let execution = run_delivery_execution(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 2,
+                mode: DeliveryMode::PullRequestV2,
+                run_id: "publication-diagnostic",
+                refresh: None,
+            },
+            authority,
+        )
+        .await;
+        let branch = delivery_head_branch(&RunId::new("publication-diagnostic"));
+        let head = git_output(&repo.remote, &["rev-parse", &branch]);
+        let final_error = execution
+            .output
+            .iter()
+            .rfind(|output| output.diagnostic == Some(FailureDiagnosticKind::Failure))
+            .assert_value();
+        for expected in ["Already published", "acme/project", "main", &branch, &head] {
+            assert!(final_error.text.contains(expected), "{}", final_error.text);
+        }
+        let review = if matches!(script, Script::PolicyForbidden) {
+            "review acme/project#17"
+        } else {
+            "review not confirmed"
+        };
+        assert!(final_error.text.contains(review), "{}", final_error.text);
+        assert!(!final_error.text.contains("test-token"));
+    }
+}
+
+#[tokio::test]
+async fn repair_push_updates_diagnostics_without_advancing_withdrawal_authority() {
+    let repo = TempRepo::delivery();
+    let (authority, adapter) = scripted_adapter(
+        &repo,
+        Script::CiFailed,
+        2,
+        DeliveryLineage::original("repair-publication"),
+    );
+    let request = || DeliveryRunRequest {
+        repo: &repo,
+        attempts: 2,
+        mode: DeliveryMode::MergeV3,
+        run_id: "repair-publication",
+        refresh: None,
+    };
+    let initial = run_with_adapter(request(), adapter.clone()).await.outcome;
+    let original_head = assert_delivery_signal(&initial, DELIVERY_CI_FAILED_LABEL)["headRevision"]
+        .as_str()
+        .assert_value()
+        .to_owned();
+    fs::write(repo.workspace.join("result.txt"), "repaired candidate\n").assert_value();
+    authority.reject_review_sync.store(true, Ordering::SeqCst);
+    authority.queue_live.store(true, Ordering::SeqCst);
+    authority.withdrawal_allowed.store(false, Ordering::SeqCst);
+    let mut handle = start_with_adapter_token(
+        request(),
+        adapter,
+        PullRequestFeedback::Consider,
+        Some("test-token"),
+    )
+    .await;
+    let error = handle.completion().await.unwrap_err();
+    let branch = delivery_head_branch(&RunId::new("repair-publication"));
+    let repaired_head = git_output(&repo.remote, &["rev-parse", &branch]);
+    assert_ne!(original_head, repaired_head);
+    let text = error.to_string();
+    assert!(
+        text.contains(&format!("head revision {repaired_head}")),
+        "{text}"
+    );
+    for expected in [
+        "Already published",
+        "acme/project#17",
+        &branch,
+        "main",
+        "Original delivery result: delivery failed with crash",
+    ] {
+        assert!(text.contains(expected), "{text}");
+    }
+    assert!(!text.contains("test-token"), "{text}");
+    assert!(!text.contains("Error {"), "{text}");
+    assert!(!text.contains("Api("), "{text}");
+    let withdrawn = authority.withdrawn_reviews.lock().unwrap();
+    assert_eq!(withdrawn.last().unwrap().head_revision, original_head);
+}
+
+#[tokio::test]
 async fn exhausted_delivery_loops_retain_latest_verifier_evidence() {
     use crate::v2_run_ledger::RunEvent;
 

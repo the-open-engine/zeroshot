@@ -1,6 +1,8 @@
 use serde_json::Value;
 
-use crate::native_v2_capsule::provider_json_lines::{ProviderJsonLine, ProviderJsonLines};
+use crate::native_v2_capsule::provider_json_lines::{
+    ProviderJsonLine, ProviderJsonLines, parse_provider_json,
+};
 use crate::native_v2_contract::{TokenUsageDelta, parse_token_usage_delta};
 use crate::native_v2_runner::{LiveOutputStream, NodeRunnerError};
 
@@ -55,6 +57,10 @@ enum AcceptedLine {
 }
 
 impl CodexOutputDecoder {
+    pub(super) fn is_completed(&self) -> bool {
+        self.output.is_completed()
+    }
+
     pub(super) fn new() -> Self {
         Self {
             lines: ProviderJsonLines::new(),
@@ -148,6 +154,13 @@ impl CodexOutput {
         self.terminal.is_some()
     }
 
+    pub(super) fn is_completed(&self) -> bool {
+        self.terminal == Some(CodexTerminal::Completed)
+            && self.final_message.is_some()
+            && self.thread_failure.is_none()
+            && self.failure.is_none()
+    }
+
     fn finalize(&mut self) {
         self.finalize_terminal();
         self.prepend_thread_failure();
@@ -222,13 +235,10 @@ impl CodexOutput {
     }
 
     fn accept_bytes(&mut self, line: &[u8]) -> AcceptedLine {
-        let Ok(line) = std::str::from_utf8(line) else {
-            return AcceptedLine::Malformed;
-        };
-        if line.trim().is_empty() {
+        if line.iter().all(u8::is_ascii_whitespace) {
             return AcceptedLine::Ignored;
         }
-        let Ok(event) = serde_json::from_str::<Value>(line) else {
+        let Ok(event) = parse_provider_json(line) else {
             return AcceptedLine::Malformed;
         };
         let Some(event_type) = event.get("type").and_then(Value::as_str) else {
