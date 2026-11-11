@@ -197,6 +197,8 @@ impl LaterWork {
     }
 }
 
+/// Coverage builds write LLVM profiles into the checkout, the working directory of every CLI and
+/// controller process whose environment drops `LLVM_PROFILE_FILE`; they are not the user's work.
 fn workspace_status(repository: &Path) -> String {
     git(
         repository,
@@ -205,6 +207,9 @@ fn workspace_status(repository: &Path) -> String {
             "--porcelain",
             "--ignored",
             "--untracked-files=all",
+            "--",
+            ".",
+            ":(exclude)*.profraw",
         ],
     )
 }
