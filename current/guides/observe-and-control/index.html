@@ -2606,37 +2606,50 @@ atomically without overwriting a competing file. It waits for the entire HTTP tr
 its framing, even after a complete tar has arrived. Transfer failures and Ctrl-C remove temporary
 output and fail the command. The archive is never extracted and its contents are never executed.</p>
 <h2 id="restart-or-resume-a-failed-run">Restart or resume a failed run<a class="headerlink" href="#restart-or-resume-a-failed-run" title="Permanent link">&para;</a></h2>
-<p>Failed local runs and direct targets retain their workspace. Restart the original graph using its
-latest files with:</p>
+<p>Failed local runs and direct targets retain their workspace. Restart the original graph at its root
+with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot resume RUN_ID</span>
 </code></pre></div>
+<p>A local restart uses your checkout as it is now. You can fix files after a failure and resume:
+commits, staged and unstaged edits, untracked and ignored files, the current branch, and the index
+are kept. Agents then change the checkout as in any run. Named targets restart on the latest
+snapshot of their own retained workspace.</p>
 <p>To resume at an earlier node, list its available input checkpoints and select one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-changes</span>
 </code></pre></div>
-<p>Add <code>--target NAME</code> to both commands for a named target. Checkpoint listings are paginated; use
-<code>--after CHECKPOINT_ID</code> with the returned <code>nextAfter</code> value to fetch the next page.</p>
+<p>Restoring a local checkpoint rolls back your checkout, so it requires <code>--discard-workspace-changes</code>.
+The checkpoint replaces tracked, staged, untracked, and ignored files and the checkout's own Git
+state, such as HEAD and the index. Without the flag the resume fails before it changes anything and
+shows the command to opt in. Branches, tags, commits, Git configuration, and other worktrees are
+kept, so later commits stay reachable from their branch while HEAD is detached at the checkpoint's
+commit.</p>
+<p>For a named target, add <code>--target NAME</code> to both commands and omit <code>--discard-workspace-changes</code>:
+the target restores its own retained copy, never your checkout. Checkpoint listings are paginated;
+use <code>--after CHECKPOINT_ID</code> with the returned <code>nextAfter</code> value to fetch the next page.</p>
 <p>A selected checkpoint restores the files from immediately before its node and the completed
 prerequisite outputs. The selected node runs again. Parallel and mapped groups have one checkpoint
 for the whole outer group, including nested groups and all mapped batches; individual concurrent
 writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.</p>
 <p>Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
 resolve credentials again. The successor does not inherit provider sessions, secrets, or previous
-token usage. Selecting a checkpoint replaces later workspace edits, including untracked and ignored
-files. Restart restores the latest completed snapshot and starts the graph at its root. A sudden
-target loss can precede the next snapshot boundary, so the last writer may run again. Local workspaces
-must be idle while they are restored.</p>
-<p>A local resume restores the snapshot before any agent starts. That preparation may take up to 10
-minutes. For larger workspaces or slower disks, set <code>ZEROSHOT_PREPARATION_TIMEOUT</code> to a whole number
-of seconds from 1 to 86400 before <code>zeroshot resume</code>. When a restore fails, or its extraction reaches
-that deadline, the error names the step that stopped and its elapsed time. Replacing the workspace
-files, once started, is allowed to finish. If it is still running 30 seconds after the deadline,
-the resume is stopped with an error that names the deadline. Either way the run stays recoverable.</p>
+token usage. A sudden target loss can precede the next snapshot boundary, so the last writer may run
+again. Local workspaces must be idle while they are restored.</p>
+<p>A local checkpoint resume restores the snapshot before any agent starts. That preparation may take
+up to 10 minutes. For larger workspaces or slower disks, set <code>ZEROSHOT_PREPARATION_TIMEOUT</code> to a
+whole number of seconds from 1 to 86400 before <code>zeroshot resume</code>. When a restore fails, or its
+extraction reaches that deadline, the error names the step that stopped and its elapsed time.
+Replacing the workspace files, once started, is allowed to finish. If it is still running 30 seconds
+after the deadline, the resume is stopped with an error that names the deadline. Either way the run
+stays recoverable.</p>
 <p>A restore never changes the checkout before the complete snapshot is extracted. If a crash
-interrupts it while it replaces files, the checkout can stay partially restored. The next
-<code>zeroshot resume</code> then removes the interrupted staging copy beside the workspace. It finishes the
-restore with the same or another checkpoint before any agent runs. A resume that would start
-without restoring a snapshot is refused until a restore completes.</p>
+interrupts it while it replaces files, the checkout can stay partially restored. A plain
+<code>zeroshot resume</code> is then refused until a restore completes, so no agent runs on a partial
+checkout. Repeat the interrupted command, or select another checkpoint with
+<code>--discard-workspace-changes</code>. That resume removes the interrupted staging copy beside the
+workspace and finishes the restore before any agent runs. Earlier releases also restored the latest
+snapshot on a plain resume; complete such an interrupted restore with
+<code>zeroshot resume RUN_ID --discard-workspace-changes</code>, which installs the same snapshot again.</p>
 <p>Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise <code>openengine.workspace-checkpoints/v1</code>. They retain that repository only for a
 failed recovery lineage and delete it after a successful run. Force-stopping a local run also

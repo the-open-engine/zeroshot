@@ -4894,7 +4894,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <h3 id="zeroshot-resume"><code>zeroshot resume</code><a class="headerlink" href="#zeroshot-resume" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a>Start a new attempt from a failed run's retained workspace or a saved checkpoint.
 <a id="__codelineno-54-2" name="__codelineno-54-2" href="#__codelineno-54-2"></a>
-<a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a>By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves its original connection requirements again; make those credentials available.
+<a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a>By default, restart the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. The successor resolves its original connection requirements again; make those credentials available.
 <a id="__codelineno-54-4" name="__codelineno-54-4" href="#__codelineno-54-4"></a>
 <a id="__codelineno-54-5" name="__codelineno-54-5" href="#__codelineno-54-5"></a>Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 <a id="__codelineno-54-6" name="__codelineno-54-6" href="#__codelineno-54-6"></a>
@@ -4911,13 +4911,18 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-54-17" name="__codelineno-54-17" href="#__codelineno-54-17"></a>      --from-checkpoint &lt;ID&gt;
 <a id="__codelineno-54-18" name="__codelineno-54-18" href="#__codelineno-54-18"></a>          Restore this checkpoint and continue from its saved graph boundary
 <a id="__codelineno-54-19" name="__codelineno-54-19" href="#__codelineno-54-19"></a>
-<a id="__codelineno-54-20" name="__codelineno-54-20" href="#__codelineno-54-20"></a>      --forward-gh-token
-<a id="__codelineno-54-21" name="__codelineno-54-21" href="#__codelineno-54-21"></a>          Send the GH_TOKEN from this shell with the resume.
+<a id="__codelineno-54-20" name="__codelineno-54-20" href="#__codelineno-54-20"></a>      --discard-workspace-changes
+<a id="__codelineno-54-21" name="__codelineno-54-21" href="#__codelineno-54-21"></a>          Allow a local checkpoint restore to replace the current checkout.
 <a id="__codelineno-54-22" name="__codelineno-54-22" href="#__codelineno-54-22"></a>
-<a id="__codelineno-54-23" name="__codelineno-54-23" href="#__codelineno-54-23"></a>          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
+<a id="__codelineno-54-23" name="__codelineno-54-23" href="#__codelineno-54-23"></a>          The checkpoint replaces tracked, staged, untracked, and ignored files and the checkout's own Git state, such as HEAD and the index. Branches, commits, and Git configuration are kept. Named targets restore their own retained copy and do not accept this flag.
 <a id="__codelineno-54-24" name="__codelineno-54-24" href="#__codelineno-54-24"></a>
-<a id="__codelineno-54-25" name="__codelineno-54-25" href="#__codelineno-54-25"></a>  -h, --help
-<a id="__codelineno-54-26" name="__codelineno-54-26" href="#__codelineno-54-26"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-54-25" name="__codelineno-54-25" href="#__codelineno-54-25"></a>      --forward-gh-token
+<a id="__codelineno-54-26" name="__codelineno-54-26" href="#__codelineno-54-26"></a>          Send the GH_TOKEN from this shell with the resume.
+<a id="__codelineno-54-27" name="__codelineno-54-27" href="#__codelineno-54-27"></a>
+<a id="__codelineno-54-28" name="__codelineno-54-28" href="#__codelineno-54-28"></a>          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
+<a id="__codelineno-54-29" name="__codelineno-54-29" href="#__codelineno-54-29"></a>
+<a id="__codelineno-54-30" name="__codelineno-54-30" href="#__codelineno-54-30"></a>  -h, --help
+<a id="__codelineno-54-31" name="__codelineno-54-31" href="#__codelineno-54-31"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-checkpoints"><code>zeroshot checkpoints</code><a class="headerlink" href="#zeroshot-checkpoints" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>List one page of a run's saved workspace checkpoints as JSON.
@@ -5042,7 +5047,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-10">10 November 2026</time>
+    Last updated <time datetime="2026-11-11">11 November 2026</time>
   </span>
 
     
