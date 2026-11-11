@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 fn user(login: &str) -> UserWire {
     UserWire {
+        node_id: None,
         id: 1,
         kind: Some("User".to_owned()),
         login: login.to_owned(),

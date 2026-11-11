@@ -1113,8 +1113,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   reconcile them even when the conversation reports resolved. Confirmed revisions remain checked
   across later repairs independently of the latest `reviewResponses`, including an empty array.
   Delivery exports credential-free, provider-owned reply/revision receipts through a private runner
-  event into execution history. Before resolving a conversation, the provider awaits its
-  `SourceReviewCheckpoint` capability after recording the exact reply/revision; settlement updates
+  event into execution history. Before posting a reply, the provider awaits its
+  `SourceReviewCheckpoint` capability for a compact intent binding the authenticated delivery actor,
+  unique response-body hash and approved revision. An uncertain POST reconciles only a unique exact
+  actor/body match on that thread; absent or ambiguous evidence blocks delivery without repeating the
+  POST or dispatching repair. A definitive HTTP 401 refusal durably retires the unposted intent
+  before returning the original authentication error to the existing credential refresh/retry path;
+  failed retirement acknowledgement blocks that retry. Normal publication acknowledges the returned reply ID before resolution;
+  recovery may derive that ID from the already acknowledged intent. Settlement updates
   are acknowledged before delivery continues. Enqueueing or reading an event is not acknowledgement:
   only the trusted supervisor acknowledges after ledger append, through the private capsule channel
   when applicable. Read-side reconciliation cannot resolve an unacknowledged in-memory receipt.
@@ -1140,7 +1146,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   threads; if a reconstructed authority cannot prove a changed resolved revision, it reopens the exact
   conversation for reassessment using the existing graph checkpoint rather than accepting its flag.
   Unchanged unresolved conversations still block
-  delivery; unauthorized participants require an explicit maintainer resolution, never agent repair.
+  delivery; unauthorized participants require an explicit maintainer resolution, never agent repair,
+  even when the same conversation also contains authorized findings. This gate precedes reply effects
+  and repair handoff.
   `pullRequestFeedback: ignore` suppresses repair and responses but keeps unresolved-conversation gates.
   Recognized merge conversation rejections require fresh exact-head blocker evidence before returning
   to this gate; other API/authentication/policy failures keep their existing handling. Merge withdrawal

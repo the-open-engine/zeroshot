@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-assert os.environ.get('GH_TOKEN') == 'test-token'
+assert os.environ.get('GH_TOKEN') in ('test-token', 'refreshed-token')
 path = Path(sys.argv[0] + '.state')
 state = json.loads(path.read_text())
 args = sys.argv[1:]
@@ -53,6 +53,8 @@ if endpoint.startswith(f'{prefix}/collaborators/'):
     emit({'permission': 'write' if author['id'] == 900 else state.get('permission', 'read'), 'user': author})
 if endpoint != 'graphql':
     raise RuntimeError(endpoint)
+if query == 'query { viewer { id } }':
+    emit({'data': {'viewer': {'id': 'USER_delivery'}}})
 if 'ReviewConversations' in query:
     nodes = [{'id': thread['id'], 'isResolved': thread['resolved'], 'comments': {'totalCount': len(thread['comments']), 'nodes': [{'fullDatabaseId': str(thread['comments'][0]['id'])}]}} for thread in threads]
     emit([{'data': {'repository': {'nameWithOwner': repo, 'pullRequest': {
@@ -62,9 +64,15 @@ if 'ReviewConversations' in query:
 thread_id = next((arg[7:] for arg in args if arg.startswith('thread=')), None)
 thread = next((thread for thread in threads if thread['id'] == thread_id), None)
 if 'addPullRequestReviewThreadReply' in query:
+    if state.get('require_fresh_reply') and os.environ['GH_TOKEN'] != 'refreshed-token':
+        save()
+        print('HTTP 401: Bad credentials', file=sys.stderr)
+        sys.exit(1)
+    if state.pop('reject_reply', False):
+        unavailable()
     body = next(arg[5:] for arg in args if arg.startswith('body='))
     reply = dict(thread['comments'][0])
-    reply.update(id=max(900, max(comment['id'] for entry in threads for comment in entry['comments'])) + 1, user={'id': 900, 'login': 'delivery', 'type': 'User'}, body=body, in_reply_to_id=thread['comments'][0]['id'])
+    reply.update(id=max(900, max(comment['id'] for entry in threads for comment in entry['comments'])) + 1, user={'id': 900, 'node_id': 'USER_delivery', 'login': 'delivery', 'type': 'User'}, body=body, in_reply_to_id=thread['comments'][0]['id'])
     thread['comments'].append(reply)
     if state.get('race') == 'edit_after_reply':
         thread['comments'][0]['body'] += ' Additional finding.'
@@ -72,6 +80,8 @@ if 'addPullRequestReviewThreadReply' in query:
         extra = dict(thread['comments'][0])
         extra.update(id=800, in_reply_to_id=thread['comments'][0]['id'], body='Another substantive finding.')
         thread['comments'].append(extra)
+    if state.pop('lose_reply_response', False):
+        unavailable()
     emit({'data': {'addPullRequestReviewThreadReply': {'comment': {'fullDatabaseId': str(reply['id'])}}}})
 if 'resolveReviewThread' in query:
     unresolve = 'unresolveReviewThread' in query

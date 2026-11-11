@@ -21,7 +21,7 @@ struct PendingResolution {
     checkpointed: bool,
     version: String,
     response_hash: String,
-    reply: u64,
+    reply: Option<u64>,
     body_hash: String,
     author: u64,
     confirmed: bool,
@@ -132,7 +132,12 @@ pub(super) async fn reconcile_resolutions(
     }
     let mut changed = false;
     for key in keys {
-        let result = settle(authority, (receipt, &key.4, &pending[&key]), credential).await?;
+        let result = settle(
+            authority,
+            (receipt, &key.4, pending.get_mut(&key).unwrap()),
+            credential,
+        )
+        .await?;
         changed |= result == SourceReviewResolution::Changed;
         settled(&mut pending, &key, result);
     }
@@ -207,7 +212,12 @@ pub(super) async fn resolve(
     if let Some(attempt) = pending.get(&key) {
         if attempt.response_hash == response_hash || !attempt.confirmed {
             acknowledge(authority, &mut pending, checkpoint).await?;
-            let result = settle(authority, (receipt, &key.4, &pending[&key]), credential).await?;
+            let result = settle(
+                authority,
+                (receipt, &key.4, pending.get_mut(&key).unwrap()),
+                credential,
+            )
+            .await?;
             settled(&mut pending, &key, result);
             acknowledge(authority, &mut pending, checkpoint).await?;
             if result == SourceReviewResolution::Changed
@@ -253,10 +263,11 @@ pub(super) async fn resolve(
     ];
     let mut post_segments = segments.to_vec();
     post_segments.push("notes");
-    let body = super::comment::literal_body(&format!(
-        "{:?}: {}",
-        response.disposition, response.response
-    ));
+    let body = super::comment::literal_body(&review_responses::reply_body(response));
+    let author = crate::source_code_provider::SourceCommentAuthority::actor(authority, credential)
+        .await?
+        .parse::<u64>()
+        .map_err(|_| SourceDeliveryError::Rejected)?;
     let mut reserved = pending.clone();
     reserved.insert(
         key.clone(),
@@ -264,28 +275,47 @@ pub(super) async fn resolve(
             checkpointed: false,
             version: response.version.clone(),
             response_hash: response_hash.clone(),
-            reply: u64::MAX,
+            reply: Some(u64::MAX),
             body_hash: review_responses::hash(&body),
-            author: u64::MAX,
+            author,
             confirmed: false,
         },
     );
     review_responses::checkpoint(&Checkpoint {
-        gitlab: reserved.into_iter().collect(),
+        gitlab: reserved
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
         replies: authority.published_replies.with_reserved_reply(
             receipt,
             &response.thread_id,
             &body,
         )?,
     })?;
-    let reply: wire::Note = authority
+    let mut intent = reserved.remove(&key).unwrap();
+    intent.reply = None;
+    pending.insert(key.clone(), intent);
+    acknowledge(authority, &mut pending, checkpoint).await?;
+    let posted = authority
         .api
-        .json(
+        .json::<wire::Note>(
             ApiRequest::write(&post_segments, Method::POST, json!({"body":body})),
             credential,
         )
-        .await?;
-    if reply.id == 0 || reply.body != body || reply.system {
+        .await;
+    let reply = match posted {
+        Ok(reply) => reply,
+        Err(error) => {
+            if error.api_status() == Some(401) {
+                // A completed authentication refusal proves no reply was published.
+                // Retire its intent durably before allowing the normal credential retry.
+                pending.remove(&key);
+                acknowledge(authority, &mut pending, checkpoint).await?;
+            }
+            return Err(error);
+        }
+    };
+    if reply.id == 0 || reply.body != body || reply.system || reply.author.id != author {
         return Err(SourceDeliveryError::identity(
             "GitLab returned invalid response identity",
         ));
@@ -293,20 +323,16 @@ pub(super) async fn resolve(
     authority
         .published_replies
         .record(receipt, &response.thread_id, (reply.id, &body))?;
-    pending.insert(
-        key.clone(),
-        PendingResolution {
-            checkpointed: false,
-            version: response.version.clone(),
-            response_hash,
-            reply: reply.id,
-            body_hash: review_responses::hash(&body),
-            author: reply.author.id,
-            confirmed: false,
-        },
-    );
+    let intent = pending.get_mut(&key).unwrap();
+    intent.reply = Some(reply.id);
+    intent.checkpointed = false;
     acknowledge(authority, &mut pending, checkpoint).await?;
-    let result = settle(authority, (receipt, &key.4, &pending[&key]), credential).await?;
+    let result = settle(
+        authority,
+        (receipt, &key.4, pending.get_mut(&key).unwrap()),
+        credential,
+    )
+    .await?;
     settled(&mut pending, &key, result);
     acknowledge(authority, &mut pending, checkpoint).await?;
     Ok(result)
@@ -314,11 +340,26 @@ pub(super) async fn resolve(
 
 async fn settle(
     authority: &GitLabDeliveryAuthority,
-    input: (&SourceReviewReceipt, &str, &PendingResolution),
+    input: (&SourceReviewReceipt, &str, &mut PendingResolution),
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewResolution, SourceDeliveryError> {
     let (receipt, id, pending) = input;
     let current = current_discussion(authority, (receipt, id), credential).await?;
+    if pending.reply.is_none() {
+        let reply = review_responses::unique_reply(current.notes.iter().filter_map(|note| {
+            (!note.system
+                && note.author.id == pending.author
+                && review_responses::hash(&note.body) == pending.body_hash)
+                .then_some(note.id)
+        }))?;
+        let note = current.notes.iter().find(|note| note.id == reply).unwrap();
+        authority
+            .published_replies
+            .record(receipt, id, (reply, &note.body))?;
+        // The durable intent binds the actor and unique body before the POST, so this
+        // ID refinement can be reconstructed without granting any new authority.
+        pending.reply = Some(reply);
+    }
     if !unchanged(&current, pending)? {
         return reopen(authority, (receipt, id, &current), credential).await;
     }
@@ -327,11 +368,9 @@ async fn settle(
     }
     // A retried write still requires fresh membership for the original participants.
     let mut permissions = BTreeMap::new();
-    for note in current
-        .notes
-        .iter()
-        .filter(|note| !note.system && note.id != pending.reply && !note.body.trim().is_empty())
-    {
+    for note in current.notes.iter().filter(|note| {
+        !note.system && Some(note.id) != pending.reply && !note.body.trim().is_empty()
+    }) {
         let allowed = match permissions.get(&note.author.id) {
             Some(allowed) => *allowed,
             None => {
@@ -362,14 +401,12 @@ fn unchanged(
     current: &wire::Discussion,
     pending: &PendingResolution,
 ) -> Result<bool, SourceDeliveryError> {
-    Ok(
-        version(&current.notes, Some(pending.reply))? == pending.version
-            && current.notes.iter().any(|note| {
-                note.id == pending.reply
-                    && review_responses::hash(&note.body) == pending.body_hash
-                    && note.author.id == pending.author
-            }),
-    )
+    Ok(version(&current.notes, pending.reply)? == pending.version
+        && current.notes.iter().any(|note| {
+            Some(note.id) == pending.reply
+                && review_responses::hash(&note.body) == pending.body_hash
+                && note.author.id == pending.author
+        }))
 }
 
 fn unresolved(discussion: &wire::Discussion) -> bool {

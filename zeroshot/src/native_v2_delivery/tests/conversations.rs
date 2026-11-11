@@ -165,6 +165,16 @@ async fn unauthorized_blocking_conversations_never_trigger_repair_or_resolution(
 }
 
 #[tokio::test]
+async fn mixed_authorized_and_unauthorized_participants_require_a_maintainer_before_repair() {
+    run_conversation_loop("Bot", false, Some("mixed_participants")).await;
+}
+
+#[tokio::test]
+async fn lost_reply_acknowledgement_reconciles_without_another_worker_or_review_pass() {
+    run_conversation_loop("Bot", true, Some("lose_reply_response")).await;
+}
+
+#[tokio::test]
 async fn interrupted_resolution_of_an_edited_thread_requires_another_repair_and_both_reviews() {
     run_conversation_loop("Bot", true, Some("edit_after_resolve")).await;
 }
@@ -193,7 +203,20 @@ async fn run_conversation_loop(kind: &str, respond: bool, race: Option<&str>) {
     let mut data = state(&program);
     data["move_positions"] = json!(true);
     let ci_repair = race == Some("edit_during_ci_repair");
-    if let Some(race) = race.filter(|_| !ci_repair) {
+    let mixed = race == Some("mixed_participants");
+    if mixed {
+        let mut reply = data["threads"][0]["comments"][0].clone();
+        reply["id"] = json!(42);
+        reply["in_reply_to_id"] = json!(41);
+        reply["user"] = json!({"id":9,"login":"reader","type":"User"});
+        reply["body"] = json!("An unauthorized request.");
+        data["threads"][0]["comments"]
+            .as_array_mut()
+            .unwrap()
+            .push(reply);
+    } else if race == Some("lose_reply_response") {
+        data["lose_reply_response"] = json!(true);
+    } else if let Some(race) = race.filter(|_| !ci_repair) {
         data["race"] = json!(race);
         data["fail_confirmation_reads"] = json!(1);
     }
@@ -295,7 +318,7 @@ async fn run_conversation_loop(kind: &str, respond: bool, race: Option<&str>) {
     let untrusted_reply = race == Some("unauthorized_reply_after_resolve");
     let expected_merge = respond && !untrusted_reply;
     let expected_repairs =
-        usize::from(kind == "Bot") + usize::from(edited) + usize::from(ci_repair);
+        usize::from(kind == "Bot" && !mixed) + usize::from(edited) + usize::from(ci_repair);
     assert_eq!(
         matches!(terminal, TerminalResult::Succeeded { .. }),
         expected_merge,
@@ -317,11 +340,11 @@ async fn run_conversation_loop(kind: &str, respond: bool, race: Option<&str>) {
     assert_eq!(data["threads"][0]["resolved"], expected_merge);
     assert_eq!(
         data["threads"][0]["comments"].as_array().unwrap().len(),
-        1 + usize::from(respond) + usize::from(edited || untrusted_reply)
+        1 + usize::from(respond) + usize::from(edited || untrusted_reply || mixed)
     );
     if !respond || untrusted_reply {
         assert!(
-            format!("{terminal:?}").contains(if kind == "User" || untrusted_reply {
+            format!("{terminal:?}").contains(if kind == "User" || untrusted_reply || mixed {
                 "automated repair and resolution are not authorized"
             } else {
                 "previously forwarded feedback is not resolution"

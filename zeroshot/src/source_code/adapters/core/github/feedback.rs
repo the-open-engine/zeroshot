@@ -8,6 +8,8 @@ const MAX_FEEDBACK_ITEMS: usize = 100_000;
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
 pub(super) struct UserWire {
     pub(super) id: u64,
+    #[serde(default)]
+    pub(super) node_id: Option<String>,
     pub(super) login: String,
     #[serde(default, rename = "type")]
     pub(super) kind: Option<String>,

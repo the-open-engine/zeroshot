@@ -24,6 +24,13 @@ pub(super) fn conversation_response(
         return Json(json!([thread])).into_response();
     }
     if method == Method::POST {
+        if state.conversation_race.as_deref() == Some("reject_reply") {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"message":"Reply unavailable"})),
+            )
+                .into_response();
+        }
         let next_id = thread["notes"]
             .as_array()
             .unwrap()
@@ -39,6 +46,13 @@ pub(super) fn conversation_response(
         thread["notes"].as_array_mut().unwrap().push(reply.clone());
         if state.conversation_race.as_deref() == Some("edit_after_reply") {
             thread["notes"][0]["body"] = json!("Edited finding.");
+        }
+        if std::mem::take(&mut state.lose_reply_response) {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"message":"Reply acknowledgement lost"})),
+            )
+                .into_response();
         }
         return Json(reply).into_response();
     }
@@ -1046,6 +1060,10 @@ async fn gitlab_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
         .await
         .unwrap();
     let response = response(&feedback);
+    let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint {
+        fail_at: Some(2),
+        ..Default::default()
+    };
     assert!(
         fixture
             .authority
@@ -1053,7 +1071,7 @@ async fn gitlab_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
                 crate::source_code_provider::SourceReviewResolutionRequest {
                     review: &receipt(),
                     response: &response,
-                    checkpoint: &crate::source_code_provider::RefuseReviewCheckpoint,
+                    checkpoint: &checkpoint,
                 },
                 credential()
             )
@@ -1092,4 +1110,373 @@ async fn gitlab_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
         SourceReviewResolution::Resolved
     );
     assert_eq!(fixture.writes("/discussions/thread/notes"), 1);
+}
+
+#[tokio::test]
+async fn gitlab_lost_reply_acknowledgement_reconciles_durable_intent_after_recovery() {
+    for recover in [false, true] {
+        for changed in [false, true] {
+            let fixture = Fixture::new().await;
+            prepare(&fixture);
+            let before = fixture
+                .authority
+                .inspect_review_feedback(&receipt(), credential())
+                .await
+                .unwrap();
+            let response = response(&before);
+            let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint::default();
+            {
+                let mut data = fixture.state.lock().unwrap();
+                data.lose_reply_response = true;
+                if changed {
+                    data.conversation_race = Some("edit_after_reply".into());
+                }
+            }
+            assert!(
+                fixture
+                    .authority
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &checkpoint,
+                        },
+                        credential(),
+                    )
+                    .await
+                    .is_err()
+            );
+            let durable = checkpoint.states.lock().unwrap()[0].clone();
+            assert_eq!(durable["gitlab"][0][1]["reply"], Value::Null);
+            assert!(durable["replies"].as_array().unwrap().is_empty());
+            let mut recovered =
+                GitLabDeliveryAuthority::new(fixture.authority.base_url.clone(), None).unwrap();
+            recovered.api = fixture.authority.api.clone();
+            let current = if recover {
+                recovered
+                    .restore_review_conversation_state(durable)
+                    .await
+                    .unwrap();
+                &recovered
+            } else {
+                &fixture.authority
+            };
+            if !recover {
+                assert_eq!(
+                    current
+                        .resolve_review_conversation(
+                            crate::source_code_provider::SourceReviewResolutionRequest {
+                                review: &receipt(),
+                                response: &response,
+                                checkpoint: &crate::source_code_provider::TestReviewCheckpoint,
+                            },
+                            credential(),
+                        )
+                        .await
+                        .unwrap(),
+                    if changed {
+                        SourceReviewResolution::Changed
+                    } else {
+                        SourceReviewResolution::Resolved
+                    }
+                );
+            }
+            let after = current
+                .inspect_review_feedback(&receipt(), credential())
+                .await
+                .unwrap();
+            assert_eq!(after.items.len(), usize::from(changed));
+            assert_eq!(after.conversations.len(), usize::from(changed));
+            if changed {
+                assert!(!after.items[0].body.contains("Guarded empty input"));
+            }
+            assert_eq!(fixture.writes("/discussions/thread/notes"), 1);
+            assert_eq!(
+                fixture.state.lock().unwrap().review.as_ref().unwrap()["blocking_discussions_resolved"],
+                !changed
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn gitlab_uncertain_reply_requires_exact_actor_body_and_unique_identity() {
+    for defect in ["actor", "body", "duplicate", "absent"] {
+        let fixture = Fixture::new().await;
+        prepare(&fixture);
+        let before = fixture
+            .authority
+            .inspect_review_feedback(&receipt(), credential())
+            .await
+            .unwrap();
+        let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint::default();
+        {
+            let mut data = fixture.state.lock().unwrap();
+            data.lose_reply_response = true;
+            if defect == "absent" {
+                data.conversation_race = Some("reject_reply".into());
+            }
+        }
+        assert!(
+            fixture
+                .authority
+                .resolve_review_conversation(
+                    crate::source_code_provider::SourceReviewResolutionRequest {
+                        review: &receipt(),
+                        response: &response(&before),
+                        checkpoint: &checkpoint,
+                    },
+                    credential(),
+                )
+                .await
+                .is_err()
+        );
+        {
+            let mut data = fixture.state.lock().unwrap();
+            let notes = data.conversation.as_mut().unwrap()["notes"]
+                .as_array_mut()
+                .unwrap();
+            match defect {
+                "actor" => notes[1]["author"]["id"] = json!(32),
+                "body" => notes[1]["body"] = json!("Edited response."),
+                "duplicate" => {
+                    let mut reply = notes[1].clone();
+                    reply["id"] = json!(502);
+                    notes.push(reply);
+                }
+                _ => {}
+            }
+        }
+        let mut recovered =
+            GitLabDeliveryAuthority::new(fixture.authority.base_url.clone(), None).unwrap();
+        recovered.api = fixture.authority.api.clone();
+        let durable = checkpoint.states.lock().unwrap()[0].clone();
+        recovered
+            .restore_review_conversation_state(durable)
+            .await
+            .unwrap();
+        assert!(
+            recovered
+                .inspect_review_feedback(&receipt(), credential())
+                .await
+                .is_err(),
+            "{defect}"
+        );
+        assert!(
+            recovered
+                .request_merge(&receipt(), credential())
+                .await
+                .is_err(),
+            "{defect}"
+        );
+        assert_eq!(fixture.writes("/discussions/thread/notes"), 1);
+        assert_eq!(fixture.writes("/discussions/thread"), 0);
+    }
+}
+
+#[tokio::test]
+async fn gitlab_reply_intent_must_be_acknowledged_before_posting() {
+    let fixture = Fixture::new().await;
+    prepare(&fixture);
+    let before = fixture
+        .authority
+        .inspect_review_feedback(&receipt(), credential())
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .authority
+            .resolve_review_conversation(
+                crate::source_code_provider::SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response(&before),
+                    checkpoint: &crate::source_code_provider::RefuseReviewCheckpoint,
+                },
+                credential(),
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(fixture.writes("/discussions/thread/notes"), 0);
+    assert_eq!(fixture.writes("/discussions/thread"), 0);
+}
+
+#[tokio::test]
+async fn gitlab_mixed_participants_keep_the_maintainer_blocker_despite_authorized_findings() {
+    let fixture = Fixture::new().await;
+    prepare(&fixture);
+    {
+        let mut data = fixture.state.lock().unwrap();
+        let mut reply = note(2, "Unauthorized request.");
+        reply["author"]["id"] = json!(32);
+        data.conversation.as_mut().unwrap()["notes"]
+            .as_array_mut()
+            .unwrap()
+            .push(reply);
+    }
+    fixture.response(
+        "GET",
+        "/members/all/32",
+        (
+            StatusCode::OK,
+            json!({"id":32,"state":"active","membership_state":"active","access_level":20}),
+        ),
+    );
+    let feedback = fixture
+        .authority
+        .inspect_review_feedback(&receipt(), credential())
+        .await
+        .unwrap();
+    assert_eq!(feedback.items.len(), 1);
+    assert!(!feedback.items[0].body.contains("Unauthorized request"));
+    assert!(!feedback.conversations[0].authorized);
+    assert_eq!(
+        fixture
+            .authority
+            .resolve_review_conversation(
+                crate::source_code_provider::SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response(&feedback),
+                    checkpoint: &crate::source_code_provider::TestReviewCheckpoint,
+                },
+                credential(),
+            )
+            .await
+            .unwrap(),
+        SourceReviewResolution::Changed
+    );
+    assert_eq!(fixture.writes("/discussions/thread/notes"), 0);
+    assert_eq!(fixture.writes("/discussions/thread"), 0);
+}
+
+#[tokio::test]
+async fn gitlab_authentication_rejection_retires_intent_before_refresh_or_recovery() {
+    for mode in ["retry", "recover", "retirement_failure"] {
+        let fixture = Fixture::new().await;
+        prepare(&fixture);
+        let before = fixture
+            .authority
+            .inspect_review_feedback(&receipt(), credential())
+            .await
+            .unwrap();
+        fixture
+            .authority
+            .resolve_review_conversation(
+                crate::source_code_provider::SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response(&before),
+                    checkpoint: &crate::source_code_provider::TestReviewCheckpoint,
+                },
+                credential(),
+            )
+            .await
+            .unwrap();
+        let previous = fixture
+            .authority
+            .review_conversation_state()
+            .await
+            .unwrap()
+            .unwrap();
+        {
+            let mut data = fixture.state.lock().unwrap();
+            data.conversation.as_mut().unwrap()["notes"][0]["body"] =
+                json!("Another substantive finding.");
+            data.conversation_race = Some("require_fresh_reply".into());
+        }
+        let before = fixture
+            .authority
+            .inspect_review_feedback(&receipt(), credential())
+            .await
+            .unwrap();
+        let response = response(&before);
+        let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint {
+            fail_at: (mode == "retirement_failure").then_some(2),
+            ..Default::default()
+        };
+        let error = fixture
+            .authority
+            .resolve_review_conversation(
+                crate::source_code_provider::SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response,
+                    checkpoint: &checkpoint,
+                },
+                credential(),
+            )
+            .await
+            .unwrap_err();
+        let states = checkpoint.states.lock().unwrap().clone();
+        assert_eq!(states.len(), 2, "{mode}");
+        assert_eq!(states[0]["gitlab"][0][1]["reply"], Value::Null);
+        assert!(states[1]["gitlab"].as_array().unwrap().is_empty());
+        assert_eq!(states[1]["replies"], previous["replies"]);
+        let mut recovered =
+            GitLabDeliveryAuthority::new(fixture.authority.base_url.clone(), None).unwrap();
+        recovered.api = fixture.authority.api.clone();
+        if mode == "retirement_failure" {
+            assert!(!error.authentication_failed());
+            assert_eq!(error.api_status(), None);
+            recovered
+                .restore_review_conversation_state(states[0].clone())
+                .await
+                .unwrap();
+            assert!(
+                recovered
+                    .inspect_review_feedback(&receipt(), credential())
+                    .await
+                    .is_err()
+            );
+        } else {
+            assert!(error.authentication_failed());
+            assert_eq!(error.api_status(), Some(401));
+            assert!(error.to_string().contains("Bad credentials"));
+            let current = if mode == "recover" {
+                recovered
+                    .restore_review_conversation_state(states[1].clone())
+                    .await
+                    .unwrap();
+                &recovered
+            } else {
+                &fixture.authority
+            };
+            assert_eq!(
+                current
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &crate::source_code_provider::TestReviewCheckpoint,
+                        },
+                        SourceDeliveryCredential::token("refreshed-private-token"),
+                    )
+                    .await
+                    .unwrap(),
+                SourceReviewResolution::Resolved
+            );
+            assert!(
+                current
+                    .inspect_review_feedback(&receipt(), credential())
+                    .await
+                    .unwrap()
+                    .items
+                    .is_empty()
+            );
+        }
+        let finished = mode != "retirement_failure";
+        assert_eq!(
+            fixture.state.lock().unwrap().review.as_ref().unwrap()["blocking_discussions_resolved"],
+            finished
+        );
+        assert_eq!(
+            fixture.state.lock().unwrap().conversation.as_ref().unwrap()["notes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2 + usize::from(finished)
+        );
+        assert_eq!(
+            fixture.writes("/discussions/thread/notes"),
+            2 + usize::from(finished)
+        );
+    }
 }

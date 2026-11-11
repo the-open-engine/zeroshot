@@ -25,8 +25,9 @@ struct PendingResolution {
     checkpointed: bool,
     version: String,
     response_hash: String,
-    reply: u64,
+    reply: Option<u64>,
     body_hash: String,
+    author: String,
     confirmed: bool,
 }
 
@@ -135,7 +136,12 @@ pub(super) async fn reconcile_resolutions(
     }
     let mut changed = false;
     for key in keys {
-        let result = settle(authority, (review, &key.4, &pending[&key]), credential).await?;
+        let result = settle(
+            authority,
+            (review, &key.4, pending.get_mut(&key).unwrap()),
+            credential,
+        )
+        .await?;
         changed |= result == SourceReviewResolution::Changed;
         settled(&mut pending, &key, result);
     }
@@ -188,6 +194,7 @@ pub(super) struct Snapshot {
     versions: BTreeMap<String, String>,
     comment_threads: BTreeMap<u64, String>,
     comment_bodies: BTreeMap<u64, String>,
+    comment_authors: BTreeMap<u64, String>,
     pub(super) items: Vec<SourceReviewFeedbackItem>,
     pub(super) conversations: Vec<SourceReviewConversation>,
 }
@@ -218,6 +225,7 @@ async fn snapshot(
         versions: BTreeMap::new(),
         comment_threads: BTreeMap::new(),
         comment_bodies: BTreeMap::new(),
+        comment_authors: BTreeMap::new(),
         comment_ids: BTreeSet::new(),
         items: Vec::new(),
         conversations: Vec::new(),
@@ -290,6 +298,9 @@ async fn snapshot(
                 result
                     .comment_bodies
                     .insert(comment.id, comment.body.clone());
+                if let Some(author) = &comment.user.node_id {
+                    result.comment_authors.insert(comment.id, author.clone());
+                }
             }
             entries.retain(|comment| Some(comment.id) != ignored_reply);
             entries.sort_by_key(|comment| comment.id);
@@ -405,7 +416,12 @@ pub(super) async fn resolve(
     if let Some(attempt) = pending.get(&key) {
         if attempt.response_hash == response_hash || !attempt.confirmed {
             acknowledge(authority, &mut pending, checkpoint).await?;
-            let result = settle(authority, (review, &key.4, &pending[&key]), credential).await?;
+            let result = settle(
+                authority,
+                (review, &key.4, pending.get_mut(&key).unwrap()),
+                credential,
+            )
+            .await?;
             settled(&mut pending, &key, result);
             acknowledge(authority, &mut pending, checkpoint).await?;
             if result == SourceReviewResolution::Changed
@@ -438,7 +454,9 @@ pub(super) async fn resolve(
         }
         return Ok(SourceReviewResolution::Changed);
     }
-    let body = format!("{:?}: {}", response.disposition, response.response);
+    let body = review_responses::reply_body(response);
+    let author =
+        crate::source_code_provider::SourceCommentAuthority::actor(authority, credential).await?;
     let mut reserved = pending.clone();
     reserved.insert(
         key.clone(),
@@ -446,24 +464,44 @@ pub(super) async fn resolve(
             checkpointed: false,
             version: response.version.clone(),
             response_hash: response_hash.clone(),
-            reply: u64::MAX,
+            reply: Some(u64::MAX),
             body_hash: review_responses::hash(&body),
+            author,
             confirmed: false,
         },
     );
     review_responses::checkpoint(&Checkpoint {
-        github: reserved.into_iter().collect(),
+        github: reserved
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
         replies: authority.published_replies.with_reserved_reply(
             review,
             &response.thread_id,
             &body,
         )?,
     })?;
-    let value = authority.api(&[
+    let mut intent = reserved.remove(&key).unwrap();
+    intent.reply = None;
+    pending.insert(key.clone(), intent);
+    acknowledge(authority, &mut pending, checkpoint).await?;
+    let posted = authority.api(&[
         "graphql".to_owned(), "-f".to_owned(),
         "query=mutation($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{fullDatabaseId}}}".to_owned(),
         "-f".to_owned(), format!("thread={}", response.thread_id), "-f".to_owned(), format!("body={body}"),
-    ], credential).await?;
+    ], credential).await;
+    let value = match posted {
+        Ok(value) => value,
+        Err(error) => {
+            if error.api_status() == Some(401) {
+                // A completed authentication refusal proves no reply was published.
+                // Retire its intent durably before allowing the normal credential retry.
+                pending.remove(&key);
+                acknowledge(authority, &mut pending, checkpoint).await?;
+            }
+            return Err(error);
+        }
+    };
     let reply = database_id(
         value["data"]["addPullRequestReviewThreadReply"]["comment"]["fullDatabaseId"]
             .as_str()
@@ -472,19 +510,16 @@ pub(super) async fn resolve(
     authority
         .published_replies
         .record(review, &response.thread_id, (reply, &body))?;
-    pending.insert(
-        key.clone(),
-        PendingResolution {
-            checkpointed: false,
-            version: response.version.clone(),
-            response_hash,
-            reply,
-            body_hash: review_responses::hash(&body),
-            confirmed: false,
-        },
-    );
+    let intent = pending.get_mut(&key).unwrap();
+    intent.reply = Some(reply);
+    intent.checkpointed = false;
     acknowledge(authority, &mut pending, checkpoint).await?;
-    let result = settle(authority, (review, &key.4, &pending[&key]), credential).await?;
+    let result = settle(
+        authority,
+        (review, &key.4, pending.get_mut(&key).unwrap()),
+        credential,
+    )
+    .await?;
     settled(&mut pending, &key, result);
     acknowledge(authority, &mut pending, checkpoint).await?;
     Ok(result)
@@ -492,11 +527,33 @@ pub(super) async fn resolve(
 
 async fn settle(
     authority: &GhCliDeliveryAuthority,
-    input: (&SourceReviewReceipt, &str, &PendingResolution),
+    input: (&SourceReviewReceipt, &str, &mut PendingResolution),
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewResolution, SourceDeliveryError> {
     let (review, id, pending) = input;
-    let before = fresh(authority, (review, Some(pending.reply)), credential).await?;
+    if pending.reply.is_none() {
+        let snapshot = fresh(authority, (review, None), credential).await?;
+        let reply = review_responses::unique_reply(snapshot.comment_bodies.iter().filter_map(
+            |(reply, body)| {
+                (snapshot
+                    .comment_threads
+                    .get(reply)
+                    .is_some_and(|thread| thread == id)
+                    && snapshot.comment_authors.get(reply) == Some(&pending.author)
+                    && review_responses::hash(body) == pending.body_hash)
+                    .then_some(*reply)
+            },
+        ))?;
+        authority.published_replies.record(
+            review,
+            id,
+            (reply, &snapshot.comment_bodies[&reply]),
+        )?;
+        // The acknowledged intent already binds this exact actor, unique body and revision.
+        // Refining its forge ID is recoverable from that intent even if this read is interrupted.
+        pending.reply = Some(reply);
+    }
+    let before = fresh(authority, (review, pending.reply), credential).await?;
     if !unchanged(&before, id, pending) {
         return reopen(authority, (review, id, &before), credential).await;
     }
@@ -507,7 +564,7 @@ async fn settle(
         return Ok(SourceReviewResolution::Changed);
     }
     set_resolved(authority, (id, true), credential).await?;
-    let after = fresh(authority, (review, Some(pending.reply)), credential).await?;
+    let after = fresh(authority, (review, pending.reply), credential).await?;
     if !unchanged(&after, id, pending) {
         return reopen(authority, (review, id, &after), credential).await;
     }
@@ -518,15 +575,19 @@ async fn settle(
 }
 
 fn unchanged(snapshot: &Snapshot, id: &str, pending: &PendingResolution) -> bool {
+    let Some(reply) = pending.reply else {
+        return false;
+    };
     snapshot.versions.get(id) == Some(&pending.version)
         && snapshot
             .comment_bodies
-            .get(&pending.reply)
+            .get(&reply)
             .is_some_and(|body| review_responses::hash(body) == pending.body_hash)
         && snapshot
             .comment_threads
-            .get(&pending.reply)
+            .get(&reply)
             .is_some_and(|thread| thread == id)
+        && snapshot.comment_authors.get(&reply) == Some(&pending.author)
 }
 
 async fn reopen(

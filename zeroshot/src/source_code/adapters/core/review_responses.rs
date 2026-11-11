@@ -31,6 +31,32 @@ pub(super) fn response_hash(
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
+/// An unpredictable marker binds an uncertain POST to one delivery-owned intent.
+pub(super) fn reply_body(response: &SourceReviewResponse) -> String {
+    format!(
+        "{:?}: {}\n\n<!-- zeroshot-review-reply:{} -->",
+        response.disposition,
+        response.response,
+        uuid::Uuid::now_v7()
+    )
+}
+
+pub(super) fn unique_reply(
+    mut matches: impl Iterator<Item = u64>,
+) -> Result<u64, SourceDeliveryError> {
+    let reply = matches.next().ok_or_else(|| {
+        SourceDeliveryError::Unavailable.with_context(
+            "Review reply publication is unconfirmed; retained intent forbids another POST",
+        )
+    })?;
+    if matches.next().is_some() {
+        return Err(SourceDeliveryError::Rejected.with_context(
+            "Review reply identity is ambiguous; a repository maintainer must reconcile it",
+        ));
+    }
+    Ok(reply)
+}
+
 type Identity = (String, String, String, u64);
 pub(super) type ReplyReceipt = (Identity, String);
 

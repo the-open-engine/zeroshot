@@ -147,8 +147,13 @@ whose worker returns no conversation responses.
 Trusted execution checkpoints preserve the exact reply and verified conversation revision across
 controller recovery, including when a later CI repair returns an empty response list. Restarting or
 rewinding graph work retains the latest owned conversation evidence, even with workspace
-snapshots disabled. Before resolving a conversation, delivery waits for durable acknowledgement of
-the exact reply and approved revision, then records confirmation as the effect settles. These receipts
+snapshots disabled. Before posting a reply, delivery waits for durable acknowledgement of its
+authenticated author, unique response hash and approved conversation revision. It records the reply ID
+and resolution confirmation as the effects settle. If the forge accepts
+the reply but loses its acknowledgement, delivery reconciles that exact reply; it does not post again
+or ask the worker to repair its own response. Missing or ambiguous publication evidence blocks delivery
+for a maintainer to reconcile. A definitive authentication rejection retires the unposted intent
+before delivery refreshes credentials and retries. These receipts
 remain recoverable while delivery waits on CI or approvals. Delivery rechecks these retained conversations before feedback and merge
 admission. Recovery reconciles receipts acknowledged before a runtime or controller failure before
 starting a successor. Compact receipt storage is bounded across repair rounds; reaching its limit stops

@@ -36,6 +36,7 @@ struct StateData {
     confirmation_failures: usize,
     lose_resolve_response: bool,
     lose_reopen_response: bool,
+    lose_reply_response: bool,
     calls: Vec<(String, String, Value)>,
     lose_create: bool,
     disconnect_create: bool,
@@ -82,6 +83,7 @@ impl Fixture {
             confirmation_failures: 0,
             lose_resolve_response: false,
             lose_reopen_response: false,
+            lose_reply_response: false,
             calls: Vec::new(),
             lose_create: false,
             disconnect_create: false,
@@ -265,11 +267,13 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
         headers,
         body,
     } = request;
-    if headers
+    let authorization = headers
         .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        != Some("Bearer test-private-token")
-    {
+        .and_then(|value| value.to_str().ok());
+    if !matches!(
+        authorization,
+        Some("Bearer test-private-token" | "Bearer refreshed-private-token")
+    ) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let body = serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null);
@@ -278,6 +282,17 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
     state
         .calls
         .push((method.to_string(), path.to_owned(), body.clone()));
+    if method == Method::POST
+        && path.ends_with("/discussions/thread/notes")
+        && state.conversation_race.as_deref() == Some("require_fresh_reply")
+        && authorization != Some("Bearer refreshed-private-token")
+    {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"message":"Bad credentials"})),
+        )
+            .into_response();
+    }
     if state.disconnect_create && method == Method::POST && path.ends_with("/merge_requests") {
         return Response::disconnected();
     }

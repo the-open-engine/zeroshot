@@ -1,7 +1,7 @@
 use super::*;
 use super::test_support::*;
 use super::super::observation::test_support::{authority, receipt};
-use serde_json::json;
+use serde_json::{Value, json};
 
 fn response(feedback: &SourceReviewFeedback) -> SourceReviewResponse {
     SourceReviewResponse {
@@ -956,13 +956,17 @@ async fn github_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
         .await
         .unwrap();
     let response = response(&feedback);
+    let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint {
+        fail_at: Some(2),
+        ..Default::default()
+    };
     assert!(
         authority
             .resolve_review_conversation(
                 crate::source_code_provider::SourceReviewResolutionRequest {
                     review: &receipt(),
                     response: &response,
-                    checkpoint: &crate::source_code_provider::RefuseReviewCheckpoint,
+                    checkpoint: &checkpoint,
                 },
                 credential
             )
@@ -1010,4 +1014,340 @@ async fn github_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_repl
             .len(),
         2
     );
+}
+
+#[tokio::test]
+async fn lost_reply_acknowledgement_retains_intent_and_reconciles_exact_reply_after_recovery() {
+    for recover in [false, true] {
+        for changed in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let program = fixture(root.path(), &receipt(), "Bot");
+            let first = authority(program.clone(), root.path());
+            let credential = SourceDeliveryCredential::token("test-token");
+            let before = first
+                .inspect_review_feedback(&receipt(), credential)
+                .await
+                .unwrap();
+            let response = response(&before);
+            let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint::default();
+            let mut data = state(&program);
+            data["lose_reply_response"] = json!(true);
+            if changed {
+                data["race"] = json!("edit_after_reply");
+            }
+            save(&program, &data);
+            assert!(
+                first
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &checkpoint,
+                        },
+                        credential,
+                    )
+                    .await
+                    .is_err()
+            );
+            let durable = checkpoint.states.lock().unwrap()[0].clone();
+            assert_eq!(durable["github"][0][1]["reply"], Value::Null);
+            assert!(durable["replies"].as_array().unwrap().is_empty());
+            assert_eq!(
+                state(&program)["threads"][0]["comments"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+            let recovered = authority(program.clone(), root.path());
+            let current = if recover {
+                recovered
+                    .restore_review_conversation_state(durable)
+                    .await
+                    .unwrap();
+                &recovered
+            } else {
+                &first
+            };
+            if !recover {
+                assert_eq!(
+                    current
+                        .resolve_review_conversation(
+                            crate::source_code_provider::SourceReviewResolutionRequest {
+                                review: &receipt(),
+                                response: &response,
+                                checkpoint: &crate::source_code_provider::TestReviewCheckpoint,
+                            },
+                            credential,
+                        )
+                        .await
+                        .unwrap(),
+                    if changed {
+                        SourceReviewResolution::Changed
+                    } else {
+                        SourceReviewResolution::Resolved
+                    }
+                );
+            }
+            // Recovery has no worker response array: the durable intent owns reconciliation.
+            let feedback = current
+                .inspect_review_feedback(&receipt(), credential)
+                .await
+                .unwrap();
+            assert_eq!(feedback.items.len(), usize::from(changed));
+            assert_eq!(feedback.conversations.len(), usize::from(changed));
+            if changed {
+                assert!(!feedback.items[0].body.contains(&response.response));
+            }
+            let data = state(&program);
+            assert_eq!(data["threads"][0]["resolved"], !changed);
+            assert_eq!(data["threads"][0]["comments"].as_array().unwrap().len(), 2);
+            assert_eq!(
+                data["calls"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|call| call.to_string().contains("addPullRequestReviewThreadReply"))
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn uncertain_reply_requires_exact_authenticated_actor_body_and_unique_identity() {
+    for defect in ["actor", "body", "duplicate", "absent"] {
+        let root = tempfile::tempdir().unwrap();
+        let program = fixture(root.path(), &receipt(), "Bot");
+        let first = authority(program.clone(), root.path());
+        let credential = SourceDeliveryCredential::token("test-token");
+        let before = first
+            .inspect_review_feedback(&receipt(), credential)
+            .await
+            .unwrap();
+        let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint::default();
+        let mut data = state(&program);
+        data[if defect == "absent" {
+            "reject_reply"
+        } else {
+            "lose_reply_response"
+        }] = json!(true);
+        save(&program, &data);
+        assert!(
+            first
+                .resolve_review_conversation(
+                    crate::source_code_provider::SourceReviewResolutionRequest {
+                        review: &receipt(),
+                        response: &response(&before),
+                        checkpoint: &checkpoint,
+                    },
+                    credential,
+                )
+                .await
+                .is_err()
+        );
+        let mut data = state(&program);
+        match defect {
+            "actor" => data["threads"][0]["comments"][1]["user"]["node_id"] = json!("USER_other"),
+            "body" => data["threads"][0]["comments"][1]["body"] = json!("Edited response."),
+            "duplicate" => {
+                let mut reply = data["threads"][0]["comments"][1].clone();
+                reply["id"] = json!(902);
+                data["threads"][0]["comments"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(reply);
+            }
+            _ => {}
+        }
+        save(&program, &data);
+        let recovered = authority(program.clone(), root.path());
+        let durable = checkpoint.states.lock().unwrap()[0].clone();
+        recovered
+            .restore_review_conversation_state(durable)
+            .await
+            .unwrap();
+        assert!(
+            recovered
+                .inspect_review_feedback(&receipt(), credential)
+                .await
+                .is_err(),
+            "{defect}"
+        );
+        assert!(
+            recovered
+                .request_merge(&receipt(), credential)
+                .await
+                .is_err(),
+            "{defect}"
+        );
+        let data = state(&program);
+        assert_eq!(data["threads"][0]["resolved"], false);
+        assert_eq!(
+            data["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|call| call.to_string().contains("addPullRequestReviewThreadReply"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn github_reply_intent_must_be_acknowledged_before_posting() {
+    let root = tempfile::tempdir().unwrap();
+    let program = fixture(root.path(), &receipt(), "Bot");
+    let authority = authority(program.clone(), root.path());
+    let credential = SourceDeliveryCredential::token("test-token");
+    let before = authority
+        .inspect_review_feedback(&receipt(), credential)
+        .await
+        .unwrap();
+    assert!(
+        authority
+            .resolve_review_conversation(
+                crate::source_code_provider::SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response(&before),
+                    checkpoint: &crate::source_code_provider::RefuseReviewCheckpoint,
+                },
+                credential,
+            )
+            .await
+            .is_err()
+    );
+    let data = state(&program);
+    assert_eq!(data["threads"][0]["comments"].as_array().unwrap().len(), 1);
+    assert!(
+        !data["calls"]
+            .to_string()
+            .contains("addPullRequestReviewThreadReply")
+    );
+    assert!(!data["calls"].to_string().contains("resolveReviewThread"));
+}
+
+#[tokio::test]
+async fn github_authentication_rejection_retires_intent_before_refresh_or_recovery() {
+    for mode in ["retry", "recover", "retirement_failure"] {
+        let root = tempfile::tempdir().unwrap();
+        let program = fixture(root.path(), &receipt(), "Bot");
+        let first = authority(program.clone(), root.path());
+        let token = SourceDeliveryCredential::token("test-token");
+        let before = first
+            .inspect_review_feedback(&receipt(), token)
+            .await
+            .unwrap();
+        first
+            .resolve_review_conversation(
+                crate::source_code_provider::SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response(&before),
+                    checkpoint: &crate::source_code_provider::TestReviewCheckpoint,
+                },
+                token,
+            )
+            .await
+            .unwrap();
+        // Retiring a later rejected POST must preserve earlier owned replies.
+        let previous = first.review_conversation_state().await.unwrap().unwrap();
+        let mut data = state(&program);
+        data["threads"][0]["comments"][0]["body"] = json!("Another substantive finding.");
+        data["require_fresh_reply"] = json!(true);
+        save(&program, &data);
+        let before = first
+            .inspect_review_feedback(&receipt(), token)
+            .await
+            .unwrap();
+        let response = response(&before);
+        let checkpoint = crate::source_code_provider::RecordingReviewCheckpoint {
+            fail_at: (mode == "retirement_failure").then_some(2),
+            ..Default::default()
+        };
+        let error = first
+            .resolve_review_conversation(
+                crate::source_code_provider::SourceReviewResolutionRequest {
+                    review: &receipt(),
+                    response: &response,
+                    checkpoint: &checkpoint,
+                },
+                token,
+            )
+            .await
+            .unwrap_err();
+        let states = checkpoint.states.lock().unwrap().clone();
+        assert_eq!(states.len(), 2, "{mode}");
+        assert_eq!(states[0]["github"][0][1]["reply"], Value::Null);
+        assert!(states[1]["github"].as_array().unwrap().is_empty());
+        assert_eq!(states[1]["replies"], previous["replies"]);
+        let recovered = authority(program.clone(), root.path());
+        if mode == "retirement_failure" {
+            // Never report the authentication error to refresh until retirement is durable.
+            assert!(!error.authentication_failed());
+            assert_eq!(error.api_status(), None);
+            recovered
+                .restore_review_conversation_state(states[0].clone())
+                .await
+                .unwrap();
+            assert!(
+                recovered
+                    .inspect_review_feedback(&receipt(), token)
+                    .await
+                    .is_err()
+            );
+        } else {
+            assert!(error.authentication_failed());
+            assert_eq!(error.api_status(), Some(401));
+            assert!(error.to_string().contains("Bad credentials"));
+            let current = if mode == "recover" {
+                recovered
+                    .restore_review_conversation_state(states[1].clone())
+                    .await
+                    .unwrap();
+                &recovered
+            } else {
+                &first
+            };
+            assert_eq!(
+                current
+                    .resolve_review_conversation(
+                        crate::source_code_provider::SourceReviewResolutionRequest {
+                            review: &receipt(),
+                            response: &response,
+                            checkpoint: &crate::source_code_provider::TestReviewCheckpoint,
+                        },
+                        SourceDeliveryCredential::token("refreshed-token"),
+                    )
+                    .await
+                    .unwrap(),
+                SourceReviewResolution::Resolved
+            );
+            assert!(
+                current
+                    .inspect_review_feedback(&receipt(), token)
+                    .await
+                    .unwrap()
+                    .items
+                    .is_empty()
+            );
+        }
+        let data = state(&program);
+        let finished = mode != "retirement_failure";
+        assert_eq!(data["threads"][0]["resolved"], finished);
+        assert_eq!(
+            data["threads"][0]["comments"].as_array().unwrap().len(),
+            2 + usize::from(finished)
+        );
+        assert_eq!(
+            data["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|call| call.to_string().contains("addPullRequestReviewThreadReply"))
+                .count(),
+            2 + usize::from(finished)
+        );
+    }
 }

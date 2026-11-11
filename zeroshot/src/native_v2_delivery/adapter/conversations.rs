@@ -23,6 +23,7 @@ impl NativeV2DeliveryAdapter {
         if drive.pull_request_feedback == PullRequestFeedback::Ignore {
             return self.conversation_blocker(drive, &feedback).map(|()| None);
         }
+        self.require_authorized_conversations(drive, &feedback)?;
         let checkpoint = ConversationCheckpoint(drive.control.clone());
         let responses = delivery_input(drive.manifest)?.review_responses;
         for response in responses {
@@ -58,6 +59,7 @@ impl NativeV2DeliveryAdapter {
                 // Absence from the unresolved list cannot settle an unconfirmed effect.
             }
             feedback = self.read_review_feedback(drive).await?;
+            self.require_authorized_conversations(drive, &feedback)?;
         }
         let blockers = feedback.conversations.clone();
         if let Some(step) = self.complete_feedback_repair(drive, feedback).await? {
@@ -78,7 +80,12 @@ impl NativeV2DeliveryAdapter {
         drive: &ReviewDrive<'_, '_>,
         feedback: &SourceReviewFeedback,
     ) -> Result<(), DeliveryStop> {
-        let Some(thread) = feedback.conversations.first() else {
+        let Some(thread) = feedback
+            .conversations
+            .iter()
+            .find(|thread| !thread.authorized)
+            .or_else(|| feedback.conversations.first())
+        else {
             return Ok(());
         };
         let reason = if thread.authorized {
@@ -93,5 +100,20 @@ impl NativeV2DeliveryAdapter {
                 thread.id, drive.review.repository, drive.review.review_id
             )),
         ))
+    }
+
+    fn require_authorized_conversations(
+        &self,
+        drive: &ReviewDrive<'_, '_>,
+        feedback: &SourceReviewFeedback,
+    ) -> Result<(), DeliveryStop> {
+        if feedback
+            .conversations
+            .iter()
+            .any(|thread| !thread.authorized)
+        {
+            self.conversation_blocker(drive, feedback)?;
+        }
+        Ok(())
     }
 }

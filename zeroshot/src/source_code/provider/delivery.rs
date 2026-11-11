@@ -274,7 +274,7 @@ pub struct SourceReviewResolutionRequest<'a> {
 #[path = "delivery_tests.rs"]
 mod tests;
 #[cfg(test)]
-pub(crate) use tests::{TestReviewCheckpoint, RefuseReviewCheckpoint};
+pub(crate) use tests::{TestReviewCheckpoint, RefuseReviewCheckpoint, RecordingReviewCheckpoint};
 
 /// Target-owned, bounded source-provider effects. Implementations must bound every network operation.
 #[async_trait]
