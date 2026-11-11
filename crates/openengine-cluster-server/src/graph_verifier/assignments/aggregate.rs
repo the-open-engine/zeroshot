@@ -209,7 +209,7 @@ pub(super) fn aggregate_component_dimension(
     aggregate_assignments_from_outcomes(AggregateCounts {
         keys: &keys,
         outcomes: &item_outcomes,
-        saturation: context.inputs.saturation,
+        count_limits: context.inputs.count_limits,
         budget: context.inputs.budget,
     })
 }
@@ -338,6 +338,7 @@ fn component_item_outcomes(
     let mut item_outcomes = enumerate_assignments(item_dimensions, context.inputs.budget)?;
     item_outcomes
         .retain(|assignment| item_assignment_matches(context, component, &key_set, assignment));
+    project_retained_controls(&mut item_outcomes, context)?;
     for assignment in &mut item_outcomes {
         assignment.retain(|key, _| key.source != ControlSourceKey::Execution);
     }
@@ -452,4 +453,36 @@ fn unfixed_item_outcomes(
         outcomes.push(empty_outcome(keys));
     }
     Some(outcomes)
+}
+
+/// Qualification needs every executed racer's private facts. Only after validating that joint
+/// assignment may losing branch controls disappear from the item exported to its parent.
+pub(super) fn project_retained_controls(
+    outcomes: &mut [Assignment],
+    context: &AggregateComponentContext<'_, '_>,
+) -> Option<()> {
+    for outcome in outcomes {
+        context
+            .inputs
+            .budget
+            .charge(1 + outcome.len() + context.shared_assignment.len())?;
+        let mut private = context.shared_assignment.clone();
+        private.extend(outcome.clone());
+        let discarded = outcome
+            .keys()
+            .filter(|key| {
+                key.source != ControlSourceKey::Execution
+                    && context
+                        .inputs
+                        .execution_correlations
+                        .get(&key.name)
+                        .is_some_and(|correlation| !correlation.retention.evaluate(&private))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in discarded {
+            outcome.insert(key, assigned_control(None, 0));
+        }
+    }
+    Some(())
 }

@@ -76,20 +76,13 @@ pub enum TerminationWitness {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct StructuralBounds {
-    /// Static derivation or ceilings enforced against actual logical work during execution.
-    pub work_enforcement: WorkEnforcement,
     pub termination: TerminationWitness,
+    /// Upper limit on logical executable visits, derived statically or enforced at runtime.
     pub max_node_executions: PositiveInteger,
+    /// Structural concurrency upper limit, capped by the runtime execution ceiling.
     pub peak_concurrency: PositiveInteger,
     #[schemars(
         schema_with = "crate::value::identifier_keyed_map_schema::<NodeName, PositiveInteger>"
     )]
     pub attempts_per_node: BTreeMap<NodeName, PositiveInteger>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkEnforcement {
-    Static,
-    Runtime,
 }

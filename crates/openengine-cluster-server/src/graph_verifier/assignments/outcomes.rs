@@ -29,7 +29,7 @@ pub(in crate::graph_verifier) fn single_outcome_dimension(
 pub(in crate::graph_verifier) struct AggregateCounts<'a> {
     pub(super) keys: &'a [SelectorKey],
     pub(super) outcomes: &'a [Assignment],
-    pub(super) saturation: u64,
+    pub(super) count_limits: &'a CountLimits,
     pub(super) budget: &'a ProofWork,
 }
 
@@ -67,7 +67,7 @@ fn next_aggregate_layer(
     for state in frontier {
         for outcome in context.outcomes {
             let candidate =
-                add_aggregate_outcome(state, outcome, context.saturation, context.budget)?;
+                add_aggregate_outcome(state, outcome, context.count_limits, context.budget)?;
             if excluded.contains(&candidate) {
                 continue;
             }
@@ -83,7 +83,7 @@ fn next_aggregate_layer(
 fn add_aggregate_outcome(
     state: &Assignment,
     outcome: &Assignment,
-    saturation: u64,
+    count_limits: &CountLimits,
     budget: &ProofWork,
 ) -> Option<Assignment> {
     budget.charge(
@@ -94,8 +94,16 @@ fn add_aggregate_outcome(
     for (key, control) in outcome {
         let target = next.get_mut(key)?;
         for (label, count) in &control.counts {
+            let limit = count_limits
+                .get(key)
+                .and_then(|limits| limits.get(label))
+                .copied()
+                .unwrap_or(0);
+            if limit == 0 {
+                continue;
+            }
             let previous = target.counts.entry(label.clone()).or_default();
-            *previous = previous.saturating_add(*count).min(saturation);
+            *previous = previous.saturating_add(*count).min(limit);
         }
     }
     Some(next)

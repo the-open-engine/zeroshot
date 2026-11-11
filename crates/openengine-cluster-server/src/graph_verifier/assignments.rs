@@ -65,7 +65,7 @@ fn is_parallel_group_control(key: &SelectorKey) -> bool {
 #[derive(Clone, Copy)]
 pub(super) struct DimensionInputs<'a, 'graph> {
     pub(super) label_classes: &'a BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
-    pub(super) saturation: u64,
+    pub(super) count_limits: &'a CountLimits,
     pub(super) budget: &'a ProofWork,
     pub(super) nodes: &'a BTreeMap<NodeName, NodeInfo<'graph>>,
     pub(super) map_aggregates: &'a BTreeMap<SelectorKey, MapAggregate>,
@@ -345,3 +345,8 @@ fn scalar_node_dimensions(
     }
     Some(dimensions)
 }
+
+use aggregate::project_retained_controls;
+
+/// Each observable label class retains only the largest count a guard can distinguish.
+pub(super) type CountLimits = BTreeMap<SelectorKey, BTreeMap<EnumLabel, u64>>;

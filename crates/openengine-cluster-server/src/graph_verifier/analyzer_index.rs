@@ -121,11 +121,6 @@ impl<'a> Analyzer<'a> {
             }
         };
         Some(StructuralBounds {
-            work_enforcement: if fold.dynamic {
-                openengine_cluster_protocol::WorkEnforcement::Runtime
-            } else {
-                openengine_cluster_protocol::WorkEnforcement::Static
-            },
             termination,
             max_node_executions,
             peak_concurrency,

@@ -197,3 +197,28 @@ fn with_racer_reference(guard: Value) -> Value {
     let error = json!({"kind":"in","value":{"name":"mappedWork","source":"error","field":null},"labels":["crash"]});
     json!({"kind":"all","guards":[guard,{"kind":"any","guards":[error.clone(),{"kind":"not","guard":error}]}]})
 }
+
+#[tokio::test]
+async fn first_join_requires_a_racer_reference_in_addition_to_incoming_facts() {
+    for racer_reference in [false, true] {
+        let state = mapped_items_state();
+        let incoming = json!({"kind":"in","value":{"name":"gate","source":"signal","field":"verdict"},"labels":["accepted"]});
+        let guard = if racer_reference {
+            with_racer_reference(incoming)
+        } else {
+            incoming
+        };
+        let graph = graph_with_state_children(
+            state.clone(),
+            json!([map_verifier("gate"),
+                {"kind":"par","name":"race","state":state,"branches":[mapped_step("mappedWork")],"join":{"kind":"first","when":guard},"promotedStatePaths":[]},
+                {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+            ]),
+        );
+        if racer_reference {
+            assert_graph_accepted(&graph).await;
+        } else {
+            assert_graph_rejected_with(&graph, GraphDiagnosticCode::InvalidGraphShape).await;
+        }
+    }
+}

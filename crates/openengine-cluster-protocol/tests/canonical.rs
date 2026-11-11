@@ -66,7 +66,7 @@ fn ir(par_order: &[&str], seq_order: &[&str]) -> CompiledGraphIr {
             "promotedStatePaths":[]
         },
         "bounds":{
-            "workEnforcement":"static",
+
             "termination":{"kind":"acyclic","order":["root","parallel","ordered"]},
             "maxNodeExecutions":8,
             "peakConcurrency":2,
@@ -205,7 +205,7 @@ fn step_ir(worker: &str, reverse_bindings: bool) -> CompiledGraphIr {
             "inputBindings":bindings,"writeBindings":[],"timeoutMs":1000,"attempts":1
         },
         "bounds":{
-            "workEnforcement":"static",
+
             "termination":{"kind":"acyclic","order":["work"]},
             "maxNodeExecutions":1,"peakConcurrency":1,"attemptsPerNode":{"work":1}
         }
@@ -280,7 +280,7 @@ fn canonical_ir_preserves_duplicate_binding_and_selector_multiplicity() {
             }]
         },
         "bounds":{
-            "workEnforcement":"static",
+
             "termination":{"kind":"acyclic","order":["done"]},
             "maxNodeExecutions":1,"peakConcurrency":1,"attemptsPerNode":{"done":1}
         }
@@ -384,7 +384,7 @@ fn nested_control_flow_ir(instructions: &str) -> CompiledGraphIr {
             "promotedStatePaths":[]
         },
         "bounds":{
-            "workEnforcement":"static",
+
             "termination":{"kind":"acyclic","order":["route","repeat","each","verify","rejected"]},
             "maxNodeExecutions":8,"peakConcurrency":1,
             "attemptsPerNode":{"route":1,"repeat":2,"each":4,"verify":1,"rejected":1}

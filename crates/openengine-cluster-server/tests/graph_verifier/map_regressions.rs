@@ -166,7 +166,7 @@ fn nested_map_graph() -> GraphSpec {
     .assert_value()
 }
 
-fn nested_map_group_aggregate_graph() -> GraphSpec {
+fn mapped_loop_group_aggregate_graph() -> GraphSpec {
     let state = json!({
         "kind":"record",
         "fields":{
@@ -209,12 +209,12 @@ fn nested_map_group_aggregate_graph() -> GraphSpec {
                         "labels":["exhausted"]
                     },
                     "node":{
-                        "kind":"succeed","name":"twoInnerOverflows",
+                        "kind":"succeed","name":"twoInnerExhaustions",
                         "output":{"kind":"null"},"bindings":[]
                     }
                 }],
                 "otherwise":{
-                    "kind":"succeed","name":"fewerInnerOverflows",
+                    "kind":"succeed","name":"fewerInnerExhaustions",
                     "output":{"kind":"null"},"bindings":[]
                 },
                 "promotedStatePaths":[]
@@ -375,3 +375,102 @@ mod core_tests;
 mod incoming_control;
 #[path = "map_regressions/outcome_presence.rs"]
 mod outcome_presence;
+
+#[tokio::test]
+async fn item_local_aggregate_counts_cannot_combine_a_signal_with_its_own_error() {
+    let state = mapped_items_state();
+    let guard = json!({"kind":"all","guards":[
+        {"kind":"k_of_map","count":1,"value":{"name":"itemVerify","source":"signal","field":"verdict"},"labels":["accepted"]},
+        {"kind":"in","value":{"name":"itemVerify","source":"error","field":null},"labels":["crash"]}
+    ]});
+    let body = json!({"kind":"seq","name":"body","state":state,"promotedStatePaths":[],"children":[
+        map_verifier("itemVerify"),{"kind":"choice","name":"route","state":state,"promotedStatePaths":[],
+            "branches":[{"when":guard,"node":mapped_step("selected")}],"otherwise":mapped_step("other")}
+    ]});
+    let graph = graph_with_state_children(
+        state.clone(),
+        json!([map_node(&state,body),{"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}]),
+    );
+    let error = ProductionGraphVerifier::new(registry())
+        .verify(&graph)
+        .await
+        .assert_error();
+    let codes = rejection_codes(error);
+    assert!(
+        codes.contains(&GraphDiagnosticCode::ChoiceExhaustiveness),
+        "{codes:?}"
+    );
+}
+
+#[tokio::test]
+async fn aggregate_counts_discard_unobservable_label_classes_after_correlation() {
+    let state = mapped_items_state();
+    let graph = mapped_control_graph(
+        state,
+        json!([map_verifier("itemVerify")]),
+        json!({"kind":"k_of_map","count":100,"value":{"name":"itemVerify","source":"signal","field":"verdict"},"labels":["accepted"]}),
+        ("many", "few"),
+    );
+    assert_graph_accepted(&graph).await;
+}
+
+#[tokio::test]
+async fn nested_maps_preserve_aggregate_scope_and_conditional_inner_execution() {
+    for gate in [None, Some(true), Some(false)] {
+        let state = mapped_items_state();
+        let inner = json!({"kind":"map","name":"inner","state":state,"over":{"source":"state","path":["items"]},"maxItems":1,"body":map_verifier("innerVerify"),"promotedStatePaths":[]});
+        let body = if gate.is_some() {
+            json!({"kind":"seq","name":"outer_body","state":state,"promotedStatePaths":[],"children":[map_verifier("gate"),
+                {"kind":"choice","name":"inner_route","state":state,"promotedStatePaths":[],"branches":[{"when":{"kind":"in","value":{"name":"gate","source":"signal","field":"verdict"},"labels":["accepted"]},"node":inner}],"otherwise":mapped_step("skipped_inner")}
+            ]})
+        } else {
+            inner
+        };
+        let inner_accepted = json!({"kind":"k_of_map","count":1,"value":{"name":"innerVerify","source":"signal","field":"verdict"},"labels":["accepted"]});
+        let guard = if let Some(accepted) = gate {
+            let gate_accepted = json!({"kind":"k_of_map","count":1,"value":{"name":"gate","source":"signal","field":"verdict"},"labels":["accepted"]});
+            json!({"kind":"all","guards":[inner_accepted, if accepted {gate_accepted} else {json!({"kind":"not","guard":gate_accepted})}]})
+        } else {
+            inner_accepted
+        };
+        let graph = graph_with_state_children(
+            state.clone(),
+            json!([
+                map_node(&state, body),
+                map_choice(state, guard, "selected", "otherwise")
+            ]),
+        );
+        if gate == Some(false) {
+            assert_graph_rejected_with(&graph, GraphDiagnosticCode::ChoiceExhaustiveness).await;
+        } else {
+            ProductionGraphVerifier::new(registry())
+                .verify(&graph)
+                .await
+                .unwrap_or_else(|error| panic!("{error:?}"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn first_join_uses_aggregate_selectors_for_deeper_map_facts() {
+    for aggregate in [false, true] {
+        let state = mapped_items_state();
+        let mut guard = json!({"kind":"in","value":{"name":"innerVerify","source":"signal","field":"verdict"},"labels":["accepted"]});
+        if aggregate {
+            guard["kind"] = json!("k_of_map");
+            guard["count"] = json!(1);
+        }
+        let graph = graph_with_state_children(
+            state.clone(),
+            json!([
+                {"kind":"par","name":"race","state":state,"promotedStatePaths":[],"branches":[map_node(&state,map_verifier("innerVerify"))],"join":{"kind":"first","when":guard}},
+                {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+            ]),
+        );
+        if aggregate {
+            assert_graph_accepted(&graph).await;
+        } else {
+            assert_graph_rejected_with(&graph, GraphDiagnosticCode::InvalidGraphShape).await;
+        }
+    }
+}

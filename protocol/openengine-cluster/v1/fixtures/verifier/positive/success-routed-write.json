@@ -16,8 +16,7 @@
             "workFailed",
             "done"
           ]
-        },
-        "workEnforcement": "static"
+        }
       },
       "initialInput": {
         "fields": {

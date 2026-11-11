@@ -23,9 +23,9 @@ impl LoopCompletion {
     }
 }
 
-pub(super) enum VisitResolution {
+pub(super) enum VisitResolution<'history> {
     Exhausted,
-    Ready(Box<ExecutableVisit>),
+    Ready(Box<ExecutableVisit<'history>>),
 }
 
 pub(super) struct LoopFinishRequest<'request, 'traversal> {
@@ -35,25 +35,25 @@ pub(super) struct LoopFinishRequest<'request, 'traversal> {
     pub(super) completion: LoopCompletion,
 }
 
-pub(super) struct ExistingExecutionRequest<'graph, 'context, 'traversal> {
+pub(super) struct ExistingExecutionRequest<'graph, 'context, 'traversal, 'history> {
     pub(super) spec: ExecutableSpec<'graph>,
     pub(super) context: &'context mut Context,
     pub(super) traversal: Traversal<'traversal>,
-    pub(super) execution: DurableExecution,
+    pub(super) execution: &'history DurableExecution,
     pub(super) input: Value,
 }
 
-pub(super) struct MissingDispatchRequest<'graph, 'traversal> {
+pub(super) struct MissingDispatchRequest<'graph, 'traversal, 'history> {
     pub(super) spec: ExecutableSpec<'graph>,
-    pub(super) visit: ExecutableVisit,
+    pub(super) visit: ExecutableVisit<'history>,
     pub(super) input: Value,
     pub(super) traversal: Traversal<'traversal>,
 }
 
-pub(super) struct RetryDispatchRequest<'graph, 'traversal> {
+pub(super) struct RetryDispatchRequest<'graph, 'traversal, 'history> {
     pub(super) spec: ExecutableSpec<'graph>,
     pub(super) traversal: Traversal<'traversal>,
-    pub(super) execution: DurableExecution,
+    pub(super) execution: &'history DurableExecution,
     pub(super) input: Value,
 }
 
@@ -64,13 +64,13 @@ pub(super) struct OutcomeApplication<'request, 'graph> {
     pub(super) outcome: &'request WorkerOutcome,
 }
 
-pub(super) struct ExecutableVisit {
+pub(super) struct ExecutableVisit<'history> {
     pub(super) occurrence: StructuralOccurrence,
-    pub(super) matching: Vec<DurableExecution>,
-    pub(super) executions: Vec<DurableExecution>,
+    pub(super) matching: Vec<&'history DurableExecution>,
+    pub(super) executions: Vec<&'history DurableExecution>,
     pub(super) number: u64,
     pub(super) attempt: PositiveInteger,
-    pub(super) existing: Option<DurableExecution>,
+    pub(super) existing: Option<&'history DurableExecution>,
 }
 
 pub(super) fn attempts_exhausted() -> Result<Status, ReducerError> {

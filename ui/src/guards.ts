@@ -50,7 +50,7 @@ function isPositiveCount(value: unknown): value is number {
 export function controlSources(node?: GraphNode): string[] {
   if (node?.kind === 'verifier') return ['error', 'signal'];
   if (node?.kind === 'step') return ['error'];
-  if (node && ['loop', 'map', 'par'].includes(node.kind)) return ['group'];
+  if (node && ['loop', 'par'].includes(node.kind)) return ['group'];
   return [];
 }
 

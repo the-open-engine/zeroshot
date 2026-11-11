@@ -543,3 +543,19 @@ pub(super) fn descendant_names(node: &GraphNode) -> BTreeSet<NodeName> {
 #[cfg(test)]
 #[path = "values/tests.rs"]
 mod tests;
+
+/// Logical visits survive discarded branch values and controls across repeated races.
+pub(super) fn merge_visit_markers(source: &Context, target: &mut Context) {
+    for (key, value) in &source.controls {
+        if key.source != ControlSource::Group || key.field.as_deref() != Some("__reducer_visit") {
+            continue;
+        }
+        let current = target
+            .controls
+            .entry(key.clone())
+            .or_insert_with(|| value.clone());
+        if value.parse::<u64>().ok() > current.parse::<u64>().ok() {
+            *current = value.clone();
+        }
+    }
+}

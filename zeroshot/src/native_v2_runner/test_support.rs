@@ -129,7 +129,6 @@ pub(crate) fn admitted() -> AdmittedRun {
             policy: graph.policy,
             root: graph.root,
             bounds: StructuralBounds {
-                work_enforcement: openengine_cluster_protocol::WorkEnforcement::Static,
                 termination: TerminationWitness::Acyclic {
                     order: NonEmptyVec::new(vec![root_name.clone()]).assert_value(),
                 },

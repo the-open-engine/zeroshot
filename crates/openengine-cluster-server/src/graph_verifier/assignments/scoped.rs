@@ -104,6 +104,7 @@ fn scope_outcomes(
     let outcomes = enumerate_assignments(dimensions, inputs.budget)?;
     let mut outcomes = fold_child_maps(plan, inputs, (inherited, outcomes))?;
     outcomes.retain(|outcome| item_assignment_matches(&context, &names, &local_keys, outcome));
+    project_retained_controls(&mut outcomes, &context)?;
     for outcome in &mut outcomes {
         outcome.retain(|key, _| key.source != ControlSourceKey::Execution);
     }
@@ -127,7 +128,7 @@ fn map_outcomes(
     aggregate_assignments_from_outcomes(AggregateCounts {
         keys: &keys,
         outcomes: &outcomes,
-        saturation: inputs.saturation,
+        count_limits: inputs.count_limits,
         budget: inputs.budget,
     })
 }

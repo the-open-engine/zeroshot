@@ -52,11 +52,29 @@ impl<'a> Analyzer<'a> {
 
     pub(super) fn collect_map_execution_correlations(&mut self, group: &MapNode) {
         self.collect_map_node_execution(&group.body, &group.name, CompletionPredicate::Always);
+        let retention = self
+            .map_execution_correlations
+            .iter()
+            .filter(|(_, correlation)| correlation.owner == group.name)
+            .map(|(name, _)| {
+                (
+                    name.clone(),
+                    self.conditional_candidate_presence(name, group.body.name())
+                        .unwrap_or(CompletionPredicate::Always),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (name, condition) in retention {
+            if let Some(correlation) = self.map_execution_correlations.get_mut(&name) {
+                correlation.retention = condition;
+            }
+        }
         let correlation = self
             .map_execution_correlations
             .entry(group.body.name().clone())
             .or_insert(MapExecutionCorrelation {
                 owner: group.name.clone(),
+                retention: CompletionPredicate::Always,
                 presence: CompletionPredicate::Always,
                 item_predicates: BTreeMap::new(),
             });
@@ -79,6 +97,7 @@ impl<'a> Analyzer<'a> {
                     node.name().clone(),
                     MapExecutionCorrelation {
                         owner: owner.clone(),
+                        retention: CompletionPredicate::Always,
                         item_predicates: BTreeMap::new(),
                         presence,
                     },
@@ -138,6 +157,7 @@ impl<'a> Analyzer<'a> {
                     group.name.clone(),
                     MapExecutionCorrelation {
                         owner: owner.clone(),
+                        retention: CompletionPredicate::Always,
                         item_predicates: BTreeMap::new(),
                         presence: presence.clone(),
                     },
@@ -149,6 +169,7 @@ impl<'a> Analyzer<'a> {
                     nested.name.clone(),
                     MapExecutionCorrelation {
                         owner: owner.clone(),
+                        retention: CompletionPredicate::Always,
                         item_predicates: BTreeMap::new(),
                         presence,
                     },
@@ -168,17 +189,13 @@ impl<'a> Analyzer<'a> {
             parallel.name.clone(),
             MapExecutionCorrelation {
                 owner: owner.clone(),
+                retention: CompletionPredicate::Always,
                 item_predicates: BTreeMap::new(),
                 presence: presence.clone(),
             },
         );
-        for (index, branch) in parallel.branches.as_slice().iter().enumerate() {
-            let retained = retention_guard(parallel, index).unwrap_or(CompletionPredicate::Never);
-            self.collect_map_node_execution(
-                branch,
-                owner,
-                CompletionPredicate::all([presence.clone(), retained]),
-            );
+        for branch in parallel.branches.as_slice() {
+            self.collect_map_node_execution(branch, owner, presence.clone());
         }
     }
 

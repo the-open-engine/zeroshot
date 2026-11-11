@@ -17,8 +17,7 @@
             "done",
             "mapControlOtherwise"
           ]
-        },
-        "workEnforcement": "runtime"
+        }
       },
       "initialInput": {
         "fields": {

@@ -12,7 +12,7 @@ const UNITS: &str = "units";
 const FINDINGS: &str = "findings";
 const UNIT_FINAL: &str = "unitFinal";
 const REST_FINAL: &str = "restFinal";
-/// Triage is asked for at most six units; the maps leave room for two more.
+/// Triage is asked for at most six units; maps run eight unit bodies concurrently and queue more.
 const MAX_UNITS: u64 = 8;
 
 /// Compose fixed instruction fragments at compile time.

@@ -7,6 +7,7 @@ import {
   projectControlHistory,
   settleControlVisits,
   type ControlRecord,
+  type ControlVisit,
 } from './control-history';
 import type { WorkflowNodeObservation } from './workflow-observation';
 
@@ -358,9 +359,7 @@ export function projectHistory(
     const current = [...latest.values()];
     const leaf = allNodes(document.graph.root).find((node) => node.name === name);
     if (leaf && ['step', 'verifier'].includes(leaf.kind)) {
-      const queued = current.filter((visit) => visit.state === 'queued').length;
-      if (queued && nodes[name]?.state !== 'running')
-        nodes[name] = { ...nodes[name], state: 'queued', detail: `${queued} queued` };
+      nodes[name] = queuedLeafObservation(nodes[name], current, invocations);
       continue;
     }
     const states = new Set(current.map((visit) => controlState(visit.state)));
@@ -539,4 +538,28 @@ export function observedRoutes(node: GraphNode, invocations: readonly Invocation
 
 export function descendantNames(node: GraphNode): Set<string> {
   return new Set([node.name, ...children(node).flatMap((child) => [...descendantNames(child)])]);
+}
+
+function queuedLeafObservation(
+  prior: WorkflowNodeObservation,
+  visits: readonly ControlVisit[],
+  invocations: readonly Invocation[]
+): WorkflowNodeObservation {
+  const queued = visits.filter(
+    (visit) =>
+      visit.state === 'queued' &&
+      !invocations.some(
+        (invocation) =>
+          invocation.node === visit.node &&
+          invocation.start >= visit.start &&
+          JSON.stringify(invocation.mapIndices) === JSON.stringify(visit.mapIndices)
+      )
+  ).length;
+  return queued
+    ? {
+        ...prior,
+        state: prior?.state === 'running' || prior?.state === 'failed' ? prior.state : 'queued',
+        detail: [prior?.detail, `${queued} queued`].filter(Boolean).join(' · '),
+      }
+    : prior;
 }

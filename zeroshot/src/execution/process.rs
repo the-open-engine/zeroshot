@@ -279,7 +279,7 @@ impl HostedProcessPool {
     ///
     /// The host pool's writer identity remains reserved for serialized source resolution. Active
     /// runs reserve one workspace owner, environment and delivery markers, and distinct
-    /// session markers for every admitted execution identity.
+    /// compact, recyclable cleanup markers for live provider sessions.
     pub(crate) fn active_run_slot(
         self,
         slot: u32,

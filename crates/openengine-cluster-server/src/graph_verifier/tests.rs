@@ -25,7 +25,6 @@ fn post_validation_invariant_failure_is_internal() -> Result<(), Box<dyn std::er
     let one = PositiveInteger::new(1)?;
     let duplicate = NodeName::new("duplicate")?;
     let bounds = StructuralBounds {
-        work_enforcement: openengine_cluster_protocol::WorkEnforcement::Static,
         termination: TerminationWitness::Acyclic {
             order: NonEmptyVec::new(vec![duplicate.clone()])?,
         },

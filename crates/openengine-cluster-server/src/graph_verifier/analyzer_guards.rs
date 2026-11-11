@@ -171,10 +171,13 @@ impl<'a> Analyzer<'a> {
     ) -> bool {
         let mut valid = true;
         for (selector, map_aggregate, condition) in guarded_selector_uses(guard) {
-            let map_available = map_aggregate
-                && self
-                    .map_owner(&selector.name)
-                    .is_some_and(|owner| available.contains(owner));
+            let map_available = map_aggregate && self.nodes.get(&selector.name).is_some_and(|info| {
+                info.path.iter().any(|part| matches!(part,
+                    DiagnosticPathSegment::Node { name } if name != &selector.name
+                        && available.contains(name)
+                        && self.nodes.get(name).is_some_and(|info| matches!(info.node, GraphNode::Map(_)))
+                ))
+            });
             if !available.contains(&selector.name)
                 && !map_available
                 && !self.choice_error_is_available(selector, available, (&condition, context.path))
@@ -428,5 +431,13 @@ impl<'a> Analyzer<'a> {
                 }
                 _ => None,
             })
+    }
+    pub(super) fn map_depth(&self, name: &NodeName) -> usize {
+        self.nodes.get(name).map_or(0, |info| {
+            info.path.iter().filter(|part| matches!(part,
+            DiagnosticPathSegment::Node { name: parent } if parent != name
+                && self.nodes.get(parent).is_some_and(|info| matches!(info.node, GraphNode::Map(_)))
+        )).count()
+        })
     }
 }

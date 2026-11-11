@@ -118,16 +118,7 @@ async fn assert_no_satisfier_control() {
 
 #[tokio::test]
 async fn statically_impossible_joins_reach_the_parent_terminal_without_dispatch() {
-    for join in [
-        json!({"kind":"all"}),
-        json!({"kind":"any"}),
-        json!({"kind":"quorum","count":2}),
-    ] {
-        let mut branches =
-            vec![json!({"kind":"fail","name":"branch_failed","reason":"branch_failed"})];
-        if join["kind"] != "any" {
-            branches.push(verifier("pending", 1));
-        }
+    for (join, branches) in impossible_joins::impossible_joins() {
         let parallel = json!({"kind":"par","name":"parallel","state":boundary_state(),
             "branches":branches,"join":join,"promotedStatePaths":[]});
         for terminal in [

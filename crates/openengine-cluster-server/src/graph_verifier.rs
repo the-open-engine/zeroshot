@@ -155,7 +155,7 @@ enum CompletionPredicate {
     Never,
     Guard(Guard),
     CandidateGuard {
-        guard: Guard,
+        guard: std::sync::Arc<Guard>,
         available: BTreeMap<SelectorKey, CompletionPredicate>,
     },
     Not(Box<Self>),
@@ -189,6 +189,7 @@ struct ParallelRetention {
 struct MapExecutionCorrelation {
     owner: NodeName,
     presence: CompletionPredicate,
+    retention: CompletionPredicate,
     item_predicates: BTreeMap<FieldName, CompletionPredicate>,
 }
 
@@ -200,6 +201,7 @@ struct ChoiceExecutionCorrelation {
 
 impl MapExecutionCorrelation {
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
+        self.retention.collect_guards(guards);
         self.presence.collect_guards(guards);
         for completion in self.item_predicates.values() {
             completion.collect_guards(guards);
@@ -395,12 +397,17 @@ impl Flow {
     }
 
     fn resolve_successful_writes(&mut self) {
-        let successful = self
-            .outcome_order
-            .iter()
-            .filter(|name| !self.failed.contains(*name))
-            .cloned()
-            .collect::<Vec<_>>();
+        let successful =
+            self.outcome_order
+                .iter()
+                .filter(|name| {
+                    !self.failed.contains(*name)
+                        && !self.conditional_nodes.iter().any(|(owner, nodes)| {
+                            self.failed.contains(owner) && nodes.contains(*name)
+                        })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
         for name in successful {
             if let Some(writes) = self.outcome_writes.remove(&name) {
                 retain_parallel_definition_effects(

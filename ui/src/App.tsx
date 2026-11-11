@@ -471,10 +471,16 @@ function closeEditorModal(state: ReturnType<typeof useAppState>) {
   const { busy, modal, modalDirty, numericDrafts, setModal, setConfirm } = state;
   if (busy) return;
   const close = () => {
-    if (modal === 'runtime') numericDrafts.clear(undefined, 'maxConcurrency');
+    if (modal === 'runtime') {
+      numericDrafts.clear(undefined, 'maxConcurrency');
+      numericDrafts.clear(undefined, 'minProbability');
+    }
     setModal(null);
   };
-  if (modalDirty || (modal === 'runtime' && numericDrafts.get(undefined, 'maxConcurrency')))
+  if (
+    modalDirty ||
+    (modal === 'runtime' && numericDrafts.pending(['maxConcurrency', 'minProbability']))
+  )
     setConfirm({
       title: modal === 'runtime' ? 'Discard runtime changes?' : 'Discard JSON changes?',
       body:
@@ -559,7 +565,7 @@ function createWorkflowEditor(
     try {
       const runtime = runtimeView === 'json' ? parseRuntime(json) : runtimeDraft;
       numericDrafts.prune(doc.graph.root, runtime);
-      if (numericDrafts.pending())
+      if (numericDrafts.pending(['maxConcurrency', 'minProbability']))
         throw new Error(
           'Finish or cancel the pending field edits before applying Runtime settings.'
         );

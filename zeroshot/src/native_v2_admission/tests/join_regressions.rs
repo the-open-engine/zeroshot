@@ -41,7 +41,18 @@ async fn first_cannot_combine_controls_of_mutually_exclusive_inner_winners() {
     ] {
         let graph: GraphSpec = serde_json::from_value(source).assert_value();
         let result = validate_join_graph(graph).await;
-        assert!(result.is_err(), "exclusive winner evidence was combined");
+        assert!(
+            matches!(&result, Err(NativeV2AdmissionError::GraphVerification(
+                openengine_cluster_server::admission::VerificationError::Rejected { diagnostics }
+            )) if diagnostics.iter().any(|diagnostic| match diagnostic.code {
+                openengine_cluster_protocol::GraphDiagnosticCode::InvalidGraphShape =>
+                    diagnostic.message == "first join guard cannot be established by any candidate racer",
+                openengine_cluster_protocol::GraphDiagnosticCode::UndefinedRead |
+                openengine_cluster_protocol::GraphDiagnosticCode::ChoiceExhaustiveness => true,
+                _ => false,
+            })),
+            "exclusive winner evidence did not produce a control/dataflow rejection: {result:?}"
+        );
     }
 }
 

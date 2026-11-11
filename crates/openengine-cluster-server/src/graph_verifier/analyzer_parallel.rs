@@ -111,6 +111,17 @@ impl<'a> Analyzer<'a> {
             }
             let mut available = incoming.available.clone();
             available.extend(collect_descendant_names(&group.branches));
+            for (selector, aggregate) in guard_selector_uses(when) {
+                if !aggregate && self.map_depth(&selector.name) > self.map_depth(&group.name) {
+                    emit_diagnostic!(
+                        self,
+                        GraphDiagnosticCode::InvalidGraphShape,
+                        "first-join scalar controls must be in the join's map scope; use an aggregate for deeper items",
+                        field_path(path, &["join", "when"]),
+                        vec![selector.name.clone()]
+                    );
+                }
+            }
             for selector in guard_selectors(when) {
                 self.dependencies
                     .entry(group.name.clone())

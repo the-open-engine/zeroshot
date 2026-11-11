@@ -16,8 +16,7 @@
               "innerLoop"
             ]
           ]
-        },
-        "workEnforcement": "runtime"
+        }
       },
       "initialInput": {
         "fields": {

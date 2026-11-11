@@ -124,8 +124,8 @@ impl Engine<'_> {
         for (index, item) in items.iter().enumerate() {
             let mut scope = traversal.map_indices.to_vec();
             scope.push(index as u64);
-            let historical = self.item_has_history(&group.body, &scope, context);
-            let retained = self.item_in_frontier(&group.body, &scope, traversal.loop_iterations);
+            let historical = self.item_has_history(&body_names, &scope, context);
+            let retained = self.item_in_frontier(&body_names, &scope, traversal.loop_iterations);
             if !historical
                 && !retained
                 && (pending >= group.max_items.get()

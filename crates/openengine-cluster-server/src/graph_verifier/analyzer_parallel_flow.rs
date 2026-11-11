@@ -6,6 +6,15 @@ struct ParallelMergeContext<'a> {
 }
 
 impl<'a> Analyzer<'a> {
+    fn unknown_parallel(&mut self, path: &[DiagnosticPathSegment]) -> Effects {
+        self.assignment_ceiling(path);
+        Effects {
+            falls_through: true,
+            completion: CompletionPredicate::Always,
+            ..Effects::default()
+        }
+    }
+
     pub(super) fn validate_par(
         &mut self,
         group: &ParNode,
@@ -72,7 +81,6 @@ impl<'a> Analyzer<'a> {
         effects
             .exit_failed
             .extend(context.node.incoming.failed.iter().cloned());
-        effects.exit_failed.insert(group.name.clone());
         effects
     }
 
@@ -103,7 +111,10 @@ impl<'a> Analyzer<'a> {
                 ..merge_parallel_scenarios(branches, required, &[])
             };
         }
-        let correlation = self.correlation_for_effects(group, branches, context.incoming);
+        let Some(correlation) = self.correlation_for_effects(group, branches, context.incoming)
+        else {
+            return self.unknown_parallel(context.path);
+        };
         self.parallel_join_correlations
             .insert(group.name.clone(), correlation);
 
@@ -138,6 +149,15 @@ impl<'a> Analyzer<'a> {
             .into_iter()
             .collect::<Vec<_>>();
         let mut merged = merge_parallel_scenarios(branches, required, &scenarios);
+        if assignments.iter().any(|assignment| {
+            (branches
+                .iter()
+                .filter(|branch| branch.completion.evaluate(assignment))
+                .count() as u64)
+                < required
+        }) {
+            merged.exit_failed.insert(group.name.clone());
+        }
         // Both reached and impossible joins return normally; controls retain success eligibility.
         merged.falls_through = true;
         merged.completion = CompletionPredicate::Always;
@@ -150,7 +170,10 @@ impl<'a> Analyzer<'a> {
         branches: &[Effects],
         context: ParallelMergeContext<'_>,
     ) -> Effects {
-        let correlation = self.correlation_for_effects(group, branches, context.incoming);
+        let Some(correlation) = self.correlation_for_effects(group, branches, context.incoming)
+        else {
+            return self.unknown_parallel(context.path);
+        };
         let satisfiers = correlation.retention().branches.clone();
         let satisfaction = CompletionPredicate::any(satisfiers.clone());
         self.parallel_join_correlations
@@ -190,6 +213,12 @@ impl<'a> Analyzer<'a> {
             );
         }
         let mut merged = merge_parallel_scenarios(branches, 1, &scenarios);
+        if assignments
+            .iter()
+            .any(|assignment| !satisfaction.evaluate(assignment))
+        {
+            merged.exit_failed.insert(group.name.clone());
+        }
         merged.falls_through = true;
         merged.completion = CompletionPredicate::Always;
         merged
@@ -200,7 +229,7 @@ impl<'a> Analyzer<'a> {
         group: &ParNode,
         branches: &[Effects],
         incoming: &Flow,
-    ) -> ParallelJoinCorrelation {
+    ) -> Option<ParallelJoinCorrelation> {
         let completions = branches
             .iter()
             .map(|branch| branch.completion.clone())
@@ -213,9 +242,16 @@ impl<'a> Analyzer<'a> {
         group: &ParNode,
         completions: &[CompletionPredicate],
         incoming: &BTreeSet<NodeName>,
-    ) -> ParallelJoinCorrelation {
+    ) -> Option<ParallelJoinCorrelation> {
         let required = parallel_required_completions(&group.join, completions.len());
         let branches = if let Join::First { when } = &group.join {
+            // Charge expansion before constructing availability maps or copying any predicates.
+            self.proof_work.charge(
+                (guard_node_count(when) as usize)
+                    .checked_add(guard_selector_uses(when).len())?
+                    .checked_mul(completions.len())?,
+            )?;
+            let shared_guard = std::sync::Arc::new(when.clone());
             completions
                 .iter()
                 .zip(group.branches.as_slice())
@@ -223,7 +259,7 @@ impl<'a> Analyzer<'a> {
                     CompletionPredicate::all([
                         completion.clone(),
                         CompletionPredicate::CandidateGuard {
-                            guard: when.clone(),
+                            guard: shared_guard.clone(),
                             available: self.first_guard_available_on_branch(when, racer, incoming),
                         },
                     ])
@@ -236,7 +272,7 @@ impl<'a> Analyzer<'a> {
             branches: branches.clone(),
             required,
         };
-        match &group.join {
+        Some(match &group.join {
             Join::First { .. } => ParallelJoinCorrelation::First {
                 satisfaction: CompletionPredicate::any(branches),
                 retention,
@@ -245,7 +281,7 @@ impl<'a> Analyzer<'a> {
                 completion: CompletionPredicate::at_least(required, branches),
                 retention,
             },
-        }
+        })
     }
 
     pub(super) fn first_guard_available_on_branch(
@@ -259,6 +295,9 @@ impl<'a> Analyzer<'a> {
         guard_selector_uses(when)
             .into_iter()
             .filter_map(|(selector, aggregate)| {
+                if !aggregate && self.map_depth(&selector.name) > self.map_depth(racer.name()) {
+                    return None;
+                }
                 let owner = if aggregate {
                     self.nodes
                         .get(&selector.name)

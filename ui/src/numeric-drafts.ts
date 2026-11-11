@@ -85,7 +85,8 @@ export function createNumericDrafts() {
       return true;
     },
     clear,
-    pending: () => values.size > 0,
+    pending: (fields?: readonly NumericField[]) =>
+      [...values.values()].some((draft) => !fields || fields.includes(draft.field)),
     rename(before: string, after: string) {
       for (const draft of [...values.values()]) {
         if (draft.node !== before) continue;

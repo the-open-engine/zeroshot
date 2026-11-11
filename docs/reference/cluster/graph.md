@@ -267,7 +267,8 @@ Only `step` and `verifier` count as logical executable visits. Retries stay in t
 The host enforces 65,536 logical visits and 65,536 loop-body entries against durable history,
 including checkpoint prefixes. Known excess work fails before dispatch; dynamic expansion fails
 at the responsible node before crossing a ceiling. Concurrency never proves total cardinality.
-Static graphs retain structural proofs; maps produce `workEnforcement: "runtime"` certificates.
+Structural bounds are guaranteed upper limits: static graphs derive them from structure, while
+maps rely on the same runtime work ceilings. They do not bound map input cardinality.
 
 Aggregate checks preserve each item's joint outcomes and conditional presence. Structural map
 bodies can complete without executable visits, so analysis assumes no cardinality bound from
@@ -300,11 +301,12 @@ within 1,024 bytes: the count is left out when it does not fit, and `.../` repla
 segments that do not fit:
 
 ```text
-graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control assignment space exceeds 65536 (and 1 more diagnostic)
+graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis exceeds 65536 states or 8388608 count-cell work units (and 1 more diagnostic)
 ```
 
-`StructuralBounds` distinguishes static and runtime work enforcement and carries a termination witness, positive maximum node executions, positive peak
-concurrency, and positive per-node attempt ceilings. A termination witness is either an acyclic node
+`StructuralBounds` carries a termination witness, a positive executable-visit upper limit,
+a positive concurrency upper limit, and positive per-node attempt ceilings. Maps rely on runtime
+ceilings for dynamic work; their bounds do not assert input cardinality. A termination witness is either an acyclic node
 order or a bounded structural ranking with positive maximum iterations.
 
 `ArtifactRef` is a durable receipt containing only:

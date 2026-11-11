@@ -14,7 +14,7 @@ async fn nested_maps_preserve_outer_index_definition_isolation() {
 
 #[tokio::test]
 async fn k_of_map_counts_group_controls_across_the_enclosing_map() {
-    let graph = nested_map_group_aggregate_graph();
+    let graph = mapped_loop_group_aggregate_graph();
     assert_graph_accepted(&graph).await;
 }
 

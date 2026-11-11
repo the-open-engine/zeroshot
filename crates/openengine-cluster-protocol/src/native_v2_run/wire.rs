@@ -25,6 +25,7 @@ pub struct RuntimePlan {
     pub size: Option<RunSize>,
     /// Maximum owned leaf and auxiliary executions. Omission uses 64 on every placement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = 65_536_u64))]
     pub max_concurrency: Option<crate::PositiveInteger>,
     /// Local workspace snapshots. Run history remains durable when disabled.
     #[serde(

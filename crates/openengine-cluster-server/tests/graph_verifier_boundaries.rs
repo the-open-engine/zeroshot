@@ -427,7 +427,7 @@ fn exact_fold_map() -> Value {
 }
 
 #[tokio::test]
-async fn checked_folds_accept_exact_execution_loop_entry_and_concurrency_limits() {
+async fn dynamic_maps_report_runtime_ceilings_and_structural_concurrency() {
     let verified = verify(&graph(vec![exact_fold_map(), succeed("done")]))
         .await
         .assert_value();
@@ -456,8 +456,8 @@ async fn dynamic_maps_report_runtime_work_enforcement_instead_of_cardinality_pro
     .await
     .assert_value();
     assert_eq!(
-        verified.compiled_ir.bounds.work_enforcement,
-        openengine_cluster_protocol::WorkEnforcement::Runtime
+        verified.compiled_ir.bounds.max_node_executions.get(),
+        FULL_V1_MAX_NODE_EXECUTIONS
     );
 }
 
@@ -611,4 +611,45 @@ async fn zero_work_map_controls_use_bounded_analysis_without_a_cardinality_assum
             .iter()
             .any(|diagnostic| diagnostic.message.contains("map bound"))
     );
+}
+
+#[tokio::test]
+async fn wide_first_join_charges_selector_expansion_before_copying_branch_predicates() {
+    let branches = (0..2048)
+        .map(|index| null_verifier(&format!("v{index}")))
+        .collect::<Vec<_>>();
+    let selector = json!({"name":"v0","source":"signal","field":"verdict"});
+    let node = json!({"kind":"par","name":"race","state":state(),"branches":branches,"promotedStatePaths":[],"join":{"kind":"first","when":{"kind":"k_of_n","count":1,"values":vec![selector;4096],"labels":["accepted"]}}});
+    let error = verify(&graph(vec![node, succeed("done")]))
+        .await
+        .assert_error();
+    assert!(
+        diagnostics(error)
+            .iter()
+            .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
+    );
+}
+
+#[tokio::test]
+async fn static_visit_and_loop_entry_totals_keep_their_exact_ceilings() {
+    for (limit, valid) in [(65536, true), (65537, false)] {
+        let loop_node = json!({"kind":"loop","name":"repeat","state":state(),"body":null_step("work",1),"maxIterations":limit,"promotedStatePaths":[]});
+        let result = verify(&graph(vec![loop_node, succeed("done")])).await;
+        if valid {
+            let verified = result.assert_value();
+            assert_eq!(verified.compiled_ir.bounds.max_node_executions.get(), 65536);
+            let openengine_cluster_protocol::TerminationWitness::Bounded { max_iterations, .. } =
+                verified.compiled_ir.bounds.termination
+            else {
+                panic!("bounded loop")
+            };
+            assert_eq!(max_iterations.get(), 65536);
+        } else {
+            assert!(
+                diagnostics(result.assert_error())
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
+            );
+        }
+    }
 }

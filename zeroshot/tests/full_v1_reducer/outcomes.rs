@@ -378,16 +378,7 @@ mod write_order;
 async fn impossible_joins_preserve_prior_worker_error_and_guarded_output() {
     let state =
         json!({"kind":"record","fields":{"result":{"type":{"kind":"integer"},"required":false}}});
-    for join in [
-        json!({"kind":"all"}),
-        json!({"kind":"any"}),
-        json!({"kind":"quorum","count":2}),
-    ] {
-        let mut branches =
-            vec![json!({"kind":"fail","name":"branch_failed","reason":"branch_failed"})];
-        if join["kind"] != "any" {
-            branches.push(verifier("pending", 1));
-        }
+    for (join, branches) in impossible_joins::impossible_joins() {
         let root = json!({"kind":"seq","name":"run","state":state,"children":[
             promoted_integer_step("writer","result"),
             {"kind":"par","name":"parallel","state":state,"branches":branches,"join":join,"promotedStatePaths":[]},

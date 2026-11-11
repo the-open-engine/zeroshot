@@ -16,8 +16,7 @@
             "selected",
             "decisionOtherwise"
           ]
-        },
-        "workEnforcement": "static"
+        }
       },
       "initialInput": {
         "fields": {

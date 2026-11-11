@@ -59,6 +59,7 @@ impl Engine<'_> {
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
+        let frontier = self.pending_frontier.clone();
         let checkpoint = self.trace_checkpoint();
         let probes = self.evaluate_parallel_branches(
             group,
@@ -100,11 +101,14 @@ impl Engine<'_> {
                 } else {
                     self.restore_trace(probe_trace)?;
                 }
+                self.pending_frontier = frontier;
+                merge_parallel_visits(&probes, context);
             }
             return Ok(status);
         }
+        self.pending_frontier = frontier;
         let winners = ordered.into_iter().take(required).collect::<Vec<_>>();
-        let (joined, join_position, winner_set) = self.join_parallel_winners(
+        let (mut joined, join_position, winner_set) = self.join_parallel_winners(
             GroupEvaluation {
                 group,
                 context: &*context,
@@ -112,6 +116,7 @@ impl Engine<'_> {
             },
             &winners,
         )?;
+        merge_parallel_visits(&probes, &mut joined);
         self.finish_parallel_join(
             GroupMutation {
                 group,
@@ -140,7 +145,7 @@ impl Engine<'_> {
             .iter()
             .enumerate()
             .collect::<Vec<_>>();
-        order.sort_by_key(|(index, branch)| {
+        order.sort_by_cached_key(|(index, branch)| {
             (self.last_service(branch, traversal.map_indices), *index)
         });
         let base = self.probe_loops.clone();
@@ -217,12 +222,21 @@ impl Engine<'_> {
             })?;
             return Ok(Some(Status::Pending));
         }
+        let position = summary
+            .probes
+            .iter()
+            .map(|(status, candidate)| match status {
+                Status::Pending => candidate.evidence_position,
+                _ => status.position().max(candidate.evidence_position),
+            })
+            .max()
+            .unwrap_or(HistoryPosition::ZERO);
         for branch in group.branches.as_slice() {
             self.void_active_descendants(
                 branch,
                 VoidScope {
                     map_indices: traversal.map_indices,
-                    cutoff: HistoryPosition::ZERO,
+                    cutoff: position,
                     reason: ExecutionVoidReason::ParallelJoin,
                     emit_decisions: traversal.mode == EvalMode::Decide,
                 },
@@ -237,15 +251,6 @@ impl Engine<'_> {
             ParallelControlResult::Unreachable,
         );
         self.continue_decision(&group.name, traversal.mode);
-        let position = summary
-            .probes
-            .iter()
-            .map(|(status, candidate)| match status {
-                Status::Pending => candidate.evidence_position,
-                _ => status.position().max(candidate.evidence_position),
-            })
-            .max()
-            .unwrap_or(HistoryPosition::ZERO);
         Ok(Some(Status::Continue { position }))
     }
 
@@ -265,7 +270,7 @@ impl Engine<'_> {
                 .iter()
                 .enumerate()
                 .collect::<Vec<_>>();
-            branches.sort_by_key(|(index, branch)| {
+            branches.sort_by_cached_key(|(index, branch)| {
                 (self.last_service(branch, traversal.map_indices), *index)
             });
             for (_, branch) in branches {
@@ -454,5 +459,11 @@ fn parallel_join_required(join: &Join, branch_count: usize) -> Result<usize, Red
         Join::Quorum { count } => {
             usize::try_from(count.get()).map_err(|_| ReducerError::IdentityOutOfRange)
         }
+    }
+}
+
+fn merge_parallel_visits(probes: &[(Status, Context)], target: &mut Context) {
+    for (_, candidate) in probes {
+        merge_visit_markers(candidate, target);
     }
 }

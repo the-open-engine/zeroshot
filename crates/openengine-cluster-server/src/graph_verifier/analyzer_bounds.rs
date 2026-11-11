@@ -71,7 +71,7 @@ impl Analyzer<'_> {
                     body.executions.saturating_mul(group.max_iterations.get()),
                     body.dynamic,
                 ),
-                FULL_V1_MAX_NODE_EXECUTIONS,
+                (FULL_V1_MAX_NODE_EXECUTIONS, "executable-node visits"),
                 &path,
             )?,
             loop_entries: self.work_bound(
@@ -81,7 +81,7 @@ impl Analyzer<'_> {
                         .saturating_mul(group.max_iterations.get()),
                     body.dynamic,
                 ),
-                FULL_V1_MAX_LOOP_ENTRIES,
+                (FULL_V1_MAX_LOOP_ENTRIES, "loop-body entries"),
                 &path,
             )?,
             concurrency: body.concurrency,
@@ -108,7 +108,7 @@ impl Analyzer<'_> {
                         .fold(0_u64, |total, fold| total.saturating_add(fold.executions)),
                     dynamic,
                 ),
-                FULL_V1_MAX_NODE_EXECUTIONS,
+                (FULL_V1_MAX_NODE_EXECUTIONS, "executable-node visits"),
                 path,
             )?,
             loop_entries: self.work_bound(
@@ -118,7 +118,7 @@ impl Analyzer<'_> {
                         .fold(0_u64, |total, fold| total.saturating_add(fold.loop_entries)),
                     dynamic,
                 ),
-                FULL_V1_MAX_LOOP_ENTRIES,
+                (FULL_V1_MAX_LOOP_ENTRIES, "loop-body entries"),
                 path,
             )?,
             concurrency: if parallel {
@@ -136,17 +136,18 @@ impl Analyzer<'_> {
     fn work_bound(
         &mut self,
         work: (u64, bool),
-        bound: u64,
+        ceiling: (u64, &str),
         path: &[DiagnosticPathSegment],
     ) -> Option<u64> {
         let (actual, dynamic) = work;
+        let (bound, metric) = ceiling;
         if actual <= bound || dynamic {
             return Some(actual.min(bound));
         }
         emit_diagnostic!(
             self,
             GraphDiagnosticCode::CeilingExceeded,
-            format!("static work exceeds run ceiling {bound}"),
+            format!("static {metric} exceed run ceiling {bound}"),
             path.to_vec(),
             Vec::new()
         );

@@ -17,8 +17,7 @@
             "selected",
             "afterMapOtherwise"
           ]
-        },
-        "workEnforcement": "runtime"
+        }
       },
       "initialInput": {
         "fields": {

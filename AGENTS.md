@@ -180,11 +180,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   imply auxiliary work. Auxiliary metadata IDs start beyond the genuine primary visit/attempt ceiling,
   independently of contained cleanup reservations. Uncertain cleanup quarantines those slots and capacity. Logical visits and loop entries each
   have a separate run ceiling of 65,536, reconstructed from ledger/checkpoint history.
-  Dynamic maps receive runtime-enforced work certificates. Correlated aggregate verification uses
+  Admission retains the established structural-bounds wire shape; dynamic work uses runtime ceilings. Correlated aggregate verification uses
   saturated joint counts and one deterministic 8 Mi count-cell proof-work bound.
   Joins use actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
   Shared three-valued guard evaluation preserves candidate-local first-join eligibility.
+  Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
+  branches on join settlement while preserving actual visit markers and earlier cancellation causes.
+  Static aggregate proofs check private qualification before exporting retained controls, clip only
+  queried label classes at their own thresholds, and charge shared-guard expansion before allocation.
+  Aggregate guards can use nested map facts when an enclosing map dominates their scope.
   The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
   actual traversal to find ready work; static write/retention witnesses remain private to admission.
   Cancel or void losers after an actual join or terminal decision through confirmed cleanup.

@@ -466,3 +466,40 @@ test('node names do not mutate observation object prototypes', () => {
   assert.equal(Object.hasOwn(projection.nodes, '__proto__'), true);
   assert.equal(projection.nodes.__proto__.state, 'running');
 });
+
+test('durable starts and completions supersede stale queue observations at each cursor', () => {
+  const history = events({ kind: 'run_started' }, start(), complete());
+  const controls = [
+    {
+      cursor: 'v2:1',
+      node: 'worker',
+      mapIndices: [],
+      visitId: 'queued-worker',
+      state: 'queued' as const,
+    },
+  ];
+  assert.equal(projectHistory(document(), history, 0, controls).nodes.worker.state, 'queued');
+  assert.equal(projectHistory(document(), history, 1, controls).nodes.worker.state, 'running');
+  assert.equal(projectHistory(document(), history, 2, controls).nodes.worker.state, 'succeeded');
+});
+
+test('queued map items preserve failed executions and verifier details', () => {
+  const doc = document({
+    kind: 'map',
+    name: 'items',
+    body: { kind: 'verifier', name: 'worker', signals: { verdict: ['rejected'] } },
+  });
+  const history = events(
+    { kind: 'run_started' },
+    start(ref(), 1, [0]),
+    complete(ref(), { status: 'error', code: 'crash' }),
+    start(ref('worker', '2', '2'), 1, [1]),
+    complete(ref('worker', '2', '2'), { status: 'verifier', signals: { verdict: 'rejected' } })
+  );
+  const projection = projectHistory(doc, history, 4, [
+    { cursor: 'v2:1', node: 'worker', mapIndices: [2], visitId: 'queued-item', state: 'queued' },
+  ]);
+  assert.equal(projection.nodes.worker.state, 'failed');
+  assert.match(projection.nodes.worker.detail ?? '', /Verdict: rejected/);
+  assert.match(projection.nodes.worker.detail ?? '', /1 queued/);
+});

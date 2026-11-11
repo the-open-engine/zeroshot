@@ -720,3 +720,35 @@ fn interrupted_saves_do_not_keep_a_replaced_profile() {
     }
     assert_eq!(retained, Vec::<PathBuf>::new());
 }
+
+#[test]
+fn an_unreadable_store_write_preserves_existing_bytes_and_never_creates_an_initial_store() {
+    for existing in [false, true] {
+        let (_root, store) = temporary_store();
+        if existing {
+            store
+                .set(profile_request("valid", "worker", true))
+                .assert_value();
+        }
+        let path = store.root.join(PROFILES_FILE);
+        let before = std::fs::read(&path).ok();
+        let mut stored = store.read().assert_value();
+        let bad = RunProfileName::new("unreadable").assert_value();
+        let payload = (0..513).fold(serde_json::Value::Null, |value, _| json!([value]));
+        stored.profiles.insert(
+            bad.clone(),
+            serde_json::value::to_raw_value(&payload).assert_value(),
+        );
+        stored.default = Some(bad);
+        assert!(store.write(&stored).is_err());
+        assert_eq!(std::fs::read(&path).ok(), before);
+        assert_eq!(
+            store
+                .read()
+                .assert_value()
+                .default
+                .map(|name| name.to_string()),
+            existing.then(|| "valid".to_owned())
+        );
+    }
+}

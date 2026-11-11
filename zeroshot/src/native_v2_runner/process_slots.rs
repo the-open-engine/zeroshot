@@ -8,28 +8,30 @@ pub(crate) const MAX_PROCESS_SLOTS: u64 = 131_072;
 pub(super) struct ProcessSlots(Arc<std::sync::Mutex<ProcessSlotState>>);
 #[derive(Default)]
 struct ProcessSlotState {
-    occupied: BTreeSet<u64>,
+    free: BTreeSet<u64>,
+    next_slot: u64,
     next_home: u64,
 }
 impl ProcessSlots {
     pub(super) fn acquire(&self) -> Result<Arc<ProcessSlot>, NodeRunnerError> {
         let mut occupied = self.0.lock().map_err(|_| NodeRunnerError::SessionOpen)?;
-        let mut slot = 1;
-        for current in occupied.occupied.iter().copied() {
-            if current != slot {
-                break;
-            }
-            slot += 1;
-        }
-        if slot > MAX_PROCESS_SLOTS {
-            return Err(NodeRunnerError::SessionOpen);
-        }
         let home_number = occupied
             .next_home
             .checked_add(1)
             .ok_or(NodeRunnerError::SessionOpen)?;
         let home = NodeInstanceId::new(home_number).map_err(|_| NodeRunnerError::SessionOpen)?;
-        occupied.occupied.insert(slot);
+        let slot = match occupied.free.pop_first() {
+            Some(slot) => slot,
+            None => {
+                let slot = occupied
+                    .next_slot
+                    .checked_add(1)
+                    .filter(|slot| *slot <= MAX_PROCESS_SLOTS)
+                    .ok_or(NodeRunnerError::SessionOpen)?;
+                occupied.next_slot = slot;
+                slot
+            }
+        };
         occupied.next_home = home_number;
         Ok(Arc::new(ProcessSlot {
             slot: NodeInstanceId::new(slot).map_err(|_| NodeRunnerError::SessionOpen)?,
@@ -82,8 +84,8 @@ impl ProcessSlot {
                 .0
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .occupied
-                .remove(&self.slot.get());
+                .free
+                .insert(self.slot.get());
         }
     }
 }

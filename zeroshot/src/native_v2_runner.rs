@@ -587,13 +587,16 @@ impl NodeRunner for NativeNodeRunner {
             tokio::select! {
                 biased;
                 _ = wait_for_cancellation(&mut stop) => return Err(NodeRunnerError::RunClosed),
-                permit = self.capacity.clone().acquire_owned() => permit.map_err(|_| NodeRunnerError::RunClosed)?,
+                permit = self.capacity.clone().acquire_owned() => permit.map_err(|_| NodeRunnerError::CleanupUnconfirmed)?,
             }
         } else {
             self.capacity
                 .clone()
                 .try_acquire_owned()
-                .map_err(|_| NodeRunnerError::ExecutionActive)?
+                .map_err(|error| match error {
+                    tokio::sync::TryAcquireError::Closed => NodeRunnerError::CleanupUnconfirmed,
+                    tokio::sync::TryAcquireError::NoPermits => NodeRunnerError::ExecutionActive,
+                })?
         };
         let reference = request.invocation.reference.clone();
         let (cancel_sender, cancel_receiver) = watch::channel(false);
@@ -612,12 +615,13 @@ impl NodeRunner for NativeNodeRunner {
         let task_output = output_sender.clone();
         let auxiliary = self.auxiliary;
 
+        let capacity = self.capacity.clone();
         tokio::spawn(async move {
             let task = RunnerTask {
                 request,
                 role: plan.role,
                 response: plan.response,
-                provider_session_slot: plan.provider_session_slot,
+                owner_slot: plan.provider_session_slot,
                 auxiliary,
                 cancellation: cancel_receiver,
                 output: task_output,
@@ -626,6 +630,7 @@ impl NodeRunner for NativeNodeRunner {
             };
             let result = execute(runtime, task).await;
             if matches!(result, Err(NodeRunnerError::CleanupUnconfirmed)) {
+                capacity.close();
                 permit.forget();
             } else {
                 drop(permit);
@@ -670,7 +675,7 @@ struct RunnerTask<'a> {
     request: NodeRunRequest,
     role: NodeRole,
     response: NodeResponseContract,
-    provider_session_slot: u64,
+    owner_slot: u64,
     auxiliary: bool,
     cancellation: watch::Receiver<bool>,
     output: broadcast::Sender<LiveOutput>,
@@ -688,7 +693,7 @@ async fn execute(
             SessionCheckout {
                 invocation: &task.request.invocation,
                 environment: &task.request.environment,
-                owner_slot: task.provider_session_slot,
+                owner_slot: task.owner_slot,
             },
             &mut task.cancellation,
         )

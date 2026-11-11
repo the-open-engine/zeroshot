@@ -18,8 +18,7 @@
             "joinControl",
             "done"
           ]
-        },
-        "workEnforcement": "static"
+        }
       },
       "initialInput": {
         "fields": {

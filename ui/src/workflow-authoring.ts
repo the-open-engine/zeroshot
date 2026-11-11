@@ -145,7 +145,7 @@ function terminalEndpoint(node: GraphNode): string | undefined {
   if (node.kind === 'choice' && nested.length && nested.every(terminalEndpoint)) return node.name;
   // Parallel consumes branch terminals and returns its group result even when the
   // join cannot be reached. Following checkpoints must remain authorable.
-  // An empty map or an exceeded item limit bypasses even a terminal-only body.
+  // An empty map bypasses even a terminal-only body.
   return undefined;
 }
 

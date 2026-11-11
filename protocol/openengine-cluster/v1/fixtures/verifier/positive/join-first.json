@@ -19,8 +19,7 @@
             "done",
             "joinControlOtherwise"
           ]
-        },
-        "workEnforcement": "static"
+        }
       },
       "initialInput": {
         "fields": {

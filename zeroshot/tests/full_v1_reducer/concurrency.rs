@@ -301,7 +301,7 @@ async fn loop_history_probing_is_bounded_without_charging_unstarted_loser() {
     ));
 }
 
-fn accepted_race_guard() -> Value {
+pub(super) fn accepted_race_guard() -> Value {
     json!({"kind":"any","guards":[
         {"kind":"in","value":{"name":"a","source":"signal","field":"verdict"},"labels":["accepted"]},
         {"kind":"in","value":{"name":"b","source":"signal","field":"verdict"},"labels":["accepted"]}]})

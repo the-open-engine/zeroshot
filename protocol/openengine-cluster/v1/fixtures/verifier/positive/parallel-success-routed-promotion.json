@@ -29,8 +29,7 @@
             "done",
             "failed"
           ]
-        },
-        "workEnforcement": "static"
+        }
       },
       "initialInput": {
         "fields": {

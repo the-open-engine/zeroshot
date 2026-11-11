@@ -3,7 +3,7 @@ use super::*;
 mod state;
 use state::*;
 
-impl Engine<'_> {
+impl<'history> Engine<'history> {
     pub(super) fn eval(
         &mut self,
         node: &GraphNode,
@@ -124,9 +124,9 @@ impl Engine<'_> {
         let mut position = HistoryPosition::ZERO;
         for (index, child) in group.children.as_slice().iter().enumerate() {
             let accepted_prefix = traversal.accepted_prefix
-                || group.children.as_slice()[index + 1..]
-                    .iter()
-                    .any(|later| self.item_has_history(later, traversal.map_indices, &local));
+                || group.children.as_slice()[index + 1..].iter().any(|later| {
+                    self.item_has_history(&descendant_names(later), traversal.map_indices, &local)
+                });
             let result = self.eval(
                 child,
                 &mut local,
@@ -357,7 +357,7 @@ impl Engine<'_> {
 
     fn finish_existing_execution(
         &mut self,
-        request: ExistingExecutionRequest<'_, '_, '_>,
+        request: ExistingExecutionRequest<'_, '_, '_, '_>,
     ) -> Result<Status, ReducerError> {
         let ExistingExecutionRequest {
             spec,
@@ -410,7 +410,7 @@ impl Engine<'_> {
         spec: &ExecutableSpec<'_>,
         context: &Context,
         map_indices: &[u64],
-    ) -> Result<VisitResolution, ReducerError> {
+    ) -> Result<VisitResolution<'history>, ReducerError> {
         let occurrence = StructuralOccurrence {
             node: spec.name.clone(),
             map_indices: map_indices.to_vec(),
@@ -465,7 +465,7 @@ impl Engine<'_> {
 
     fn dispatch_missing(
         &mut self,
-        request: MissingDispatchRequest<'_, '_>,
+        request: MissingDispatchRequest<'_, '_, '_>,
     ) -> Result<Status, ReducerError> {
         let MissingDispatchRequest {
             spec,
@@ -495,7 +495,7 @@ impl Engine<'_> {
 
     fn dispatch_retry(
         &mut self,
-        request: RetryDispatchRequest<'_, '_>,
+        request: RetryDispatchRequest<'_, '_, '_>,
     ) -> Result<Status, ReducerError> {
         let RetryDispatchRequest {
             spec,
@@ -518,7 +518,7 @@ impl Engine<'_> {
             &spec,
             DispatchVisit {
                 node_instance: previous.node_instance,
-                occurrence: previous.occurrence,
+                occurrence: previous.occurrence.clone(),
                 attempt,
             },
             (input, traversal),
@@ -716,10 +716,10 @@ impl Engine<'_> {
     // Choice, parallel, and map evaluation live in the groups companion module.
 }
 
-fn native_visit_executions(
-    executions: &[DurableExecution],
+fn native_visit_executions<'history>(
+    executions: &[&'history DurableExecution],
     requested_visit: u64,
-) -> Vec<DurableExecution> {
+) -> Vec<&'history DurableExecution> {
     let mut visit = 0;
     executions
         .iter()
@@ -727,7 +727,7 @@ fn native_visit_executions(
             if execution.attempt.get() == 1 {
                 visit += 1;
             }
-            (visit == requested_visit).then(|| execution.clone())
+            (visit == requested_visit).then_some(*execution)
         })
         .collect()
 }

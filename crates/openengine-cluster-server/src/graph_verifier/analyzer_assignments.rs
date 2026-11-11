@@ -4,7 +4,7 @@ struct AssignmentInputs {
     selectors: Vec<ControlSelector>,
     map_aggregates: BTreeMap<SelectorKey, MapAggregate>,
     join_correlations: BTreeSet<NodeName>,
-    saturation: u64,
+    count_limits: CountLimits,
     label_classes: BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
 }
 
@@ -69,9 +69,9 @@ impl<'a> Analyzer<'a> {
             selectors,
             map_aggregates,
             join_correlations,
-            saturation,
+            count_limits,
             label_classes,
-        }) = self.assignment_inputs(guards)
+        }) = self.assignment_inputs(guards, path)
         else {
             self.assignment_ceiling(path);
             return None;
@@ -83,7 +83,7 @@ impl<'a> Analyzer<'a> {
         let Some(dimensions) = build_dimensions(
             &selectors,
             DimensionInputs {
-                saturation,
+                count_limits: &count_limits,
                 budget: &self.proof_work,
                 label_classes: &label_classes,
                 nodes: &self.nodes,
@@ -112,13 +112,29 @@ impl<'a> Analyzer<'a> {
         Some(assignments)
     }
 
-    fn assignment_inputs(&self, guards: &[&Guard]) -> Option<AssignmentInputs> {
+    fn assignment_inputs(
+        &self,
+        guards: &[&Guard],
+        path: &[DiagnosticPathSegment],
+    ) -> Option<AssignmentInputs> {
+        let local_maps = path
+            .iter()
+            .filter_map(|part| match part {
+                DiagnosticPathSegment::Node { name }
+                    if matches!(self.nodes.get(name)?.node, GraphNode::Map(_)) =>
+                {
+                    Some(name.clone())
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
         let mut expanded = guards.to_vec();
         let mut aggregates = self.explicit_map_aggregates(&expanded);
         let mut join_correlations = BTreeSet::new();
         let mut execution_correlations = BTreeSet::new();
         let mut loop_correlations = BTreeSet::new();
         loop {
+            aggregates.retain(|_, aggregate| !local_maps.contains(&aggregate.owner));
             self.proof_work.charge(
                 expanded
                     .iter()
@@ -188,23 +204,29 @@ impl<'a> Analyzer<'a> {
                 break;
             }
         }
-        let selectors = expanded
+        aggregates.retain(|_, aggregate| !local_maps.contains(&aggregate.owner));
+        self.assignment_controls(&expanded, aggregates, join_correlations)
+    }
+
+    fn assignment_controls(
+        &self,
+        guards: &[&Guard],
+        aggregates: BTreeMap<SelectorKey, MapAggregate>,
+        join_correlations: BTreeSet<NodeName>,
+    ) -> Option<AssignmentInputs> {
+        let selectors = guards
             .iter()
             .flat_map(|guard| guard_selectors(guard))
             .cloned()
             .collect::<Vec<_>>();
 
-        let saturation = expanded
-            .iter()
-            .map(|guard| aggregate_threshold(guard))
-            .max()
-            .unwrap_or(1);
-        let label_classes = self.aggregate_label_classes(&selectors, &aggregates, &expanded)?;
+        let label_classes = self.aggregate_label_classes(&selectors, &aggregates, guards)?;
+        let count_limits = aggregate_count_limits(guards, &label_classes);
         Some(AssignmentInputs {
             selectors,
             map_aggregates: aggregates,
             join_correlations,
-            saturation,
+            count_limits,
             label_classes,
         })
     }
@@ -375,18 +397,55 @@ impl<'a> Analyzer<'a> {
     }
 }
 
-pub(super) fn aggregate_threshold(guard: &Guard) -> u64 {
-    match guard {
-        Guard::KOfMap { count, .. } => count.get(),
-        Guard::All { guards } | Guard::Any { guards } => guards
-            .as_slice()
-            .iter()
-            .map(aggregate_threshold)
-            .max()
-            .unwrap_or(1),
-        Guard::Not { guard } => aggregate_threshold(guard),
-        Guard::In { .. } | Guard::KOfN { .. } => 1,
+fn aggregate_count_limits(
+    guards: &[&Guard],
+    classes: &BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
+) -> CountLimits {
+    fn collect(
+        guard: &Guard,
+        classes: &BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
+        limits: &mut CountLimits,
+    ) {
+        let mut add = |selector: &ControlSelector, labels: &[EnumLabel], count| {
+            let key = SelectorKey::from(selector);
+            if let Some(mapping) = classes.get(&key) {
+                for label in labels {
+                    if let Some(class) = mapping.get(label) {
+                        let limit = limits
+                            .entry(key.clone())
+                            .or_default()
+                            .entry(class.clone())
+                            .or_default();
+                        *limit = (*limit).max(count);
+                    }
+                }
+            }
+        };
+        match guard {
+            Guard::In { value, labels } => add(value, labels.values(), 1),
+            Guard::KOfMap {
+                value,
+                labels,
+                count,
+            } => add(value, labels.values(), count.get()),
+            Guard::KOfN { values, labels, .. } => {
+                for value in values.as_slice() {
+                    add(value, labels.values(), 1);
+                }
+            }
+            Guard::All { guards } | Guard::Any { guards } => {
+                for guard in guards.as_slice() {
+                    collect(guard, classes, limits);
+                }
+            }
+            Guard::Not { guard } => collect(guard, classes, limits),
+        }
     }
+    let mut limits = CountLimits::new();
+    for guard in guards {
+        collect(guard, classes, &mut limits);
+    }
+    limits
 }
 
 fn is_parallel_join_selector(selector: &ControlSelector, field: &str) -> bool {

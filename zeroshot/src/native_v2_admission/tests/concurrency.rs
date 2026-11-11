@@ -185,3 +185,27 @@ async fn serial_concurrency_does_not_authorize_repeated_map_delivery() {
         .await;
     }
 }
+
+#[tokio::test]
+async fn admission_accepts_the_concurrency_ceiling_and_rejects_the_next_value() {
+    for (limit, valid) in [(65536, true), (65537, false)] {
+        let mut submission = request(writer());
+        submission.runtime.max_concurrency =
+            Some(openengine_cluster_protocol::PositiveInteger::new(limit).assert_value());
+        let result = NativeV2Admission
+            .validate_profile(
+                &submission.graph,
+                &submission.runtime,
+                DeliveryPolicy::Optional,
+            )
+            .await;
+        if valid {
+            result.assert_value();
+        } else {
+            assert!(matches!(
+                result,
+                Err(NativeV2AdmissionError::InvalidRuntime(_))
+            ));
+        }
+    }
+}

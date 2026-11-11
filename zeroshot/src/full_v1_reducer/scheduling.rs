@@ -20,11 +20,11 @@ impl Engine<'_> {
 
     pub(super) fn item_in_frontier(
         &self,
-        body: &GraphNode,
+        names: &BTreeSet<NodeName>,
         scope: &[u64],
         iterations: &[u64],
     ) -> bool {
-        descendant_names(body).iter().any(|name| {
+        names.iter().any(|name| {
             self.pending_frontier
                 .range((name.clone(), scope.to_vec(), Vec::new())..)
                 .take_while(|(node, indices, _)| node == name && indices.starts_with(scope))
@@ -80,11 +80,20 @@ impl Engine<'_> {
 
     pub(super) fn last_service(&self, node: &GraphNode, scope: &[u64]) -> HistoryPosition {
         let names = descendant_names(node);
-        self.executions
+        names
             .iter()
-            .filter(|execution| {
-                names.contains(&execution.occurrence.node)
-                    && execution.occurrence.map_indices.starts_with(scope)
+            .flat_map(|name| {
+                self.by_occurrence
+                    .range(
+                        StructuralOccurrence {
+                            node: name.clone(),
+                            map_indices: scope.to_vec(),
+                        }..,
+                    )
+                    .take_while(move |(occurrence, _)| {
+                        occurrence.node == *name && occurrence.map_indices.starts_with(scope)
+                    })
+                    .flat_map(|(_, executions)| executions.iter())
             })
             .map(|execution| execution.dispatch_position)
             .max()
@@ -94,11 +103,11 @@ impl Engine<'_> {
     // Visit markers survive loop rounds; an old index alone is never current-round history.
     pub(super) fn item_has_history(
         &self,
-        body: &GraphNode,
+        names: &BTreeSet<NodeName>,
         scope: &[u64],
         context: &Context,
     ) -> bool {
-        descendant_names(body).iter().any(|name| {
+        names.iter().any(|name| {
             self.by_occurrence
                 .range(
                     StructuralOccurrence {

@@ -361,6 +361,7 @@ pub struct MapNode {
     pub state: PayloadType,
     pub body: Box<GraphNode>,
     pub over: DataSelector,
+    /// Maximum active complete item bodies. Larger inputs queue; every item runs unless authored control flow stops it.
     pub max_items: PositiveInteger,
     pub promoted_state_paths: Vec<FieldPath>,
 }

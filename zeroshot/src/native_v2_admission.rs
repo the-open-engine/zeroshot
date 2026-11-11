@@ -123,7 +123,9 @@ pub enum NativeV2AdmissionError {
         delivery: NodeName,
         writer: NodeName,
     },
-    #[error("map {map} may execute Git delivery node {delivery} concurrently across items")]
+    #[error(
+        "map {map} may repeat publication node {delivery} across items, including at concurrency one"
+    )]
     ConcurrentMapDelivery { map: NodeName, delivery: NodeName },
     #[error("graph-local worker descriptor could not be constructed: {0}")]
     WorkerDescriptor(String),

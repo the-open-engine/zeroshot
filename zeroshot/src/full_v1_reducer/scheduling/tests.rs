@@ -56,20 +56,7 @@ fn admission(history: &[DurableExecution], capacity: usize) -> (Result<Status, R
     engine.dispatch_remaining = capacity;
     let mut context = Context::new(Value::Null);
     mark_visit(group.body.name(), &[], &mut context.controls, count);
-    let result = engine.eval(
-        &group.body,
-        &mut context,
-        Traversal {
-            map_indices: &[],
-            loop_iterations: &[],
-            boundary: None,
-            item: None,
-            mode: EvalMode::Decide,
-            cutoff: HistoryPosition::MAX,
-            accepted_prefix: false,
-            record_evidence: true,
-        },
-    );
+    let result = engine.eval(&group.body, &mut context, Traversal::root());
     (result, engine.next_execution)
 }
 

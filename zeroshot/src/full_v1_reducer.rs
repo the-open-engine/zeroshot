@@ -189,22 +189,17 @@ impl<'a> FullV1Reducer<'a> {
         }
         let mut engine = Engine::new(input, &self.graph.compiled_ir.root, self.execution_mode)?;
         engine.dispatch_remaining = self.dispatch_limit;
-        engine.frontier_limit = self.dispatch_limit.clamp(1, 1024);
+        engine.frontier_limit = if trace && self.dispatch_limit == 0 {
+            1024
+        } else {
+            self.dispatch_limit.clamp(1, 1024)
+        };
         engine.trace = trace.then(TraceCollector::default);
         let mut context = Context::new(initial_state);
         let status = engine.eval(
             &self.graph.compiled_ir.root,
             &mut context,
-            Traversal {
-                map_indices: &[],
-                loop_iterations: &[],
-                boundary: None,
-                item: None,
-                mode: EvalMode::Decide,
-                cutoff: HistoryPosition::MAX,
-                accepted_prefix: false,
-                record_evidence: true,
-            },
+            Traversal::root(),
         )?;
         engine.ensure_history_consumed()?;
         engine.canonicalize_void_decisions();
@@ -301,6 +296,21 @@ struct Traversal<'a> {
     cutoff: HistoryPosition,
     accepted_prefix: bool,
     record_evidence: bool,
+}
+
+impl Traversal<'_> {
+    fn root() -> Self {
+        Self {
+            map_indices: &[],
+            loop_iterations: &[],
+            boundary: None,
+            item: None,
+            mode: EvalMode::Decide,
+            cutoff: HistoryPosition::MAX,
+            accepted_prefix: false,
+            record_evidence: true,
+        }
+    }
 }
 
 struct ExecutableSpec<'a> {
@@ -423,7 +433,7 @@ struct Engine<'a> {
     decisions: Vec<Decision>,
     map_depths: BTreeMap<NodeName, usize>,
     map_owners: BTreeMap<NodeName, NodeName>,
-    by_occurrence: BTreeMap<StructuralOccurrence, Vec<DurableExecution>>,
+    by_occurrence: BTreeMap<StructuralOccurrence, Vec<&'a DurableExecution>>,
     optional_promotions: BTreeMap<NodeName, BTreeSet<FieldPath>>,
     consumed_executions: BTreeSet<ExecutionId>,
     void_cutoffs: BTreeMap<ExecutionId, VoidCutoff>,
@@ -456,12 +466,12 @@ impl<'a> Engine<'a> {
         collect_map_depths(root, 0, &mut map_depths);
         let mut map_owners = BTreeMap::new();
         collect_map_owners(root, None, &mut map_owners);
-        let mut by_occurrence = BTreeMap::<StructuralOccurrence, Vec<DurableExecution>>::new();
+        let mut by_occurrence = BTreeMap::<StructuralOccurrence, Vec<&'a DurableExecution>>::new();
         for execution in input.executions {
             by_occurrence
                 .entry(execution.occurrence.clone())
                 .or_default()
-                .push(execution.clone());
+                .push(execution);
         }
         let mut executable_depths = BTreeMap::new();
         collect_executable_depths(root, 0, &mut executable_depths);
