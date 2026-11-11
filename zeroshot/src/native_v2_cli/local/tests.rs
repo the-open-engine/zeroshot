@@ -602,6 +602,7 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
                 github_token: None,
             },
             recovery,
+            false,
         )
         .await
         .unwrap_err();

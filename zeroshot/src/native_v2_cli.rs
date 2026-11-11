@@ -301,6 +301,8 @@ pub struct RunSelector {
 pub struct RunResumeCommand {
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
+    /// Allow a local resume to replace the user-owned checkout with a checkpoint snapshot.
+    pub discard_workspace_changes: bool,
     /// Send the caller's `GH_TOKEN` with a named-target resume.
     pub forward_github_token: bool,
 }
@@ -833,10 +835,13 @@ pub trait NativeV2CliBackend: Send + Sync {
             "target does not support workspace checkpoints".to_owned(),
         ))
     }
+    /// `discard_workspace_changes` is local consent to replace the user-owned checkout. Named
+    /// targets restore only their own retained copies, so the parser never sets it for them.
     async fn run_resume(
         &self,
         _target: Option<&str>,
         _params: openengine_cluster_protocol::RunResumeParams,
+        _discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         Err(NativeV2CliError::Target(
             "target does not support workspace recovery".to_owned(),

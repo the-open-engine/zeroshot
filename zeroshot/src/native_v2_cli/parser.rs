@@ -168,8 +168,11 @@ enum UtilityCommand {
 
     /// Start a new attempt from a failed run's retained workspace or a saved checkpoint.
     ///
-    /// By default, restart the original graph using its latest retained workspace.
-    /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
+    /// By default, restart the original graph on its retained workspace. A local run keeps its
+    /// checkout as it is now, including files and Git state changed after the failure; a named
+    /// target restarts on the latest snapshot of its retained copy.
+    /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a
+    /// local run this replaces the checkout and requires --discard-workspace-changes.
     /// The successor resolves its original connection requirements again; make those credentials available.
     ///
     /// Target runs reuse the saved environment definition: setup runs before workspace restore,
@@ -774,6 +777,13 @@ struct RunResumeArgs {
     /// Restore this checkpoint and continue from its saved graph boundary.
     #[arg(long, value_name = "ID")]
     from_checkpoint: Option<String>,
+    /// Allow a local checkpoint restore to replace the current checkout.
+    ///
+    /// The checkpoint replaces tracked, staged, untracked, and ignored files and the checkout's
+    /// own Git state, such as HEAD and the index. Branches, commits, and Git configuration are
+    /// kept. Named targets restore their own retained copy and do not accept this flag.
+    #[arg(long, conflicts_with = "target")]
+    discard_workspace_changes: bool,
     /// Send the GH_TOKEN from this shell with the resume.
     ///
     /// Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in
