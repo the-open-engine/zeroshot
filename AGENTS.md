@@ -693,7 +693,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   (Codex bounds that drain after a completed turn).
   Their shared decoder replaces invalid UTF-8 and unpaired Unicode surrogate escapes with U+FFFD
   before adapter parsing and redaction; all other malformed JSON retains each reader's rejection policy.
-- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
+- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before each run's first model
   turn it runs the selected executable with `--version` through that turn's launch path and
   environment. One `--print` process can write several results while background subagents or
   shells finish, so Claude parses every record through stdout EOF and the last result decides the
@@ -797,6 +797,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   connection; control requests and ordinary observers keep their independent connections.
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
   milliseconds and remain unchanged across durable replay.
+- Each run records its executing Zeroshot version before preparation or dispatch logs; resumed
+  successors record their own build. The supervisor serializes version initialization across drive
+  and force-stop. Force-stop stops live work before version logging and request persistence, and
+  skips ledger reads once version initialization completes.
+  Adapters log accepted CLI versions through the existing output
+  bridge once per run and lane when they read them; Claude serializes its initial version check
+  for each run even when ACP reuses the adapter. After invocations drain, `NodeDriver::close_run`
+  releases that run's check state; lane routing forwards the hook to its adapters. ACP records its
+  build at run creation before publishing the supervisor to cancellation.
 - Runner start reserves an execution and returns its handle before asynchronous provider startup.
   Pending start waits are cancellable; accepted startup failures settle through the owned handle.
   Pending remote starts reread connection loss after a close notification so failed closure cannot

@@ -129,6 +129,7 @@ pub struct NativeV2Supervisor {
     runtime_lost: Arc<AtomicBool>,
     force_requested: Arc<AtomicBool>,
     resolution_stop: watch::Sender<bool>,
+    version_initialized: Arc<Mutex<bool>>,
     drive_turn: Arc<Mutex<()>>,
 }
 
@@ -153,6 +154,7 @@ impl NativeV2Supervisor {
             runtime_lost: Arc::new(AtomicBool::new(false)),
             force_requested: Arc::new(AtomicBool::new(false)),
             resolution_stop: watch::channel(false).0,
+            version_initialized: Arc::new(Mutex::new(false)),
             drive_turn: Arc::new(Mutex::new(())),
         }
     }
@@ -203,7 +205,10 @@ impl NativeV2Supervisor {
     }
 
     async fn initialize(&self) -> Result<Initialization, NativeV2SupervisorError> {
-        let mut stored = self.load().await?;
+        let mut stored = match self.initialize_version().await? {
+            Some(stored) => stored,
+            None => self.load().await?,
+        };
         if let Some(terminal) = self.initialized_terminal(&stored).await? {
             return Ok(Initialization::Terminal(terminal));
         }
@@ -223,6 +228,19 @@ impl NativeV2Supervisor {
             instructions: catalog.instructions,
             admitted: stored.admitted,
         })))
+    }
+
+    async fn initialize_version(&self) -> Result<Option<StoredRun>, NativeV2SupervisorError> {
+        // Drive and force-stop can both reach an empty ledger before either appends its version.
+        let mut initialized = self.version_initialized.lock().await;
+        if *initialized {
+            // Later force-stops must reach persistence without depending on ledger reads.
+            return Ok(None);
+        }
+        let mut stored = self.load().await?;
+        logging::record_run_version(self.ledger.as_ref(), &mut stored).await?;
+        *initialized = true;
+        Ok(Some(stored))
     }
 
     async fn initialized_terminal(
@@ -452,6 +470,7 @@ impl NativeV2Supervisor {
         self.force_requested.store(true, Ordering::Release);
         self.resolution_stop.send_replace(true);
         self.runner.close_run(&self.run_id).await;
+        self.initialize_version().await?;
         self.ledger.request_force_stop(&self.run_id).await?;
         Ok(())
     }

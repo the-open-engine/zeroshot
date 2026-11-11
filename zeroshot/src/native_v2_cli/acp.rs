@@ -44,7 +44,7 @@ use crate::native_v2_supervisor::{
     NativeV2Supervisor, NativeV2SupervisorError, RunEnvironment, RunEnvironmentError,
 };
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
-use crate::v2_run_ledger::{CreateRun, RunLedger, RunLedgerError};
+use crate::v2_run_ledger::{CreateRun, CreateRunOutcome, RunLedger, RunLedgerError};
 
 const ACP_ERROR_INVALID_PARAMS: i32 = -32602;
 const ACP_ERROR_INTERNAL: i32 = -32603;
@@ -642,13 +642,18 @@ impl AcpSession {
         let paths = PortableControllerPaths::new(storage);
         let leases = Arc::new(TurnLeases::acquire(&paths)?);
         let ledger = Arc::new(SqliteRunLedger::open(paths.ledger())?);
-        ledger
+        let mut stored = match ledger
             .create_or_get(CreateRun {
                 run_id: run_id.clone(),
                 submission_key,
                 submission_digest: digest,
                 admitted,
             })
+            .await?
+        {
+            CreateRunOutcome::Created(stored) | CreateRunOutcome::Existing(stored) => stored,
+        };
+        crate::native_v2_supervisor::logging::record_run_version(ledger.as_ref(), &mut stored)
             .await?;
         Ok(PreparedTurn {
             run_id,
