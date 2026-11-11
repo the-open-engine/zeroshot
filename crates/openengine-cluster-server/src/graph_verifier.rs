@@ -537,10 +537,7 @@ mod analyzer_parallel;
 mod analyzer_parallel_flow;
 mod analyzer_terminal;
 mod assignments;
-pub use assignments::{
-    ProofWork, ControlSnapshot, MapCardinality, CollectionWrite, MapProgress,
-    loop_reentry_possible, guard_has_possible_future, retained_branch_guard, map_write_guard,
-};
+use assignments::ProofWork;
 mod choice;
 mod contexts;
 mod diagnostics;

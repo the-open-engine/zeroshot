@@ -61,28 +61,18 @@ For `first`, a completed candidate uses its own available results and pre-parall
 Other racers remain unknown. Short-circuit truth allows either accepted reviewer to establish
 `any(a.accepted, b.accepted)`; conditional controls contribute only on their selected route.
 The guard must reference a racer and at least one candidate must be able to establish it.
-Viability follows the selected remaining flow: skipped producers cannot qualify a candidate, while
-unfinished loop rounds may replace provisional controls. Future predicates share legal joint
-outcomes, so one verdict cannot satisfy incompatible labels or both signal and error predicates.
-Partial maps preserve settled item contributions while expanding future outcomes through the same
-choice-presence and retained-branch correlations used at admission. Finishing an unrelated item tail
-does not make a settled verdict replaceable. Loop revisits replace final-round controls, preserving
-a known map cardinality when remaining visible writes cannot change its selected collection.
-Selector projections use each suspended group's local state and respect write order and promotion
-boundaries. A guaranteed loop exit prevents another round from replacing its settled controls.
-Known map lengths require exactly that many item outcomes; a nonempty map can complete its racer
-only when every selected body can finish normally under the same joint outcomes.
-Nested aggregate folds preserve every enclosing map cardinality and full item index scope. Choice
-conditions stay attached to future collection writes, and completion predicates share the actual
-aggregate counts of other maps. Impossible joins retain settled prefix evidence during terminal
-replay even when a disqualified racer still has pending work.
-Map count predicates respect those cardinality constraints. Speculative oversized maps
-can lose a race without triggering a work-limit failure; work that starts still consumes the
-actual run ceilings.
-Once no unfinished candidate can qualify, the join reports `no_satisfier` and stops unnecessary
-work. Other impossible joins report `quorum_unreachable`; their queued eligible branches remain
-potential contributors until control proves otherwise. Voided or unstarted losers provide no
-controls or promoted writes.
+Pending branches remain potential contributors until they settle. The reducer may finish a branch
+or map body, run a queued item, or enter another loop round before deciding whether it qualifies.
+It does not simulate future writes, map sizes, choice routes, convergence, or alternative loop exits.
+An unfinished loop's current-round controls cannot establish a final result; completed loops expose
+only their final-round facts. Missing foreign controls remain unknown, including beneath negation.
+
+A satisfied join cancels or voids remaining active and queued losers through confirmed cleanup.
+When actual settled outcomes leave too few contributors, `first` reports `no_satisfier` and other
+joins report `quorum_unreachable`. Unstarted losers cannot cause a work-limit failure. Each next
+actual executable visit or loop-body entry checks its own 65,536-unit ceiling before consuming it;
+queued work spends neither attempts nor timeout. Static graph validation separately preserves
+signal/error exclusivity and sound correlated aggregate proofs without consulting runtime history.
 
 Worker failures retain those four codes. Native machine-readable credential rejections use
 `refusal` with reason `authentication_required`; rejected models use `refusal` with reason
@@ -361,7 +351,6 @@ Their Rust parser and JSON Schema checks are fixture validation only. Exact prod
 success and rejection envelopes live under `protocol/openengine-cluster/v1/fixtures/verifier/` and
 are generated through the reusable server verifier.
 
-Nested map guards count only item occurrences on selected choice routes. A queued item keeps
-known immutable child-collection sizes, and settled aggregates from before a race remain
-available to its completion guards. These facts let impossible races settle before unrelated
-queued work starts.
+Nested map guards count only item occurrences on selected choice routes. Completed candidates
+can use settled aggregates from before their race. Pending map bodies and queued items remain
+potential contributors until actual outcomes settle the join.

@@ -1,5 +1,4 @@
 use super::*;
-use super::scoped::{done, entry, seq};
 
 fn copy(name: &str, source: &str, target: &str, schema: &Value) -> Value {
     let mut leaf = step(name, 1);
@@ -63,7 +62,7 @@ fn winning_history(scope: &[u64], queued: bool, descendant: bool) -> Vec<Durable
     for round in 0..2 {
         append_round(&mut history, round, &scope, descendant);
     }
-    super::loop_outcomes::normalize_instances(&mut history);
+    normalize_instances(&mut history);
     history
 }
 
@@ -72,8 +71,7 @@ async fn intermediate_convergence_preserves_real_winners_at_every_prefix() {
     for (nested, queued) in [(false, false), (true, false), (false, true), (true, true)] {
         for rounds in [2, 3, 4, 5] {
             let (left, schema) = swap_loop(rounds, queued);
-            let graph =
-                race_in_scope(left, continuation::opposite_verdicts(), schema, nested).await;
+            let graph = race_in_scope(left, opposite_verdicts(), schema, nested).await;
             let (input, history) = inputs_and_history(nested, queued, false);
             assert!(matches!(
                 one_slot(&graph, &input, &history).terminal,
@@ -86,59 +84,6 @@ async fn intermediate_convergence_preserves_real_winners_at_every_prefix() {
                 &format!("nested={nested} queued={queued} rounds={rounds}"),
             );
         }
-    }
-}
-
-#[tokio::test]
-async fn intermediate_exits_require_their_own_convergence_and_count_witness() {
-    for (nested, queued) in [(false, false), (false, true)] {
-        for incompatible in ["exhausted", "exit_rejected", "three_items"] {
-            let (left, schema) = swap_loop(3, queued);
-            let mut guard = continuation::opposite_verdicts();
-            match incompatible {
-                "exhausted" => guard["guards"].as_array_mut().unwrap().push(json!({"kind":"in","value":{"name":"repeat","source":"group","field":"terminated"},"labels":["exhausted"]})),
-                "exit_rejected" => guard["guards"].as_array_mut().unwrap().push(signal("exit","rejected",false)),
-                _ => guard["guards"][0]["count"] = json!(2),
-            }
-            eprintln!(
-                "admission control nested={nested} queued={queued} incompatible={incompatible}"
-            );
-            let graph = race_in_scope(left, guard, schema, nested).await;
-            let scope = if nested { vec![0] } else { vec![] };
-            let result = one_slot(
-                &graph,
-                &json!({"items":[1],"other":[1,1],"temp":[1]}),
-                &[entry(1, "b", "rejected", scope)],
-            );
-            assert!(
-                result.terminal.is_some(),
-                "nested={nested} queued={queued} incompatible={incompatible}: {result:#?}"
-            );
-            assert_no_satisfier(&result);
-        }
-    }
-}
-
-#[tokio::test]
-async fn current_round_exit_keeps_observed_rejections_fixed() {
-    for nested in [false, true] {
-        let (left, schema) = swap_loop(2, false);
-        let graph = race_in_scope(left, continuation::opposite_verdicts(), schema, nested).await;
-        let scope = if nested { vec![0] } else { vec![] };
-        let mut first = scope.clone();
-        first.push(0);
-        let mut second = scope.clone();
-        second.push(1);
-        let history = vec![
-            entry(1, "b", "rejected", scope),
-            entry(2, "a", "rejected", first),
-            entry(3, "a", "rejected", second),
-        ];
-        assert_no_satisfier(&one_slot(
-            &graph,
-            &json!({"items":[1,1],"other":[1],"temp":[1]}),
-            &history,
-        ));
     }
 }
 
@@ -156,7 +101,7 @@ async fn descendant_intermediate_exits_preserve_winners_at_every_prefix() {
         let (left, schema) = swap_loop_with_scope(rounds, queued, true);
         let inside = root_with_join(
             vec![left, verifier("b", 1)],
-            json!({"kind":"first","when":either(continuation::opposite_verdicts())}),
+            json!({"kind":"first","when":either(opposite_verdicts())}),
             &schema,
         );
         let root = if nested {

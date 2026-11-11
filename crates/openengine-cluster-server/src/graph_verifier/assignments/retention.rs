@@ -11,13 +11,9 @@ pub(in crate::graph_verifier) fn retention_guard(
     group: &ParNode,
     index: usize,
 ) -> Option<CompletionPredicate> {
-    retained_branch_guard(group, index).map(CompletionPredicate::Guard)
-}
-
-/// The same private retained-branch witness used by admission and residual write analysis.
-pub fn retained_branch_guard(group: &ParNode, index: usize) -> Option<Guard> {
+    // Static witness for the subset of branches retained at a valid join.
     group.branches.as_slice().get(index)?;
-    Some(Guard::In {
+    Some(CompletionPredicate::Guard(Guard::In {
         value: ControlSelector {
             name: group.name.clone(),
             source: ControlSource::Group,
@@ -25,7 +21,7 @@ pub fn retained_branch_guard(group: &ParNode, index: usize) -> Option<Guard> {
         },
         labels: openengine_cluster_protocol::NonEmptyEnumSet::new(vec![enum_label("retained")?])
             .ok()?,
-    })
+    }))
 }
 
 pub(in crate::graph_verifier) fn proof_group_domain(
@@ -113,9 +109,7 @@ pub(in crate::graph_verifier) fn is_map_item_predicate(key: &SelectorKey) -> boo
 }
 
 fn is_map_item_predicate_field(field: Option<&FieldName>) -> bool {
-    field.is_some_and(|field| {
-        field.as_str() == "__map_body_completed" || map_write_index(Some(field)).is_some()
-    })
+    field.is_some_and(|field| field.as_str() == "__map_body_completed")
 }
 
 pub(in crate::graph_verifier) fn map_completion_predicate(
@@ -123,16 +117,6 @@ pub(in crate::graph_verifier) fn map_completion_predicate(
 ) -> Option<CompletionPredicate> {
     map_item_guard(map, FieldName::new("__map_body_completed").ok()?)
         .map(CompletionPredicate::Guard)
-}
-
-pub(in crate::graph_verifier) fn map_write_index(field: Option<&FieldName>) -> Option<usize> {
-    field?.as_str().strip_prefix("__map_write.")?.parse().ok()
-}
-
-/// A complete collection requires every item to produce this authored promoted path.
-pub fn map_write_guard(map: &MapNode, index: usize) -> Option<Guard> {
-    map.promoted_state_paths.get(index)?;
-    map_item_guard(map, FieldName::new(format!("__map_write.{index}")).ok()?)
 }
 
 fn map_item_guard(map: &MapNode, field: FieldName) -> Option<Guard> {

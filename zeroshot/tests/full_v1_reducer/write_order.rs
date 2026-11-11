@@ -1,5 +1,4 @@
 use super::*;
-use super::scoped::{done, entry, seq};
 use async_trait::async_trait;
 use openengine_cluster_protocol::{WorkerDescriptor, WorkerRef};
 use openengine_cluster_server::worker_registry::{WorkerRegistry, WorkerRegistryError};
@@ -41,7 +40,7 @@ async fn ordered_graph(nested: bool, parent_last: bool) -> VerifiedGraph {
     });
     children.push(target);
     let no_errors = json!({"kind":"not","guard":{"kind":"k_of_map","count":1,"value":{"name":"copy","source":"error","field":null},"labels":["crash","timeout","malformed","refusal"]}});
-    let condition = json!({"kind":"all","guards":[no_errors,continuation::opposite_verdicts()]});
+    let condition = json!({"kind":"all","guards":[no_errors,opposite_verdicts()]});
     let mut definition = race_definition(seq("left", children, &schema), condition, &schema);
     if nested {
         let outer = json!({"kind":"map","name":"outer","state":schema,"body":definition,"over":{"source":"state","path":["next_items"]},"maxItems":1,"promotedStatePaths":[]});
@@ -55,7 +54,10 @@ async fn ordered_graph(nested: bool, parent_last: bool) -> VerifiedGraph {
 }
 
 fn completed_replacements(scope: Vec<u64>, parent_last: bool) -> Vec<DurableExecution> {
-    let (_, item, other) = loop_writes::scopes(!scope.is_empty());
+    let mut item = scope.clone();
+    item.push(0);
+    let mut other = scope.clone();
+    other.push(1);
     let mut history = vec![
         entry(1, "b", "rejected", scope.clone()),
         done(2, "gate", scope.clone()),
@@ -87,9 +89,9 @@ async fn overlapping_replacements_follow_authored_order_in_scalar_and_mapped_sco
         for parent_last in [false, true] {
             let graph = ordered_graph(nested, parent_last).await;
             let input = json!({"data":{"items":[1]},"next_items":[null]});
-            let (scope, _, _) = loop_writes::scopes(nested);
+            let scope = if nested { vec![0] } else { vec![] };
             let history = completed_replacements(scope, parent_last);
-            loop_writes::assert_viability(&one_slot(&graph, &input, &history[..1]), parent_last);
+            assert_pending_dispatch(&one_slot(&graph, &input, &history[..1]), "gate");
             let complete = one_slot(&graph, &input, &history);
             if parent_last {
                 assert!(

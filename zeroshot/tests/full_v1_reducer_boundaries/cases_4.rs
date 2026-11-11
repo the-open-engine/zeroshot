@@ -115,3 +115,52 @@ async fn assert_no_satisfier_control() {
         Some(TerminalProjection::Succeeded { .. })
     ));
 }
+
+#[tokio::test]
+async fn statically_impossible_joins_reach_the_parent_terminal_without_dispatch() {
+    for join in [
+        json!({"kind":"all"}),
+        json!({"kind":"any"}),
+        json!({"kind":"quorum","count":2}),
+    ] {
+        let mut branches =
+            vec![json!({"kind":"fail","name":"branch_failed","reason":"branch_failed"})];
+        if join["kind"] != "any" {
+            branches.push(verifier("pending", 1));
+        }
+        let parallel = json!({"kind":"par","name":"parallel","state":boundary_state(),
+            "branches":branches,"join":join,"promotedStatePaths":[]});
+        for terminal in [
+            succeed("handled"),
+            json!({"kind":"fail","name":"handled","reason":"join_failed"}),
+        ] {
+            let succeeds = terminal["kind"] == "succeed";
+            let graph = verified(seq(vec![parallel.clone(), terminal]), json!({})).await;
+            let traced = FullV1Reducer::native_v2(&graph)
+                .reduce_with_trace(input(&json!({"items":[]}), &[]))
+                .assert_value();
+            assert!(
+                traced
+                    .trace
+                    .iter()
+                    .any(|record| record.node.as_str() == "parallel"
+                        && record.detail.as_deref() == Some("quorum_unreachable"))
+            );
+            let terminal = traced.reduction.terminal.assert_value();
+            if succeeds {
+                assert!(matches!(terminal, TerminalProjection::Succeeded { .. }));
+            } else {
+                assert!(
+                    matches!(terminal,TerminalProjection::Failed{reason,..} if reason.as_str()=="join_failed")
+                );
+            }
+            assert!(
+                !traced
+                    .reduction
+                    .decisions
+                    .iter()
+                    .any(|decision| matches!(decision, Decision::Dispatch { .. }))
+            );
+        }
+    }
+}

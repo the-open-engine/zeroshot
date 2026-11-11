@@ -1,14 +1,11 @@
 use super::*;
 
-type ExternalControlQueries = BTreeMap<SelectorKey, (ControlSelector, bool, Vec<EnumLabel>)>;
-
 struct AssignmentInputs {
     selectors: Vec<ControlSelector>,
     map_aggregates: BTreeMap<SelectorKey, MapAggregate>,
     join_correlations: BTreeSet<NodeName>,
     saturation: u64,
     label_classes: BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
-    external_queries: ExternalControlQueries,
 }
 
 impl<'a> Analyzer<'a> {
@@ -68,25 +65,13 @@ impl<'a> Analyzer<'a> {
         guards: &[&Guard],
         path: &[DiagnosticPathSegment],
     ) -> Option<Vec<Assignment>> {
-        self.assignments_with_runtime(guards, path, None)
-    }
-
-    pub(super) fn assignments_with_runtime(
-        &mut self,
-        guards: &[&Guard],
-        path: &[DiagnosticPathSegment],
-        runtime: Option<RuntimeScope<'_>>,
-    ) -> Option<Vec<Assignment>> {
         let Some(AssignmentInputs {
             selectors,
             map_aggregates,
             join_correlations,
             saturation,
             label_classes,
-            external_queries,
-        }) = self
-            .prepare_write_predicates(guards)
-            .and_then(|()| self.assignment_inputs(guards))
+        }) = self.assignment_inputs(guards)
         else {
             self.assignment_ceiling(path);
             return None;
@@ -95,33 +80,10 @@ impl<'a> Analyzer<'a> {
             self.assignment_ceiling(path);
             return None;
         }
-        let fixed_controls = runtime.map_or_else(Assignment::new, |runtime| {
-            external_queries
-                .into_iter()
-                .filter_map(|(key, (selector, aggregate, labels))| {
-                    runtime
-                        .snapshot
-                        .fixed_count((&selector, &[], aggregate), runtime.indices)?;
-                    let counts = labels
-                        .into_iter()
-                        .filter_map(|label| {
-                            let count = runtime.snapshot.fixed_count(
-                                (&selector, std::slice::from_ref(&label), aggregate),
-                                runtime.indices,
-                            )?;
-                            Some((label, count))
-                        })
-                        .collect();
-                    Some((key, AssignedControl { counts }))
-                })
-                .collect()
-        });
         let Some(dimensions) = build_dimensions(
             &selectors,
             DimensionInputs {
                 saturation,
-                runtime,
-                fixed_controls: &fixed_controls,
                 budget: &self.proof_work,
                 label_classes: &label_classes,
                 nodes: &self.nodes,
@@ -238,14 +200,12 @@ impl<'a> Analyzer<'a> {
             .max()
             .unwrap_or(1);
         let label_classes = self.aggregate_label_classes(&selectors, &aggregates, &expanded)?;
-        let external_queries = self.external_control_queries(&expanded)?;
         Some(AssignmentInputs {
             selectors,
             map_aggregates: aggregates,
             join_correlations,
             saturation,
             label_classes,
-            external_queries,
         })
     }
 
@@ -335,34 +295,6 @@ impl<'a> Analyzer<'a> {
             discovered = true;
         }
         discovered
-    }
-
-    fn external_control_queries(&self, expanded: &[&Guard]) -> Option<ExternalControlQueries> {
-        let mut queries = BTreeMap::new();
-        for guard in expanded {
-            collect_label_queries(guard, &mut queries, &self.proof_work)?;
-        }
-        let external = expanded
-            .iter()
-            .flat_map(|guard| guard_selector_uses(guard))
-            .filter(|(selector, _)| !self.nodes.contains_key(&selector.name))
-            .map(|(selector, aggregate)| (SelectorKey::from(selector), (selector, aggregate)))
-            .collect::<BTreeMap<_, _>>();
-        let mut result = BTreeMap::new();
-        for (key, (selector, aggregate)) in external {
-            let tests = queries.get(&key)?;
-            self.proof_work
-                .charge(1 + tests.iter().map(Vec::len).sum::<usize>())?;
-            let labels = tests
-                .iter()
-                .flatten()
-                .cloned()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            result.insert(key, (selector.clone(), aggregate, labels));
-        }
-        Some(result)
     }
 
     fn aggregate_label_classes(

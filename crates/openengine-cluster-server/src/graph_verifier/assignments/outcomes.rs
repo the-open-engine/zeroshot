@@ -31,54 +31,36 @@ pub(in crate::graph_verifier) struct AggregateCounts<'a> {
     pub(super) outcomes: &'a [Assignment],
     pub(super) saturation: u64,
     pub(super) budget: &'a ProofWork,
-    pub(super) exact_occurrences: Option<u64>,
 }
 
 pub(in crate::graph_verifier) fn aggregate_assignments_from_outcomes(
     context: AggregateCounts<'_>,
 ) -> Option<Vec<Assignment>> {
     let keys = context.keys;
-    let exact_occurrences = context.exact_occurrences;
     let empty = keys
         .iter()
         .cloned()
         .map(|key| (key, assigned_control(None, 0)))
         .collect::<Assignment>();
-    // Exact cardinality advances complete item layers. Once a saturated layer is a fixed point,
-    // every remaining item preserves it. Unknown cardinality instead closes over all finite layers.
+    // Close over finite input cardinalities using saturated correlated counts.
     let mut states = BTreeSet::from([empty.clone()]);
     let mut frontier = BTreeSet::from([empty]);
-    let mut occurrences = 0;
     loop {
-        if exact_occurrences == Some(occurrences) {
-            return Some(frontier.into_iter().collect());
+        let next = next_aggregate_layer(&frontier, &states, &context)?;
+        if next.is_empty() {
+            return Some(states.into_iter().collect());
         }
-        let next = next_aggregate_layer(
-            &frontier,
-            exact_occurrences.is_none().then_some(&states),
-            &context,
-        )?;
-        if exact_occurrences.is_some() {
-            if next == frontier {
-                return Some(next.into_iter().collect());
-            }
-        } else {
-            if next.is_empty() {
-                return Some(states.into_iter().collect());
-            }
-            if states.len().checked_add(next.len())? as u64 > FULL_V1_MAX_GUARD_ASSIGNMENTS {
-                return None;
-            }
-            states.extend(next.iter().cloned());
+        if states.len().checked_add(next.len())? as u64 > FULL_V1_MAX_GUARD_ASSIGNMENTS {
+            return None;
         }
+        states.extend(next.iter().cloned());
         frontier = next;
-        occurrences += 1;
     }
 }
 
 fn next_aggregate_layer(
     frontier: &BTreeSet<Assignment>,
-    excluded: Option<&BTreeSet<Assignment>>,
+    excluded: &BTreeSet<Assignment>,
     context: &AggregateCounts<'_>,
 ) -> Option<BTreeSet<Assignment>> {
     let mut next = BTreeSet::new();
@@ -86,7 +68,7 @@ fn next_aggregate_layer(
         for outcome in context.outcomes {
             let candidate =
                 add_aggregate_outcome(state, outcome, context.saturation, context.budget)?;
-            if excluded.is_some_and(|seen| seen.contains(&candidate)) {
+            if excluded.contains(&candidate) {
                 continue;
             }
             if !next.contains(&candidate) && next.len() as u64 >= FULL_V1_MAX_GUARD_ASSIGNMENTS {

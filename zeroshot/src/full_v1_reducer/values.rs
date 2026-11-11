@@ -482,21 +482,6 @@ pub(super) fn clear_scoped_runtime_facts(
     map_indices: &[u64],
 ) {
     context
-        .pending_writes
-        .retain(|(name, indices), _| !names.contains(name) || !indices.starts_with(map_indices));
-    context
-        .map_sizes
-        .retain(|(name, indices), _| !names.contains(name) || !indices.starts_with(map_indices));
-    context
-        .loop_exits
-        .retain(|(name, indices), _| !names.contains(name) || !indices.starts_with(map_indices));
-    context
-        .revisitable
-        .retain(|(name, indices)| !names.contains(name) || !indices.starts_with(map_indices));
-    context
-        .retained
-        .retain(|(name, indices), _| !names.contains(name) || !indices.starts_with(map_indices));
-    context
         .completed
         .retain(|(name, indices)| !names.contains(name) || !indices.starts_with(map_indices));
     context.controls.retain(|key, _| {
@@ -512,11 +497,6 @@ pub(super) fn clear_scoped_runtime_facts(
 
 pub(super) fn merge_runtime_facts(source: &Context, target: &mut Context) {
     target.evidence_position = target.evidence_position.max(source.evidence_position);
-    target.map_sizes.extend(source.map_sizes.clone());
-    target.loop_exits.extend(source.loop_exits.clone());
-    target.pending_writes.extend(source.pending_writes.clone());
-    target.retained.extend(source.retained.clone());
-    target.revisitable.extend(source.revisitable.clone());
     target.completed.extend(source.completed.clone());
     target.controls.extend(source.controls.clone());
     target.channels.extend(source.channels.clone());
@@ -529,25 +509,6 @@ pub(super) fn merge_scoped_runtime_facts(
     map_indices: &[u64],
 ) {
     target.evidence_position = target.evidence_position.max(source.evidence_position);
-    target
-        .pending_writes
-        .extend(scoped_map_facts(&source.pending_writes, names, map_indices));
-    target
-        .retained
-        .extend(scoped_map_facts(&source.retained, names, map_indices));
-    target
-        .map_sizes
-        .extend(scoped_map_facts(&source.map_sizes, names, map_indices));
-    target
-        .loop_exits
-        .extend(scoped_map_facts(&source.loop_exits, names, map_indices));
-    target.revisitable.extend(
-        source
-            .revisitable
-            .iter()
-            .filter(|(name, indices)| names.contains(name) && indices.starts_with(map_indices))
-            .cloned(),
-    );
     target.completed.extend(
         source
             .completed
@@ -582,22 +543,3 @@ pub(super) fn descendant_names(node: &GraphNode) -> BTreeSet<NodeName> {
 #[cfg(test)]
 #[path = "values/tests.rs"]
 mod tests;
-
-fn owned_runtime_scope(
-    key: &(NodeName, Vec<u64>),
-    names: &BTreeSet<NodeName>,
-    scope: &[u64],
-) -> bool {
-    names.contains(&key.0) && key.1.starts_with(scope)
-}
-
-pub(super) fn scoped_map_facts<'a, T: Clone>(
-    values: &'a BTreeMap<(NodeName, Vec<u64>), T>,
-    names: &'a BTreeSet<NodeName>,
-    indices: &'a [u64],
-) -> impl Iterator<Item = ((NodeName, Vec<u64>), T)> + 'a {
-    values
-        .iter()
-        .filter(move |(key, _)| owned_runtime_scope(key, names, indices))
-        .map(|(key, value)| (key.clone(), value.clone()))
-}

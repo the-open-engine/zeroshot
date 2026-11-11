@@ -68,6 +68,10 @@ impl<'a> Analyzer<'a> {
         ) {
             effects.parallel_definition_effects.push(definition_effect);
         }
+        // Settling this join does not establish whether earlier workers succeeded.
+        effects
+            .exit_failed
+            .extend(context.node.incoming.failed.iter().cloned());
         effects.exit_failed.insert(group.name.clone());
         effects
     }
@@ -135,6 +139,7 @@ impl<'a> Analyzer<'a> {
             .collect::<Vec<_>>();
         let mut merged = merge_parallel_scenarios(branches, required, &scenarios);
         // Both reached and impossible joins return normally; controls retain success eligibility.
+        merged.falls_through = true;
         merged.completion = CompletionPredicate::Always;
         merged
     }

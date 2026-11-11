@@ -8,8 +8,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-mod future;
-use future::FutureWrites;
 mod history;
 mod trace;
 
@@ -27,7 +25,6 @@ use openengine_cluster_protocol::{
     WorkerErrorCode, WorkerOutcome, WorkerRef,
 };
 use openengine_cluster_server::admission::VerifiedGraph;
-use openengine_cluster_server::graph_verifier::{MapCardinality, CollectionWrite};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -119,8 +116,8 @@ pub enum ReducerError {
     Encoding,
     #[error("structural observation exceeds its bounded projection budget")]
     TraceLimit,
-    #[error("a speculative path exceeds the loop-entry ceiling")]
-    ProspectiveWorkLimit,
+    #[error("history probing reached the loop-entry ceiling")]
+    ProbeLoopLimit,
     #[error("node {node} exceeds run ceiling {bound} for {kind}")]
     WorkLimit {
         node: NodeName,
@@ -207,7 +204,6 @@ impl<'a> FullV1Reducer<'a> {
                 cutoff: HistoryPosition::MAX,
                 accepted_prefix: false,
                 record_evidence: true,
-                necessary: true,
             },
         )?;
         engine.ensure_history_consumed()?;
@@ -258,8 +254,6 @@ struct GroupMutation<'a, G> {
     traversal: Traversal<'a>,
 }
 
-type MapSizes = BTreeMap<(NodeName, Vec<u64>), MapCardinality>;
-
 #[derive(Clone)]
 struct Context {
     state: Value,
@@ -268,11 +262,6 @@ struct Context {
     channels: BTreeMap<(NodeName, Vec<u64>), Channels>,
     local_writes: BTreeSet<FieldPath>,
     completed: BTreeSet<(NodeName, Vec<u64>)>,
-    map_sizes: MapSizes,
-    loop_exits: BTreeMap<(NodeName, Vec<u64>), Vec<future::LoopExit>>,
-    pending_writes: BTreeMap<(NodeName, Vec<u64>), future::FutureWrites>,
-    revisitable: BTreeSet<(NodeName, Vec<u64>)>,
-    retained: BTreeMap<(NodeName, Vec<u64>), BTreeSet<usize>>,
 }
 
 impl Context {
@@ -284,11 +273,6 @@ impl Context {
             channels: BTreeMap::new(),
             local_writes: BTreeSet::new(),
             completed: BTreeSet::new(),
-            map_sizes: BTreeMap::new(),
-            loop_exits: BTreeMap::new(),
-            pending_writes: BTreeMap::new(),
-            revisitable: BTreeSet::new(),
-            retained: BTreeMap::new(),
         }
     }
 }
@@ -317,7 +301,6 @@ struct Traversal<'a> {
     cutoff: HistoryPosition,
     accepted_prefix: bool,
     record_evidence: bool,
-    necessary: bool,
 }
 
 struct ExecutableSpec<'a> {
@@ -426,15 +409,13 @@ struct VoidCutoff {
 }
 
 struct Engine<'a> {
-    root: &'a GraphNode,
-    selector_work: openengine_cluster_server::graph_verifier::ProofWork,
     boundary: Option<ExecutionBoundary>,
     dispatch_remaining: usize,
     frontier_limit: usize,
     pending_frontier: BTreeSet<(NodeName, Vec<u64>, Vec<u64>)>,
     logical_visits: u64,
     loop_entries: LoopWork,
-    prospective_loops: LoopWork,
+    probe_loops: LoopWork,
     active_loops: Vec<(NodeName, Vec<u64>, Vec<u64>)>,
     executions: &'a [DurableExecution],
     next_node_instance: u64,
@@ -454,7 +435,7 @@ struct Engine<'a> {
 impl<'a> Engine<'a> {
     fn new(
         input: ReductionInput<'a>,
-        root: &'a GraphNode,
+        root: &GraphNode,
         execution_mode: ExecutionMode,
     ) -> Result<Self, ReducerError> {
         validate_history_for_mode(input.executions, execution_mode)?;
@@ -496,8 +477,6 @@ impl<'a> Engine<'a> {
             return Err(ReducerError::InconsistentHistory);
         }
         Ok(Self {
-            root,
-            selector_work: Default::default(),
             boundary: None,
             dispatch_remaining: 0,
             frontier_limit: 1,
@@ -508,7 +487,7 @@ impl<'a> Engine<'a> {
                 .filter(|execution| execution.attempt.get() == 1)
                 .count() as u64,
             loop_entries: LoopWork::default(),
-            prospective_loops: LoopWork::default(),
+            probe_loops: LoopWork::default(),
             active_loops: Vec::new(),
             executions: input.executions,
             next_node_instance: input.next_node_instance,

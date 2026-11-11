@@ -2,7 +2,6 @@ use super::*;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{WorkerDescriptor, WorkerRef};
 use openengine_cluster_server::worker_registry::{WorkerRegistry, WorkerRegistryError};
-use super::scoped::{done, entry, seq};
 
 struct SignalWorkers(&'static str);
 #[async_trait]
@@ -130,7 +129,11 @@ async fn frozen_signals_named_like_group_controls_preserve_selected_routes() {
                 observed(2, "gate", (field, "rejected"), scope.clone()),
                 done(3, "noop", scope.clone()),
             ];
-            assert_no_satisfier(&one_slot(&g, &input, &history));
+            let pending = one_slot(&g, &input, &history);
+            assert_pending_dispatch(&pending, "tail");
+            let mut complete = history;
+            complete.push(done(4, "tail", scope.clone()));
+            assert_no_satisfier(&one_slot(&g, &input, &complete));
             let mut accepted = vec![
                 entry(1, "b", "rejected", vec![]),
                 observed(2, "gate", (field, "accepted"), scope.clone()),

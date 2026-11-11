@@ -66,8 +66,6 @@ fn is_parallel_group_control(key: &SelectorKey) -> bool {
 pub(super) struct DimensionInputs<'a, 'graph> {
     pub(super) label_classes: &'a BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
     pub(super) saturation: u64,
-    pub(super) runtime: Option<RuntimeScope<'a>>,
-    pub(super) fixed_controls: &'a Assignment,
     pub(super) budget: &'a ProofWork,
     pub(super) nodes: &'a BTreeMap<NodeName, NodeInfo<'graph>>,
     pub(super) map_aggregates: &'a BTreeMap<SelectorKey, MapAggregate>,
@@ -79,11 +77,8 @@ pub(super) fn build_dimensions(
     selectors: &[ControlSelector],
     inputs: DimensionInputs<'_, '_>,
 ) -> Option<Vec<Vec<Assignment>>> {
-    if inputs.runtime.is_some()
-        || has_nested_aggregates(inputs)
-        || has_loop_controls(selectors, inputs)
-    {
-        return runtime::dimensions(selectors, inputs, inputs.runtime);
+    if has_nested_aggregates(inputs) || has_loop_controls(selectors, inputs) {
+        return scoped::dimensions(selectors, inputs);
     }
     flat_dimensions(selectors, inputs)
 }
@@ -238,7 +233,6 @@ fn dimensions_for_keys(
     nodes: &BTreeMap<NodeName, NodeInfo<'_>>,
     keys: &BTreeSet<SelectorKey>,
     budget: &ProofWork,
-    runtime: Option<RuntimeScope<'_>>,
 ) -> Option<Vec<Vec<Assignment>>> {
     let mut by_node = BTreeMap::<NodeName, BTreeSet<SelectorKey>>::new();
     for key in keys {
@@ -251,11 +245,7 @@ fn dimensions_for_keys(
     by_node
         .into_iter()
         .try_fold(Vec::new(), |mut dimensions, (name, keys)| {
-            let scalar = keys.iter().cloned().collect::<Vec<_>>();
-            if let Some(fixed) = runtime.and_then(|runtime| fixed_outcome(&name, &scalar, runtime))
-            {
-                dimensions.push(vec![fixed]);
-            } else if let Some(node) = nodes.get(&name).map(|info| info.node) {
+            if let Some(node) = nodes.get(&name).map(|info| info.node) {
                 dimensions.extend(scalar_dimensions_for_node(
                     node,
                     &keys,
@@ -324,28 +314,20 @@ fn aggregate_shared_execution_keys(
 }
 
 mod aggregate;
-mod future;
 mod outcomes;
-mod runtime;
-pub use future::{
-    ControlSnapshot, MapCardinality, CollectionWrite, MapProgress, loop_reentry_possible,
-    guard_has_possible_future,
-};
-pub(super) use future::RuntimeScope;
-use future::fixed_outcome;
 mod retention;
+mod scoped;
 
 use aggregate::*;
 pub(super) use outcomes::*;
 pub(super) use retention::{
     retention_index, retention_guard, proof_group_domain, retained_selection_matches,
-    is_map_item_predicate, map_completion_predicate, map_write_index,
+    is_map_item_predicate, map_completion_predicate,
 };
-pub use retention::{retained_branch_guard, map_write_guard};
 
 #[path = "proof_work.rs"]
 mod proof_work;
-pub use proof_work::ProofWork;
+pub(super) use proof_work::ProofWork;
 
 fn scalar_node_dimensions(
     name: &NodeName,
@@ -353,17 +335,7 @@ fn scalar_node_dimensions(
     inputs: DimensionInputs<'_, '_>,
 ) -> Option<Vec<Vec<Assignment>>> {
     let mut dimensions = Vec::new();
-    let scalar = keys
-        .iter()
-        .filter(|key| !inputs.map_aggregates.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
-    if let Some(fixed) = inputs
-        .runtime
-        .and_then(|runtime| fixed_outcome(name, &scalar, runtime))
-    {
-        dimensions.push(vec![fixed]);
-    } else if let Some(node) = inputs.nodes.get(name).map(|info| info.node) {
+    if let Some(node) = inputs.nodes.get(name).map(|info| info.node) {
         dimensions.extend(scalar_dimensions_for_node(
             node,
             keys,

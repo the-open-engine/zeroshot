@@ -113,7 +113,7 @@ async fn pending_item_holds_its_slot_through_nested_work_and_parallel_siblings_g
 }
 
 #[tokio::test]
-async fn completed_rejecting_map_makes_first_join_impossible_before_branch_tail() {
+async fn rejecting_map_waits_for_branch_tail_before_first_join_settles() {
     let aggregate = json!({"kind":"k_of_map","count":1,"value":{"name":"a","source":"signal","field":"verdict"},"labels":["accepted"]});
     let guard = json!({"kind":"any","guards":[aggregate,{"kind":"in","value":{"name":"b","source":"signal","field":"verdict"},"labels":["accepted"]}]});
     let mut branch = sequence(
@@ -122,7 +122,7 @@ async fn completed_rejecting_map_makes_first_join_impossible_before_branch_tail(
     );
     branch["state"] = state();
     let graph = verified_race(vec![branch, verifier("b", 1)], guard).await;
-    let history = [
+    let mut history = vec![
         settled(
             SettledSpec::new(1, 1, "a").map_indices(vec![0]).position(3),
             verdict("rejected"),
@@ -131,7 +131,12 @@ async fn completed_rejecting_map_makes_first_join_impossible_before_branch_tail(
     ];
     let input = json!({"items":[null]});
     let reduced = one_slot(&graph, &input, &history);
-    assert_complete(&reduced);
+    assert_pending_dispatch(&reduced, "irrelevant_tail");
+    history.push(settled(
+        SettledSpec::new(3, 3, "irrelevant_tail").position(5),
+        success(1),
+    ));
+    assert_complete(&one_slot(&graph, &input, &history));
 }
 
 #[tokio::test]
@@ -192,7 +197,7 @@ async fn fresh_loop_round_does_not_inherit_map_frontier_exemptions() {
 }
 
 #[tokio::test]
-async fn known_map_work_excess_fails_clearly_instead_of_skipping_input() {
+async fn large_map_admits_actual_work_without_precharging_queued_items() {
     let graph = reducer_test_support::verified_graph(
         root(vec![mapped(step("work", 1), 1), succeed("done")]),
         state(),
@@ -200,11 +205,13 @@ async fn known_map_work_excess_fails_clearly_instead_of_skipping_input() {
     )
     .await;
     let input = json!({"items":vec![Value::Null;65537]});
-    let error = FullV1Reducer::native_v2(&graph)
-        .reduce(input_for(&input, &[]))
-        .expect_err("must reject known excess work");
+    let reduced = one_slot(&graph, &input, &[]);
+    assert!(reduced.terminal.is_none());
     assert!(
-        matches!(error,ReducerError::WorkLimit {node,bound:65536,..} if node.as_str()=="items_map")
+        reduced
+            .decisions
+            .iter()
+            .any(|d| matches!(d,Decision::Dispatch{occurrence,..} if occurrence.map_indices==[0]))
     );
 }
 
@@ -244,26 +251,33 @@ async fn replay_keeps_accepted_loop_prefixes_of_completed_race_losers() {
     left["state"] = state.clone();
     let guard = accepted_race_guard();
     let race = json!({"kind":"par","name":"race","state":state,"branches":[left,verifier("b",1)],"join":{"kind":"first","when":guard},"promotedStatePaths":[]});
-    let root = json!({"kind":"seq","name":"run","state":state,"children":[race,empty_loop("tail",2),succeed("done")],"promotedStatePaths":[]});
-    let graph = reducer_test_support::verified_graph(root, state, true).await;
-    let history = race_history("rejected", "accepted");
-    let input = json!({"empty":[]});
-    let result = FullV1Reducer::native_v2(&graph).reduce(input_for(&input, &history));
-    assert!(
-        matches!(
-            result,
-            Err(ReducerError::WorkLimit {
-                bound: 65536,
-                kind: "loop-body entries",
-                ..
-            })
-        ),
-        "{result:?}"
-    );
+    let mut root = json!({"kind":"seq","name":"run","state":state,"children":[race,empty_loop("tail",2),succeed("done")],"promotedStatePaths":[]});
+    for tail in [1, 2] {
+        root["children"][1]["maxIterations"] = json!(tail);
+        let graph = reducer_test_support::verified_graph(root.clone(), state.clone(), true).await;
+        let history = race_history("rejected", "accepted");
+        let input = json!({"empty":[]});
+        let result = FullV1Reducer::native_v2(&graph).reduce(input_for(&input, &history));
+        if tail == 1 {
+            assert_complete(&result.assert_value());
+        } else {
+            assert!(
+                matches!(
+                    result,
+                    Err(ReducerError::WorkLimit {
+                        bound: 65536,
+                        kind: "loop-body entries",
+                        ..
+                    })
+                ),
+                "{result:?}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
-async fn prospective_nested_empty_loops_are_bounded_without_charging_pruned_work() {
+async fn loop_history_probing_is_bounded_without_charging_unstarted_loser() {
     let state = empty_loop_state();
     let nested = json!({"kind":"loop","name":"huge","state":state,"maxIterations":65536,"body":empty_loop("inner",65536),"promotedStatePaths":[]});
     let mut left = sequence("left", vec![nested.clone(), verifier("a", 1)]);
@@ -294,7 +308,7 @@ fn accepted_race_guard() -> Value {
 }
 
 #[tokio::test]
-async fn impossible_race_keeps_rejected_prefix_facts_when_deferring_an_expensive_tail() {
+async fn pending_rejecting_racer_enters_its_tail_until_actual_work_limit() {
     for through_choice in [false, true] {
         let state = empty_loop_state();
         let huge = json!({"kind":"loop","name":"huge","state":state,"maxIterations":65536,"body":empty_loop("inner",65536),"promotedStatePaths":[]});
@@ -315,8 +329,17 @@ async fn impossible_race_keeps_rejected_prefix_facts_when_deferring_an_expensive
             settled(SettledSpec::new(2, 2, "a").position(3), verdict("rejected")),
             settled(SettledSpec::new(3, 3, "b").position(4), verdict("rejected")),
         ];
-        let reduced = one_slot(&graph, &json!({"empty":[]}), &history);
-        assert_complete(&reduced);
+        let input = json!({"empty":[]});
+        assert!(matches!(
+            FullV1Reducer::native_v2(&graph)
+                .with_dispatch_limit(1)
+                .reduce(input_for(&input, &history)),
+            Err(ReducerError::WorkLimit {
+                bound: 65536,
+                kind: "loop-body entries",
+                ..
+            })
+        ));
     }
 }
 
@@ -372,5 +395,10 @@ fn root_with_join(branches: Vec<Value>, join: Value, state: &Value) -> Value {
     json!({"kind":"seq","name":"run","state":state,"children":[race,succeed("done")],"promotedStatePaths":[]})
 }
 
-#[path = "viability.rs"]
-mod viability;
+#[path = "outcomes.rs"]
+mod outcomes;
+
+fn assert_pending_dispatch(reduced: &Reduction, node: &str) {
+    assert!(reduced.terminal.is_none(), "{reduced:#?}");
+    assert!(reduced.decisions.iter().any(|decision| matches!(decision,Decision::Dispatch{occurrence,..} if occurrence.node.as_str()==node)),"{reduced:#?}");
+}

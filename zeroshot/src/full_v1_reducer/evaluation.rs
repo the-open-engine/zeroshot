@@ -145,9 +145,6 @@ impl Engine<'_> {
                     position = position.max(child_position);
                 }
                 other => {
-                    if matches!(other, Status::Pending) {
-                        self.project_sequence_tail((group, index), &mut local, traversal);
-                    }
                     merge_runtime_facts(&local, context);
                     return Ok(other.after(position));
                 }
@@ -238,9 +235,9 @@ impl Engine<'_> {
             self.charge_loop(&group.name, traversal.map_indices, &rounds)?;
         }
         if traversal.mode == EvalMode::Probe {
-            self.prospective_loops
+            self.probe_loops
                 .record(&group.name, traversal.map_indices, &rounds)
-                .map_err(|_| ReducerError::ProspectiveWorkLimit)?;
+                .map_err(|_| ReducerError::ProbeLoopLimit)?;
         }
         Ok(rounds)
     }
@@ -258,15 +255,6 @@ impl Engine<'_> {
         ));
         let result = self.eval(&group.body, context, traversal);
         self.active_loops.pop();
-        if matches!(result, Ok(Status::Pending))
-            && traversal
-                .loop_iterations
-                .last()
-                .is_some_and(|round| *round < group.max_iterations.get())
-            && self.loop_may_reenter((group, None), context, traversal)
-        {
-            self.project_loop_reentry(group, context, traversal);
-        }
         result
     }
 

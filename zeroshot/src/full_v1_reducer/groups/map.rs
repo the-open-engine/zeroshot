@@ -16,12 +16,7 @@ impl Engine<'_> {
         let items = selected
             .as_array()
             .ok_or(ReducerError::InvalidDurableValue)?;
-        self.check_map_work(group, items, (context, traversal))?;
         let item_count = items.len();
-        context.map_sizes.insert(
-            (group.name.clone(), traversal.map_indices.to_vec()),
-            MapCardinality::fixed(item_count as u64),
-        );
         let checkpoint = self.trace_checkpoint();
         let probes = self.evaluate_map_items(
             MapItemsEvaluation {
@@ -83,77 +78,28 @@ impl Engine<'_> {
             || results
                 .iter()
                 .any(|result| matches!(result.status, Status::Pending));
-        let projected = pending.then(|| {
-            self.project_queued_item_maps(
-                &group.body,
-                items,
-                (traversal.map_indices, results.len()),
-            )
-        });
         let evaluation = GroupMutation {
             group,
             context,
             traversal,
         };
-        if let Some(projected) = projected {
-            self.finish_pending_map(evaluation, &results, (item_count, projected));
+        if pending {
+            self.mark_pending_map(evaluation, &results);
             Ok(Status::Pending)
         } else {
             self.finish_map(evaluation, &results)
         }
     }
 
-    fn finish_pending_map(
-        &self,
-        evaluation: GroupMutation<'_, MapNode>,
-        results: &[MapItemResult],
-        pending: (usize, MapSizes),
-    ) {
+    fn mark_pending_map(&self, evaluation: GroupMutation<'_, MapNode>, results: &[MapItemResult]) {
         let GroupMutation {
             group,
             context,
-            traversal,
-        } = evaluation;
-        self.mark_pending_map(
-            GroupMutation {
-                group,
-                context,
-                traversal,
-            },
-            results,
-            pending.0,
-        );
-        context.map_sizes.extend(pending.1);
-    }
-
-    fn mark_pending_map(
-        &self,
-        evaluation: GroupMutation<'_, MapNode>,
-        results: &[MapItemResult],
-        item_count: usize,
-    ) {
-        let GroupMutation {
-            group,
-            context,
-            traversal,
+            traversal: _,
         } = evaluation;
         let names = descendant_names(&group.body);
         for item in results {
             merge_scoped_runtime_facts(&item.context, context, &names, &item.scope);
-        }
-        if results.len() < item_count {
-            self.mark_future_flow(
-                GroupMutation {
-                    group: &group.body,
-                    context,
-                    traversal: Traversal {
-                        item: None,
-                        ..traversal
-                    },
-                },
-                &mut FutureWrites::default(),
-                None,
-            );
         }
     }
 
@@ -171,7 +117,7 @@ impl Engine<'_> {
                 },
             items,
         } = evaluation;
-        let base = self.prospective_loops.clone();
+        let base = self.probe_loops.clone();
         let body_names = descendant_names(&group.body);
         let mut results = Vec::new();
         let mut pending = 0_u64;
@@ -188,7 +134,7 @@ impl Engine<'_> {
                 continue;
             }
             if mode == EvalMode::Probe {
-                self.prospective_loops = base.clone();
+                self.probe_loops = base.clone();
             }
             let mut item_context = context.clone();
             item_context.local_writes.clear();
@@ -207,19 +153,19 @@ impl Engine<'_> {
             }
             compact_map_context(&mut item_context, group, (&body_names, &scope))?;
             results.push(MapItemResult {
-                prospective: self.map_probe_work(mode, &scope),
+                probe_work: self.map_probe_work(mode, &scope),
                 status,
                 context: item_context,
                 scope,
             });
         }
-        self.prospective_loops = base;
+        self.probe_loops = base;
         Ok(results)
     }
 
     fn map_probe_work(&self, mode: EvalMode, scope: &[u64]) -> LoopWork {
         if mode == EvalMode::Probe {
-            self.prospective_loops.scoped(scope)
+            self.probe_loops.scoped(scope)
         } else {
             LoopWork::default()
         }
@@ -241,9 +187,9 @@ impl Engine<'_> {
             .ok_or(ReducerError::InconsistentHistory)?
             .scope;
         if traversal.mode == EvalMode::Probe {
-            self.prospective_loops
-                .merge(&selected.probes[selected.index].prospective)
-                .map_err(|_| ReducerError::ProspectiveWorkLimit)?;
+            self.probe_loops
+                .merge(&selected.probes[selected.index].probe_work)
+                .map_err(|_| ReducerError::ProbeLoopLimit)?;
         }
         let terminal = if traversal.mode != EvalMode::Probe || traversal.record_evidence {
             let mut terminal_context = context.clone();
@@ -339,9 +285,9 @@ impl Engine<'_> {
     ) -> Result<(), ReducerError> {
         if traversal.mode == EvalMode::Probe {
             for item in results {
-                self.prospective_loops
-                    .merge(&item.prospective)
-                    .map_err(|_| ReducerError::ProspectiveWorkLimit)?;
+                self.probe_loops
+                    .merge(&item.probe_work)
+                    .map_err(|_| ReducerError::ProbeLoopLimit)?;
             }
         }
         Ok(())
@@ -362,21 +308,6 @@ fn compact_map_context(
             set_path(&mut state, path, select(&context.state, path)?.clone())?;
         }
     }
-    context
-        .pending_writes
-        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
-    context
-        .map_sizes
-        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
-    context
-        .loop_exits
-        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
-    context
-        .revisitable
-        .retain(|(name, scope)| names.contains(name) && scope.starts_with(indices));
-    context
-        .retained
-        .retain(|(name, scope), _| names.contains(name) && scope.starts_with(indices));
     context.state = state;
     context.local_writes = writes.into_iter().collect();
     context

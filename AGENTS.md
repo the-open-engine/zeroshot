@@ -185,6 +185,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Joins use actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
   Shared three-valued guard evaluation preserves candidate-local first-join eligibility.
+  The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
+  actual traversal to find ready work; static write/retention witnesses remain private to admission.
   Cancel or void losers after an actual join or terminal decision through confirmed cleanup.
   Do not predict future writes, map cardinalities, choice routes, convergence or loop exits.
   Extra execution while an outcome remains unknown is permitted. Enforce work ceilings at

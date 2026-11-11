@@ -21,8 +21,7 @@ pub(super) fn aggregate_scope_dimensions(
         return component_dimensions(&context, &components, &Assignment::new());
     }
 
-    let shared_dimensions =
-        dimensions_for_keys(inputs.nodes, &shared_keys, inputs.budget, inputs.runtime)?;
+    let shared_dimensions = dimensions_for_keys(inputs.nodes, &shared_keys, inputs.budget)?;
     if !dimension_product_is_bounded(&shared_dimensions) {
         return None;
     }
@@ -205,14 +204,13 @@ pub(super) fn aggregate_component_dimension(
     component: &BTreeSet<NodeName>,
 ) -> Option<Vec<Assignment>> {
     let keys = component_keys(context.scope_nodes, component);
-    let mut item_outcomes = component_item_outcomes(context, component, None)?;
+    let mut item_outcomes = component_item_outcomes(context, component)?;
     item_outcomes.retain(|assignment| !assignment_is_empty(assignment));
     aggregate_assignments_from_outcomes(AggregateCounts {
         keys: &keys,
         outcomes: &item_outcomes,
         saturation: context.inputs.saturation,
         budget: context.inputs.budget,
-        exact_occurrences: None,
     })
 }
 
@@ -327,13 +325,12 @@ pub(super) fn normalize_outcome_labels(
 fn component_item_outcomes(
     context: &AggregateComponentContext<'_, '_>,
     component: &BTreeSet<NodeName>,
-    runtime: Option<RuntimeScope<'_>>,
 ) -> Option<Vec<Assignment>> {
     let keys = component_keys(context.scope_nodes, component);
     let key_set = keys.iter().cloned().collect::<BTreeSet<_>>();
     let mut item_dimensions = Vec::new();
     for name in component {
-        item_dimensions.push(item_node_dimension(context, name, runtime)?);
+        item_dimensions.push(item_node_dimension(context, name)?);
     }
     if !dimension_product_is_bounded(&item_dimensions) {
         return None;
@@ -353,44 +350,9 @@ fn component_item_outcomes(
     Some(item_outcomes)
 }
 
-pub(super) fn add_count_dimensions(
-    left: &[Assignment],
-    right: &[Assignment],
-    inputs: DimensionInputs<'_, '_>,
-) -> Option<Vec<Assignment>> {
-    let mut results = BTreeSet::new();
-    for prefix in left {
-        for suffix in right {
-            inputs.budget.charge(
-                1 + prefix.len()
-                    + suffix
-                        .values()
-                        .map(|control| 1 + control.counts.len())
-                        .sum::<usize>(),
-            )?;
-            let mut next = prefix.clone();
-            for (key, control) in suffix {
-                let target = next
-                    .entry(key.clone())
-                    .or_insert_with(|| assigned_control(None, 0));
-                for (label, count) in &control.counts {
-                    let value = target.counts.entry(label.clone()).or_default();
-                    *value = value.saturating_add(*count).min(inputs.saturation);
-                }
-            }
-            if !results.contains(&next) && results.len() as u64 >= FULL_V1_MAX_GUARD_ASSIGNMENTS {
-                return None;
-            }
-            results.insert(next);
-        }
-    }
-    Some(results.into_iter().collect())
-}
-
 pub(super) fn item_node_dimension(
     context: &AggregateComponentContext<'_, '_>,
     name: &NodeName,
-    runtime: Option<RuntimeScope<'_>>,
 ) -> Option<Vec<Assignment>> {
     let node_keys = context.scope_nodes.get(name)?;
     let node = context.inputs.nodes.get(name)?.node;
@@ -404,12 +366,7 @@ pub(super) fn item_node_dimension(
         .cloned()
         .collect::<Vec<_>>();
     outcome_keys.retain(|key| !is_map_item_predicate(key));
-    let mut outcomes =
-        if let Some(fixed) = runtime.and_then(|scope| fixed_outcome(name, &outcome_keys, scope)) {
-            vec![fixed]
-        } else {
-            unfixed_item_outcomes(context, name, &outcome_keys)?
-        };
+    let mut outcomes = unfixed_item_outcomes(context, name, &outcome_keys)?;
     for marker in markers {
         context
             .inputs

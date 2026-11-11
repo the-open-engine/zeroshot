@@ -73,7 +73,7 @@ impl Engine<'_> {
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
         match self.eval(node, context, traversal) {
-            Err(ReducerError::ProspectiveWorkLimit) => Ok(Status::Pending),
+            Err(ReducerError::ProbeLoopLimit) => Ok(Status::Pending),
             other => other,
         }
     }
@@ -117,38 +117,6 @@ impl Engine<'_> {
                         >= next_visit(name, &occurrence.map_indices, &context.controls)
                 })
         })
-    }
-
-    pub(super) fn check_map_work(
-        &self,
-        group: &MapNode,
-        items: &[Value],
-        runtime: (&Context, Traversal<'_>),
-    ) -> Result<(), ReducerError> {
-        let (context, traversal) = runtime;
-        // A speculative racer can still be discarded by its join. Charge its actual leaves only.
-        if traversal.mode == EvalMode::Probe || !traversal.necessary {
-            return Ok(());
-        }
-        // A mandatory leaf per item proves overflow before any of that map's work starts.
-        if matches!(*group.body, GraphNode::Step(_) | GraphNode::Verifier(_)) {
-            let mut fresh = 0_u64;
-            for index in 0..items.len() {
-                let mut scope = traversal.map_indices.to_vec();
-                scope.push(index as u64);
-                if !self.item_has_history(&group.body, &scope, context) {
-                    fresh += 1;
-                }
-            }
-            if self.logical_visits.saturating_add(fresh) > FULL_V1_MAX_NODE_EXECUTIONS {
-                return Err(ReducerError::WorkLimit {
-                    node: group.name.clone(),
-                    bound: FULL_V1_MAX_NODE_EXECUTIONS,
-                    kind: "executable-node visits",
-                });
-            }
-        }
-        Ok(())
     }
 }
 
@@ -223,3 +191,6 @@ impl LoopWork {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
