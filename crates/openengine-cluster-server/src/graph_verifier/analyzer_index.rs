@@ -2,14 +2,6 @@ use super::*;
 
 impl<'a> Analyzer<'a> {
     pub(super) fn new(graph: &'a GraphSpec) -> Self {
-        Self::from_view(GraphView {
-            profile: graph.profile,
-            initial_input: &graph.initial_input,
-            root: &graph.root,
-        })
-    }
-
-    pub(super) fn from_view(graph: GraphView<'a>) -> Self {
         Self {
             graph,
             proof_work: ProofWork::default(),
@@ -34,7 +26,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn analyze(&mut self) -> Option<StructuralBounds> {
         self.validate_profile();
         let root_path = vec![field_segment("root"), node_segment(self.graph.root.name())];
-        self.index_node(self.graph.root, root_path, 1);
+        self.index_node(&self.graph.root, root_path, 1);
         self.validate_global_limits();
         if !self.diagnostics.is_empty() {
             return None;
@@ -47,13 +39,13 @@ impl<'a> Analyzer<'a> {
             .and_then(|state| self.graph.initial_input.materialized_subtype_of(state));
         let initial_state = materialized_state
             .as_ref()
-            .unwrap_or(self.graph.initial_input);
+            .unwrap_or(&self.graph.initial_input);
         let initial = Flow {
             defined: required_paths_with_types(initial_state),
             ..Flow::default()
         };
         self.validate_node(
-            self.graph.root,
+            &self.graph.root,
             NodeValidationContext {
                 incoming: &initial,
                 state: initial_state,
@@ -63,7 +55,7 @@ impl<'a> Analyzer<'a> {
         );
         self.validate_terminal_coverage();
         let order = self.reference_topological_order();
-        let fold = self.fold_node(self.graph.root);
+        let fold = self.fold_node(&self.graph.root);
 
         if !self.diagnostics.is_empty() {
             return None;

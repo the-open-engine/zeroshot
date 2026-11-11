@@ -564,9 +564,13 @@ fn primary_retries_keep_recall_and_fresh_homes_get_fresh_recall_budgets() {
             *session_scope = SessionScope::NodeInstance;
         }
         primary.node.reference.execution = ExecutionId::new(execution).assert_value();
-        assert_ne!(
-            hooks.invocation(primary.clone()).node.instructions,
-            primary.node.instructions
+        let supplemented = hooks.invocation(primary.clone());
+        assert_eq!(supplemented.node.instructions, primary.node.instructions);
+        assert!(
+            supplemented
+                .host_context
+                .assert_value()
+                .contains("Check all declared outputs for worker.")
         );
         let previous = super::provider_session_key(&primary);
         primary.provider_home_slot = NodeInstanceId::new(3).assert_value();

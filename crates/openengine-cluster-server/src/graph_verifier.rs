@@ -488,14 +488,8 @@ struct Fold {
     dynamic: bool,
 }
 
-struct GraphView<'a> {
-    profile: GraphProfile,
-    initial_input: &'a PayloadType,
-    root: &'a GraphNode,
-}
-
 struct Analyzer<'a> {
-    graph: GraphView<'a>,
+    graph: &'a GraphSpec,
     proof_work: ProofWork,
     nodes: BTreeMap<NodeName, NodeInfo<'a>>,
     authored: Vec<NodeName>,

@@ -159,7 +159,7 @@ impl NodeDriver for Driver {
             .reference
             .node_instance
             .get()
-            .saturating_sub(AUXILIARY_PROVIDER_SLOT_OFFSET)
+            .saturating_sub(AUXILIARY_EXECUTION_OFFSET)
             / 1_000_000;
         if held.is_some_and(|held| {
             held.name == name && batch >= held.from_batch && attempt >= held.from_attempt

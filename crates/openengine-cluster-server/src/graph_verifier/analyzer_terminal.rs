@@ -2,8 +2,8 @@ use super::*;
 
 impl<'a> Analyzer<'a> {
     pub(super) fn validate_terminal_coverage(&mut self) {
-        self.terminal_flow(self.graph.root);
-        if self.may_fall_through(self.graph.root) {
+        self.terminal_flow(&self.graph.root);
+        if self.may_fall_through(&self.graph.root) {
             emit_diagnostic!(
                 self,
                 GraphDiagnosticCode::Reachability,
