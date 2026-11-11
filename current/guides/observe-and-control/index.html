@@ -1073,6 +1073,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#json-error-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON error codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#attach-to-an-active-execution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2332,6 +2343,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#json-error-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON error codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#attach-to-an-active-execution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2502,6 +2524,65 @@ ends, whatever the run's result. The <a href="../../zeroshot-cli/">CLI reference
 <code>run</code>, <code>watch</code> and <code>logs</code>.</p>
 <p>The producer records each log timestamp as a positive JavaScript-safe Unix epoch millisecond, and
 durable replay preserves it.</p>
+<h2 id="json-error-codes">JSON error codes<a class="headerlink" href="#json-error-codes" title="Permanent link">&para;</a></h2>
+<p>Set <code>ZEROSHOT_ERROR_FORMAT=json</code> to receive a <code>zeroshot.error/v1</code> object on stderr when a CLI
+command fails. Successful stdout and NDJSON events keep their existing format. The object contains
+<code>kind</code>, <code>code</code>, <code>message</code>, optional <code>path</code> and <code>node</code> context, and an object-valued <code>details</code>.
+Use <code>code</code> to distinguish a failed run or a request that needs correction from a transport outage:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Kind</th>
+<th>Code</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A followed run failed (<code>run</code> or <code>watch</code>)</td>
+<td><code>run_failed</code></td>
+<td><code>run.failed</code></td>
+<td><code>runId</code></td>
+</tr>
+<tr>
+<td>Unknown registered target name</td>
+<td><code>invalid_request</code></td>
+<td><code>request.invalid</code></td>
+<td><code>{}</code></td>
+</tr>
+<tr>
+<td>Local registry has no workspace-recovery authorization</td>
+<td><code>invalid_request</code></td>
+<td><code>request.invalid</code></td>
+<td><code>{}</code></td>
+</tr>
+<tr>
+<td>Workspace-recovery authorization does not match the original run</td>
+<td><code>invalid_request</code></td>
+<td><code>request.invalid</code></td>
+<td><code>{}</code></td>
+</tr>
+<tr>
+<td>Local workspace-recovery authorization is malformed</td>
+<td><code>invalid_request</code></td>
+<td><code>request.invalid</code></td>
+<td><code>{}</code></td>
+</tr>
+<tr>
+<td>Target transport failed</td>
+<td><code>target</code></td>
+<td><code>target.unavailable</code></td>
+<td><code>target</code> and <code>origin</code> when known</td>
+</tr>
+</tbody>
+</table>
+<p><code>run.failed</code> reports a terminal outcome; retrying observation does not restart that run. Inspect its
+status and logs before selecting a recovery action. Correct the request or local registry state
+for the listed <code>request.invalid</code> refusals. Transport failures remain <code>target.unavailable</code>.</p>
+<p>The Python SDK maps <code>request.invalid</code> to <code>InvalidRequestError</code> and transport failures to
+<code>TargetError</code>. A failed run ends <code>Run.watch()</code> normally; <code>Run.wait()</code> returns its <code>RunResult</code>.
+Call <code>RunResult.raise_for_failure()</code> to opt into <code>RunFailedError</code>.</p>
 <h2 id="attach-to-an-active-execution">Attach to an active execution<a class="headerlink" href="#attach-to-an-active-execution" title="Permanent link">&para;</a></h2>
 <p>Status can expose an active execution reference. Attach to its interactive event stream with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot attach RUN_ID EXECUTION_REF</span>

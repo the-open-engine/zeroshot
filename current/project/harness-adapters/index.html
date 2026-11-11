@@ -2386,6 +2386,9 @@ reserved-control validation for <code>harnessConfig</code>, and a factory. Keep 
 provider requests. The registry validates bounded harness/provider IDs and compatible pairs.
 Factories receive <code>HarnessBuildContext</code> and return <code>HarnessAdapter</code> with <code>NodeDriver</code> and
 <code>SessionFactory</code> implementations.</p>
+<p>Run closure drains active invocations before calling the optional <code>NodeDriver::close_run</code> hook.
+Use it to release run-owned bookkeeping while preserving native sessions owned by an ACP session.
+The hook may be called repeatedly.</p>
 <p>Adapters own native protocols, authentication translation and permission handling, including their
 environment allowlists and home/path expansion. Use shared process and session helpers for private
 execution files, bounded streaming, cancellation and cleanup. Apply the shared
@@ -2434,7 +2437,7 @@ must cover forwarding, isolation, reuse and rejection for every registered adapt
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-10">10 November 2026</time>
+    Last updated <time datetime="2026-11-11">11 November 2026</time>
   </span>
 
     
