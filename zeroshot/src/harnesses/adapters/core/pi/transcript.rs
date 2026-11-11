@@ -5,7 +5,7 @@
 //! assistant message is the node's response: Pi can emit several per run.
 
 use crate::native_v2_capsule::{
-    provider_json_lines::{ProviderJsonLine, ProviderJsonLines},
+    provider_json_lines::{ProviderJsonLine, ProviderJsonLines, parse_provider_json},
     provider_process::{
         text::ProviderText, turn::ProviderTranscript, ProviderProcessFailure,
         ProviderProcessFailureKind,
@@ -172,7 +172,7 @@ impl PiTranscript {
             if bytes.iter().all(u8::is_ascii_whitespace) {
                 continue;
             }
-            let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+            let Ok(value) = parse_provider_json(&bytes) else {
                 // A malformed record never fails the turn on its own: Pi may interleave records a
                 // future version adds. A turn with no terminal event still settles as a failure.
                 continue;

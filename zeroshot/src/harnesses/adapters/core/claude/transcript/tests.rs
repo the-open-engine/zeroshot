@@ -8,6 +8,8 @@ use crate::native_v2_capsule::provider_process::ProviderProcessFailureKind;
 mod limit_tests;
 #[path = "tests/redaction.rs"]
 mod redaction_tests;
+#[path = "tests/unicode.rs"]
+mod unicode_tests;
 #[path = "tests/usage.rs"]
 mod usage_tests;
 
