@@ -453,7 +453,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. `need_rebase` merges the captured target into a
+  merges; required merge trains remain pending. GitLab's complete HTTP 400 missing-source-branch
+  creation validation retries only within the existing review-sync batch, rechecking the published
+  candidate before each POST; uncertain creation responses retain their at-most-once fence.
+  `need_rebase` merges the captured target into a
   workspace descending from the MR head, bounded by their fork point rather than the MR head, then
   returns repair; a candidate already containing the target is refused naming the merge method and
   target revision. GitLab readiness, approval handoff and merge share

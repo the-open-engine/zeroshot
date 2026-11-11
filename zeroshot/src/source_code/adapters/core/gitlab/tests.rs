@@ -31,6 +31,7 @@ struct StateData {
     discussion_note: Value,
     calls: Vec<(String, String, Value)>,
     lose_create: bool,
+    disconnect_create: bool,
     lose_merge: bool,
     move_head_during_feedback: bool,
     oversized_notes: bool,
@@ -63,6 +64,7 @@ impl Fixture {
             discussion_note: note(1, "Please test the edge case."),
             calls: Vec::new(),
             lose_create: false,
+            disconnect_create: false,
             lose_merge: false,
             move_head_during_feedback: false,
             oversized_notes: false,
@@ -238,6 +240,9 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
     state
         .calls
         .push((method.to_string(), path.to_owned(), body.clone()));
+    if state.disconnect_create && method == Method::POST && path.ends_with("/merge_requests") {
+        return Response::disconnected();
+    }
     let query = uri.query().unwrap_or("");
     if state.disconnect_membership && path.contains("/members/all/") {
         return Response::disconnected();
