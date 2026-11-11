@@ -3,6 +3,9 @@ use serde_json::json;
 
 use super::*;
 
+#[path = "tests/unicode.rs"]
+mod unicode;
+
 fn output_with_provisional_usage(event_type: &str, usage: Option<Value>) -> CodexOutput {
     let mut terminal = json!({"type":event_type});
     if event_type == "turn.failed" {

@@ -190,5 +190,7 @@ session, and releases the workspace lease. `session/cancel` force-stops only the
 turn and returns ACP's `cancelled` stop reason.
 
 Authored graph failures are normal turn results: the agent emits a failure message and records the
-failure under `rawOutput`. Admission, storage, or supervisor faults return a generic ACP internal
-error and write the safe diagnostic to standard error.
+failure under `rawOutput`. When recorded failure context is available, the message includes the
+bounded foreground failure summary and the `zeroshot logs RUN_ID` command. Without recorded context,
+the message remains `Zeroshot run failed: REASON`. Admission, storage, or supervisor faults return a
+generic ACP internal error and write the safe diagnostic to standard error.

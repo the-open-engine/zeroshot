@@ -47,6 +47,25 @@ A run ID belongs to the controller or target that created it. Pass `--target NAM
 from a named target. Finished status separates graph-authored `terminalResult.output` from optional
 runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the receipt.
 
+## Token usage
+
+`metadata.tokenUsage` contains run totals summed across agent invocations, including retries,
+correction turns and auxiliary agents such as postmortem specialists. Counters are summed as each
+harness reports them; input-token accounting can differ between harnesses.
+
+| Field                      | Meaning                                               |
+| -------------------------- | ----------------------------------------------------- |
+| `inputTokens`              | Input tokens reported by the harness.                 |
+| `outputTokens`             | Output tokens reported by the harness.                |
+| `cacheReadInputTokens`     | Input tokens reported as read from a prompt cache.    |
+| `cacheCreationInputTokens` | Input tokens reported as written to a prompt cache.   |
+| `complete`                 | Whether every invocation reported usable token usage. |
+
+When `complete` is `false`, the totals retain known usage but at least one invocation's usage is
+missing or unusable. An omitted cache counter means at least one invocation did not report that
+counter; its run total is unknown, not zero. Cache counters can be omitted even when `complete` is
+`true`. Script steps record zero for all four counters and preserve known cache totals.
+
 ## Failure evidence and mapped executions
 
 Failed `terminalResult.context` separates the known runtime cause (`primary`) from recent recorded
@@ -177,7 +196,10 @@ without restoring a snapshot is refused until a restore completes.
 
 Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise `openengine.workspace-checkpoints/v1`. They retain that repository only for a
-failed recovery lineage and delete it after a successful run. Platform exposes recovery through
+failed recovery lineage and delete it after a successful run. Force-stopping a local run also
+deletes the repository, together with the checkpoints listed by every run in its recovery lineage,
+so neither the original run nor its successors list checkpoints that can no longer be restored.
+Other lineages keep theirs. Platform exposes recovery through
 authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
 original capsule is removed. Platform resolves declared connections from their original references.
 Direct-target resume reuses the original source connection authorization and resolves fresh values;

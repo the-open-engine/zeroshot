@@ -234,6 +234,8 @@ impl Api {
                 .extend_pairs(request.query.iter().map(|(k, v)| (*k, v)));
         }
         let resource = format!("{} {}", request.method, &url[..Position::AfterPath]);
+        let creating_review = request.method == Method::POST
+            && matches!(request.segments, ["projects", _, "merge_requests"]);
         let mut builder = self
             .client
             .request(request.method, url)
@@ -251,17 +253,18 @@ impl Api {
             )
         })?;
         if !response.status().is_success() {
-            return Err(rejection(&resource, response, credential).await);
+            return Err(rejection(&resource, response, credential, creating_review).await);
         }
         Ok(response)
     }
 }
 
-/// The status alone classifies the failure; the body only explains it.
+/// Only a complete missing-source-branch validation response can specialize the status policy.
 async fn rejection(
     resource: &str,
     mut response: reqwest::Response,
     credential: SourceDeliveryCredential<'_>,
+    creating_review: bool,
 ) -> SourceDeliveryError {
     let status = response.status().as_u16();
     let mut body = Vec::new();
@@ -283,10 +286,19 @@ async fn rejection(
         diagnostic.extend_from_slice(b": ");
         diagnostic.extend_from_slice(&body);
     }
-    SourceDeliveryError::api(
+    let retry_visibility = creating_review
+        && status == 400
+        && !truncated
+        && super::review::missing_source_branch(&body);
+    let error = SourceDeliveryError::api(
         Some(status),
         display_text(diagnostic, truncated, credential),
-    )
+    );
+    if retry_visibility {
+        error.temporary_review_sync()
+    } else {
+        error
+    }
 }
 
 fn transport_failure(
@@ -313,7 +325,7 @@ fn transport_failure(
 }
 
 /// Forge and transport text is redacted before truncation and kept on one control-free line.
-fn display_text(
+pub(super) fn display_text(
     bytes: Vec<u8>,
     truncated: bool,
     credential: SourceDeliveryCredential<'_>,

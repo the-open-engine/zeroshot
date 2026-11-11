@@ -11,6 +11,7 @@ enum Outage {
     Api,
     Refresh,
     Visibility,
+    BranchVisibility(usize),
 }
 
 struct OutageAuthority {
@@ -26,7 +27,15 @@ impl SourceDeliveryAuthority for OutageAuthority {
         _request: &SourceReviewRequest,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+        let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Outage::BranchVisibility(failures) = self.outage
+            && attempt <= failures
+        {
+            return Err(SourceDeliveryError::api(
+                Some(400),
+                "GitLab merge request creation for branch zeroshot/outage: source_branch does not exist",
+            ).temporary_review_sync());
+        }
         let failure = match self.outage {
             Outage::Refresh if credential.expose() != "refreshed-token" => Some(401),
             Outage::Api if Instant::now() < self.available_at => Some(503),
@@ -234,15 +243,24 @@ fn probe(outage: Outage) -> (Arc<SyncProbe>, Arc<OutageAuthority>, Arc<TimedRefr
 }
 
 async fn run_probe(probe: Arc<SyncProbe>) -> WorkerOutcome {
+    run_probe_with_output(probe).await.0
+}
+
+async fn run_probe_with_output(probe: Arc<SyncProbe>) -> (WorkerOutcome, String) {
     let runner = NativeNodeRunner::new(&test_support::admitted(), probe.clone(), probe.clone())
         .assert_value();
     let mut handle = runner
         .start(test_support::request("sync-outage", "worker", (1, 1)))
         .await
         .assert_value();
+    let mut output = handle.attach();
     let completion = handle.completion().await.assert_value();
     assert_eq!(probe.starts.load(Ordering::SeqCst), 1);
-    completion.outcome
+    let mut text = String::new();
+    while let Ok(output) = output.recv().await {
+        text.push_str(&output.text);
+    }
+    (completion.outcome, text)
 }
 
 #[tokio::test(start_paused = true)]
@@ -270,6 +288,34 @@ async fn visibility_failures_keep_the_existing_bounded_batch() {
     );
     assert!(started.elapsed() < Duration::from_secs(90));
     assert_eq!(authority.calls.load(Ordering::SeqCst), REVIEW_SYNC_ATTEMPTS);
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_source_branch_keeps_the_existing_attempt_count_and_interval() {
+    let (probe, authority, _) = probe(Outage::BranchVisibility(usize::MAX));
+    let started = Instant::now();
+    let (outcome, output) = run_probe_with_output(probe).await;
+    assert_eq!(
+        outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+    );
+    assert_eq!(authority.calls.load(Ordering::SeqCst), REVIEW_SYNC_ATTEMPTS);
+    assert_eq!(started.elapsed(), Duration::from_secs(55));
+    assert!(output.contains("failed after 10 attempt(s)"), "{output}");
+    assert!(output.contains("source_branch does not exist"), "{output}");
+    assert!(output.contains("zeroshot/outage"), "{output}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_source_branch_recovers_without_a_worker_or_reviewer_round() {
+    let (probe, authority, _) = probe(Outage::BranchVisibility(1));
+    let started = Instant::now();
+    assert!(matches!(
+        run_probe(probe).await,
+        WorkerOutcome::Verified { .. }
+    ));
+    assert_eq!(authority.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(started.elapsed(), REVIEW_SYNC_INTERVAL);
 }
 
 async fn assert_recovers_after_the_outage(probe: Arc<SyncProbe>) {

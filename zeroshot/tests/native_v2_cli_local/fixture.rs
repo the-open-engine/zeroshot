@@ -731,6 +731,9 @@ mod slow_checkpoint_restore;
 #[path = "resume_lane_executable.rs"]
 mod resume_lane_executable;
 
+#[path = "force_stop_lineage.rs"]
+mod force_stop_lineage;
+
 #[cfg(target_os = "linux")]
 #[path = "agent_tmpdir.rs"]
 mod agent_tmpdir;

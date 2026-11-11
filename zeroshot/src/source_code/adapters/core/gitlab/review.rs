@@ -325,6 +325,38 @@ fn begin_creation(
     Ok(())
 }
 
+pub(super) fn missing_source_branch(body: &[u8]) -> bool {
+    let Ok(Value::Object(mut body)) = serde_json::from_slice(body) else {
+        return false;
+    };
+    if body.len() != 1 {
+        return false;
+    }
+    let message_matches = |message: &str| {
+        message.eq_ignore_ascii_case("source_branch does not exist")
+            || message.eq_ignore_ascii_case("source branch does not exist")
+    };
+    match body.remove("message") {
+        Some(Value::String(message)) => message_matches(&message),
+        Some(Value::Array(messages)) => {
+            !messages.is_empty()
+                && messages
+                    .iter()
+                    .all(|message| message.as_str().is_some_and(message_matches))
+        }
+        Some(Value::Object(fields)) if fields.len() == 1 => fields
+            .get("source_branch")
+            .and_then(Value::as_array)
+            .is_some_and(|messages| {
+                !messages.is_empty()
+                    && messages
+                        .iter()
+                        .all(|message| message.as_str() == Some("does not exist"))
+            }),
+        _ => false,
+    }
+}
+
 async fn reconcile_creation(
     authority: &GitLabDeliveryAuthority,
     request: &SourceReviewRequest,
@@ -341,7 +373,20 @@ async fn reconcile_creation(
                 .map_err(|_| SourceDeliveryError::Unavailable)?
                 .creates
                 .remove(&key);
-            Err(original)
+            if original.api_status() == Some(400) && original.retryable_review_sync() {
+                let context = super::api::display_text(
+                    format!(
+                        "GitLab merge request creation for branch {}",
+                        request.head_branch
+                    )
+                    .into_bytes(),
+                    false,
+                    credential,
+                );
+                Err(original.with_context(context))
+            } else {
+                Err(original)
+            }
         }
         None => Err(SourceDeliveryError::api(
             None,

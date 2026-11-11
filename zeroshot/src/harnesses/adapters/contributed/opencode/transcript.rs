@@ -9,7 +9,9 @@ use std::collections::BTreeSet;
 use openengine_cluster_protocol::TokenCount;
 use serde_json::Value;
 
-use crate::native_v2_capsule::provider_json_lines::{ProviderJsonLine, ProviderJsonLines};
+use crate::native_v2_capsule::provider_json_lines::{
+    ProviderJsonLine, ProviderJsonLines, parse_provider_json,
+};
 use crate::native_v2_capsule::provider_process::text::ProviderText;
 use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
 use crate::native_v2_capsule::provider_process::{
@@ -64,7 +66,7 @@ impl OpenCodeTranscript {
         let mut emissions = Vec::new();
         for record in records {
             match record {
-                ProviderJsonLine::Record(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+                ProviderJsonLine::Record(bytes) => match parse_provider_json(&bytes) {
                     Ok(value) => self.accept_record(&value, &mut emissions),
                     Err(_) if bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
                         self.usage_invalid = true
