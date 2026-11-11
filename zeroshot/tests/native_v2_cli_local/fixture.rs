@@ -725,6 +725,9 @@ mod harness_environment;
 #[path = "restic_selector.rs"]
 mod restic_selector;
 
+#[path = "script_spawn.rs"]
+mod script_spawn;
+
 #[path = "slow_checkpoint_restore.rs"]
 mod slow_checkpoint_restore;
 

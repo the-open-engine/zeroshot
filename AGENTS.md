@@ -797,6 +797,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retains errors during draining; capsule terminal metadata preserves bounded error records too. Retries, corrections, and typed delivery
   outcomes log detail separately only when completion would lose it. Correction prompts stay out of
   diagnostics. Public error formatting is bounded and control-safe without suppressing causes.
+  Shared process spawn errors include the program as an escaped preview of at most 256 bytes plus
+  a truncation marker, alongside the OS cause; they never include arguments or environment values.
   These public summaries stay separate from private operator diagnostics.
   Existing Error output and safe-log records may carry `FailureDiagnosticKind` metadata; their text
   is the public-safe explanation. The ordinary ledger projection retains a bounded `FailureContext`
