@@ -569,13 +569,22 @@ impl Drop for ProcessGroup {
 }
 
 pub(crate) fn diagnostic_text(bytes: Vec<u8>, truncated: bool, token: &str) -> (String, bool) {
-    sanitize(
-        CapturedBytes { bytes, truncated },
+    diagnostic_text_with_secrets(
+        bytes,
+        truncated,
         &[
             token.to_owned(),
             super::git_auth::encode_basic_credential(token),
         ],
     )
+}
+
+pub(crate) fn diagnostic_text_with_secrets(
+    bytes: Vec<u8>,
+    truncated: bool,
+    secrets: &[String],
+) -> (String, bool) {
+    sanitize(CapturedBytes { bytes, truncated }, secrets)
 }
 
 #[cfg(test)]

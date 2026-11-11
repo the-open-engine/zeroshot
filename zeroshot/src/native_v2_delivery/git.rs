@@ -61,6 +61,20 @@ impl SystemGit {
         self
     }
 
+    pub(super) fn diagnostic_secrets(&self) -> Vec<String> {
+        self.local_environment
+            .iter()
+            .flat_map(|environment| environment.iter())
+            .filter(|(name, value)| command::native_credential_name(name) && !value.is_empty())
+            .flat_map(|(_, value)| {
+                [
+                    value.clone(),
+                    super::git_auth::encode_basic_credential(value),
+                ]
+            })
+            .collect()
+    }
+
     pub(crate) fn with_commit_identity(
         mut self,
         identity: Option<openengine_cluster_protocol::CommitIdentity>,

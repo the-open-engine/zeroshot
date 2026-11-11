@@ -33,7 +33,10 @@ impl SourceDeliveryAuthority for OutageAuthority {
         {
             return Err(SourceDeliveryError::api(
                 Some(400),
-                "GitLab merge request creation for branch zeroshot/outage: source_branch does not exist",
+                format!(
+                    "GitLab merge request creation for branch zeroshot/outage: source_branch does not exist; echoed credential {}",
+                    credential.expose(),
+                ),
             ).temporary_review_sync());
         }
         let failure = match self.outage {
@@ -258,6 +261,9 @@ async fn run_probe_with_output(probe: Arc<SyncProbe>) -> (WorkerOutcome, String)
     assert_eq!(probe.starts.load(Ordering::SeqCst), 1);
     let mut text = String::new();
     while let Ok(output) = output.recv().await {
+        for secret in ["test-token", "refreshed-token"] {
+            assert!(!output.text.contains(secret), "{}", output.text);
+        }
         text.push_str(&output.text);
     }
     (completion.outcome, text)

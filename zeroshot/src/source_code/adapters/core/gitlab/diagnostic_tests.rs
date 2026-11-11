@@ -2,6 +2,170 @@ use super::*;
 
 const PROJECT: &str = "/projects/group%2Fsub%2Fproject";
 
+#[test]
+fn object_credentials_are_redacted_before_error_and_context_bounds() {
+    use crate::native_v2_delivery::git_auth;
+
+    let token = "glpat-synthetic-review-secret-value";
+    let password = "https-synthetic-response-secret";
+    let encoded = git_auth::encode_user_password("git-user", password);
+    let credential = SourceDeliveryCredential::token(token).with_git(SourceGitCredential::Https {
+        username: "git-user",
+        password,
+    });
+    let context = "GitLab merge request group/sub/project!17";
+    let cutoff = MAX_SOURCE_API_DIAGNOSTIC_BYTES - "\n[diagnostic truncated]".len();
+    for secret in [token, password, &encoded] {
+        for offset in [0, context.len() + 1] {
+            let prefix = &secret[..secret.len() / 2];
+            let padding = "x".repeat(cutoff - offset - prefix.len());
+            let error = super::super::api::identity_error(
+                format!("{padding}{secret} trailing response text"),
+                credential,
+            );
+            for error in [
+                error.clone(),
+                super::super::api::delivery_context(error, context.to_owned(), credential),
+            ] {
+                let text = error.to_string();
+                assert!(
+                    !text.contains(prefix),
+                    "credential fragment survived the cutoff"
+                );
+                assert!(text.len() <= MAX_SOURCE_API_DIAGNOSTIC_BYTES + 64);
+                assert!(matches!(error, SourceDeliveryError::Identity(_)));
+                assert!(!error.authentication_failed());
+                assert!(!error.retryable_review_sync());
+                assert!(!error.retryable_operation());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn closed_and_merged_reviews_name_the_review_and_distinct_resume_steps() {
+    for (state, expected) in [("closed", "reopen it"), ("merged", "start a new run")] {
+        let fixture = Fixture::new().await;
+        fixture.open_review();
+        fixture.state.lock().unwrap().review.as_mut().unwrap()["state"] = json!(state);
+        let error = fixture
+            .authority
+            .open_or_update_review(&request(), credential())
+            .await
+            .unwrap_err();
+        let text = error.to_string();
+        for detail in [REPOSITORY, "!17", "zeroshot/test", "main", HEAD, expected] {
+            assert!(text.contains(detail), "{detail}: {text}");
+        }
+        assert!(
+            text.contains(if state == "closed" {
+                "was closed"
+            } else {
+                "already merged"
+            }),
+            "{text}"
+        );
+        assert!(!text.contains("Identity("), "{text}");
+        assert_eq!(fixture.writes("/merge_requests/17"), 0);
+    }
+}
+
+#[tokio::test]
+async fn merge_401_distinguishes_missing_permission_from_a_rejected_token() {
+    for authenticated in [true, false] {
+        let fixture = Fixture::new().await;
+        fixture.open_review();
+        fixture.response(
+            "PUT",
+            "/merge_requests/17/merge",
+            (
+                StatusCode::UNAUTHORIZED,
+                json!({"message":"401 Unauthorized test-private-token"}),
+            ),
+        );
+        if !authenticated {
+            fixture.response(
+                "GET",
+                "/user",
+                (StatusCode::UNAUTHORIZED, json!({"message":"expired token"})),
+            );
+        }
+        let error = fixture
+            .authority
+            .request_merge(&receipt(), credential())
+            .await
+            .unwrap_err()
+            .with_context("delivery refused");
+        assert_eq!(error.api_status(), Some(401));
+        assert_eq!(error.authentication_failed(), !authenticated, "{error}");
+        assert!(!error.retryable_operation());
+        assert!(!error.retryable_review_sync());
+        let text = error.to_string();
+        assert!(!text.contains("test-private-token"), "{text}");
+        assert_eq!(
+            text.contains("merge permission is missing"),
+            authenticated,
+            "{text}"
+        );
+        for detail in [REPOSITORY, "!17", "zeroshot/test", "main", HEAD, "HTTP 401"] {
+            assert!(text.contains(detail), "{text}");
+        }
+        assert_eq!(fixture.writes("/merge_requests/17/merge"), 1);
+        let withdrawal = fixture
+            .authority
+            .withdraw_merge_request(&receipt(), credential())
+            .await
+            .unwrap();
+        assert_eq!(withdrawal, SourceMergeWithdrawal::Withdrawn);
+    }
+}
+
+#[tokio::test]
+async fn deleted_target_branch_names_the_project_and_branch() {
+    let fixture = Fixture::new().await;
+    fixture.open_review();
+    fixture.response(
+        "GET",
+        "/repository/branches/main",
+        (StatusCode::NOT_FOUND, Value::Null),
+    );
+    let workspace = tempfile::tempdir().unwrap();
+    let request = request();
+    let target_error = fixture
+        .authority
+        .reconcile_delivery_target(
+            SourceTargetReconciliation {
+                workspace: workspace.path(),
+                target: &request.target,
+                commit_message: "Integrate target",
+            },
+            credential(),
+        )
+        .await
+        .unwrap_err();
+    let conflict_error = fixture
+        .authority
+        .materialize_merge_conflict(
+            &SourceConflictRequest {
+                workspace: workspace.path().to_owned(),
+                review: receipt(),
+            },
+            credential(),
+        )
+        .await
+        .unwrap_err();
+    for error in [target_error, conflict_error] {
+        let text = error.to_string();
+        for detail in [REPOSITORY, "main", "Restore", "resuming"] {
+            assert!(
+                text.to_lowercase().contains(&detail.to_lowercase()),
+                "{text}"
+            );
+        }
+        assert!(matches!(error, SourceDeliveryError::Identity(_)));
+    }
+}
+
 fn rejection_cases() -> impl IntoIterator<
     Item = (
         &'static str,
