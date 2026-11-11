@@ -8,6 +8,9 @@ use crate::native_v2_runner::LiveOutputStream;
 use crate::native_v2_capsule::provider_process::{ProviderProcessFailure, ProviderProcessFailureKind};
 use serde_json::json;
 
+#[path = "tests/unicode.rs"]
+mod unicode;
+
 fn header(id: &str) -> String {
     json!({"type": "session", "version": 3, "id": id, "cwd": "/w"}).to_string()
 }

@@ -7,7 +7,9 @@ use serde_json::{Value, json};
 use crate::execution::process::{
     ProcessFrame, ProcessRunnerError, ProcessStdout, MAX_PROCESS_MESSAGE_BYTES,
 };
-use crate::native_v2_capsule::provider_json_lines::{ProviderJsonLine, ProviderJsonLines};
+use crate::native_v2_capsule::provider_json_lines::{
+    ProviderJsonLine, ProviderJsonLines, parse_provider_json,
+};
 use crate::native_v2_capsule::provider_process::{
     ProviderEmission, ProviderFailureRetry, ProviderProcess, require_process_cleanup,
     report_cleanup_failure,
@@ -220,7 +222,7 @@ impl<'a> HermesConnection<'a> {
         loop {
             if let Some(record) = self.pending.pop_front() {
                 return match record {
-                    ProviderJsonLine::Record(bytes) => serde_json::from_slice(&bytes)
+                    ProviderJsonLine::Record(bytes) => parse_provider_json(&bytes)
                         .map(Some)
                         .map_err(|_| failure("Hermes emitted an invalid private event")),
                     ProviderJsonLine::Oversized => {
