@@ -445,6 +445,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Publishing already committed work may confirm the admitted source commit without a new commit,
   including unchanged local and remote HEAD after resume.
   Exact clean merged-head recovery accepts that same local source commit, with inclusive ancestry.
+  Merge confirmation during handoff also requires a clean workspace at the exact reviewed head
+  with admitted source ancestry and the configured local branch still attached. A saved review
+  binding never confirms unpublished local work or overrides an attached-branch refusal.
   Unbound local review discovery and creation select active reviews rather than branch history,
   including resumes that have not recorded any delivery;
   trusted delivery records a confirmed review binding in the existing recovery metadata before

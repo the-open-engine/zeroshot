@@ -294,6 +294,45 @@ impl NativeV2DeliveryAdapter {
             Ok(SourceMergeWithdrawal::Merged { merge_revision })
                 if valid_revision(&merge_revision) =>
             {
+                // A bound review can merge before this run publishes its current workspace.
+                if let Some(branch) = &self.config.local_branch {
+                    match self.git.attached_branch(&self.config.workspace).await {
+                        Ok(current) if &current == branch => {}
+                        Err(git::GitError::Command(failure)) if failure.cleanup_unconfirmed => {
+                            return Err(NodeRunnerError::CleanupUnconfirmed);
+                        }
+                        _ => return outcome,
+                    }
+                }
+                match self.git.workspace_state(&self.config.workspace).await {
+                    Ok((head, false)) if head == review.head_revision => {}
+                    Err(git::GitError::Command(failure)) if failure.cleanup_unconfirmed => {
+                        return Err(NodeRunnerError::CleanupUnconfirmed);
+                    }
+                    _ => return outcome,
+                }
+                let provenance = if self.config.local_branch.is_some() {
+                    self.git
+                        .descendant_revision(
+                            &self.config.workspace,
+                            &self.config.target.base_revision,
+                        )
+                        .await
+                } else {
+                    self.git
+                        .deliverable_revision(
+                            &self.config.workspace,
+                            &self.config.target.base_revision,
+                        )
+                        .await
+                };
+                match provenance {
+                    Ok(head) if head == review.head_revision => {}
+                    Err(git::GitError::Command(failure)) if failure.cleanup_unconfirmed => {
+                        return Err(NodeRunnerError::CleanupUnconfirmed);
+                    }
+                    _ => return outcome,
+                }
                 validate_delivery_contract(mode, response)?;
                 delivery_outcome(
                     DeliveryResult {

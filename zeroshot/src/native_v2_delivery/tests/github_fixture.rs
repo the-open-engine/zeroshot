@@ -801,6 +801,11 @@ impl SourceDeliveryAuthority for FakeGitHub {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
         self.withdrawn_reviews.lock().unwrap().push(review.clone());
+        if matches!(self.script, Script::PreflightMerged) {
+            return Ok(SourceMergeWithdrawal::Merged {
+                merge_revision: "c".repeat(40),
+            });
+        }
         if !self.queue_live.load(Ordering::SeqCst) {
             return Ok(SourceMergeWithdrawal::Withdrawn);
         }

@@ -387,6 +387,218 @@ async fn merged_local_committed_source_is_confirmed_on_resume_without_republicat
 }
 
 #[tokio::test]
+async fn merged_review_binding_never_confirms_unpublished_local_work() {
+    use crate::native_v2_candidate::test_support::{commit_all, path_text};
+
+    for worktree in [false, true] {
+        for (case, confirmed) in [
+            ("clean-ancestor", true),
+            ("source-equal", true),
+            ("dirty", false),
+            ("newer-head", false),
+            ("unrelated-source", false),
+            ("detached", false),
+            ("wrong-branch", false),
+        ] {
+            let mut repo = TempRepo::delivery();
+            git(&repo.workspace, &["checkout", "-b", "feature/bound-merge"]);
+            commit_all(&repo.workspace, "reviewed candidate");
+            let published = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+            let invoking = repo.workspace.clone();
+            let branch = if worktree {
+                let branch = delivery_head_branch(&RunId::new("bound-merge"));
+                let workspace = repo.root.child("retained-worktree");
+                git(
+                    &invoking,
+                    &[
+                        "worktree",
+                        "add",
+                        "-b",
+                        &branch,
+                        path_text(&workspace),
+                        &published,
+                    ],
+                );
+                repo.workspace = workspace;
+                branch
+            } else {
+                "feature/bound-merge".to_owned()
+            };
+            git(&repo.workspace, &["push", "origin", &branch]);
+            match case {
+                "source-equal" => repo.base.clone_from(&published),
+                "detached" => git(&repo.workspace, &["checkout", "--detach", &published]),
+                "wrong-branch" => git(&repo.workspace, &["checkout", "-b", "feature/other-run"]),
+                "dirty" | "newer-head" => {
+                    fs::write(repo.workspace.join("unpublished.txt"), "retain this work\n")
+                        .assert_value();
+                    if case == "newer-head" {
+                        commit_all(&repo.workspace, "unpublished work");
+                    }
+                }
+                "unrelated-source" => {
+                    repo.base = git_output(
+                        &repo.workspace,
+                        &[
+                            "-c",
+                            "user.name=Test",
+                            "-c",
+                            "user.email=test@example.invalid",
+                            "commit-tree",
+                            "HEAD^{tree}",
+                            "-m",
+                            "unrelated admitted source",
+                        ],
+                    );
+                }
+                _ => {}
+            }
+            let review = SourceReviewReceipt {
+                review_id: "17".to_owned(),
+                repository: target(&repo).repository,
+                target_branch: target(&repo).target_branch,
+                head_branch: branch.clone(),
+                head_revision: published.clone(),
+            };
+            let authority = Arc::new(FakeGitHub::new(
+                repo.remote.clone(),
+                Script::PreflightMerged,
+            ));
+            authority
+                .reviews
+                .lock()
+                .assert_value()
+                .push(SourceReviewRequest {
+                    include_terminal_reviews: true,
+                    known_review: None,
+                    target: target(&repo),
+                    head_branch: branch.clone(),
+                    head_revision: published.clone(),
+                    title: "previously observed review".to_owned(),
+                    description: "merged before this run published".to_owned(),
+                    source_issue: None,
+                });
+            let adapter = Arc::new(
+                NativeV2DeliveryAdapter::new(
+                    NativeV2DeliveryConfig {
+                        local_branch: Some(branch.clone()),
+                        delivery_run_id: RunId::new("bound-merge"),
+                        adopt_existing_delivery: true,
+                        git_identity: None,
+                        commit_identity: None,
+                        commit_co_author: None,
+                        workspace: repo.workspace.clone(),
+                        git_program: "/usr/bin/git".into(),
+                        target: target(&repo),
+                        poll: DeliveryPollPolicy::new(2, Duration::ZERO).assert_value(),
+                    },
+                    authority.clone(),
+                )
+                .with_recovered_review(Some(contract::RecoveredReview {
+                    published: false,
+                    review,
+                })),
+            );
+            let before_head = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+            let before_status = git_output(&repo.workspace, &["status", "--porcelain=v1"]);
+            let before_index = git_output(&repo.workspace, &["write-tree"]);
+            let before_attachment = git_output(
+                &repo.workspace,
+                &["rev-parse", "--symbolic-full-name", "HEAD"],
+            );
+            let branch_reference = format!("refs/heads/{branch}");
+            let before_branch_tip = git_output(&repo.workspace, &["rev-parse", &branch_reference]);
+            let execution = run_with_adapter(
+                DeliveryRunRequest {
+                    repo: &repo,
+                    attempts: 2,
+                    mode: DeliveryMode::Merge,
+                    run_id: "bound-merge-successor",
+                    refresh: None,
+                },
+                adapter,
+            )
+            .await;
+            if confirmed {
+                assert_eq!(
+                    assert_delivery_signal(&execution.outcome, DELIVERY_MERGED_LABEL)["headRevision"],
+                    published
+                );
+            } else {
+                assert_eq!(
+                    execution.outcome,
+                    WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+                    "{case}"
+                );
+                let expected = if case == "detached" || case == "wrong-branch" {
+                    "HEAD must stay attached"
+                } else {
+                    "already merged"
+                };
+                assert!(
+                    execution
+                        .output
+                        .iter()
+                        .any(|output| output.text.contains(expected)),
+                    "{case}"
+                );
+                if case == "detached" || case == "wrong-branch" {
+                    assert!(
+                        execution.output.iter().any(|output| {
+                            output.text.contains(&format!("git switch {branch}"))
+                        })
+                    );
+                }
+            }
+            assert_eq!(
+                authority.withdrawn_reviews.lock().assert_value().len(),
+                usize::from(!confirmed)
+            );
+            assert_eq!(authority.head_updates.load(Ordering::SeqCst), 0);
+            assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+            assert_eq!(authority.review_requests().len(), 1);
+            assert_eq!(
+                git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+                before_head
+            );
+            assert_eq!(git_output(&repo.workspace, &["write-tree"]), before_index);
+            assert_eq!(
+                git_output(&repo.workspace, &["status", "--porcelain=v1"]),
+                before_status
+            );
+            assert_eq!(
+                git_output(
+                    &repo.workspace,
+                    &["rev-parse", "--symbolic-full-name", "HEAD"]
+                ),
+                before_attachment
+            );
+            assert_eq!(
+                git_output(&repo.workspace, &["rev-parse", &branch_reference]),
+                before_branch_tip
+            );
+            assert_eq!(
+                git_output(
+                    &repo.remote,
+                    &["rev-parse", &format!("refs/heads/{branch}")]
+                ),
+                published
+            );
+            if case == "dirty" || case == "newer-head" {
+                assert_eq!(
+                    fs::read_to_string(repo.workspace.join("unpublished.txt")).assert_value(),
+                    "retain this work\n"
+                );
+            }
+            if worktree {
+                assert_eq!(git_output(&invoking, &["rev-parse", "HEAD"]), published);
+                assert!(git_output(&invoking, &["status", "--porcelain=v1"]).is_empty());
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn in_place_delivery_publishes_the_attached_branch_and_its_unpushed_commits() {
     for mode in [
         DeliveryMode::Push,
