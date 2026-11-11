@@ -233,3 +233,37 @@ async fn retained_resume_allows_a_turn_without_an_observed_thread_id() {
     assert_eq!(capture.matches("arg=resume\n").count(), 1);
     assert_eq!(capture.matches("arg=retained-thread\n").count(), 1);
 }
+
+#[tokio::test]
+async fn node_instance_session_resumes_after_late_exit_or_forced_release() {
+    for teardown in ["exit 1", "/usr/bin/sleep 30"] {
+        let directory = TestDirectory::new("codex-resume-after-release");
+        let capture = directory.child("capture");
+        let state = directory.child("state");
+        let script = format!("{RETAINED_THREAD_SCRIPT}\n{teardown}\n");
+        let (admitted, runtime) = openai_scripted_runtime(
+            &directory,
+            OpenAiScript {
+                scope: SessionScope::NodeInstance,
+                environment: &["CAPTURE_PATH", "OPENAI_API_KEY", "STATE_PATH"],
+                name: "resume-after-release",
+                body: &script,
+            },
+        )
+        .await;
+        let values = [
+            ("CAPTURE_PATH", capture.display().to_string()),
+            ("OPENAI_API_KEY", "fake-openai-key".to_owned()),
+            ("STATE_PATH", state.display().to_string()),
+        ];
+        tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            assert_two_turn_outputs(&runtime, &admitted, &values),
+        )
+        .await
+        .assert_value_with("both turns must settle after bounded release");
+        let capture = fs::read_to_string(capture).assert_value();
+        assert_eq!(capture.matches("arg=resume\n").count(), 1);
+        assert_eq!(capture.matches("arg=retained-thread\n").count(), 1);
+    }
+}

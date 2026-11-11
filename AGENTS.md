@@ -587,6 +587,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. Structured output receives at most two correction turns before `malformed`.
+  A Codex `turn.completed` with a final agent message preserves its answer and usage across later
+  process failures. Its remaining output and process wait share a 250 ms grace, followed by bounded
+  release and confirmed process-tree cleanup. Teardown failures are logged once without replacing
+  that answer; incomplete input, output delivery failures, cancellation and unconfirmed cleanup
+  retain their failure semantics. Reusable Codex session files survive this per-turn release.
 - Pi drives one `pi --mode json` process per turn, with the node prompt on stdin so a large input
   payload can never exceed the platform argument limit. Model identifiers stay caller-owned and Pi
   owns their resolution. Its provider lanes are `anthropic`, `openai`, `openrouter`, `bedrock`,
@@ -671,7 +676,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   RPC writes, cancellation, durable output and cleanup failures still fail closed.
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
-  validating provider-owned fields, and continue draining after the first valid terminal event.
+  validating provider-owned fields, and continue draining after the first valid terminal event
+  (Codex bounds that drain after a completed turn).
 - Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
   turn it runs the selected executable with `--version` through that turn's launch path and
   environment. One `--print` process can write several results while background subagents or

@@ -55,6 +55,10 @@ enum AcceptedLine {
 }
 
 impl CodexOutputDecoder {
+    pub(super) fn is_completed(&self) -> bool {
+        self.output.is_completed()
+    }
+
     pub(super) fn new() -> Self {
         Self {
             lines: ProviderJsonLines::new(),
@@ -146,6 +150,13 @@ impl CodexOutput {
 
     fn is_settled(&self) -> bool {
         self.terminal.is_some()
+    }
+
+    pub(super) fn is_completed(&self) -> bool {
+        self.terminal == Some(CodexTerminal::Completed)
+            && self.final_message.is_some()
+            && self.thread_failure.is_none()
+            && self.failure.is_none()
     }
 
     fn finalize(&mut self) {
