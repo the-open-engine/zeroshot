@@ -1,6 +1,65 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
+async fn shipped_cli_announces_each_follow_loss_once_and_ctrl_c_detaches() {
+    if !cli_prerequisites_available() {
+        return;
+    }
+    let host =
+        LoopbackHost::start_with_observation_loss(Arc::new(TestControllerFactory), true).await;
+    let root = temp_root();
+    let config = root.path("reconnect-config");
+    let (runtime, graph, input) = write_fixture_files(&root);
+    let script = shell_script()
+        + r#"
+foreground=$(
+  timeout --preserve-status --signal=INT 1 "$1" run --target prod --forward-gh-token \
+    --repository open-engine/zeroshot --branch main --title "Foreground reconnect" \
+    --runtime-config "$4" --graph "$5" --input "$6" --submission-key reconnect-foreground
+) || exit $?
+run_id=$(printf '%s\n' "$foreground" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p' | head -1)
+test -n "$run_id" || exit 94
+printf 'FOREGROUND=%s\n' "$foreground"
+"$1" force-stop "$run_id" --target prod || exit $?
+"#;
+    let mut command = cli_command(CliInvocation {
+        script: &script,
+        label: "reconnect",
+        binary: env!("CARGO_BIN_EXE_zeroshot"),
+        origin: &host.origin,
+        config: &config,
+        runtime: &runtime,
+        graph: &graph,
+        input: &input,
+        extra: None,
+        source_revision: Some(TEST_SOURCE_REVISION),
+    });
+    command.env(GITHUB_TOKEN_ENV, "test-token");
+    let (stdout, stderr) =
+        run_cli_command(command, Duration::from_secs(60), "shipped CLI reconnect").await;
+    let notices = stderr
+        .lines()
+        .filter(|line| line.contains("Connection to target"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        notices.len(),
+        4,
+        "one notice each for run, watch, logs and attach: {stderr}"
+    );
+    assert!(
+        notices
+            .iter()
+            .all(|line| line.contains("\"prod\"") && line.contains("continues there"))
+    );
+    assert!(stdout.contains("WATCH={\"subscriptionId\":"));
+    assert!(stdout.contains("LOGS={\"subscriptionId\":"));
+    assert!(stdout.contains("ATTACH={\"subscriptionId\":"));
+    assert!(stdout.contains("FOREGROUND="));
+    // The shell reaches an explicit force-stop after all three Ctrl-C detachments.
+    assert!(stdout.contains("FORCED={\"runId\":"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
     if !cli_prerequisites_available() {
         return;

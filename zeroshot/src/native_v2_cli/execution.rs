@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
-use std::time::Duration;
 
 use openengine_cluster_protocol::{
     Cursor, RunAttachParams, RunCheckpointsParams, RunDiscardWorkspaceParams, RunForceParams,
@@ -29,6 +28,8 @@ mod failure;
 mod graph_tree;
 #[path = "execution/profiles.rs"]
 mod profiles;
+#[path = "execution/reconnect.rs"]
+mod reconnect;
 #[path = "execution/sizes.rs"]
 mod sizes;
 #[path = "execution/stacks.rs"]
@@ -48,6 +49,7 @@ use submission::{
     GitHubTokenScope, RunSubmission, read_github_token, select_connection_requirements, submit_run,
 };
 use status::outcome_for_status;
+use reconnect::Reconnect;
 
 pub async fn execute_native_v2_cli<B, S, W>(
     command: NativeV2CliCommand,
@@ -601,7 +603,7 @@ enum DurableItem {
 
 enum SubscriptionStep<E> {
     Detached,
-    Reconnect,
+    Reconnect(NativeV2CliError),
     Item(Option<E>),
 }
 
@@ -618,7 +620,7 @@ where
         () = detach.as_mut() => Ok(SubscriptionStep::Detached),
         item = next => match item {
             Ok(item) => Ok(SubscriptionStep::Item(item)),
-            Err(error) if error.is_disconnected() => Ok(SubscriptionStep::Reconnect),
+            Err(error) if error.is_disconnected() => Ok(SubscriptionStep::Reconnect(error)),
             Err(error) => Err(error),
         },
     }
@@ -660,24 +662,29 @@ where
 {
     let mut from_cursor = follow.initial_cursor.clone();
     let mut opened = false;
+    let mut reconnect = Reconnect::new(follow.target, &follow.run_id);
     loop {
         let subscription = tokio::select! {
             biased;
             () = detach.as_mut() => return Ok(CliOutcome::Detached),
+            error = reconnect.expired() => return Err(error),
             result = follow.open(from_cursor.clone()) => match result {
                 Ok(subscription) => {
                     opened = true;
+                    reconnect.connected();
                     subscription
                 }
                 Err(error) if !opened => return Err(error),
                 Err(error) => {
-                    retry_disconnected(error).await?;
+                    if reconnect.wait(error, detach.as_mut()).await? {
+                        return Ok(CliOutcome::Detached);
+                    }
                     continue;
                 }
             },
         };
         let mut subscription = subscription;
-        loop {
+        let error = loop {
             match next_or_detach(subscription.next(), detach.as_mut()).await? {
                 SubscriptionStep::Detached => return Ok(CliOutcome::Detached),
                 SubscriptionStep::Item(Some(DurableItem::Closed(
@@ -688,16 +695,18 @@ where
                 SubscriptionStep::Item(Some(DurableItem::Closed(
                     SubscriptionCloseReason::SlowConsumer,
                 )))
-                | SubscriptionStep::Item(None)
-                | SubscriptionStep::Reconnect => break,
+                | SubscriptionStep::Item(None) => break NativeV2CliError::Disconnected,
+                SubscriptionStep::Reconnect(error) => break error,
                 SubscriptionStep::Item(Some(event)) => {
                     if let Some(outcome) = write_durable_event(event, &mut from_cursor, output)? {
                         return Ok(outcome);
                     }
                 }
             }
+        };
+        if reconnect.wait(error, detach.as_mut()).await? {
+            return Ok(CliOutcome::Detached);
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -765,14 +774,6 @@ fn write_json(output: &mut impl Write, value: &impl Serialize) -> Result<(), Nat
     serde_json::to_writer(&mut *output, value)?;
     output.write_all(b"\n")?;
     output.flush()?;
-    Ok(())
-}
-
-async fn retry_disconnected(error: NativeV2CliError) -> Result<(), NativeV2CliError> {
-    if !error.is_disconnected() {
-        return Err(error);
-    }
-    tokio::time::sleep(Duration::from_millis(100)).await;
     Ok(())
 }
 

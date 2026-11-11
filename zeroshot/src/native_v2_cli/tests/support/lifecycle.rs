@@ -1,6 +1,35 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(in crate::native_v2_cli) enum ObservationOutage {
+    TransportError,
+    Pending,
+}
+
+impl ObservationOutage {
+    pub(super) async fn reopen<E>(self) -> Result<FakeSubscription<E>, NativeV2CliError> {
+        match self {
+            Self::TransportError => Err(target_transport_error()),
+            Self::Pending => std::future::pending().await,
+        }
+    }
+}
+
 impl FakeBackend {
+    pub(in crate::native_v2_cli) fn with_observation_outage(pending: bool) -> Self {
+        Self {
+            queued_lifecycle: true,
+            reconnect_logs: true,
+            attach_behavior: AttachBehavior::Disconnect,
+            observation_outage: Some(if pending {
+                ObservationOutage::Pending
+            } else {
+                ObservationOutage::TransportError
+            }),
+            ..Self::default()
+        }
+    }
+
     pub(in super::super) fn with_target_transport_reopen_error() -> Self {
         Self {
             queued_lifecycle: true,
@@ -51,6 +80,13 @@ pub(super) fn queued_watch(
         )]);
     }
     FakeSubscription::items(vec![
+        // A replayed boundary must not be printed twice when a target reconnects.
+        watch_event(
+            params,
+            "watch-reopened",
+            "cloud:1",
+            json!({"phase":"queued"}),
+        ),
         watch_event(
             params,
             "watch-admitted",

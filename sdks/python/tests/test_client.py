@@ -754,6 +754,32 @@ def test_run_watch_rejects_a_failure_for_another_run(
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("target", ["direct", "hosted"])
+def test_run_wait_without_timeout_propagates_observation_outage(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "outage")
+
+    async def exercise() -> None:
+        selected = (
+            DirectTarget("http://127.0.0.1:8080") if target == "direct" else HostedTarget("hosted")
+        )
+        async with Client(target=selected) as client:
+            run = client.get_run("01900000-0000-7000-8000-000000000001")
+            # This outer guard catches any fallback that would hang after watch exits.
+            async with asyncio.timeout(5):
+                with pytest.raises(TargetError, match="cannot reach target") as caught:
+                    await run.wait()
+            assert caught.value.exit_code == 1
+
+    asyncio.run(exercise())
+    arguments = [item["args"] for item in read_invocations(fake_native)]
+    observations = [args for args in arguments if args[0] in {"status", "watch"}]
+    assert [args[0] for args in observations] == ["status", "watch"]
+    route = "python-sdk" if target == "direct" else "hosted"
+    assert all(args[args.index("--target") + 1] == route for args in observations)
+
+
 def test_run_watch_rejects_different_ids_that_redact_to_the_same_value(fake_native: Path) -> None:
     async def exercise() -> None:
         async with Client(

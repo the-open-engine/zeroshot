@@ -16,6 +16,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::*;
 
+#[path = "reconnect_tests.rs"]
+mod reconnect_tests;
+
 struct FailingTransport {
     requests: Arc<Mutex<Vec<Value>>>,
 }
@@ -64,8 +67,8 @@ impl SubscriptionTransport for FailingTransport {
     }
 }
 
-struct StubConnector {
-    transport: Arc<FailingTransport>,
+struct StubConnector<T = FailingTransport> {
+    transport: Arc<T>,
     hosted_status: Option<CliRunStatusResult>,
 }
 
@@ -85,8 +88,11 @@ fn called(operation: &str) -> NativeV2CliError {
 }
 
 #[async_trait]
-impl TargetConnector for StubConnector {
-    type Transport = FailingTransport;
+impl<T> TargetConnector for StubConnector<T>
+where
+    T: SubscriptionTransport + Send + Sync + 'static,
+{
+    type Transport = T;
 
     async fn add(&self, _request: TargetAdd) -> Result<(), NativeV2CliError> {
         Err(called("add"))
@@ -604,47 +610,41 @@ async fn wave7_cli_contract_oecp_subscription_framing_and_hosted_refusals_are_ex
     let requests = connector.transport.requests.clone();
     let backend = NamedTargetCliBackend::new(connector);
     let run_id = RunId::new("run-contract");
-    let mut watch = backend
-        .run_watch(
-            Some("prod"),
-            RunWatchParams {
-                run_id: run_id.clone(),
-                from_cursor: Some(Cursor::new("cloud:9")),
-            },
-        )
-        .await
-        .assert_value();
     assert!(matches!(
-        watch.next().await,
+        backend
+            .run_watch(
+                Some("prod"),
+                RunWatchParams {
+                    run_id: run_id.clone(),
+                    from_cursor: Some(Cursor::new("cloud:9")),
+                },
+            )
+            .await,
         Err(NativeV2CliError::Disconnected)
     ));
-    let mut logs = backend
-        .run_logs(
-            Some("prod"),
-            RunLogsParams {
-                run_id: run_id.clone(),
-                from_cursor: Some(Cursor::new("v2:2")),
-                execution: None,
-            },
-        )
-        .await
-        .assert_value();
     assert!(matches!(
-        logs.next().await,
+        backend
+            .run_logs(
+                Some("prod"),
+                RunLogsParams {
+                    run_id: run_id.clone(),
+                    from_cursor: Some(Cursor::new("v2:2")),
+                    execution: None,
+                },
+            )
+            .await,
         Err(NativeV2CliError::Disconnected)
     ));
-    let mut attach = backend
-        .run_attach(
-            Some("prod"),
-            RunAttachParams {
-                run_id: run_id.clone(),
-                execution: ExecutionRef::new("worker-1").assert_value(),
-            },
-        )
-        .await
-        .assert_value();
     assert!(matches!(
-        attach.next().await,
+        backend
+            .run_attach(
+                Some("prod"),
+                RunAttachParams {
+                    run_id: run_id.clone(),
+                    execution: ExecutionRef::new("worker-1").assert_value(),
+                },
+            )
+            .await,
         Err(NativeV2CliError::Disconnected)
     ));
     assert_eq!(
