@@ -8,6 +8,7 @@ use crate::source_code_provider::provider::*;
 use crate::execution::process::HostedProcessIdentity;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
+mod ci_diagnostics;
 mod git;
 pub(crate) mod github;
 pub(crate) mod gitlab;

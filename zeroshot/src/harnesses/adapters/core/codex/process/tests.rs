@@ -3,6 +3,95 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
 
+#[path = "tests/settlement.rs"]
+mod settlement;
+
+fn completed_output() -> CodexOutput {
+    CodexOutput::parse(concat!(
+        "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"done\"}}\n",
+        "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":17,\"output_tokens\":9}}\n",
+    ).as_bytes())
+}
+
+#[test]
+fn completed_turn_keeps_answer_and_usage_despite_late_process_failure() {
+    let mut exited = completion(ProcessCleanupEvidence::Reaped, false);
+    exited.exit_code = Some(1);
+    let mut signalled = exited.clone();
+    signalled.exit_code = None;
+    signalled.termination_signal = Some(9);
+    let mut io_failed = exited.clone();
+    io_failed.post_launch_error = Some("late I/O failure".to_owned());
+    for process in [exited, signalled, io_failed] {
+        let diagnostic =
+            cleanup_failure_diagnostic(&Ok(completed_output()), &Ok(process.clone()), None, &[])
+                .assert_value();
+        assert!(diagnostic.contains("teardown failed after the completed turn"));
+        let output =
+            resolve_process_completion(Ok(completed_output()), Ok(process), false).assert_value();
+        assert_eq!(output.final_message().assert_value(), "done");
+        assert!(output.failure_message().is_none());
+        let usage = output.token_usage().assert_value();
+        assert_eq!(usage.input_tokens.get(), 17);
+        assert_eq!(usage.output_tokens.get(), 9);
+    }
+}
+
+#[test]
+fn completed_turn_does_not_override_cancellation_cleanup_or_input_failure() {
+    for cancelled in [false, true] {
+        assert!(matches!(
+            resolve_process_completion(
+                Ok(completed_output()),
+                Ok(completion(ProcessCleanupEvidence::TimedOut, cancelled)),
+                cancelled,
+            ),
+            Err(NodeRunnerError::CleanupUnconfirmed)
+        ));
+    }
+    assert!(matches!(
+        resolve_process_completion(
+            Ok(completed_output()),
+            Ok(completion(ProcessCleanupEvidence::Reaped, false)),
+            true,
+        ),
+        Err(NodeRunnerError::Cancelled)
+    ));
+    assert!(matches!(
+        resolve_process_completion(
+            Ok(completed_output()),
+            Ok(completion(ProcessCleanupEvidence::Reaped, true)),
+            false,
+        ),
+        Err(NodeRunnerError::Cancelled)
+    ));
+    assert!(
+        resolve_input_failure(
+            Ok(completed_output()),
+            ProcessRunnerError::Io("stdin closed".to_owned()),
+            Ok(completion(ProcessCleanupEvidence::Reaped, false)),
+            false,
+        )
+        .assert_value()
+        .failure_message()
+        .assert_value()
+        .contains("stdin closed")
+    );
+}
+
+#[test]
+fn final_message_without_completed_turn_still_fails_on_process_exit() {
+    let output = CodexOutput::parse(
+        b"{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"done\"}}\n",
+    );
+    let mut exited = completion(ProcessCleanupEvidence::Reaped, false);
+    exited.exit_code = Some(1);
+    let output = resolve_process_completion(Ok(output), Ok(exited), false).assert_value();
+    let failure = output.failure_message().assert_value();
+    assert!(failure.contains("without a terminal turn event"));
+    assert!(failure.contains("exited with status 1"));
+}
+
 fn completion(cleanup: ProcessCleanupEvidence, cancelled: bool) -> ProcessSessionOutput {
     ProcessSessionOutput {
         launch_evidence: ProcessLaunchEvidence::MayHaveStarted,

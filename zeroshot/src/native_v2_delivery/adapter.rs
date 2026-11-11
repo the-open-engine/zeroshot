@@ -532,7 +532,10 @@ impl NativeV2DeliveryAdapter {
                 DeliveryStop::Runner(NodeRunnerError::DriverDetail(_)) => diagnostic,
                 _ => format!("Git delivery: {diagnostic}"),
             };
-            let diagnostic = self.redact_feedback(credentials, diagnostic);
+            let diagnostic = self.redact_feedback(
+                credentials,
+                format!("{}\n{diagnostic}", self.publication_diagnostic()),
+            );
             let cleanup_unconfirmed = match stop {
                 DeliveryStop::Runner(NodeRunnerError::CleanupUnconfirmed) => true,
                 DeliveryStop::Explained { result, .. } => {
@@ -835,7 +838,13 @@ impl NativeV2DeliveryAdapter {
                 .push_branch(&push, preparation.credentials.current())
                 .await
             {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    self.record_publication(SourceReviewReceipt::for_request(
+                        review,
+                        String::new(),
+                    ));
+                    return Ok(());
+                }
                 Err(error) => {
                     self.retry_operation(
                         error,
@@ -1007,9 +1016,10 @@ impl NativeV2DeliveryAdapter {
                 )
                 .await
             }
-            ReviewProgress::Merged(_) | ReviewProgress::Closed => {
-                review::failed_review("pull request was closed or merged before delivery completed")
+            ReviewProgress::Merged(revision) => {
+                review::failed_review(&review::merged_review(&drive.review, &revision))
             }
+            ReviewProgress::Closed => review::failed_review(&review::closed_review(&drive.review)),
         }
     }
 
@@ -1044,9 +1054,10 @@ impl NativeV2DeliveryAdapter {
                 .await?;
                 Ok(ReviewStep::Continue)
             }
-            ReviewProgress::Merged(_) | ReviewProgress::Closed => {
-                review::failed_review("pull request was closed or merged before delivery completed")
+            ReviewProgress::Merged(revision) => {
+                review::failed_review(&review::merged_review(&drive.review, &revision))
             }
+            ReviewProgress::Closed => review::failed_review(&review::closed_review(&drive.review)),
         }
     }
 
@@ -1078,9 +1089,7 @@ impl NativeV2DeliveryAdapter {
                 emit(drive.control, "delivery: waiting for forge merge policy").await?;
                 Ok(ReviewStep::Continue)
             }
-            ReviewProgress::Closed => {
-                review::failed_review("pull request was closed or merged before delivery completed")
-            }
+            ReviewProgress::Closed => review::failed_review(&review::closed_review(&drive.review)),
         }
     }
 

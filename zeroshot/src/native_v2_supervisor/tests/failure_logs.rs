@@ -332,7 +332,7 @@ async fn authored_graph_failure_is_also_a_run_log() {
     )
     .await;
     harness.supervisor.drive().await.assert_value();
-    let records = public_logs(&harness).await;
+    let records = public_errors(&harness).await;
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].record.level, LogLevel::Error);
     assert!(records[0].execution.is_none());

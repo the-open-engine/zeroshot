@@ -253,6 +253,7 @@ async fn first_checkpoint_rejection_names_the_entry_in_public_run_logs() {
             .map(|record| record.record.message.as_str())
             .collect::<Vec<_>>(),
         [
+            concat!("Zeroshot version: ", env!("CARGO_PKG_VERSION")),
             "Runtime failed: workspace checkpoint is unavailable: candidate contains an \
              unsupported filesystem entry \"dev-server.sock\"",
             "Run failed: runtime_failed",

@@ -399,6 +399,10 @@ pub trait NodeDriver: Send + Sync {
         invocation: DriverInvocation,
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError>;
+
+    /// Releases run-owned bookkeeping after this runner's invocations have drained.
+    /// Repeated calls must be harmless and leave owner-scoped sessions available.
+    async fn close_run(&self, _run_id: &RunId) {}
 }
 
 #[async_trait]
@@ -602,6 +606,7 @@ impl NodeRunner for NativeNodeRunner {
         }
         self.sessions.close_run(run_id).await;
         wait_for_activity(targets).await;
+        self.driver.close_run(run_id).await;
     }
 }
 

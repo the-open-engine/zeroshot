@@ -469,6 +469,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   regardless of head-pipeline presence or status, never `Passed`. Required or unknown policy needs
   captured-head CI evidence; absent/running CI stays pending and failure/skipped rules still apply.
   Synthetic pipeline SHAs do not prove required captured-head CI. All non-CI gates remain authoritative.
+  Failed required GitLab pipelines include REST and GraphQL configuration errors, failed regular
+  and trigger job names/stages/reasons, and labelled, credential-redacted trace tails. GraphQL
+  error-message reads bind the captured project/pipeline/commit and use bounded cursor pagination.
+  Both forges share CI diagnostic bounds and excerpt formatting in
+  `source_code/adapters/core/ci_diagnostics`; unavailable traces retain the job list.
   Empty generated delivery bindings acquire the adapter's default connection only after source or
   comment destination selection. Managed GitHub.com token/file fallback never authorizes another instance.
   Adapters own optional canonical review/commit receipt links and comment permalink validation.
@@ -595,6 +600,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. Structured output receives at most two correction turns before `malformed`.
+  A Codex `turn.completed` with a final agent message preserves its answer and usage across later
+  process failures. Its remaining output and process wait share a 250 ms grace, followed by bounded
+  release and confirmed process-tree cleanup. Teardown failures are logged once without replacing
+  that answer; incomplete input, output delivery failures, cancellation and unconfirmed cleanup
+  retain their failure semantics. Reusable Codex session files survive this per-turn release.
 - Pi drives one `pi --mode json` process per turn, with the node prompt on stdin so a large input
   payload can never exceed the platform argument limit. Model identifiers stay caller-owned and Pi
   owns their resolution. Its provider lanes are `anthropic`, `openai`, `openrouter`, `bedrock`,
@@ -679,10 +689,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   RPC writes, cancellation, durable output and cleanup failures still fail closed.
 - Provider JSONL readers do not cap cumulative output. They share the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
-  validating provider-owned fields, and continue draining after the first valid terminal event.
+  validating provider-owned fields, and continue draining after the first valid terminal event
+  (Codex bounds that drain after a completed turn).
   Their shared decoder replaces invalid UTF-8 and unpaired Unicode surrogate escapes with U+FFFD
   before adapter parsing and redaction; all other malformed JSON retains each reader's rejection policy.
-- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
+- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before each run's first model
   turn it runs the selected executable with `--version` through that turn's launch path and
   environment. One `--print` process can write several results while background subagents or
   shells finish, so Claude parses every record through stdout EOF and the last result decides the
@@ -731,7 +742,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
   not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
-  retained workspace recovery. Default resume starts a fresh graph on the latest retained workspace;
+  retained workspace recovery. Default resume starts a fresh graph on the retained workspace;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
   imports old provider sessions, secrets, or token usage. Checkpoint IDs never become filesystem paths.
   The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
@@ -743,7 +754,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
   Versioned execution seeds live in separate files and are read only for selected continuation.
-  Restart restores the latest published snapshot without importing a seed. Restore staging is a
+  Target restart restores the latest published snapshot without importing a seed. Local restart
+  restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
+  after a failure enters the successor. A selected local checkpoint is an explicit rollback that
+  requires the CLI-only `--discard-workspace-changes` (rejected with `--target`); without it resume
+  fails before credential resolution, successor claim or workspace change and names the opt-in
+  command. Rollback keeps the shared-Git restore contract below. Restore staging is a
   private sibling of the workspace so final replacement stays on one filesystem. A restore reads
   the selected seed and extracts and validates its complete stage before changing the workspace.
   Restic runs in a contained process tree that is confirmed stopped on failure or at the deadline.
@@ -753,8 +769,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   selected snapshot and records it with the successor as the attempt in the predecessor's recovery
   metadata before launch, and clears it once that successor is ready. The local stage is named
   after its attempt, so the next resume removes only that stage. The same selection must still
-  resolve to the pinned snapshot; another selection that restores a snapshot replaces the record,
-  and a resume that would start without restoring is refused while it remains. Successful lineages
+  resolve to the pinned snapshot; another consented checkpoint selection replaces the record, and a
+  plain resume is refused while it remains. A `Latest` record left by an older plain resume is
+  completed only with consent: `resume RUN_ID --discard-workspace-changes` replays its pinned
+  snapshot. Outside that case the flag requires `--from-checkpoint`. Successful lineages
   delete their catalogs and repository only after durable terminal success; failed lineages retain
   both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable
@@ -786,6 +804,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   connection; control requests and ordinary observers keep their independent connections.
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
   milliseconds and remain unchanged across durable replay.
+- Each run records its executing Zeroshot version before preparation or dispatch logs; resumed
+  successors record their own build. The supervisor serializes version initialization across drive
+  and force-stop. Force-stop stops live work before version logging and request persistence, and
+  skips ledger reads once version initialization completes.
+  Adapters log accepted CLI versions through the existing output
+  bridge once per run and lane when they read them; Claude serializes its initial version check
+  for each run even when ACP reuses the adapter. After invocations drain, `NodeDriver::close_run`
+  releases that run's check state; lane routing forwards the hook to its adapters. ACP records its
+  build at run creation before publishing the supervisor to cancellation.
 - Runner start reserves an execution and returns its handle before asynchronous provider startup.
   Pending start waits are cancellable; accepted startup failures settle through the owned handle.
   Pending remote starts reread connection loss after a close notification so failed closure cannot
@@ -811,6 +838,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retains errors during draining; capsule terminal metadata preserves bounded error records too. Retries, corrections, and typed delivery
   outcomes log detail separately only when completion would lose it. Correction prompts stay out of
   diagnostics. Public error formatting is bounded and control-safe without suppressing causes.
+  Shared process spawn errors include the program as an escaped preview of at most 256 bytes plus
+  a truncation marker, alongside the OS cause; they never include arguments or environment values.
   These public summaries stay separate from private operator diagnostics.
   Existing Error output and safe-log records may carry `FailureDiagnosticKind` metadata; their text
   is the public-safe explanation. The ordinary ledger projection retains a bounded `FailureContext`
@@ -867,6 +896,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the unchanged candidate directly; other integrated remote changes return `repair_required` so the
   authored graph decides what work follows. Agents receive local refs and conflicts without the
   delivery credential. Closed PRs, identity changes and lost published ancestry stop delivery.
+  Failure diagnostics name the project, source/target branches and known review/head, including the
+  last confirmed publication. Diagnostic publication evidence is separate from reconciliation and
+  withdrawal authority: a repair push may advance it before review synchronization succeeds.
+  GitLab merge HTTP 401 is a missing merge permission only when a fresh authenticated user read
+  succeeds; rejected tokens retain authentication failure classification.
 - Hosted delivery Git runs as the pinned workspace writer UID/GID, matching source checkout, so
   fetched objects, commits, merges, and partial failures remain writable by subsequent repairs.
   Admission excludes overlapping writers and requires their process cleanup before delivery;
@@ -982,7 +1016,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Workspace Git and forge reconciliation parse private protocol stdout separately from printable
   diagnostics, including when native credentials collide with object IDs or Git-directory paths;
   parsing and failure classification must preserve raw evidence before credential redaction. Final delivery feedback
-  also redacts the invocation's source credentials and its current refreshed issuance;
+  also redacts the invocation's source credentials, its current refreshed issuance, and captured
+  native Git credentials using the shared credential-name selector. GitLab object diagnostics redact
+  credentials before bounded source errors are constructed; malformed object fields are described
+  without interpolating their unbounded response text;
   unfamiliar failures use the existing optional `repair_required` signal. After exact-ref
   confirmation, only the exact forge-authored branch-protection and push-permission texts in
   `git_diagnostic.rs` (relayed `remote:` lines or GitHub's SSH `ERROR:` lines) become
@@ -1242,6 +1279,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
+  JSON diagnostics use `run_failed` / `run.failed` with `details.runId` for that terminal outcome.
+  Unknown target names and registry workspace-recovery authorization refusals use
+  `invalid_request` / `request.invalid`; transport failures retain `target.unavailable`.
+  The Python SDK consumes the explicit failed-run diagnostic without inferring failure from a
+  target error or rereading status; public failed-result exceptions remain opt-in. Failed-run
+  identity stays private and unredacted for exact watch matching; its printable message is redacted.
   ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
   context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
 - Graph verification errors display their first safe diagnostic, its path and the count of further

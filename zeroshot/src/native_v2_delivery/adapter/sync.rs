@@ -167,14 +167,18 @@ impl NativeV2DeliveryAdapter {
                     ));
                 }
             };
-            match handle_review_sync_failure(ReviewSyncFailure {
-                control,
-                attempt,
-                error: error.clone(),
-                deadline,
-                retry_interval,
-            })
-            .await?
+            match self
+                .handle_review_sync_failure(
+                    state.credentials,
+                    ReviewSyncFailure {
+                        control,
+                        attempt,
+                        error: error.clone(),
+                        deadline,
+                        retry_interval,
+                    },
+                )
+                .await?
             {
                 ReviewSyncDisposition::Retry => {}
                 ReviewSyncDisposition::Stop => return Err(error.into()),
@@ -241,6 +245,38 @@ impl NativeV2DeliveryAdapter {
             )),
         })
     }
+
+    async fn handle_review_sync_failure(
+        &self,
+        credentials: &DeliveryCredentials<'_>,
+        failure: ReviewSyncFailure<'_>,
+    ) -> Result<ReviewSyncDisposition, DeliveryStop> {
+        let retry = failure.attempt < REVIEW_SYNC_ATTEMPTS && failure.error.retryable_review_sync();
+        let diagnostic = if retry {
+            format!(
+                "delivery: forge review synchronization attempt {} failed: {}; retrying",
+                failure.attempt, failure.error
+            )
+        } else {
+            format!(
+                "delivery: forge review synchronization failed after {} attempt(s): {}",
+                failure.attempt, failure.error
+            )
+        };
+        emit(
+            failure.control,
+            &self.redact_feedback(credentials, diagnostic),
+        )
+        .await?;
+        if !retry {
+            return Ok(ReviewSyncDisposition::Stop);
+        }
+        if wait_for_review_sync(failure.control, failure.deadline, failure.retry_interval).await? {
+            Ok(ReviewSyncDisposition::Retry)
+        } else {
+            Ok(ReviewSyncDisposition::TimedOut)
+        }
+    }
 }
 
 fn temporary_sync_failure(message: &str) -> SourceDeliveryError {
@@ -285,32 +321,6 @@ async fn wait_for_review_sync(
     tokio::select! {
         _ = cancellation.cancelled() => Err(NodeRunnerError::Cancelled.into()),
         () = tokio::time::sleep(wait) => Ok(true),
-    }
-}
-
-async fn handle_review_sync_failure(
-    failure: ReviewSyncFailure<'_>,
-) -> Result<ReviewSyncDisposition, DeliveryStop> {
-    let retry = failure.attempt < REVIEW_SYNC_ATTEMPTS && failure.error.retryable_review_sync();
-    let diagnostic = if retry {
-        format!(
-            "delivery: forge review synchronization attempt {} failed: {}; retrying",
-            failure.attempt, failure.error
-        )
-    } else {
-        format!(
-            "delivery: forge review synchronization failed after {} attempt(s): {}",
-            failure.attempt, failure.error
-        )
-    };
-    emit(failure.control, &diagnostic).await?;
-    if !retry {
-        return Ok(ReviewSyncDisposition::Stop);
-    }
-    if wait_for_review_sync(failure.control, failure.deadline, failure.retry_interval).await? {
-        Ok(ReviewSyncDisposition::Retry)
-    } else {
-        Ok(ReviewSyncDisposition::TimedOut)
     }
 }
 

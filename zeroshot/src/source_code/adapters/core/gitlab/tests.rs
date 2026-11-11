@@ -44,10 +44,14 @@ struct StateData {
     oversized_notes: bool,
     disconnect_membership: bool,
     responses: BTreeMap<(String, String), (StatusCode, Value)>,
+    job_pages: BTreeMap<u32, Vec<Value>>,
+    trigger_job_pages: BTreeMap<u32, Vec<Value>>,
+    pipeline_error_pages: BTreeMap<Option<String>, Value>,
+    job_logs: BTreeMap<u64, Vec<u8>>,
 }
 
-struct Fixture {
-    authority: GitLabDeliveryAuthority,
+pub(crate) struct Fixture {
+    pub(crate) authority: GitLabDeliveryAuthority,
     state: Arc<Mutex<StateData>>,
     server: tokio::task::JoinHandle<()>,
 }
@@ -59,7 +63,11 @@ impl Drop for Fixture {
 }
 
 impl Fixture {
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
+        Self::with_api_prefix("").await
+    }
+
+    async fn with_api_prefix(prefix: &str) -> Self {
         let state = Arc::new(Mutex::new(StateData {
             version: "19.5.1-ee".into(),
             project: project(),
@@ -82,9 +90,13 @@ impl Fixture {
             oversized_notes: false,
             disconnect_membership: false,
             responses: BTreeMap::new(),
+            job_pages: BTreeMap::new(),
+            trigger_job_pages: BTreeMap::new(),
+            pipeline_error_pages: BTreeMap::new(),
+            job_logs: BTreeMap::new(),
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}/api/v4/", listener.local_addr().unwrap());
+        let endpoint = format!("http://{}/{prefix}api/v4/", listener.local_addr().unwrap());
         let handler_state = state.clone();
         let server = tokio::spawn(http_fixture::serve(listener, move |request| {
             handler(&handler_state, request)
@@ -99,8 +111,12 @@ impl Fixture {
         }
     }
 
-    fn open_review(&self) {
+    pub(crate) fn open_review(&self) {
         self.state.lock().unwrap().review = Some(merge_request());
+    }
+
+    pub(crate) fn change_review(&self, field: &str, value: Value) {
+        self.state.lock().unwrap().review.as_mut().unwrap()[field] = value;
     }
 
     fn response(&self, method: &str, suffix: &str, response: (StatusCode, Value)) {
@@ -178,6 +194,16 @@ fn merge_request() -> Value {
         "description":format!("{DELIVERY_GENERATED_BODY_START}\nPreserve behavior.\n{DELIVERY_GENERATED_BODY_END}"),
         "merge_when_pipeline_succeeds":false,
     })
+}
+
+fn pipeline_error_page(nodes: Vec<Value>, next: Option<&str>) -> Value {
+    json!({"data":{"project":{
+        "id":"gid://gitlab/Project/11",
+        "pipeline":{
+            "id":"gid://gitlab/Ci::Pipeline/81", "sha":HEAD,
+            "errorMessages":{"nodes":nodes,"pageInfo":{"hasNextPage":next.is_some(),"endCursor":next}},
+        },
+    }}})
 }
 
 fn note(id: u64, body: &str) -> Value {
@@ -267,6 +293,52 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
     }
     if state.conversation.is_some() && path.contains("/discussions") {
         return conversation_tests::conversation_response(&mut state, &method, path, body);
+    }
+    if path.ends_with("/api/graphql") {
+        assert_eq!(method, Method::POST);
+        assert_eq!(
+            body["variables"]["project"],
+            state.project["path_with_namespace"]
+        );
+        assert_eq!(
+            body["variables"]["pipeline"],
+            "gid://gitlab/Ci::Pipeline/81"
+        );
+        let cursor = body["variables"]["after"].as_str().map(str::to_owned);
+        return Json(
+            state
+                .pipeline_error_pages
+                .get(&cursor)
+                .cloned()
+                .unwrap_or_else(|| pipeline_error_page(Vec::new(), None)),
+        )
+        .into_response();
+    }
+    if path.ends_with("/pipelines/81/jobs") || path.ends_with("/pipelines/81/trigger_jobs") {
+        let page = uri
+            .query_pairs()
+            .find(|(key, _)| key == "page")
+            .unwrap()
+            .1
+            .parse::<u32>()
+            .unwrap();
+        let pages = if path.ends_with("/trigger_jobs") {
+            &state.trigger_job_pages
+        } else {
+            &state.job_pages
+        };
+        return Json(pages.get(&page).cloned().unwrap_or_default()).into_response();
+    }
+    if path.ends_with("/pipelines/81") {
+        return Json(state.review.as_ref().unwrap()["head_pipeline"].clone()).into_response();
+    }
+    if path.ends_with("/trace") {
+        let id = path.rsplit('/').nth(1).unwrap().parse::<u64>().unwrap();
+        return state
+            .job_logs
+            .get(&id)
+            .cloned()
+            .map_or_else(|| StatusCode::NOT_FOUND.into_response(), Response::raw);
     }
     if path.ends_with("/merge_requests") {
         return list_or_create(&mut state, &method, body, query);
@@ -1331,7 +1403,7 @@ async fn persistent_merge_request_ref_disagreement_is_terminal() {
             matches!(error, SourceDeliveryError::Identity(_)),
             "{error:?}"
         );
-        for expected in ["17", "zeroshot/test", &HEAD[..12], &MERGED[..12]] {
+        for expected in [REPOSITORY, "17", "zeroshot/test", "main", HEAD, MERGED] {
             assert!(error.to_string().contains(expected), "{error}");
         }
     }
@@ -1349,6 +1421,9 @@ async fn run_branch_review_outside_the_target_is_refused() {
         .await
         .unwrap_err();
     assert!(!error.retryable_operation(), "{error}");
+    for expected in [REPOSITORY, "!17", "zeroshot/test", "main", "other", HEAD] {
+        assert!(error.to_string().contains(expected), "{error}");
+    }
     assert_eq!(fixture.writes("/merge_requests"), 0);
 }
 

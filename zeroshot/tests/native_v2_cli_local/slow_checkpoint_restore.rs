@@ -1,6 +1,5 @@
-//! A checkpoint restore that outlasts the former ten-second controller start-up wait still resumes
-//! in both local forms: plain resume from the latest snapshot and `--from-checkpoint`. Restores
-//! that a deadline or a crash interrupts keep recovery intact for a retry.
+//! A checkpoint restore that outlasts the former ten-second controller start-up wait still resumes.
+//! Restores that a deadline or a crash interrupts keep recovery intact for a retry.
 
 use openengine_cluster_testkit::assertions::AssertAt;
 
@@ -18,17 +17,16 @@ const SHORT_PREPARATION_SECONDS: u64 = 5;
 const CLAIM_HANDOFF: Duration = Duration::from_secs(10);
 
 #[tokio::test(flavor = "multi_thread")]
-async fn plain_resume_survives_a_restore_slower_than_the_former_startup_wait() {
-    let slow = SlowRestore::failed_run().await;
-    let successor = slow.resume(&[]).await;
-    slow.assert_restored_and_succeeded(&successor).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn checkpoint_resume_survives_a_restore_slower_than_the_former_startup_wait() {
     let slow = SlowRestore::failed_run().await;
     let checkpoint_id = slow.worker_checkpoint().await;
-    let successor = slow.resume(&["--from-checkpoint", &checkpoint_id]).await;
+    let successor = slow
+        .resume(&[
+            "--from-checkpoint",
+            &checkpoint_id,
+            "--discard-workspace-changes",
+        ])
+        .await;
     slow.assert_restored_and_succeeded(&successor).await;
 }
 
@@ -59,6 +57,7 @@ async fn interrupted_checkpoint_restores_keep_recovery_for_a_retry_of_the_same_c
         slow.failed_run_id.as_str(),
         "--from-checkpoint",
         &checkpoint_id,
+        "--discard-workspace-changes",
     ];
     fs::write(slow.control("slow"), "").assert_value_with("delay later restores");
 

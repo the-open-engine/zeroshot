@@ -5,11 +5,11 @@ use tokio::time::timeout;
 
 use super::wire::{GitReferenceWire, reference_revision, require_review_head};
 use super::*;
+use super::super::ci_diagnostics::{MAX_JOB_LOG_BYTES, job_log_tail};
 
-const MAX_API_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_API_OUTPUT_BYTES: usize = MAX_JOB_LOG_BYTES;
 const MAX_API_ERROR_BYTES: usize = 64 * 1024;
 const MAX_API_DIAGNOSTIC_STREAM_BYTES: usize = 8 * 1024;
-const MAX_CHECK_LOG_TAIL_BYTES: usize = 64 * 1024;
 
 impl GhCliDeliveryAuthority {
     pub(super) async fn api(
@@ -522,8 +522,7 @@ pub(super) fn check_log_tail(output: &[u8]) -> String {
                 .map_or(output.len(), |length| offset + length + 1)
         })
         .unwrap_or(output.len());
-    let start = end.saturating_sub(MAX_CHECK_LOG_TAIL_BYTES);
-    String::from_utf8_lossy(&output[start..end]).into_owned()
+    job_log_tail(&output[..end])
 }
 
 #[cfg(test)]

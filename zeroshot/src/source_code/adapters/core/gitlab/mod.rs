@@ -7,13 +7,15 @@ use crate::native_v2_delivery::transport::{self, GitTransport};
 use crate::source_code_provider::*;
 
 mod api;
+mod ci;
 mod comment;
 mod conversations;
+mod pipeline_errors;
 mod review;
 mod wire;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use api::{Api, ApiRequest};
 use wire::{MergeRequest, Project};
@@ -81,7 +83,7 @@ impl GitLabDeliveryAuthority {
             .api
             .json(ApiRequest::get(&["projects", repository]), credential)
             .await?;
-        project.validate(repository, &self.base_url)?;
+        project.validate(repository, &self.base_url, credential)?;
         let mut projects = self
             .projects
             .lock()
@@ -107,8 +109,13 @@ impl GitLabDeliveryAuthority {
         match self.api.json::<wire::Branch>(request, credential).await {
             Ok(value) => {
                 if value.name != branch || !valid_git_revision(&value.commit.id) {
-                    return Err(SourceDeliveryError::identity(
-                        "GitLab branch observation changed identity",
+                    return Err(api::identity_error(
+                        format!(
+                            "GitLab branch observation changed identity in project {repository}: expected branch {branch}, observed branch {} at {}",
+                            wire::branch_identity(&value.name),
+                            wire::revision_identity(&value.commit.id),
+                        ),
+                        credential,
                     ));
                 }
                 Ok(Some(value.commit.id))
@@ -136,7 +143,7 @@ impl GitLabDeliveryAuthority {
                 credential,
             )
             .await?;
-        value.require_review(review, project.id)?;
+        value.require_review(review, project.id, credential)?;
         Ok(value)
     }
 }
@@ -169,7 +176,20 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         request: SourceDeliveryRead<'_>,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
-        review::observe(self, request, credential).await
+        review::observe(self, request, credential)
+            .await
+            .map_err(|error| {
+                api::delivery_context(
+                    error,
+                    format!(
+                        "GitLab project {}, source branch {}, target branch {}",
+                        request.target.repository,
+                        request.head_branch,
+                        request.target.target_branch,
+                    ),
+                    credential,
+                )
+            })
     }
 
     async fn reconcile_delivery_target(
@@ -184,7 +204,10 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
                 credential,
             )
             .await?
-            .ok_or_else(|| SourceDeliveryError::identity("GitLab target branch is absent"))?;
+            .ok_or_else(|| api::identity_error(format!(
+                "GitLab target branch is absent: branch {} in project {} (admitted source revision {}). Restore the target branch before resuming.",
+                request.target.target_branch, request.target.repository, request.target.base_revision,
+            ), credential))?;
         transport::reconcile_target(self.git()?, request, &revision, credential).await
     }
 
@@ -212,7 +235,21 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         request: &SourceReviewRequest,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
-        review::open_or_update(self, request, credential).await
+        review::open_or_update(self, request, credential)
+            .await
+            .map_err(|error| {
+                api::delivery_context(
+                    error,
+                    format!(
+                        "GitLab project {}, source branch {} at {}, target branch {}",
+                        request.target.repository,
+                        request.head_branch,
+                        request.head_revision,
+                        request.target.target_branch,
+                    ),
+                    credential,
+                )
+            })
     }
 
     async fn inspect_review(
@@ -220,7 +257,11 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewObservation, SourceDeliveryError> {
-        review::inspect(self, receipt, credential).await
+        review::inspect(self, receipt, credential)
+            .await
+            .map_err(|error| {
+                api::delivery_context(error, review::merge_request_identity(receipt), credential)
+            })
     }
 
     async fn inspect_review_feedback(
@@ -228,7 +269,11 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
-        review::feedback(self, receipt, credential).await
+        review::feedback(self, receipt, credential)
+            .await
+            .map_err(|error| {
+                api::delivery_context(error, review::merge_request_identity(receipt), credential)
+            })
     }
 
     async fn resolve_review_conversation(
@@ -236,7 +281,12 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         request: crate::source_code_provider::SourceReviewResolutionRequest<'_>,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<crate::source_code_provider::SourceReviewResolution, SourceDeliveryError> {
-        conversations::resolve(self, request, credential).await
+        let receipt = request.review;
+        conversations::resolve(self, request, credential)
+            .await
+            .map_err(|error| {
+                api::delivery_context(error, review::merge_request_identity(receipt), credential)
+            })
     }
 
     async fn request_merge(
@@ -244,10 +294,16 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
-        if conversations::reconcile_resolutions(self, receipt, credential).await? {
-            return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+        let result = async {
+            if conversations::reconcile_resolutions(self, receipt, credential).await? {
+                return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+            }
+            review::merge(self, receipt, credential).await
         }
-        review::merge(self, receipt, credential).await
+        .await;
+        result.map_err(|error| {
+            api::delivery_context(error, review::merge_request_identity(receipt), credential)
+        })
     }
 
     async fn withdraw_merge_request(
@@ -255,7 +311,11 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
-        review::withdraw(self, receipt, credential).await
+        review::withdraw(self, receipt, credential)
+            .await
+            .map_err(|error| {
+                api::delivery_context(error, review::merge_request_identity(receipt), credential)
+            })
     }
 
     async fn materialize_merge_conflict(
@@ -271,7 +331,10 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
                 credential,
             )
             .await?
-            .ok_or_else(|| SourceDeliveryError::identity("GitLab target branch is absent"))?;
+            .ok_or_else(|| api::identity_error(format!(
+                "GitLab target branch is absent: branch {} in project {} for {}; restore the target branch before resuming",
+                request.review.target_branch, request.review.repository, review::merge_request_identity(&request.review),
+            ), credential))?;
         if value.detailed_merge_status == "need_rebase" {
             return review::integrate_rebase(self, request, &revision, credential).await;
         }

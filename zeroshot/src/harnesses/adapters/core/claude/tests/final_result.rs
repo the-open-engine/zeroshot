@@ -537,6 +537,7 @@ async fn claude_older_than_2_1_310_is_rejected_before_any_model_turn() {
             turns(&workspace).is_empty(),
             "{version} started a model turn"
         );
+        assert!(!finished.logs.contains("Claude Code version: "));
         let failure = finished.failure_text();
         assert!(
             failure.contains("2.1.310"),
@@ -556,6 +557,11 @@ async fn claude_2_1_310_and_newer_are_accepted() {
         .await;
         finished.assert_answer("final");
         assert_eq!(turns(&workspace), ["initial"], "{version}");
+        assert!(
+            finished
+                .logs
+                .contains(&format!("Claude Code version: {version}"))
+        );
     }
 }
 

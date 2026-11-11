@@ -497,6 +497,7 @@ where
         &self,
         target: Option<&str>,
         params: openengine_cluster_protocol::RunResumeParams,
+        _discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let target = require_named_target(target)?;
         if let Some(result) = self

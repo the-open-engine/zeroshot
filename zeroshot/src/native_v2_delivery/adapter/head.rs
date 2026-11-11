@@ -57,6 +57,7 @@ impl NativeV2DeliveryAdapter {
         }
         self.record_review_base(None);
         let previous = std::mem::replace(&mut drive.review, updated);
+        self.record_publication(drive.review.clone());
         // Record before an awaited log/output operation can fail or cancellation can intervene.
         self.state
             .lock()
@@ -184,7 +185,12 @@ impl NativeV2DeliveryAdapter {
                 .observe_delivery(request, drive.credentials.current())
                 .await
             {
-                Ok(snapshot) => return Ok(snapshot),
+                Ok(snapshot) => {
+                    if let Some(review) = &snapshot.review {
+                        self.record_publication(preflight::receipt_from_observation(review));
+                    }
+                    return Ok(snapshot);
+                }
                 Err(error) => {
                     self.retry_operation(
                         error,
@@ -241,7 +247,13 @@ impl NativeV2DeliveryAdapter {
         let Some(review) = snapshot.review else {
             return Err(identity_failure(
                 drive.control,
-                "the bound run PR disappeared during recovery",
+                &self.redact_feedback(
+                    drive.credentials,
+                    format!(
+                        "{} disappeared during recovery",
+                        review::review_identity(&drive.review)
+                    ),
+                ),
             )
             .await);
         };
@@ -252,11 +264,30 @@ impl NativeV2DeliveryAdapter {
                 return Ok(ReviewStep::Continue);
             }
             SourceReviewState::Open { .. } if snapshot.head_revision.is_some() => {}
+            SourceReviewState::Closed => {
+                self.refuse_delivery(
+                    drive.control,
+                    &review::closed_review(&preflight::receipt_from_observation(&review)),
+                )
+                .await?;
+            }
+            SourceReviewState::Merged { merge_revision } => {
+                self.refuse_delivery(
+                    drive.control,
+                    &review::merged_review(
+                        &preflight::receipt_from_observation(&review),
+                        merge_revision,
+                    ),
+                )
+                .await?;
+            }
             _ => {
                 self.refuse_delivery(
                     drive.control,
-                    "the run PR closed, merged with a different head, or its branch disappeared; \
-                     local work was preserved",
+                    &format!(
+                        "{} has lost its source branch; local work was preserved",
+                        review::review_identity(&preflight::receipt_from_observation(&review))
+                    ),
                 )
                 .await?;
             }

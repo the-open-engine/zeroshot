@@ -1,8 +1,7 @@
 use super::*;
 use super::super::local_contract_tests::contract_submission;
 use crate::native_v2_candidate::test_support::TestDirectory;
-use crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection;
-use openengine_cluster_protocol::{CheckpointId, RunResumeFrom};
+use openengine_cluster_protocol::CheckpointId;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 fn params(from: Option<RunResumeFrom>) -> openengine_cluster_protocol::RunResumeParams {
@@ -147,24 +146,84 @@ async fn dead_controller_resume_retains_acknowledged_receipts_without_importing_
     }
 }
 
-#[test]
-fn legacy_resume_uses_the_retained_workspace_but_checkpoint_selection_stays_strict() {
-    let root = TestDirectory::new("llr");
+/// Publishes a latest snapshot of `workspace` for the predecessor of [`params`].
+async fn publish_latest(root: &TestDirectory, backend: &LocalCliBackend, workspace: &Path) {
+    use crate::native_v2_supervisor::checkpoints::{RunCheckpointStore, fake_checkpoint_store};
+    let directory = checkpoint_directory(backend);
+    fake_checkpoint_store(
+        root.path(),
+        directory,
+        workspace.to_owned(),
+        Default::default(),
+    )
+    .finish(&[])
+    .await
+    .assert_value();
+}
+
+fn checkpoint_directory(backend: &LocalCliBackend) -> PathBuf {
+    backend
+        .paths(&params(None).run_id)
+        .assert_value()
+        .storage()
+        .join("checkpoints")
+}
+
+#[tokio::test]
+async fn plain_resume_keeps_the_checkout_even_when_a_latest_snapshot_exists() {
+    let root = TestDirectory::new("lpk");
     let backend = backend(&root);
     let recovery = recovery(&root, true);
+    std::fs::create_dir(&recovery.workspace).assert_value();
+    std::fs::write(recovery.workspace.join("source.txt"), "snapshot").assert_value();
+    publish_latest(&root, &backend, &recovery.workspace).await;
+    assert!(checkpoint_directory(&backend).join("latest.json").is_file());
 
     for from in [None, Some(RunResumeFrom::Restart {})] {
         assert!(
             backend
-                .checkpoint_selection(&params(from), &recovery)
+                .checkpoint_selection(&params(from.clone()), &recovery, false)
                 .assert_value()
                 .is_none()
         );
+        // Consent without a selected checkpoint has nothing to replace.
+        let error = backend
+            .checkpoint_selection(&params(from), &recovery, true)
+            .assert_error();
+        assert!(
+            matches!(&error, NativeV2CliError::Usage(message)
+                if message.contains("--discard-workspace-changes requires --from-checkpoint")),
+            "{error}"
+        );
     }
-    // A selected checkpoint is pinned before launch, so an unavailable one fails without a
+}
+
+#[test]
+fn selected_checkpoint_requires_consent_before_it_is_pinned() {
+    let root = TestDirectory::new("lsc");
+    let backend = backend(&root);
+    let recovery = recovery(&root, true);
+
+    let error = backend
+        .checkpoint_selection(&params(selected_checkpoint()), &recovery, false)
+        .assert_error();
+    let NativeV2CliError::Usage(message) = &error else {
+        panic!("a rollback without consent must be a usage error: {error}");
+    };
+    for expected in [
+        "restoring checkpoint entry-1 discards this workspace's",
+        "untracked, and ignored files",
+        "HEAD and the index",
+        "branches and commits are kept",
+        "zeroshot resume 0199f33f-3b44-7d21-9000-000000000001 --from-checkpoint entry-1 \
+         --discard-workspace-changes",
+    ] {
+        assert!(message.contains(expected), "{message}");
+    }
+    // A consented checkpoint is pinned before launch, so an unavailable one fails without a
     // controller instead of falling back to the retained workspace.
     let error = backend
-        .checkpoint_selection(&params(selected_checkpoint()), &recovery)
+        .checkpoint_selection(&params(selected_checkpoint()), &recovery, true)
         .assert_error();
     assert!(
         error
@@ -175,22 +234,24 @@ fn legacy_resume_uses_the_retained_workspace_but_checkpoint_selection_stays_stri
 }
 
 #[test]
-fn interrupted_restore_blocks_a_resume_that_would_not_restore() {
+fn interrupted_restore_blocks_a_resume_that_would_not_complete_it() {
     let root = TestDirectory::new("lir");
     let backend = backend(&root);
     let mut recovery = recovery(&root, true);
+    let command = "zeroshot resume 0199f33f-3b44-7d21-9000-000000000001";
     for (selection, hint) in [
         (
             CheckpointRestoreSelection::Latest,
-            "resume with plain resume",
+            format!("`{command} --discard-workspace-changes`"),
         ),
         (
             CheckpointRestoreSelection::Checkpoint {
                 checkpoint_id: CheckpointId::new("entry-1").assert_value(),
             },
-            "resume with --from-checkpoint entry-1",
+            format!("`{command} --from-checkpoint entry-1 --discard-workspace-changes`"),
         ),
     ] {
+        let legacy = selection == CheckpointRestoreSelection::Latest;
         recovery.pending_restore = Some(PendingRestore {
             selection,
             snapshot: serde_json::from_value(serde_json::json!(uuid::Uuid::now_v7().to_string()))
@@ -198,21 +259,24 @@ fn interrupted_restore_blocks_a_resume_that_would_not_restore() {
             attempt: RunId::new("0199f33f-3b44-7d21-9000-000000000003"),
         });
         for from in [None, Some(RunResumeFrom::Restart {})] {
-            let error = backend
-                .checkpoint_selection(&params(from), &recovery)
-                .assert_error()
-                .to_string();
-            assert!(
-                error.contains("partially restored") && error.contains(hint),
-                "{error}"
-            );
+            // Consent completes only an interrupted latest restore; a checkpoint names its own.
+            for discard in [false, !legacy] {
+                let error = backend
+                    .checkpoint_selection(&params(from.clone()), &recovery, discard)
+                    .assert_error()
+                    .to_string();
+                assert!(
+                    error.contains("partially restored") && error.contains(&hint),
+                    "{error}"
+                );
+            }
         }
     }
 }
 
 #[tokio::test]
-async fn interrupted_latest_restore_rejects_a_changed_pinned_snapshot() {
-    use crate::native_v2_supervisor::checkpoints::{RunCheckpointStore, fake_checkpoint_store};
+async fn interrupted_latest_restore_completes_only_with_consent_and_its_pinned_snapshot() {
+    use crate::native_v2_supervisor::checkpoints::pin;
 
     let root = TestDirectory::new("restore-pin");
     let backend = backend(&root);
@@ -221,40 +285,37 @@ async fn interrupted_latest_restore_rejects_a_changed_pinned_snapshot() {
     std::fs::create_dir(&workspace).assert_value();
     let source = workspace.join("source.txt");
     std::fs::write(&source, "original").assert_value();
+    publish_latest(&root, &backend, &workspace).await;
     let request = params(None);
-    let directory = backend
-        .paths(&request.run_id)
-        .assert_value()
-        .storage()
-        .join("checkpoints");
-    let store = || {
-        fake_checkpoint_store(
-            root.path(),
-            directory.clone(),
-            workspace.clone(),
-            Default::default(),
-        )
-    };
-    store().finish(&[]).await.assert_value();
+    // Earlier releases recorded this pending restore for a plain resume.
+    let snapshot = pin(&CheckpointRestore {
+        directory: checkpoint_directory(&backend),
+        selection: CheckpointRestoreSelection::Latest,
+    })
+    .assert_value();
+    recovery.pending_restore = Some(PendingRestore {
+        selection: CheckpointRestoreSelection::Latest,
+        snapshot: snapshot.clone(),
+        attempt: RunId::new("0199f33f-3b44-7d21-9000-000000000003"),
+    });
 
+    let error = backend
+        .checkpoint_selection(&request, &recovery, false)
+        .assert_error();
+    assert!(error.to_string().contains("partially restored"), "{error}");
     let (restore, pending) = backend
-        .checkpoint_selection(&request, &recovery)
+        .checkpoint_selection(&request, &recovery, true)
         .assert_value()
         .assert_value();
     assert_eq!(restore.selection, CheckpointRestoreSelection::Latest);
+    assert_eq!(pending.selection, CheckpointRestoreSelection::Latest);
+    assert_eq!(pending.snapshot, snapshot);
     assert_eq!(pending.attempt, request.successor_run_id);
-    recovery.pending_restore = Some(pending.clone());
-    assert!(
-        backend
-            .checkpoint_selection(&request, &recovery)
-            .assert_value()
-            .is_some()
-    );
 
     std::fs::write(&source, "newer workspace").assert_value();
-    store().finish(&[]).await.assert_value();
+    publish_latest(&root, &backend, &workspace).await;
     let error = backend
-        .checkpoint_selection(&request, &recovery)
+        .checkpoint_selection(&request, &recovery, true)
         .assert_error();
     assert!(
         error
@@ -264,7 +325,7 @@ async fn interrupted_latest_restore_rejects_a_changed_pinned_snapshot() {
     );
     assert_eq!(
         recovery.pending_restore.as_ref().assert_value().snapshot,
-        pending.snapshot
+        snapshot
     );
     assert_eq!(
         std::fs::read_to_string(source).assert_value(),
@@ -287,15 +348,17 @@ fn disabled_workspace_checkpoints_allow_restart_but_reject_snapshot_restore() {
     for from in [None, Some(RunResumeFrom::Restart {})] {
         assert!(
             backend
-                .checkpoint_selection(&params(from), &recovery)
+                .checkpoint_selection(&params(from), &recovery, false)
                 .assert_value()
                 .is_none()
         );
     }
-    let error = backend
-        .checkpoint_selection(&params(selected_checkpoint()), &recovery)
-        .unwrap_err();
-    assert!(error.to_string().contains("workspaceCheckpoints is false"));
+    for discard in [false, true] {
+        let error = backend
+            .checkpoint_selection(&params(selected_checkpoint()), &recovery, discard)
+            .unwrap_err();
+        assert!(error.to_string().contains("workspaceCheckpoints is false"));
+    }
 }
 
 fn backend(root: &TestDirectory) -> LocalCliBackend {

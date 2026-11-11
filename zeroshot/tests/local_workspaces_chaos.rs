@@ -740,7 +740,13 @@ fn selected_plain_folder_checkpoint_restores_bytes_and_a_fresh_worker_session() 
     )
     .unwrap();
     let resumed = fixture
-        .command(&["resume", &original_id, "--from-checkpoint", checkpoint_id])
+        .command(&[
+            "resume",
+            &original_id,
+            "--from-checkpoint",
+            checkpoint_id,
+            "--discard-workspace-changes",
+        ])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();

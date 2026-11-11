@@ -1315,7 +1315,7 @@ Options:
 <section id="zeroshot-resume"><h3><code>zeroshot resume</code></h3>
 <pre><code>Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint.
 
-By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves its original connection requirements again; make those credentials available.
+By default, restart the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. The successor resolves its original connection requirements again; make those credentials available.
 
 Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 
@@ -1331,6 +1331,11 @@ Options:
 
       --from-checkpoint &lt;ID&gt;
           Restore this checkpoint and continue from its saved graph boundary
+
+      --discard-workspace-changes
+          Allow a local checkpoint restore to replace the current checkout.
+
+          The checkpoint replaces tracked, staged, untracked, and ignored files and the checkout&#39;s own Git state, such as HEAD and the index. Branches, commits, and Git configuration are kept. Named targets restore their own retained copy and do not accept this flag.
 
       --forward-gh-token
           Send the GH_TOKEN from this shell with the resume.

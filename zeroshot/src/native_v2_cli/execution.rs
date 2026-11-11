@@ -256,6 +256,7 @@ where
                 commit_identity: None,
                 commit_co_author: None,
             },
+            command.discard_workspace_changes,
         )
         .await?;
     write_json(output, &result)?;

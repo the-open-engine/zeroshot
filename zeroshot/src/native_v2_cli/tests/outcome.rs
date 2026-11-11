@@ -28,6 +28,10 @@ async fn foreground_run_reports_a_terminal_failure_after_printing_it() {
         .await
         .assert_error();
     assert!(matches!(error, NativeV2CliError::RunFailed(_)));
+    let diagnostic = serde_json::to_value(error.diagnostic()).assert_value();
+    assert_eq!(diagnostic["kind"], "run_failed");
+    assert_eq!(diagnostic["code"], "run.failed");
+    assert_eq!(diagnostic["details"], json!({"runId": "run-public"}));
     assert_eq!(
         error.to_string(),
         "run finished unsuccessfully\nFull run log: zeroshot logs run-public --target prod"
@@ -49,6 +53,10 @@ async fn watch_reports_a_terminal_failure_like_the_foreground_run() {
         .assert_error();
 
     assert!(matches!(error, NativeV2CliError::RunFailed(_)));
+    let diagnostic = serde_json::to_value(error.diagnostic()).assert_value();
+    assert_eq!(diagnostic["kind"], "run_failed");
+    assert_eq!(diagnostic["code"], "run.failed");
+    assert_eq!(diagnostic["details"], json!({"runId": "run-public"}));
     assert_eq!(
         error.to_string(),
         "run finished unsuccessfully\nFull run log: zeroshot logs run-public --target prod"
@@ -221,6 +229,11 @@ async fn assert_resume_resolves_current_values(
     if let Some(id) = checkpoint {
         command_args.extend(["--from-checkpoint", id]);
     }
+    // Only a local checkpoint restore replaces the caller's checkout and needs consent.
+    let discard = expected_target.is_none() && checkpoint.is_some();
+    if discard {
+        command_args.push("--discard-workspace-changes");
+    }
     if forward {
         command_args.push("--forward-gh-token");
     }
@@ -235,10 +248,16 @@ async fn assert_resume_resolves_current_values(
         .assert_value();
 
     let calls = backend.calls();
-    let Call::Resume { target, params } = &calls[1] else {
+    let Call::Resume {
+        target,
+        params,
+        discard_workspace_changes,
+    } = &calls[1]
+    else {
         panic!("resume call was not recorded");
     };
     assert_eq!(target.as_deref(), expected_target);
+    assert_eq!(*discard_workspace_changes, discard);
     assert_eq!(
         params.from,
         checkpoint.map(|id| RunResumeFrom::Checkpoint {
@@ -731,6 +750,7 @@ async fn resume_keeps_local_trusted_authority_and_scopes_named_github_fallback()
             Call::Resume {
                 target: actual_target,
                 params,
+                ..
             },
         ] = calls.as_slice()
         else {

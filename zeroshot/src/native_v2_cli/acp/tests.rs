@@ -11,6 +11,9 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 
+#[path = "tests/versions.rs"]
+mod versions;
+
 #[test]
 fn prompt_requires_exactly_one_nonempty_text_block() {
     assert_eq!(task_from_prompt(vec!["work".into()]).unwrap(), "work");

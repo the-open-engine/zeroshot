@@ -3,20 +3,19 @@
 //! The transcript relies on fields that release writes on every numbered result: per-result usage
 //! in `model_usage_since_last_result` and stopped subagents in `subagent_stats`. Older releases
 //! report only session running totals, which a resumed session cannot divide into invocations.
-//! The selected executable is checked once per adapter, before its first model turn, through the
+//! The selected executable is checked once per run, before its first model turn, through the
 //! same launch path and environment as that turn. Newer releases have no upper bound.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use super::{ClaudeAdapter, ClaudeAttempt, ClaudeProcessStart, turn_process};
+use super::{ClaudeAdapter, ClaudeAttempt, ClaudeProcessStart, ClaudeTurn, turn_process};
 use crate::execution::process::{ProcessSessionCommand, ProcessSessionOutput};
 use crate::native_v2_capsule::provider_process::{
     ProviderExecutionFiles, open_provider_process, process_failure_evidence,
     report_cleanup_failure, require_process_cleanup,
 };
-use crate::native_v2_runner::{DriverControl, NodeRunnerError};
+use crate::native_v2_runner::{LiveOutput, LiveOutputStream, NodeRunnerError};
 
 const MINIMUM: [u64; 3] = [2, 1, 310];
 const CHECK_BUDGET: Duration = Duration::from_secs(60);
@@ -28,9 +27,16 @@ impl ClaudeAdapter {
         &self,
         files: Arc<ProviderExecutionFiles>,
         command: &ProcessSessionCommand,
-        control: &DriverControl,
+        turn: &ClaudeTurn<'_>,
     ) -> Result<Option<ClaudeProcessStart>, NodeRunnerError> {
-        if self.version_supported.load(Ordering::Acquire) {
+        let control = turn.control;
+        let run_id = &turn.invocation.node.reference.run_id;
+        let mut cancellation = control.cancellation();
+        let mut checked_runs = tokio::select! {
+            _ = cancellation.cancelled() => return Err(NodeRunnerError::Cancelled),
+            checked = self.version_checked_runs.lock() => checked,
+        };
+        if checked_runs.contains(run_id) {
             return Ok(None);
         }
         let mut check = command.clone();
@@ -65,9 +71,16 @@ impl ClaudeAdapter {
         let reported = String::from_utf8_lossy(&reported);
         let reported = reported.trim();
         if process_failure_evidence(output, false).is_none()
-            && release(reported).is_some_and(|release| release >= MINIMUM)
+            && let Some([major, minor, patch]) =
+                release(reported).filter(|release| *release >= MINIMUM)
         {
-            self.version_supported.store(true, Ordering::Release);
+            control
+                .emit(LiveOutput::new(
+                    LiveOutputStream::System,
+                    format!("Claude Code version: {major}.{minor}.{patch}"),
+                )?)
+                .await?;
+            checked_runs.insert(run_id.clone());
             return Ok(None);
         }
         Ok(Some(ClaudeProcessStart::Failed(
