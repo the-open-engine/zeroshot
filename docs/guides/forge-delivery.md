@@ -42,7 +42,8 @@ Runs without a bound review reuse an unambiguous active review or open a new one
 resumes before any delivery was recorded. Closed and merged reviews on a reused feature branch
 belong to earlier runs. Bound review IDs retain terminal-review safeguards.
 Resume recovers the current review's identity from the run lineage's
-recorded delivery, including a confirmed review whose delivery later timed out or was cancelled,
+recorded delivery, including a confirmed review whose target reconciliation required repair,
+timed out or was cancelled,
 so older reviews on that branch do not make recovery ambiguous. A committed
 candidate can still incorporate a diverged target without requiring another edit first; the integrated
 result returns through review before publication.
@@ -56,7 +57,8 @@ configure an upstream first, or explicitly choose `--worktree-base local`.
 The invoking checkout's files, index, HEAD and branch tips stay unchanged. The new worktree
 contains committed files only: dependencies, `.env` and other untracked resources are not copied,
 linked or installed. Resume reuses the same workspace and attached run branch, while preserving
-shared branch tips. Worktrees remain after success and failure; inspect and remove them explicitly
+shared branch tips. If another checkout owns the saved branch, release it there before resuming.
+Worktrees remain after success and failure; inspect and remove them explicitly
 with `git worktree remove PATH`. Use `git worktree list` from the invoking repository to find its
 path. Hosted and named-target delivery keep their managed run branches.
 
@@ -171,7 +173,9 @@ characters; shortened titles retain the complete original once in the generated 
 The same title normalization runs before generated delivery commits, including repair commits pushed
 to an existing MR, so GitLab's push processing cannot mark it draft from zeroshot's commit message.
 Creation, refresh, and confirmation use the same canonical metadata, including for custom graphs.
-Refresh replaces only the generated markers' contents and preserves surrounding human text. A draft
+An existing MR without generated markers keeps its description and gains an appended generated section.
+Refresh replaces only the generated markers' contents and preserves surrounding human text; incomplete,
+duplicated or reversed markers are refused. A draft
 deliberately applied after creation keeps its existing title and draft status during refresh.
 
 GitLab `--pr` readiness, human-review handoff and `--ship` merging use the same required-CI policy.

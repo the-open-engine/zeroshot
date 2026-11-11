@@ -216,6 +216,15 @@ fn generated_description(request: &SourceReviewRequest) -> String {
 }
 
 fn refresh_description(existing: &str, replacement: &str) -> Result<String, SourceDeliveryError> {
+    if !existing.contains(DELIVERY_GENERATED_BODY_START)
+        && !existing.contains(DELIVERY_GENERATED_BODY_END)
+    {
+        return Ok(if existing.is_empty() {
+            replacement.to_owned()
+        } else {
+            format!("{existing}\n\n{replacement}")
+        });
+    }
     let Some(start) = existing.find(DELIVERY_GENERATED_BODY_START) else {
         return Err(SourceDeliveryError::identity(
             "GitLab review lacks its generated metadata section",

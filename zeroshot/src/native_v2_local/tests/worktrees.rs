@@ -232,6 +232,102 @@ fn detached_resume_reattaches_the_run_branch_without_rewinding_it() {
     );
 }
 
+#[test]
+fn resume_refuses_a_branch_owned_by_another_checkout_without_changing_either() {
+    for main_checkout in [false, true] {
+        let repo = TestGitRepository::candidate();
+        let branch = "zeroshot/v2-retained";
+        let retained = repo.root.child("retained worktree");
+        git(
+            &repo.workspace,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                retained.to_str().assert_value(),
+                &repo.base,
+            ],
+        );
+        git(&retained, &["checkout", "--detach"]);
+        let owner = if main_checkout {
+            git(&repo.workspace, &["checkout", branch]);
+            repo.workspace.clone()
+        } else {
+            #[cfg(unix)]
+            let owner = repo.root.child("other checkout\nwith newline");
+            #[cfg(not(unix))]
+            let owner = repo.root.child("other checkout");
+            git(
+                &repo.workspace,
+                &["worktree", "add", owner.to_str().assert_value(), branch],
+            );
+            owner
+        };
+        // The other checkout can advance the shared tip while the run remains detached.
+        std::fs::write(owner.join("README.md"), "later shared commit\n").assert_value();
+        git(
+            &owner,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-am",
+                "later commit",
+            ],
+        );
+        let live = git_output(&owner, &["rev-parse", "HEAD"]);
+        for checkout in [&retained, &owner] {
+            std::fs::write(checkout.join("README.md"), "staged candidate\n").assert_value();
+            git(checkout, &["add", "README.md"]);
+            std::fs::write(checkout.join("README.md"), "unstaged candidate\n").assert_value();
+        }
+        let snapshot = |checkout: &Path| {
+            let index = git_output(
+                checkout,
+                &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+            );
+            let head = git_output(
+                checkout,
+                &["rev-parse", "--path-format=absolute", "--git-path", "HEAD"],
+            );
+            (
+                std::fs::read(head).assert_value(),
+                std::fs::read(index).assert_value(),
+                std::fs::read(checkout.join("README.md")).assert_value(),
+                git_output(checkout, &["show-ref"]),
+            )
+        };
+        let retained_before = snapshot(&retained);
+        let owner_before = snapshot(&owner);
+        let error = attach_run_branch(&retained, Path::new("git"), branch)
+            .expect_err("another checkout owns the run branch")
+            .to_string();
+        let expected_owner = std::fs::canonicalize(&owner).assert_value();
+        assert!(
+            error.contains(branch) && error.contains(expected_owner.to_str().assert_value()),
+            "{error}"
+        );
+        assert_eq!(snapshot(&retained), retained_before);
+        assert_eq!(snapshot(&owner), owner_before);
+
+        // Explicitly releasing ownership permits attachment, without rewinding the shared tip.
+        git(&owner, &["checkout", "--detach"]);
+        attach_run_branch(&retained, Path::new("git"), branch).assert_value();
+        assert_eq!(
+            git_output(&retained, &["symbolic-ref", "--short", "HEAD"]),
+            branch
+        );
+        assert_eq!(git_output(&retained, &["rev-parse", "HEAD"]), live);
+        let after = snapshot(&retained);
+        assert_eq!(after.1, retained_before.1);
+        assert_eq!(after.2, retained_before.2);
+        assert_eq!(after.3, retained_before.3);
+    }
+}
+
 #[tokio::test]
 async fn a_worktree_without_delivery_needs_no_remote() {
     let repo = TestGitRepository::candidate();

@@ -224,7 +224,7 @@ pub(crate) fn build_local_owner_native_v2_candidate(
 #[derive(Default)]
 pub(crate) struct TrustedDeliveryCapabilities {
     pub(crate) review_binding_recorder: Option<crate::native_v2_delivery::ReviewBindingRecorder>,
-    pub(crate) recovered_review: Option<crate::source_code_provider::SourceReviewReceipt>,
+    pub(crate) recovered_review: Option<crate::native_v2_delivery::contract::RecoveredReview>,
     pub(crate) token: Option<Arc<str>>,
     pub(crate) token_file: Option<TrustedGitHubTokenFile>,
     pub(crate) validator: Option<TrustedDeliveryValidator>,

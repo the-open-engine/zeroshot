@@ -145,7 +145,7 @@ async fn confirmed_review_survives_failed_delivery_and_a_crash_without_a_settled
         )
         .assert_value()
         .assert_value();
-        recorder(&review).assert_value();
+        recorder(&review, false).assert_value();
         let prepared = PreparedLocalRun {
             run_id: RunId::new("0199f33f-3b44-7d21-9000-0000000000d6"),
             delivery_run_id: run.clone(),
@@ -168,24 +168,46 @@ async fn confirmed_review_survives_failed_delivery_and_a_crash_without_a_settled
             .await
             .assert_value()
             .assert_value();
-        assert_eq!(
-            contract::review_from_receipt(&recovered, DeliveryMode::PullRequest, &target, branch),
-            Some(review.clone())
-        );
+        let bound =
+            contract::review_from_recovery(&recovered, DeliveryMode::PullRequest, &target, branch)
+                .assert_value();
+        assert_eq!(bound.review, review);
+        assert!(!bound.published);
         assert!(!crate::native_v2_delivery::is_matching_success_receipt(
-            &recovered,
+            &recovered["receipt"],
             DeliveryMode::PullRequest,
             &target
         ));
-        let mut other = review;
+        let mut other = review.clone();
         other.review_id = "18".to_owned();
-        assert!(recorder(&other).is_err());
+        assert!(recorder(&other, false).is_err());
         assert_eq!(
             backend
                 .read_recovery_document(&run)
                 .assert_value()
                 .delivery_receipt,
             Some(recovered)
+        );
+        // Observations cannot promote first publication, downgrade it, or replace its
+        // verified head with an unverified remote rewrite.
+        recorder(&review, true).assert_value();
+        let published = backend
+            .read_recovery_document(&run)
+            .assert_value()
+            .delivery_receipt;
+        let mut observed = review;
+        observed.head_revision = "c".repeat(40);
+        recorder(&observed, false).assert_value();
+        let saved = backend
+            .recover_delivery_receipt(&run, &prepared)
+            .await
+            .assert_value()
+            .assert_value();
+        assert_eq!(Some(saved.clone()), published);
+        assert!(
+            contract::review_from_recovery(&saved, DeliveryMode::PullRequest, &target, branch)
+                .assert_value()
+                .published
         );
     }
 }

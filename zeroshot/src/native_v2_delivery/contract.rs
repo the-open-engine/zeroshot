@@ -120,6 +120,49 @@ pub(crate) fn review_binding_receipt(
     })
 }
 
+/// Private lifecycle evidence. Binding an observed review does not prove first publication.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewRecoveryWire {
+    receipt: Value,
+    published: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RecoveredReview {
+    pub(crate) review: super::SourceReviewReceipt,
+    pub(crate) published: bool,
+}
+
+pub(crate) fn review_recovery(
+    mode: DeliveryMode,
+    review: &super::SourceReviewReceipt,
+    published: bool,
+) -> Value {
+    serde_json::json!({"receipt": review_binding_receipt(mode, review), "published": published})
+}
+
+pub(crate) fn review_from_recovery(
+    value: &Value,
+    mode: DeliveryMode,
+    target: &DeliveryTarget,
+    branch: &str,
+) -> Option<RecoveredReview> {
+    if value.get("receipt").is_some() || value.get("published").is_some() {
+        let saved: ReviewRecoveryWire = serde_json::from_value(value.clone()).ok()?;
+        Some(RecoveredReview {
+            review: review_from_receipt(&saved.receipt, mode, target, branch)?,
+            published: saved.published,
+        })
+    } else {
+        // Older metadata and settled ledger outcomes were recorded after publication.
+        Some(RecoveredReview {
+            review: review_from_receipt(value, mode, target, branch)?,
+            published: true,
+        })
+    }
+}
+
 /// Recovers review identity, not delivery confirmation, from an owned delivery execution.
 pub(crate) fn review_from_receipt(
     output: &Value,

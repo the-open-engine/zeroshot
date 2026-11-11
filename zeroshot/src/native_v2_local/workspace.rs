@@ -233,6 +233,12 @@ pub(super) fn attach_run_branch(
         workspace,
         &["show-ref", "--verify", &reference],
     )?;
+    if let Some(owner) = branch_owner_elsewhere(workspace, git_program, branch)? {
+        return Err(LocalCompositionError::Worktree(format!(
+            "run branch `{branch}` is checked out in {}; release it there before resuming this checkout",
+            owner.display(),
+        )));
+    }
     if let Ok(current) = super::source::attached_branch(workspace, git_program) {
         if current != branch {
             return Err(LocalCompositionError::Worktree(format!(
@@ -248,4 +254,32 @@ pub(super) fn attach_run_branch(
         &["symbolic-ref", "HEAD", &reference],
     )?;
     Ok(())
+}
+
+/// Git's NUL-delimited listing preserves checkout paths containing spaces or newlines.
+/// Missing but registered checkouts still own their branches until explicitly removed/pruned.
+pub(super) fn branch_owner_elsewhere(
+    workspace: &Path,
+    git_program: &Path,
+    branch: &str,
+) -> Result<Option<PathBuf>, LocalCompositionError> {
+    let current = std::fs::canonicalize(workspace).map_err(|_| LocalCompositionError::Workspace)?;
+    let listing = super::git_output(
+        git_program,
+        workspace,
+        &["worktree", "list", "--porcelain", "-z"],
+    )?;
+    let reference = format!("branch refs/heads/{branch}");
+    for record in listing.split("\0\0").filter(|record| !record.is_empty()) {
+        let mut fields = record.split('\0');
+        let path = fields
+            .next()
+            .and_then(|field| field.strip_prefix("worktree "))
+            .ok_or(LocalCompositionError::ResolvedSource)?;
+        let owner = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+        if fields.any(|field| field == reference) && owner != current {
+            return Ok(Some(owner));
+        }
+    }
+    Ok(None)
 }

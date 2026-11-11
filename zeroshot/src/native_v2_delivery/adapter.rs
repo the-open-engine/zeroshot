@@ -21,7 +21,7 @@ const MAX_FEEDBACK_DIAGNOSTIC_BYTES: usize = 4 * 1024 * 1024;
 
 /// Local lifecycle-owned persistence, separate from successful delivery receipts.
 pub(crate) type ReviewBindingRecorder =
-    Arc<dyn Fn(&SourceReviewReceipt) -> Result<(), String> + Send + Sync>;
+    Arc<dyn Fn(&SourceReviewReceipt, bool) -> Result<(), String> + Send + Sync>;
 
 #[cfg(all(test, target_os = "linux"))]
 mod ownership_tests;
@@ -44,12 +44,16 @@ pub struct NativeV2DeliveryAdapter {
 
 impl NativeV2DeliveryAdapter {
     /// Seeds a local successor from the lineage's trusted, durable delivery evidence.
-    pub(crate) fn with_recovered_review(self, review: Option<SourceReviewReceipt>) -> Self {
-        if let Some(review) = review {
-            self.state
+    pub(crate) fn with_recovered_review(self, review: Option<contract::RecoveredReview>) -> Self {
+        if let Some(saved) = review {
+            let mut state = self
+                .state
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .published = Some(review);
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.review_binding = Some(saved.review.clone());
+            if saved.published {
+                state.published = Some(saved.review);
+            }
         }
         self
     }
@@ -699,10 +703,7 @@ impl NativeV2DeliveryAdapter {
         let head_revision = revision.unwrap_or_else(|| self.config.target.base_revision.clone());
         let review_request = SourceReviewRequest {
             include_terminal_reviews: self.include_terminal_reviews(),
-            known_review: self
-                .delivery_state()
-                .published
-                .filter(|review| !review.review_id.is_empty()),
+            known_review: self.delivery_state().known_review().cloned(),
             target: self.config.target.clone(),
             head_branch: self.config.head_branch(),
             head_revision,

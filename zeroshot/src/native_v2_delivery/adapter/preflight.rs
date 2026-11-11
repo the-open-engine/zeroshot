@@ -35,6 +35,7 @@ impl<'environment> DeliveryCredentials<'environment> {
 
 #[derive(Clone, Default)]
 pub(super) struct DeliveryState {
+    pub(super) review_binding: Option<SourceReviewReceipt>,
     pub(super) published: Option<SourceReviewReceipt>,
     pub(super) intended_push: Option<String>,
     pub(super) pending_head: Option<head::PendingHead>,
@@ -42,13 +43,18 @@ pub(super) struct DeliveryState {
     pub(super) feedback_versions: BTreeMap<String, String>,
 }
 
+impl DeliveryState {
+    pub(super) fn known_review(&self) -> Option<&SourceReviewReceipt> {
+        self.review_binding
+            .as_ref()
+            .or(self.published.as_ref())
+            .filter(|review| !review.review_id.is_empty())
+    }
+}
+
 impl NativeV2DeliveryAdapter {
     pub(super) fn include_terminal_reviews(&self) -> bool {
-        self.config.local_branch.is_none()
-            || self
-                .delivery_state()
-                .published
-                .is_some_and(|review| !review.review_id.is_empty())
+        self.config.local_branch.is_none() || self.delivery_state().known_review().is_some()
     }
     pub(super) fn delivery_state(&self) -> DeliveryState {
         self.state
@@ -58,7 +64,7 @@ impl NativeV2DeliveryAdapter {
     }
 
     pub(super) fn record_published(&self, review: SourceReviewReceipt) -> Result<(), DeliveryStop> {
-        self.persist_review_binding(&review)?;
+        self.record_review_binding(&review, true)?;
         let mut state = self
             .state
             .lock()
@@ -69,16 +75,26 @@ impl NativeV2DeliveryAdapter {
         Ok(())
     }
 
-    fn persist_review_binding(&self, review: &SourceReviewReceipt) -> Result<(), DeliveryStop> {
+    fn record_review_binding(
+        &self,
+        review: &SourceReviewReceipt,
+        published: bool,
+    ) -> Result<(), DeliveryStop> {
         if !review.review_id.is_empty()
             && let Some(record) = &self.review_binding_recorder
         {
-            record(review).map_err(|message| {
+            record(review, published).map_err(|message| {
                 DeliveryStop::failure(
                     WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
                     format!("Cannot retain the confirmed review identity for resume: {message}"),
                 )
             })?;
+        }
+        if !review.review_id.is_empty() {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .review_binding = Some(review.clone());
         }
         Ok(())
     }
@@ -134,10 +150,15 @@ impl NativeV2DeliveryAdapter {
             include_terminal_reviews: self.include_terminal_reviews(),
             target: &self.config.target,
             head_branch: &branch,
-            known_review: known.published.as_ref(),
+            known_review: known.known_review(),
             include_review: mode.creates_review(),
         };
         let snapshot = self.observe_before_delivery(request, preparation).await?;
+        if self.config.local_branch.is_some()
+            && let Some(review) = &snapshot.review
+        {
+            self.record_review_binding(&receipt_from_observation(review), false)?;
+        }
         self.check_terminal_review(&snapshot, preparation).await?;
         self.stage_workspace(preparation).await?;
         let Some(observed) = observed_receipt(snapshot, &self.config.target, &branch) else {

@@ -446,7 +446,7 @@ fn build_local_candidate_config(
                 mode,
             )
             .map_err(|_| LocalCompositionError::ResolvedSource)?;
-            crate::native_v2_delivery::contract::review_from_receipt(
+            crate::native_v2_delivery::contract::review_from_recovery(
                 output,
                 mode,
                 &target,

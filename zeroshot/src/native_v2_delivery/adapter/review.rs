@@ -250,7 +250,8 @@ impl NativeV2DeliveryAdapter {
         let latest = state
             .pending_head
             .and_then(|pending| pending.updated)
-            .or(state.published);
+            .or(state.published)
+            .or(state.review_binding);
         let Some(review) = handoff_review(mode, &outcome, latest) else {
             return outcome;
         };

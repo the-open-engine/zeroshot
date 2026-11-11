@@ -35,6 +35,7 @@ pub(in crate::native_v2_delivery) enum Script {
     ReconcileCompletesThenUnavailable,
     TargetIntegrationResponseLost,
     TargetDeferred,
+    TargetUnavailable,
     TargetIntegrationThenDeferred,
     LaterTargetIntegrationFails,
     ConflictMaterializationFailsAfterMutation,
@@ -486,6 +487,9 @@ impl SourceDeliveryAuthority for FakeGitHub {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceTargetIntegration, SourceDeliveryError> {
         let attempt = self.target_reconciliations.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.script, Script::TargetUnavailable) {
+            return Err(SourceDeliveryError::Unavailable);
+        }
         if matches!(self.script, Script::TargetDeferred)
             || matches!(self.script, Script::TargetIntegrationThenDeferred) && attempt > 0
         {

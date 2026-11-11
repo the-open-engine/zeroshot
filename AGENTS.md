@@ -431,7 +431,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   review target remains the invoking upstream/name. Copy no untracked resources and perform no
   dependency setup. Recovery metadata retains the chosen source commit, workspace, invoking
   workspace and attached branch; local request fingerprints preserve replay before remote I/O.
-  Resume reuses that workspace and attaches its branch without rewinding shared refs.
+  Resume reuses that workspace and attaches its branch without rewinding shared refs, refusing
+  attachment when another registered checkout owns the branch.
   Detached-HEAD guidance prefers a unique retained workspace branch, verified against local refs,
   ancestry and worktree ownership; checkout history is a fallback, never a guessed default branch.
   Publishing already committed work may confirm the admitted source commit without a new commit,
@@ -440,7 +441,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Unbound local review discovery and creation select active reviews rather than branch history,
   including resumes that have not recorded any delivery;
   trusted delivery records a confirmed review binding in the existing recovery metadata before
-  polling or handing off, so timeout, cancellation and crash preserve that identity. Successors
+  target reconciliation, polling or handing off, so repair, timeout, cancellation and crash preserve
+  that identity. Private recovery evidence distinguishes observed identity from completed first
+  publication; saving identity never skips target reconciliation. Successors
   recover it from that metadata or older trusted lineage ledger executions (including checkpoint
   seeds) and carry it through the private bootstrap, retaining terminal
   safeguards for that review without adopting branch history. Source-equal, already committed local
@@ -501,7 +504,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   titles bounded to 255 Unicode characters. Its same title normalizer supplies generated delivery
   commit messages before preflight reconciliation or commit creation, preventing push-triggered drafts.
   Shortened titles retain the original once inside the
-  generated description section. Metadata refresh preserves surrounding human text and later
+  generated description section. Existing GitLab reviews without either generated-body marker
+  acquire an appended generated section, preserving human text; partial, duplicated or reordered
+  markers still refuse metadata refresh. Refresh preserves surrounding human text and later
   human-applied draft status; comment literalization precedes hashing and durable publication intent.
   Capability admission rejects unsupported operations before credential resolution or workspace
   mutation. Pure remote identification uses each registered

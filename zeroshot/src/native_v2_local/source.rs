@@ -283,11 +283,6 @@ pub(crate) fn verified_detached_branch(workspace: &Path, git_program: &Path, bra
             &["merge-base", "--is-ancestor", "HEAD", &reference],
         )
         .is_ok()
-        && git_output(git_program, workspace, &["worktree", "list", "--porcelain"]).is_ok_and(
-            |worktrees| {
-                !worktrees
-                    .lines()
-                    .any(|line| line == format!("branch {reference}"))
-            },
-        )
+        && super::workspace::branch_owner_elsewhere(workspace, git_program, branch)
+            .is_ok_and(|owner| owner.is_none())
 }

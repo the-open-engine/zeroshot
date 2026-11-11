@@ -46,6 +46,8 @@ mod head_update;
 mod local_branch;
 #[path = "tests/metadata.rs"]
 mod metadata;
+#[path = "tests/review_binding.rs"]
+mod review_binding;
 #[path = "tests/review_sync.rs"]
 mod review_sync;
 #[path = "tests/routing.rs"]

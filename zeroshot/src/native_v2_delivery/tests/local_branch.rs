@@ -81,8 +81,10 @@ async fn timeout_and_cancellation_retain_the_confirmed_review_before_polling_com
         // This is durable before any successful verifier result exists.
         let recovery: Value =
             serde_json::from_slice(&fs::read(&recovery_path).assert_value()).assert_value();
-        let receipt = &recovery["deliveryReceipt"];
+        let saved = &recovery["deliveryReceipt"];
+        let receipt = &saved["receipt"];
         assert_eq!(receipt["pullRequestId"], "17");
+        assert_eq!(saved["published"], true);
         assert!(!is_matching_success_receipt(receipt, mode, &target(&repo)));
         if cancel {
             handle.cancel();
@@ -100,7 +102,7 @@ async fn timeout_and_cancellation_retain_the_confirmed_review_before_polling_com
         let pushes = authority.head_updates.load(Ordering::SeqCst);
         authority.closed.store(true, Ordering::SeqCst);
         let recovered =
-            contract::review_from_receipt(receipt, mode, &target(&repo), branch).assert_value();
+            contract::review_from_recovery(saved, mode, &target(&repo), branch).assert_value();
         let resumed = NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
                 adopt_existing_delivery: true,
@@ -275,12 +277,15 @@ async fn unbound_local_resume_ignores_history_and_retains_bound_terminal_review_
         let head = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
         let pushes = authority.head_updates.load(Ordering::SeqCst);
         let bound = NativeV2DeliveryAdapter::new(config, authority.clone()).with_recovered_review(
-            Some(SourceReviewReceipt {
-                review_id: "1".to_owned(),
-                repository: target(&repo).repository,
-                target_branch: target(&repo).target_branch,
-                head_branch: branch.to_owned(),
-                head_revision: head.clone(),
+            Some(contract::RecoveredReview {
+                published: true,
+                review: SourceReviewReceipt {
+                    review_id: "1".to_owned(),
+                    repository: target(&repo).repository,
+                    target_branch: target(&repo).target_branch,
+                    head_branch: branch.to_owned(),
+                    head_revision: head.clone(),
+                },
             }),
         );
         let refused = run_with_adapter(request(), Arc::new(bound)).await;
@@ -317,12 +322,15 @@ async fn merged_local_committed_source_is_confirmed_on_resume_without_republicat
                 },
                 authority.clone(),
             )
-            .with_recovered_review(adopting.then(|| SourceReviewReceipt {
-                review_id: "17".to_owned(),
-                repository: target(&repo).repository,
-                target_branch: target(&repo).target_branch,
-                head_branch: "feature/committed".to_owned(),
-                head_revision: repo.base.clone(),
+            .with_recovered_review(adopting.then(|| contract::RecoveredReview {
+                published: true,
+                review: SourceReviewReceipt {
+                    review_id: "17".to_owned(),
+                    repository: target(&repo).repository,
+                    target_branch: target(&repo).target_branch,
+                    head_branch: "feature/committed".to_owned(),
+                    head_revision: repo.base.clone(),
+                },
             })),
         )
     };

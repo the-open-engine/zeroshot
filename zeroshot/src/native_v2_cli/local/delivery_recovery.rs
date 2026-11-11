@@ -24,7 +24,8 @@ pub(crate) fn review_binding_recorder(
     let workspace = workspace.to_owned();
     let branch = branch.to_owned();
     let delivery_run_id = delivery_run_id.clone();
-    let record = move |review: &crate::source_code_provider::SourceReviewReceipt| {
+    let record = move |review: &crate::source_code_provider::SourceReviewReceipt,
+                       published: bool| {
         let mut recovery = LocalRecoveryDocument::read(&path)?;
         if recovery.workspace != workspace
             || recovery.local_branch.as_deref() != Some(&branch)
@@ -38,18 +39,28 @@ pub(crate) fn review_binding_recorder(
             .filter(|mode| *mode != DeliveryMode::Push)
             .ok_or_else(|| local_message("review binding requires review delivery"))?;
         let target = recovery_target(&recovery, mode)?;
-        let receipt = contract::review_binding_receipt(mode, review);
+        let receipt = contract::review_recovery(mode, review, published);
         if review.head_branch != branch
-            || contract::review_from_receipt(&receipt, mode, &target, &branch).as_ref()
-                != Some(review)
+            || contract::review_from_recovery(&receipt, mode, &target, &branch)
+                .is_none_or(|saved| saved.review != *review)
             || recovery.delivery_receipt.as_ref().is_some_and(|existing| {
-                contract::review_from_receipt(existing, mode, &target, &branch)
-                    .is_none_or(|known| known.review_id != review.review_id)
+                contract::review_from_recovery(existing, mode, &target, &branch)
+                    .is_none_or(|known| known.review.review_id != review.review_id)
             })
         {
             return Err(local_message(
                 "confirmed review differs from the retained delivery identity",
             ));
+        }
+        // An observation binds identity only. It cannot replace the verified published head
+        // used to detect rewrites, or erase publication already recorded by this lineage.
+        if !published
+            && recovery.delivery_receipt.as_ref().is_some_and(|existing| {
+                contract::review_from_recovery(existing, mode, &target, &branch)
+                    .is_some_and(|known| known.published)
+            })
+        {
+            return Ok(());
         }
         if recovery.delivery_receipt.as_ref() == Some(&receipt) {
             return Ok(());
@@ -57,8 +68,8 @@ pub(crate) fn review_binding_recorder(
         recovery.delivery_receipt = Some(receipt);
         recovery.write(&path)
     };
-    Ok(Some(Arc::new(move |review| {
-        record(review).map_err(|error| error.to_string())
+    Ok(Some(Arc::new(move |review, published| {
+        record(review, published).map_err(|error| error.to_string())
     })))
 }
 
@@ -105,7 +116,7 @@ impl LocalCliBackend {
                     crate::native_v2_admission::delivery_mode(&recovery.submission.graph.root)
                         .ok_or_else(|| local_message("delivery recovery mode is missing"))?;
                 let target = recovery_target(&recovery, mode)?;
-                contract::review_from_receipt(receipt, mode, &target, branch)
+                contract::review_from_recovery(receipt, mode, &target, branch)
                     .ok_or_else(|| local_message("retained delivery review identity is invalid"))?;
                 return Ok(Some(receipt.clone()));
             }
