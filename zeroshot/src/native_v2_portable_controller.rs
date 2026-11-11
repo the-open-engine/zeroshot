@@ -179,6 +179,8 @@ pub struct PortableControllerReady {
 
 #[derive(Debug, Error)]
 pub enum PortableControllerError {
+    #[error("portable controller stopped during preparation")]
+    Shutdown,
     #[error("portable controller path must be absolute")]
     Path,
     #[error("portable controller bootstrap is malformed or too large")]

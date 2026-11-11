@@ -60,6 +60,11 @@ pub(crate) fn guard_controller_console() -> io::Result<()> {
     check(unsafe { SetConsoleCtrlHandler(Some(ignore_console_interrupt), 1) })
 }
 
+// Close, logoff and shutdown retain their default handling. Cooperative stop uses the protocol.
+pub(crate) fn controller_termination() -> io::Result<impl Future<Output = ()> + Send> {
+    Ok(std::future::pending())
+}
+
 unsafe extern "system" fn ignore_console_interrupt(event: u32) -> BOOL {
     BOOL::from(matches!(event, CTRL_C_EVENT | CTRL_BREAK_EVENT))
 }

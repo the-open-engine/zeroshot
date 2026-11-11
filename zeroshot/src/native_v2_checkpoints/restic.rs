@@ -17,6 +17,7 @@ use crate::execution::process::platform::{
     ProcessContainment, capture_process_tree, configure_process, register_process_tree_for,
     terminate_process_tree,
 };
+use super::stopped;
 
 const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
@@ -126,6 +127,7 @@ pub(super) struct Repository {
     program: ResticProgram,
     root: PathBuf,
     deadline: Option<Instant>,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 impl Repository {
@@ -134,6 +136,7 @@ impl Repository {
             program,
             root,
             deadline: None,
+            stopping: None,
         }
     }
 
@@ -144,13 +147,26 @@ impl Repository {
         self
     }
 
+    pub(super) fn with_stop_request(
+        mut self,
+        stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> Self {
+        self.stopping = stopping;
+        self
+    }
+
     pub(super) async fn initialize(&self) -> io::Result<()> {
         self.prepare_paths()?;
-        if self
-            .run(&self.root, &arguments(["cat", "config"]))
-            .await
-            .is_err()
-        {
+        if let Err(error) = self.run(&self.root, &arguments(["cat", "config"])).await {
+            // A stopped probe must retain its cleanup evidence. Trying another command could
+            // replace unconfirmed cleanup with a clean pre-start cancellation marker.
+            if self
+                .stopping
+                .as_ref()
+                .is_some_and(|request| *request.borrow())
+            {
+                return Err(error);
+            }
             self.run(&self.root, &arguments(["init"])).await?;
         }
         self.run(&self.root, &arguments(["unlock", "--remove-all"]))
@@ -226,6 +242,13 @@ impl Repository {
     }
 
     async fn run(&self, directory: &Path, arguments: &[OsString]) -> io::Result<Vec<u8>> {
+        if self
+            .stopping
+            .as_ref()
+            .is_some_and(|request| *request.borrow())
+        {
+            return Err(stopped());
+        }
         #[cfg(test)]
         if self.program.in_process_test_fake {
             return self.run_test_fake(directory, arguments);
@@ -247,6 +270,10 @@ impl Repository {
         timeout: Duration,
     ) -> io::Result<Vec<u8>> {
         let operation = operation_name(arguments);
+        let stopping = self.stopping.clone();
+        if stopping.as_ref().is_some_and(|request| *request.borrow()) {
+            return Err(stopped());
+        }
         let mut environment = BTreeMap::new();
         platform::process_environment(&mut environment);
         let mut command = Command::new(&self.program.executable);
@@ -282,7 +309,7 @@ impl Repository {
             .stderr
             .take()
             .ok_or_else(|| io::Error::other("restic stderr is unavailable"))?;
-        let result = tokio::time::timeout(timeout, async {
+        let completion = tokio::time::timeout(timeout, async {
             tokio::try_join!(
                 async {
                     operation_output(stdout, operation == "backup")
@@ -301,8 +328,11 @@ impl Repository {
                         .map_err(|error| operation_io_error(operation, "wait", error))
                 },
             )
-        })
-        .await;
+        });
+        let result = tokio::select! {
+            result = completion => result,
+            () = crate::execution::process::wait_for_stop_request(stopping) => Ok(Err(stopped())),
+        };
         // Main-process exit is not tree exit: a helper that closed its output may still run.
         let termination = terminate_process_tree(&tree, &mut child).await;
         let outcome = match result {

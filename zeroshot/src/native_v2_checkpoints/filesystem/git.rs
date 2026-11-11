@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::{
-    copy_workspace_entry, entry_metadata, existing_directory, invalid, private_stage, remove_entry,
+    SnapshotOperation, entry_metadata, existing_directory, invalid, private_stage, remove_entry,
     require_directory,
 };
 use crate::execution::platform;
@@ -149,47 +149,67 @@ fn checkout_error(root: &Path, checkout: &Path, error: io::Error) -> io::Error {
     )
 }
 
-pub(super) fn capture(workspace: &Path, tree: &Path) -> io::Result<bool> {
-    capture_tree(workspace, workspace, tree, None)
+pub(super) fn capture(
+    workspace: &Path,
+    tree: &Path,
+    operation: &SnapshotOperation,
+) -> io::Result<bool> {
+    capture_tree(
+        &CaptureContext {
+            root: workspace,
+            operation,
+        },
+        workspace,
+        tree,
+        None,
+    )
+}
+
+struct CaptureContext<'a> {
+    root: &'a Path,
+    operation: &'a SnapshotOperation,
 }
 
 fn capture_tree(
-    root: &Path,
+    context: &CaptureContext<'_>,
     workspace: &Path,
     tree: &Path,
     modules: Option<&Path>,
 ) -> io::Result<bool> {
+    let CaptureContext { root, operation } = context;
+    operation.check()?;
     let layout = GitLayout::discover(workspace, modules)
         .map_err(|error| checkout_error(root, workspace, error))?;
     let own_modules = layout
         .as_ref()
         .map(|layout| layout.directory.join("modules"));
-    capture_nested(root, workspace, tree, own_modules.as_deref().or(modules))?;
+    capture_nested(context, workspace, tree, own_modules.as_deref().or(modules))?;
     let Some(layout) = layout else {
         return Ok(false);
     };
-    validate_git_metadata(&layout.common.join("objects"))?;
-    let head = checkpoint_head(workspace, &layout)?;
+    validate_git_metadata(&layout.common.join("objects"), operation)?;
+    let head = checkpoint_head(workspace, &layout, operation)?;
     let target = tree.join(".git");
-    normalize_git_tree(&layout, &target)?;
-    validate_git_metadata(&target)?;
+    normalize_git_tree(&layout, &target, operation)?;
+    validate_git_metadata(&target, operation)?;
     write_snapshot_head(&target, &head)?;
-    normalize_config(&target)?;
+    normalize_config(&target, operation)?;
     Ok(true)
 }
 
 fn capture_nested(
-    root: &Path,
+    context: &CaptureContext<'_>,
     workspace: &Path,
     tree: &Path,
     modules: Option<&Path>,
 ) -> io::Result<()> {
     for entry in fs::read_dir(tree)? {
+        context.operation.check()?;
         let entry = entry?;
         let metadata = fs::symlink_metadata(entry.path())?;
         if entry.file_name() != ".git" && metadata.is_dir() && !metadata.file_type().is_symlink() {
             capture_tree(
-                root,
+                context,
                 &workspace.join(entry.file_name()),
                 &entry.path(),
                 modules,
@@ -204,21 +224,29 @@ fn write_snapshot_head(target: &Path, head: &str) -> io::Result<()> {
     fs::write(target.join("HEAD"), format!("{head}\n"))
 }
 
-fn normalize_git_tree(layout: &GitLayout, target: &Path) -> io::Result<()> {
+fn normalize_git_tree(
+    layout: &GitLayout,
+    target: &Path,
+    operation: &SnapshotOperation,
+) -> io::Result<()> {
     let metadata = fs::symlink_metadata(target)?;
     if metadata.is_dir() && !metadata.file_type().is_symlink() {
         return remove_entry(&target.join("worktrees"));
     }
     remove_entry(target)?;
     platform::create_private_directory(target)?;
-    populate_git(layout, target)
+    populate_git(layout, target, operation)
 }
 
-fn populate_git(layout: &GitLayout, target: &Path) -> io::Result<()> {
+fn populate_git(
+    layout: &GitLayout,
+    target: &Path,
+    operation: &SnapshotOperation,
+) -> io::Result<()> {
     for path in SHARED_PATHS {
-        copy_optional(&layout.common.join(path), &target.join(path))?;
+        copy_optional(&layout.common.join(path), &target.join(path), operation)?;
     }
-    copy_private(&layout.directory, target)?;
+    copy_private(&layout.directory, target, operation)?;
     Ok(())
 }
 
@@ -237,28 +265,36 @@ fn private_name(name: &std::ffi::OsStr) -> bool {
                 .all(|byte| byte.is_ascii_uppercase() || byte == b'_'))
 }
 
-fn private_names(directory: &Path) -> io::Result<BTreeSet<std::ffi::OsString>> {
+fn private_names(
+    directory: &Path,
+    operation: &SnapshotOperation,
+) -> io::Result<BTreeSet<std::ffi::OsString>> {
     fs::read_dir(directory)?
-        .map(|entry| entry.map(|entry| entry.file_name()))
+        .map(|entry| {
+            operation.check()?;
+            entry.map(|entry| entry.file_name())
+        })
         .filter(|entry| entry.as_ref().map_or(true, |name| private_name(name)))
         .collect()
 }
 
-fn copy_private(source: &Path, target: &Path) -> io::Result<()> {
-    let names = private_names(source)?
-        .union(&private_names(target)?)
+fn copy_private(source: &Path, target: &Path, operation: &SnapshotOperation) -> io::Result<()> {
+    let names = private_names(source, operation)?
+        .union(&private_names(target, operation)?)
         .cloned()
         .collect::<Vec<_>>();
     for name in names {
-        replace_optional(&source.join(&name), &target.join(name))?;
+        operation.check()?;
+        replace_optional(&source.join(&name), &target.join(name), operation)?;
     }
     for name in PRIVATE_PATHS {
-        replace_optional(&source.join(name), &target.join(name))?;
+        operation.check()?;
+        replace_optional(&source.join(name), &target.join(name), operation)?;
     }
     Ok(())
 }
 
-fn replace_optional(source: &Path, target: &Path) -> io::Result<()> {
+fn replace_optional(source: &Path, target: &Path, operation: &SnapshotOperation) -> io::Result<()> {
     let parent = target
         .parent()
         .ok_or_else(|| invalid("Git entry has no parent"))?;
@@ -266,10 +302,10 @@ fn replace_optional(source: &Path, target: &Path) -> io::Result<()> {
     match fs::symlink_metadata(source) {
         // HEAD and the index must never be absent: an interrupted restore is retried in this
         // checkout, and Git refuses a directory without HEAD.
-        Ok(metadata) if metadata.is_file() => publish_file(source, target),
+        Ok(metadata) if metadata.is_file() => publish_file(source, target, operation),
         Ok(_) => {
             remove_entry(target)?;
-            copy_optional(source, target)
+            copy_optional(source, target, operation)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => remove_entry(target),
         Err(error) => Err(error),
@@ -281,7 +317,7 @@ fn replace_optional(source: &Path, target: &Path) -> io::Result<()> {
 /// objects, which `git fsck` tolerates and `git prune` removes from object directories. A hard
 /// crash between copy and rename can still leave one inert temporary in the administrative
 /// directory, which Git ignores.
-fn publish_file(source: &Path, target: &Path) -> io::Result<()> {
+fn publish_file(source: &Path, target: &Path, operation: &SnapshotOperation) -> io::Result<()> {
     let parent = target
         .parent()
         .ok_or_else(|| invalid("Git entry has no parent"))?;
@@ -289,29 +325,31 @@ fn publish_file(source: &Path, target: &Path) -> io::Result<()> {
         remove_entry(target)?;
     }
     let temporary = parent.join(format!("tmp_obj_{}", uuid::Uuid::now_v7().simple()));
-    let result =
-        copy_workspace_entry(source, &temporary).and_then(|()| fs::rename(&temporary, target));
+    let result = operation
+        .copy(source, &temporary)
+        .and_then(|()| fs::rename(&temporary, target));
     if result.is_err() {
         let _ = remove_entry(&temporary);
     }
     result
 }
 
-fn copy_optional(source: &Path, target: &Path) -> io::Result<()> {
+fn copy_optional(source: &Path, target: &Path, operation: &SnapshotOperation) -> io::Result<()> {
     match fs::symlink_metadata(source) {
         Ok(_) => {
             let parent = target
                 .parent()
                 .ok_or_else(|| invalid("Git entry has no parent"))?;
             fs::create_dir_all(parent)?;
-            copy_workspace_entry(source, target)
+            operation.copy(source, target)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
 }
 
-fn validate_git_metadata(path: &Path) -> io::Result<()> {
+fn validate_git_metadata(path: &Path, operation: &SnapshotOperation) -> io::Result<()> {
+    operation.check()?;
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(invalid("Git metadata cannot contain symbolic links"));
@@ -325,22 +363,25 @@ fn validate_git_metadata(path: &Path) -> io::Result<()> {
     }
     if metadata.is_dir() {
         for entry in fs::read_dir(path)? {
-            validate_git_metadata(&entry?.path())?;
+            validate_git_metadata(&entry?.path(), operation)?;
         }
     }
     Ok(())
 }
 
-fn checkpoint_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
+fn checkpoint_head(
+    workspace: &Path,
+    layout: &GitLayout,
+    operation: &SnapshotOperation,
+) -> io::Result<String> {
     require_plain_head(&layout.directory)?;
-    let output = git_directory_command(workspace, &layout.directory)
-        .args(["rev-parse", "--verify", "HEAD"])
-        .output()?;
-    if !output.status.success() {
-        return unborn_head(workspace, layout);
+    let mut command = git_directory_command(workspace, &layout.directory);
+    command.args(["rev-parse", "--verify", "HEAD"]);
+    let output = operation.git(command)?;
+    if output.diagnostic().exit_status != Some(0) {
+        return unborn_head(workspace, layout, operation);
     }
-    let head = String::from_utf8(output.stdout).map_err(io::Error::other)?;
-    let head = head.trim();
+    let head = output.stdout().trim();
     if !checkpoint_revision(head) {
         return Err(invalid("invalid Git checkpoint revision"));
     }
@@ -359,30 +400,36 @@ fn require_plain_head(directory: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn unborn_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
-    let output = git_directory_command(workspace, &layout.directory)
-        .args(["symbolic-ref", "--quiet", "--no-recurse", "HEAD"])
-        .output()?;
-    if !output.status.success() {
+fn unborn_head(
+    workspace: &Path,
+    layout: &GitLayout,
+    operation: &SnapshotOperation,
+) -> io::Result<String> {
+    let mut command = git_directory_command(workspace, &layout.directory);
+    command.args(["symbolic-ref", "--quiet", "--no-recurse", "HEAD"]);
+    let output = operation.git(command)?;
+    if output.diagnostic().exit_status != Some(0) {
         return Err(invalid(
             "Git checkpoint HEAD is neither committed nor unborn",
         ));
     }
-    let reference = String::from_utf8(output.stdout).map_err(io::Error::other)?;
-    let reference = reference.trim();
-    require_branch_reference(&layout.directory, reference)?;
-    require_missing_reference(workspace, layout, reference)?;
+    let reference = output.stdout().trim();
+    require_branch_reference(&layout.directory, reference, operation)?;
+    require_missing_reference(workspace, layout, reference, operation)?;
     Ok(format!("ref: {reference}"))
 }
 
-fn require_branch_reference(directory: &Path, reference: &str) -> io::Result<()> {
+fn require_branch_reference(
+    directory: &Path,
+    reference: &str,
+    operation: &SnapshotOperation,
+) -> io::Result<()> {
     if !reference.starts_with("refs/heads/") {
         return Err(invalid("invalid unborn Git checkpoint branch"));
     }
-    let status = git_command(directory, None)
-        .args(["check-ref-format", reference])
-        .status()?;
-    if !status.success() {
+    let mut command = git_command(directory, None);
+    command.args(["check-ref-format", reference]);
+    if operation.git(command)?.diagnostic().exit_status != Some(0) {
         return Err(invalid("invalid unborn Git checkpoint branch"));
     }
     Ok(())
@@ -392,13 +439,14 @@ fn require_missing_reference(
     workspace: &Path,
     layout: &GitLayout,
     reference: &str,
+    operation: &SnapshotOperation,
 ) -> io::Result<()> {
-    let status = git_directory_command(workspace, &layout.directory)
-        .args(["show-ref", "--verify", "--quiet", reference])
-        .status()?;
+    let mut command = git_directory_command(workspace, &layout.directory);
+    command.args(["show-ref", "--verify", "--quiet", reference]);
+    let status = operation.git(command)?.diagnostic().exit_status;
     // Git resolves packed and backend-owned refs. The loose-path check additionally rejects a
     // broken or indirect ref that Git can report as missing; it is never the absence authority.
-    if status.code() != Some(1) || entry_metadata(&layout.common.join(reference))?.is_some() {
+    if status != Some(1) || entry_metadata(&layout.common.join(reference))?.is_some() {
         return Err(invalid(
             "unborn Git checkpoint branch now exists or cannot be verified; shared refs are preserved",
         ));
@@ -406,12 +454,15 @@ fn require_missing_reference(
     Ok(())
 }
 
-fn snapshot_unborn_reference(directory: &Path) -> io::Result<Option<String>> {
+fn snapshot_unborn_reference(
+    directory: &Path,
+    operation: &SnapshotOperation,
+) -> io::Result<Option<String>> {
     require_plain_head(directory)?;
     let head = read_small(&directory.join("HEAD"))?;
     let head = head.trim();
     if let Some(reference) = head.strip_prefix("ref: ") {
-        require_branch_reference(directory, reference)?;
+        require_branch_reference(directory, reference, operation)?;
         return Ok(Some(reference.to_owned()));
     }
     if !checkpoint_revision(head) {
@@ -491,8 +542,9 @@ fn git_path(path: &Path) -> std::borrow::Cow<'_, Path> {
     }
 }
 
-fn normalize_config(directory: &Path) -> io::Result<()> {
+fn normalize_config(directory: &Path, operation: &SnapshotOperation) -> io::Result<()> {
     for name in ["config", "config.worktree"] {
+        operation.check()?;
         let original = directory.join(name);
         if name != "config" && !original.exists() {
             continue;
@@ -500,25 +552,26 @@ fn normalize_config(directory: &Path) -> io::Result<()> {
         // Edit a separate config copy: failed Git may have left a legitimate .lock to retain.
         let stage = private_stage(directory, ".checkpoint-config-")?;
         let path = stage.path().join("config");
-        copy_optional(&original, &path)?;
-        rewrite_config(&path, name == "config")?;
+        copy_optional(&original, &path, operation)?;
+        rewrite_config(&path, name == "config", operation)?;
         fs::rename(path, original)?;
     }
     Ok(())
 }
 
-fn rewrite_config(path: &Path, standalone: bool) -> io::Result<()> {
-    let status = git_config(path)?
-        .args(["--unset-all", "core.worktree"])
-        .status()?;
-    if !status.success() && status.code() != Some(5) {
+fn rewrite_config(path: &Path, standalone: bool, operation: &SnapshotOperation) -> io::Result<()> {
+    let mut command = git_config(path)?;
+    command.args(["--unset-all", "core.worktree"]);
+    let status = operation.git(command)?.diagnostic().exit_status;
+    if !matches!(status, Some(0 | 5)) {
         return Err(invalid(
             "Git checkpoint configuration could not be normalized",
         ));
     }
     if standalone {
-        let status = git_config(path)?.args(["core.bare", "false"]).status()?;
-        if !status.success() {
+        let mut command = git_config(path)?;
+        command.args(["core.bare", "false"]);
+        if operation.git(command)?.diagnostic().exit_status != Some(0) {
             return Err(invalid(
                 "Git checkpoint configuration could not be normalized",
             ));
@@ -544,15 +597,16 @@ fn git_config(path: &Path) -> io::Result<Command> {
 pub(super) fn restore_target(
     workspace: &Path,
     snapshot_git: Option<&Path>,
+    operation: &SnapshotOperation,
 ) -> io::Result<Option<GitLayout>> {
     let unborn_reference = snapshot_git
-        .map(snapshot_unborn_reference)
+        .map(|directory| snapshot_unborn_reference(directory, operation))
         .transpose()?
         .flatten();
     let target = GitLayout::discover(workspace, None)
         .map_err(|error| checkout_error(workspace, workspace, error))?;
     if workspace.exists() {
-        validate_nested_restore(workspace)?;
+        validate_nested_restore(workspace, operation)?;
     }
     if target.is_some() && snapshot_git.is_none() {
         return Err(invalid(
@@ -560,7 +614,7 @@ pub(super) fn restore_target(
         ));
     }
     if let Some(layout) = target.as_ref() {
-        validate_existing_restore(workspace, layout, unborn_reference.as_deref())?;
+        validate_existing_restore(workspace, layout, unborn_reference.as_deref(), operation)?;
     }
     Ok(target)
 }
@@ -569,18 +623,20 @@ fn validate_existing_restore(
     workspace: &Path,
     layout: &GitLayout,
     unborn_reference: Option<&str>,
+    operation: &SnapshotOperation,
 ) -> io::Result<()> {
-    validate_git_metadata(&layout.common.join("objects"))?;
+    validate_git_metadata(&layout.common.join("objects"), operation)?;
     if let Some(reference) = unborn_reference {
-        require_missing_reference(workspace, layout, reference)?;
+        require_missing_reference(workspace, layout, reference, operation)?;
     }
     Ok(())
 }
 
 // Nested checkouts become independent repositories. Replacing one that owns linked peers would
 // remove those peers' shared administrative state; refuse before changing any workspace bytes.
-fn validate_nested_restore(workspace: &Path) -> io::Result<()> {
+fn validate_nested_restore(workspace: &Path, operation: &SnapshotOperation) -> io::Result<()> {
     for entry in fs::read_dir(workspace)? {
+        operation.check()?;
         let entry = entry?;
         if entry.file_name() == ".git" {
             continue;
@@ -588,7 +644,7 @@ fn validate_nested_restore(workspace: &Path) -> io::Result<()> {
         let metadata = fs::symlink_metadata(entry.path())?;
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
             require_no_nested_peers(&entry.path().join(".git"))?;
-            validate_nested_restore(&entry.path())?;
+            validate_nested_restore(&entry.path(), operation)?;
         }
     }
     Ok(())
@@ -615,20 +671,26 @@ fn require_no_nested_peers(directory: &Path) -> io::Result<()> {
 }
 
 pub(super) fn restore_existing(snapshot: &Path, target: &GitLayout) -> io::Result<()> {
-    add_objects(&snapshot.join("objects"), &target.common.join("objects"))?;
-    copy_private(snapshot, &target.directory)
+    // Once replacement starts, finish installing the snapshot even if shutdown is requested.
+    let operation = SnapshotOperation::uncancelled();
+    add_objects(
+        &snapshot.join("objects"),
+        &target.common.join("objects"),
+        &operation,
+    )?;
+    copy_private(snapshot, &target.directory, &operation)
 }
 
-fn add_objects(source: &Path, target: &Path) -> io::Result<()> {
+fn add_objects(source: &Path, target: &Path, operation: &SnapshotOperation) -> io::Result<()> {
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let destination = target.join(entry.file_name());
         let metadata = fs::symlink_metadata(entry.path())?;
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
             ensure_object_directory(&destination)?;
-            add_objects(&entry.path(), &destination)?;
+            add_objects(&entry.path(), &destination, operation)?;
         } else {
-            add_object(&entry.path(), &destination)?;
+            add_object(&entry.path(), &destination, operation)?;
         }
     }
     Ok(())
@@ -642,12 +704,14 @@ fn ensure_object_directory(path: &Path) -> io::Result<()> {
     }
 }
 
-fn add_object(source: &Path, target: &Path) -> io::Result<()> {
+fn add_object(source: &Path, target: &Path, operation: &SnapshotOperation) -> io::Result<()> {
     match fs::symlink_metadata(target) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
         Ok(_) => Err(invalid("Git object destination is not a plain file")),
         // A complete object is never replaced; publication keeps every new one complete too.
-        Err(error) if error.kind() == io::ErrorKind::NotFound => publish_file(source, target),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            publish_file(source, target, operation)
+        }
         Err(error) => Err(error),
     }
 }

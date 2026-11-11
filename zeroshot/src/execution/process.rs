@@ -37,6 +37,16 @@ pub(crate) async fn wait_for_deadline(deadline: Option<tokio::time::Instant>) {
     }
 }
 
+/// Waits for explicit stop intent; an absent or closed false source does not request a stop.
+pub(crate) async fn wait_for_stop_request(request: Option<tokio::sync::watch::Receiver<bool>>) {
+    if let Some(mut request) = request
+        && request.wait_for(|requested| *requested).await.is_ok()
+    {
+        return;
+    }
+    std::future::pending::<()>().await;
+}
+
 pub const MAX_PROCESS_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 /// Last-resort allocation guards for already-constructed provider commands.
 ///

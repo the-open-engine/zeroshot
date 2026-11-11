@@ -87,6 +87,7 @@ fn github_com_source(source: &ResolvedSource) -> bool {
 pub(crate) async fn prepare_local_checkout(
     admitted: &AdmittedRun,
     bootstrap: &PortableControllerBootstrap,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<(), PortableControllerError> {
     use crate::native_v2_delivery::transport::{GitTransport, GitTransportConfig, source_credential};
     let references = checkout_references(admitted)
@@ -124,7 +125,8 @@ pub(crate) async fn prepare_local_checkout(
             deadline: super::LOCAL_CHECKOUT_TIMEOUT,
         },
         crate::source_code_provider::adapters::core::source_remote(source),
-    );
+    )
+    .with_stop_request(stopping);
     transport
         .fetch_review_references(
             &references,

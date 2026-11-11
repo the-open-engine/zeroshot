@@ -8,10 +8,8 @@ use tokio::io::AsyncReadExt;
 use crate::v2_run_ledger::{CreateRun, RunEvent, RunLedger};
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 
-#[tokio::test]
-async fn terminal_server_closes_idle_connections_and_releases_controller_ownership() {
-    let root = tempfile::tempdir().assert_value();
-    let paths = PortableControllerPaths::new(root.path().join("state"));
+async fn terminal_controller(root: &Path) -> Arc<PortableRunController> {
+    let paths = PortableControllerPaths::new(root.join("state"));
     crate::execution::platform::create_private_directory(paths.storage()).assert_value();
     let run_id = RunId::new("terminal-connection-retirement");
     let ledger = SqliteRunLedger::open(paths.ledger()).assert_value();
@@ -37,13 +35,21 @@ async fn terminal_server_closes_idle_connections_and_releases_controller_ownersh
         .assert_value();
     drop(ledger);
 
-    let controller = Arc::new(
+    Arc::new(
         PortableRunController::open_observer(paths.clone(), run_id)
             .await
             .assert_value(),
-    );
+    )
+}
+
+#[tokio::test]
+async fn terminal_server_closes_idle_connections_and_releases_controller_ownership() {
+    let root = tempfile::tempdir().assert_value();
+    let controller = terminal_controller(root.path()).await;
+    let paths = controller.paths().clone();
     let server = controller.bind().await.assert_value();
-    let serving = tokio::spawn(server.serve_until_terminal());
+    let (_stop, stopping) = tokio::sync::watch::channel(false);
+    let serving = tokio::spawn(server.serve_until_terminal(stopping));
     let mut observer = super::super::transport::connect(&paths.socket())
         .await
         .assert_value();
@@ -68,4 +74,26 @@ async fn terminal_server_closes_idle_connections_and_releases_controller_ownersh
             )),
         "terminal controller left its idle observation connection open: {read:?}"
     );
+}
+
+#[tokio::test]
+async fn shutdown_keeps_a_durable_terminal_and_does_not_wait_for_a_first_connection() {
+    let root = tempfile::tempdir().assert_value();
+    let controller = terminal_controller(root.path()).await;
+    let paths = controller.paths().clone();
+    let run_id = controller.run_id().clone();
+    let ledger = SqliteRunLedger::open_read_only(paths.ledger()).assert_value();
+    let before = ledger.get(&run_id).await.assert_value().assert_value();
+    let server = controller.bind().await.assert_value();
+    let (_stop, stopping) = tokio::sync::watch::channel(true);
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        server.serve_until_terminal(stopping),
+    )
+    .await
+    .assert_value_with("shutdown must not wait for the submitting CLI to connect")
+    .assert_value();
+    let after = ledger.get(&run_id).await.assert_value().assert_value();
+    assert_eq!(after.snapshot, before.snapshot);
+    let _reclaimed = ControllerLease::acquire(paths.lease()).assert_value();
 }

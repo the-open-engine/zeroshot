@@ -24,6 +24,7 @@ use super::{
     PortableControllerReady,
 };
 
+mod shutdown;
 #[path = "process/startup_failure.rs"]
 mod startup_failure;
 use startup_failure::{record_startup_failure, startup_paths, startup_redactions};
@@ -173,17 +174,22 @@ pub fn guard_controller_process() -> Result<(), PortableControllerError> {
 /// The bootstrap is consumed before any durable controller effect and is never retained.
 pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), PortableControllerError> {
     let paths = startup_paths(bootstrap_path);
+    let shutdown = shutdown::ControllerShutdown::install()
+        .inspect_err(|error| record_startup_failure(&paths, error, &[]))?;
     let bootstrap = load_bootstrap_file(bootstrap_path)
         .inspect_err(|error| record_startup_failure(&paths, error, &[]))?;
     let redactions = startup_redactions(&bootstrap);
-    let server = start_controller_process(bootstrap)
+    let server = start_controller_process(bootstrap, shutdown.requested.clone())
         .await
         .inspect_err(|error| record_startup_failure(&paths, error, &redactions))?;
-    server.serve_until_terminal().await
+    server
+        .serve_until_terminal(shutdown.requested.clone())
+        .await
 }
 
 async fn start_controller_process(
     bootstrap: PortableControllerBootstrap,
+    stopping: tokio::sync::watch::Receiver<bool>,
 ) -> Result<PortableControllerServer, PortableControllerError> {
     let workspace = bootstrap.workspace.clone();
     let storage = bootstrap.storage.clone();
@@ -196,24 +202,28 @@ async fn start_controller_process(
     let native_environment = bootstrap.native_environment.clone();
     let memory_storage = bootstrap.memory_storage.clone();
     let controller = Arc::new(
-        PortableRunController::start(bootstrap, move |admitted| {
-            crate::native_v2_local::build_local_process_candidate(
-                crate::native_v2_local::LocalProcessCandidateRequest {
-                    admitted,
-                    delivery_run_id: delivery_run_id.clone(),
-                    adopt_existing_delivery,
-                    workspace: &workspace,
-                    storage: &storage,
-                    memory_storage: memory_storage.as_deref(),
-                    github_token,
-                    github_token_file,
-                    delivery_validator,
-                    git_credentials,
-                    native_environment: &native_environment,
-                },
-            )
-            .map(PortableRuntime::new)
-        })
+        PortableRunController::start_with_shutdown(
+            bootstrap,
+            move |admitted| {
+                crate::native_v2_local::build_local_process_candidate(
+                    crate::native_v2_local::LocalProcessCandidateRequest {
+                        admitted,
+                        delivery_run_id: delivery_run_id.clone(),
+                        adopt_existing_delivery,
+                        workspace: &workspace,
+                        storage: &storage,
+                        memory_storage: memory_storage.as_deref(),
+                        github_token,
+                        github_token_file,
+                        delivery_validator,
+                        git_credentials,
+                        native_environment: &native_environment,
+                    },
+                )
+                .map(PortableRuntime::new)
+            },
+            Some(stopping),
+        )
         .await?,
     );
     controller.bind().await
@@ -362,7 +372,10 @@ impl PortableControllerServer {
     /// Serves one active local run until its durable terminal result exists. If a very short run
     /// finishes before the submitting CLI reaches the socket, one connection is still accepted so
     /// readiness cannot race normal startup. Later observation reopens the durable ledger.
-    async fn serve_until_terminal(self) -> Result<(), PortableControllerError> {
+    async fn serve_until_terminal(
+        self,
+        mut stopping: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<(), PortableControllerError> {
         let mut lifecycle = ServerLifecycle::default();
         let mut connections = tokio::task::JoinSet::new();
         let (shutdown, _) = tokio::sync::watch::channel(());
@@ -375,6 +388,9 @@ impl PortableControllerServer {
                     break Ok(());
                 }
                 tokio::select! {
+                    Ok(()) = async { stopping.wait_for(|requested| *requested).await.map(|_| ()) } => {
+                        break self.controller.stop_for_shutdown().await;
+                    }
                     accepted = self.listener.accept() => {
                         let stream = match accepted {
                             Ok(stream) => stream,
