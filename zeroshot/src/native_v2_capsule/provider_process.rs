@@ -70,6 +70,7 @@ pub(crate) use provider_file::write_provider_file;
 pub(crate) use contained::ProviderProcess;
 pub(crate) use filesystem::{
     ProviderExecution, ProviderExecutionFiles, ProviderFilesystemConfig, copy_workspace_entry,
+    copy_workspace_entry_until_stopped,
 };
 
 const CONTINUE_PROMPT: &str = "Continue";

@@ -69,6 +69,7 @@ enum WorkspaceMonitorAction {
 }
 
 struct PreparedControllerStart {
+    stopping: Option<watch::Receiver<bool>>,
     admitted: AdmittedRun,
     environment: RunEnvironment,
     paths: PortableControllerPaths,
@@ -117,8 +118,21 @@ impl PortableRunController {
         F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
         E: std::error::Error + Send + Sync + 'static,
     {
+        Self::start_with_shutdown(bootstrap, runtime_factory, None).await
+    }
+
+    pub(super) async fn start_with_shutdown<F, E>(
+        bootstrap: PortableControllerBootstrap,
+        runtime_factory: F,
+        stopping: Option<watch::Receiver<bool>>,
+    ) -> Result<Self, PortableControllerError>
+    where
+        F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
         let preparation_deadline = tokio::time::Instant::now() + bootstrap.preparation_timeout;
-        let prepared = prepare_controller_start(&bootstrap).await?;
+        let mut prepared = prepare_controller_start(&bootstrap).await?;
+        prepared.stopping = stopping;
         let prepared_runtime =
             prepare_runtime(&prepared, &bootstrap, runtime_factory, preparation_deadline).await?;
         let allocator = Arc::new(SingleRunAllocator::new(
@@ -228,6 +242,20 @@ impl PortableRunController {
         }
     }
 
+    /// Reuses force-stop's cancellation and durable terminal semantics. The process request also
+    /// tells local checkpoint cleanup to retain recovery data, unlike explicit force-stop.
+    pub(super) async fn stop_for_shutdown(&self) -> Result<(), PortableControllerError> {
+        let result = self
+            .inner
+            .force(openengine_cluster_protocol::RunForceParams {
+                run_id: self.run_id.clone(),
+            })
+            .await;
+        // A failed request must not discard an in-flight runtime failure's terminal append.
+        self.inner.wait_runtime_settled(&self.run_id).await;
+        result.map(|_| ()).map_err(PortableControllerError::from)
+    }
+
     pub async fn bind(
         self: Arc<Self>,
     ) -> Result<PortableControllerServer, PortableControllerError> {
@@ -281,6 +309,7 @@ async fn prepare_controller_start(
     let (paths, lease, ledger) = open_controller_storage(&bootstrap.storage)?;
     let existing = validate_existing_run(ledger.as_ref(), &bootstrap.run_id).await?;
     Ok(PreparedControllerStart {
+        stopping: None,
         admitted,
         environment,
         paths,
@@ -334,8 +363,17 @@ where
     if !workspace_identity.is_current(&bootstrap.workspace) {
         return Err(PortableControllerError::Workspace);
     }
-    let execution_seed = restore_execution_seed(bootstrap, preparation_deadline).await?;
-    crate::native_v2_review::prepare_local_checkout(&prepared.admitted, bootstrap).await?;
+    require_not_stopping(prepared)?;
+    let execution_seed =
+        restore_execution_seed(bootstrap, preparation_deadline, prepared.stopping.clone()).await?;
+    require_not_stopping(prepared)?;
+    crate::native_v2_review::prepare_local_checkout(
+        &prepared.admitted,
+        bootstrap,
+        prepared.stopping.clone(),
+    )
+    .await?;
+    require_not_stopping(prepared)?;
     let mut runtime = runtime_factory(&prepared.admitted)
         .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     runtime.execution_seed = execution_seed;
@@ -347,6 +385,18 @@ where
     })
 }
 
+fn require_not_stopping(prepared: &PreparedControllerStart) -> Result<(), PortableControllerError> {
+    if prepared
+        .stopping
+        .as_ref()
+        .is_some_and(|stopping| *stopping.borrow())
+    {
+        Err(PortableControllerError::Shutdown)
+    } else {
+        Ok(())
+    }
+}
+
 fn configure_workspace_checkpoints(
     prepared: &PreparedControllerStart,
     bootstrap: &PortableControllerBootstrap,
@@ -355,6 +405,7 @@ fn configure_workspace_checkpoints(
     runtime.checkpoints = None;
     if prepared.admitted.runtime.workspace_checkpoints {
         runtime.cleanup = Arc::new(PortableCheckpointCleanup {
+            stopping: prepared.stopping.clone(),
             inner: runtime.cleanup,
             directory: prepared.paths.storage().join("checkpoints"),
             repository: bootstrap.checkpoint_repository.clone(),
@@ -366,7 +417,8 @@ fn configure_workspace_checkpoints(
                 bootstrap.workspace.clone(),
                 crate::native_v2_admission::writer_nodes(&prepared.admitted),
             )
-            .map_err(|error| PortableControllerError::Io(error.0))?,
+            .map_err(|error| PortableControllerError::Io(error.0))?
+            .with_stop_request(prepared.stopping.clone()),
         ));
     }
     Ok(runtime)
@@ -378,20 +430,22 @@ fn configure_workspace_checkpoints(
 async fn restore_execution_seed(
     bootstrap: &PortableControllerBootstrap,
     deadline: tokio::time::Instant,
+    stopping: Option<watch::Receiver<bool>>,
 ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, PortableControllerError> {
-    use crate::native_v2_supervisor::checkpoints::{RestoreAttempt, restore_attempt};
+    use crate::native_v2_supervisor::checkpoints::{RestoreAttempt, restore_attempt_until_stopped};
     match &bootstrap.checkpoint {
         Some(selection) => {
             if !bootstrap.submission.runtime.workspace_checkpoints {
                 return Err(PortableControllerError::CheckpointsDisabled);
             }
-            restore_attempt(
+            restore_attempt_until_stopped(
                 selection,
                 &bootstrap.workspace,
                 RestoreAttempt {
                     owner: &bootstrap.run_id,
                     deadline,
                 },
+                stopping,
             )
             .await
             .map_err(|error| PortableControllerError::Restore(error.0))
@@ -401,6 +455,7 @@ async fn restore_execution_seed(
 }
 
 pub(super) struct PortableCheckpointCleanup {
+    pub(super) stopping: Option<watch::Receiver<bool>>,
     pub(super) inner: Arc<dyn CapsuleCleanup>,
     pub(super) directory: PathBuf,
     pub(super) repository: PathBuf,
@@ -418,7 +473,12 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         // Explicitly stopped runs have no durable terminal path that can perform post-terminal GC.
         // Stopping discards the whole lineage: every catalog naming the shared repository goes
         // before the repository, so no predecessor or successor lists deleted snapshots.
-        if matches!(exit, RunRuntimeExit::ForceStopped) {
+        if matches!(exit, RunRuntimeExit::ForceStopped)
+            && !self
+                .stopping
+                .as_ref()
+                .is_some_and(|stopping| *stopping.borrow())
+        {
             crate::native_v2_supervisor::checkpoints::discard_lineage(
                 &self.directory,
                 &self.repository,

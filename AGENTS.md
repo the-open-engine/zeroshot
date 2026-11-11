@@ -713,12 +713,32 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   loss.
 - SQLite operations acquire the single connection asynchronously before running on a blocking
   thread; cancelling a caller does not release an in-flight database operation's ownership.
+  The connection is granted in request order, also to a pending request that is no longer
+  polled, which then blocks every later operation: drop such a request before awaiting other
+  ledger work in its place. The local controller's serving loop drops its terminal wait before
+  it runs a requested stop.
 - Live force-stop signals owned work before waiting for persistence. Local stop intent prevents
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;
   a later durable terminal snapshot remains authoritative over the in-memory fallback. A local
   controller keeps serving until that attempt settles, bounded beyond SQLite's busy timeout, so
   process exit cannot discard the terminal; success exits are never delayed.
+  Detached local controllers latch Unix SIGTERM before bootstrap consumption and reuse this stop
+  path, retaining workspace/checkpoint recovery data. One process deadline bounds preparation,
+  cleanup, persistence and runtime exit to 30 seconds after the first request; repeated signals
+  cannot restart it. Startup review fetches and checkpoint capture/backup/extraction observe this
+  request and confirm subprocess cleanup before releasing workspace ownership. Snapshot traversal
+  reuses cancellable file copying and checks cancellation while validating and syncing metadata;
+  all snapshot Git commands use the shared bounded, cancellable process runner. Blocking snapshot
+  work bridges to its owning async runtime; synchronous callers use a joined private I/O thread.
+  Restore prevalidation is cancellable and supervised; replacement finishes once it starts. Only a
+  restore with a stop request, which the local controller awaits to its end, replaces the
+  workspace on the blocking pool. Every other restore replaces it inside its own poll, so a
+  dropped hosted allocation leaves no writer behind. Only confirmed
+  checkpoint cancellation settles as a stop; cancellation during a final checkpoint preserves the
+  latched primary outcome. No terminal is invented when settlement fails or
+  the deadline/OS ends the process. Terminal closure remains detached. Windows keeps Ctrl-C and
+  Ctrl-Break guards and adds no close/logoff/shutdown handler; cooperative stop uses force-stop.
 - Failed local and direct-target runs retain an exclusively claimable workspace for a successor
   attempt. Local recovery metadata lives beside each run ledger while the checkout remains
   user-owned; direct targets retain only the candidate and Git metadata, dispose private runtime

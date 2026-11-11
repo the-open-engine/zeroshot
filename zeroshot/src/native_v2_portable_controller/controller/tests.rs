@@ -9,6 +9,32 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use openengine_cluster_server::{ClusterBackend, ConnectionContext};
 
 use super::*;
+
+#[tokio::test]
+async fn shutdown_before_runtime_composition_never_dispatches_or_admits_a_run() {
+    let root = tempfile::tempdir().assert_value();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let storage = root.path().join("state");
+    let (_request, stopping) = watch::channel(true);
+    let result = PortableRunController::start_with_shutdown(
+        crate::native_v2_portable_controller::tests::bootstrap(
+            RunId::new("stopped-startup"),
+            crate::native_v2_portable_controller::tests::submission("stopped-startup"),
+            workspace,
+            storage.clone(),
+        ),
+        |_| -> Result<PortableRuntime, std::io::Error> {
+            panic!("a stopped startup must not compose a runtime")
+        },
+        Some(stopping),
+    )
+    .await;
+    assert!(matches!(result, Err(PortableControllerError::Shutdown)));
+    let ledger = SqliteRunLedger::open_read_only(PortableControllerPaths::new(storage).ledger())
+        .assert_value();
+    assert!(ledger.list().await.assert_value().is_empty());
+}
 use crate::v2_run_ledger::{CreateRun, RunLedger, fake::FakeRunLedger};
 
 async fn insert_fake_run(ledger: &FakeRunLedger, run: &str, key: &str, digest: char) {

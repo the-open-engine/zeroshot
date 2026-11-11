@@ -412,10 +412,14 @@ fn final_contract_controller_serves_a_runtime_failure_until_its_terminal_is_dura
         let server = controller.clone().bind().await.assert_value();
         // The submitting CLI is the observer a short run waits for.
         let _observer = connect_transport(controller.paths()).await.assert_value();
-        tokio::time::timeout(Duration::from_secs(30), server.serve_until_terminal())
-            .await
-            .assert_value_with("controller stopped serving")
-            .assert_value();
+        let (_stop, stopping) = tokio::sync::watch::channel(false);
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            server.serve_until_terminal(stopping),
+        )
+        .await
+        .assert_value_with("controller stopped serving")
+        .assert_value();
     });
     drop(controller_process);
     persistence.release();
