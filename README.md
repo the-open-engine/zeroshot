@@ -177,6 +177,10 @@ Drive zeroshot from your own code, CI or UI.
 Run locally, [self-host with Docker](docker/zeroshot-target/README.md), or share graphs and run
 on [zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API keys.
 
+zeroshot sends no telemetry. The CLI contacts GitHub only to install or update, and otherwise only
+the model providers, Git hosts and targets you set up. See
+[network access](docs/reference/installation.md#network-access).
+
 ## Community
 
 [The Open Engine](https://theopenengine.com/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Research blog](https://zeroshot.sh/blog/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [X](https://x.com/OpenEngineHQ) · [LinkedIn](https://www.linkedin.com/company/the-open-engine-company/) · [Instagram](https://www.instagram.com/theopenengine/)
