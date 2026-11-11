@@ -214,6 +214,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
                     connection_resolver: None,
                     github_token: None,
                 },
+                false,
             )
             .await,
     );
@@ -320,6 +321,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
                     connection_resolver: None,
                     github_token: None,
                 },
+                false,
             )
             .await
             .is_err()
@@ -425,18 +427,21 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
     );
 
     let error = backend
-        .resume_local(RunResumeParams {
-            git_credentials: None,
-            commit_identity: None,
-            commit_co_author: None,
+        .resume_local(
+            RunResumeParams {
+                git_credentials: None,
+                commit_identity: None,
+                commit_co_author: None,
 
-            run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
-            successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
-            from: None,
-            connections: BTreeMap::new(),
-            connection_resolver: None,
-            github_token: None,
-        })
+                run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
+                successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
+                from: None,
+                connections: BTreeMap::new(),
+                connection_resolver: None,
+                github_token: None,
+            },
+            false,
+        )
         .await
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
@@ -459,17 +464,20 @@ async fn local_resume_rejects_a_commit_identity_or_co_author_before_touching_loc
         (None, Some(co_author_identity())),
     ] {
         let error = backend
-            .resume_local(RunResumeParams {
-                run_id: run_id("0199f33f-3b44-7d21-9000-000000000044"),
-                successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000045"),
-                from: None,
-                connections: BTreeMap::new(),
-                connection_resolver: None,
-                github_token: None,
-                git_credentials: None,
-                commit_identity,
-                commit_co_author,
-            })
+            .resume_local(
+                RunResumeParams {
+                    run_id: run_id("0199f33f-3b44-7d21-9000-000000000044"),
+                    successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000045"),
+                    from: None,
+                    connections: BTreeMap::new(),
+                    connection_resolver: None,
+                    github_token: None,
+                    git_credentials: None,
+                    commit_identity,
+                    commit_co_author,
+                },
+                false,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -526,18 +534,21 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
         .assert_value();
 
     let error = backend
-        .resume_local(RunResumeParams {
-            git_credentials: None,
-            commit_identity: None,
-            commit_co_author: None,
+        .resume_local(
+            RunResumeParams {
+                git_credentials: None,
+                commit_identity: None,
+                commit_co_author: None,
 
-            run_id: original.clone(),
-            successor_run_id: successor.clone(),
-            from: None,
-            connections: BTreeMap::new(),
-            connection_resolver: None,
-            github_token: None,
-        })
+                run_id: original.clone(),
+                successor_run_id: successor.clone(),
+                from: None,
+                connections: BTreeMap::new(),
+                connection_resolver: None,
+                github_token: None,
+            },
+            false,
+        )
         .await
         .assert_error();
 

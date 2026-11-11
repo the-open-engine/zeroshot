@@ -48,7 +48,13 @@ async fn force_stopped_successor_discards_every_catalog_of_its_lineage() {
         .assert_value_with("checkpoint identity");
     let restored = fixture
         .json(
-            &["resume", &separate, "--from-checkpoint", checkpoint_id],
+            &[
+                "resume",
+                &separate,
+                "--from-checkpoint",
+                checkpoint_id,
+                "--discard-workspace-changes",
+            ],
             "finish",
         )
         .await;
@@ -60,7 +66,7 @@ async fn force_stopped_successor_discards_every_catalog_of_its_lineage() {
 }
 
 impl LocalFixture {
-    async fn failed_run(&self, title: &str) -> String {
+    pub(super) async fn failed_run(&self, title: &str) -> String {
         let failed = self.run(title, "fail", false).await;
         assert!(!failed.status.success(), "injected local failure succeeded");
         let run_id = json_lines(&failed.stdout)
@@ -74,7 +80,7 @@ impl LocalFixture {
         run_id
     }
 
-    async fn checkpoints(&self, run_id: &str) -> Vec<Value> {
+    pub(super) async fn checkpoints(&self, run_id: &str) -> Vec<Value> {
         self.json(&["checkpoints", run_id], "finish")
             .await
             .assert_key("checkpoints")

@@ -742,7 +742,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
   not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
-  retained workspace recovery. Default resume starts a fresh graph on the latest retained workspace;
+  retained workspace recovery. Default resume starts a fresh graph on the retained workspace;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
   imports old provider sessions, secrets, or token usage. Checkpoint IDs never become filesystem paths.
   The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
@@ -754,7 +754,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
   Versioned execution seeds live in separate files and are read only for selected continuation.
-  Restart restores the latest published snapshot without importing a seed. Restore staging is a
+  Target restart restores the latest published snapshot without importing a seed. Local restart
+  restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
+  after a failure enters the successor. A selected local checkpoint is an explicit rollback that
+  requires the CLI-only `--discard-workspace-changes` (rejected with `--target`); without it resume
+  fails before credential resolution, successor claim or workspace change and names the opt-in
+  command. Rollback keeps the shared-Git restore contract below. Restore staging is a
   private sibling of the workspace so final replacement stays on one filesystem. A restore reads
   the selected seed and extracts and validates its complete stage before changing the workspace.
   Restic runs in a contained process tree that is confirmed stopped on failure or at the deadline.
@@ -764,8 +769,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   selected snapshot and records it with the successor as the attempt in the predecessor's recovery
   metadata before launch, and clears it once that successor is ready. The local stage is named
   after its attempt, so the next resume removes only that stage. The same selection must still
-  resolve to the pinned snapshot; another selection that restores a snapshot replaces the record,
-  and a resume that would start without restoring is refused while it remains. Successful lineages
+  resolve to the pinned snapshot; another consented checkpoint selection replaces the record, and a
+  plain resume is refused while it remains. A `Latest` record left by an older plain resume is
+  completed only with consent: `resume RUN_ID --discard-workspace-changes` replays its pinned
+  snapshot. Outside that case the flag requires `--from-checkpoint`. Successful lineages
   delete their catalogs and repository only after durable terminal success; failed lineages retain
   both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable

@@ -33,8 +33,13 @@ async fn resume_without_the_lane_executable_on_path_is_refused_like_run() {
         "precondition: run from a PATH without codex must refuse\nstderr:\n{stderr}"
     );
 
-    // A plain resume restores the latest checkpoint; `--from-checkpoint` selects one.
-    for selection in [&[][..], &["--from-checkpoint", checkpoint_id.as_str()][..]] {
+    // A plain resume keeps the checkout; `--from-checkpoint` restores the selected one.
+    let rollback = [
+        "--from-checkpoint",
+        checkpoint_id.as_str(),
+        "--discard-workspace-changes",
+    ];
+    for selection in [&[][..], &rollback[..]] {
         let mut arguments = vec!["resume", failed_run_id.as_str()];
         arguments.extend_from_slice(selection);
         let resume = fixture.output(&arguments, "finish").await;
@@ -72,9 +77,18 @@ async fn resume_without_the_lane_executable_on_path_is_refused_like_run() {
         "a refused resume created a run"
     );
 
-    // From a PATH that finds codex, the same run still resumes.
+    // From a PATH that finds codex, the same run still resumes. The refused rollback may have
+    // left its restore incomplete, so a plain resume is refused until that rollback is repeated.
     fixture.harness_environment.remove("PATH");
-    let resumed = fixture.output(&["resume", &failed_run_id], "finish").await;
+    let plain = fixture.output(&["resume", &failed_run_id], "finish").await;
+    let stderr = String::from_utf8_lossy(&plain.stderr);
+    assert!(
+        !plain.status.success() && stderr.contains("partially restored"),
+        "a plain resume must not start on a pending restore\nstderr:\n{stderr}"
+    );
+    let mut arguments = vec!["resume", failed_run_id.as_str()];
+    arguments.extend_from_slice(&rollback);
+    let resumed = fixture.output(&arguments, "finish").await;
     assert_success(&resumed, "resume from a PATH that finds codex");
     fixture
         .wait_succeeded(&receipt_run_id(&resumed), "finish")
@@ -91,12 +105,24 @@ async fn resume_finds_a_lane_executable_that_only_its_restored_checkpoint_contai
     git(&fixture.repository, &["add", "tools/codex"]);
     git(&fixture.repository, &["commit", "-m", "carry codex"]);
     let failed_run_id = failed_run(&fixture).await;
+    let checkpoint_id = worker_checkpoint(&fixture, &failed_run_id).await;
     fs::remove_file(tools.join("codex")).assert_value_with("remove the workspace codex");
     fixture
         .harness_environment
         .insert("PATH".to_owned(), format!("tools:{HOST_PATH}"));
 
-    let resumed = fixture.output(&["resume", &failed_run_id], "finish").await;
+    let resumed = fixture
+        .output(
+            &[
+                "resume",
+                &failed_run_id,
+                "--from-checkpoint",
+                &checkpoint_id,
+                "--discard-workspace-changes",
+            ],
+            "finish",
+        )
+        .await;
 
     assert_success(
         &resumed,

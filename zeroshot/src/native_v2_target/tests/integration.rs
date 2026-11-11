@@ -622,6 +622,7 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
                     commit_co_author: None,
                     from: None,
                 },
+                false,
             )
             .await
             .assert_error(),

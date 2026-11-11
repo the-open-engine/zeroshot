@@ -759,6 +759,9 @@ mod resume_lane_executable;
 #[path = "force_stop_lineage.rs"]
 mod force_stop_lineage;
 
+#[path = "resume_workspace.rs"]
+mod resume_workspace;
+
 #[cfg(target_os = "linux")]
 #[path = "agent_tmpdir.rs"]
 mod agent_tmpdir;

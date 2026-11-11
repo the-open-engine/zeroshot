@@ -578,6 +578,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
                     commit_identity: None,
                     commit_co_author: None,
                 },
+                false,
             )
             .await
             .assert_error()
