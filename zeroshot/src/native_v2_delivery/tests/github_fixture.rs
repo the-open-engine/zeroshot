@@ -90,6 +90,7 @@ pub(in crate::native_v2_delivery) struct FakeGitHub {
     pub(super) delivery_read_branches: Mutex<Vec<String>>,
     pub(super) reviews: Mutex<Vec<SourceReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
+    pub(super) reject_review_sync: AtomicBool,
     pub(super) conflict_materializations: AtomicUsize,
     pub(super) target_reconciliations: AtomicUsize,
 }
@@ -118,6 +119,7 @@ impl FakeGitHub {
             delivery_read_branches: Mutex::new(Vec::new()),
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
+            reject_review_sync: AtomicBool::new(false),
             conflict_materializations: AtomicUsize::new(0),
             target_reconciliations: AtomicUsize::new(0),
         }
@@ -583,6 +585,12 @@ impl SourceDeliveryAuthority for FakeGitHub {
     ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
         assert!(self.pushed.load(Ordering::SeqCst));
         let attempt = self.review_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.reject_review_sync.load(Ordering::SeqCst) {
+            return Err(SourceDeliveryError::api(
+                Some(403),
+                "Review update refused test-token",
+            ));
+        }
         if matches!(self.script, Script::ReviewSyncCredentialExpires)
             && credential.expose() == "test-token"
         {

@@ -333,17 +333,57 @@ pub(super) fn display_text(
     truncated: bool,
     credential: SourceDeliveryCredential<'_>,
 ) -> String {
-    // Trim raw secret prefixes before UTF8 replacement can change their bytes.
-    let (text, truncated) =
-        crate::native_v2_delivery::command::diagnostic_text(bytes, truncated, credential.expose());
-    let encoded = credential_segment(credential.expose());
-    let (text, truncated) =
-        crate::native_v2_delivery::command::diagnostic_text(text.into_bytes(), truncated, &encoded);
+    use crate::native_v2_delivery::git_auth;
+    use crate::source_code_provider::SourceGitCredential;
+
+    let mut values = vec![credential.expose()];
+    values.extend(credential.github_git_token());
+    let mut secrets = Vec::new();
+    match credential.git() {
+        Some(SourceGitCredential::Https { username, password }) => {
+            values.extend([username, password]);
+            secrets.push(git_auth::encode_user_password(username, password));
+        }
+        Some(SourceGitCredential::Ssh {
+            private_key,
+            known_hosts,
+        }) => {
+            values.extend([private_key, known_hosts]);
+            values.extend(private_key.lines());
+        }
+        None => {}
+    }
+    for value in values.into_iter().filter(|value| !value.is_empty()) {
+        secrets.extend([
+            value.to_owned(),
+            credential_segment(value),
+            git_auth::encode_basic_credential(value),
+        ]);
+    }
+    // Redact every credential before any size bound or lossy UTF8 conversion can split it.
+    let (text, truncated) = crate::native_v2_delivery::command::diagnostic_text_with_secrets(
+        bytes, truncated, &secrets,
+    );
     let mut text = text.replace(char::is_control, " ");
     if truncated {
         text.push_str(" [truncated]");
     }
     text
+}
+
+pub(super) fn identity_error(
+    diagnostic: String,
+    credential: SourceDeliveryCredential<'_>,
+) -> SourceDeliveryError {
+    SourceDeliveryError::identity(display_text(diagnostic.into_bytes(), false, credential))
+}
+
+pub(super) fn delivery_context(
+    error: SourceDeliveryError,
+    context: String,
+    credential: SourceDeliveryCredential<'_>,
+) -> SourceDeliveryError {
+    error.with_context(display_text(context.into_bytes(), false, credential))
 }
 
 // Match the request encoder, including slash and percent escapes, without changing its URL.

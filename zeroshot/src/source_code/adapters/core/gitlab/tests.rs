@@ -43,8 +43,8 @@ struct StateData {
     job_logs: BTreeMap<u64, Vec<u8>>,
 }
 
-struct Fixture {
-    authority: GitLabDeliveryAuthority,
+pub(crate) struct Fixture {
+    pub(crate) authority: GitLabDeliveryAuthority,
     state: Arc<Mutex<StateData>>,
     server: tokio::task::JoinHandle<()>,
 }
@@ -56,7 +56,7 @@ impl Drop for Fixture {
 }
 
 impl Fixture {
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         Self::with_api_prefix("").await
     }
 
@@ -99,8 +99,12 @@ impl Fixture {
         }
     }
 
-    fn open_review(&self) {
+    pub(crate) fn open_review(&self) {
         self.state.lock().unwrap().review = Some(merge_request());
+    }
+
+    pub(crate) fn change_review(&self, field: &str, value: Value) {
+        self.state.lock().unwrap().review.as_mut().unwrap()[field] = value;
     }
 
     fn response(&self, method: &str, suffix: &str, response: (StatusCode, Value)) {
@@ -1384,7 +1388,7 @@ async fn persistent_merge_request_ref_disagreement_is_terminal() {
             matches!(error, SourceDeliveryError::Identity(_)),
             "{error:?}"
         );
-        for expected in ["17", "zeroshot/test", &HEAD[..12], &MERGED[..12]] {
+        for expected in [REPOSITORY, "17", "zeroshot/test", "main", HEAD, MERGED] {
             assert!(error.to_string().contains(expected), "{error}");
         }
     }
@@ -1402,6 +1406,9 @@ async fn run_branch_review_outside_the_target_is_refused() {
         .await
         .unwrap_err();
     assert!(!error.retryable_operation(), "{error}");
+    for expected in [REPOSITORY, "!17", "zeroshot/test", "main", "other", HEAD] {
+        assert!(error.to_string().contains(expected), "{error}");
+    }
     assert_eq!(fixture.writes("/merge_requests"), 0);
 }
 

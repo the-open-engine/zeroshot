@@ -889,6 +889,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the unchanged candidate directly; other integrated remote changes return `repair_required` so the
   authored graph decides what work follows. Agents receive local refs and conflicts without the
   delivery credential. Closed PRs, identity changes and lost published ancestry stop delivery.
+  Failure diagnostics name the project, source/target branches and known review/head, including the
+  last confirmed publication. Diagnostic publication evidence is separate from reconciliation and
+  withdrawal authority: a repair push may advance it before review synchronization succeeds.
+  GitLab merge HTTP 401 is a missing merge permission only when a fresh authenticated user read
+  succeeds; rejected tokens retain authentication failure classification.
 - Hosted delivery Git runs as the pinned workspace writer UID/GID, matching source checkout, so
   fetched objects, commits, merges, and partial failures remain writable by subsequent repairs.
   Admission excludes overlapping writers and requires their process cleanup before delivery;
@@ -1001,7 +1006,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Workspace Git and forge reconciliation parse private protocol stdout separately from printable
   diagnostics, including when native credentials collide with object IDs or Git-directory paths;
   parsing and failure classification must preserve raw evidence before credential redaction. Final delivery feedback
-  also redacts the invocation's source credentials and its current refreshed issuance;
+  also redacts the invocation's source credentials, its current refreshed issuance, and captured
+  native Git credentials using the shared credential-name selector. GitLab object diagnostics redact
+  credentials before bounded source errors are constructed; malformed object fields are described
+  without interpolating their unbounded response text;
   unfamiliar failures use the existing optional `repair_required` signal. After exact-ref
   confirmation, only the exact forge-authored branch-protection and push-permission texts in
   `git_diagnostic.rs` (relayed `remote:` lines or GitHub's SSH `ERROR:` lines) become

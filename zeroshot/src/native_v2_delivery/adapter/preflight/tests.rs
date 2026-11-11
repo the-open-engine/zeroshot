@@ -2,6 +2,38 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+#[tokio::test]
+async fn gitlab_existing_run_branch_refusal_names_the_observed_branch_and_revision() {
+    use crate::source_code_provider::adapters::core::gitlab::tests::Fixture;
+
+    let fixture = Fixture::new().await;
+    let target = DeliveryTarget::new("group/sub/project", "main", "a".repeat(40)).assert_value();
+    let snapshot = fixture
+        .authority
+        .observe_delivery(
+            SourceDeliveryRead {
+                target: &target,
+                head_branch: "zeroshot/test",
+                known_review: None,
+                include_review: false,
+            },
+            SourceDeliveryCredential::token("test-private-token"),
+        )
+        .await
+        .assert_value();
+    let observed = observed_receipt(snapshot, &target, "zeroshot/test").assert_value();
+    let error = reconciliation_anchor(&DeliveryState::default(), &observed, false).assert_error();
+    for expected in [
+        "unexpected existing run branch",
+        "group/sub/project",
+        "zeroshot/test",
+        "main",
+        &"b".repeat(40),
+    ] {
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
 const OBSERVED_HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const PUBLISHED_HEAD: &str = "cccccccccccccccccccccccccccccccccccccccc";
 const INTENDED_HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";

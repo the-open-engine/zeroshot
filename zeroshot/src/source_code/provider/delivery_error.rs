@@ -15,6 +15,7 @@ pub struct SourceApiFailure {
     status: Option<u16>,
     diagnostic: Box<str>,
     retry: ApiRetry,
+    authentication_failed: bool,
 }
 
 impl SourceApiFailure {
@@ -35,6 +36,7 @@ impl SourceApiFailure {
             status,
             diagnostic: diagnostic.into_boxed_str(),
             retry: ApiRetry::Status,
+            authentication_failed: status == Some(401),
         }
     }
 
@@ -46,7 +48,7 @@ impl SourceApiFailure {
     }
 
     fn authentication_failed(&self) -> bool {
-        matches!(self.status, Some(401))
+        self.authentication_failed
     }
 }
 
@@ -130,6 +132,14 @@ impl SourceDeliveryError {
         self
     }
 
+    /// A successful authenticated read proved this API refusal is about permission.
+    pub(crate) fn permission_denied(mut self) -> Self {
+        if let Self::Api(failure) = &mut self {
+            failure.authentication_failed = false;
+        }
+        self
+    }
+
     /// A visibility race may retry only within the existing review synchronization batch.
     pub fn temporary_review_sync(mut self) -> Self {
         if let Self::Api(failure) = &mut self
@@ -150,6 +160,7 @@ impl SourceDeliveryError {
                 let mut wrapped =
                     SourceApiFailure::new(failure.status, format!("{context}\n{failure}"));
                 wrapped.retry = failure.retry;
+                wrapped.authentication_failed = failure.authentication_failed;
                 Self::Api(wrapped)
             }
             Self::Identity(detail) => Self::identity(format!("{context}\n{detail}")),
