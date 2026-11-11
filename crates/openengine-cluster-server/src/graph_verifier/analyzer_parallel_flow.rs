@@ -246,9 +246,11 @@ impl<'a> Analyzer<'a> {
         let required = parallel_required_completions(&group.join, completions.len());
         let branches = if let Join::First { when } = &group.join {
             // Charge expansion before constructing availability maps or copying any predicates.
+            self.proof_work.charge(guard_cell_count(when))?;
             self.proof_work.charge(
-                (guard_node_count(when) as usize)
-                    .checked_add(guard_selector_uses(when).len())?
+                guard_selector_uses(when)
+                    .len()
+                    .checked_add(1)?
                     .checked_mul(completions.len())?,
             )?;
             let shared_guard = std::sync::Arc::new(when.clone());
@@ -359,6 +361,7 @@ impl<'a> Analyzer<'a> {
         let start = names.iter().position(|name| *name == racer)?;
         let mut guards = Vec::new();
         for name in names[start..].iter().filter(|name| **name != target) {
+            self.proof_work.charge(2)?;
             if let Some(presence) =
                 self.candidate_parent_presence(self.nodes.get(*name)?.node, &names)?
             {
