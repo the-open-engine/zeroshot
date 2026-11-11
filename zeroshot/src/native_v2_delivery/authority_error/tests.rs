@@ -82,6 +82,14 @@ fn context_preserves_authority_failure_policy() {
             false,
             true,
         ),
+        (
+            SourceDeliveryError::api(Some(400), "branch not indexed").temporary_review_sync(),
+            "api",
+            Some(400),
+            true,
+            false,
+            false,
+        ),
     ];
     for (error, expected_kind, status, review_retry, authentication, operation_retry) in cases {
         let contextual = error.with_context("synchronizing review");

@@ -416,14 +416,14 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         // Provider cleanup is authoritative; checkpoint scratch collection is best effort.
         let _ = remove_directory_if_present(&self.directory.join("staging"));
         // Explicitly stopped runs have no durable terminal path that can perform post-terminal GC.
+        // Stopping discards the whole lineage: every catalog naming the shared repository goes
+        // before the repository, so no predecessor or successor lists deleted snapshots.
         if matches!(exit, RunRuntimeExit::ForceStopped) {
-            for path in [&self.directory, &self.repository] {
-                match std::fs::remove_dir_all(path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(_) => return Err(CapsuleCleanupUnavailable),
-                }
-            }
+            crate::native_v2_supervisor::checkpoints::discard_lineage(
+                &self.directory,
+                &self.repository,
+            )
+            .map_err(|_| CapsuleCleanupUnavailable)?;
         }
         Ok(destroyed)
     }

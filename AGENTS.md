@@ -453,7 +453,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. `need_rebase` merges the captured target into a
+  merges; required merge trains remain pending. GitLab's complete HTTP 400 missing-source-branch
+  creation validation retries only within the existing review-sync batch, rechecking the published
+  candidate before each POST; uncertain creation responses retain their at-most-once fence.
+  `need_rebase` merges the captured target into a
   workspace descending from the MR head, bounded by their fork point rather than the MR head, then
   returns repair; a candidate already containing the target is refused naming the merge method and
   target revision. GitLab readiness, approval handoff and merge share
@@ -674,10 +677,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   After an accepted answer, a valid `session.detach` refusal or peer EOF is logged and keeps the
   outcome, including a closed stdin pipe during that request. Malformed RPC replies/events, other
   RPC writes, cancellation, durable output and cleanup failures still fail closed.
-- Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
+- Provider JSONL readers do not cap cumulative output. They share the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
   validating provider-owned fields, and continue draining after the first valid terminal event
   (Codex bounds that drain after a completed turn).
+  Their shared decoder replaces invalid UTF-8 and unpaired Unicode surrogate escapes with U+FFFD
+  before adapter parsing and redaction; all other malformed JSON retains each reader's rejection policy.
 - Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
   turn it runs the selected executable with `--version` through that turn's launch path and
   environment. One `--print` process can write several results while background subagents or
@@ -758,6 +763,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Hosted failed runs likewise collect checkpoint staging as best effort after process cleanup;
   retained recovery still requires runtime cleanup, workspace ownership transfer, and durable
   recovery metadata. Force-stop and explicit discard retain authoritative lineage deletion.
+  Local force-stop stays destructive for the whole lineage and retains no checkpoints: after
+  confirmed runtime cleanup it reuses `discard_lineage` to remove every catalog naming the shared
+  repository, predecessor and successor alike, before the repository. A catalog removal failure
+  keeps the repository and reports cleanup unavailable. Other lineages are untouched.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
@@ -1191,6 +1200,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
+  ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
+  context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
 - Graph verification errors display their first safe diagnostic, its path and the count of further
   diagnostics through the shared verifier error, so local validation and hosted rejection report the
   same cause. Within the 1,024-byte target problem message bound, the count and then the path's
