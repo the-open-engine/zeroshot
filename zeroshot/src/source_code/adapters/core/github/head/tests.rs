@@ -381,7 +381,14 @@ async fn real_reconciliation_materializes_conflict_without_discarding_repairs() 
 async fn real_reconciliation_refuses_rewritten_remote_without_changing_local_work() {
     let history = SeparateHistory::new();
     let observed = history.rewrite_remote();
-    assert_refusal_preserves_repairs(&history, &observed, false).await;
+    let diagnostic = assert_refusal_preserves_repairs(&history, &observed, false).await;
+    assert_eq!(
+        diagnostic,
+        format!(
+            "remote history was rewritten: published head {}; observed head {}; local work was preserved",
+            history.published.head_revision, observed.head_revision,
+        ),
+    );
 }
 
 #[tokio::test]
@@ -406,32 +413,47 @@ async fn real_reconciliation_preserves_the_authorized_clean_fast_forward_path() 
 }
 
 #[tokio::test]
-async fn real_reconciliation_refuses_lost_local_anchor_even_when_remote_is_unchanged() {
+async fn real_reconciliation_refuses_lost_local_anchor_with_checkpoint_recovery() {
     let history = SeparateHistory::new();
     git(
         &history.repository.workspace,
         &["reset", "--hard", &history.repository.base],
     );
-    assert_refusal_preserves_repairs(&history, &history.published, false).await;
+    let diagnostic = assert_refusal_preserves_repairs(&history, &history.published, false).await;
+    for expected in [
+        format!("published head {}", history.published.head_revision),
+        format!("branch {}", history.published.head_branch),
+        format!("local head {}", history.repository.base),
+        "zeroshot checkpoints RUN_ID".to_owned(),
+        "zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID".to_owned(),
+        "checkpoint taken before the rewrite".to_owned(),
+    ] {
+        assert!(diagnostic.contains(&expected), "{diagnostic}");
+    }
 }
 
 async fn assert_refusal_preserves_repairs(
     history: &SeparateHistory,
     observed: &SourceReviewReceipt,
     adopting_existing: bool,
-) {
+) -> String {
     std::fs::write(
         history.repository.workspace.join("repair.txt"),
         "preserve\n",
     )
     .assert_value();
     let before = git_output(&history.repository.workspace, &["rev-parse", "HEAD"]);
-    assert!(matches!(
-        history
-            .reconcile_with_mode(observed, false, adopting_existing)
-            .await,
-        SourceReconciliationOutcome::Refused(_)
-    ));
+    let status_before = git_output(
+        &history.repository.workspace,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    );
+    let remote_before = git_output(&history.repository.remote, &["show-ref"]);
+    let SourceReconciliationOutcome::Refused(diagnostic) = history
+        .reconcile_with_mode(observed, false, adopting_existing)
+        .await
+    else {
+        panic!("expected refusal");
+    };
     assert_eq!(
         git_output(&history.repository.workspace, &["rev-parse", "HEAD"]),
         before
@@ -440,4 +462,16 @@ async fn assert_refusal_preserves_repairs(
         std::fs::read_to_string(history.repository.workspace.join("repair.txt")).assert_value(),
         "preserve\n"
     );
+    assert_eq!(
+        git_output(
+            &history.repository.workspace,
+            &["status", "--porcelain=v1", "--untracked-files=all"],
+        ),
+        status_before,
+    );
+    assert_eq!(
+        git_output(&history.repository.remote, &["show-ref"]),
+        remote_before,
+    );
+    diagnostic
 }
