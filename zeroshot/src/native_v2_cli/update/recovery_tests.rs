@@ -7,6 +7,118 @@ const TARGET_RELEASE: ReleaseVersion = ReleaseVersion([8, 2, 1]);
 /// Bounds each wait of the overlap below, so serialized installations proceed after it.
 const OVERLAP_WAIT: Duration = Duration::from_secs(5);
 
+#[cfg(unix)]
+#[tokio::test]
+async fn unwritable_npm_installations_fail_before_asset_downloads_but_allow_current_versions() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    if std::env::var("ZEROSHOT_SKIP_SKILLS").as_deref() != Ok("1") {
+        // Keep the current-version assertion independent of user-scope skill writes.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "native_v2_cli::update::tests::recovery_tests::unwritable_npm_installations_fail_before_asset_downloads_but_allow_current_versions",
+                "--nocapture",
+            ])
+            .env("ZEROSHOT_SKIP_SKILLS", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        return;
+    }
+    let assets = TcpListener::bind("127.0.0.1:0").unwrap();
+    assets.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", assets.local_addr().unwrap());
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(1))
+        .build()
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    for relative in [
+        "prefix/lib/node_modules/@the-open-engine-company/zeroshot/bin/native",
+        r"prefix\node_modules\@the-open-engine-company\zeroshot\bin\native",
+    ] {
+        let native = directory.path().join(relative);
+        fs::create_dir_all(&native).unwrap();
+        let current = native.join("zeroshot");
+        fs::write(&current, b"old binary").unwrap();
+        fs::write(native.join("restic"), b"old restic").unwrap();
+
+        // A writable npm installation remains eligible, and its probe leaves no staging files.
+        check_installation(&current, ReleaseVersion([8, 2, 0]), TARGET_RELEASE).unwrap();
+        assert!(staged_update_files(&native).is_empty());
+        fs::set_permissions(&native, fs::Permissions::from_mode(0o555)).unwrap();
+        let result = apply_release(
+            &client,
+            InstalledRelease {
+                executable: &current,
+                version: ReleaseVersion([8, 2, 0]),
+            },
+            TARGET_RELEASE,
+            &base_url,
+        )
+        .await;
+        let server = TestServer::start(vec![fixed_response("200 OK", b"")]);
+        let current_result = apply_release(
+            &client,
+            InstalledRelease {
+                executable: &current,
+                version: TARGET_RELEASE,
+            },
+            TARGET_RELEASE,
+            &server.base_url,
+        )
+        .await;
+        fs::set_permissions(&native, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let error = result.assert_error().to_string();
+        assert!(
+            error.contains("cannot replace this installation"),
+            "{error}"
+        );
+        assert!(error.contains("Permission denied"), "{error}");
+        assert!(
+            error.ends_with("npm install --global @the-open-engine-company/zeroshot@8.2.1"),
+            "{error}"
+        );
+        let (updated, skill_updated) = current_result.unwrap();
+        server.finish();
+        let mut output = Vec::new();
+        write_result(
+            &mut output,
+            UpdateResult {
+                current_version: TARGET_RELEASE.to_string(),
+                latest_version: TARGET_RELEASE.to_string(),
+                updated,
+                skill_updated,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output).unwrap()["updated"],
+            false
+        );
+        assert_eq!(fs::read(&current).unwrap(), b"old binary");
+        assert_eq!(fs::read(native.join("restic")).unwrap(), b"old restic");
+        assert!(staged_update_files(&native).is_empty());
+    }
+    assert_eq!(
+        assets.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "an asset request preceded the installation preflight"
+    );
+}
+
 #[test]
 fn overlapping_installs_succeed_and_keep_the_restic_sidecar_of_the_installed_release() {
     let directory = tempfile::tempdir().unwrap();

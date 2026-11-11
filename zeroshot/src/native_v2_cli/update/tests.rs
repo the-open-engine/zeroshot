@@ -116,7 +116,9 @@ fn assert_release_archive_accepts_exact_regular_executables() {
         ArchiveEntry::File("zeroshot", binary),
         ArchiveEntry::File("restic", restic),
     ]);
-    let extracted = extract_executables(&archive, &["zeroshot", "restic"]).assert_value();
+    let extracted =
+        extract_executables(&archive, &["zeroshot", "restic"], ReleaseVersion([8, 2, 1]))
+            .assert_value();
     assert_eq!(extracted["zeroshot"], binary);
     assert_eq!(extracted["restic"], restic);
 }
@@ -125,6 +127,14 @@ fn assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_execu
     let cases = [
         (
             test_archive(&[ArchiveEntry::File("bin/zeroshot", b"binary")]),
+            "unexpected entry",
+        ),
+        (
+            test_archive(&[
+                ArchiveEntry::File("zeroshot", b"binary"),
+                ArchiveEntry::File("restic", b"sidecar"),
+                ArchiveEntry::File("README", b"extra entry"),
+            ]),
             "unexpected entry",
         ),
         (
@@ -139,12 +149,50 @@ fn assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_execu
             "duplicate",
         ),
         (test_archive(&[]), "omits a required executable"),
+        (
+            test_archive(&[ArchiveEntry::File("zeroshot", b"binary")]),
+            "omits a required executable",
+        ),
+        (
+            test_archive(&[ArchiveEntry::File("restic", b"sidecar")]),
+            "omits a required executable",
+        ),
     ];
     for (archive, expected) in cases {
-        let error = extract_executables(&archive, &["zeroshot", "restic"])
+        for version in [ReleaseVersion([8, 2, 1]), ReleaseVersion([10, 9, 2])] {
+            let error = extract_executables(&archive, &["zeroshot", "restic"], version)
+                .assert_error()
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+            assert!(
+                error.ends_with(&format!(
+                    "npm install --global @the-open-engine-company/zeroshot@{version}"
+                )),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn release_lookup_rate_limits_end_with_the_npm_command() {
+    let client = http_client().assert_value();
+    for status in ["403 Forbidden", "429 Too Many Requests"] {
+        let server = TestServer::start(vec![fixed_response(
+            status,
+            br#"{"message":"API rate limit exceeded. Authenticate for a higher limit."}"#,
+        )]);
+        let error = latest_version_at(&client, &server.url("latest"))
+            .await
             .assert_error()
             .to_string();
-        assert!(error.contains(expected), "{error}");
+        server.finish();
+        assert!(error.contains(status), "{error}");
+        assert!(error.contains("API rate limit exceeded"), "{error}");
+        assert!(
+            error.ends_with("npm install --global @the-open-engine-company/zeroshot@latest"),
+            "{error}"
+        );
     }
 }
 
@@ -458,8 +506,12 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
     assert_eq!(
         apply_release(
             &client,
-            ReleaseVersion([8, 2, 1]),
+            InstalledRelease {
+                executable: Path::new("unused"),
+                version: ReleaseVersion([8, 2, 1]),
+            },
             ReleaseVersion([8, 2, 0]),
+            "unused",
         )
         .await
         .assert_value(),
@@ -750,7 +802,7 @@ fn assert_update_process_boundaries_fail_before_replacement() {
         .assert_error()
         .to_string();
     assert!(unsupported.contains("plan9/mips"));
-    assert!(extract_executables(b"not a gzip archive", &[executable, restic]).is_err());
+    assert!(extract_executables(b"not a gzip archive", &[executable, restic], version).is_err());
     assert!(
         install_at(
             Path::new(""),
@@ -806,7 +858,17 @@ async fn assert_update_short_circuits_and_serializes_without_release_io() {
     let older = ReleaseVersion([8, 3, 9]);
     let client = http_client().assert_value();
     assert_eq!(
-        apply_release(&client, current, older).await.assert_value(),
+        apply_release(
+            &client,
+            InstalledRelease {
+                executable: Path::new("unused"),
+                version: current,
+            },
+            older,
+            "unused",
+        )
+        .await
+        .assert_value(),
         (false, false)
     );
     assert!(installed_version().is_err());
@@ -877,9 +939,13 @@ async fn wave11_cli_contract_update_wrappers_fail_before_remote_or_replacement_e
         "{error}"
     );
 
-    let error = install(&test_executables(), ReleaseVersion([8, 11, 0]))
-        .assert_error()
-        .to_string();
+    let error = install(
+        &std::env::current_exe().unwrap(),
+        &test_executables(),
+        ReleaseVersion([8, 11, 0]),
+    )
+    .assert_error()
+    .to_string();
     assert!(error.contains("could not verify the update"), "{error}");
 }
 

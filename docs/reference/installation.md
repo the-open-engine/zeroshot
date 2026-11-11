@@ -26,13 +26,19 @@ against that release's `SHA256SUMS`, and verifies the new executable before repl
 zeroshot update
 ```
 
-The update does not elevate privileges; the current executable must be writable by the caller.
+The update does not elevate privileges. Before downloading release assets for a newer version,
+it checks that the installation directory is writable. A current executable still reports
+`"updated":false` when that directory is unwritable; managed skills are refreshed separately.
 Updates of one installation replace it one at a time. An update that waited for another one and
 finds the same release already installed reports `"updated":false`. Before installing a newer
 release, an update also removes the files that interrupted updates left next to the executable.
 A download fails with a timeout once the server has sent nothing for 30 seconds; a slow download
 that keeps receiving data is never cut off. Failures name their cause, such as an unreachable or
 refusing proxy, an untrusted certificate, or GitHub's explanation of a rate limit.
+An unwritable installation or rejected archive ends with an npm reinstall command pinned to the
+release being installed. A release lookup refused with HTTP 403 or 429 instead names
+`npm install --global @the-open-engine-company/zeroshot@latest`, because no release version was
+resolved. The updater uses anonymous GitHub requests.
 Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, Pi, and Claude
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.
@@ -40,6 +46,13 @@ after completing any safe updates.
 Older updaters install only the skills they know. If `zeroshot-graph-design` or `zeroshot-plan` is
 missing after an executable upgrade, run `zeroshot update` again. The current updater refreshes all
 managed skills even when the executable version is already current.
+
+An in-place update of a writable npm installation is supported. It replaces the executables under
+the package's `bin/native` directory without changing `package.json` or npm's installation records.
+`npm list --global` therefore reports the npm package version originally installed, while
+`zeroshot --version` reports the updated executable. A later npm install uses its selected package
+version to replace the executables again. To synchronize npm's records with the CLI, reinstall the
+desired version with `npm install --global @the-open-engine-company/zeroshot@X.Y.Z`.
 
 ## Managed skills
 

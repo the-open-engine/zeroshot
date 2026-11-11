@@ -56,6 +56,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   none is installed, and reports `updated: false` when the executable and sidecar already hold the
   release's bytes. It installs or refreshes only unchanged managed skill copies and preserves
   conflicts.
+  A newer release probes installation-directory writability before downloading any asset; a current
+  installation skips that probe. Unwritable installs and archive rejections end with the shared
+  version-pinned npm reinstall command; release-lookup HTTP 403/429 uses `@latest` because no version
+  was resolved. In-place updates preserve npm's recorded package version. The exact two-executable
+  archive layout is a compatibility contract: adding entries strands released updaters.
   Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
   whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
   bounded, control-safe `message`, never request URLs.

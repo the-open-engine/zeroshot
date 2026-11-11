@@ -89,6 +89,10 @@ This updates the executable and unchanged managed skills. It preserves edited sk
 conflicts by path. If skills are missing after upgrading through an older updater, run the command
 again. See [update behavior](../reference/installation.md#update-behavior) for verification and failures.
 
+For an npm installation, this replaces the bundled executables in place. npm's package metadata
+keeps the version originally installed, so `npm list --global` can show an older version than
+`zeroshot --version`. Reinstall through npm to bring its recorded version up to date.
+
 Versions 10.4.0 through 10.8.0 cannot update themselves: their updater rejects the bundled sidecar
 with `release archive contains unexpected entry restic` (`restic.exe` on Windows).
 Reinstall once through npm; subsequent updates can use `zeroshot update`:

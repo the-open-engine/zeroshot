@@ -56,6 +56,11 @@ npm as described in [Install zeroshot](getting-started/install.md). `SHA256SUMS`
 and the exact `zeroshot-skill.md`, `zeroshot-memory-init-skill.md`, `zeroshot-graph-design-skill.md`,
 and `zeroshot-plan-skill.md` copied from their canonical npm sources. The workflow also rejects a Linux zeroshot release binary that has a dynamic interpreter.
 
+The exact archive layout is an updater compatibility contract. Adding an archive entry strands
+every released updater: each rejects unknown entries before it can install a newer executable.
+Changing the extractor in a new release cannot repair those installed updaters; users must reinstall
+through npm to cross that boundary. Keep additional release assets outside the native archives.
+
 ## Version staging
 
 Checked-in manifests carry development versions that are not release identifiers. In the release
