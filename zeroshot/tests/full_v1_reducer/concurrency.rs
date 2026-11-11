@@ -41,15 +41,16 @@ async fn complete_input_runs_in_item_batches_including_1025_items() {
         let input = json!({"items":vec![Value::Null;count]});
         let mut history = Vec::new();
         let mut observed = Vec::new();
+        let mut clock = 1;
         loop {
             let reduced = FullV1Reducer::native_v2(&graph)
-                .with_dispatch_limit(3)
+                .with_dispatch_limit(11)
                 .reduce(input_for(&input, &history))
-                .assert_value();
-            if reduced.terminal.is_some() {
+                .unwrap();
+            if let Some(terminal) = reduced.terminal {
+                assert!(matches!(terminal, TerminalProjection::Succeeded { .. }));
                 break;
             }
-            let mut started = 0;
             for decision in reduced.decisions {
                 if let Decision::Dispatch {
                     node_instance,
@@ -61,23 +62,39 @@ async fn complete_input_runs_in_item_batches_including_1025_items() {
                 } = decision
                 {
                     observed.push(occurrence.map_indices[0]);
-                    started += 1;
-                    let position = execution.get() * 2;
                     history.push(DurableExecution {
                         node_instance,
                         execution,
                         occurrence,
                         attempt,
                         input,
-                        dispatch_position: HistoryPosition::new(position).assert_value(),
-                        state: DurableExecutionState::Settled {
-                            position: HistoryPosition::new(position + 1).assert_value(),
-                            outcome: success(position as i64),
-                        },
+                        dispatch_position: HistoryPosition::new(clock).unwrap(),
+                        state: DurableExecutionState::Active,
                     });
+                    clock += 1;
                 }
             }
-            assert!((1..=3).contains(&started));
+            let active = history
+                .iter()
+                .enumerate()
+                .filter_map(|(index, execution)| {
+                    matches!(execution.state, DurableExecutionState::Active).then_some(index)
+                })
+                .collect::<Vec<_>>();
+            assert!(!active.is_empty(), "pending input must make progress");
+            assert!(active.len() <= 7, "whole item bodies own the map capacity");
+            if observed.len() == 7 {
+                assert_eq!(active.len(), 7);
+            }
+            // Keep a body active while admitting the next batch, rather than draining every slot.
+            let settle = active.len().saturating_sub(1).max(1);
+            for index in active.into_iter().take(settle) {
+                history[index].state = DurableExecutionState::Settled {
+                    position: HistoryPosition::new(clock).unwrap(),
+                    outcome: success(clock as i64),
+                };
+                clock += 1;
+            }
         }
         assert_eq!(observed, (0..count as u64).collect::<Vec<_>>());
     }
@@ -326,8 +343,14 @@ async fn pending_rejecting_racer_enters_its_tail_until_actual_work_limit() {
                 SettledSpec::new(1, 1, "gate").position(2),
                 verdict("accepted"),
             ),
-            settled(SettledSpec::new(2, 2, "a").position(3), verdict("rejected")),
-            settled(SettledSpec::new(3, 3, "b").position(4), verdict("rejected")),
+            settled(
+                SettledSpec::new(2, 2, "a").position(5).dispatched(3),
+                verdict("rejected"),
+            ),
+            settled(
+                SettledSpec::new(3, 3, "b").position(6).dispatched(4),
+                verdict("rejected"),
+            ),
         ];
         let input = json!({"empty":[]});
         assert!(matches!(
@@ -401,4 +424,75 @@ mod outcomes;
 fn assert_pending_dispatch(reduced: &Reduction, node: &str) {
     assert!(reduced.terminal.is_none(), "{reduced:#?}");
     assert!(reduced.decisions.iter().any(|decision| matches!(decision,Decision::Dispatch{occurrence,..} if occurrence.node.as_str()==node)),"{reduced:#?}");
+}
+
+#[tokio::test]
+async fn partially_settled_batches_fill_all_available_execution_capacity() {
+    let graph = reducer_test_support::verified_graph(
+        root(vec![mapped(step("work", 1), 128), succeed("done")]),
+        state(),
+        true,
+    )
+    .await;
+    let input = json!({"items":vec![Value::Null;128]});
+    let mut history = Vec::new();
+    let mut clock = 1;
+    for available in [64, 57, 7] {
+        let reduced = FullV1Reducer::native_v2(&graph)
+            .with_dispatch_limit(available)
+            .reduce(input_for(&input, &history))
+            .unwrap();
+        let mut started = 0;
+        for decision in reduced.decisions {
+            if let Decision::Dispatch {
+                node_instance,
+                execution,
+                occurrence,
+                attempt,
+                input,
+                ..
+            } = decision
+            {
+                history.push(DurableExecution {
+                    node_instance,
+                    execution,
+                    occurrence,
+                    attempt,
+                    input,
+                    dispatch_position: HistoryPosition::new(clock).unwrap(),
+                    state: DurableExecutionState::Active,
+                });
+                clock += 1;
+                started += 1;
+            }
+        }
+        assert_eq!(
+            started, available,
+            "active bodies do not consume the free frontier budget"
+        );
+        let settle = match available {
+            64 => 57,
+            57 => 7,
+            _ => 64,
+        };
+        for execution in history
+            .iter_mut()
+            .filter(|execution| matches!(execution.state, DurableExecutionState::Active))
+            .take(settle)
+        {
+            execution.state = DurableExecutionState::Settled {
+                position: HistoryPosition::new(clock).unwrap(),
+                outcome: success(1),
+            };
+            clock += 1;
+        }
+    }
+    let done = FullV1Reducer::native_v2(&graph)
+        .reduce(input_for(&input, &history))
+        .unwrap();
+    assert!(matches!(
+        done.terminal,
+        Some(TerminalProjection::Succeeded { .. })
+    ));
+    assert_eq!(history.len(), 128);
 }

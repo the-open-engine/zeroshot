@@ -154,6 +154,7 @@ enum CompletionPredicate {
     #[default]
     Never,
     Guard(Guard),
+    Shared(std::sync::Arc<Self>),
     CandidateGuard {
         guard: std::sync::Arc<Guard>,
         available: BTreeMap<SelectorKey, CompletionPredicate>,
@@ -294,6 +295,7 @@ impl CompletionPredicate {
             Self::Always => true,
             Self::Never => false,
             Self::Guard(guard) => evaluate_guard(guard, assignment),
+            Self::Shared(predicate) => predicate.evaluate(assignment),
             Self::CandidateGuard { guard, available } => {
                 openengine_cluster_protocol::evaluate_partial_guard(
                     guard,
@@ -328,6 +330,7 @@ impl CompletionPredicate {
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
         match self {
             Self::Guard(guard) => guards.push(guard),
+            Self::Shared(predicate) => predicate.collect_guards(guards),
             Self::CandidateGuard { guard, available } => {
                 guards.push(guard);
                 for presence in available.values() {
@@ -509,6 +512,7 @@ struct Analyzer<'a> {
     choice_reachability: BTreeMap<NodeName, ChoiceReachability>,
     choice_execution_correlations: BTreeMap<NodeName, Vec<ChoiceExecutionCorrelation>>,
     choice_write_conditions: BTreeMap<NodeName, CompletionPredicate>,
+    choice_routes: std::cell::RefCell<BTreeMap<NodeName, Vec<CompletionPredicate>>>,
     parallel_join_correlations: BTreeMap<NodeName, ParallelJoinCorrelation>,
     map_execution_correlations: BTreeMap<NodeName, MapExecutionCorrelation>,
     node_completion: BTreeMap<NodeName, CompletionPredicate>,

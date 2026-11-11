@@ -736,7 +736,10 @@ struct UniformRuntimePlan {
     provider: openengine_cluster_protocol::ProviderId,
     #[serde(default)]
     size: Option<RunSize>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "openengine_cluster_protocol::RuntimePlan::deserialize_max_concurrency"
+    )]
     max_concurrency: Option<openengine_cluster_protocol::PositiveInteger>,
     #[serde(default = "default_workspace_checkpoints")]
     workspace_checkpoints: bool,

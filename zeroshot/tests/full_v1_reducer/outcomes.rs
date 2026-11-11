@@ -80,7 +80,7 @@ async fn unfinished_loop_keeps_scalar_and_mapped_verdicts_replaceable() {
                 assert!(next.terminal.is_none());
                 assert!(next.decisions.iter().any(|d|matches!(d,Decision::Dispatch {occurrence,iteration,..} if occurrence.node.as_str()=="a" && occurrence.map_indices==indices && *iteration==2)));
                 history.push(settled(
-                    SettledSpec::new(4, 1, "a").map_indices(indices).position(5),
+                    SettledSpec::new(4, 1, "a").map_indices(indices).position(6),
                     verdict(if first_label == "accepted" {
                         "rejected"
                     } else {
@@ -88,7 +88,7 @@ async fn unfinished_loop_keeps_scalar_and_mapped_verdicts_replaceable() {
                     }),
                 ));
                 history.push(settled(
-                    SettledSpec::new(5, 3, "round_tail").position(6),
+                    SettledSpec::new(5, 3, "round_tail").position(8),
                     success(2),
                 ));
                 let complete = one_slot(&graph, &input, &history);

@@ -84,14 +84,18 @@ impl Engine<'_> {
             traversal,
         };
         if pending {
-            self.mark_pending_map(evaluation, &results);
+            self.mark_pending_map(evaluation, &results)?;
             Ok(Status::Pending)
         } else {
             self.finish_map(evaluation, &results)
         }
     }
 
-    fn mark_pending_map(&self, evaluation: GroupMutation<'_, MapNode>, results: &[MapItemResult]) {
+    fn mark_pending_map(
+        &self,
+        evaluation: GroupMutation<'_, MapNode>,
+        results: &[MapItemResult],
+    ) -> Result<(), ReducerError> {
         let GroupMutation {
             group,
             context,
@@ -99,8 +103,9 @@ impl Engine<'_> {
         } = evaluation;
         let names = descendant_names(&group.body);
         for item in results {
-            merge_scoped_runtime_facts(&item.context, context, &names, &item.scope);
+            merge_scoped_runtime_facts(&item.context, context, &names, &item.scope)?;
         }
+        Ok(())
     }
 
     fn evaluate_map_items(
@@ -117,24 +122,22 @@ impl Engine<'_> {
                 },
             items,
         } = evaluation;
-        let base = self.probe_loops.clone();
         let body_names = descendant_names(&group.body);
         let mut results = Vec::new();
         let mut pending = 0_u64;
+        let mut queued = 0_usize;
         for (index, item) in items.iter().enumerate() {
             let mut scope = traversal.map_indices.to_vec();
             scope.push(index as u64);
-            let historical = self.item_has_history(&body_names, &scope, context);
+            let historical = self.item_has_history(&body_names, &scope, traversal);
             let retained = self.item_in_frontier(&body_names, &scope, traversal.loop_iterations);
             if !historical
                 && !retained
                 && (pending >= group.max_items.get()
+                    || queued >= self.frontier_limit
                     || self.pending_frontier.len() >= self.frontier_limit)
             {
                 continue;
-            }
-            if mode == EvalMode::Probe {
-                self.probe_loops = base.clone();
             }
             let mut item_context = context.clone();
             item_context.local_writes.clear();
@@ -150,25 +153,16 @@ impl Engine<'_> {
             )?;
             if matches!(status, Status::Pending) {
                 pending += 1;
+                queued += usize::from(!historical);
             }
             compact_map_context(&mut item_context, group, (&body_names, &scope))?;
             results.push(MapItemResult {
-                probe_work: self.map_probe_work(mode, &scope),
                 status,
                 context: item_context,
                 scope,
             });
         }
-        self.probe_loops = base;
         Ok(results)
-    }
-
-    fn map_probe_work(&self, mode: EvalMode, scope: &[u64]) -> LoopWork {
-        if mode == EvalMode::Probe {
-            self.probe_loops.scoped(scope)
-        } else {
-            LoopWork::default()
-        }
     }
 
     fn finish_terminal_map_item(
@@ -186,36 +180,55 @@ impl Engine<'_> {
             .get(selected.index)
             .ok_or(ReducerError::InconsistentHistory)?
             .scope;
-        if traversal.mode == EvalMode::Probe {
-            self.probe_loops
-                .merge(&selected.probes[selected.index].probe_work)
-                .map_err(|_| ReducerError::ProbeLoopLimit)?;
-        }
-        let terminal = if traversal.mode != EvalMode::Probe || traversal.record_evidence {
-            let mut terminal_context = context.clone();
-            self.eval(
-                &group.body,
-                &mut terminal_context,
-                Traversal {
-                    map_indices: terminal_scope,
-                    item: Some(
-                        selected
-                            .items
-                            .get(
-                                *terminal_scope
-                                    .last()
-                                    .ok_or(ReducerError::InconsistentHistory)?
-                                    as usize,
-                            )
-                            .ok_or(ReducerError::InconsistentHistory)?,
-                    ),
-                    cutoff: selected.terminal.position(),
-                    ..traversal
-                },
-            )?
-        } else {
-            selected.terminal
+        // Replay every started item through the same terminal boundary. Their execution
+        // progress is independent of which item's values and controls survive.
+        let window = Traversal {
+            cutoff: selected.terminal.position().max(traversal.after),
+            ..traversal
         };
+        let checkpoint = self.trace_checkpoint();
+        self.evaluate_map_items(
+            MapItemsEvaluation {
+                evaluation: GroupEvaluation {
+                    group,
+                    context,
+                    traversal: Traversal {
+                        mode: if traversal.mode == EvalMode::Probe {
+                            EvalMode::Probe
+                        } else {
+                            EvalMode::Replay
+                        },
+                        record_evidence: false,
+                        ..window
+                    },
+                },
+                items: selected.items,
+            },
+            if traversal.mode == EvalMode::Probe {
+                EvalMode::Probe
+            } else {
+                EvalMode::Replay
+            },
+        )?;
+        drop(self.take_trace_since(checkpoint));
+        let mut terminal_context = context.clone();
+        let terminal = self.eval(
+            &group.body,
+            &mut terminal_context,
+            Traversal {
+                map_indices: terminal_scope,
+                item: Some(
+                    &selected.items[*terminal_scope
+                        .last()
+                        .ok_or(ReducerError::InconsistentHistory)?
+                        as usize],
+                ),
+                ..window
+            },
+        )?;
+        if traversal.mode != EvalMode::Probe {
+            self.confirm_work(&terminal_context, &group.name)?;
+        }
         self.void_map_losers(
             &group.body,
             MapVoidScope {
@@ -223,7 +236,7 @@ impl Engine<'_> {
                     map_indices: traversal.map_indices,
                     cutoff: terminal.position(),
                     reason: ExecutionVoidReason::MapTerminal,
-                    emit_decisions: traversal.mode == EvalMode::Decide,
+                    mode: traversal.mode,
                 },
                 winner_scope: terminal_scope,
             },
@@ -241,7 +254,6 @@ impl Engine<'_> {
             context,
             traversal,
         } = evaluation;
-        self.merge_map_probe(traversal, results)?;
         let mut local = context.clone();
         let mut collected_paths = Vec::new();
         for path in &group.promoted_state_paths {
@@ -269,7 +281,7 @@ impl Engine<'_> {
         )?;
         let body_names = descendant_names(&group.body);
         for item in results {
-            merge_scoped_runtime_facts(&item.context, context, &body_names, &item.scope);
+            merge_scoped_runtime_facts(&item.context, context, &body_names, &item.scope)?;
         }
         let position = results
             .iter()
@@ -277,20 +289,6 @@ impl Engine<'_> {
             .max()
             .unwrap_or(HistoryPosition::ZERO);
         Ok(Status::Continue { position })
-    }
-    fn merge_map_probe(
-        &mut self,
-        traversal: Traversal<'_>,
-        results: &[MapItemResult],
-    ) -> Result<(), ReducerError> {
-        if traversal.mode == EvalMode::Probe {
-            for item in results {
-                self.probe_loops
-                    .merge(&item.probe_work)
-                    .map_err(|_| ReducerError::ProbeLoopLimit)?;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -301,6 +299,7 @@ fn compact_map_context(
     scope: (&BTreeSet<NodeName>, &[u64]),
 ) -> Result<(), ReducerError> {
     let (names, indices) = scope;
+    context.work.retain_scope(indices);
     let mut state = Value::Object(Map::new());
     let writes = promoted_write_paths(&context.local_writes, &group.promoted_state_paths);
     for path in &group.promoted_state_paths {

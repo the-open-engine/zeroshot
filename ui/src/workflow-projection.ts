@@ -633,7 +633,7 @@ class WorkflowProjectionBuilder {
       node,
       'map-start',
       title(node.name),
-      `${mapSourceLabel(this.document, node)}${limit ? ` · ${limit} concurrent items` : ''}`
+      `${mapSourceLabel(this.document, node)}${limit ? ` · ${limit} ${limit === 1 ? 'item' : 'items'} at a time` : ''}`
     );
     const body = nodeLike(node.body)
       ? this.visit(node.body, next)

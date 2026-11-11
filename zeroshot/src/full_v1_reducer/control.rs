@@ -13,7 +13,7 @@ impl Engine<'_> {
     ) -> Option<u64> {
         let (selector, labels, aggregate) = query;
         let depth = *self.map_depths.get(&selector.name)?;
-        let available = if aggregate {
+        let available = if aggregate && depth > indices.len() {
             self.aggregate_owner_at_scope(&selector.name, indices)
                 .is_some_and(|owner| {
                     let depth = self.map_depths[owner];
@@ -189,6 +189,9 @@ impl Engine<'_> {
     }
 
     pub(super) fn void_active_descendants(&mut self, node: &GraphNode, scope: VoidScope<'_>) {
+        if scope.mode == EvalMode::Probe {
+            return;
+        }
         let descendants = descendant_names(node);
         let mut losers = self
             .executions
@@ -214,19 +217,23 @@ impl Engine<'_> {
         losers.sort_unstable();
         for (_, execution, active) in losers {
             let reason = self.record_void_cutoff(execution, scope.cutoff, scope.reason);
-            if active && scope.emit_decisions {
+            if active && scope.mode == EvalMode::Decide {
                 self.push_void_decision(execution, reason);
             }
         }
     }
 
     pub(super) fn void_map_losers(&mut self, body: &GraphNode, scope: MapVoidScope<'_>) {
+        if scope.common.mode == EvalMode::Probe {
+            return;
+        }
         let descendants = descendant_names(body);
         let mut losers = self
             .executions
             .iter()
             .filter(|execution| {
                 self.consumed_executions.contains(&execution.execution)
+                    && execution.dispatch_position <= scope.common.cutoff
                     && descendants.contains(&execution.occurrence.node)
                     && execution
                         .occurrence
@@ -250,7 +257,7 @@ impl Engine<'_> {
         for (_, execution, active) in losers {
             let reason =
                 self.record_void_cutoff(execution, scope.common.cutoff, scope.common.reason);
-            if active && scope.common.emit_decisions {
+            if active && scope.common.mode == EvalMode::Decide {
                 self.push_void_decision(execution, reason);
             }
         }

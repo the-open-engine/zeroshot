@@ -288,7 +288,7 @@ fn nested_profile_request(name: &str, depth: usize) -> RunProfileSetRequest {
 }
 
 #[test]
-fn profile_store_round_trips_depth_64_graphs_with_transport_wrappers() {
+fn profile_store_round_trips_depth_64_graphs() {
     let root = tempfile::tempdir().assert_value();
     let store = LocalRunProfileStore::new(root.path().to_path_buf());
     for depth in [61, 62, 63, 64] {

@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Default)]
 struct ScopePlan<'a> {
+    owner: Option<NodeName>,
     local: BTreeMap<NodeName, Vec<SelectorKey>>,
     maps: Vec<(&'a MapNode, ScopePlan<'a>)>,
     keys: BTreeSet<SelectorKey>,
@@ -69,7 +70,13 @@ fn insert_key<'a>(plan: &mut ScopePlan<'a>, chain: &[&'a MapNode], key: Selector
         .iter()
         .position(|(existing, _)| existing.name == map.name)
         .unwrap_or_else(|| {
-            plan.maps.push((map, ScopePlan::default()));
+            plan.maps.push((
+                map,
+                ScopePlan {
+                    owner: Some(map.name.clone()),
+                    ..ScopePlan::default()
+                },
+            ));
             plan.maps.len() - 1
         });
     insert_key(&mut plan.maps[index].1, rest, key);
@@ -91,6 +98,7 @@ fn scope_outcomes(
     let available = plan.keys.iter().chain(inherited.keys()).cloned().collect();
     let context = AggregateComponentContext {
         inputs,
+        owner: plan.owner.as_ref(),
         scope_nodes: &plan.local,
         shared_assignment: inherited,
         available_keys: &available,

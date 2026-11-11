@@ -218,19 +218,6 @@ impl SessionPool {
         }
     }
 
-    pub(super) fn provider_session_slot(
-        &self,
-        invocation: &NodeInvocation,
-        owner_slot: u64,
-    ) -> Result<NodeInstanceId, NodeRunnerError> {
-        match self.boundary {
-            ReusableSessionBoundary::Run => Ok(invocation.reference.node_instance),
-            ReusableSessionBoundary::Owner => {
-                NodeInstanceId::new(owner_slot).map_err(|_| NodeRunnerError::InvalidRole)
-            }
-        }
-    }
-
     pub(super) async fn checkout(
         &self,
         request: SessionCheckout<'_>,
@@ -260,7 +247,8 @@ impl SessionPool {
             },
             ReusableSessionBoundary::Owner => SessionKey::Owner {
                 node: invocation.reference.node.clone(),
-                provider_session_slot: self.provider_session_slot(invocation, owner_slot)?,
+                provider_session_slot: NodeInstanceId::new(owner_slot)
+                    .map_err(|_| NodeRunnerError::InvalidRole)?,
             },
         })
     }

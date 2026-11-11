@@ -55,8 +55,21 @@ fn admission(history: &[DurableExecution], capacity: usize) -> (Result<Status, R
     assert_eq!(engine.logical_visits, count);
     engine.dispatch_remaining = capacity;
     let mut context = Context::new(Value::Null);
-    mark_visit(group.body.name(), &[], &mut context.controls, count);
-    let result = engine.eval(&group.body, &mut context, Traversal::root());
+    let after = history
+        .last()
+        .map(|execution| match execution.state {
+            DurableExecutionState::Settled { position, .. } => position,
+            _ => execution.dispatch_position,
+        })
+        .unwrap_or(HistoryPosition::ZERO);
+    let result = engine.eval(
+        &group.body,
+        &mut context,
+        Traversal {
+            after,
+            ..Traversal::root()
+        },
+    );
     (result, engine.next_execution)
 }
 

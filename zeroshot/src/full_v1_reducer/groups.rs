@@ -39,7 +39,7 @@ impl Engine<'_> {
             .ok_or(ReducerError::MissingChoiceRoute)?;
         self.trace_branch(&group.name, selected.name());
         let result = self.eval(selected, &mut local, traversal);
-        merge_runtime_facts(&local, context);
+        merge_runtime_facts(&local, context)?;
         let status = result?;
         if let Status::Continue { position } = status {
             self.promote_group(
@@ -86,29 +86,16 @@ impl Engine<'_> {
             },
         )? {
             if !matches!(status, Status::Pending) {
-                if traversal.record_evidence {
-                    // Observe only history-backed completed loops. This remains a bounded probe:
-                    // unstarted tails neither acquire execution identities nor charge actual work.
-                    self.evaluate_parallel_branches(
-                        group,
-                        context,
-                        Traversal {
-                            mode: EvalMode::Probe,
-                            record_evidence: true,
-                            ..traversal
-                        },
-                    )?;
-                } else {
+                if !traversal.record_evidence {
                     self.restore_trace(probe_trace)?;
                 }
                 self.pending_frontier = frontier;
-                self.merge_parallel_visits(&probes, context, status.position());
             }
             return Ok(status);
         }
         self.pending_frontier = frontier;
         let winners = ordered.into_iter().take(required).collect::<Vec<_>>();
-        let (mut joined, join_position, winner_set) = self.join_parallel_winners(
+        let (joined, join_position, winner_set) = self.join_parallel_winners(
             GroupEvaluation {
                 group,
                 context: &*context,
@@ -116,7 +103,6 @@ impl Engine<'_> {
             },
             &winners,
         )?;
-        self.merge_parallel_visits(&probes, &mut joined, join_position);
         self.finish_parallel_join(
             GroupMutation {
                 group,
@@ -148,23 +134,13 @@ impl Engine<'_> {
         order.sort_by_cached_key(|(index, branch)| {
             (self.last_service(branch, traversal.map_indices), *index)
         });
-        let base = self.probe_loops.clone();
         let mut results = Vec::new();
         for (index, branch) in order {
-            self.probe_loops = base.clone();
             let mut branch_context = context.clone();
             branch_context.local_writes.clear();
-            let status = self.probe(
-                branch,
-                &mut branch_context,
-                Traversal {
-                    accepted_prefix: false,
-                    ..traversal
-                },
-            )?;
+            let status = self.probe(branch, &mut branch_context, traversal)?;
             results.push((index, (status, branch_context)));
         }
-        self.probe_loops = base;
         results.sort_by_key(|(index, _)| *index);
         Ok(results.into_iter().map(|(_, result)| result).collect())
     }
@@ -222,15 +198,42 @@ impl Engine<'_> {
             })?;
             return Ok(Some(Status::Pending));
         }
-        let position = summary
+        let mut rejected = summary
             .probes
             .iter()
-            .map(|(status, candidate)| match status {
-                Status::Pending => candidate.evidence_position,
-                _ => status.position().max(candidate.evidence_position),
+            .filter_map(|(status, candidate)| {
+                let qualifies = matches!(status, Status::Continue { .. })
+                    && match &group.join {
+                        Join::First { when } => {
+                            self.candidate_guard(when, candidate, traversal.map_indices)
+                                == openengine_cluster_protocol::GuardTruth::True
+                        }
+                        _ => true,
+                    };
+                (!qualifies && !matches!(status, Status::Pending)).then_some(status.position())
             })
-            .max()
-            .unwrap_or(HistoryPosition::ZERO);
+            .collect::<Vec<_>>();
+        rejected.sort_unstable();
+        let position = rejected[summary.probes.len() - summary.required].max(traversal.after);
+        self.replay_parallel(
+            group,
+            context,
+            Traversal {
+                cutoff: position,
+                ..traversal
+            },
+        )?;
+        if traversal.record_evidence {
+            self.evaluate_parallel_branches(
+                group,
+                context,
+                Traversal {
+                    cutoff: position,
+                    mode: EvalMode::Probe,
+                    ..traversal
+                },
+            )?;
+        }
         for branch in group.branches.as_slice() {
             self.void_active_descendants(
                 branch,
@@ -238,7 +241,7 @@ impl Engine<'_> {
                     map_indices: traversal.map_indices,
                     cutoff: position,
                     reason: ExecutionVoidReason::ParallelJoin,
-                    emit_decisions: traversal.mode == EvalMode::Decide,
+                    mode: traversal.mode,
                 },
             );
         }
@@ -263,7 +266,7 @@ impl Engine<'_> {
             context,
             traversal,
         } = evaluation;
-        if traversal.mode == EvalMode::Decide {
+        if traversal.mode != EvalMode::Probe {
             let mut branches = group
                 .branches
                 .as_slice()
@@ -302,20 +305,23 @@ impl Engine<'_> {
             .collect::<BTreeSet<_>>();
         let mut joined = context.clone();
         joined.local_writes.clear();
+        self.replay_parallel(
+            group,
+            context,
+            Traversal {
+                cutoff: join_position,
+                ..traversal
+            },
+        )?;
         for (index, _) in winners {
+            let branch = &group.branches.as_slice()[*index];
             let mut branch_context = context.clone();
             branch_context.local_writes.clear();
-            let branch = group
-                .branches
-                .as_slice()
-                .get(*index)
-                .ok_or(ReducerError::InconsistentHistory)?;
             let status = self.eval(
                 branch,
                 &mut branch_context,
                 Traversal {
                     cutoff: join_position,
-                    accepted_prefix: false,
                     ..traversal
                 },
             )?;
@@ -335,9 +341,37 @@ impl Engine<'_> {
                 &mut joined,
                 &branch_names,
                 traversal.map_indices,
-            );
+            )?;
         }
         Ok((joined, join_position, winner_set))
+    }
+
+    fn replay_parallel(
+        &mut self,
+        group: &ParNode,
+        context: &Context,
+        traversal: Traversal<'_>,
+    ) -> Result<(), ReducerError> {
+        let checkpoint = self.trace_checkpoint();
+        let traversal = Traversal {
+            mode: if traversal.mode == EvalMode::Probe {
+                EvalMode::Probe
+            } else {
+                EvalMode::Replay
+            },
+            record_evidence: false,
+            ..traversal
+        };
+        for branch in group.branches.as_slice() {
+            let mut local = context.clone();
+            local.local_writes.clear();
+            let status = self.probe(branch, &mut local, traversal)?;
+            if traversal.mode != EvalMode::Probe && !matches!(status, Status::Pending) {
+                self.confirm_work(&local, branch.name())?;
+            }
+        }
+        drop(self.take_trace_since(checkpoint));
+        Ok(())
     }
 
     fn finish_parallel_join(
@@ -372,7 +406,7 @@ impl Engine<'_> {
                             map_indices: traversal.map_indices,
                             cutoff: join.position,
                             reason: ExecutionVoidReason::ParallelJoin,
-                            emit_decisions: traversal.mode == EvalMode::Decide,
+                            mode: traversal.mode,
                         },
                     );
                 }
@@ -449,47 +483,6 @@ impl Engine<'_> {
         });
         Ok(())
     }
-    // Only dispatched history before this join may advance a losing branch's visit.
-    fn merge_parallel_visits(
-        &self,
-        probes: &[(Status, Context)],
-        target: &mut Context,
-        cutoff: HistoryPosition,
-    ) {
-        for (key, value) in probes
-            .iter()
-            .flat_map(|(_, context)| &context.controls)
-            .filter(|(key, _)| {
-                key.source == ControlSource::Group
-                    && key.field.as_deref() == Some("__reducer_visit")
-            })
-        {
-            let next = next_visit(&key.node, &key.map_indices, &target.controls);
-            let proposed = value.parse::<u64>().unwrap_or(0);
-            if proposed < next {
-                continue;
-            }
-            let occurrence = StructuralOccurrence {
-                node: key.node.clone(),
-                map_indices: key.map_indices.clone(),
-            };
-            let actual = self.by_occurrence.get(&occurrence).map_or(0, |history| {
-                history
-                    .iter()
-                    .filter(|execution| {
-                        execution.dispatch_position <= cutoff
-                            && (self.execution_mode == ExecutionMode::LegacyAttempts
-                                || execution.attempt.get() == 1)
-                    })
-                    .count() as u64
-            });
-            let visit = proposed.min(actual);
-            if visit >= next {
-                mark_visit(&key.node, &key.map_indices, &mut target.controls, visit);
-            }
-        }
-    }
-
     // Control and voiding operations live in the control companion module.
 }
 

@@ -503,3 +503,43 @@ test('queued map items preserve failed executions and verifier details', () => {
   assert.match(projection.nodes.worker.detail ?? '', /Verdict: rejected/);
   assert.match(projection.nodes.worker.detail ?? '', /1 queued/);
 });
+
+test('a queued retry and a stopped unstarted visit supersede prior attempts', () => {
+  const log = {
+    kind: 'safe_log',
+    execution: null,
+    stream: 'output',
+    line: 'transition',
+    timestamp: 1,
+  };
+  const history = events(
+    { kind: 'run_started' },
+    start(),
+    complete(ref(), { status: 'error', code: 'crash' }),
+    log,
+    log
+  );
+  const controls = [
+    { cursor: 'v2:1', node: 'worker', mapIndices: [], visitId: 'retry', state: 'queued' as const },
+    {
+      cursor: 'v2:2',
+      node: 'worker',
+      mapIndices: [],
+      visitId: 'retry',
+      state: 'completed' as const,
+    },
+    { cursor: 'v2:4', node: 'worker', mapIndices: [], visitId: 'retry', state: 'queued' as const },
+    { cursor: 'v2:5', node: 'worker', mapIndices: [], visitId: 'retry', state: 'stopped' as const },
+  ];
+  const pending = projectHistory(document(), history, 3, controls).nodes.worker;
+  assert.equal(pending.state, 'queued');
+  assert.match(pending.detail ?? '', /1 queued/);
+  assert.equal(projectHistory(document(), history, 4, controls).nodes.worker.state, 'skipped');
+  assert.equal(
+    projectHistory(document(), events(log, log), 1, [
+      { ...controls[0], cursor: 'v2:1' },
+      { ...controls[3], cursor: 'v2:2' },
+    ]).nodes.worker.state,
+    'skipped'
+  );
+});

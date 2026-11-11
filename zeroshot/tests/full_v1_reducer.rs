@@ -108,6 +108,7 @@ struct SettledSpec<'a> {
     map_indices: Vec<u64>,
     attempt: u64,
     position: u64,
+    dispatched: Option<u64>,
 }
 
 impl<'a> SettledSpec<'a> {
@@ -119,7 +120,13 @@ impl<'a> SettledSpec<'a> {
             map_indices: Vec::new(),
             attempt: 1,
             position: 1,
+            dispatched: None,
         }
+    }
+
+    fn dispatched(mut self, position: u64) -> Self {
+        self.dispatched = Some(position);
+        self
     }
 
     fn map_indices(mut self, map_indices: Vec<u64>) -> Self {
@@ -141,7 +148,11 @@ impl<'a> SettledSpec<'a> {
 fn settled(spec: SettledSpec<'_>, outcome: WorkerOutcome) -> DurableExecution {
     DurableExecution {
         delivery_state: None,
-        dispatch_position: HistoryPosition::new(spec.position.saturating_sub(1)).assert_value(),
+        dispatch_position: HistoryPosition::new(
+            spec.dispatched
+                .unwrap_or_else(|| spec.position.saturating_sub(1)),
+        )
+        .assert_value(),
         node_instance: NodeInstanceId::new(spec.node_instance).assert_value(),
         execution: ExecutionId::new(spec.execution).assert_value(),
         occurrence: StructuralOccurrence {
@@ -212,7 +223,7 @@ fn reduce(graph: &VerifiedGraph, input: &Value, executions: &[DurableExecution])
                 .unwrap_or(0)
                 + 1,
         })
-        .assert_value()
+        .unwrap_or_else(|error| panic!("reducer failed: {error:?}"))
 }
 
 #[path = "full_v1_reducer/cases_1.rs"]
@@ -384,15 +395,29 @@ async fn repeated_race_does_not_revisit_or_cancel_a_later_rounds_first_execution
     assert_eq!(dispatches[0].1.node.as_str(), "b");
     let mut later = active(2, 2, "b", 3);
     history.push(later.clone());
-    let running = reduce(&history, 0);
+    let running = reduce(&history, 1);
     assert!(running.terminal.is_none());
     assert!(
-        !running.decisions.iter().any(|decision| matches!(
-            decision,
-            Decision::VoidLoser { .. } | Decision::Dispatch { .. }
-        )),
+        !running
+            .decisions
+            .iter()
+            .any(|decision| matches!(decision, Decision::VoidLoser { .. })),
         "later-round work must remain active: {:?}",
         running.decisions
+    );
+    assert!(
+        running
+            .decisions
+            .iter()
+            .filter_map(|decision| match decision {
+                Decision::Dispatch {
+                    occurrence,
+                    iteration,
+                    ..
+                } => Some((occurrence, iteration)),
+                _ => None,
+            })
+            .all(|(occurrence, iteration)| occurrence.node.as_str() == "a" && *iteration == 2)
     );
     later.state = DurableExecutionState::Settled {
         position: HistoryPosition::new(4).unwrap(),
@@ -412,3 +437,6 @@ async fn repeated_race_does_not_revisit_or_cancel_a_later_rounds_first_execution
         Decision::VoidLoser { .. } | Decision::Dispatch { .. }
     )));
 }
+
+#[path = "full_v1_reducer/replay_windows.rs"]
+mod replay_windows;

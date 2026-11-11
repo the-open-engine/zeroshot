@@ -16,6 +16,7 @@ export type ControlRecord = {
 export type ControlVisit = ControlRecord & {
   start: number;
   updated: number;
+  queuedAt?: number;
   visit: number;
 };
 
@@ -164,6 +165,7 @@ export function projectControlHistory(
       visit,
       start: previous?.start ?? index,
       updated: index,
+      queuedAt: record.state === 'queued' ? index : previous?.queuedAt,
     });
   }
   return [...visits.values()];

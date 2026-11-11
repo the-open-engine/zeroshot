@@ -252,7 +252,7 @@ struct GroupMutation<'a, G> {
 #[derive(Clone)]
 struct Context {
     state: Value,
-    evidence_position: HistoryPosition,
+    work: LoopWork,
     controls: BTreeMap<ControlKey, String>,
     channels: BTreeMap<(NodeName, Vec<u64>), Channels>,
     local_writes: BTreeSet<FieldPath>,
@@ -263,7 +263,7 @@ impl Context {
     fn new(state: Value) -> Self {
         Self {
             state,
-            evidence_position: HistoryPosition::ZERO,
+            work: LoopWork::default(),
             controls: BTreeMap::new(),
             channels: BTreeMap::new(),
             local_writes: BTreeSet::new(),
@@ -283,6 +283,7 @@ struct ControlKey {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum EvalMode {
     Decide,
+    Replay,
     Probe,
 }
 
@@ -294,11 +295,15 @@ struct Traversal<'a> {
     item: Option<&'a Value>,
     mode: EvalMode,
     cutoff: HistoryPosition,
-    accepted_prefix: bool,
+    after: HistoryPosition,
     record_evidence: bool,
 }
 
 impl Traversal<'_> {
+    fn is_open(self) -> bool {
+        self.mode == EvalMode::Decide && self.cutoff == HistoryPosition::MAX
+    }
+
     fn root() -> Self {
         Self {
             map_indices: &[],
@@ -307,7 +312,7 @@ impl Traversal<'_> {
             item: None,
             mode: EvalMode::Decide,
             cutoff: HistoryPosition::MAX,
-            accepted_prefix: false,
+            after: HistoryPosition::ZERO,
             record_evidence: true,
         }
     }
@@ -346,7 +351,7 @@ struct VoidScope<'a> {
     map_indices: &'a [u64],
     cutoff: HistoryPosition,
     reason: ExecutionVoidReason,
-    emit_decisions: bool,
+    mode: EvalMode,
 }
 
 struct WriteApplication<'a> {
@@ -407,6 +412,9 @@ impl Status {
                 position: position.max(prior),
                 projection,
             },
+            Self::Continue { position } => Self::Continue {
+                position: position.max(prior),
+            },
             other => other,
         }
     }
@@ -425,8 +433,6 @@ struct Engine<'a> {
     pending_frontier: BTreeSet<(NodeName, Vec<u64>, Vec<u64>)>,
     logical_visits: u64,
     loop_entries: LoopWork,
-    probe_loops: LoopWork,
-    active_loops: Vec<(NodeName, Vec<u64>, Vec<u64>)>,
     executions: &'a [DurableExecution],
     next_node_instance: u64,
     next_execution: u64,
@@ -473,6 +479,9 @@ impl<'a> Engine<'a> {
                 .or_default()
                 .push(execution);
         }
+        for history in by_occurrence.values_mut() {
+            history.sort_by_key(|execution| execution.dispatch_position);
+        }
         let mut executable_depths = BTreeMap::new();
         collect_executable_depths(root, 0, &mut executable_depths);
         let mut optional_promotions = BTreeMap::new();
@@ -497,8 +506,6 @@ impl<'a> Engine<'a> {
                 .filter(|execution| execution.attempt.get() == 1)
                 .count() as u64,
             loop_entries: LoopWork::default(),
-            probe_loops: LoopWork::default(),
-            active_loops: Vec::new(),
             executions: input.executions,
             next_node_instance: input.next_node_instance,
             next_execution: input.next_execution,

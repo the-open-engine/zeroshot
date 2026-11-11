@@ -2,6 +2,12 @@ use super::*;
 use openengine_cluster_server::graph_verifier::{FULL_V1_MAX_NODE_EXECUTIONS, FULL_V1_MAX_LOOP_ENTRIES};
 
 impl Engine<'_> {
+    pub(super) fn observe_missing(&mut self, node: &NodeName, traversal: Traversal<'_>) {
+        if traversal.cutoff == HistoryPosition::MAX {
+            self.pending_leaf(node, traversal);
+        }
+    }
+
     pub(super) fn pending_leaf(&mut self, node: &NodeName, traversal: Traversal<'_>) -> bool {
         let key = (
             node.clone(),
@@ -32,11 +38,18 @@ impl Engine<'_> {
         })
     }
 
-    pub(super) fn charge_active_loops(&mut self) -> Result<(), ReducerError> {
-        for (node, indices, iterations) in self.active_loops.clone() {
-            self.charge_loop(&node, &indices, &iterations)?;
-        }
-        Ok(())
+    pub(super) fn confirm_work(
+        &mut self,
+        context: &Context,
+        node: &NodeName,
+    ) -> Result<(), ReducerError> {
+        self.loop_entries
+            .merge(&context.work)
+            .map_err(|_| ReducerError::WorkLimit {
+                node: node.clone(),
+                bound: FULL_V1_MAX_LOOP_ENTRIES,
+                kind: "loop-body entries",
+            })
     }
 
     pub(super) fn charge_visit(&mut self, node: &NodeName) -> Result<(), ReducerError> {
@@ -49,21 +62,6 @@ impl Engine<'_> {
         }
         self.logical_visits += 1;
         Ok(())
-    }
-
-    pub(super) fn charge_loop(
-        &mut self,
-        node: &NodeName,
-        scope: &[u64],
-        iterations: &[u64],
-    ) -> Result<(), ReducerError> {
-        self.loop_entries
-            .record(node, scope, iterations)
-            .map_err(|_| ReducerError::WorkLimit {
-                node: node.clone(),
-                bound: FULL_V1_MAX_LOOP_ENTRIES,
-                kind: "loop-body entries",
-            })
     }
 
     pub(super) fn probe(
@@ -105,7 +103,7 @@ impl Engine<'_> {
         &self,
         names: &BTreeSet<NodeName>,
         scope: &[u64],
-        context: &Context,
+        traversal: Traversal<'_>,
     ) -> bool {
         names.iter().any(|name| {
             self.by_occurrence
@@ -118,12 +116,12 @@ impl Engine<'_> {
                 .take_while(|(occurrence, _)| {
                     occurrence.node == *name && occurrence.map_indices.starts_with(scope)
                 })
-                .any(|(occurrence, executions)| {
-                    executions
-                        .iter()
-                        .filter(|execution| execution.attempt.get() == 1)
-                        .count() as u64
-                        >= next_visit(name, &occurrence.map_indices, &context.controls)
+                .any(|(_, executions)| {
+                    executions.iter().any(|execution| {
+                        (traversal.after == HistoryPosition::ZERO
+                            || execution.dispatch_position > traversal.after)
+                            && execution.dispatch_position <= traversal.cutoff
+                    })
                 })
         })
     }
@@ -183,16 +181,12 @@ impl LoopWork {
         self.total = total;
         Ok(())
     }
-    pub(super) fn scoped(&self, scope: &[u64]) -> Self {
-        let spans = self
-            .spans
-            .iter()
-            .filter(|((_, indices, _), _)| indices.starts_with(scope))
-            .map(|(key, round)| (key.clone(), *round))
-            .collect::<BTreeMap<_, _>>();
-        let total = spans.values().sum();
-        Self { spans, total }
+    pub(super) fn retain_scope(&mut self, scope: &[u64]) {
+        self.spans
+            .retain(|(_, indices, _), _| indices.starts_with(scope));
+        self.total = self.spans.values().sum();
     }
+
     pub(super) fn merge(&mut self, other: &Self) -> Result<(), ()> {
         for (key, round) in &other.spans {
             self.span(key.clone(), *round)?;

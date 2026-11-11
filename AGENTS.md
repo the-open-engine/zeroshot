@@ -170,8 +170,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   state fields only when their payload types have deterministic implicit empty values; verification
   proves this and reduction materializes missing null, string, array, and recursively empty record values.
 - `maxItems` limits active complete map bodies, never total input cardinality. The reducer derives
-  a bounded pending frontier from current visit markers and durable history; prior loop rounds do not
-  exempt fresh items. Admission records effective `maxConcurrency` (default 64, maximum 65,536).
+  a bounded pending frontier from dispatch-ordered history within the current visit window; prior
+  loop rounds do not exempt fresh items. Read-only probes discover settlement, strict closed-window
+  replay validates owned executions, and only current decisions admit new work. Execution progress
+  and confirmed loop work survive independently of discarded values and controls; do not encode
+  visit counters as control facts or infer executed prefixes from later-round descendants. Admission records effective `maxConcurrency` (default 64, maximum 65,536).
   The supervisor admits leaf executions before allocating identities, attempts or timeouts and keeps
   capacity through cleanup and durable settlement. Native auxiliary runners share the candidate's
   execution capacity. Provider sessions lease compact cleanup slots independently of durable retry
@@ -182,7 +185,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   have a separate run ceiling of 65,536, reconstructed from ledger/checkpoint history.
   Admission retains the established structural-bounds wire shape; dynamic work uses runtime ceilings. Correlated aggregate verification uses
   saturated joint counts and one deterministic 8 Mi count-cell proof-work bound.
-  Joins use actual settled outcomes and completed candidate facts. Pending candidates remain
+  Joins settle at the earliest actual history prefix proving success or impossibility, and use
+  actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
   Shared three-valued guard evaluation preserves candidate-local first-join eligibility.
   Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
@@ -1657,7 +1661,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   corruption still fails closed. Checked saves decode the selected profile for its revision.
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
   generation; imports carry no foreign revision. Pending numeric text, including run-wide concurrency, belongs to the document,
-  survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
+  survives inspector navigation, and commits only when valid. Runtime dialogs use a separate instance
+  of the same numeric draft store; Apply and Cancel own only those dialog drafts. Navigation must
+  preserve unsaved work. Queued/retried and stopped unstarted leaves use the latest queue transition,
+  while actual starts and outcomes remain authoritative for executions.
   Hosted workspaces use the `platform` kind with their existing opaque workspace IDs. The tag
   rename starts a new browser storage namespace; earlier drafts and preferences are not imported.
   Hosted environment saves use the same correlated snapshot/acknowledgement lifecycle: the iframe

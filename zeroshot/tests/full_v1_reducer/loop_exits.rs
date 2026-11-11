@@ -160,7 +160,70 @@ fn assert_pending_prefixes(
             reduced.terminal.is_none(),
             "{case} prefix={count}: {reduced:#?}"
         );
+        let dispatches = reduced
+            .decisions
+            .iter()
+            .filter_map(|decision| {
+                if let Decision::Dispatch {
+                    occurrence,
+                    iteration,
+                    ..
+                } = decision
+                {
+                    Some((occurrence, iteration))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !dispatches.is_empty(),
+            "{case} prefix={count}: pending work must dispatch"
+        );
+        for (occurrence, iteration) in dispatches {
+            assert!(
+                history[count..]
+                    .iter()
+                    .any(|entry| entry.occurrence == *occurrence),
+                "{case} prefix={count}: unexpected {occurrence:?}"
+            );
+            let depth = enclosing_loop_scope(&graph.compiled_ir.root, &occurrence.node, (0, None))
+                .expect("authored occurrence");
+            let expected = depth.map_or(0, |depth| {
+                1 + history[..count]
+                    .iter()
+                    .filter(|entry| {
+                        entry.occurrence.node.as_str() == "tail"
+                            && entry.occurrence.map_indices == occurrence.map_indices[..depth]
+                    })
+                    .count() as u64
+            });
+            assert_eq!(
+                *iteration, expected,
+                "{case} prefix={count}: wrong loop round for {occurrence:?}"
+            );
+        }
     }
+}
+
+fn enclosing_loop_scope(
+    node: &openengine_cluster_protocol::GraphNode,
+    target: &openengine_cluster_protocol::NodeName,
+    scope: (usize, Option<usize>),
+) -> Option<Option<usize>> {
+    if node.name() == target {
+        return Some(scope.1);
+    }
+    let (mut depth, mut owner) = scope;
+    if matches!(node, openengine_cluster_protocol::GraphNode::Map(_)) {
+        depth += 1;
+    }
+    if matches!(node, openengine_cluster_protocol::GraphNode::Loop(_)) {
+        owner = Some(depth);
+    }
+    openengine_cluster_server::graph_verifier::graph_node_children(node)
+        .into_iter()
+        .find_map(|child| enclosing_loop_scope(child, target, (depth, owner)))
 }
 
 fn append_round(history: &mut Vec<DurableExecution>, round: u64, scope: &[u64], descendant: bool) {

@@ -1,31 +1,5 @@
 use super::*;
 
-pub(in crate::graph_verifier) fn group_control_dimensions(
-    node: &GraphNode,
-    keys: &[SelectorKey],
-) -> Vec<Vec<Assignment>> {
-    keys.iter()
-        .filter(|key| key.source == ControlSourceKey::Group)
-        .map(|key| {
-            proof_group_domain(node, key.field.as_ref())
-                .unwrap_or_default()
-                .into_iter()
-                .map(|label| BTreeMap::from([(key.clone(), assigned_control(Some(label), 1))]))
-                .collect()
-        })
-        .collect()
-}
-
-pub(in crate::graph_verifier) fn single_outcome_dimension(
-    node: &GraphNode,
-    keys: &[SelectorKey],
-    budget: &ProofWork,
-) -> Option<Vec<Assignment>> {
-    let choices = per_execution_outcomes(node, keys, budget)?;
-    (u64::try_from(choices.len()).unwrap_or(u64::MAX) <= FULL_V1_MAX_GUARD_ASSIGNMENTS)
-        .then_some(choices)
-}
-
 pub(in crate::graph_verifier) struct AggregateCounts<'a> {
     pub(super) keys: &'a [SelectorKey],
     pub(super) outcomes: &'a [Assignment],

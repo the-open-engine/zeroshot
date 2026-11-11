@@ -241,6 +241,7 @@ impl<'a> Analyzer<'a> {
 fn map_effects(group: &MapNode, incoming: &Flow, body: &Effects) -> Effects {
     Effects {
         definite_nodes: BTreeSet::from([group.name.clone()]),
+        conditional_nodes: body.conditional_nodes.clone(),
         exit_failed: incoming.failed.union(&body.exit_failed).cloned().collect(),
         falls_through: true,
         completion: map_completion_predicate(group).unwrap_or(CompletionPredicate::Always),

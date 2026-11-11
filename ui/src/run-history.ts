@@ -302,14 +302,20 @@ export function projectHistory(
     if (event.kind === 'terminal') terminal = event.result;
     else readHistoryEvent(event, index, projection);
   }
+  const controls = settleControlVisits(
+    document.graph.root,
+    projectControlHistory(control, events, through)
+  );
+  const byControlNode = new Map<string, typeof controls>();
+  for (const visit of controls) {
+    const visits = byControlNode.get(visit.node) ?? [];
+    visits.push(visit);
+    byControlNode.set(visit.node, visits);
+  }
   const nodes: Record<string, WorkflowNodeObservation> = Object.create(null);
   for (const node of allNodes(document.graph.root)) {
     const descendants = new Set(allNodes(node).map((child) => child.name));
     const executions = invocations.filter((invocation) => descendants.has(invocation.node));
-    const latestByOccurrence = new Map<string, Invocation>();
-    for (const invocation of executions)
-      latestByOccurrence.set(JSON.stringify([invocation.node, invocation.mapIndices]), invocation);
-    const latest = [...latestByOccurrence.values()];
     // A settled descendant does not prove a group finished: more branches, map items or
     // loop visits may follow. Only active descendants provide a current group observation.
     // Structural terminal nodes have no dispatch record, so do not label them unreached.
@@ -322,36 +328,7 @@ export function projectHistory(
       continue;
     }
     if (!['step', 'verifier'].includes(node.kind)) continue;
-    const state: NodeState = latest.some((i) => i.state === 'running')
-      ? 'running'
-      : latest.some((i) => i.state === 'failed')
-        ? 'failed'
-        : latest.some((i) => i.state === 'skipped')
-          ? 'skipped'
-          : latest.length
-            ? 'succeeded'
-            : 'idle';
-    const own = invocations.filter((i) => i.node === node.name);
-    const signals = own.at(-1)?.outcome?.signals;
-    nodes[node.name] = {
-      state,
-      count: executions.length,
-      detail:
-        signals &&
-        Object.entries(signals)
-          .map(([key, value]) => `${humanize(key)}: ${value}`)
-          .join(' · '),
-    };
-  }
-  const controls = settleControlVisits(
-    document.graph.root,
-    projectControlHistory(control, events, through)
-  );
-  const byControlNode = new Map<string, typeof controls>();
-  for (const visit of controls) {
-    const visits = byControlNode.get(visit.node) ?? [];
-    visits.push(visit);
-    byControlNode.set(visit.node, visits);
+    nodes[node.name] = leafObservation(executions, byControlNode.get(node.name) ?? []);
   }
   for (const [name, visits] of byControlNode) {
     const latest = new Map<string, (typeof controls)[number]>();
@@ -359,7 +336,6 @@ export function projectHistory(
     const current = [...latest.values()];
     const leaf = allNodes(document.graph.root).find((node) => node.name === name);
     if (leaf && ['step', 'verifier'].includes(leaf.kind)) {
-      nodes[name] = queuedLeafObservation(nodes[name], current, invocations);
       continue;
     }
     const states = new Set(current.map((visit) => controlState(visit.state)));
@@ -540,26 +516,47 @@ export function descendantNames(node: GraphNode): Set<string> {
   return new Set([node.name, ...children(node).flatMap((child) => [...descendantNames(child)])]);
 }
 
-function queuedLeafObservation(
-  prior: WorkflowNodeObservation,
-  visits: readonly ControlVisit[],
-  invocations: readonly Invocation[]
+function leafObservation(
+  executions: readonly Invocation[],
+  controls: readonly ControlVisit[]
 ): WorkflowNodeObservation {
-  const queued = visits.filter(
-    (visit) =>
-      visit.state === 'queued' &&
-      !invocations.some(
-        (invocation) =>
-          invocation.node === visit.node &&
-          invocation.start >= visit.start &&
-          JSON.stringify(invocation.mapIndices) === JSON.stringify(visit.mapIndices)
-      )
-  ).length;
-  return queued
-    ? {
-        ...prior,
-        state: prior?.state === 'running' || prior?.state === 'failed' ? prior.state : 'queued',
-        detail: [prior?.detail, `${queued} queued`].filter(Boolean).join(' · '),
-      }
-    : prior;
+  const latest = new Map<string, { state: WorkflowNodeObservation['state']; start: number }>();
+  for (const invocation of executions)
+    latest.set(JSON.stringify(invocation.mapIndices), invocation);
+  const queued = applyPendingVisits(latest, controls);
+  const states = new Set([...latest.values()].map((visit) => visit.state));
+  const state =
+    (['running', 'failed', 'queued', 'skipped'] as const).find((next) => states.has(next)) ??
+    (latest.size ? 'succeeded' : 'idle');
+  const signals = executions.at(-1)?.outcome?.signals;
+  return {
+    state,
+    count: executions.length,
+    detail:
+      [
+        signals &&
+          Object.entries(signals)
+            .map(([key, value]) => `${humanize(key)}: ${value}`)
+            .join(' · '),
+        queued ? `${queued} queued` : undefined,
+      ]
+        .filter(Boolean)
+        .join(' · ') || undefined,
+  };
+}
+
+function applyPendingVisits(
+  latest: Map<string, { state: WorkflowNodeObservation['state']; start: number }>,
+  controls: readonly ControlVisit[]
+) {
+  const current = new Map(controls.map((visit) => [JSON.stringify(visit.mapIndices), visit]));
+  let queued = 0;
+  for (const [key, visit] of current) {
+    if (visit.state !== 'queued' && visit.state !== 'stopped') continue;
+    const start = visit.queuedAt ?? visit.start;
+    if ((latest.get(key)?.start ?? -1) >= start) continue;
+    latest.set(key, { start, state: controlState(visit.state) });
+    if (visit.state === 'queued') queued++;
+  }
+  return queued;
 }

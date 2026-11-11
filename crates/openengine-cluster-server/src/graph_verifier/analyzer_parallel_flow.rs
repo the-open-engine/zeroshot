@@ -234,14 +234,14 @@ impl<'a> Analyzer<'a> {
             .iter()
             .map(|branch| branch.completion.clone())
             .collect::<Vec<_>>();
-        self.parallel_correlation(group, &completions, &incoming.available)
+        self.parallel_correlation(group, &completions, incoming)
     }
 
     pub(super) fn parallel_correlation(
         &self,
         group: &ParNode,
         completions: &[CompletionPredicate],
-        incoming: &BTreeSet<NodeName>,
+        incoming: &Flow,
     ) -> Option<ParallelJoinCorrelation> {
         let required = parallel_required_completions(&group.join, completions.len());
         let branches = if let Join::First { when } = &group.join {
@@ -256,15 +256,16 @@ impl<'a> Analyzer<'a> {
                 .iter()
                 .zip(group.branches.as_slice())
                 .map(|(completion, racer)| {
-                    CompletionPredicate::all([
+                    Some(CompletionPredicate::all([
                         completion.clone(),
                         CompletionPredicate::CandidateGuard {
                             guard: shared_guard.clone(),
-                            available: self.first_guard_available_on_branch(when, racer, incoming),
+                            available: self
+                                .first_guard_available_on_branch(when, racer, incoming)?,
                         },
-                    ])
+                    ]))
                 })
-                .collect::<Vec<_>>()
+                .collect::<Option<Vec<_>>>()?
         } else {
             completions.to_vec()
         };
@@ -288,43 +289,57 @@ impl<'a> Analyzer<'a> {
         &self,
         when: &Guard,
         racer: &GraphNode,
-        incoming: &BTreeSet<NodeName>,
-    ) -> BTreeMap<SelectorKey, CompletionPredicate> {
+        incoming: &Flow,
+    ) -> Option<BTreeMap<SelectorKey, CompletionPredicate>> {
         let mut owned = BTreeSet::new();
         collect_names(racer, &mut owned);
-        guard_selector_uses(when)
-            .into_iter()
-            .filter_map(|(selector, aggregate)| {
-                if !aggregate && self.map_depth(&selector.name) > self.map_depth(racer.name()) {
-                    return None;
-                }
-                let owner = if aggregate {
-                    self.nodes
-                        .get(&selector.name)
-                        .and_then(|info| {
-                            info.path.iter().find_map(|part| {
-                                let DiagnosticPathSegment::Node { name } = part else {
-                                    return None;
-                                };
-                                (matches!(self.nodes.get(name)?.node, GraphNode::Map(_))
-                                    && (owned.contains(name) || incoming.contains(name)))
-                                .then_some(name)
-                            })
+        let mut available = BTreeMap::new();
+        for (selector, aggregate) in guard_selector_uses(when) {
+            let depth = self.map_depth(&selector.name);
+            if !aggregate && depth > self.map_depth(racer.name()) {
+                continue;
+            }
+            let owner = if aggregate && depth > self.map_depth(racer.name()) {
+                self.nodes
+                    .get(&selector.name)
+                    .and_then(|info| {
+                        info.path.iter().find_map(|part| {
+                            let DiagnosticPathSegment::Node { name } = part else {
+                                return None;
+                            };
+                            (matches!(self.nodes.get(name)?.node, GraphNode::Map(_))
+                                && (owned.contains(name) || incoming.available.contains(name)))
+                            .then_some(name)
                         })
-                        .unwrap_or(&selector.name)
-                } else {
-                    &selector.name
-                };
-                let presence = if incoming.contains(owner) {
-                    CompletionPredicate::Always
-                } else if owned.contains(owner) {
-                    self.conditional_candidate_presence(owner, racer.name())?
-                } else {
-                    return None;
-                };
-                Some((SelectorKey::from(selector), presence))
-            })
-            .collect()
+                    })
+                    .unwrap_or(&selector.name)
+            } else {
+                &selector.name
+            };
+            let presence = if incoming.available.contains(owner) {
+                self.incoming_control_presence(owner, incoming)?
+            } else if owned.contains(owner) {
+                self.conditional_candidate_presence(owner, racer.name())?
+            } else {
+                continue;
+            };
+            available.insert(SelectorKey::from(selector), presence);
+        }
+        Some(available)
+    }
+
+    fn incoming_control_presence(
+        &self,
+        name: &NodeName,
+        incoming: &Flow,
+    ) -> Option<CompletionPredicate> {
+        let mut predicates = Vec::new();
+        for (owner, nodes) in &incoming.conditional_nodes {
+            if nodes.contains(name) {
+                predicates.push(self.conditional_candidate_presence(name, owner)?);
+            }
+        }
+        Some(CompletionPredicate::all(predicates))
     }
 
     pub(super) fn conditional_candidate_presence(
@@ -343,7 +358,8 @@ impl<'a> Analyzer<'a> {
         let start = names.iter().position(|name| *name == racer)?;
         let mut guards = Vec::new();
         for name in names[start..].iter().filter(|name| **name != target) {
-            if let Some(presence) = candidate_parent_presence(self.nodes.get(*name)?.node, &names)?
+            if let Some(presence) =
+                self.candidate_parent_presence(self.nodes.get(*name)?.node, &names)?
             {
                 guards.push(presence);
             }
@@ -352,34 +368,73 @@ impl<'a> Analyzer<'a> {
     }
 }
 
-fn candidate_choice_route(choice: &ChoiceNode, names: &[&NodeName]) -> Option<CompletionPredicate> {
-    let branch = choice
-        .branches
-        .as_slice()
-        .iter()
-        .position(|branch| names.contains(&branch.node.name()));
-    match branch {
-        Some(index) => choice_branch_completion_predicates(choice)
-            .get(index)
-            .cloned(),
-        None => Some(choice_otherwise_completion_predicate(choice)),
-    }
-}
-
-fn candidate_parent_presence(
-    node: &GraphNode,
-    names: &[&NodeName],
-) -> Option<Option<CompletionPredicate>> {
-    match node {
-        GraphNode::Par(group) => {
-            let index = group
+impl Analyzer<'_> {
+    fn candidate_choice_route(
+        &self,
+        choice: &ChoiceNode,
+        names: &[&NodeName],
+    ) -> Option<CompletionPredicate> {
+        let mut routes = self.choice_routes.borrow_mut();
+        if !routes.contains_key(&choice.name) {
+            let cells = choice
                 .branches
                 .as_slice()
                 .iter()
-                .position(|branch| names.contains(&branch.name()))?;
-            Some(Some(retention_guard(group, index)?))
+                .try_fold(0_usize, |sum, branch| {
+                    sum.checked_add(guard_cell_count(&branch.when))
+                })?;
+            self.proof_work
+                .charge(cells.checked_mul(choice.branches.as_slice().len().checked_add(1)?)?)?;
+            let mut predicates = choice_branch_completion_predicates(choice);
+            predicates.push(choice_otherwise_completion_predicate(choice));
+            routes.insert(
+                choice.name.clone(),
+                predicates
+                    .into_iter()
+                    .map(|predicate| CompletionPredicate::Shared(std::sync::Arc::new(predicate)))
+                    .collect(),
+            );
         }
-        GraphNode::Choice(choice) => Some(Some(candidate_choice_route(choice, names)?)),
-        _ => Some(None),
+        let index = choice
+            .branches
+            .as_slice()
+            .iter()
+            .position(|branch| names.contains(&branch.node.name()))
+            .unwrap_or(choice.branches.as_slice().len());
+        routes.get(&choice.name)?.get(index).cloned()
+    }
+
+    fn candidate_parent_presence(
+        &self,
+        node: &GraphNode,
+        names: &[&NodeName],
+    ) -> Option<Option<CompletionPredicate>> {
+        match node {
+            GraphNode::Par(group) => {
+                let index = group
+                    .branches
+                    .as_slice()
+                    .iter()
+                    .position(|branch| names.contains(&branch.name()))?;
+                Some(Some(retention_guard(group, index)?))
+            }
+            GraphNode::Choice(choice) => Some(Some(self.candidate_choice_route(choice, names)?)),
+            _ => Some(None),
+        }
+    }
+}
+
+fn guard_cell_count(guard: &Guard) -> usize {
+    match guard {
+        Guard::In { labels, .. } | Guard::KOfMap { labels, .. } => 1 + labels.values().len(),
+        Guard::KOfN { values, labels, .. } => 1 + values.as_slice().len() + labels.values().len(),
+        Guard::Not { guard } => 1 + guard_cell_count(guard),
+        Guard::All { guards } | Guard::Any { guards } => {
+            1 + guards
+                .as_slice()
+                .iter()
+                .map(guard_cell_count)
+                .sum::<usize>()
+        }
     }
 }

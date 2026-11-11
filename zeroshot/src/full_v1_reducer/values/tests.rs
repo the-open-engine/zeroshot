@@ -5,7 +5,7 @@ use super::*;
 const NODE_INSTANCE: u64 = 1;
 
 #[test]
-fn loop_fact_reset_preserves_sibling_map_items_and_visit_markers() {
+fn loop_fact_reset_preserves_sibling_map_items_and_ancestor_facts() {
     let child: NodeName = "child".parse().expect("node name");
     let ancestor: NodeName = "ancestor".parse().expect("node name");
     let target_error = ControlKey {
@@ -26,7 +26,6 @@ fn loop_fact_reset_preserves_sibling_map_items_and_visit_markers() {
         field: Some("terminated".to_owned()),
         map_indices: Vec::new(),
     };
-    let visit = visit_key(&child, &[0]);
     let mut context = Context::new(Value::Null);
     context
         .controls
@@ -37,7 +36,6 @@ fn loop_fact_reset_preserves_sibling_map_items_and_visit_markers() {
     context
         .controls
         .insert(ancestor_group.clone(), "done".to_owned());
-    context.controls.insert(visit.clone(), "2".to_owned());
     let channels = Channels {
         output: Value::Null,
         signals: BTreeMap::new(),
@@ -64,7 +62,6 @@ fn loop_fact_reset_preserves_sibling_map_items_and_visit_markers() {
         context.controls.get(&ancestor_group).map(String::as_str),
         Some("done")
     );
-    assert_eq!(context.controls.get(&visit).map(String::as_str), Some("2"));
     assert!(!context.channels.contains_key(&(child.clone(), vec![0])));
     assert!(context.channels.contains_key(&(child, vec![1])));
     assert!(context.channels.contains_key(&(ancestor, Vec::new())));

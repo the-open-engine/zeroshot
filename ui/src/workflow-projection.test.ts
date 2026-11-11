@@ -280,11 +280,12 @@ test('maps identify separate item state, item concurrency, and empty-input bypas
   const view = projectWorkflow(doc(seq('root', [map, done('finish')])));
   assert.match(
     byOwner(view, 'each_task', 'map-start').detail ?? '',
-    /Item · task.list.*5 concurrent items/
+    /Item · task.list.*5 items at a time/
   );
   assert.match(view.edges.find((edge) => edge.repeat)?.label ?? '', /remaining items/);
   const serial = projectWorkflow(doc(seq('root', [{ ...map, maxItems: 1 }, done('finish')])));
   assert.ok(serial.edges.some((edge) => edge.repeat));
+  assert.match(byOwner(serial, 'each_task', 'map-start').detail ?? '', /1 item at a time/);
   const bypass = view.edges.find(
     (edge) =>
       edge.source === byOwner(view, 'each_task', 'map-start').id &&

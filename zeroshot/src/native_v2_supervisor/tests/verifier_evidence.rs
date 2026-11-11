@@ -226,7 +226,11 @@ async fn unreachable_parallel_reviews_retain_exhausted_loops_in_status_and_histo
                 |(name, count)| ["left_rounds", "right_rounds"].contains(name) && *count == 2
             ));
         }
-        assert!((1..=2).contains(&context.verifiers.len()));
+        if join["kind"] == "any" {
+            assert_eq!(context.verifiers.len(), 2);
+        } else {
+            assert!((1..=2).contains(&context.verifiers.len()));
+        }
         assert!(!context.incomplete);
         let tail = harness
             .ledger

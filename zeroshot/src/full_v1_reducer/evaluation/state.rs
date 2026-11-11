@@ -43,10 +43,10 @@ pub(super) struct ExistingExecutionRequest<'graph, 'context, 'traversal, 'histor
     pub(super) input: Value,
 }
 
-pub(super) struct MissingDispatchRequest<'graph, 'traversal, 'history> {
+pub(super) struct MissingDispatchRequest<'graph, 'context, 'traversal, 'history> {
     pub(super) spec: ExecutableSpec<'graph>,
     pub(super) visit: ExecutableVisit<'history>,
-    pub(super) input: Value,
+    pub(super) context: &'context Context,
     pub(super) traversal: Traversal<'traversal>,
 }
 
@@ -66,9 +66,8 @@ pub(super) struct OutcomeApplication<'request, 'graph> {
 
 pub(super) struct ExecutableVisit<'history> {
     pub(super) occurrence: StructuralOccurrence,
-    pub(super) matching: Vec<&'history DurableExecution>,
+    pub(super) node_instance: Option<NodeInstanceId>,
     pub(super) executions: Vec<&'history DurableExecution>,
-    pub(super) number: u64,
     pub(super) attempt: PositiveInteger,
     pub(super) existing: Option<&'history DurableExecution>,
 }

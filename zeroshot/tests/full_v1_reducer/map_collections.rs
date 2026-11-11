@@ -147,13 +147,13 @@ async fn failed_map_collection_never_reuses_a_prior_collection_as_an_item_result
         settled(
             SettledSpec::new(3, 3, "inspect")
                 .map_indices(vec![0])
-                .position(3),
+                .position(5),
             success(10),
         ),
         settled(
             SettledSpec::new(4, 4, "inspect")
                 .map_indices(vec![1])
-                .position(4),
+                .position(6),
             WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
         ),
     ];

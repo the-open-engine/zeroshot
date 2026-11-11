@@ -46,10 +46,11 @@ async fn earlier_history_position_wins_first_independent_of_authored_and_history
         json!({"authored_first":1,"settled_first":1}),
     )
     .await;
-    let authored = execution(
+    let mut authored = execution(
         ExecutionSpec::new(1, 1, "authored_first").settled_at(10),
         verdict("accepted"),
     );
+    authored.dispatch_position = HistoryPosition::new(1).assert_value();
     let earlier = execution(
         ExecutionSpec::new(2, 2, "settled_first").settled_at(3),
         verdict("accepted"),

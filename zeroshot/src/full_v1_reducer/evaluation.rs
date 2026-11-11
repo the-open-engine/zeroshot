@@ -28,7 +28,8 @@ impl<'history> Engine<'history> {
             GraphNode::Succeed(_) | GraphNode::Fail(_) => {
                 self.eval_terminal_node(node, context, traversal)
             }
-        }?;
+        }?
+        .after(traversal.after);
         record_completed(node, context, traversal, &status);
         self.trace_finish(trace, &status, context);
         if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_)) {
@@ -122,22 +123,15 @@ impl<'history> Engine<'history> {
         let mut local = context.clone();
         local.local_writes.clear();
         let mut position = HistoryPosition::ZERO;
-        for (index, child) in group.children.as_slice().iter().enumerate() {
-            let accepted_prefix = traversal.accepted_prefix
-                || group.children.as_slice()[index + 1..].iter().any(|later| {
-                    self.item_has_history(&descendant_names(later), traversal.map_indices, &local)
-                });
+        for child in group.children.as_slice() {
             let result = self.eval(
                 child,
                 &mut local,
                 Traversal {
-                    accepted_prefix,
+                    after: traversal.after.max(position),
                     ..traversal
                 },
             );
-            if result.is_err() {
-                merge_runtime_facts(&local, context);
-            }
             match result? {
                 Status::Continue {
                     position: child_position,
@@ -145,7 +139,7 @@ impl<'history> Engine<'history> {
                     position = position.max(child_position);
                 }
                 other => {
-                    merge_runtime_facts(&local, context);
+                    merge_runtime_facts(&local, context)?;
                     return Ok(other.after(position));
                 }
             }
@@ -172,18 +166,22 @@ impl<'history> Engine<'history> {
             clear_scoped_runtime_facts(&mut local, &loop_names, traversal.map_indices);
             // Optional outputs describe this iteration; required state still carries across rounds.
             local.local_writes.clear();
-            let loop_iterations = self.enter_loop_round(group, traversal, iteration)?;
-            let result = self.eval_loop_body(
-                group,
+            let mut loop_iterations = traversal.loop_iterations.to_vec();
+            loop_iterations.push(iteration);
+            let round_traversal = Traversal {
+                after: traversal.after.max(position),
+                loop_iterations: &loop_iterations,
+                ..traversal
+            };
+            self.enter_loop_round(group, &mut local, round_traversal)?;
+            let result = self.eval(
+                &group.body,
                 &mut local,
                 Traversal {
                     loop_iterations: &loop_iterations,
-                    ..traversal
+                    ..round_traversal
                 },
             );
-            if result.is_err() {
-                merge_runtime_facts(&local, context);
-            }
             match result? {
                 Status::Continue {
                     position: body_position,
@@ -191,7 +189,7 @@ impl<'history> Engine<'history> {
                     position = position.max(body_position);
                 }
                 other => {
-                    merge_runtime_facts(&local, context);
+                    merge_runtime_facts(&local, context)?;
                     return Ok(other.after(position));
                 }
             }
@@ -226,36 +224,28 @@ impl<'history> Engine<'history> {
     fn enter_loop_round(
         &mut self,
         group: &openengine_cluster_protocol::LoopNode,
-        traversal: Traversal<'_>,
-        iteration: u64,
-    ) -> Result<Vec<u64>, ReducerError> {
-        let mut rounds = traversal.loop_iterations.to_vec();
-        rounds.push(iteration);
-        if traversal.mode != EvalMode::Probe || traversal.accepted_prefix {
-            self.charge_loop(&group.name, traversal.map_indices, &rounds)?;
-        }
-        if traversal.mode == EvalMode::Probe {
-            self.probe_loops
-                .record(&group.name, traversal.map_indices, &rounds)
-                .map_err(|_| ReducerError::ProbeLoopLimit)?;
-        }
-        Ok(rounds)
-    }
-
-    fn eval_loop_body(
-        &mut self,
-        group: &openengine_cluster_protocol::LoopNode,
         context: &mut Context,
         traversal: Traversal<'_>,
-    ) -> Result<Status, ReducerError> {
-        self.active_loops.push((
-            group.name.clone(),
-            traversal.map_indices.to_vec(),
-            traversal.loop_iterations.to_vec(),
-        ));
-        let result = self.eval(&group.body, context, traversal);
-        self.active_loops.pop();
-        result
+    ) -> Result<(), ReducerError> {
+        let rounds = traversal.loop_iterations;
+        context
+            .work
+            .record(&group.name, traversal.map_indices, rounds)
+            .map_err(|_| {
+                if traversal.is_open() {
+                    ReducerError::WorkLimit {
+                        node: group.name.clone(),
+                        bound: 65_536,
+                        kind: "loop-body entries",
+                    }
+                } else {
+                    ReducerError::ProbeLoopLimit
+                }
+            })?;
+        if traversal.is_open() {
+            self.confirm_work(context, &group.name)?;
+        }
+        Ok(())
     }
 
     fn finish_loop(&mut self, request: LoopFinishRequest<'_, '_>) -> Result<Status, ReducerError> {
@@ -317,35 +307,29 @@ impl<'history> Engine<'history> {
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
-        let resolution = self.resolve_visit(&spec, context, traversal.map_indices)?;
+        let resolution = self.resolve_visit(&spec, traversal)?;
         let VisitResolution::Ready(visit) = resolution else {
             return attempts_exhausted();
         };
         let visit = *visit;
-        let input = bind_payload(spec.input_bindings, &context.state, traversal.item)?;
-        for execution in &visit.executions {
-            if execution.input != input {
-                return Err(ReducerError::InconsistentHistory);
-            }
-            self.consumed_executions.insert(execution.execution);
-        }
-        if !visit.executions.is_empty() {
-            self.charge_active_loops()?;
-        }
-        mark_visit(
-            spec.name,
-            traversal.map_indices,
-            &mut context.controls,
-            visit.number,
-        );
         let Some(execution) = visit.existing else {
             return self.dispatch_missing(MissingDispatchRequest {
                 spec,
                 visit,
-                input,
+                context,
                 traversal,
             });
         };
+        // Discovery uses recorded input. Strict replay validates only owned executions.
+        let input = if traversal.mode == EvalMode::Probe {
+            execution.input.clone()
+        } else {
+            bind_payload(spec.input_bindings, &context.state, traversal.item)?
+        };
+        if traversal.mode != EvalMode::Probe {
+            self.consume_visit(&visit, &input)?;
+            self.confirm_work(context, spec.name)?;
+        }
         self.finish_existing_execution(ExistingExecutionRequest {
             spec,
             context,
@@ -353,6 +337,20 @@ impl<'history> Engine<'history> {
             execution,
             input,
         })
+    }
+
+    fn consume_visit(
+        &mut self,
+        visit: &ExecutableVisit<'_>,
+        input: &Value,
+    ) -> Result<(), ReducerError> {
+        for execution in &visit.executions {
+            if &execution.input != input {
+                return Err(ReducerError::InconsistentHistory);
+            }
+            self.consumed_executions.insert(execution.execution);
+        }
+        Ok(())
     }
 
     fn finish_existing_execution(
@@ -408,56 +406,61 @@ impl<'history> Engine<'history> {
     fn resolve_visit(
         &self,
         spec: &ExecutableSpec<'_>,
-        context: &Context,
-        map_indices: &[u64],
+        traversal: Traversal<'_>,
     ) -> Result<VisitResolution<'history>, ReducerError> {
         let occurrence = StructuralOccurrence {
             node: spec.name.clone(),
-            map_indices: map_indices.to_vec(),
+            map_indices: traversal.map_indices.to_vec(),
         };
-        let mut matching = self
+        let history = self
             .by_occurrence
             .get(&occurrence)
-            .cloned()
-            .unwrap_or_default();
-        let number = next_visit(spec.name, map_indices, &context.controls);
-        let (attempt, existing, executions) = match self.execution_mode {
+            .map_or(&[][..], Vec::as_slice);
+        // ZERO is the empty prefix; settlements are strictly later than their starts.
+        let start = history.partition_point(|execution| {
+            traversal.after != HistoryPosition::ZERO
+                && execution.dispatch_position <= traversal.after
+        });
+        let current = &history[start..];
+        let (attempt, executions) = match self.execution_mode {
             ExecutionMode::LegacyAttempts => {
-                matching.sort_by_key(|execution| execution.attempt);
-                let attempt =
-                    PositiveInteger::new(number).map_err(|_| ReducerError::InconsistentHistory)?;
-                if attempt.get() > spec.attempt_ceiling.get() {
+                let attempt = PositiveInteger::new(start as u64 + 1)
+                    .map_err(|_| ReducerError::InconsistentHistory)?;
+                if attempt > spec.attempt_ceiling {
                     return Ok(VisitResolution::Exhausted);
                 }
-                let existing = matching
-                    .iter()
-                    .find(|execution| execution.attempt == attempt)
-                    .cloned();
-                let executions = existing.iter().cloned().collect();
-                (attempt, existing, executions)
+                let executions = current
+                    .first()
+                    .filter(|execution| execution.dispatch_position <= traversal.cutoff)
+                    .into_iter()
+                    .copied()
+                    .collect::<Vec<_>>();
+                (attempt, executions)
             }
             ExecutionMode::NativeV2 => {
-                matching.sort_by_key(|execution| execution.dispatch_position);
-                let executions = native_visit_executions(&matching, number);
-                let existing = executions.last().cloned();
-                let attempt = existing.as_ref().map_or_else(
-                    || {
-                        PositiveInteger::new(INITIAL_ATTEMPT)
-                            .expect("the initial attempt is positive")
-                    },
+                let end = current
+                    .iter()
+                    .skip(1)
+                    .position(|execution| execution.attempt.get() == INITIAL_ATTEMPT)
+                    .map_or(current.len(), |index| index + 1);
+                let through = current[..end]
+                    .partition_point(|execution| execution.dispatch_position <= traversal.cutoff);
+                let executions = current[..through].to_vec();
+                let attempt = executions.last().map_or(
+                    PositiveInteger::new(INITIAL_ATTEMPT).expect("positive initial attempt"),
                     |execution| execution.attempt,
                 );
                 if attempt > spec.attempt_ceiling {
                     return Err(ReducerError::InconsistentHistory);
                 }
-                (attempt, existing, executions)
+                (attempt, executions)
             }
         };
+        let existing = executions.last().copied();
         Ok(VisitResolution::Ready(Box::new(ExecutableVisit {
             occurrence,
-            matching,
+            node_instance: history.first().map(|execution| execution.node_instance),
             executions,
-            number,
             attempt,
             existing,
         })))
@@ -465,21 +468,25 @@ impl<'history> Engine<'history> {
 
     fn dispatch_missing(
         &mut self,
-        request: MissingDispatchRequest<'_, '_, '_>,
+        request: MissingDispatchRequest<'_, '_, '_, '_>,
     ) -> Result<Status, ReducerError> {
         let MissingDispatchRequest {
             spec,
             visit,
-            input,
+            context,
             traversal,
         } = request;
+        if !traversal.is_open() {
+            self.observe_missing(spec.name, traversal);
+            return Ok(Status::Pending);
+        }
         if !self.admit_leaf(spec.name, traversal)? {
             return Ok(Status::Pending);
         }
-        self.charge_active_loops()?;
+        let input = bind_payload(spec.input_bindings, &context.state, traversal.item)?;
         self.charge_visit(spec.name)?;
-        let node_instance = match visit.matching.last() {
-            Some(previous) => previous.node_instance,
+        let node_instance = match visit.node_instance {
+            Some(previous) => previous,
             None => self.allocate_node_instance()?,
         };
         self.dispatch_visit(
@@ -716,30 +723,13 @@ impl<'history> Engine<'history> {
     // Choice, parallel, and map evaluation live in the groups companion module.
 }
 
-fn native_visit_executions<'history>(
-    executions: &[&'history DurableExecution],
-    requested_visit: u64,
-) -> Vec<&'history DurableExecution> {
-    let mut visit = 0;
-    executions
-        .iter()
-        .filter_map(|execution| {
-            if execution.attempt.get() == 1 {
-                visit += 1;
-            }
-            (visit == requested_visit).then_some(*execution)
-        })
-        .collect()
-}
-
 fn record_completed(
     node: &GraphNode,
     context: &mut Context,
     traversal: Traversal<'_>,
     status: &Status,
 ) {
-    if let Status::Continue { position } = status {
-        context.evidence_position = context.evidence_position.max(*position);
+    if let Status::Continue { .. } = status {
         context
             .completed
             .insert((node.name().clone(), traversal.map_indices.to_vec()));

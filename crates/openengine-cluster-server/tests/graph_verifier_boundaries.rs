@@ -21,6 +21,9 @@ struct PermissiveRegistry;
 impl WorkerRegistry for PermissiveRegistry {
     async fn resolve(&self, worker: &WorkerRef) -> Result<WorkerDescriptor, WorkerRegistryError> {
         let verifier_contract = match worker.as_str() {
+            "worker.route-verify@1" => {
+                json!({"signals":{"verdict":enum_labels("route",4096)},"diagnostic":{"kind":"null"}})
+            }
             "worker.wide-verify@1" => json!({
                 "signals": {
                     "left": enum_labels("left", 253),
@@ -650,6 +653,33 @@ async fn static_visit_and_loop_entry_totals_keep_their_exact_ceilings() {
                     .iter()
                     .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
             );
+        }
+    }
+}
+
+#[tokio::test]
+async fn choice_route_availability_shares_large_predicates_and_keeps_the_proof_ceiling() {
+    for count in [1, 2050] {
+        let mut gate = null_verifier("gate");
+        gate["worker"] = json!("worker.route-verify@1");
+        gate["signals"]["verdict"] = json!(enum_labels("route", 4096));
+        let children = (0..count)
+            .map(|index| null_verifier(&format!("v{index}")))
+            .collect::<Vec<_>>();
+        let choice = json!({"kind":"choice","name":"route","state":state(),"promotedStatePaths":[],
+            "branches":[{"when":{"kind":"in","value":{"name":"gate","source":"signal","field":"verdict"},"labels":enum_labels("route",4096)},
+                "node":{"kind":"seq","name":"selected","state":state(),"children":children,"promotedStatePaths":[]}}],
+            "otherwise":{"kind":"fail","name":"unselected","reason":"unselected"}});
+        let selectors = (0..count)
+            .map(|index| json!({"name":format!("v{index}"),"source":"error","field":null}))
+            .collect::<Vec<_>>();
+        let first = json!({"kind":"par","name":"race","state":state(),"branches":[choice],"promotedStatePaths":[],
+            "join":{"kind":"first","when":{"kind":"k_of_n","count":1,"values":selectors,"labels":["crash"]}}});
+        let result = verify(&graph(vec![gate, first, succeed("done")])).await;
+        if count == 1 {
+            result.unwrap_or_else(|error| panic!("ordinary route proof failed: {error:?}"));
+        } else {
+            assert_ceiling(result.assert_error());
         }
     }
 }

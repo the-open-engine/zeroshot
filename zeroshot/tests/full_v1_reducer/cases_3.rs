@@ -25,8 +25,14 @@ async fn assert_parallel_promotion() {
     *parallel_root.get_mut("state").assert_value() = parallel_state;
     let graph = verified(parallel_root, json!({"left":1,"right":1})).await;
     let history = [
-        settled(SettledSpec::new(1, 1, "left").position(10), success(7)),
-        settled(SettledSpec::new(2, 2, "right").position(8), success(9)),
+        settled(
+            SettledSpec::new(1, 1, "left").position(10).dispatched(1),
+            success(7),
+        ),
+        settled(
+            SettledSpec::new(2, 2, "right").position(8).dispatched(2),
+            success(9),
+        ),
     ];
     assert_eq!(
         reduce(&graph, &json!({}), &history).terminal,
@@ -93,11 +99,15 @@ async fn parallel_all_merges_disjoint_descendants_of_one_promoted_record() {
             },
         ),
         settled(
-            SettledSpec::new(2, 2, "left_review").position(2),
+            SettledSpec::new(2, 2, "left_review")
+                .position(4)
+                .dispatched(2),
             success(7),
         ),
         settled(
-            SettledSpec::new(3, 3, "right_review").position(3),
+            SettledSpec::new(3, 3, "right_review")
+                .position(5)
+                .dispatched(3),
             success(9),
         ),
     ];
@@ -261,7 +271,7 @@ async fn assert_flat_map_terminal() {
             .position(4),
         success(1),
     );
-    let mut loser = active(2, 2, "mapped_work", 10);
+    let mut loser = active(2, 2, "mapped_work", 2);
     loser.occurrence.map_indices = vec![1];
     let reduction = reduce(&graph, &json!({"items":[null,null]}), &[loser, winner]);
     assert!(reduction.terminal.is_some());
@@ -308,7 +318,7 @@ async fn assert_nested_map_terminal() {
             .position(4),
         success(1),
     );
-    let mut nested_loser = active(2, 2, "nested_work", 10);
+    let mut nested_loser = active(2, 2, "nested_work", 2);
     nested_loser.occurrence.map_indices = vec![0, 1];
     let nested_reduction = reduce(
         &nested_graph,
