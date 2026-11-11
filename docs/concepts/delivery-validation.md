@@ -31,12 +31,15 @@ review-stage hooks or late feedback. A completed remote merge cannot become anot
 ## Example
 
 This check runs the test suite on the exact candidate before it is pushed and again before the
-merge request, in a scratch copy so the checkout stays clean. It needs `jq`.
+merge request, in a scratch clone of that exact commit, so the checkout stays clean. It needs `jq`.
+If any setup step fails, it exits non-zero, which stops the execution instead of accepting.
 
 ```sh
 #!/bin/sh
-# Run the tests on the exact candidate in a scratch copy, so the checkout stays clean.
+# Run the tests on the exact candidate in a scratch clone, so the checkout stays clean.
 # The check starts with only LANG=C, so it sets PATH and HOME itself.
+# Any setup failure exits non-zero, which stops the execution instead of accepting.
+set -eu
 export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
 export HOME=/Users/you # npm keeps its cache here
 
@@ -51,8 +54,9 @@ esac
 
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-git archive "$head" | tar -x -C "$scratch"
-if (cd "$scratch" && npm ci && npm test) >/dev/null 2>&1; then
+git clone --quiet --shared --no-checkout . "$scratch/repo"
+git -C "$scratch/repo" checkout --quiet --detach "$head"
+if (cd "$scratch/repo" && npm ci && npm test) >/dev/null 2>&1; then
   echo '{"verdict":"accepted"}'
 else
   jq -cn --arg head "$head" '{verdict: "repair",
