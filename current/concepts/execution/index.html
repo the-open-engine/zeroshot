@@ -580,6 +580,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-checks-are-deterministic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which checks are deterministic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#state-reduction-chooses-the-next-step" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2244,6 +2255,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-checks-are-deterministic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which checks are deterministic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#state-reduction-chooses-the-next-step" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2382,6 +2404,14 @@ checks. <code>--validate-only</code> runs these checks without starting a run.</
 </table>
 <p>Routes and conditions are structured data, not executable code or prompt instructions.
 The <a href="../../reference/cluster/graph/">graph contract</a> defines their fields.</p>
+<h2 id="which-checks-are-deterministic">Which checks are deterministic<a class="headerlink" href="#which-checks-are-deterministic" title="Permanent link">&para;</a></h2>
+<p>The engine enforces the order, routes and retry limits. What a step decides depends on its
+binding. Agent steps and verifiers are model judgement. A <code>step</code> can instead run a
+<a href="../../reference/runtime-plan/#script">script</a> you own, which takes the step's JSON input and
+returns its JSON output, so that step's result comes from your program, not a model. A non-zero
+exit is an error, and the graph's error and retry rules apply. Script steps are local only for now.</p>
+<p>Outside the graph, delivery waits on your CI and required checks and cannot override them, and
+local runs can add a <a href="../delivery-validation/">delivery check command</a>.</p>
 <h2 id="state-reduction-chooses-the-next-step">How results choose the next step<a class="headerlink" href="#state-reduction-chooses-the-next-step" title="Permanent link">&para;</a></h2>
 <p>Each agent returns a value through its declared output channel. zeroshot validates that value,
 updates state using the graph's bindings, then evaluates what runs next.</p>
@@ -2495,7 +2525,7 @@ disables it; <a href="../../reference/execution/#delivery-feedback">feedback rul
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-10">10 November 2026</time>
+    Last updated <time datetime="2026-11-11">11 November 2026</time>
   </span>
 
     
