@@ -177,7 +177,10 @@ without restoring a snapshot is refused until a restore completes.
 
 Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise `openengine.workspace-checkpoints/v1`. They retain that repository only for a
-failed recovery lineage and delete it after a successful run. Platform exposes recovery through
+failed recovery lineage and delete it after a successful run. Force-stopping a local run also
+deletes the repository, together with the checkpoints listed by every run in its recovery lineage,
+so neither the original run nor its successors list checkpoints that can no longer be restored.
+Other lineages keep theirs. Platform exposes recovery through
 authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
 original capsule is removed. Platform resolves declared connections from their original references.
 Direct-target resume reuses the original source connection authorization and resolves fresh values;

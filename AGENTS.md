@@ -752,6 +752,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Hosted failed runs likewise collect checkpoint staging as best effort after process cleanup;
   retained recovery still requires runtime cleanup, workspace ownership transfer, and durable
   recovery metadata. Force-stop and explicit discard retain authoritative lineage deletion.
+  Local force-stop stays destructive for the whole lineage and retains no checkpoints: after
+  confirmed runtime cleanup it reuses `discard_lineage` to remove every catalog naming the shared
+  repository, predecessor and successor alike, before the repository. A catalog removal failure
+  keeps the repository and reports cleanup unavailable. Other lineages are untouched.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
