@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::*;
+use super::super::ci_diagnostics::{MAX_FAILURE_DIAGNOSTIC_CHARS, bounded_text, include_job_logs};
 
 #[path = "policy/checks.rs"]
 mod checks;
@@ -76,9 +77,6 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String, $head:
   }
 }
 "#;
-
-const MAX_FAILURE_DIAGNOSTIC_CHARS: usize = 8 * 1_024;
-const MAX_FAILURE_FEEDBACK_CHARS: usize = 64 * 1_024;
 
 pub(super) struct PolicySnapshot {
     pub(super) pull_request_id: String,
@@ -437,16 +435,7 @@ pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, St
     else {
         return;
     };
-    if logs.is_empty() {
-        return;
-    }
-    let budget = MAX_FAILURE_FEEDBACK_CHARS.saturating_sub(diagnostic.chars().count()) / logs.len();
-    for (job, log) in logs {
-        let heading = format!("\n--- GitHub Actions job {job} log excerpt ---\n");
-        let excerpt = log_tail(log, budget.saturating_sub(heading.chars().count()));
-        diagnostic.push_str(&heading);
-        diagnostic.push_str(&excerpt);
-    }
+    include_job_logs(diagnostic, "GitHub Actions", logs);
 }
 
 fn require_identity<'a>(
@@ -711,35 +700,4 @@ fn waiting_snapshot() -> PolicySnapshot {
         pull_request_ready: false,
         observed_required_checks: BTreeSet::new(),
     }
-}
-
-fn bounded_text(value: &str, maximum: usize) -> String {
-    const TRUNCATED: &str = "[diagnostic truncated]";
-    if value.chars().count() <= maximum {
-        return value.to_owned();
-    }
-    let mut text = value
-        .chars()
-        .take(maximum.saturating_sub(TRUNCATED.len()))
-        .collect::<String>();
-    text.extend(TRUNCATED.chars().take(maximum));
-    text
-}
-
-fn log_tail(value: &str, maximum: usize) -> String {
-    const TRUNCATED: &str = "[earlier log output truncated]\n";
-    let clean = value
-        .chars()
-        .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
-        .collect::<String>();
-    if clean.chars().count() <= maximum {
-        return clean;
-    }
-    let retain = maximum.saturating_sub(TRUNCATED.chars().count());
-    let mut tail = clean.chars().rev().take(retain).collect::<Vec<_>>();
-    tail.reverse();
-    bounded_text(
-        &format!("{TRUNCATED}{}", tail.into_iter().collect::<String>()),
-        maximum,
-    )
 }

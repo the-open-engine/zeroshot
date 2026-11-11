@@ -2,6 +2,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use openengine_cluster_testkit::fixture::TemporaryDirectory;
 
 use super::*;
+use crate::source_code_provider::adapters::core::ci_diagnostics::MAX_JOB_LOG_TAIL_BYTES;
 
 #[test]
 fn api_payload_budget_and_log_tail_are_bounded() {
@@ -16,10 +17,10 @@ fn api_payload_budget_and_log_tail_are_bounded() {
     );
 
     let mut output = b"discard".to_vec();
-    output.extend(vec![b'x'; MAX_CHECK_LOG_TAIL_BYTES]);
+    output.extend(vec![b'x'; MAX_JOB_LOG_TAIL_BYTES]);
     output.extend_from_slice(b"failure at end");
     let tail = check_log_tail(&output);
-    assert_eq!(tail.len(), MAX_CHECK_LOG_TAIL_BYTES);
+    assert_eq!(tail.len(), MAX_JOB_LOG_TAIL_BYTES);
     assert!(!tail.contains("discard"));
     assert!(tail.ends_with("failure at end"));
 }
@@ -325,7 +326,7 @@ async fn api_pipe_failure_preserves_stream_and_partial_output_with_redaction() {
 fn failed_step_output_survives_large_github_cleanup_logs() {
     let mut output =
         b"setup\nassertion: expected 400, received 202\n2026-09-14 ##[error]exit code 1\n".to_vec();
-    output.extend_from_slice(&vec![b'x'; MAX_CHECK_LOG_TAIL_BYTES * 2]);
+    output.extend_from_slice(&vec![b'x'; MAX_JOB_LOG_TAIL_BYTES * 2]);
     let excerpt = check_log_tail(&output);
     assert!(excerpt.contains("assertion: expected 400, received 202"));
     assert!(excerpt.ends_with("##[error]exit code 1\n"));

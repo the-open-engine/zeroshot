@@ -1,7 +1,6 @@
 use super::*;
 
-const MAX_FAILURE_ITEM_CHARS: usize = 1_024;
-const MAX_FAILED_CHECK_LOGS: usize = 8;
+use super::super::super::ci_diagnostics::{MAX_FAILURE_ITEM_CHARS, MAX_FAILED_CHECK_LOGS};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RequiredChecks {
