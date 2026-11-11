@@ -44,10 +44,14 @@ The [graph contract](../reference/cluster/graph.md) defines their fields.
 
 ## Which checks are deterministic
 
-Every `step` and `verifier` is an agent. The engine enforces the order, routes and retry limits,
-and the verdicts are model judgement. Deterministic checks sit outside the graph, in your CI and
-required checks, which delivery waits on and cannot override, and for local runs in a
-[delivery check command](delivery-validation.md) you own.
+The engine enforces the order, routes and retry limits. What a step decides depends on its
+binding. Agent steps and verifiers are model judgement. A `step` can instead run a
+[script](../reference/runtime-plan.md#script) you own, which takes the step's JSON input and
+returns its JSON output, so that step's result comes from your program, not a model. A non-zero
+exit is an error, and the graph's error and retry rules apply. Script steps are local only for now.
+
+Outside the graph, delivery waits on your CI and required checks and cannot override them, and
+local runs can add a [delivery check command](delivery-validation.md).
 
 ## How results choose the next step { #state-reduction-chooses-the-next-step }
 
