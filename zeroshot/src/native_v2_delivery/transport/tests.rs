@@ -669,6 +669,7 @@ async fn native_reconciliation_redacts_git_filter_secret_output() {
     let outcome = reconcile_head(
         &transport,
         SourceHeadReconciliation {
+            require_fast_forward: false,
             workspace: &repository.workspace,
             published: &published,
             observed: &observed,
@@ -976,6 +977,7 @@ async fn host_commit_identity_authors_transport_and_reconciliation_commits() {
     let outcome = reconcile_head(
         &transport,
         SourceHeadReconciliation {
+            require_fast_forward: false,
             workspace: &repository.workspace,
             published: &published,
             observed: &observed,
@@ -1006,4 +1008,118 @@ async fn host_commit_identity_authors_transport_and_reconciliation_commits() {
         git(&repository.workspace, &["rev-parse", "HEAD^1^"]),
         local_revision
     );
+}
+
+#[tokio::test]
+async fn local_non_fast_forward_push_and_reconciliation_preserve_history() {
+    use crate::source_code_provider::{
+        SourceHeadReconciliation, SourceReconciliationOutcome, SourceReviewReceipt,
+    };
+    let repository = Repository::new();
+    git(
+        &repository.workspace,
+        &["checkout", "-b", "feature/conflict"],
+    );
+    git(
+        &repository.remote,
+        &[
+            "update-ref",
+            "refs/heads/feature/conflict",
+            &repository.base,
+        ],
+    );
+    std::fs::write(repository.workspace.join("local"), "local").assert_value();
+    git(&repository.workspace, &["add", "local"]);
+    git(&repository.workspace, &["commit", "-m", "local"]);
+    let head = git(&repository.workspace, &["rev-parse", "HEAD"]);
+    let peer = repository.root.path().join("peer");
+    git(
+        &repository.workspace,
+        &[
+            "clone",
+            repository.remote.to_str().assert_value(),
+            peer.to_str().assert_value(),
+        ],
+    );
+    git(&peer, &["checkout", "feature/conflict"]);
+    std::fs::write(peer.join("remote"), "remote").assert_value();
+    git(&peer, &["add", "remote"]);
+    git(
+        &peer,
+        &[
+            "-c",
+            "user.name=Peer",
+            "-c",
+            "user.email=peer@example.invalid",
+            "commit",
+            "-m",
+            "remote",
+        ],
+    );
+    git(&peer, &["push", "origin", "feature/conflict"]);
+    let remote = git(&peer, &["rev-parse", "HEAD"]);
+    let mut config = repository
+        .transport(
+            Path::new("git"),
+            &repository.workspace,
+            repository.remote.as_os_str(),
+        )
+        .config()
+        .clone();
+    config.local_environment =
+        Some(crate::native_v2_capsule::provider_process::current_process_environment());
+    let transport = GitTransport::new(config, &repository.remote);
+    let credential = SourceDeliveryCredential::token("");
+    assert_eq!(
+        transport.default_branch(credential).await.assert_value(),
+        "main"
+    );
+    let error = transport
+        .push("feature/conflict", &head, credential)
+        .await
+        .expect_err("diverged push must refuse");
+    assert!(
+        matches!(&error, SourceDeliveryError::Command(failure) if failure.non_fast_forward()),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("feature/conflict")
+            && (error.to_string().contains("fetch first")
+                || error.to_string().contains("non-fast-forward"))
+    );
+    let receipt = SourceReviewReceipt {
+        review_id: String::new(),
+        repository: "acme/project".to_owned(),
+        target_branch: "main".to_owned(),
+        head_branch: "feature/conflict".to_owned(),
+        head_revision: remote.clone(),
+    };
+    let outcome = reconcile_head(
+        &transport,
+        SourceHeadReconciliation {
+            require_fast_forward: true,
+            workspace: &repository.workspace,
+            published: &receipt,
+            observed: &receipt,
+            commit_message: "do not merge",
+            authorized_update: false,
+            adopting_existing: false,
+        },
+        credential,
+    )
+    .await
+    .assert_value();
+    assert!(
+        matches!(outcome, SourceReconciliationOutcome::Refused(message) if message.contains("feature/conflict"))
+    );
+    assert_eq!(git(&repository.workspace, &["rev-parse", "HEAD"]), head);
+    assert_eq!(
+        git(&repository.remote, &["rev-parse", "feature/conflict"]),
+        remote
+    );
+    assert_eq!(
+        git(&repository.workspace, &["symbolic-ref", "--short", "HEAD"]),
+        "feature/conflict"
+    );
+    assert!(!repository.workspace.join("remote").exists());
 }

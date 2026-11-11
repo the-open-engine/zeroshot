@@ -206,6 +206,7 @@ where
         github_token,
         git_credentials: None,
         cwd: run.cwd.clone(),
+        worktree: run.worktree,
         source_connection: run.source_connection.clone(),
         source: input.review.map(|review| super::super::NamedRunSource {
             resolved: review.source,

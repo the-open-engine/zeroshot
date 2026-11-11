@@ -30,6 +30,11 @@ fn recovery(root: &TestDirectory, checkpoints: bool) -> LocalRecoveryDocument {
     let mut submission = contract_submission("checkpoint-compatibility");
     submission.runtime.workspace_checkpoints = checkpoints;
     LocalRecoveryDocument {
+        delivery_receipt: None,
+        local_branch: None,
+        invoking_workspace: None,
+        request_digest: None,
+        workspace_revision: None,
         submission,
         workspace: root.child("workspace"),
         resumed_from: None,

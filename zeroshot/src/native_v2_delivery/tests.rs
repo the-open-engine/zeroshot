@@ -42,6 +42,8 @@ mod diagnostics;
 pub(super) mod github_fixture;
 #[path = "tests/head_update.rs"]
 mod head_update;
+#[path = "tests/local_branch.rs"]
+mod local_branch;
 #[path = "tests/metadata.rs"]
 mod metadata;
 #[path = "tests/review_sync.rs"]
@@ -244,6 +246,7 @@ async fn configured_commit_attribution_reaches_original_and_resumed_delivered_co
         let deliver = |run_id, adopt_existing_delivery| {
             let adapter = Arc::new(NativeV2DeliveryAdapter::new(
                 NativeV2DeliveryConfig {
+                    local_branch: None,
                     delivery_run_id: RunId::new("delivery-attribution"),
                     adopt_existing_delivery,
                     git_identity: None,
@@ -1124,6 +1127,7 @@ async fn run_delivery_execution_with_identity_and_adoption(
     adopt_existing_delivery: bool,
 ) -> DeliveryExecution {
     let config = NativeV2DeliveryConfig {
+        local_branch: None,
         delivery_run_id: RunId::new(delivery_run_id),
         adopt_existing_delivery,
         git_identity: None,
@@ -1168,6 +1172,7 @@ fn retained_adapter(
 ) -> Arc<NativeV2DeliveryAdapter> {
     Arc::new(NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: RunId::new(lineage.run_id),
             adopt_existing_delivery: lineage.adopt_existing,
             git_identity: None,
@@ -1312,6 +1317,17 @@ async fn admitted_with_feedback(
     mode: DeliveryMode,
     pull_request_feedback: PullRequestFeedback,
 ) -> crate::native_v2_contract::AdmittedRun {
+    NativeV2Admission
+        .admit(delivery_submission(repo, mode, pull_request_feedback))
+        .await
+        .assert_value()
+}
+
+fn delivery_submission(
+    repo: &TempRepo,
+    mode: DeliveryMode,
+    pull_request_feedback: PullRequestFeedback,
+) -> RunSubmission {
     let graph = full_graph(vec![delivery_node(mode), success_node()]);
     let binding = NodeRuntimeBinding::GitDelivery {
         connections: DeclaredConnections::single(
@@ -1324,19 +1340,16 @@ async fn admitted_with_feedback(
         .assert_value(),
         pull_request_feedback,
     };
-    NativeV2Admission
-        .admit(RunSubmission {
-            environment: None,
-            title: RunTitle::new("Delivery test").assert_value(),
-            graph,
-            initial_input: Value::Null,
-            runtime: delivery_runtime(binding),
-            source: source_for_revision(&repo.base),
-            submission_key: IdempotencyKey::new(format!("delivery-{}-{}", repo.base, mode.label()))
-                .assert_value(),
-        })
-        .await
-        .assert_value()
+    RunSubmission {
+        environment: None,
+        title: RunTitle::new("Delivery test").assert_value(),
+        graph,
+        initial_input: Value::Null,
+        runtime: delivery_runtime(binding),
+        source: source_for_revision(&repo.base),
+        submission_key: IdempotencyKey::new(format!("delivery-{}-{}", repo.base, mode.label()))
+            .assert_value(),
+    }
 }
 
 fn delivery_runtime(binding: NodeRuntimeBinding) -> RuntimePlan {

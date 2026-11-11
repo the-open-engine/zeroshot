@@ -223,6 +223,8 @@ pub(crate) fn build_local_owner_native_v2_candidate(
 
 #[derive(Default)]
 pub(crate) struct TrustedDeliveryCapabilities {
+    pub(crate) review_binding_recorder: Option<crate::native_v2_delivery::ReviewBindingRecorder>,
+    pub(crate) recovered_review: Option<crate::source_code_provider::SourceReviewReceipt>,
     pub(crate) token: Option<Arc<str>>,
     pub(crate) token_file: Option<TrustedGitHubTokenFile>,
     pub(crate) validator: Option<TrustedDeliveryValidator>,
@@ -287,6 +289,12 @@ fn build_candidate(
     let delivery = delivery.map(|delivery| {
         Arc::new(
             NativeV2DeliveryAdapter::new(delivery.config, delivery.authority)
+                .with_recovered_review(trusted.recovered_review.filter(|_| placement.is_local()))
+                .with_review_binding_recorder(
+                    trusted
+                        .review_binding_recorder
+                        .filter(|_| placement.is_local()),
+                )
                 .with_local_git_environment(
                     trusted
                         .local_git_environment

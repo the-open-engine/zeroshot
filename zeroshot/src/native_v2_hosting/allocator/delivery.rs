@@ -96,6 +96,7 @@ impl ProductionCapsuleAllocator {
             let target = crate::native_v2_delivery::source_target(source, mode)
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
             let config = NativeV2DeliveryConfig {
+                local_branch: None,
                 commit_identity: request.commit_identity.cloned(),
                 commit_co_author: request.commit_co_author.cloned(),
                 ..NativeV2DeliveryConfig::for_hosted_workspace(

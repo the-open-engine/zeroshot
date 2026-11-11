@@ -39,6 +39,7 @@ fn prepared_request(run_id: RunId) -> PreparedRunRequest {
         git_credentials: None,
 
         cwd: None,
+        worktree: None,
         source_connection: None,
 
         run_id,
@@ -515,6 +516,11 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
         .write_recovery_document(
             &original,
             &LocalRecoveryDocument {
+                delivery_receipt: None,
+                local_branch: None,
+                invoking_workspace: None,
+                request_digest: None,
+                workspace_revision: None,
                 submission,
                 workspace,
                 resumed_from: None,
@@ -567,6 +573,11 @@ fn local_resume_claimability_fails_closed_before_controller_effects() {
     let workspace = root.path().join("workspace");
     std::fs::create_dir(&workspace).assert_value();
     let mut recovery = LocalRecoveryDocument {
+        delivery_receipt: None,
+        local_branch: None,
+        invoking_workspace: None,
+        request_digest: None,
+        workspace_revision: None,
         submission: contract_submission("backend-claimability"),
         workspace,
         resumed_from: None,

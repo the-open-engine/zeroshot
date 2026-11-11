@@ -57,7 +57,7 @@ impl From<SourceDeliveryError> for DeliveryStop {
                 WorkerOutcome::policy_refusal(),
                 format!(
                     "forge branch protection or permissions refused the push; local work was \
-                     preserved. Allow delivery to publish its managed branch, then resume the \
+                     preserved. Allow delivery to publish this branch, then resume the \
                      run.\n{diagnostic}"
                 ),
             )
@@ -103,7 +103,7 @@ impl NativeV2DeliveryAdapter {
                 review_id: String::new(),
                 repository: self.config.target.repository.clone(),
                 target_branch: self.config.target.target_branch.clone(),
-                head_branch: delivery_head_branch(&self.config.delivery_run_id),
+                head_branch: self.config.head_branch(),
                 head_revision: String::new(),
             });
         let diagnostic = format!(

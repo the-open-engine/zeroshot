@@ -356,6 +356,14 @@ printf '%s\n' '{{"type":"turn.completed"}}'
         git(repository, &["branch", "-M", "feature/local"]);
         git(
             repository,
+            &["config", "branch.feature/local.remote", "origin"],
+        );
+        git(
+            repository,
+            &["config", "branch.feature/local.merge", "refs/heads/main"],
+        );
+        git(
+            repository,
             &[
                 "remote",
                 "add",

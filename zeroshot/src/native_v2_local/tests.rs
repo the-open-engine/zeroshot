@@ -12,6 +12,8 @@ use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, git, s
 
 #[path = "tests/git_environment.rs"]
 mod git_environment;
+#[path = "tests/worktrees.rs"]
+mod worktrees;
 
 fn local_request(run_id: RunId) -> PreparedRunRequest {
     let intent = serde_json::from_value(json!({
@@ -34,6 +36,7 @@ fn local_request(run_id: RunId) -> PreparedRunRequest {
         github_token: Some("github-token".to_owned()),
         git_credentials: None,
         cwd: None,
+        worktree: None,
         source_connection: None,
         source: None,
         profile: None,
@@ -209,7 +212,7 @@ fn local_preparation_snapshots_optional_git_identity_and_accepts_generic_sources
     );
     assert!(matches!(
         resolved_git_source(root.path(), Path::new("git"), None),
-        Err(LocalCompositionError::DetachedHead)
+        Err(LocalCompositionError::DetachedHead { branch }) if branch == "main"
     ));
     git(root.path(), &["checkout", "main"]);
     git(

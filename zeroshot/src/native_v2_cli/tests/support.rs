@@ -774,6 +774,7 @@ impl NativeV2CliBackend for FakeBackend {
             profile: _,
             git_credentials: _,
             cwd: _,
+            worktree: _,
             source_connection: _,
         } = request;
         self.calls.lock().assert_value().push(Call::Submit {

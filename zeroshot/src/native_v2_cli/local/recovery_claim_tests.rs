@@ -34,6 +34,11 @@ fn resume_claim_fixture(name: &str, submission_key: &str) -> ResumeClaimFixture 
         .write_recovery_document(
             &run_id,
             &LocalRecoveryDocument {
+                delivery_receipt: None,
+                local_branch: None,
+                invoking_workspace: None,
+                request_digest: None,
+                workspace_revision: None,
                 submission: submission.clone(),
                 workspace: root.child("workspace"),
                 delivery_run_id: Some(run_id.clone()),

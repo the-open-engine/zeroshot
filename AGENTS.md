@@ -421,12 +421,43 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   folders exclude each other while sibling folders remain concurrent. Lease guards explicitly
   unlock on drop so fork-before-exec children cannot retain released ownership. Git metadata and
   transport commands discard ambient repository-selection variables before inspecting the selected folder.
+- Local delivery commits on HEAD and publishes that same attached branch, including earlier
+  unpushed commits. In-place runs never create managed run refs. PR/merge targets a different
+  upstream branch or the remote default, and refuses the target branch before agent launch with
+  feature-branch/`--worktree` guidance. Explicit push may publish any branch. Never force-push;
+  non-fast-forward and policy refusals stop without repair. `--worktree` prepares a retained Git
+  worktree on a managed run branch before controller startup for all graphs/harnesses. Its local
+  base is exact invoking HEAD; explicit remote base fetches the upstream and requires one. Its
+  review target remains the invoking upstream/name. Copy no untracked resources and perform no
+  dependency setup. Recovery metadata retains the chosen source commit, workspace, invoking
+  workspace and attached branch; local request fingerprints preserve replay before remote I/O.
+  Resume reuses that workspace and attaches its branch without rewinding shared refs.
+  Detached-HEAD guidance prefers a unique retained workspace branch, verified against local refs,
+  ancestry and worktree ownership; checkout history is a fallback, never a guessed default branch.
+  Publishing already committed work may confirm the admitted source commit without a new commit,
+  including unchanged local and remote HEAD after resume.
+  Exact clean merged-head recovery accepts that same local source commit, with inclusive ancestry.
+  Unbound local review discovery and creation select active reviews rather than branch history,
+  including resumes that have not recorded any delivery;
+  trusted delivery records a confirmed review binding in the existing recovery metadata before
+  polling or handing off, so timeout, cancellation and crash preserve that identity. Successors
+  recover it from that metadata or older trusted lineage ledger executions (including checkpoint
+  seeds) and carry it through the private bootstrap, retaining terminal
+  safeguards for that review without adopting branch history. Source-equal, already committed local
+  candidates can integrate a diverged target and return through review; contained runs retain their
+  mutation requirement. Git integration pins
+  delivery identity per command and never writes it into shared worktree configuration.
+  Existing attached HEAD survives checkpoint restore while files/index restore independently. Worktree
+  removal is explicit; hosted/named-target managed branch behavior is unchanged. These flags
+  are local CLI state and do not change MCP tools, protocol source types or remote plugins.
 - New local PR/merge submissions verify the remote target branch before controller startup,
   after checking for an existing submission. Remote I/O stays outside the shared submission lock;
   admission rechecks idempotency before launch. Preflight reuses the prepared native snapshot and
   delivery binding's resolved credentials; native Git starts in the selected workspace so relative
   search paths resolve consistently. Shared delivery credential helpers preserve declared
   GitHub token precedence and source-only Git authority; forge API tokens remain provider-owned.
+  Fresh review delivery reconciles the target and returns changed candidates through review before
+  its first publication, including when the local feature branch already exists on the remote.
 - Git checkout and push use credential-free HTTPS or SSH locators independently of a forge.
   The target image includes OpenSSH and a fixed root-owned libnss_wrapper for pinned SSH
   transport. Contained SSH Git uses private per-command user/group records for allocated numeric
@@ -867,7 +898,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Delivery commits default to `Zeroshot <delivery@zeroshot.invalid>`. A hosted
   `TargetRunRequest.commitIdentity`, or `RunResumeParams.commitIdentity` for a successor, replaces
   that author and committer for every commit the attempt's delivery creates: prepared revisions,
-  reconcile and target merges, and the repository-local identity pinned before conflict repair.
+  reconcile and target merges, and the contained repository-local identity pinned before conflict
+  repair. Local delivery always keeps identity command-scoped and preserves shared Git configuration.
   Like resume credentials, hosts resupply it for each successor. `CommitIdentity` rejects values
   over 256 bytes, control characters, `<`, `>`, and values Git trims to nothing.
   `NativeV2CandidateDelivery::new` derives the shared transport's identity from the delivery
@@ -920,7 +952,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   delivery hands the workspace back to agents. Hook code and credentials remain host-owned.
   Clean candidates equal to the admitted base also reach validation before `NoMutation`; a hook
   may return repair without creating a commit, run branch or review, but cannot authorize an empty
-  publication. Runs without a host validator preserve the ordinary no-mutation refusal.
+  publication in a contained run. Local delivery may publish existing committed branch work;
+  contained runs without a host validator preserve the ordinary no-mutation refusal.
 - `ZEROSHOT_DELIVERY_CHECK_COMMAND` selects one private absolute executable outside the checkout
   for trusted local publication, review observation and merge validation. Its capability travels only through the consumed
   private bootstrap, never provider context or recovery metadata; resume selects it freshly. The
@@ -1009,8 +1042,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   queues, branch freshness advances only through an authorized compare-and-swap response. A
   reported conflict is routable only after the trusted lane fetches the exact current target and
   leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub
-  credential, and the trusted lane pins their repository-local commit identity to the delivery
-  identity before handoff. Merge receipts preserve GitHub's
+  credential, and the trusted lane pins their contained repository-local commit identity to the delivery
+  identity before handoff. Local checkouts retain their user's Git configuration. Merge receipts preserve GitHub's
   authoritative merged revision. When a required check fails, bounded repair diagnostics include
   supporting failed checks and labelled raw job excerpts ending at the last GitHub error annotation.
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
@@ -1045,7 +1078,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   so refreshing metadata cannot retain a stale issue reference. Reviews with an unowned closing
   reference in a legacy Zeroshot layout fail closed instead of rewriting ambiguous human text.
 - Current software-change templates author `push@1`, `pr@2`, and `merge@3` Git delivery workers.
-  Push publishes only the exact managed branch revision. PR delivery stops only after required CI,
+  Push publishes only the exact working branch revision. PR delivery stops only after required CI,
   freshness, and conflict checks pass; missing review approval is allowed and no merge is requested.
   PR and merge workers read all visible issue comments, review summaries, and inline comments behind
   one exact-head fence. A run checkpoint routes each new or edited item through the existing repair

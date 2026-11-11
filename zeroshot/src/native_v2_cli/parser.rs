@@ -89,10 +89,16 @@ enum CliCommand {
     /// requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a
     /// supported forge. Named targets require a committed Git source. Local workspaces must not
     /// overlap Zeroshot state.
-    /// For local PR and merge delivery, the target is the branch's upstream when configured,
-    /// otherwise the local branch name. Preparation verifies that the remote contains the target
-    /// before agents start. To target `main` from a fresh worktree, run
-    /// `git branch --set-upstream-to=origin/main`, or create the worktree from `origin/main`.
+    /// Local delivery commits on the checked-out branch and pushes that same branch, including
+    /// existing unpushed commits. PR/merge targets a different upstream branch, or the remote's
+    /// default branch; starting on that target is refused. Start from a feature branch or use
+    /// --worktree. Explicit --push can publish any branch, including main, without force-pushing.
+    /// --worktree creates a retained worktree and managed run branch from local HEAD by default.
+    /// --worktree-base remote fetches the invoking branch's upstream and requires one to be set.
+    /// Worktree PR/merge targets the invoking branch's upstream, or its name without an upstream.
+    /// Preparation verifies the target before agents start. Worktrees contain committed files only;
+    /// dependencies and untracked resources are not copied or installed. Resume reuses the same
+    /// workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
     ///
     /// A foreground run follows NDJSON events until completion. --detach returns after submission.
     /// Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the
@@ -652,6 +658,14 @@ struct RunArgs {
     /// Working folder (default: invoking folder). File arguments stay relative to the invoking folder.
     #[arg(long, value_name = "FOLDER")]
     cwd: Option<PathBuf>,
+
+    /// Run in a retained Git worktree on a new managed branch. Local runs only.
+    #[arg(long, conflicts_with = "target")]
+    worktree: bool,
+
+    /// Start the worktree at local HEAD (default) or fetch the invoking branch's upstream.
+    #[arg(long, value_enum, requires = "worktree", value_name = "BASE")]
+    worktree_base: Option<super::LocalWorktreeBase>,
 
     /// Named connection for Git checkout and push.
     ///

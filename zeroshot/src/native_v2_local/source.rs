@@ -23,12 +23,7 @@ pub(super) fn resolved_git_source(
     {
         return Err(LocalCompositionError::DeliverySourceRequired);
     }
-    let branch = git_line(
-        git_program,
-        workspace,
-        &["symbolic-ref", "--quiet", "--short", "HEAD"],
-    )
-    .map_err(|_| LocalCompositionError::DetachedHead)?;
+    let branch = attached_branch(workspace, git_program)?;
     let revision = git_line(
         git_program,
         workspace,
@@ -61,7 +56,11 @@ pub(super) fn resolved_git_source(
     })
 }
 
-fn branch_upstream(workspace: &Path, git_program: &Path, branch: &str) -> Option<(String, String)> {
+pub(super) fn branch_upstream(
+    workspace: &Path,
+    git_program: &Path,
+    branch: &str,
+) -> Option<(String, String)> {
     let remote = git_line(
         git_program,
         workspace,
@@ -123,12 +122,19 @@ fn transport_repository(
         .map_err(|_| LocalCompositionError::ResolvedSource)
 }
 
-/// Observes a new local PR/merge run's base using the same context and authority as delivery.
-pub(crate) async fn validate_remote_base_branch(
+/// Resolve local transport with delivery's native context and declared Git authority.
+pub(super) async fn local_transport(
     prepared: &super::PreparedLocalRun,
     git_program: &Path,
     state_root: &Path,
-) -> Result<(), LocalCompositionError> {
+) -> Result<
+    (
+        crate::native_v2_delivery::transport::GitTransport,
+        Option<String>,
+        Option<openengine_cluster_protocol::GitTransportCredentials>,
+    ),
+    LocalCompositionError,
+> {
     use crate::native_v2_delivery::{github_git_token, resolved_git_credentials, transport};
     use crate::native_v2_contract::NodeRuntimeBinding;
 
@@ -142,13 +148,23 @@ pub(crate) async fn validate_remote_base_branch(
         .runtime
         .nodes()
         .values()
-        .find(|binding| matches!(binding, NodeRuntimeBinding::GitDelivery { .. }))
-        .ok_or(LocalCompositionError::DeliverySourceRequired)?;
-    let environment = prepared.environment.resolve(binding).await?;
-    let token = github_git_token(&environment, prepared.github_token.as_deref())
-        .map_err(|_| LocalCompositionError::DeliveryCredentials)?;
-    let credentials = resolved_git_credentials(&environment, prepared.git_credentials.as_ref())
-        .map_err(|_| LocalCompositionError::DeliveryCredentials)?;
+        .find(|binding| matches!(binding, NodeRuntimeBinding::GitDelivery { .. }));
+    let environment = match binding {
+        Some(binding) => Some(prepared.environment.resolve(binding).await?),
+        None => None,
+    };
+    let token = match &environment {
+        Some(environment) => github_git_token(environment, prepared.github_token.as_deref())
+            .map_err(|_| LocalCompositionError::DeliveryCredentials)?,
+        None => prepared.github_token.as_deref(),
+    };
+    let credentials = match &environment {
+        Some(environment) => {
+            resolved_git_credentials(environment, prepared.git_credentials.as_ref())
+                .map_err(|_| LocalCompositionError::DeliveryCredentials)?
+        }
+        None => prepared.git_credentials.clone(),
+    };
     let token_from_file = if token.is_none()
         && credentials.is_none()
         && crate::source_code_provider::adapters::core::delivery_uses_github_cli(
@@ -178,8 +194,28 @@ pub(crate) async fn validate_remote_base_branch(
         },
         crate::source_code_provider::adapters::core::source_remote(source),
     );
-    let credential = transport::source_credential(
-        token.or(token_from_file.as_deref()).unwrap_or(""),
+    Ok((
+        transport,
+        token.or(token_from_file.as_deref()).map(str::to_owned),
+        credentials,
+    ))
+}
+
+/// Observes a new local PR/merge run's target with delivery's native transport and credentials.
+pub(crate) async fn validate_remote_base_branch(
+    prepared: &super::PreparedLocalRun,
+    git_program: &Path,
+    state_root: &Path,
+) -> Result<(), LocalCompositionError> {
+    let source = prepared
+        .submission
+        .source
+        .as_ref()
+        .ok_or(LocalCompositionError::DeliverySourceRequired)?;
+    let (transport, token, credentials) =
+        local_transport(prepared, git_program, state_root).await?;
+    let credential = super::super::native_v2_delivery::transport::source_credential(
+        token.as_deref().unwrap_or(""),
         credentials.as_ref(),
     );
     match transport.read_ref(source.branch.as_str(), credential).await {
@@ -191,4 +227,67 @@ pub(crate) async fn validate_remote_base_branch(
             branch: source.branch.to_string(),
         }),
     }
+}
+
+/// Delivery and worktree preparation require an attached branch. Reflog selectors identify the
+/// branch to return to without switching refs or guessing from an ambiguous commit decoration.
+/// The CLI can supplement this evidence from its retained workspace recovery metadata.
+pub(super) fn attached_branch(
+    workspace: &Path,
+    git_program: &Path,
+) -> Result<String, LocalCompositionError> {
+    git_line(
+        git_program,
+        workspace,
+        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+    )
+    .map_err(|_| {
+        let branch = {
+            git_output(
+                git_program,
+                workspace,
+                &["reflog", "show", "-n", "32", "--format=%gs", "HEAD"],
+            )
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.strip_prefix("checkout: moving from "))
+            .filter_map(|line| line.split_once(" to "))
+            // A restored HEAD has no checkout event: prefer the last attached destination.
+            // An explicit detached checkout has a commit destination, so use its origin.
+            .flat_map(|(from, to)| [to, from])
+            .find(|name| verified_detached_branch(workspace, git_program, name))
+            .map(str::to_owned)
+        };
+        branch.map_or(LocalCompositionError::DetachedHeadUnknown, |branch| {
+            LocalCompositionError::DetachedHead { branch }
+        })
+    })
+}
+
+/// Recovery hints must still name an existing descendant branch available to this checkout.
+/// Neither a stale recovery record nor a reflog entry authorizes switching a shared ref.
+pub(crate) fn verified_detached_branch(workspace: &Path, git_program: &Path, branch: &str) -> bool {
+    if !crate::source_code_provider::valid_git_branch(branch) {
+        return false;
+    }
+    let reference = format!("refs/heads/{branch}");
+    git_output(
+        git_program,
+        workspace,
+        &["show-ref", "--verify", &reference],
+    )
+    .is_ok()
+        && git_output(
+            git_program,
+            workspace,
+            &["merge-base", "--is-ancestor", "HEAD", &reference],
+        )
+        .is_ok()
+        && git_output(git_program, workspace, &["worktree", "list", "--porcelain"]).is_ok_and(
+            |worktrees| {
+                !worktrees
+                    .lines()
+                    .any(|line| line == format!("branch {reference}"))
+            },
+        )
 }

@@ -242,11 +242,18 @@ fn private_names(directory: &Path) -> io::Result<BTreeSet<std::ffi::OsString>> {
 }
 
 fn copy_private(source: &Path, target: &Path) -> io::Result<()> {
+    copy_private_head(source, target, false)
+}
+
+fn copy_private_head(source: &Path, target: &Path, preserve_head: bool) -> io::Result<()> {
     let names = private_names(source)?
         .union(&private_names(target)?)
         .cloned()
         .collect::<Vec<_>>();
     for name in names {
+        if preserve_head && name == "HEAD" {
+            continue;
+        }
         replace_optional(&source.join(&name), &target.join(name))?;
     }
     for name in PRIVATE_PATHS {
@@ -613,7 +620,12 @@ fn require_no_nested_peers(directory: &Path) -> io::Result<()> {
 
 pub(super) fn restore_existing(snapshot: &Path, target: &GitLayout) -> io::Result<()> {
     add_objects(&snapshot.join("objects"), &target.common.join("objects"))?;
-    copy_private(snapshot, &target.directory)
+    // Restored files and index may describe an older candidate. Keep an existing attached HEAD
+    // at its live branch tip: attaching the snapshot's commit would require rewinding shared refs.
+    let preserve_head = snapshot_unborn_reference(snapshot)?.is_none()
+        && require_plain_head(&target.directory).is_ok()
+        && read_small(&target.directory.join("HEAD"))?.starts_with("ref: refs/heads/");
+    copy_private_head(snapshot, &target.directory, preserve_head)
 }
 
 fn add_objects(source: &Path, target: &Path) -> io::Result<()> {

@@ -202,6 +202,59 @@ async fn updated_target_workflow_is_integrated_and_reviewed_before_first_push() 
 }
 
 #[tokio::test]
+async fn existing_local_remote_branch_integrates_and_reviews_an_advanced_target_before_push() {
+    for adopting in [false, true] {
+        for mode in [DeliveryMode::PullRequest, DeliveryMode::Merge] {
+            let fixture = UpdatedTarget::new();
+            let branch = "feature/existing";
+            git(&fixture.repo.workspace, &["checkout", "-b", branch]);
+            git(&fixture.repo.workspace, &["push", "origin", branch]);
+            let authority = Arc::new(FakeGitHub::new(fixture.repo.remote.clone(), Script::NoCi));
+            let adapter = Arc::new(NativeV2DeliveryAdapter::new(
+                NativeV2DeliveryConfig {
+                    local_branch: Some(branch.to_owned()),
+                    delivery_run_id: RunId::new("updated-target-before-push"),
+                    adopt_existing_delivery: adopting,
+                    git_identity: None,
+                    commit_identity: None,
+                    commit_co_author: None,
+                    workspace: fixture.repo.workspace.clone(),
+                    git_program: "/usr/bin/git".into(),
+                    target: target(&fixture.repo),
+                    poll: DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
+                },
+                authority.clone(),
+            ));
+
+            let integrated = run_with_adapter(fixture.request(mode), adapter.clone()).await;
+
+            fixture.assert_integrated(&authority, &integrated.outcome);
+            assert_eq!(authority.target_reconciliations.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                git_output(&fixture.repo.remote, &["rev-parse", branch]),
+                fixture.repo.base
+            );
+            let reviewed = fixture.head();
+            let delivered = run_with_adapter(fixture.request(mode), adapter).await;
+            let receipt = assert_delivery_signal(&delivered.outcome, mode.success_outcome());
+            assert_eq!(receipt["headRevision"], reviewed);
+            assert_eq!(authority.target_reconciliations.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                git_output(&fixture.repo.remote, &["rev-parse", branch]),
+                reviewed
+            );
+            assert_eq!(
+                git_output(
+                    &fixture.repo.workspace,
+                    &["symbolic-ref", "--short", "HEAD"]
+                ),
+                branch
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn target_advancing_during_review_requires_another_review_before_push() {
     let (mut fixture, authority, adapter) = UpdatedTarget::harness(Script::NoCi);
     let mode = DeliveryMode::PullRequest;

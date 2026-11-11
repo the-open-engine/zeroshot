@@ -501,6 +501,7 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
     .await;
     let adapter = Arc::new(NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: RunId::new("ownership-handoff"),
             adopt_existing_delivery: false,
             git_identity: fixture.authority.config.git_identity,

@@ -569,6 +569,7 @@ fn local_selection_request(
         github_token: None,
         git_credentials: None,
         cwd: None,
+        worktree: None,
         source_connection: None,
         source: source.map(|resolved| crate::native_v2_cli::NamedRunSource {
             resolved,

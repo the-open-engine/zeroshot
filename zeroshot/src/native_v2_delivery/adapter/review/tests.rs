@@ -55,6 +55,7 @@ mod queued_handoff {
                 .unwrap();
             let adapter = NativeV2DeliveryAdapter::new(
                 NativeV2DeliveryConfig {
+                    local_branch: None,
                     delivery_run_id: openengine_cluster_protocol::RunId::new("cleanup"),
                     adopt_existing_delivery: false,
                     git_identity: None,
@@ -67,7 +68,7 @@ mod queued_handoff {
                 },
                 authority.clone(),
             );
-            adapter.record_published(review.clone());
+            assert!(adapter.record_published(review.clone()).is_ok());
             let response = NodeResponseContract::Verifier {
                 output: delivery_result_schema(DeliveryMode::MergeV3).unwrap(),
                 signals: BTreeMap::from([(

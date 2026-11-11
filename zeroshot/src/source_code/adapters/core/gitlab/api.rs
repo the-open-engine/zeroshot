@@ -23,6 +23,7 @@ pub(super) struct Api {
     metadata: Arc<OnceCell<ServerMetadata>>,
 }
 
+#[derive(Clone)]
 pub(super) struct ApiRequest<'a> {
     method: Method,
     segments: &'a [&'a str],
@@ -120,16 +121,32 @@ impl Api {
         segments: &[&str],
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Vec<T>, SourceDeliveryError> {
+        self.pages_request(ApiRequest::get(segments), credential)
+            .await
+    }
+
+    pub(super) async fn pages_request<T: DeserializeOwned>(
+        &self,
+        request: ApiRequest<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<Vec<T>, SourceDeliveryError> {
         let mut result = Vec::new();
         for page in 1..=PAGE_LIMIT {
             let values: Vec<T> = self
                 .json(
-                    ApiRequest::get(segments)
+                    request
+                        .clone()
                         .query("per_page", PAGE_SIZE.to_string())
                         .query("page", page.to_string()),
                     credential,
                 )
                 .await?;
+            if values.len() > PAGE_SIZE {
+                return Err(SourceDeliveryError::api(
+                    None,
+                    "GitLab page exceeded its item bound",
+                ));
+            }
             let complete = values.len() < PAGE_SIZE;
             result.extend(values);
             if complete {

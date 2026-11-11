@@ -216,6 +216,10 @@ impl LocalCliBackend {
         )
         .map_err(local_error)?;
         Ok(PreparedLocalRun {
+            local_branch: recovery.local_branch.clone(),
+            invoking_workspace: recovery.invoking_workspace.clone(),
+            request_digest: recovery.request_digest.clone(),
+            workspace_revision: recovery.workspace_revision.clone(),
             run_id: params.successor_run_id.clone(),
             delivery_run_id: self.delivery_run_id(&params.run_id, recovery)?,
             submission,

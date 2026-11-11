@@ -26,6 +26,40 @@ Runs without Git
 delivery keep their normal behavior. Delivery shows Git's warning when a run adds an unregistered
 embedded repository, but permits the gitlink; register it as a submodule when others need to clone it.
 
+**Breaking change:** in-place delivery commits on the branch you checked out and pushes the
+remote branch with that same name, including earlier unpushed commits. It creates no
+`zeroshot/v2-…` branch. `--pr` and `--ship` open the PR/MR from that branch into a different
+upstream branch when configured, otherwise the remote's default branch. Starting on the target
+itself is refused before agents start: use a feature branch or `--worktree`. Explicit `--push`
+may publish `main`. Delivery never force-pushes; non-fast-forward and forge policy refusals name
+the branch and stop without an agent repair round.
+
+Delivery can publish existing committed work without creating another commit and confirm that same
+published commit again on resume. Before a fresh
+PR/MR publication, it reconciles the target and sends an updated candidate through review,
+including when the feature branch already exists on the remote.
+Runs without a bound review reuse an unambiguous active review or open a new one, including
+resumes before any delivery was recorded. Closed and merged reviews on a reused feature branch
+belong to earlier runs. Bound review IDs retain terminal-review safeguards.
+Resume recovers the current review's identity from the run lineage's
+recorded delivery, including a confirmed review whose delivery later timed out or was cancelled,
+so older reviews on that branch do not make recovery ambiguous. A committed
+candidate can still incorporate a diverged target without requiring another edit first; the integrated
+result returns through review before publication.
+
+For isolation, add `--worktree`. zeroshot creates a managed run branch in a retained worktree
+and commits and pushes that matching branch. Its PR/MR targets the invoking branch's upstream,
+or its own name without an upstream. The default base is your exact local HEAD, including
+unpushed commits. To start from the upstream instead, use `--worktree --worktree-base remote`;
+configure an upstream first, or explicitly choose `--worktree-base local`.
+
+The invoking checkout's files, index, HEAD and branch tips stay unchanged. The new worktree
+contains committed files only: dependencies, `.env` and other untracked resources are not copied,
+linked or installed. Resume reuses the same workspace and attached run branch, while preserving
+shared branch tips. Worktrees remain after success and failure; inspect and remove them explicitly
+with `git worktree remove PATH`. Use `git worktree list` from the invoking repository to find its
+path. Hosted and named-target delivery keep their managed run branches.
+
 GitHub delivery requires `gh`. GitLab needs `glab` only to reuse its native login. Sign in to the host you use:
 
 ```console
@@ -161,6 +195,7 @@ Resuming accepts intentional commits pushed to the run branch. If the complete r
 already matches its published tree and no merge is pending, delivery reuses that commit without another
 work round. Pending merges retain their normal reconciliation path. Different
 local content is preserved and returns to the review loop. Discovery checks every review from the run
-branch before validating its target; retargeted or ambiguous reviews are refused rather than duplicated.
+branch across bounded complete pages before validating its target; retargeted or ambiguous reviews
+are refused rather than duplicated.
 GitLab briefly rechecks a lagging merge-request head against the branch ref. Persistent disagreement
 stops with both revisions in the diagnostic instead of polling indefinitely.

@@ -450,6 +450,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
         git_credentials: None,
 
         cwd: None,
+        worktree: None,
         source_connection: None,
 
         run_id,

@@ -729,20 +729,30 @@ async fn every_native_git_receipt_kind_is_independent_of_terminal_output() {
         } else {
             native["links"] = json!({});
         }
-        let mut recorded = snapshot(&admitted, [("deliver", delivery_outcome(native.clone()))]);
-        let result = TerminalResult::Succeeded {
-            output: Value::Null,
-        };
-        let checked = super::super::enforce_delivery_terminal(
-            DeliveryPolicy::Required,
-            &admitted,
-            &recorded,
-            result.clone(),
-        )
-        .assert_value();
-        assert_eq!(checked.result, result, "{mode:?}");
-        recorded.primary_graph = Some(checked);
-        assert_eq!(recorded.delivery_receipt(), Some(native), "{mode:?}");
+        for head in [
+            native["headRevision"].clone(),
+            json!(admitted.source.as_ref().assert_value().revision.as_str()),
+        ] {
+            native["headRevision"] = head;
+            let mut recorded = snapshot(&admitted, [("deliver", delivery_outcome(native.clone()))]);
+            let result = TerminalResult::Succeeded {
+                output: Value::Null,
+            };
+            let checked = super::super::enforce_delivery_terminal(
+                DeliveryPolicy::Required,
+                &admitted,
+                &recorded,
+                result.clone(),
+            )
+            .assert_value();
+            assert_eq!(checked.result, result, "{mode:?}");
+            recorded.primary_graph = Some(checked);
+            assert_eq!(
+                recorded.delivery_receipt(),
+                Some(native.clone()),
+                "{mode:?}"
+            );
+        }
     }
 }
 

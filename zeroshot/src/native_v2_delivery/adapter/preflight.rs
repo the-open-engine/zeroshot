@@ -43,6 +43,13 @@ pub(super) struct DeliveryState {
 }
 
 impl NativeV2DeliveryAdapter {
+    pub(super) fn include_terminal_reviews(&self) -> bool {
+        self.config.local_branch.is_none()
+            || self
+                .delivery_state()
+                .published
+                .is_some_and(|review| !review.review_id.is_empty())
+    }
     pub(super) fn delivery_state(&self) -> DeliveryState {
         self.state
             .lock()
@@ -50,7 +57,8 @@ impl NativeV2DeliveryAdapter {
             .clone()
     }
 
-    pub(super) fn record_published(&self, review: SourceReviewReceipt) {
+    pub(super) fn record_published(&self, review: SourceReviewReceipt) -> Result<(), DeliveryStop> {
+        self.persist_review_binding(&review)?;
         let mut state = self
             .state
             .lock()
@@ -58,6 +66,21 @@ impl NativeV2DeliveryAdapter {
         state.published = Some(review);
         state.intended_push = None;
         state.pending_head = None;
+        Ok(())
+    }
+
+    fn persist_review_binding(&self, review: &SourceReviewReceipt) -> Result<(), DeliveryStop> {
+        if !review.review_id.is_empty()
+            && let Some(record) = &self.review_binding_recorder
+        {
+            record(review).map_err(|message| {
+                DeliveryStop::failure(
+                    WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+                    format!("Cannot retain the confirmed review identity for resume: {message}"),
+                )
+            })?;
+        }
+        Ok(())
     }
 
     pub(super) fn checkpoint_feedback(
@@ -89,10 +112,26 @@ impl NativeV2DeliveryAdapter {
         preparation: &mut DeliveryPreparation<'_, '_>,
         commit_message: &str,
     ) -> Result<(), DeliveryStop> {
-        let branch = delivery_head_branch(&self.config.delivery_run_id);
+        let branch = self.config.head_branch();
+        if self.config.local_branch.is_some() {
+            let current = match self.git.attached_branch(&self.config.workspace).await {
+                Ok(branch) => Some(branch),
+                Err(error @ git::GitError::Command(_)) if matches!(&error, git::GitError::Command(failure) if failure.cleanup_unconfirmed) =>
+                {
+                    return Err(recovery::git_failure(error));
+                }
+                Err(_) => None,
+            };
+            if current.as_ref() != Some(&branch) {
+                return self.refuse_delivery(preparation.control, &format!(
+                    "HEAD must stay attached to run branch `{branch}`; if HEAD is detached or on another branch, return with `git switch {branch}` before resuming"
+                )).await;
+            }
+        }
         let known = self.delivery_state();
         let mode = preparation_mode(preparation)?;
         let request = SourceDeliveryRead {
+            include_terminal_reviews: self.include_terminal_reviews(),
             target: &self.config.target,
             head_branch: &branch,
             known_review: known.published.as_ref(),
@@ -159,6 +198,7 @@ impl NativeV2DeliveryAdapter {
         });
         let adopting_existing = self.is_adopting_existing_delivery(known);
         let request = SourceHeadReconciliation {
+            require_fast_forward: self.config.local_branch.is_some(),
             workspace: &self.config.workspace,
             published: &published,
             observed: &observed,
@@ -177,11 +217,21 @@ impl NativeV2DeliveryAdapter {
                 .await
             }
             SourceReconciliationOutcome::NeedsWork(diagnostic) => {
-                self.record_published(observed.clone());
+                self.record_published(observed.clone())?;
                 Err(recovery::repair(diagnostic).with_review(&observed))
             }
             SourceReconciliationOutcome::Unchanged | SourceReconciliationOutcome::Adopted => {
-                self.record_published(observed);
+                // An existing local branch on the remote is not evidence that this run's
+                // candidate has incorporated and reviewed the target. Keep reconciling it
+                // until the first publication, including after a repair/review round.
+                if self.config.local_branch.is_some()
+                    && known.published.is_none()
+                    && preparation_mode(preparation)?.creates_review()
+                {
+                    self.reconcile_target_before_publication(preparation, commit_message)
+                        .await?;
+                }
+                self.record_published(observed)?;
                 Ok(())
             }
         }
@@ -199,7 +249,11 @@ impl NativeV2DeliveryAdapter {
         observed: &SourceReviewReceipt,
         control: &DriverControl,
     ) -> Result<SourceReviewReceipt, DeliveryStop> {
-        match reconciliation_anchor(known, observed, self.config.adopt_existing_delivery) {
+        match reconciliation_anchor(
+            known,
+            observed,
+            self.config.adopt_existing_delivery || self.config.local_branch.is_some(),
+        ) {
             Ok(published) => Ok(published),
             Err(error) => {
                 emit(control, &format!("delivery: {error}")).await?;
@@ -332,11 +386,16 @@ impl NativeV2DeliveryAdapter {
                 "the run PR is already merged, but current local work is not confirmed delivered; work was preserved")
                 .await;
         }
-        if let Err(error) = self
-            .git
-            .deliverable_revision(&self.config.workspace, &self.config.target.base_revision)
-            .await
-        {
+        let provenance = if self.config.local_branch.is_some() {
+            self.git
+                .descendant_revision(&self.config.workspace, &self.config.target.base_revision)
+                .await
+        } else {
+            self.git
+                .deliverable_revision(&self.config.workspace, &self.config.target.base_revision)
+                .await
+        };
+        if let Err(error) = provenance {
             return self
                 .refuse_delivery(
                     preparation.control,
@@ -376,6 +435,10 @@ impl NativeV2DeliveryAdapter {
         _control: &DriverControl,
         diagnostic: &str,
     ) -> Result<(), DeliveryStop> {
+        let diagnostic = match &self.config.local_branch {
+            Some(branch) => format!("local branch `{branch}`: {diagnostic}"),
+            None => diagnostic.to_owned(),
+        };
         Err(DeliveryStop::failure(
             WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
             diagnostic,
@@ -447,6 +510,17 @@ impl NativeV2DeliveryAdapter {
             &self.redact_feedback(credentials, format!("delivery: {error}")),
         )
         .await?;
+        if self.config.local_branch.is_some()
+            && !error.cleanup_unconfirmed()
+            && matches!(&error, SourceDeliveryError::Command(failure) if failure.non_fast_forward())
+        {
+            return Err(SourceDeliveryError::identity(format!(
+                "remote branch `{}` cannot be fast-forwarded; local work was preserved\n{}",
+                self.config.head_branch(),
+                self.redact_feedback(credentials, error.to_string()),
+            ))
+            .into());
+        }
         let can_refresh =
             error.authentication_failed() && credentials.can_refresh() && !retry.refreshed;
         if !can_refresh && !error.retryable_operation() {

@@ -195,6 +195,8 @@ fn probe(outage: Outage) -> (Arc<SyncProbe>, Arc<OutageAuthority>, Arc<TimedRefr
         calls: AtomicUsize::new(0),
     });
     let request = SourceReviewRequest {
+        include_terminal_reviews: true,
+        known_review: None,
         target: DeliveryTarget::new("acme/project", "main", "a".repeat(40)).assert_value(),
         head_branch: "zeroshot/outage".to_owned(),
         head_revision: "b".repeat(40),
@@ -204,6 +206,7 @@ fn probe(outage: Outage) -> (Arc<SyncProbe>, Arc<OutageAuthority>, Arc<TimedRefr
     };
     let adapter = NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: openengine_cluster_protocol::RunId::new("outage-test"),
             adopt_existing_delivery: false,
             git_identity: None,

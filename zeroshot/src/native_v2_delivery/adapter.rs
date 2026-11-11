@@ -19,6 +19,10 @@ mod target;
 
 const MAX_FEEDBACK_DIAGNOSTIC_BYTES: usize = 4 * 1024 * 1024;
 
+/// Local lifecycle-owned persistence, separate from successful delivery receipts.
+pub(crate) type ReviewBindingRecorder =
+    Arc<dyn Fn(&SourceReviewReceipt) -> Result<(), String> + Send + Sync>;
+
 #[cfg(all(test, target_os = "linux"))]
 mod ownership_tests;
 use input::delivery_input;
@@ -35,9 +39,29 @@ pub struct NativeV2DeliveryAdapter {
     trusted_delivery_validator: Option<super::validation::TrustedDeliveryValidator>,
     trusted_git_credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
     state: Arc<std::sync::Mutex<preflight::DeliveryState>>,
+    review_binding_recorder: Option<ReviewBindingRecorder>,
 }
 
 impl NativeV2DeliveryAdapter {
+    /// Seeds a local successor from the lineage's trusted, durable delivery evidence.
+    pub(crate) fn with_recovered_review(self, review: Option<SourceReviewReceipt>) -> Self {
+        if let Some(review) = review {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .published = Some(review);
+        }
+        self
+    }
+
+    pub(crate) fn with_review_binding_recorder(
+        mut self,
+        recorder: Option<ReviewBindingRecorder>,
+    ) -> Self {
+        self.review_binding_recorder = recorder;
+        self
+    }
+
     #[must_use]
     pub fn new(
         config: NativeV2DeliveryConfig,
@@ -56,6 +80,7 @@ impl NativeV2DeliveryAdapter {
             trusted_delivery_validator: None,
             trusted_git_credentials: None,
             state: Arc::new(std::sync::Mutex::new(preflight::DeliveryState::default())),
+            review_binding_recorder: None,
         }
     }
 
@@ -673,8 +698,13 @@ impl NativeV2DeliveryAdapter {
         let unchanged = revision.is_none();
         let head_revision = revision.unwrap_or_else(|| self.config.target.base_revision.clone());
         let review_request = SourceReviewRequest {
+            include_terminal_reviews: self.include_terminal_reviews(),
+            known_review: self
+                .delivery_state()
+                .published
+                .filter(|review| !review.review_id.is_empty()),
             target: self.config.target.clone(),
-            head_branch: delivery_head_branch(&self.config.delivery_run_id),
+            head_branch: self.config.head_branch(),
             head_revision,
             title: input.title,
             description: input.description,
@@ -701,7 +731,7 @@ impl NativeV2DeliveryAdapter {
         self.publish_review_head(&mut preparation, &review_request, &pending)
             .await?;
         if !mode.creates_review() {
-            self.record_published(pending.clone());
+            self.record_published(pending.clone())?;
             emit(preparation.control, "delivery: exact run branch published").await?;
             return Ok(pending);
         }
@@ -741,7 +771,7 @@ impl NativeV2DeliveryAdapter {
                 "Forge returned a review receipt that does not match the intended repository, branch or revision",
             ));
         }
-        self.record_published(review.clone());
+        self.record_published(review.clone())?;
         emit(
             preparation.control,
             "delivery: review created or rediscovered",
@@ -766,6 +796,15 @@ impl NativeV2DeliveryAdapter {
             )
             .await
         {
+            Err(git::GitError::NoMutation) if self.config.local_branch.is_some() => {
+                // Local delivery can publish committed work captured at admission and confirm
+                // that same candidate again after restart, without manufacturing another commit.
+                self.git
+                    .descendant_revision(&session.workspace, &self.config.target.base_revision)
+                    .await
+                    .map(Some)
+                    .map_err(recovery::git_failure)
+            }
             // A host may prove an already-satisfied task without manufacturing a commit. It
             // still cannot publish an unchanged candidate, even when validation accepts it.
             Err(git::GitError::NoMutation) if self.trusted_delivery_validator.is_some() => Ok(None),

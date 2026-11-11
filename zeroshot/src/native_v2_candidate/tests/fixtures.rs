@@ -226,6 +226,7 @@ pub(super) fn candidate_config(
         workspace: repository.workspace.clone(),
         delivery: Some(NativeV2CandidateDelivery {
             config: NativeV2DeliveryConfig {
+                local_branch: None,
                 delivery_run_id: RunId::new("candidate-fixture"),
                 adopt_existing_delivery: false,
                 git_identity: None,

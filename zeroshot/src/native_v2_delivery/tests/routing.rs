@@ -130,6 +130,7 @@ async fn drive_repair_loop(
     let admitted = admitted_routing_graph(&repo.base, mode).await;
     let delivery = Arc::new(NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: RunId::new("delivery-routing"),
             adopt_existing_delivery: false,
             git_identity: None,

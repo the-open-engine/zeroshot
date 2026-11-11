@@ -169,6 +169,7 @@ async fn known_review_and_branch_observation_are_fenced_against_head_movement() 
     let request = request();
     let known = receipt();
     let read = SourceDeliveryRead {
+        include_terminal_reviews: true,
         target: &request.target,
         head_branch: &request.head_branch,
         known_review: Some(&known),

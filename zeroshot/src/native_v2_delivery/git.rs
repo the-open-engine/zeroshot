@@ -35,6 +35,17 @@ pub(crate) struct SystemGit {
 }
 
 impl SystemGit {
+    pub(crate) async fn attached_branch(&self, workspace: &Path) -> Result<String, GitError> {
+        let output = self
+            .require_success(workspace, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .await?;
+        let branch = output.stdout().trim();
+        if output.stdout_truncated() || !crate::source_code_provider::valid_git_branch(branch) {
+            return Err(GitError::InvalidRevision);
+        }
+        Ok(branch.to_owned())
+    }
+
     pub(crate) fn new(program: PathBuf) -> Self {
         Self {
             program,
@@ -317,15 +328,25 @@ impl SystemGit {
         workspace: &Path,
         base_revision: &str,
     ) -> Result<String, GitError> {
+        let revision = self.descendant_revision(workspace, base_revision).await?;
+        if revision == base_revision {
+            return Err(GitError::NoMutation);
+        }
+        Ok(revision)
+    }
+
+    /// Confirms source ancestry, including an already committed local starting revision.
+    pub(crate) async fn descendant_revision(
+        &self,
+        workspace: &Path,
+        base_revision: &str,
+    ) -> Result<String, GitError> {
         let output = self
             .require_success(workspace, &["rev-parse", "HEAD"])
             .await?;
         let revision = output.stdout().trim().to_owned();
         if output.stdout_truncated() || !valid_revision(&revision) {
             return Err(GitError::InvalidRevision);
-        }
-        if revision == base_revision {
-            return Err(GitError::NoMutation);
         }
         self.require_success(
             workspace,

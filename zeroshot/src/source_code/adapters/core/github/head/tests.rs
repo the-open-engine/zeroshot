@@ -266,6 +266,7 @@ impl SeparateHistory {
         super::reconcile(
             &self.authority,
             SourceHeadReconciliation {
+                require_fast_forward: false,
                 workspace: &self.repository.workspace,
                 published: &self.published,
                 observed,

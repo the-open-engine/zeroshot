@@ -403,6 +403,7 @@ impl CapsuleAllocator for CandidateAllocator {
         } = request;
         let delivery = Arc::new(NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
+                local_branch: None,
                 delivery_run_id: RunId::new("candidate-test"),
                 adopt_existing_delivery: false,
                 git_identity: None,
@@ -695,6 +696,7 @@ async fn submit_through_cli(
     let outcome = execute_native_v2_cli_with_context(
         NativeV2CliCommand::Run(Box::new(RunCommand {
             cwd: None,
+            worktree: None,
             source_connection: None,
             source_forge: None,
 
@@ -1090,6 +1092,7 @@ fn routed_agent(
 fn routing_delivery(workspace: &Path) -> Arc<NativeV2DeliveryAdapter> {
     Arc::new(NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: RunId::new("candidate-routing"),
             adopt_existing_delivery: false,
             git_identity: None,
@@ -1211,6 +1214,7 @@ exec /usr/bin/git "${{arguments[@]}}"
 
     let delivery = NativeV2CandidateDelivery::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: RunId::new("candidate-commit-identity"),
             adopt_existing_delivery: false,
             git_identity: None,
@@ -1254,6 +1258,7 @@ exec /usr/bin/git "${{arguments[@]}}"
         .authority
         .reconcile_delivery_head(
             SourceHeadReconciliation {
+                require_fast_forward: false,
                 workspace,
                 published: &published,
                 observed: &observed,

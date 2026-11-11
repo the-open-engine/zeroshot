@@ -377,6 +377,7 @@ impl CapsuleAllocator for DeliveryAllocator {
             .ok_or(CapsuleAllocationUnavailable::Runtime)?;
         let delivery = NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
+                local_branch: None,
                 delivery_run_id: run_id.clone(),
                 adopt_existing_delivery: false,
                 git_identity: None,

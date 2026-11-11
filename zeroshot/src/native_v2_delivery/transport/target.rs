@@ -1,7 +1,9 @@
 use std::time::Duration;
 use tokio::process::Command;
 use crate::source_code_provider::*;
-use crate::native_v2_delivery::command::{capture, capture_sensitive, delivery_identity};
+use crate::native_v2_delivery::command::{
+    capture, capture_sensitive, delivery_identity, identity_configuration,
+};
 use super::GitTransport;
 
 pub(super) async fn bounded_status(
@@ -117,14 +119,23 @@ async fn integrate(
     if is_ancestor(context, target_revision, &head).await? {
         return Ok(SourceReconciliationOutcome::Unchanged);
     }
-    let candidate = git
+    let prepared = git
         .prepare_revision(
             context.request.workspace,
             source_revision,
             context.request.commit_message,
         )
-        .await
-        .map_err(git_error)?;
+        .await;
+    let candidate = match prepared {
+        Err(crate::native_v2_delivery::git::GitError::NoMutation)
+            if context.transport.config().local_environment.is_some() =>
+        {
+            git.descendant_revision(context.request.workspace, source_revision)
+                .await
+                .map_err(git_error)?
+        }
+        result => result.map_err(git_error)?,
+    };
     configure_delivery_identity(context.transport).await?;
     merge_target(context, target_revision, &candidate).await
 }
@@ -135,9 +146,14 @@ async fn merge_target(
     candidate: &str,
 ) -> Result<SourceReconciliationOutcome, SourceDeliveryError> {
     let mut command = local_command(context);
+    let [name, email] = identity_configuration(context.transport.commit_identity());
     command.args([
         "-c",
         "rerere.enabled=false",
+        "-c",
+        &name,
+        "-c",
+        &email,
         "merge",
         "--ff",
         "--no-squash",
@@ -230,6 +246,12 @@ fn local_command(context: TargetContext<'_>) -> Command {
 pub(super) async fn configure_delivery_identity(
     transport: &GitTransport,
 ) -> Result<(), SourceDeliveryError> {
+    // Local transport carries the invoking shell's context and uses a caller-owned checkout.
+    // Its identity stays command-scoped, including in worktrees sharing that checkout's config.
+    // Contained checkouts retain the identity handoff for subsequent conflict-repair commits.
+    if transport.config().local_environment.is_some() {
+        return Ok(());
+    }
     let (name, email) = delivery_identity(transport.commit_identity());
     for (key, value) in [("user.name", name), ("user.email", email)] {
         let mut command = transport.command(&transport.config().workspace);

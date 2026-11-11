@@ -202,6 +202,7 @@ async fn capture_exchange(
     let raw_stdout_truncated = captured_stdout.truncated;
     (diagnostic.stdout, diagnostic.stdout_truncated) = sanitize(captured_stdout, &secrets);
     diagnostic.classify_stderr(&String::from_utf8_lossy(&captured_stderr.bytes));
+    diagnostic.classify_stdout(&raw_stdout);
     (diagnostic.stderr, diagnostic.stderr_truncated) = sanitize(captured_stderr, &secrets);
     match result {
         Ok(Ok(_)) => Ok(GitCommandOutput {

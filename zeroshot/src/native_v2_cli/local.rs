@@ -57,6 +57,12 @@ use connections::LocalConnectionStore;
 #[path = "local/backend.rs"]
 mod backend;
 
+#[path = "local/branch.rs"]
+mod branch;
+#[path = "local/delivery_recovery.rs"]
+mod delivery_recovery;
+pub(crate) use delivery_recovery::review_binding_recorder;
+
 #[path = "local/native_forge.rs"]
 pub(super) mod native_forge;
 
@@ -83,8 +89,18 @@ const MAX_RECOVERY_LINEAGE_DEPTH: usize = 64;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct LocalRecoveryDocument {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivery_receipt: Option<serde_json::Value>,
     submission: RunSubmission,
     workspace: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    local_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invoking_workspace: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    request_digest: Option<Sha256Digest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace_revision: Option<openengine_cluster_protocol::SourceRevisionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resumed_from: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -262,7 +278,44 @@ impl LocalCliBackend {
             .await
             .map_err(NativeV2CliError::InvalidRun)?;
 
-        let prepared = self.prepare_run(request).await?;
+        let worktree = request.worktree;
+        let mut prepared = self.prepare_run(request).await?;
+        let request_bytes =
+            serde_json::to_vec(&(&prepared.submission, worktree, &prepared.local_branch))
+                .map_err(local_error)?;
+        let request_digest = Sha256Digest::new(format!("{:x}", Sha256::digest(&request_bytes)))
+            .map_err(local_error)?;
+        prepared.request_digest = Some(request_digest.clone());
+        {
+            let _submission_lock = self.acquire_submission_lock().await?;
+            if let Some(run_id) = self
+                .existing_local_request(&prepared, &request_digest)
+                .await?
+            {
+                return Ok(run_id);
+            }
+            if worktree.is_none() {
+                let digest = submission_digest(&prepared.submission).map_err(local_error)?;
+                if let Some(run_id) = self
+                    .existing_submission(
+                        &prepared.submission.submission_key,
+                        &digest,
+                        &prepared.workspace,
+                    )
+                    .await?
+                {
+                    return Ok(run_id);
+                }
+            }
+        }
+        crate::native_v2_local::prepare_branch_source(
+            &mut prepared,
+            worktree,
+            &self.git_program,
+            &self.state_root,
+        )
+        .await
+        .map_err(|error| self.local_branch_error(error, &prepared.workspace))?;
         let digest = submission_digest(&prepared.submission).map_err(local_error)?;
 
         let existing = || {
@@ -293,12 +346,27 @@ impl LocalCliBackend {
 
         // A concurrent submitter may have accepted this request during remote validation.
         let _submission_lock = self.acquire_submission_lock().await?;
+        if let Some(run_id) = self
+            .existing_local_request(&prepared, &request_digest)
+            .await?
+        {
+            return Ok(run_id);
+        }
         if let Some(run_id) = existing().await? {
             return Ok(run_id);
         }
         crate::native_v2_local::validate_clean_checkout(&prepared, &self.git_program)
             .await
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        if worktree.is_some() {
+            crate::native_v2_local::create_run_worktree(
+                &mut prepared,
+                &self.git_program,
+                &self.state_root,
+            )
+            .await
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        }
         self.start_prepared_controller(prepared).await
     }
 
@@ -314,7 +382,12 @@ impl LocalCliBackend {
             &self.current_directory,
             &self.git_program,
         )
-        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        .map_err(|error| {
+            self.local_branch_error(
+                error,
+                request.cwd.as_deref().unwrap_or(&self.current_directory),
+            )
+        })?;
         crate::native_v2_local::validate_workspace_state(&workspace, &self.state_root)
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         let mut submission =
@@ -429,6 +502,13 @@ impl LocalCliBackend {
             })
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         }
+        let delivery_receipt = match resumed_from.as_ref() {
+            Some(predecessor) => {
+                self.recover_delivery_receipt(predecessor, &prepared)
+                    .await?
+            }
+            None => None,
+        };
         let adopt_existing_delivery = resumed_from.is_some();
         let paths = self.paths(&prepared.run_id)?;
         let ready_timeout = self
@@ -444,6 +524,11 @@ impl LocalCliBackend {
         self.write_recovery_document(
             &prepared.run_id,
             &LocalRecoveryDocument {
+                delivery_receipt: delivery_receipt.clone(),
+                local_branch: prepared.local_branch.clone(),
+                invoking_workspace: prepared.invoking_workspace.clone(),
+                request_digest: prepared.request_digest.clone(),
+                workspace_revision: prepared.workspace_revision.clone(),
                 submission: prepared.submission.clone(),
                 workspace: prepared.workspace.clone(),
                 delivery_run_id: Some(prepared.delivery_run_id.clone()),
@@ -456,6 +541,8 @@ impl LocalCliBackend {
         let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
         let bootstrap_path = storage.join(BOOTSTRAP_FILE);
         let bootstrap = PortableControllerBootstrap {
+            delivery_receipt,
+            local_branch: prepared.local_branch.clone(),
             memory_storage: Some(
                 self.state_root
                     .join("active-memory")
@@ -564,6 +651,46 @@ impl LocalCliBackend {
         }
     }
 
+    /// The request precedes remote default/base resolution. Replays use its frozen recovery
+    /// fingerprint so a moved remote or dirty retained worktree cannot start another run.
+    async fn existing_local_request(
+        &self,
+        prepared: &PreparedLocalRun,
+        digest: &Sha256Digest,
+    ) -> Result<Option<RunId>, NativeV2CliError> {
+        for run_id in self.local_run_ids()? {
+            if !self.recovery_path(&run_id)?.is_file() {
+                continue;
+            }
+            let recovery = self.read_recovery_document(&run_id)?;
+            if recovery.submission.submission_key != prepared.submission.submission_key {
+                continue;
+            }
+            let Some(saved) = &recovery.request_digest else {
+                continue;
+            };
+            if saved != digest
+                || recovery
+                    .invoking_workspace
+                    .as_ref()
+                    .unwrap_or(&recovery.workspace)
+                    != &prepared.workspace
+            {
+                return Err(NativeV2CliError::SubmissionConflict {
+                    existing_run_id: run_id.as_str().to_owned(),
+                });
+            }
+            let final_digest = submission_digest(&recovery.submission).map_err(local_error)?;
+            if let Some(run_id) = self
+                .matching_submission(run_id, &recovery.submission.submission_key, &final_digest)
+                .await?
+            {
+                return Ok(Some(run_id));
+            }
+        }
+        Ok(None)
+    }
+
     async fn existing_submission(
         &self,
         submission_key: &IdempotencyKey,
@@ -576,7 +703,12 @@ impl LocalCliBackend {
                 .await?
             {
                 let recovery = self.read_recovery_document(&existing)?;
-                if recovery.workspace != workspace {
+                if recovery
+                    .invoking_workspace
+                    .as_ref()
+                    .unwrap_or(&recovery.workspace)
+                    != workspace
+                {
                     return Err(NativeV2CliError::SubmissionConflict {
                         existing_run_id: existing.as_str().to_owned(),
                     });
@@ -887,9 +1019,7 @@ impl LocalCliBackend {
         &self,
         run_id: &RunId,
     ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
-        let bytes = std::fs::read(self.recovery_path(run_id)?).map_err(local_io)?;
-        serde_json::from_slice(&bytes)
-            .map_err(|_| local_message("workspace recovery metadata is invalid"))
+        LocalRecoveryDocument::read(&self.recovery_path(run_id)?)
     }
 
     fn write_recovery_document(
@@ -897,12 +1027,23 @@ impl LocalCliBackend {
         run_id: &RunId,
         document: &LocalRecoveryDocument,
     ) -> Result<(), NativeV2CliError> {
-        let path = self.recovery_path(run_id)?;
+        document.write(&self.recovery_path(run_id)?)
+    }
+}
+
+impl LocalRecoveryDocument {
+    fn read(path: &Path) -> Result<Self, NativeV2CliError> {
+        let bytes = std::fs::read(path).map_err(local_io)?;
+        serde_json::from_slice(&bytes)
+            .map_err(|_| local_message("workspace recovery metadata is invalid"))
+    }
+
+    fn write(&self, path: &Path) -> Result<(), NativeV2CliError> {
         let parent = path
             .parent()
             .ok_or_else(|| local_message("workspace recovery path is invalid"))?;
         let temporary = parent.join(format!(".workspace-recovery-{}.tmp", uuid::Uuid::now_v7()));
-        let bytes = serde_json::to_vec(document)
+        let bytes = serde_json::to_vec(self)
             .map_err(|_| local_message("workspace recovery metadata could not be encoded"))?;
         let result = (|| {
             let file = private_file(&temporary, FileAccess::CreateNew).map_err(local_io)?;
@@ -911,14 +1052,16 @@ impl LocalCliBackend {
                 &bytes,
                 CommitPaths {
                     temporary: &temporary,
-                    destination: &path,
+                    destination: path,
                     parent,
                 },
             )
         })();
         cleanup_temporary(result, &temporary)
     }
+}
 
+impl LocalCliBackend {
     fn delivery_run_id(
         &self,
         run_id: &RunId,

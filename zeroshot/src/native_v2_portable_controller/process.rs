@@ -37,6 +37,8 @@ const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivery_receipt: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     preparation_timeout_ms: u64,
     run_id: RunId,
@@ -54,6 +56,8 @@ struct PortableBootstrapDocument {
     delivery_validator: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     git_credentials: Option<GitTransportCredentials>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    local_branch: Option<String>,
     workspace: PathBuf,
     workspace_lease: PathBuf,
     checkpoint_repository: PathBuf,
@@ -93,6 +97,8 @@ impl PortableBootstrapDocument {
             return Err(PortableControllerError::Bootstrap);
         }
         Ok(PortableControllerBootstrap {
+            delivery_receipt: self.delivery_receipt,
+            local_branch: self.local_branch,
             checkpoint: self.checkpoint,
             preparation_timeout: Duration::from_millis(self.preparation_timeout_ms),
             run_id: self.run_id,
@@ -186,7 +192,9 @@ async fn start_controller_process(
     bootstrap: PortableControllerBootstrap,
 ) -> Result<PortableControllerServer, PortableControllerError> {
     let workspace = bootstrap.workspace.clone();
+    let delivery_receipt = bootstrap.delivery_receipt.clone();
     let storage = bootstrap.storage.clone();
+    let local_branch = bootstrap.local_branch.clone();
     let delivery_run_id = bootstrap.delivery_run_id.clone();
     let adopt_existing_delivery = bootstrap.adopt_existing_delivery;
     let github_token = bootstrap.github_token.clone();
@@ -199,6 +207,8 @@ async fn start_controller_process(
         PortableRunController::start(bootstrap, move |admitted| {
             crate::native_v2_local::build_local_process_candidate(
                 crate::native_v2_local::LocalProcessCandidateRequest {
+                    delivery_receipt,
+                    local_branch: local_branch.clone(),
                     admitted,
                     delivery_run_id: delivery_run_id.clone(),
                     adopt_existing_delivery,
@@ -258,6 +268,7 @@ fn encode_bootstrap(
         .filter(|milliseconds| *milliseconds > 0)
         .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
+        delivery_receipt: bootstrap.delivery_receipt.clone(),
         checkpoint: bootstrap.checkpoint.clone(),
         preparation_timeout_ms,
         run_id: bootstrap.run_id.clone(),
@@ -276,6 +287,7 @@ fn encode_bootstrap(
             .as_ref()
             .map(|validator| validator.path().to_owned()),
         git_credentials: bootstrap.git_credentials.clone(),
+        local_branch: bootstrap.local_branch.clone(),
         workspace: bootstrap.workspace.clone(),
         workspace_lease: bootstrap.workspace_lease.clone(),
         checkpoint_repository: bootstrap.checkpoint_repository.clone(),
