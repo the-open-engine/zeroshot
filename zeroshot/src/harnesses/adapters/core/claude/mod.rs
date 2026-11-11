@@ -18,7 +18,7 @@ mod transcript;
 mod version;
 use crate::native_v2_capsule::provider_process::turn as turn_process;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
@@ -57,7 +57,7 @@ pub struct ClaudeAdapter {
     runners: ProviderProcessRunners,
     local_environment: BTreeMap<String, String>,
     active_memory: Option<std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
-    version_supported: std::sync::atomic::AtomicBool,
+    version_checked_runs: tokio::sync::Mutex<BTreeSet<openengine_cluster_protocol::RunId>>,
     #[cfg(test)]
     test_permission_policy: Option<crate::native_v2_capsule::provider_process::PermissionPolicy>,
 }
@@ -128,7 +128,7 @@ impl ClaudeAdapter {
             runners,
             local_environment: BTreeMap::new(),
             active_memory: None,
-            version_supported: std::sync::atomic::AtomicBool::new(false),
+            version_checked_runs: tokio::sync::Mutex::new(BTreeSet::new()),
             #[cfg(test)]
             test_permission_policy: None,
         })
@@ -337,7 +337,7 @@ impl ClaudeAdapter {
             },
         )?;
         if let Some(start) = self
-            .require_supported_version(files.clone(), &command, turn.control)
+            .require_supported_version(files.clone(), &command, turn)
             .await?
         {
             return Ok(start);

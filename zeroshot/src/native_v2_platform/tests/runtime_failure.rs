@@ -569,13 +569,17 @@ async fn permanent_storage_failure_preserves_status_and_reports_stream_completen
                 .all(|event| !matches!(event.status, RunStatus::Finished { .. }))
         );
         let logs = drain(logs, close).await;
-        assert_eq!(logs.len(), 2);
+        assert_eq!(logs.len(), 3);
         assert_eq!(
             logs.assert_at(0).record.message.as_str(),
+            concat!("Zeroshot version: ", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            logs.assert_at(1).record.message.as_str(),
             "Preparing execution environment"
         );
-        assert_eq!(logs.assert_at(1).cursor, harness.before.at_cursor);
-        assert_eq!(logs.assert_at(1).record.message.as_str(), RETAINED_OUTPUT);
+        assert_eq!(logs.assert_at(2).cursor, harness.before.at_cursor);
+        assert_eq!(logs.assert_at(2).record.message.as_str(), RETAINED_OUTPUT);
         harness.assert_storage_diagnostic();
         harness.assert_recovery_diagnostic(&sqlite_failure().to_string());
         if lose_reads {

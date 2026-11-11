@@ -216,6 +216,7 @@ exit 1
     )
     .await;
 
+    assert_version_output(&mut durable).await;
     let (output, completion) = tokio::join!(durable.recv_output(), handle.completion());
     assert_eq!(output, Err(AttachReceiveError::Closed));
     let Err(NodeRunnerError::DriverDetail(detail)) = completion else {

@@ -462,6 +462,9 @@ mod verifier_evidence;
 #[path = "tests/failure_logs.rs"]
 mod failure_logs;
 
+#[path = "tests/versions.rs"]
+mod versions;
+
 #[path = "tests/checkpoint_seed.rs"]
 mod checkpoint_seed;
 #[path = "tests/checkpoints.rs"]

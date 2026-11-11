@@ -19,7 +19,9 @@ wait
 "#,
     );
     let mut handle = start_anthropic(&workspace, "claude-haiku-4-5", None).await;
-    drop(handle.take_initial_output().assert_value());
+    let mut durable = handle.take_initial_output().assert_value();
+    assert_version_output(&mut durable).await;
+    drop(durable);
     let child_pid = wait_for_child_pid(&workspace).await;
     workspace.write("emit-output", "go");
     let _ = wait_for_file(&workspace, "output-emitted").await;

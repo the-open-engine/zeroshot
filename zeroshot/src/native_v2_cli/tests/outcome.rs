@@ -28,6 +28,10 @@ async fn foreground_run_reports_a_terminal_failure_after_printing_it() {
         .await
         .assert_error();
     assert!(matches!(error, NativeV2CliError::RunFailed(_)));
+    let diagnostic = serde_json::to_value(error.diagnostic()).assert_value();
+    assert_eq!(diagnostic["kind"], "run_failed");
+    assert_eq!(diagnostic["code"], "run.failed");
+    assert_eq!(diagnostic["details"], json!({"runId": "run-public"}));
     assert_eq!(
         error.to_string(),
         "run finished unsuccessfully\nFull run log: zeroshot logs run-public --target prod"
@@ -49,6 +53,10 @@ async fn watch_reports_a_terminal_failure_like_the_foreground_run() {
         .assert_error();
 
     assert!(matches!(error, NativeV2CliError::RunFailed(_)));
+    let diagnostic = serde_json::to_value(error.diagnostic()).assert_value();
+    assert_eq!(diagnostic["kind"], "run_failed");
+    assert_eq!(diagnostic["code"], "run.failed");
+    assert_eq!(diagnostic["details"], json!({"runId": "run-public"}));
     assert_eq!(
         error.to_string(),
         "run finished unsuccessfully\nFull run log: zeroshot logs run-public --target prod"

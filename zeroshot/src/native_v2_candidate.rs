@@ -12,7 +12,7 @@ pub(crate) use provider_access::{
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use openengine_cluster_protocol::GitTransportCredentials;
+use openengine_cluster_protocol::{GitTransportCredentials, RunId};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -566,6 +566,24 @@ impl SessionFactory for CandidateNodeLane {
 
 #[async_trait]
 impl NodeDriver for CandidateNodeLane {
+    async fn close_run(&self, run_id: &RunId) {
+        for agents in self.agents.values() {
+            agents.driver.close_run(run_id).await;
+        }
+        if let Some(adapter) = &self.scripts {
+            adapter.close_run(run_id).await;
+        }
+        if let Some(adapter) = &self.decisions {
+            adapter.close_run(run_id).await;
+        }
+        if let Some(adapter) = &self.comment_delivery {
+            adapter.close_run(run_id).await;
+        }
+        if let Some(adapter) = &self.delivery {
+            adapter.close_run(run_id).await;
+        }
+    }
+
     async fn run(
         &self,
         invocation: DriverInvocation,

@@ -94,6 +94,18 @@ pub(super) struct Pipeline {
     pub project_id: Option<u64>,
     pub sha: String,
     pub status: String,
+    #[serde(default)]
+    pub yaml_errors: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct Job {
+    pub id: u64,
+    pub name: String,
+    pub stage: String,
+    pub status: String,
+    pub failure_reason: Option<String>,
+    pub pipeline: Pipeline,
 }
 
 #[derive(Clone, Debug, Deserialize)]

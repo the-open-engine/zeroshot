@@ -172,6 +172,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
             .await
             .assert_value();
         let mut attach = handle.take_initial_output().assert_value();
+        assert_version_output(&mut attach).await;
         let (live, completion) = tokio::join!(attach.recv_output(), handle.completion());
         assert_eq!(live.assert_value().text, "visible [REDACTED]");
         assert_eq!(

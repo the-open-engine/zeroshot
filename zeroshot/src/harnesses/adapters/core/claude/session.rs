@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use openengine_cluster_protocol::WorkerOutcome;
+use openengine_cluster_protocol::{RunId, WorkerOutcome};
 use tokio::sync::Mutex;
 
 use crate::execution::SessionScope;
@@ -40,6 +40,10 @@ crate::native_v2_capsule::provider_process::impl_provider_session_factory!(
 
 #[async_trait]
 impl NodeDriver for ClaudeAdapter {
+    async fn close_run(&self, run_id: &RunId) {
+        self.version_checked_runs.lock().await.remove(run_id);
+    }
+
     async fn run(
         &self,
         invocation: DriverInvocation,

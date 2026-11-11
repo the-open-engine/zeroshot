@@ -47,6 +47,25 @@ A run ID belongs to the controller or target that created it. Pass `--target NAM
 from a named target. Finished status separates graph-authored `terminalResult.output` from optional
 runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the receipt.
 
+## Token usage
+
+`metadata.tokenUsage` contains run totals summed across agent invocations, including retries,
+correction turns and auxiliary agents such as postmortem specialists. Counters are summed as each
+harness reports them; input-token accounting can differ between harnesses.
+
+| Field                      | Meaning                                               |
+| -------------------------- | ----------------------------------------------------- |
+| `inputTokens`              | Input tokens reported by the harness.                 |
+| `outputTokens`             | Output tokens reported by the harness.                |
+| `cacheReadInputTokens`     | Input tokens reported as read from a prompt cache.    |
+| `cacheCreationInputTokens` | Input tokens reported as written to a prompt cache.   |
+| `complete`                 | Whether every invocation reported usable token usage. |
+
+When `complete` is `false`, the totals retain known usage but at least one invocation's usage is
+missing or unusable. An omitted cache counter means at least one invocation did not report that
+counter; its run total is unknown, not zero. Cache counters can be omitted even when `complete` is
+`true`. Script steps record zero for all four counters and preserve known cache totals.
+
 ## Failure evidence and mapped executions
 
 Failed `terminalResult.context` separates the known runtime cause (`primary`) from recent recorded
@@ -96,6 +115,30 @@ ends, whatever the run's result. The [CLI reference](../zeroshot-cli.md) lists t
 
 The producer records each log timestamp as a positive JavaScript-safe Unix epoch millisecond, and
 durable replay preserves it.
+
+## JSON error codes
+
+Set `ZEROSHOT_ERROR_FORMAT=json` to receive a `zeroshot.error/v1` object on stderr when a CLI
+command fails. Successful stdout and NDJSON events keep their existing format. The object contains
+`kind`, `code`, `message`, optional `path` and `node` context, and an object-valued `details`.
+Use `code` to distinguish a failed run or a request that needs correction from a transport outage:
+
+| Condition                                                        | Kind              | Code                 | Details                          |
+| ---------------------------------------------------------------- | ----------------- | -------------------- | -------------------------------- |
+| A followed run failed (`run` or `watch`)                         | `run_failed`      | `run.failed`         | `runId`                          |
+| Unknown registered target name                                   | `invalid_request` | `request.invalid`    | `{}`                             |
+| Local registry has no workspace-recovery authorization           | `invalid_request` | `request.invalid`    | `{}`                             |
+| Workspace-recovery authorization does not match the original run | `invalid_request` | `request.invalid`    | `{}`                             |
+| Local workspace-recovery authorization is malformed              | `invalid_request` | `request.invalid`    | `{}`                             |
+| Target transport failed                                          | `target`          | `target.unavailable` | `target` and `origin` when known |
+
+`run.failed` reports a terminal outcome; retrying observation does not restart that run. Inspect its
+status and logs before selecting a recovery action. Correct the request or local registry state
+for the listed `request.invalid` refusals. Transport failures remain `target.unavailable`.
+
+The Python SDK maps `request.invalid` to `InvalidRequestError` and transport failures to
+`TargetError`. A failed run ends `Run.watch()` normally; `Run.wait()` returns its `RunResult`.
+Call `RunResult.raise_for_failure()` to opt into `RunFailedError`.
 
 ## Attach to an active execution
 

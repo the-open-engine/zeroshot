@@ -258,6 +258,13 @@ fn assert_process_diagnostics_preserve_cli_detail_and_classify_runtime_failures(
     assert_eq!(cli["code"], "request.invalid");
     assert_eq!(cli["message"], "invalid invocation");
 
+    let unknown_target = process_error_diagnostic(&ProcessError::Target(
+        TargetConnectorError::NotFound("unknown".to_owned()),
+    ));
+    let unknown_target = serde_json::to_value(unknown_target).assert_value();
+    assert_eq!(unknown_target["kind"], "invalid_request");
+    assert_eq!(unknown_target["code"], "request.invalid");
+
     let output = process_error_diagnostic(&ProcessError::Output(std::io::Error::other(
         "closed output",
     )));
@@ -443,7 +450,7 @@ async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
     .assert_value();
     assert!(matches!(
         named_error,
-        ProcessError::Cli(NativeV2CliError::Target(message))
+        ProcessError::Cli(NativeV2CliError::Usage(message))
             if message.contains("missing") && message.contains("not found")
     ));
 }

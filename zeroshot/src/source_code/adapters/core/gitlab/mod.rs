@@ -7,7 +7,9 @@ use crate::native_v2_delivery::transport::{self, GitTransport};
 use crate::source_code_provider::*;
 
 mod api;
+mod ci;
 mod comment;
+mod pipeline_errors;
 mod review;
 mod wire;
 

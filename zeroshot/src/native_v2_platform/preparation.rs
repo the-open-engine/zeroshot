@@ -94,8 +94,13 @@ impl PreparationProgress for LedgerPreparationProgress {
 impl NativeV2PlatformController {
     pub(super) async fn start_preparation(
         &self,
-        start: PreparationStart,
+        mut start: PreparationStart,
     ) -> Result<(), NativeV2PlatformError> {
+        crate::native_v2_supervisor::logging::record_run_version(
+            self.ledger.as_ref(),
+            &mut start.stored,
+        )
+        .await?;
         self.observability.track_runtime(&start.stored.snapshot)?;
         let run_id = start.stored.snapshot.run_id.clone();
         let task = Arc::new(PreparationTask {

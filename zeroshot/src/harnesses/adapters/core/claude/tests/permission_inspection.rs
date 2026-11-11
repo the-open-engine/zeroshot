@@ -290,7 +290,7 @@ async fn unavailable_claude_permission_inspection_reports_each_cause_and_keeps_n
         causes.insert(label, diagnostics[0].text.clone());
     }
 
-    // The version check runs once per adapter. A CLI removed after it leaves the next probe unable
+    // The version check runs once per run. A CLI removed after it leaves the next probe unable
     // to start; the native launch failure stays authoritative and the fallback is still reported.
     let inspection = Inspection::new(Probe::Unset).await;
     assert_completed_natively("SpawnFailure setup", &inspection.observe(1, false).await);

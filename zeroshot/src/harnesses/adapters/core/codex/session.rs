@@ -18,7 +18,7 @@ pub(super) struct CodexSession {
 }
 
 impl CodexSession {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             core: ProviderSessionCore::new(),
             thread_id: Mutex::new(None),

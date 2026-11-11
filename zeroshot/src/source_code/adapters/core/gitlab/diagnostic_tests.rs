@@ -414,6 +414,31 @@ async fn missing_branch_text_on_other_resources_does_not_enable_review_sync_retr
 }
 
 #[tokio::test]
+async fn graphql_missing_branch_text_does_not_enable_review_sync_retries() {
+    let fixture = Fixture::new().await;
+    fixture.response(
+        "POST",
+        "/api/graphql",
+        (
+            StatusCode::BAD_REQUEST,
+            json!({"message":["source_branch does not exist"]}),
+        ),
+    );
+    let error = fixture
+        .authority
+        .api
+        .json::<Value>(
+            ApiRequest::graphql("query { project { id } }", json!({})),
+            credential(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.api_status(), Some(400));
+    assert!(!error.retryable_review_sync(), "{error}");
+    assert!(!error.retryable_operation(), "{error}");
+}
+
+#[tokio::test]
 async fn missing_branch_context_redacts_credentials() {
     let fixture = Fixture::new().await;
     let mut request = request();

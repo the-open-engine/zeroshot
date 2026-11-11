@@ -369,7 +369,7 @@ fn sanitize(mut captured: CapturedBytes, secrets: &[String]) -> (String, bool) {
     (text, truncated)
 }
 
-pub(super) fn redact(value: &str, secrets: &[String]) -> String {
+pub(crate) fn redact(value: &str, secrets: &[String]) -> String {
     let mut secrets = secrets
         .iter()
         .filter(|secret| !secret.is_empty())

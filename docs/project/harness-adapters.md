@@ -106,6 +106,10 @@ provider requests. The registry validates bounded harness/provider IDs and compa
 Factories receive `HarnessBuildContext` and return `HarnessAdapter` with `NodeDriver` and
 `SessionFactory` implementations.
 
+Run closure drains active invocations before calling the optional `NodeDriver::close_run` hook.
+Use it to release run-owned bookkeeping while preserving native sessions owned by an ACP session.
+The hook may be called repeatedly.
+
 Adapters own native protocols, authentication translation and permission handling, including their
 environment allowlists and home/path expansion. Use shared process and session helpers for private
 execution files, bounded streaming, cancellation and cleanup. Apply the shared
