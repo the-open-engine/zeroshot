@@ -315,6 +315,7 @@ async fn nonexistent_executable_emits_a_specific_nonretryable_launch_failure() {
     .await;
     assert!(rendered.contains("process launch failed before start"));
     assert!(rendered.contains("process spawn failed"));
+    assert!(rendered.contains("/missing-zeroshot-claude-executable"));
     assert!(!rendered.contains("execution failed without provider detail"));
     assert!(!rendered.contains("continuing once"));
 }

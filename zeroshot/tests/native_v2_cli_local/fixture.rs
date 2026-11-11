@@ -464,7 +464,7 @@ async fn interrupt_after_observation(mut child: Child, expected: &str) -> Output
 }
 
 pub(super) async fn wait_for_exit(pid: u32) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + CLI_TIMEOUT;
     while process_exists(pid) {
         assert!(Instant::now() < deadline, "process {pid} did not exit");
         sleep(Duration::from_millis(20)).await;
@@ -746,6 +746,9 @@ mod harness_environment;
 
 #[path = "restic_selector.rs"]
 mod restic_selector;
+
+#[path = "script_spawn.rs"]
+mod script_spawn;
 
 #[path = "slow_checkpoint_restore.rs"]
 mod slow_checkpoint_restore;
