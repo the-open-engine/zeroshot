@@ -17,6 +17,7 @@ from zeroshot import (
     InvalidRequestError,
     LocalTarget,
     Preset,
+    ProtocolError,
     RunFailedError,
     RunRequest,
     RunResult,
@@ -678,15 +679,14 @@ def test_hosted_stack_watch_propagates_unexpected_failure_after_success(
 
 
 @pytest.mark.parametrize(
-    ("failure", "phases", "status_reads"),
-    [("terminal", ["running", "finished"], 0), ("early", ["running"], 1)],
+    ("failure", "phases"),
+    [("terminal", ["running", "finished"]), ("early", ["running"])],
 )
 def test_run_watch_ends_normally_when_the_cli_reports_a_failed_run(
     fake_native: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
     phases: list[str],
-    status_reads: int,
 ) -> None:
     monkeypatch.setenv("FAKE_WATCH_FAILURE", failure)
 
@@ -700,16 +700,18 @@ def test_run_watch_ends_normally_when_the_cli_reports_a_failed_run(
                 assert statuses[-1].result.failure == "worker_failed"
 
     asyncio.run(exercise())
-    # A delivered failed result needs no status read, which could otherwise fail the watch.
+    # The explicit failure code needs no status read, even without a terminal snapshot.
     arguments = [item["args"] for item in read_invocations(fake_native)]
-    assert sum(args[0] == "status" for args in arguments) == status_reads
+    assert all(args[0] != "status" for args in arguments)
 
 
-def test_run_watch_propagates_cli_failure_while_the_run_is_unfinished(
+@pytest.mark.parametrize("failure", ["outage", "outage_failed_run", "outage_after_terminal"])
+def test_run_watch_propagates_transport_failure_regardless_of_run_status(
     fake_native: Path,
     monkeypatch: pytest.MonkeyPatch,
+    failure: str,
 ) -> None:
-    monkeypatch.setenv("FAKE_WATCH_FAILURE", "outage")
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", failure)
 
     async def exercise() -> None:
         observed = []
@@ -719,9 +721,42 @@ def test_run_watch_propagates_cli_failure_while_the_run_is_unfinished(
                 async for status in run.watch():
                     observed.append(status.phase)
         assert caught.value.exit_code == 1
-        assert observed == ["running"]
+        assert observed == (
+            ["running", "finished"] if failure == "outage_after_terminal" else ["running"]
+        )
 
     asyncio.run(exercise())
+    assert all(item["args"][0] != "status" for item in read_invocations(fake_native))
+
+
+def test_run_watch_rejects_a_failure_for_another_run(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "wrong_run")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            with pytest.raises(ProtocolError, match="different run"):
+                async for _ in client.get_run("requested-run").watch():
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_run_watch_propagates_a_permanent_refusal_without_reading_status(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "invalid_request")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            with pytest.raises(InvalidRequestError) as caught:
+                async for _ in client.get_run("requested-run").watch():
+                    pass
+            assert caught.value.code == "request.invalid"
+
+    asyncio.run(exercise())
+    assert all(item["args"][0] != "status" for item in read_invocations(fake_native))
 
 
 def test_stack_requires_a_hosted_target(fake_native: Path) -> None:

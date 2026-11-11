@@ -4,7 +4,6 @@
 //! discovery, explicit hosted/direct access, submission, and run-scoped OECP sessions. Runtime
 //! values cross only in the ephemeral per-run request and are never stored locally.
 
-use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -132,6 +131,20 @@ pub enum TargetConnectorError {
     InvalidBearerToken,
     #[error("target OECP connection failed: {0}")]
     OecpConnection(String),
+}
+
+impl TargetConnectorError {
+    pub(super) fn to_cli_error(&self) -> NativeV2CliError {
+        match self {
+            Self::NotFound(_)
+            | Self::RecoveryAuthorizationUnavailable
+            | Self::RecoveryAuthorizationMismatch
+            | Self::RecoveryAuthorizationInvalid => {
+                NativeV2CliError::Usage(format!("target operation failed: {self}"))
+            }
+            _ => NativeV2CliError::Target(self.to_string()),
+        }
+    }
 }
 
 /// Waits before each identical replay of a run submission whose receipt was lost.
@@ -894,8 +907,8 @@ fn connection_values_match_requirements(
     })
 }
 
-fn cli_target_error(error: impl fmt::Display) -> NativeV2CliError {
-    NativeV2CliError::Target(error.to_string())
+fn cli_target_error(error: TargetConnectorError) -> NativeV2CliError {
+    error.to_cli_error()
 }
 
 fn cli_connector_error(target: &TargetRecord, error: TargetConnectorError) -> NativeV2CliError {

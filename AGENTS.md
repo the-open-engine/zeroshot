@@ -1185,6 +1185,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
+  JSON diagnostics use `run_failed` / `run.failed` with `details.runId` for that terminal outcome.
+  Unknown target names and registry workspace-recovery authorization refusals use
+  `invalid_request` / `request.invalid`; transport failures retain `target.unavailable`.
+  The Python SDK consumes the explicit failed-run diagnostic without inferring failure from a
+  target error or rereading status; public failed-result exceptions remain opt-in.
 - Graph verification errors display their first safe diagnostic, its path and the count of further
   diagnostics through the shared verifier error, so local validation and hosted rejection report the
   same cause. Within the 1,024-byte target problem message bound, the count and then the path's

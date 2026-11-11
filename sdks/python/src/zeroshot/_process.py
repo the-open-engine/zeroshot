@@ -15,6 +15,14 @@ from .run_errors import RunNotFoundError, SubmissionConflictError
 _ERROR_SCHEMA = "zeroshot.error/v1"
 
 
+class _RunFailed(ZeroshotError):
+    """Native observation completed with a failed run rather than a transport error."""
+
+    def __init__(self, message: str, run_id: str) -> None:
+        super().__init__(message)
+        self.run_id = run_id
+
+
 class NativeProcess:
     """Run one native command at a time with secret-redacted diagnostics."""
 
@@ -217,6 +225,20 @@ def _run_not_found_diagnostic(
     return RunNotFoundError(message, exit_code=exit_code)
 
 
+def _run_failed_diagnostic(
+    message: str,
+    code: str,
+    details: dict[str, Any],
+    _node: str | None,
+    _path: tuple[str | int, ...] | None,
+    _exit_code: int,
+) -> ZeroshotError:
+    run_id = details.get("runId")
+    if code != "run.failed" or not isinstance(run_id, str) or not run_id:
+        return _malformed_diagnostic()
+    return _RunFailed(message, run_id)
+
+
 def _submission_conflict_diagnostic(
     message: str,
     _code: str,
@@ -284,6 +306,7 @@ def _redact_value(value: Any, secrets: Sequence[str]) -> Any:
 _DIAGNOSTIC_PROJECTORS = {
     "invalid_request": _invalid_request_diagnostic,
     "protocol": _protocol_diagnostic,
+    "run_failed": _run_failed_diagnostic,
     "run_not_found": _run_not_found_diagnostic,
     "submission_conflict": _submission_conflict_diagnostic,
     "target": _target_diagnostic,

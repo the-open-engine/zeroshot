@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TypedDict, Unpack, overload
 
 from ._binary import resolve_binary
-from ._process import NativeProcess
+from ._process import NativeProcess, _RunFailed
 from ._projection import _log_event, _stack_status, _status, _summary
 from .errors import ClientClosedError, InvalidRequestError, ProtocolError, TargetError
 from .run_errors import RunWaitTimeout
@@ -566,23 +566,14 @@ class Client:
         if after is not None:
             arguments.extend(["--after", after])
         stream = self._native().json_lines([*arguments, *self._route_arguments()])
-        failed_result_yielded = False
         try:
             async with aclosing(stream) as values:
                 async for value in values:
-                    status = _status(value)
-                    failed_result_yielded = failed_result_yielded or (
-                        status.result is not None and not status.result.succeeded
-                    )
-                    yield status
-        except TargetError:
-            # Native watch exits unsuccessfully when the run failed. RunStatus.result reports that
-            # outcome, so only observation failures propagate. A stream that ended before the failed
-            # terminal snapshot, for example after its cursor, needs run status to tell them apart.
-            if not failed_result_yielded:
-                result = (await self._status(run_id)).result
-                if result is None or result.succeeded:
-                    raise
+                    yield _status(value)
+        except _RunFailed as error:
+            # Failed results stay opt-in exceptions through RunResult.raise_for_failure().
+            if error.run_id != run_id:
+                raise ProtocolError("Zeroshot reported failure for a different run") from error
 
     async def _logs(
         self,

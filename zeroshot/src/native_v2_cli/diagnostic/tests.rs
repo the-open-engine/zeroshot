@@ -157,6 +157,15 @@ fn parser_diagnostics_classify_clap_and_json_failures() {
 fn run_and_remote_diagnostics_normalize_kind_and_detail_shape() {
     let cases = [
         (
+            NativeV2CliError::RunFailed(Box::new(super::super::RunFailure::read_for_test(
+                openengine_cluster_protocol::RunId::new("run-failed"),
+                Some("prod"),
+            ))),
+            "run_failed",
+            "run.failed",
+            json!({"runId": "run-failed"}),
+        ),
+        (
             NativeV2CliError::RunNotFound {
                 run_id: "run-local".to_owned(),
             },
@@ -284,6 +293,12 @@ fn protocol_and_fallback_diagnostics_remain_distinct() {
             "target",
             "target.unavailable",
             json!({"target": "platform", "origin": "https://api.example.test"}),
+        ),
+        (
+            NativeV2CliError::Disconnected,
+            "target",
+            "target.unavailable",
+            json!({}),
         ),
         (
             NativeV2CliError::SubmissionOutcomeUnknown {

@@ -78,6 +78,10 @@ impl<W: std::io::Write> DurableOutput for FailureOutput<'_, W> {
 }
 
 impl RunFailure {
+    pub(in crate::native_v2_cli) fn run_id(&self) -> &RunId {
+        &self.run_id
+    }
+
     pub(super) fn from_context(
         run_id: RunId,
         target: Option<&str>,
@@ -94,7 +98,7 @@ impl RunFailure {
     }
 
     #[cfg(test)]
-    pub(super) fn read_for_test(run_id: RunId, target: Option<&str>) -> Self {
+    pub(in crate::native_v2_cli) fn read_for_test(run_id: RunId, target: Option<&str>) -> Self {
         Self {
             run_id,
             target: target.map(str::to_owned),
