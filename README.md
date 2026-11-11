@@ -25,7 +25,7 @@ zeroshot is a multi-agent framework built around this cycle. Define your graph t
 your agents and models, and make independent approval a requirement for delivery. The engine
 enforces the process.
 
-## Build your own graph
+## How it works
 
 An example graph: independent reviews, end-to-end testing, and CI must pass before merge.
 
@@ -62,9 +62,63 @@ and run the same process across tasks.
 
 See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 
+## Get started
+
+```bash
+npm install -g @the-open-engine-company/zeroshot
+```
+
+The CLI installer adds skills for Claude Code, Codex, Copilot CLI and Pi.
+See [installation options](docs/getting-started/install.md) to skip skill installation.
+
+Use zeroshot in ChatGPT, Codex, or Claude with the [plugin and MCP connection](docs/guides/plugins.md);
+the zeroshot CLI is optional for Platform workflows.
+
+### Run a first task
+
+Open your agent in a repo and ask for a change. For example:
+
+```text
+use zeroshot to let users export their data as CSV. Keep the changes local.
+```
+
+Run locally with your agent's existing login and subscription. Watch with `zeroshot ui`.
+The [CLI quick start](docs/getting-started/first-run.md) walks through a run directly in the terminal.
+
+### Design your own graph
+
+To choose your own agents, models, review gates, and delivery, ask:
+
+```text
+design a zeroshot graph for this repo
+```
+
+The skill reads your repo and builds the graph with you. Then plan a task:
+
+```text
+plan this with zeroshot: let users export their data as CSV
+```
+
+Run the plan:
+
+```text
+zeroshot it
+```
+
+#### Edit a graph directly
+
+Export a template with Git delivery disabled:
+
+```bash
+zeroshot template show software-change --delivery none > graph.json
+```
+
+Edit the graph, choose a runtime, and run it. The [review loop guide](docs/guides/review-loop.md)
+has complete graph, input, and runtime files.
+
 ## Features
 
-### Bring your own graphs
+### Graphs and agents
 
 One graph per process your team runs.
 
@@ -117,49 +171,6 @@ Drive zeroshot from your own code, CI or UI.
   targets.
 - **[Agent adapters](docs/project/harness-adapters.md):** add support for another coding agent
   through a documented contract.
-
-## Get started
-
-```bash
-npm install -g @the-open-engine-company/zeroshot
-```
-
-Use Zeroshot in ChatGPT, Codex, or Claude with the [plugin and MCP connection](docs/guides/plugins.md);
-the Zeroshot CLI is optional for Platform workflows.
-
-The CLI installer adds skills for Claude Code, Codex, Copilot CLI and Pi. Open your agent in a repo and ask:
-
-```text
-design a zeroshot graph for this repo
-```
-
-The skill reads your repo and builds the graph with you: agents, models, review gates, and
-delivery. Then plan a task:
-
-```text
-plan this with zeroshot: let users export their data as CSV
-```
-
-Run the plan:
-
-```text
-zeroshot it
-```
-
-Run locally with your agent's existing login and subscription. Watch with `zeroshot ui`.
-See [installation options](docs/getting-started/install.md) to skip skill installation.
-
-### Edit a graph directly
-
-Export a template with Git delivery disabled:
-
-```bash
-zeroshot template show software-change --delivery none > graph.json
-```
-
-Edit the graph, choose a runtime, and run it. The [review loop guide](docs/guides/review-loop.md)
-has complete graph, input, and runtime files; the [CLI quick start](docs/getting-started/first-run.md)
-shows validation and execution.
 
 ## Hosting
 
