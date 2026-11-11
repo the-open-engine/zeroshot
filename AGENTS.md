@@ -716,7 +716,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   reuses cancellable file copying and checks cancellation while validating and syncing metadata;
   all snapshot Git commands use the shared bounded, cancellable process runner. Blocking snapshot
   work bridges to its owning async runtime; synchronous callers use a joined private I/O thread.
-  Restore prevalidation is cancellable and supervised; replacement finishes once it starts. Only confirmed
+  Restore prevalidation is cancellable and supervised; replacement finishes once it starts. Only a
+  restore with a stop request, which the local controller awaits to its end, replaces the
+  workspace on the blocking pool. Every other restore replaces it inside its own poll, so a
+  dropped hosted allocation leaves no writer behind. Only confirmed
   checkpoint cancellation settles as a stop; cancellation during a final checkpoint preserves the
   latched primary outcome. No terminal is invented when settlement fails or
   the deadline/OS ends the process. Terminal closure remains detached. Windows keeps Ctrl-C and

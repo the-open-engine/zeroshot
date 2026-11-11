@@ -480,6 +480,9 @@ pub async fn restore_attempt(
 }
 
 /// The local process can stop extraction without abandoning its confirmed process cleanup.
+///
+/// With a stop request, workspace replacement runs on the blocking pool and outlives a dropped
+/// future. Await this restore to its end before cleaning up or releasing the workspace.
 pub(crate) async fn restore_attempt_until_stopped(
     selection: &CheckpointRestore,
     workspace: &Path,
@@ -556,16 +559,25 @@ async fn restore_with(
     // The complete stage is validated before the first workspace change. Replacement ignores the
     // deadline: stopping it halfway would itself leave a partial checkout. The CLI's stop grace
     // covers it; a hard stop from here on is repaired by repeating this restore completely.
-    let operation = filesystem::SnapshotOperation::current(stopping);
-    let workspace = workspace.to_owned();
-    tokio::task::spawn_blocking(move || {
-        // Retain the disposable stage until validation and replacement have both completed.
-        let _stage = stage;
-        filesystem::restore_staged_with(&restored, &workspace, &operation)
-    })
-    .await
-    .map_err(|_| catalog::invalid("checkpoint replacement task failed"))?
-    .map_err(|error| progress.failed("replacing the workspace", error))?;
+    let replaced = match stopping {
+        // Only the local controller passes a stop request, and it awaits this restore to its end.
+        // The blocking pool lets replacement observe the request; nothing abandons that task.
+        Some(stopping) => {
+            let operation = filesystem::SnapshotOperation::current(Some(stopping));
+            let workspace = workspace.to_owned();
+            tokio::task::spawn_blocking(move || {
+                // Retain the disposable stage until validation and replacement have both completed.
+                let _stage = stage;
+                filesystem::restore_staged_with(&restored, &workspace, &operation)
+            })
+            .await
+            .map_err(|_| catalog::invalid("checkpoint replacement task failed"))?
+        }
+        // Hosted preparation drops this future on force-stop or at its timeout and then cleans up
+        // the workspace. Replacement therefore stays inside one poll: no writer outlives the drop.
+        None => filesystem::restore_staged(&restored, workspace),
+    };
+    replaced.map_err(|error| progress.failed("replacing the workspace", error))?;
     Ok(seed)
 }
 
