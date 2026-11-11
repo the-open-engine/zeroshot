@@ -1,4 +1,4 @@
-//! Public failure summaries share the completion/terminal transaction across all placements.
+//! Public run logs and failure summaries across all placements.
 
 use std::time::Duration;
 
@@ -8,7 +8,37 @@ use openengine_cluster_protocol::{
 };
 
 use crate::native_v2_contract::{ExecutionRef, NodeCompletion};
-use crate::v2_run_ledger::{RunEvent, RunLedgerError, RunSnapshot, SafeLogLine, SafeLogStream};
+use crate::v2_run_ledger::{
+    RunEvent, RunLedger, RunLedgerError, RunSnapshot, SafeLogLine, SafeLogStream, StoredRun,
+    cursor_sequence,
+};
+
+/// Record the executing build before preparation or dispatch can produce other logs.
+/// A successor has its own empty ledger; reopening a run preserves its original version.
+pub(crate) async fn record_run_version(
+    ledger: &dyn RunLedger,
+    stored: &mut StoredRun,
+) -> Result<(), RunLedgerError> {
+    if cursor_sequence(&stored.snapshot.cursor)? == 0 {
+        stored.snapshot = ledger
+            .append(
+                &stored.snapshot.run_id,
+                vec![RunEvent::SafeLog {
+                    execution: None,
+                    diagnostic: None,
+                    timestamp: crate::native_v2_runner::current_timestamp(),
+                    stream: SafeLogStream::System,
+                    line: SafeLogLine::new(concat!(
+                        "Zeroshot version: ",
+                        env!("CARGO_PKG_VERSION")
+                    ))?,
+                }],
+            )
+            .await?
+            .snapshot;
+    }
+    Ok(())
+}
 
 pub(super) fn completion_events(
     completion: NodeCompletion,

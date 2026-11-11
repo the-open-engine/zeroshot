@@ -204,6 +204,9 @@ impl NativeV2Supervisor {
 
     async fn initialize(&self) -> Result<Initialization, NativeV2SupervisorError> {
         let mut stored = self.load().await?;
+        if stored.snapshot.phase == RunPhase::Admitted {
+            logging::record_run_version(self.ledger.as_ref(), &mut stored).await?;
+        }
         if let Some(terminal) = self.initialized_terminal(&stored).await? {
             return Ok(Initialization::Terminal(terminal));
         }

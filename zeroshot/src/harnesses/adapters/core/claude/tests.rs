@@ -547,6 +547,16 @@ fn write_claude_script(workspace: &TestDirectory, script: &str) {
     );
 }
 
+async fn assert_version_output(output: &mut crate::native_v2_runner::DurableOutput) {
+    let version = output.recv_output().await.assert_value();
+    assert_eq!(
+        version.stream,
+        crate::native_v2_runner::LiveOutputStream::System
+    );
+    assert_eq!(version.text, "Claude Code version: 2.1.318");
+    assert!(version.diagnostic.is_none());
+}
+
 fn assert_resumed_session(arguments: &str) {
     assert!(arguments.lines().any(|line| line == "--resume"));
     assert!(arguments.lines().any(|line| line == "session-1"));
@@ -730,6 +740,7 @@ wait
     );
     let mut handle = start_anthropic(&workspace, "claude-haiku-4-5", None).await;
     let mut attach = handle.take_initial_output().assert_value();
+    assert_version_output(&mut attach).await;
     assert_eq!(attach.recv_output().await.assert_value().text, "started");
     let child_pid: u32 = workspace.read("child.pid").parse().assert_value();
     cancel_and_assert_reaped(handle, &workspace, child_pid).await;
@@ -751,6 +762,7 @@ exec sleep 30
     );
     let mut handle = start_anthropic(&workspace, "claude-haiku-4-5", None).await;
     let mut attach = handle.take_initial_output().assert_value();
+    assert_version_output(&mut attach).await;
     assert_eq!(attach.recv_output().await.assert_value().text, "ready\n");
 
     handle.cancel();
@@ -828,3 +840,6 @@ async fn dispatch_metadata_reaches_claude_corrections() {
 
 #[path = "tests/verifier_evidence.rs"]
 mod verifier_evidence;
+
+#[path = "tests/versions.rs"]
+mod versions;

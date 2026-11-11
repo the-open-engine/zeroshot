@@ -18,6 +18,9 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use zeroshot_engine::v2_run_ledger::{sqlite::SqliteRunLedger, RunLedger};
 
+#[path = "native_v2_acp/versions.rs"]
+mod versions;
+
 #[derive(Default)]
 struct RecordingClient {
     messages: Mutex<Vec<String>>,

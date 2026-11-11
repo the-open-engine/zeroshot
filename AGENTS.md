@@ -672,7 +672,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
   validating provider-owned fields, and continue draining after the first valid terminal event.
-- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
+- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before each run's first model
   turn it runs the selected executable with `--version` through that turn's launch path and
   environment. One `--print` process can write several results while background subagents or
   shells finish, so Claude parses every record through stdout EOF and the last result decides the
@@ -772,6 +772,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   connection; control requests and ordinary observers keep their independent connections.
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
   milliseconds and remain unchanged across durable replay.
+- Each run records its executing Zeroshot version before preparation or dispatch logs; resumed
+  successors record their own build. Adapters log accepted CLI versions through the existing output
+  bridge once per run and lane when they read them; Claude serializes its initial version check
+  for each run even when ACP reuses the adapter. ACP records its build at run creation before
+  publishing the supervisor to cancellation.
 - Runner start reserves an execution and returns its handle before asynchronous provider startup.
   Pending start waits are cancellable; accepted startup failures settle through the owned handle.
   Pending remote starts reread connection loss after a close notification so failed closure cannot

@@ -212,6 +212,28 @@ impl LocalFixture {
         interrupt_after_observation(child, expected).await
     }
 
+    pub(super) async fn assert_version_log(&self, run_id: &str) {
+        let logs = self.output(&["logs", run_id], "finish").await;
+        assert_success(&logs, "finished run version logs");
+        let records = json_lines(&logs.stdout);
+        let expected = concat!("Zeroshot version: ", env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            records
+                .first()
+                .assert_value()
+                .assert_key("record")
+                .assert_key("message"),
+            expected
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|log| log.assert_key("record").assert_key("message") == expected)
+                .count(),
+            1
+        );
+    }
+
     pub(super) async fn assert_replay(&self, command: &str, run_id: &str, expected: &str) {
         let output = self.output(&[command, run_id], "block").await;
         assert_success(&output, "terminal observation replay");
