@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::active_memory::hooks::{ActiveMemoryHooks, ActiveMemorySource, HookQuery};
 use crate::execution::process::HostedProcessScope;
 use crate::native_v2_candidate::test_support::TestDirectory;
@@ -444,10 +443,7 @@ fn contained_configuration_discards_native_homes_and_authentication() {
     assert_eq!(command.environment["HOME"], files.home().to_string_lossy());
 }
 
-struct RecallMemory {
-    callbacks: AtomicUsize,
-    failures: AtomicUsize,
-}
+struct RecallMemory;
 
 impl ActiveMemorySource for RecallMemory {
     fn tool_context(&self, query: &HookQuery) -> String {
@@ -458,24 +454,94 @@ impl ActiveMemorySource for RecallMemory {
             assert_eq!(query.tool_name, "nativeproof_record");
             assert_eq!(query.tool_input["marker"], "mcp-fixture");
         }
-        self.callbacks.fetch_add(1, Ordering::SeqCst);
         " recalled-marker".to_owned()
     }
     fn graph_context(&self, _: &str, _: &str) -> String {
         String::new()
     }
-    fn unavailable(&self, _: &str) {
-        self.failures.fetch_add(1, Ordering::SeqCst);
-    }
+}
+
+fn memory_callback_receipts(
+    files: &ProviderExecutionFiles,
+) -> std::thread::JoinHandle<Vec<Option<u8>>> {
+    use std::io::{ErrorKind, Read, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).assert_value();
+    listener.set_nonblocking(true).assert_value();
+    let capability_path = files.home().join("active-memory-capability.json");
+    let mut capability: Value =
+        serde_json::from_slice(&std::fs::read(&capability_path).assert_value()).assert_value();
+    capability["endpoint"] = json!(listener.local_addr().assert_value().to_string());
+    std::fs::write(
+        &capability_path,
+        serde_json::to_vec(&capability).assert_value(),
+    )
+    .assert_value();
+    let workspace = files.workspace.clone();
+    std::thread::spawn(move || {
+        let mut receipts = Vec::new();
+        for tool in ["read", "nativeproof_record", "nativeproof_record"] {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "plugin did not request context");
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("callback accept failed: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .assert_value();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .assert_value();
+            let mut header = [0; 4];
+            stream.read_exact(&mut header).assert_value();
+            let length = u32::from_be_bytes(header) as usize;
+            assert!(length <= 256 * 1024);
+            let mut body = vec![0; length];
+            stream.read_exact(&mut body).assert_value();
+            let request: Value = serde_json::from_slice(&body).assert_value();
+            assert_eq!(request["token"], capability["token"]);
+            assert_eq!(request["event"]["toolName"], tool);
+            assert_eq!(request["event"]["cwd"], json!(workspace));
+            assert_eq!(request["event"]["sessionId"], "ses_fixture");
+            assert_eq!(
+                request["event"]["input"],
+                if tool == "read" {
+                    json!({"filePath":"README.md"})
+                } else {
+                    json!({"marker":"mcp-fixture"})
+                }
+            );
+            let context = b" recalled-marker";
+            let mut frame = (context.len() as u32).to_be_bytes().to_vec();
+            frame.extend_from_slice(context);
+            stream.write_all(&frame).assert_value();
+            receipts.push(std::thread::spawn(move || {
+                let mut receipt = [0];
+                match stream.read_exact(&mut receipt) {
+                    Ok(()) => Some(receipt[0]),
+                    Err(error) if error.kind() == ErrorKind::UnexpectedEof => None,
+                    Err(error) => panic!("callback receipt failed: {error}"),
+                }
+            }));
+        }
+        receipts
+            .into_iter()
+            .map(|receipt| receipt.join().assert_value())
+            .collect()
+    })
 }
 
 #[test]
 fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachments() {
-    let source = Arc::new(RecallMemory {
-        callbacks: AtomicUsize::new(0),
-        failures: AtomicUsize::new(0),
-    });
-    let hooks = Arc::new(ActiveMemoryHooks::new(source.clone()).assert_value());
+    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(RecallMemory)).assert_value());
     let directory = TestDirectory::new("opencode-native-memory-plugin");
     let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n").with_active_memory(Some(hooks));
     let files =
@@ -503,6 +569,9 @@ fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachment
         .assert_value()
         .as_str()
         .assert_value();
+    // Check the carrier's bytes directly. The production broker's 250 ms receipt deadline may
+    // correctly mark an otherwise returned result unavailable when a loaded CI host delays it.
+    let receipts = memory_callback_receipts(&files);
     let source_code = r#"const {default:create}=await import(process.argv[1]);
 const plugin=await create({directory:process.argv[2]});
 const output={title:'read',output:'original',metadata:{}};
@@ -522,6 +591,7 @@ console.log(JSON.stringify({output,mcp,before}));"#;
         .arg(&files.workspace)
         .output()
         .assert_value();
+    let receipts = receipts.join().assert_value();
     assert!(
         output.status.success(),
         "{}",
@@ -546,11 +616,10 @@ console.log(JSON.stringify({output,mcp,before}));"#;
         assert_eq!(returned["mcp"][field], before[field]);
     }
     drop(adapter);
-    assert_eq!(source.callbacks.load(Ordering::SeqCst), 3);
     assert_eq!(
-        source.failures.load(Ordering::SeqCst),
-        1,
-        "unsupported null output must remain unavailable rather than being acknowledged"
+        receipts,
+        vec![Some(1), Some(1), None],
+        "builtin and MCP results must acknowledge context; unsupported null output must not"
     );
 }
 
@@ -616,10 +685,7 @@ async fn per_node_pure_mode_is_rejected_before_launch_with_or_without_owned_plug
                 "#!/bin/sh\nprintf 'launch\\n' >> launches\nexit 0\n",
             );
             if memory {
-                let source = Arc::new(RecallMemory {
-                    callbacks: AtomicUsize::new(0),
-                    failures: AtomicUsize::new(0),
-                });
+                let source = Arc::new(RecallMemory);
                 adapter = adapter.with_active_memory(Some(Arc::new(
                     ActiveMemoryHooks::new(source).assert_value(),
                 )));
