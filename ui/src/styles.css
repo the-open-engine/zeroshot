@@ -1200,9 +1200,14 @@ h2 {
     --inspector-default-width: 310px;
     box-shadow: -5px 0 24px var(--shadow-panel);
   }
+  /* The inspector overlays the canvas below a fixed-height toolbar here, so the toolbar keeps one
+     row and scrolls sideways rather than wrapping under it. */
   .canvas-toolbar {
+    height: 54px;
     min-height: 54px;
-    padding: 6px 10px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 0 10px;
   }
   .canvas-actions {
     gap: 2px;
