@@ -485,7 +485,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   search paths resolve consistently. Shared delivery credential helpers preserve declared
   GitHub token precedence and source-only Git authority; forge API tokens remain provider-owned.
   Local PR/merge submissions and resumes also perform one authenticated, read-only forge project
-  and server-version check before controller launch. Checkpoint resumes defer that single check
+  and server-version check before controller launch. A plain resume makes it under its recovery
+  claim with the shared submission lock released, then rechecks the retained workspace record
+  under that lock before it publishes the successor. Checkpoint resumes defer that single check
   until restoration under the controller's workspace lease, before runtime construction and agents.
   The deferred check observes the controller's stop request: the GitHub project read runs in the
   shared stop-aware capture, which ends the `gh` process tree with confirmed cleanup, the GitLab

@@ -81,20 +81,27 @@ impl LocalCliBackend {
                 "local runs keep the default delivery commit identity and credit no co-author",
             ));
         }
-        let _submission_lock = self.acquire_submission_lock().await?;
-        self.reconcile_local_resume_claim(&params.run_id, self.ready_timeout)
-            .await?;
-        self.confirm_loss_for_resume(&params.run_id).await?;
-        let status = self
-            .status_local(RunStatusParams {
-                run_id: params.run_id.clone(),
-            })
-            .await?;
-        let recovery = self
-            .claimable_recovery_document(&params.run_id, status.workspace_recovery.recoverable)?;
-        let _claim = self.claim_recovery_workspace(&params.run_id)?;
-        self.retain_predecessor_delivery(&params.run_id, &recovery)
-            .await?;
+        // The shared lock serializes the claim. The claim alone then excludes other resumes of
+        // this run while its successor is prepared, so a forge request never holds that lock.
+        let (recovery, _claim) = {
+            let _submission_lock = self.acquire_submission_lock().await?;
+            self.reconcile_local_resume_claim(&params.run_id, self.ready_timeout)
+                .await?;
+            self.confirm_loss_for_resume(&params.run_id).await?;
+            let status = self
+                .status_local(RunStatusParams {
+                    run_id: params.run_id.clone(),
+                })
+                .await?;
+            let recovery = self.claimable_recovery_document(
+                &params.run_id,
+                status.workspace_recovery.recoverable,
+            )?;
+            let claim = self.claim_recovery_workspace(&params.run_id)?;
+            self.retain_predecessor_delivery(&params.run_id, &recovery)
+                .await?;
+            (recovery, claim)
+        };
         self.start_local_successor(params, recovery, discard_workspace_changes)
             .await
     }
@@ -139,6 +146,24 @@ impl LocalCliBackend {
             return Err(local_message("retained workspace was already claimed"));
         }
         Ok(recovery)
+    }
+
+    /// A successor is published only from the record that its preparation read under the claim.
+    fn require_unchanged_recovery(
+        &self,
+        run_id: &RunId,
+        prepared_from: &LocalRecoveryDocument,
+    ) -> Result<(), NativeV2CliError> {
+        let current = self.read_recovery_document(run_id)?;
+        let unchanged = serde_json::to_value(&current).map_err(local_error)?
+            == serde_json::to_value(prepared_from).map_err(local_error)?;
+        if unchanged {
+            Ok(())
+        } else {
+            Err(local_message(
+                "retained workspace record changed while the resume was prepared; run resume again",
+            ))
+        }
     }
 
     /// Selects the restore for a successor and pins the snapshot it installs. After an
@@ -202,10 +227,14 @@ impl LocalCliBackend {
             .unzip();
         let prepared = self.prepare_successor(&params, &recovery).await?;
         if checkpoint.is_none() {
+            // Remote I/O runs under the recovery claim only, outside the shared submission lock.
             crate::native_v2_local::check_forge_access(&prepared, &self.state_root)
                 .await
                 .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         }
+        // Publication is serialized with other submissions again; recheck what the claim covers.
+        let _submission_lock = self.acquire_submission_lock().await?;
+        self.require_unchanged_recovery(&params.run_id, &recovery)?;
         if let Some(interrupted) = &recovery.pending_restore {
             // Reconciliation confirmed that the interrupted attempt's controller released its
             // claim, so only its own stage is removed; other names beside the workspace stay.

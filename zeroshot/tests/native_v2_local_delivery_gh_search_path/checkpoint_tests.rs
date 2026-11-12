@@ -276,6 +276,84 @@ async fn controller_shutdown_cancels_the_restored_forge_check_before_agents_star
     assert_eq!(listed.assert_key("runs").as_array().assert_value().len(), 1);
 }
 
+/// A plain resume asks the forge under its own recovery claim. The lock that every local
+/// submission and resume on this state directory takes must stay free meanwhile.
+#[tokio::test(flavor = "multi_thread")]
+async fn stalled_plain_resume_forge_check_does_not_block_other_local_commands() {
+    // The fixture `gh` stalls for 60 seconds; both other commands must finish well inside that.
+    const UNBLOCKED: Duration = Duration::from_secs(20);
+    let fixture = DeliveryFixture::new();
+    let CheckpointedRun {
+        path,
+        tools,
+        run_id,
+        ..
+    } = checkpointed_run(&fixture).await;
+    // A plain resume keeps the checkout, so the workspace needs its delivery program again.
+    write_checkpoint_gh(&fixture, &tools.join("gh"));
+    let processes = fixture.root.path(STALLED_READ_PROCESSES);
+    fs::write(fixture.root.path(STALLED_READ), b"stall").assert_value();
+
+    let mut stalled = fixture
+        .command(&path)
+        .args(["resume", &run_id])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .assert_value();
+    timeout(CLI_TIMEOUT, async {
+        while fs::read_to_string(&processes)
+            .unwrap_or_default()
+            .split_whitespace()
+            .count()
+            != 2
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .assert_value_with("the plain resume's forge check must start");
+
+    // The claim still excludes a second resume of this run, which status reports at once.
+    let second = timeout(UNBLOCKED, output(&fixture, &["resume", &run_id], &path))
+        .await
+        .assert_value_with("a second resume must not wait for the stalled forge request");
+    assert!(
+        !second.status.success()
+            && String::from_utf8_lossy(&second.stderr)
+                .contains("run does not have a recoverable workspace"),
+        "the stalled resume must keep its recovery claim: {second:?}"
+    );
+    // A new submission takes the shared lock; it must be admitted while the request is stalled.
+    let unrelated = fixture.root.path("unrelated-workspace");
+    fs::create_dir(&unrelated).assert_value();
+    let submission = [
+        "--delivery",
+        "none",
+        "--cwd",
+        unrelated.to_str().assert_value(),
+        "--detach",
+    ];
+    let admitted = timeout(UNBLOCKED, fixture.run_arguments(&submission, &path))
+        .await
+        .assert_value_with("an unrelated run must not wait for the stalled forge request");
+    assert!(
+        admitted.status.success(),
+        "an unrelated run without delivery must be admitted: {admitted:?}"
+    );
+    assert_eq!(
+        project_reads(&fixture),
+        2,
+        "only the stalled resume may have asked the forge"
+    );
+
+    stalled.kill().await.assert_value();
+    let status = json_output(&fixture, &["status", &run_id], &path).await;
+    let recovery = status.assert_key("workspaceRecovery");
+    assert_eq!(recovery.assert_key("recoverable"), true);
+    assert!(recovery.get("successorRunId").is_none(), "{recovery}");
+}
+
 /// The foreground CLI starts the detached controller as its only child and waits for it.
 fn detached_controller(cli: u32) -> Option<u32> {
     let children = StdCommand::new("pgrep")
