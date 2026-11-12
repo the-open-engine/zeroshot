@@ -417,7 +417,10 @@ async fn map_paths_match_active_watch_logs_and_failure_evidence_including_nested
             .await
             .assert_value();
         while let Some(event) = watch.recv().await.assert_value() {
-            if let RunStatus::Running { active_executions } = event.status {
+            if let RunStatus::Running {
+                active_executions, ..
+            } = event.status
+            {
                 for execution in active_executions {
                     observed.insert(execution.execution.clone(), execution.map_indices);
                 }

@@ -164,7 +164,7 @@ impl NativeV2Supervisor {
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
         let appended = self
             .ledger
-            .append(&self.run_id, super::logging::terminal_events(terminal)?)
+            .append(&self.run_id, vec![RunEvent::Terminal { result: terminal }])
             .await?;
         appended
             .snapshot

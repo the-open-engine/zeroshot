@@ -162,6 +162,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
+- Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`
+  while running or stopping, including postmortem/finalization. Finished status carries only
+  `terminalResult`. Graph-result logging and its watch event publish with `PrimaryGraphCompleted`;
+  terminalization never repeats that graph-result log. Foreground follow still waits for Finished.
 - Initial input remains caller-owned and is validated unchanged. A root group may add required
   state fields only when their payload types have deterministic implicit empty values; verification
   proves this and reduction materializes missing null, string, array, and recursively empty record values.

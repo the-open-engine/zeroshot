@@ -116,6 +116,7 @@ impl ClusterBackend for FakeBackend {
     ) -> Result<RunStatusResult, BackendError> {
         Ok(status(
             RunStatus::Running {
+                graph_result: None,
                 active_executions: vec![],
             },
             2,
@@ -143,6 +144,7 @@ impl ClusterBackend for FakeBackend {
                     size: RunSize::new("small").assert_value(),
                     cursor: cursor(3),
                     status: RunStatus::Running {
+                        graph_result: None,
                         active_executions: vec![],
                     },
                 }),
@@ -157,6 +159,7 @@ impl ClusterBackend for FakeBackend {
                     size: RunSize::new("small").assert_value(),
                     cursor: cursor(99),
                     status: RunStatus::Running {
+                        graph_result: None,
                         active_executions: vec![],
                     },
                 }),
@@ -227,6 +230,7 @@ impl ClusterBackend for FakeBackend {
     ) -> Result<RunForceResult, BackendError> {
         let result = status(
             RunStatus::Stopping {
+                graph_result: None,
                 active_executions: vec![],
             },
             5,

@@ -164,10 +164,25 @@ pub enum RunStatus {
     Running {
         #[serde(rename = "activeExecutions")]
         active_executions: Vec<ActiveExecution>,
+        /// Recorded graph outcome while postmortem and finalization are still pending.
+        /// Only `Finished.terminalResult` determines the final run outcome.
+        #[serde(
+            default,
+            rename = "graphResult",
+            skip_serializing_if = "Option::is_none"
+        )]
+        graph_result: Option<TerminalResult>,
     },
     Stopping {
         #[serde(rename = "activeExecutions")]
         active_executions: Vec<ActiveExecution>,
+        /// Recorded graph outcome retained while stopping finalization.
+        #[serde(
+            default,
+            rename = "graphResult",
+            skip_serializing_if = "Option::is_none"
+        )]
+        graph_result: Option<TerminalResult>,
     },
     Finished {
         #[serde(rename = "terminalResult")]

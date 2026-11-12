@@ -50,6 +50,10 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
             watch_fixture(),
         ),
         json_artifact(
+            format!("{ROOT}/fixtures/native_v2_observation/graph_result.json"),
+            graph_result_fixture(),
+        ),
+        json_artifact(
             format!("{ROOT}/fixtures/native_v2_observation/logs.json"),
             logs_fixture(),
         ),
@@ -97,6 +101,7 @@ fn status() -> RunStatusResult {
         size: RunSize::new("medium").assert_value(),
         at_cursor: cursor(7),
         status: RunStatus::Running {
+            graph_result: None,
             active_executions: vec![
                 ActiveExecution {
                     map_indices: Vec::new(),
@@ -155,6 +160,18 @@ fn watch_fixture() -> Value {
     })
 }
 
+fn graph_result_fixture() -> Value {
+    let mut result = status();
+    result.at_cursor = cursor(8);
+    result.status = RunStatus::Running {
+        active_executions: Vec::new(),
+        graph_result: Some(TerminalResult::Succeeded {
+            output: json!({"summary":"graph completed; postmortem is running"}),
+        }),
+    };
+    serde_json::to_value(result).assert_value()
+}
+
 fn logs_fixture() -> Value {
     json!({
         "params": RunLogsParams {
@@ -208,11 +225,16 @@ fn force_fixture() -> Value {
     let mut result = status();
     result.at_cursor = cursor(10);
     let active_executions = match result.status {
-        RunStatus::Running { active_executions } => Some(active_executions),
+        RunStatus::Running {
+            active_executions, ..
+        } => Some(active_executions),
         _ => None,
     }
     .assert_value_with("fixture status must be running");
-    result.status = RunStatus::Stopping { active_executions };
+    result.status = RunStatus::Stopping {
+        active_executions,
+        graph_result: None,
+    };
     json!({
         "params": RunForceParams { run_id: run_id() },
         "result": RunForceResult {

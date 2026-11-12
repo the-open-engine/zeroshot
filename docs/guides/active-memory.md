@@ -53,6 +53,18 @@ These settings apply per run, so saved profiles can use different policies. Post
 counts toward the run total. An ordinary postmortem failure appears in the logs and does not change
 the main graph's result.
 
+While the postmortem runs, the run stays `running`. `status` and `list` carry the recorded graph
+outcome in `status.graphResult`; `watch` and foreground `run` print it immediately. A log line
+records that outcome and says the postmortem is running. The run finishes after postmortem,
+usage accounting and cleanup, and then only `terminalResult` remains. The foreground command
+waits until then and exits according to that final result.
+
+A force stop during the postmortem cancels and drains it while preserving the recorded graph
+result. Ordinary postmortem errors and controller restart after confirmed cleanup also preserve
+that result. A runtime or cleanup failure during finalization can prevent completion or produce
+a final `runtime_failed` or `runtime_lost` result, so `graphResult` is not a guarantee of the final
+run outcome. See [observing run results](observe-and-control.md#inventory-and-current-status).
+
 ## Indexing and retrieval
 
 Repository lessons match file paths, folders, identifiers and keyword groups. Graph lessons belong

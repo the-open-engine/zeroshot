@@ -93,6 +93,72 @@ async fn stored_primary(ledger: &FakeRunLedger, run_id: &RunId) -> StoredRun {
     ledger.get(run_id).await.assert_value().assert_value()
 }
 
+#[tokio::test]
+async fn status_and_list_expose_graph_result_during_finalization_and_stopping() {
+    for failed in [false, true] {
+        let fixture = harness(Behavior::Complete).await;
+        let request = seed_tail(&fixture.ledger, "graph-status", failed, true).await;
+        for stopping in [false, true] {
+            if stopping {
+                fixture
+                    .ledger
+                    .append(&request.run_id, vec![RunEvent::ForceStopRequested])
+                    .await
+                    .assert_value();
+            }
+            let status = fixture
+                .controller
+                .status(RunStatusParams {
+                    run_id: request.run_id.clone(),
+                })
+                .await
+                .assert_value();
+            let value = serde_json::to_value(&status.status).assert_value();
+            assert_eq!(
+                value["phase"],
+                if stopping { "stopping" } else { "running" }
+            );
+            assert_eq!(
+                value["graphResult"],
+                serde_json::to_value(outcome(failed)).assert_value()
+            );
+            assert_eq!(value["activeExecutions"], json!([]));
+            let list = ClusterBackend::run_list(
+                &fixture.controller,
+                &ConnectionContext::default(),
+                RunListParams::default(),
+            )
+            .await
+            .assert_value();
+            assert_eq!(list.runs, vec![status]);
+        }
+        fixture
+            .ledger
+            .append(
+                &request.run_id,
+                vec![RunEvent::Terminal {
+                    result: outcome(failed),
+                }],
+            )
+            .await
+            .assert_value();
+        let list = ClusterBackend::run_list(
+            &fixture.controller,
+            &ConnectionContext::default(),
+            RunListParams::default(),
+        )
+        .await
+        .assert_value();
+        let value = serde_json::to_value(&list.runs[0].status).assert_value();
+        assert_eq!(value["phase"], "finished");
+        assert!(value.get("graphResult").is_none());
+        assert_eq!(
+            value["terminalResult"],
+            serde_json::to_value(outcome(failed)).assert_value()
+        );
+    }
+}
+
 async fn restart(fixture: &Harness) -> NativeV2PlatformController {
     NativeV2PlatformController::new(fixture.ledger.clone(), fixture.allocator.clone())
         .await

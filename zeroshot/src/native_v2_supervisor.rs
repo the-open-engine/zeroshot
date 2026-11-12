@@ -408,19 +408,12 @@ impl NativeV2Supervisor {
             }
             primary.result.clone()
         } else {
-            let terminal =
+            let mut terminal =
                 enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
-            let auxiliary_pending = self.enabled_postmortem(admitted).is_some();
+            terminal.auxiliary_pending = self.enabled_postmortem(admitted).is_some();
             let latched = self
                 .ledger
-                .append(
-                    &self.run_id,
-                    vec![RunEvent::PrimaryGraphCompleted {
-                        result: terminal.result,
-                        auxiliary_pending,
-                        delivery_execution: terminal.delivery_execution,
-                    }],
-                )
+                .append(&self.run_id, logging::primary_graph_events(terminal)?)
                 .await?;
             let terminal = latched
                 .snapshot

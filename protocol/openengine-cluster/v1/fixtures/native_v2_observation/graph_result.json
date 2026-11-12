@@ -1,0 +1,21 @@
+{
+  "atCursor": "v2:8",
+  "runId": "run-1",
+  "size": "medium",
+  "source": {
+    "branch": "main",
+    "repository": "open-engine/zeroshot",
+    "revision": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "status": {
+    "activeExecutions": [],
+    "graphResult": {
+      "output": {
+        "summary": "graph completed; postmortem is running"
+      },
+      "status": "succeeded"
+    },
+    "phase": "running"
+  },
+  "title": "Repair checkout flow"
+}

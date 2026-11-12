@@ -5,6 +5,63 @@ use openengine_cluster_protocol::EnumLabel;
 use super::*;
 use crate::native_v2_cli::tests::support::FakeBackend;
 
+#[test]
+fn foreground_follow_prints_graph_result_and_only_settles_on_the_final_result() {
+    for graph in [
+        serde_json::json!({"status":"succeeded","output":{"answer":42}}),
+        serde_json::json!({"status":"failed","reason":"worker_failed"}),
+    ] {
+        for succeeded in [false, true] {
+            let mut bytes = Vec::new();
+            let mut cursor = None;
+            let event = |cursor: &str, status: serde_json::Value| {
+                DurableItem::Watch(Box::new(
+                    serde_json::from_value(serde_json::json!({
+                        "subscriptionId":"watch-1", "runId":"run-local", "title":"Task",
+                        "size":"small", "cursor":cursor, "status":status
+                    }))
+                    .expect("valid watch event"),
+                ))
+            };
+            let pending = serde_json::json!({
+                "phase":"running", "activeExecutions":[], "graphResult":graph
+            });
+            assert_eq!(
+                write_durable_event(event("v2:1", pending), &mut cursor, &mut bytes)
+                    .expect("print graph result"),
+                None
+            );
+            let written: serde_json::Value = serde_json::from_slice(&bytes)
+                .expect("graph result was printed before finalization");
+            assert_eq!(written["status"]["graphResult"], graph);
+            assert_eq!(cursor.as_ref().expect("graph cursor").as_str(), "v2:1");
+            // The final outcome, rather than the graph outcome, controls today's exit code.
+            let terminal = if succeeded {
+                serde_json::json!({"status":"succeeded","output":null})
+            } else {
+                serde_json::json!({"status":"failed","reason":"runtime_failed"})
+            };
+            let final_status = serde_json::json!({"phase":"finished","terminalResult":terminal});
+            assert_eq!(
+                write_durable_event(event("v2:2", final_status), &mut cursor, &mut bytes)
+                    .expect("print terminal result"),
+                Some(if succeeded {
+                    CliOutcome::Finished
+                } else {
+                    CliOutcome::Failed
+                })
+            );
+            assert_eq!(
+                bytes
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                    .count(),
+                2
+            );
+        }
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn error_log_read_ends_at_its_deadline_or_ctrl_c() {
     for (detach_after, waited) in [(60, 5), (2, 2)] {

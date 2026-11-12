@@ -49,6 +49,13 @@ def _status(value: object) -> RunStatus:
         )
     )
     result = None
+    graph_result = None
+    if phase in {"running", "stopping"} and native_status.get("graphResult") is not None:
+        graph_result = _terminal_result(
+            _string(root, "runId", "run status"),
+            native_status["graphResult"],
+            None,
+        )
     if phase == "finished":
         result = _terminal_result(
             _string(root, "runId", "run status"),
@@ -64,6 +71,7 @@ def _status(value: object) -> RunStatus:
         phase=phase,
         active_executions=active,
         result=result,
+        graph_result=graph_result,
     )
 
 
@@ -77,6 +85,7 @@ def _summary(status: RunStatus) -> RunSummary:
         cursor=status.cursor,
         phase=status.phase,
         force_stop_requested=status.phase == "stopping" or failure == "force_stopped",
+        graph_result=status.graph_result,
     )
 
 
