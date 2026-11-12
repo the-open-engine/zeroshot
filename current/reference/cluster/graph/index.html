@@ -2452,6 +2452,61 @@ to each item's joint join/branch-control outcome before <code>k_of_map</code> ag
 For <code>first</code>, a winning branch must complete, guarantee the controls read by <code>when</code>, and make
 <code>when</code> true. The <code>raced=satisfied|no_satisfier</code> control is correlated with those legal winner
 assignments; a non-satisfying completion cannot contribute promotion guarantees.</p>
+<p>Worker failures retain those four codes. Native machine-readable credential rejections use
+<code>refusal</code> with reason <code>authentication_required</code>; rejected models use <code>refusal</code> with reason
+<code>model_unavailable</code>, and their diagnostic names the requested model. A force-stopped node uses
+<code>refusal</code> with reason <code>stopped</code> and logs that it was stopped. Guards on <code>refusal</code> see all three
+cases as well as task and policy refusals. These outcomes receive neither an adapter continuation
+nor another node attempt. Active Memory skips its postmortem, with an explanation in the log,
+when the selected source node's final outcome is an authentication or model rejection, including
+restored checkpoint prerequisites.</p>
+<p>Classification uses each harness's native signals, without a Zeroshot model catalog or matching
+human-readable error wording:</p>
+<table>
+<thead>
+<tr>
+<th>Harness</th>
+<th>Rejected credential</th>
+<th>Model not accepted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude</td>
+<td><code>authentication_failed</code> on <code>system/api_retry</code> or an assistant error, or numeric <code>api_error_status: 401</code>, followed by a failed result</td>
+<td>A failed result with the native stderr marker <code>[claude-code:unrecognized_model]</code> and its JSON <code>model</code> field. A successful result keeps its answer despite this warning.</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>No distinct signal in exec JSON: <code>error</code> and <code>turn.failed.error</code> expose only <code>message</code>; remains <code>crash</code>/<code>declared_failure</code>.</td>
+<td>Same message-only exec error; remains <code>crash</code>/<code>declared_failure</code>.</td>
+</tr>
+<tr>
+<td>Copilot</td>
+<td><code>session.error.data.errorType: authentication</code>, including the equivalent request-correlated RPC error data</td>
+<td>Generic <code>query</code> errors do not distinguish model rejection; remains <code>crash</code>/<code>declared_failure</code> when no specific signal is available.</td>
+</tr>
+<tr>
+<td>Pi</td>
+<td>Failed assistant messages expose <code>stopReason</code> and <code>errorMessage</code>, without a credential rejection class; remains <code>crash</code>/<code>declared_failure</code>.</td>
+<td>Native model selection and failed assistant messages provide no distinct model rejection class; remains <code>crash</code>/<code>declared_failure</code>.</td>
+</tr>
+<tr>
+<td>OpenCode</td>
+<td>Native <code>ProviderAuthError</code>, or <code>APIError.data.statusCode: 401</code></td>
+<td>Native <code>ProviderModelNotFoundError</code>, or <code>APIError.data.responseBody</code> containing JSON <code>error.code: model_not_found</code>. A bare 404 or a message-only startup error remains <code>crash</code>/<code>declared_failure</code>.</td>
+</tr>
+<tr>
+<td>Hermes</td>
+<td>Failed native result <code>failure_reason: auth</code> or <code>auth_permanent</code></td>
+<td>Failed native result <code>failure_reason: model_not_found</code> or <code>model_entitlement</code>. Older native results without <code>failure_reason</code> remain <code>crash</code>/<code>declared_failure</code> for either case.</td>
+</tr>
+</tbody>
+</table>
+<p>These mappings apply locally and through hosted capsule transport. A cut or malformed provider
+response stream remains <code>crash</code>/<code>declared_failure</code> and retains the harness's existing continuation
+policy and the node's crash attempts. A malformed <strong>worker response contract</strong> instead remains
+<code>malformed</code>/<code>malformed_result</code> after its allowed corrections.</p>
 <h2 id="data-and-control-separation">Data and control separation<a class="headerlink" href="#data-and-control-separation" title="Permanent link">&para;</a></h2>
 <p>No selector or guard is source text. <code>DataSelector</code> is tagged by <code>source</code> and reads only a bounded,
 non-empty <code>FieldPath</code> from <code>state</code> or the current map <code>item</code>. An input binding has an explicit target
@@ -2730,7 +2785,7 @@ are generated through the reusable server verifier.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-09">9 November 2026</time>
+    Last updated <time datetime="2026-11-12">12 November 2026</time>
   </span>
 
     
