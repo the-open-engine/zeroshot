@@ -648,9 +648,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   detected envelope fault (empty reply, text before the object, unterminated object, or content
   after it) and restate the expected response as a one-line skeleton whose placeholders are not
   JSON; parsing stays strict and nothing is repaired or extracted.
-- Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
+- Provider continuation is bounded: Claude continues once after a retryable `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
-  exists. Structured output receives at most two correction turns before `malformed`.
+  exists. A rejected credential or unavailable model with a native machine-readable signal is
+  `refusal` with `authentication_required` or `model_unavailable`, bypasses continuation and node
+  attempts, and skips Active Memory postmortem when it is the inherited source node's final outcome.
+  Claude's authentication `api_retry` does not authorize continuation. Force stops use
+  `refusal`/`stopped`; cut or malformed streams stay retryable `crash`. Classification belongs to
+  each adapter and survives capsule transport; never infer it from provider message wording.
+  Terminalization helpers preserve the complete worker outcome: live and reconstructed force stops
+  use `stopped`, while runtime loss stays `crash`.
+  Postmortem source outcomes use canonical durable history, including restored checkpoint
+  prerequisites. Typed provider diagnostics use the session's current redactions after credential
+  refresh, before leaving the adapter.
+  Structured output receives at most two correction turns before `malformed`.
   A Codex `turn.completed` with a final agent message preserves its answer and usage across later
   process failures. Its remaining output and process wait share a 250 ms grace, followed by bounded
   release and confirmed process-tree cleanup. Teardown failures are logged once without replacing

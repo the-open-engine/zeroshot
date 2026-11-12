@@ -410,7 +410,7 @@ impl NativeV2Supervisor {
         } else {
             let terminal =
                 enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
-            let auxiliary_pending = self.enabled_postmortem(admitted).is_some();
+            let auxiliary_pending = self.enabled_postmortem(admitted, snapshot).is_some();
             let latched = self
                 .ledger
                 .append(

@@ -101,11 +101,15 @@ pub enum CapsuleNodeFailure {
     RunClosed,
     ExecutionActive,
     ExecutionFailed,
+    AuthenticationRequired,
+    ModelUnavailable,
 }
 
 impl CapsuleNodeFailure {
     fn from_runner(error: &NodeRunnerError) -> Self {
         match error {
+            NodeRunnerError::AuthenticationRequired(_) => Self::AuthenticationRequired,
+            NodeRunnerError::ModelUnavailable(_) => Self::ModelUnavailable,
             NodeRunnerError::CleanupUnconfirmed => Self::CleanupUnconfirmed,
             NodeRunnerError::Cancelled => Self::Cancelled,
             NodeRunnerError::SessionLost => Self::SessionLost,
@@ -124,6 +128,12 @@ impl CapsuleNodeFailure {
             Self::RunClosed => NodeRunnerError::RunClosed,
             Self::ExecutionActive => NodeRunnerError::ExecutionActive,
             Self::ExecutionFailed => NodeRunnerError::Driver,
+            Self::AuthenticationRequired => NodeRunnerError::AuthenticationRequired(
+                "remote provider rejected authentication; see node diagnostics".to_owned(),
+            ),
+            Self::ModelUnavailable => NodeRunnerError::ModelUnavailable(
+                "remote provider rejected the model; see node diagnostics".to_owned(),
+            ),
         }
     }
 }

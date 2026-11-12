@@ -195,7 +195,25 @@ impl OpenCodeAdapter {
         let attempt = match turn::open(turn.files.clone(), command, turn.control).await? {
             ProviderProcessStart::Ready(mut process) => {
                 turn::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
-                    .await?
+                    .await
+                    .map_err(|error| match error {
+                        NodeRunnerError::ModelUnavailable(detail) => {
+                            let crate::native_v2_contract::NodeRuntimeBinding::Agent {
+                                model, ..
+                            } = &turn.invocation.node.binding
+                            else {
+                                return NodeRunnerError::Driver;
+                            };
+                            NodeRunnerError::ModelUnavailable(format!("model {model}: {detail}"))
+                        }
+                        error => error,
+                    })
+                    .map_err(|error| {
+                        crate::native_v2_capsule::provider_process::redact_provider_error(
+                            error,
+                            &redactions,
+                        )
+                    })?
             }
             ProviderProcessStart::Failed(attempt) => attempt,
         };

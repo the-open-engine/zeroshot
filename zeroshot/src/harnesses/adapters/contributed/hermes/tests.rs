@@ -157,6 +157,51 @@ async fn native_cleanup_acknowledgement_is_required_even_after_success() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn native_provider_rejections_survive_the_bridge_without_another_prompt() {
+    for reason in [
+        "auth",
+        "auth_permanent",
+        "model_not_found",
+        "model_entitlement",
+    ] {
+        let directory = TestDirectory::new("hermes-provider-rejection");
+        let source = fixture("", true)
+            .replace(
+                "assert message['type']=='prompt'",
+                "assert message['type']=='prompt'; pathlib.Path('prompts').open('a').write('prompt\\n')",
+            )
+            .replace(
+                "'completed':True,'failed':False",
+                &format!(
+                    "'completed':False,'failed':True,'failure_reason':{reason:?},'error':init['authority'].get('apiKey')"
+                ),
+            );
+        let adapter = adapter(&directory, &source);
+        let error = run(
+            &adapter,
+            invocation(&[("OPENAI_API_KEY", "rejected-fixture-secret")]),
+        )
+        .await
+        .unwrap_err();
+        if reason.starts_with("auth") {
+            assert!(matches!(error, NodeRunnerError::AuthenticationRequired(_)));
+        } else {
+            assert!(matches!(error, NodeRunnerError::ModelUnavailable(_)));
+            assert!(error.to_string().contains("opaque/model"));
+        }
+        assert!(!error.to_string().contains("rejected-fixture-secret"));
+        assert_eq!(
+            std::fs::read_to_string(adapter.config.workspace.join("prompts"))
+                .assert_value()
+                .lines()
+                .count(),
+            1
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn structured_corrections_use_the_same_runtime_and_remain_bounded() {
     let directory = TestDirectory::new("hermes-corrections");
     let adapter = adapter(&directory, &fixture("malformed", true));

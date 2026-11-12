@@ -35,7 +35,12 @@ async fn rejected_before_process(fixture: Fixture) {
 
 #[tokio::test]
 async fn credential_callback_refreshes_through_the_existing_resolver() {
-    for mode in ["refresh", "refresh_error"] {
+    for mode in [
+        "refresh",
+        "refresh_error",
+        "refresh_auth_error",
+        "refresh_auth_rpc_error",
+    ] {
         let fixture = Fixture::with_values(
             mode,
             BTreeMap::from([(auth::EXPIRES_AT.to_owned(), expiry())]),
@@ -61,14 +66,21 @@ async fn credential_callback_refreshes_through_the_existing_resolver() {
         if mode == "refresh" {
             verified(outcome);
         } else {
-            let Err(NodeRunnerError::DriverDetail(detail)) = outcome else {
-                panic!("expected refreshed-token error: {outcome:?}");
+            let detail = match outcome {
+                Err(NodeRunnerError::DriverDetail(detail)) if mode == "refresh_error" => {
+                    assert!(detail.contains("refresh failure: [REDACTED]"));
+                    detail
+                }
+                Err(NodeRunnerError::AuthenticationRequired(detail)) if mode != "refresh_error" => {
+                    detail
+                }
+                outcome => panic!("expected refreshed-token error: {outcome:?}"),
             };
             assert!(detail.contains("rejected [REDACTED]"));
-            assert!(detail.contains("refresh failure: [REDACTED]"));
             assert!(!detail.contains("rotated-sensitive-value"));
             assert!(!detail.contains("gho_fake-secret"));
             assert!(error_output(&events).is_empty());
+            assert!(!format!("{events:?}").contains("rotated-sensitive-value"));
         }
         assert_eq!(refresh.calls.load(Ordering::Relaxed), 1);
         let capture = fixture.capture();

@@ -261,3 +261,22 @@ def test_graph_output_cannot_supply_a_delivery_receipt() -> None:
     result = _status(value).result
     assert result is not None
     assert result.delivery_receipt is None
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Node writer failed: refusal: authentication required",
+        "Node writer failed: refusal: model unavailable: model missing-model",
+        "Node writer was stopped after 1.0s",
+    ],
+)
+def test_provider_rejection_and_stopped_diagnostics_preserve_native_messages(message: str) -> None:
+    from zeroshot._projection import _failure_context
+
+    context = _failure_context({"recorded": [{"message": message}]})
+    assert context is not None
+    assert context.recorded[0].message == message
+    wire = log_event()
+    wire["record"] = {"level": "error", "target": "node", "message": message}
+    assert _log_event(wire).message == message

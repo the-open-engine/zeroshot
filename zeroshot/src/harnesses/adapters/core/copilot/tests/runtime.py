@@ -198,7 +198,7 @@ while (message := read()) is not None:
     elif method == "session.send":
         turn += 1
         rate_limit_attempt = None
-        if mode in ("refresh", "refresh_error"):
+        if mode in ("refresh", "refresh_error", "refresh_auth_error", "refresh_auth_rpc_error"):
             send({"id": "auth-refresh", "method": "gitHubToken.getToken", "params": {
                 "registrationId": registration, "host": github_host,
                 "sessionId": session, "reason": "refresh"}})
@@ -279,10 +279,17 @@ while (message := read()) is not None:
             sys.stdout.buffer.flush()
         if mode == "error":
             event("session.error", {"message": "rejected gho_fake-secret"})
-        if mode == "refresh_error":
+        if mode in ("refresh_error", "refresh_auth_error", "refresh_auth_rpc_error"):
             print("refresh failure: rotated-sensitive-value", file=sys.stderr, flush=True)
-            event("session.error", {"message": "rejected rotated-sensitive-value"})
-        if mode in ("error", "refresh_error", "error_cleanup"):
+            detail = {"message": "rejected rotated-sensitive-value"}
+            if mode == "refresh_auth_error":
+                detail["errorType"] = "authentication"
+            if mode == "refresh_auth_rpc_error":
+                send({"id": message["id"], "error": {
+                    "code": -32000, **detail, "data": {"errorType": "authentication"}}})
+            else:
+                event("session.error", detail)
+        if mode in ("error", "refresh_error", "refresh_auth_error", "refresh_auth_rpc_error", "error_cleanup"):
             continue  # A session error must settle even without the session.send response.
         if mode == "permission":
             event("assistant.message", {

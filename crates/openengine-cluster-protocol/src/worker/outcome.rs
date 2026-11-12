@@ -18,6 +18,8 @@ pub enum WorkerFailureReason {
     PolicyDenied,
     InteractiveInputRequired,
     AuthenticationRequired,
+    ModelUnavailable,
+    Stopped,
     MalformedResult,
 }
 
@@ -123,6 +125,22 @@ impl WorkerOutcome {
     }
 
     #[must_use]
+    pub const fn model_refusal() -> Self {
+        Self::Error {
+            code: WorkerErrorCode::Refusal,
+            reason: WorkerFailureReason::ModelUnavailable,
+        }
+    }
+
+    #[must_use]
+    pub const fn stopped() -> Self {
+        Self::Error {
+            code: WorkerErrorCode::Refusal,
+            reason: WorkerFailureReason::Stopped,
+        }
+    }
+
+    #[must_use]
     pub const fn malformed() -> Self {
         Self::Error {
             code: WorkerErrorCode::Malformed,
@@ -148,6 +166,8 @@ const fn valid_failure_pair(code: WorkerErrorCode, reason: WorkerFailureReason) 
                 WorkerFailureReason::PolicyDenied
                     | WorkerFailureReason::InteractiveInputRequired
                     | WorkerFailureReason::AuthenticationRequired
+                    | WorkerFailureReason::ModelUnavailable
+                    | WorkerFailureReason::Stopped
             ) | (
                 WorkerErrorCode::Malformed,
                 WorkerFailureReason::MalformedResult
@@ -231,7 +251,9 @@ impl JsonSchema for WorkerOutcome {
                                         "enum": [
                                             "policy_denied",
                                             "interactive_input_required",
-                                            "authentication_required"
+                                            "authentication_required",
+                                            "model_unavailable",
+                                            "stopped"
                                         ]
                                     }
                                 }

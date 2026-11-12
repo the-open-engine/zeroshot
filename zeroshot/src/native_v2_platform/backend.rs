@@ -239,9 +239,10 @@ pub(super) async fn append_interrupted(
     ledger: &dyn RunLedger,
     stored: &StoredRun,
     reason: &str,
+    outcome: WorkerOutcome,
 ) -> Result<(), RunLedgerError> {
     let Some(primary) = &stored.snapshot.primary_graph else {
-        return append_terminal_failure(ledger, stored, reason).await;
+        return append_terminal_failure(ledger, stored, reason, outcome).await;
     };
     if stored.snapshot.terminal.is_some() {
         return Ok(());
@@ -271,6 +272,7 @@ pub(super) async fn append_terminal_failure(
     ledger: &dyn RunLedger,
     stored: &StoredRun,
     reason: &str,
+    outcome: WorkerOutcome,
 ) -> Result<(), RunLedgerError> {
     if stored.snapshot.terminal.is_some() {
         return Ok(());
@@ -278,7 +280,7 @@ pub(super) async fn append_terminal_failure(
     let events = crate::native_v2_supervisor::logging::terminal_failure_events(
         &stored.snapshot,
         reason,
-        WorkerErrorCode::Crash,
+        outcome,
     )?;
     ledger.append(&stored.snapshot.run_id, events).await?;
     Ok(())

@@ -3,8 +3,7 @@
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
-    EnumLabel, FailureDiagnosticKind, TerminalResult, WorkerErrorCode, WorkerFailureReason,
-    WorkerOutcome,
+    EnumLabel, FailureDiagnosticKind, TerminalResult, WorkerFailureReason, WorkerOutcome,
 };
 
 use crate::native_v2_contract::{ExecutionRef, NodeCompletion};
@@ -64,11 +63,21 @@ pub(super) fn node_failure_log(
         let timing = elapsed.map_or_else(String::new, |duration| {
             format!(" after {:.1}s", duration.as_secs_f64())
         });
+        if *reason == WorkerFailureReason::Stopped {
+            return error_log(
+                Some(reference.execution),
+                format!("Node {} was stopped{timing}", reference.node.as_str()),
+                Some(FailureDiagnosticKind::Failure),
+            )
+            .map(Some);
+        }
         let reason = match reason {
             WorkerFailureReason::DeclaredFailure => "",
             WorkerFailureReason::PolicyDenied => ": policy denied",
             WorkerFailureReason::InteractiveInputRequired => ": interactive input required",
             WorkerFailureReason::AuthenticationRequired => ": authentication required",
+            WorkerFailureReason::ModelUnavailable => ": model unavailable",
+            WorkerFailureReason::Stopped => ": stopped",
             WorkerFailureReason::MalformedResult => ": result did not match the node contract",
         };
         let cause_text = cause.map_or_else(String::new, |cause| format!(": {cause}"));
@@ -110,7 +119,7 @@ pub(crate) fn terminal_events(result: TerminalResult) -> Result<Vec<RunEvent>, R
 pub(crate) fn terminal_failure_events(
     snapshot: &RunSnapshot,
     reason: &str,
-    code: WorkerErrorCode,
+    outcome: WorkerOutcome,
 ) -> Result<Vec<RunEvent>, RunLedgerError> {
     let terminal = TerminalResult::Failed {
         context: None,
@@ -122,7 +131,7 @@ pub(crate) fn terminal_failure_events(
         events.extend(completion_events(
             NodeCompletion {
                 reference: node.reference.clone(),
-                outcome: WorkerOutcome::declared_failure(code),
+                outcome: outcome.clone(),
             },
             None,
             Some(&cause),

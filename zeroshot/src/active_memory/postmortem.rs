@@ -24,6 +24,7 @@ mod execution;
 mod impact;
 pub(crate) mod initialize;
 mod plan;
+pub(crate) use plan::source_node;
 mod proposals;
 mod source_file;
 

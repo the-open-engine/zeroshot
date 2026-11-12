@@ -55,6 +55,7 @@ async fn handled_worker_and_verifier_errors_remain_in_public_logs() {
                 "refusal",
             ),
             (WorkerOutcome::policy_refusal(), "policy denied"),
+            (WorkerOutcome::model_refusal(), "model unavailable"),
             (
                 WorkerOutcome::interactive_refusal(),
                 "interactive input required",
@@ -461,7 +462,7 @@ async fn force_stop_keeps_an_already_failed_execution_cause() {
     }));
     assert_eq!(
         stored_run(&harness.ledger).await.snapshot.executions[&execution].outcome(),
-        Some(&WorkerOutcome::declared_failure(WorkerErrorCode::Refusal))
+        Some(&WorkerOutcome::stopped())
     );
 }
 
@@ -550,4 +551,104 @@ async fn cancellation_keeps_real_loser_errors_and_does_not_invent_errors_for_nor
             assert!(errors.is_empty());
         }
     }
+}
+
+#[tokio::test]
+async fn provider_rejections_do_not_consume_a_second_verifier_attempt() {
+    for remote in [false, true] {
+        for (error, outcome) in [
+            (
+                NodeRunnerError::AuthenticationRequired("bad key".into()),
+                WorkerOutcome::authentication_refusal(),
+            ),
+            (
+                NodeRunnerError::ModelUnavailable("model missing-model".into()),
+                WorkerOutcome::model_refusal(),
+            ),
+        ] {
+            let mut review = verifier("review", 1_000);
+            review["attempts"] = json!(2);
+            let driver = FakeDriver::scripted([("review", vec![Behavior::Fail(error)])]);
+            let mut harness = harness(
+                graph(
+                    sequence(vec![review, succeed("done")], null_type()),
+                    null_type(),
+                ),
+                Value::Null,
+                driver.clone(),
+            )
+            .await;
+            if remote {
+                use crate::native_v2_capsule::{NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner};
+                let endpoint = NativeCapsuleNodeEndpoint::new(harness.supervisor.runner.clone());
+                harness.supervisor.runner =
+                    Arc::new(RemoteCapsuleNodeRunner::new(Arc::new(endpoint)));
+            }
+            harness.supervisor.drive().await.assert_value();
+            assert_eq!(driver.starts("review"), 1);
+            let stored = stored_run(&harness.ledger).await;
+            assert_eq!(
+                stored
+                    .snapshot
+                    .executions
+                    .values()
+                    .next()
+                    .assert_value()
+                    .outcome(),
+                Some(&outcome)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn force_stop_through_drive_records_stopped_for_every_parallel_node() {
+    let driver = FakeDriver::scripted([("a", vec![Behavior::Hang]), ("b", vec![Behavior::Hang])]);
+    let harness = harness(
+        parallel(
+            json!({"kind":"all"}),
+            vec![step("a", 10_000), step("b", 10_000)],
+        ),
+        Value::Null,
+        driver.clone(),
+    )
+    .await;
+    let drive = harness.spawn_drive();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while driver.starts("a") == 0 || driver.starts("b") == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value();
+    harness.supervisor.force_stop().await.assert_value();
+    let terminal = tokio::time::timeout(Duration::from_secs(2), drive)
+        .await
+        .assert_value()
+        .assert_value()
+        .assert_value();
+    assert!(
+        matches!(terminal, TerminalResult::Failed { reason, .. } if reason.as_str() == "force_stopped")
+    );
+    let stored = stored_run(&harness.ledger).await;
+    assert_eq!(stored.snapshot.executions.len(), 2);
+    for node in stored.snapshot.executions.values() {
+        assert_eq!(node.outcome(), Some(&WorkerOutcome::stopped()));
+    }
+    let errors = public_errors(&harness).await;
+    for name in ["a", "b"] {
+        assert!(errors.iter().any(|record| {
+            record
+                .record
+                .message
+                .as_str()
+                .starts_with(&format!("Node {name} was stopped"))
+        }));
+    }
+    assert!(
+        errors
+            .iter()
+            .filter(|record| record.execution.is_some())
+            .all(|record| record.record.message.as_str().contains(" was stopped"))
+    );
 }

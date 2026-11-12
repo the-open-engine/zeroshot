@@ -22,6 +22,8 @@ pub(crate) trait ProviderTranscript: Send {
     fn finish_stream(&mut self) -> Vec<ProviderEmission>;
     fn token_usage(&self) -> Option<TokenUsageDelta>;
     fn is_success(&self) -> bool;
+    /// Harness-owned machine diagnostics can also arrive on stderr.
+    fn observe_stderr(&mut self, _stderr: &[u8]) {}
     /// Returns only producer-redacted failure evidence, without consuming the transcript.
     fn failure_diagnostic(&self, _process_detail: Option<&str>) -> Option<String> {
         None
@@ -107,7 +109,7 @@ pub(crate) async fn finish_process<T: ProviderTranscript>(
 }
 
 async fn finish_input_failure<T: ProviderTranscript>(
-    transcript: T,
+    mut transcript: T,
     failure: ProcessInputFailure<Result<(), NodeRunnerError>>,
     control: &DriverControl,
 ) -> Result<ProviderAttempt, NodeRunnerError> {
@@ -126,6 +128,9 @@ async fn finish_input_failure<T: ProviderTranscript>(
         return Err(NodeRunnerError::Cancelled);
     }
 
+    if let Ok(output) = &completion {
+        transcript.observe_stderr(&output.stderr_tail);
+    }
     let mut diagnostic = diagnostic;
     if let Err(error) = output {
         append_detail(
@@ -217,12 +222,13 @@ fn cleanup_failure_diagnostic<T: ProviderTranscript>(
 }
 
 fn resolve_process_completion<T: ProviderTranscript>(
-    transcript: T,
+    mut transcript: T,
     completion: Result<ProcessSessionOutput, ProcessRunnerError>,
     cancelled: bool,
 ) -> Result<ProviderAttempt, NodeRunnerError> {
     let output = require_process_cleanup(&completion)?;
     let failure = process_failure_context(output, cancelled, !transcript.is_success())?;
+    transcript.observe_stderr(&output.stderr_tail);
     transcript.finish(failure)
 }
 

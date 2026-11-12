@@ -196,7 +196,7 @@ impl NativeV2Supervisor {
             events.extend(super::logging::terminal_failure_events(
                 &snapshot,
                 "force_stopped",
-                WorkerErrorCode::Refusal,
+                WorkerOutcome::stopped(),
             )?);
             let appended = self.ledger.append(&self.run_id, events).await?;
             appended
@@ -240,7 +240,7 @@ impl NativeV2Supervisor {
         events.extend(super::logging::terminal_failure_events(
             &snapshot,
             reason,
-            WorkerErrorCode::Crash,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
         )?);
         let appended = self.ledger.append(&self.run_id, events).await?;
         appended

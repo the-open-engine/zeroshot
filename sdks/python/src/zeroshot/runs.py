@@ -59,6 +59,9 @@ class ActiveExecution:
 class FailureDiagnostic:
     """One producer-redacted failure record retained with the run.
 
+    Worker refusal messages distinguish authentication required, model unavailable, and stopped
+    nodes. Messages pass through unchanged; this record also carries runtime failure diagnostics.
+
     Args:
         message: Bounded secret-safe explanation.
         execution: Associated executable graph node, or None for a run-wide record.

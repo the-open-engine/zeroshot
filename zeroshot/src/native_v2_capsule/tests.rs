@@ -618,3 +618,6 @@ async fn private_capsule_roundtrip_preserves_delivery_checkpoint_state_without_l
     assert_eq!(live.recv().await.assert_value().text, "working");
     assert!(live.recv().await.is_err());
 }
+
+#[path = "tests/provider_rejections.rs"]
+mod provider_rejections;

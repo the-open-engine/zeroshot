@@ -31,6 +31,9 @@ fn session_error(data: &Value) -> Result<(), NodeRunnerError> {
     let message = data["message"]
         .as_str()
         .ok_or_else(|| failure("Copilot session error is invalid"))?;
+    if data["errorType"] == "authentication" {
+        return Err(NodeRunnerError::AuthenticationRequired(message.to_owned()));
+    }
     Err(failure(message))
 }
 

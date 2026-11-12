@@ -298,9 +298,14 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
         .await
         .assert_value_with("source lookup")
         .assert_value_with("source run");
-    append_terminal_failure(ledger.as_ref(), &source, "worker_failed")
-        .await
-        .assert_value_with("source failure");
+    append_terminal_failure(
+        ledger.as_ref(),
+        &source,
+        "worker_failed",
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+    )
+    .await
+    .assert_value_with("source failure");
     let allocator = Arc::new(RetainedCleanupFailureAllocator::new());
     let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
@@ -487,9 +492,14 @@ async fn seed_failed_source_run(submitted: &RunSubmitParams, ledger: &Arc<FakeRu
         .await
         .assert_value()
         .assert_value();
-    append_terminal_failure(ledger.as_ref(), &failed, "worker_failed")
-        .await
-        .assert_value();
+    append_terminal_failure(
+        ledger.as_ref(),
+        &failed,
+        "worker_failed",
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+    )
+    .await
+    .assert_value();
 }
 
 fn source_recovery_request(remote: &str) -> RunSubmitParams {

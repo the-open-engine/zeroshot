@@ -143,7 +143,12 @@ impl TerminalMetadata {
                 timestamp: crate::native_v2_runner::current_timestamp(),
             });
         }
-        if let Err(error @ NodeRunnerError::DriverDetail(_)) = &completion {
+        if let Err(
+            error @ (NodeRunnerError::DriverDetail(_)
+            | NodeRunnerError::AuthenticationRequired(_)
+            | NodeRunnerError::ModelUnavailable(_)),
+        ) = &completion
+        {
             let diagnostic =
                 LiveOutput::diagnostic(FailureDiagnosticKind::Failure, error.to_string());
             if self.last_failure_message.as_deref() != Some(diagnostic.text.as_str()) {
