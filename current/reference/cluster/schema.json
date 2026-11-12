@@ -5030,6 +5030,17 @@
               },
               "type": "array"
             },
+            "graphResult": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TerminalResult"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Recorded graph outcome while postmortem and finalization are still pending.\nOnly `Finished.terminalResult` determines the final run outcome."
+            },
             "phase": {
               "const": "running",
               "type": "string"
@@ -5049,6 +5060,17 @@
                 "$ref": "#/$defs/ActiveExecution"
               },
               "type": "array"
+            },
+            "graphResult": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TerminalResult"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Recorded graph outcome retained while stopping finalization."
             },
             "phase": {
               "const": "stopping",

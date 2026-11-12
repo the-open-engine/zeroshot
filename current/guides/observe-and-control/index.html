@@ -2447,6 +2447,25 @@ return after submission:</p>
 <p>A run ID belongs to the controller or target that created it. Pass <code>--target NAME</code> when reading one
 from a named target. Finished status separates graph-authored <code>terminalResult.output</code> from optional
 runtime-confirmed <code>metadata.deliveryReceipt</code>; graphs without delivery omit the receipt.</p>
+<p>When the graph ends, <code>status</code> and <code>list</code> expose its recorded outcome as <code>status.graphResult</code>,
+using the same shape as <code>terminalResult</code>, while <code>phase</code> remains <code>running</code> during the Active Memory
+postmortem and finalization. For example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"phase"</span><span class="p">:</span><span class="w"> </span><span class="s2">"running"</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">"activeExecutions"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">"graphResult"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"failed"</span><span class="p">,</span><span class="w"> </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"worker_failed"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>graphResult</code> is absent before the graph ends and after the run finishes, when <code>terminalResult</code>
+is the only result. It remains visible if finalization enters <code>stopping</code>. <code>watch</code> emits the result
+as soon as it is recorded, and foreground <code>run</code> prints that event and keeps waiting for finalization.
+The log records the graph result once and says when the postmortem is running. Exit codes still
+follow the final run result.</p>
+<p>The recorded graph result does not guarantee the final run result. A force stop during the
+postmortem cancels and drains that work and preserves the recorded graph result; ordinary
+postmortem failures and controller restart after confirmed cleanup preserve it too. A runtime or
+cleanup failure during finalization can instead prevent completion or end the run with
+<code>runtime_failed</code> or <code>runtime_lost</code>. Read <code>terminalResult</code> once the run is finished.</p>
 <h2 id="token-usage">Token usage<a class="headerlink" href="#token-usage" title="Permanent link">&para;</a></h2>
 <p><code>metadata.tokenUsage</code> contains run totals summed across agent invocations, including retries,
 correction turns and auxiliary agents such as postmortem specialists. Counters are summed as each
@@ -2512,8 +2531,8 @@ Successful terminal results keep their existing representation.</p>
 <h2 id="resume-event-and-log-streams">Resume event and log streams<a class="headerlink" href="#resume-event-and-log-streams" title="Permanent link">&para;</a></h2>
 <p><code>watch</code> follows status events; <code>logs</code> follows safe provider and controller log records. Both accept
 an opaque cursor and resume strictly after it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot watch RUN_ID --after STATUS_CURSOR</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot logs RUN_ID --after LOG_CURSOR</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot watch RUN_ID --after STATUS_CURSOR</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot logs RUN_ID --after LOG_CURSOR</span>
 </code></pre></div>
 <p>Cursors are opaque, so store the last fully consumed value and pass it back unchanged.
 <code>logs --execution EXECUTION_REF</code> restricts output to one execution selector from status.</p>
@@ -2585,13 +2604,13 @@ for the listed <code>request.invalid</code> refusals. Transport failures remain 
 Call <code>RunResult.raise_for_failure()</code> to opt into <code>RunFailedError</code>.</p>
 <h2 id="attach-to-an-active-execution">Attach to an active execution<a class="headerlink" href="#attach-to-an-active-execution" title="Permanent link">&para;</a></h2>
 <p>Status can expose an active execution reference. Attach to its interactive event stream with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot attach RUN_ID EXECUTION_REF</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot attach RUN_ID EXECUTION_REF</span>
 </code></pre></div>
 <p>Closing the attachment stream does not cancel the execution.</p>
 <h2 id="download-a-retained-workspace">Download a retained workspace<a class="headerlink" href="#download-a-retained-workspace" title="Permanent link">&para;</a></h2>
 <p>Download the latest retained files without starting another run:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot export-workspace RUN_ID --target platform --output workspace.tar</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot export-workspace RUN_ID --target platform --from-checkpoint CHECKPOINT_ID --output checkpoint.tar</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot export-workspace RUN_ID --target platform --output workspace.tar</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">zeroshot export-workspace RUN_ID --target platform --from-checkpoint CHECKPOINT_ID --output checkpoint.tar</span>
 </code></pre></div>
 <p>Use <code>zeroshot checkpoints RUN_ID --target platform</code> to find an entry checkpoint ID. Omit
 <code>--from-checkpoint</code> to export the latest retained workspace. The target authorizes access and
@@ -2608,15 +2627,15 @@ output and fail the command. The archive is never extracted and its contents are
 <h2 id="restart-or-resume-a-failed-run">Restart or resume a failed run<a class="headerlink" href="#restart-or-resume-a-failed-run" title="Permanent link">&para;</a></h2>
 <p>Failed local runs and direct targets retain their workspace. Restart the original graph at its root
 with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot resume RUN_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot resume RUN_ID</span>
 </code></pre></div>
 <p>A local restart uses your checkout as it is now. You can fix files after a failure and resume:
 commits, staged and unstaged edits, untracked and ignored files, the current branch, and the index
 are kept. Agents then change the checkout as in any run. Named targets restart on the latest
 snapshot of their own retained workspace.</p>
 <p>To resume at an earlier node, list its available input checkpoints and select one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-changes</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-changes</span>
 </code></pre></div>
 <p>Restoring a local checkpoint rolls back your checkout, so it requires <code>--discard-workspace-changes</code>.
 The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Without the
@@ -2662,7 +2681,7 @@ export <code>GH_TOKEN</code> again and pass <code>--forward-gh-token</code> when
 instead of the target's stored <code>github</code> connection.</p>
 <h2 id="stop-only-with-explicit-intent">Stop only with explicit intent<a class="headerlink" href="#stop-only-with-explicit-intent" title="Permanent link">&para;</a></h2>
 <p><code>force-stop</code> is the destructive run-lifetime command:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">zeroshot force-stop RUN_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="go">zeroshot force-stop RUN_ID</span>
 </code></pre></div>
 <p>The command asks the controller to stop active work and writes the resulting status as JSON. Read
 status first if another operator may already have stopped the run, or if it may have completed.</p>

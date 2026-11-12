@@ -3627,8 +3627,8 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>  run                Submit a graph run locally or to a named target
 <a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  update             Update this executable and managed agent skills to the newest canonical release
 <a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  list               List runs as JSON
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  status             Read a run's current status as JSON, including separate native delivery evidence when available
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
 <a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>  logs               Follow a run's log stream as NDJSON
 <a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>  attach             Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>  force-stop         Force a run to stop and write the result as JSON
@@ -4564,7 +4564,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-46-2" name="__codelineno-46-2" href="#__codelineno-46-2"></a>
 <a id="__codelineno-46-3" name="__codelineno-46-3" href="#__codelineno-46-3"></a>Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named targets require a committed Git source. Local workspaces must not overlap Zeroshot state. Local delivery commits on the checked-out branch and pushes that same branch, including existing unpushed commits. PR/merge targets a different upstream branch, or the remote's default branch; starting on that target is refused. Start from a feature branch or use --worktree. Explicit --push can publish any branch, including main, without force-pushing. --worktree creates a retained worktree and managed run branch from local HEAD by default. --worktree-base remote fetches the invoking branch's upstream and requires one to be set. Worktree PR/merge targets the invoking branch's upstream, or its name without an upstream. Preparation verifies the target before agents start. Worktrees contain committed files only; dependencies and untracked resources are not copied or installed. Resume reuses the same workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
 <a id="__codelineno-46-4" name="__codelineno-46-4" href="#__codelineno-46-4"></a>
-<a id="__codelineno-46-5" name="__codelineno-46-5" href="#__codelineno-46-5"></a>A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
+<a id="__codelineno-46-5" name="__codelineno-46-5" href="#__codelineno-46-5"></a>A foreground run follows NDJSON events until completion. --detach returns after submission. It prints graphResult when the graph ends and keeps waiting through the Active Memory postmortem and finalization; its exit code follows the final terminalResult. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
 <a id="__codelineno-46-6" name="__codelineno-46-6" href="#__codelineno-46-6"></a>
 <a id="__codelineno-46-7" name="__codelineno-46-7" href="#__codelineno-46-7"></a>Usage: zeroshot run [OPTIONS] --title &lt;TITLE&gt;
 <a id="__codelineno-46-8" name="__codelineno-46-8" href="#__codelineno-46-8"></a>
@@ -4797,7 +4797,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-48-10" name="__codelineno-48-10" href="#__codelineno-48-10"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-status"><code>zeroshot status</code><a class="headerlink" href="#zeroshot-status" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>Read a run's current status as JSON, including separate native delivery evidence when available
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
 <a id="__codelineno-49-2" name="__codelineno-49-2" href="#__codelineno-49-2"></a>
 <a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a>Usage: zeroshot status [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-49-4" name="__codelineno-49-4" href="#__codelineno-49-4"></a>
@@ -4813,7 +4813,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-49-14" name="__codelineno-49-14" href="#__codelineno-49-14"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-watch"><code>zeroshot watch</code><a class="headerlink" href="#zeroshot-watch" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>Follow durable status as NDJSON, including native delivery evidence independently of graph output
+<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
 <a id="__codelineno-50-2" name="__codelineno-50-2" href="#__codelineno-50-2"></a>
 <a id="__codelineno-50-3" name="__codelineno-50-3" href="#__codelineno-50-3"></a>Usage: zeroshot watch [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-50-4" name="__codelineno-50-4" href="#__codelineno-50-4"></a>
@@ -5023,8 +5023,8 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-59-15" name="__codelineno-59-15" href="#__codelineno-59-15"></a>  run                Submit a graph run locally or to a named target
 <a id="__codelineno-59-16" name="__codelineno-59-16" href="#__codelineno-59-16"></a>  update             Update this executable and managed agent skills to the newest canonical release
 <a id="__codelineno-59-17" name="__codelineno-59-17" href="#__codelineno-59-17"></a>  list               List runs as JSON
-<a id="__codelineno-59-18" name="__codelineno-59-18" href="#__codelineno-59-18"></a>  status             Read a run's current status as JSON, including separate native delivery evidence when available
-<a id="__codelineno-59-19" name="__codelineno-59-19" href="#__codelineno-59-19"></a>  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
+<a id="__codelineno-59-18" name="__codelineno-59-18" href="#__codelineno-59-18"></a>  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
+<a id="__codelineno-59-19" name="__codelineno-59-19" href="#__codelineno-59-19"></a>  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
 <a id="__codelineno-59-20" name="__codelineno-59-20" href="#__codelineno-59-20"></a>  logs               Follow a run's log stream as NDJSON
 <a id="__codelineno-59-21" name="__codelineno-59-21" href="#__codelineno-59-21"></a>  attach             Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-59-22" name="__codelineno-59-22" href="#__codelineno-59-22"></a>  force-stop         Force a run to stop and write the result as JSON

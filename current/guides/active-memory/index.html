@@ -2328,6 +2328,16 @@ do not qualify as lessons.</p>
 <p>These settings apply per run, so saved profiles can use different policies. Postmortem model usage
 counts toward the run total. An ordinary postmortem failure appears in the logs and does not change
 the main graph's result.</p>
+<p>While the postmortem runs, the run stays <code>running</code>. <code>status</code> and <code>list</code> carry the recorded graph
+outcome in <code>status.graphResult</code>; <code>watch</code> and foreground <code>run</code> print it immediately. A log line
+records that outcome and says the postmortem is running. The run finishes after postmortem,
+usage accounting and cleanup, and then only <code>terminalResult</code> remains. The foreground command
+waits until then and exits according to that final result.</p>
+<p>A force stop during the postmortem cancels and drains it while preserving the recorded graph
+result. Ordinary postmortem errors and controller restart after confirmed cleanup also preserve
+that result. A runtime or cleanup failure during finalization can prevent completion or produce
+a final <code>runtime_failed</code> or <code>runtime_lost</code> result, so <code>graphResult</code> is not a guarantee of the final
+run outcome. See <a href="../observe-and-control/#inventory-and-current-status">observing run results</a>.</p>
 <h2 id="indexing-and-retrieval">Indexing and retrieval<a class="headerlink" href="#indexing-and-retrieval" title="Permanent link">&para;</a></h2>
 <p>Repository lessons match file paths, folders, identifiers and keyword groups. Graph lessons belong
 to a particular compiled graph and node; changing the graph creates a new scope. Lessons do not
@@ -2412,7 +2422,7 @@ contracts.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-10">10 November 2026</time>
+    Last updated <time datetime="2026-11-12">12 November 2026</time>
   </span>
 
     
