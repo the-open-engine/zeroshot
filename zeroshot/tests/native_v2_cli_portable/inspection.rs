@@ -15,6 +15,7 @@ mod sqlite_crash;
 #[derive(Debug, PartialEq)]
 struct Entry {
     bytes: Option<Vec<u8>>,
+    len: Option<u64>,
     modified: SystemTime,
     permissions: Permissions,
 }
@@ -35,6 +36,7 @@ fn tree(path: &Path) -> BTreeMap<PathBuf, Entry> {
             } else {
                 None
             },
+            len: metadata.is_file().then_some(metadata.len()),
             modified: metadata.modified().unwrap(),
             permissions: metadata.permissions(),
         },
@@ -43,7 +45,8 @@ fn tree(path: &Path) -> BTreeMap<PathBuf, Entry> {
 }
 
 /// A live controller locks its lease for the whole length, and Windows refuses a read of a
-/// range that another process locked. Only that file's bytes may stay out of a snapshot.
+/// range that another process locked. Only that file's bytes may stay out of a snapshot; its
+/// length, modification time and permissions are still compared.
 fn contents(path: &Path) -> Option<Vec<u8>> {
     match std::fs::read(path) {
         Ok(bytes) => Some(bytes),
