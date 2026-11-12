@@ -1,10 +1,16 @@
 use super::*;
 use crate::native_v2_cli::CliSubscription;
+use crate::native_v2_portable_controller::availability::tests::ServedEndpoint;
 use crate::native_v2_runner::test_support;
 use crate::v2_run_ledger::{CreateRun, RunEvent, SafeLogLine, SafeLogStream, sqlite_crash};
-use openengine_cluster_protocol::{ControllerState, UnixTimestampMillis, WorkerOutcome};
+use openengine_cluster_protocol::{
+    ClusterStatus, ControllerState, EnumLabel, GetParams, GetResult, InitializeParams,
+    InitializeResult, ServerCapabilities, UnixTimestampMillis, WorkerOutcome,
+};
+use openengine_cluster_server::{BackendError, ClusterBackend, ConnectionContext};
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct Fixture {
     root: tempfile::TempDir,
@@ -431,4 +437,156 @@ async fn controls_preserve_readiness_when_loss_append_fails_and_retry() {
         drop(connection);
         assert_recovery_can_retry(&fixture, force, &ready).await;
     }
+}
+
+/// Stands in for a live controller. Without a `status`, its status read waits for storage.
+struct LiveController {
+    status: Option<RunStatusResult>,
+    stopped: RunStatusResult,
+    forced: AtomicBool,
+}
+
+impl LiveController {
+    fn new(status: Option<RunStatusResult>, recorded: &RunStatusResult) -> Arc<Self> {
+        Arc::new(Self {
+            status,
+            stopped: failed(recorded, "force_stopped"),
+            forced: AtomicBool::new(false),
+        })
+    }
+}
+
+#[async_trait]
+impl ClusterBackend for LiveController {
+    async fn initialize(
+        &self,
+        _context: &ConnectionContext,
+        _params: InitializeParams,
+    ) -> Result<InitializeResult, BackendError> {
+        Ok(InitializeResult::new(
+            ServerCapabilities::default(),
+            ClusterStatus::empty(),
+        ))
+    }
+
+    async fn get(
+        &self,
+        _context: &ConnectionContext,
+        _params: GetParams,
+    ) -> Result<GetResult, BackendError> {
+        Ok(GetResult::empty())
+    }
+
+    async fn run_status(
+        &self,
+        _context: &ConnectionContext,
+        _params: RunStatusParams,
+    ) -> Result<RunStatusResult, BackendError> {
+        match &self.status {
+            Some(status) => Ok(status.clone()),
+            None => std::future::pending().await,
+        }
+    }
+
+    async fn run_force(
+        &self,
+        _context: &ConnectionContext,
+        _params: RunForceParams,
+    ) -> Result<RunForceResult, BackendError> {
+        self.forced.store(true, Ordering::SeqCst);
+        let stopped = self.stopped.clone();
+        Ok(RunForceResult {
+            run_id: stopped.run_id,
+            title: stopped.title,
+            source: stopped.source,
+            size: stopped.size,
+            at_cursor: stopped.at_cursor,
+            status: stopped.status,
+            controller: None,
+            workspace_recovery: stopped.workspace_recovery,
+        })
+    }
+}
+
+fn failed(recorded: &RunStatusResult, reason: &str) -> RunStatusResult {
+    let mut status = recorded.clone();
+    status.status = RunStatus::Finished {
+        terminal_result: TerminalResult::Failed {
+            reason: EnumLabel::new(reason).unwrap(),
+            context: None,
+        },
+        metadata: Default::default(),
+    };
+    status
+}
+
+#[tokio::test]
+async fn force_reaches_a_live_controller_whose_status_read_waits_for_storage() {
+    let fixture = Fixture::new(false, false).await;
+    let params = RunStatusParams {
+        run_id: fixture.id.clone(),
+    };
+    let recorded = fixture
+        .backend
+        .read_recorded_status(params.clone())
+        .await
+        .unwrap();
+    let controller = LiveController::new(None, &recorded);
+    let _endpoint = ServedEndpoint::start(
+        &fixture.backend.paths(&fixture.id).unwrap(),
+        controller.clone(),
+    );
+    // Inspection cannot tell this controller from a stalled one and never calls it lost.
+    let status = fixture.backend.status_local(params).await.unwrap();
+    assert!(matches!(status.status, RunStatus::Running { .. }));
+    assert_eq!(status.controller.unwrap().state, ControllerState::Unknown);
+    // The stop request still reaches it: a live controller stops owned work before it waits
+    // for storage, so the request must not wait for a status reply first.
+    let forced = tokio::time::timeout(
+        Duration::from_secs(30),
+        fixture.backend.force_once(RunForceParams {
+            run_id: fixture.id.clone(),
+        }),
+    )
+    .await
+    .expect("the force request settles")
+    .expect("the force request reaches the live controller");
+    assert!(controller.forced.load(Ordering::SeqCst));
+    assert!(
+        matches!(forced.status, RunStatus::Finished { terminal_result: TerminalResult::Failed { reason, .. }, .. } if reason.as_str() == "force_stopped")
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_ledger_does_not_hide_a_responding_controller() {
+    let fixture = Fixture::new(false, false).await;
+    let params = RunStatusParams {
+        run_id: fixture.id.clone(),
+    };
+    let recorded = fixture
+        .backend
+        .read_recorded_status(params.clone())
+        .await
+        .unwrap();
+    let paths = fixture.backend.paths(&fixture.id).unwrap();
+    std::fs::write(paths.ledger(), b"not a database").unwrap();
+
+    // Without a controller that answers, the read error stands and nothing is written.
+    let before = tree(fixture.root.path());
+    assert!(fixture.backend.status_local(params.clone()).await.is_err());
+    assert!(fixture.backend.list_local().await.unwrap().runs.is_empty());
+    assert_eq!(before, tree(fixture.root.path()));
+
+    // A controller that could not persist its failure still reports it.
+    let unpersisted = failed(&recorded, "runtime_failed");
+    let _endpoint = ServedEndpoint::start(
+        &paths,
+        LiveController::new(Some(unpersisted.clone()), &recorded),
+    );
+    let status = fixture.backend.status_local(params).await.unwrap();
+    assert_eq!(status.status, unpersisted.status);
+    assert!(status.controller.is_none());
+    let listed = fixture.backend.list_local().await.unwrap().runs;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].status, unpersisted.status);
 }

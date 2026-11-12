@@ -62,6 +62,19 @@ pub(crate) async fn check_controller(
     })
 }
 
+/// Connects a control request to the endpoint named by `id`'s readiness record. No status reply
+/// is asked for first: a live controller stops owned work before it can read a busy ledger.
+pub(crate) async fn connect_controller(
+    paths: &PortableControllerPaths,
+    id: &RunId,
+) -> Option<Arc<PortableControllerTransport>> {
+    read_ready(paths).ok().filter(|ready| ready.run_id == *id)?;
+    tokio::time::timeout(PROBE_TIMEOUT, connect_transport(paths))
+        .await
+        .ok()?
+        .ok()
+}
+
 fn confirmed_absence(
     paths: &PortableControllerPaths,
     ready: &PortableControllerReady,
@@ -91,4 +104,4 @@ fn observed_at() -> UnixTimestampMillis {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

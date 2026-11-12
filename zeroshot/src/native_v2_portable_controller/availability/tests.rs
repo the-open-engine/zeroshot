@@ -1,7 +1,63 @@
 use super::*;
 use crate::execution::platform::{private_file, FileAccess};
+use openengine_cluster_server::ClusterBackend;
+use openengine_cluster_server::admission::CancellationSignal;
+use openengine_cluster_server::identity::{
+    BindingAttributes, ConnectionBinding, ConnectionIdentity, ConnectionIdentityConfig,
+    PrincipalId, StaticConnectionIdentityResolver, SystemConnectionTime, TenantId,
+};
+use openengine_cluster_server::stdio::{NdjsonIo, serve_ndjson_until_shutdown};
 use std::io::Write;
 use std::process::{Command, Stdio};
+
+/// A live controller as other modules' tests see it: the run's held lease and its endpoint,
+/// answered by `backend` in place of a ledger and a runtime.
+pub(crate) struct ServedEndpoint {
+    _lease: ControllerLease,
+    serving: tokio::task::JoinHandle<()>,
+}
+
+impl ServedEndpoint {
+    pub(crate) fn start<B: ClusterBackend>(
+        paths: &PortableControllerPaths,
+        backend: Arc<B>,
+    ) -> Self {
+        let lease = ControllerLease::acquire(paths.lease()).unwrap();
+        let listener = super::super::transport::Listener::bind(&paths.socket()).unwrap();
+        let serving = tokio::spawn(async move {
+            while let Ok(stream) = listener.accept().await {
+                let (reader, writer) = tokio::io::split(stream);
+                let identity = ConnectionIdentity::new(ConnectionIdentityConfig {
+                    principal: PrincipalId::new("local-controller"),
+                    tenant: TenantId::new("local-run"),
+                    issued_at_ms: None,
+                    expires_at_ms: u64::MAX,
+                    binding_attributes: BindingAttributes::default(),
+                });
+                tokio::spawn(serve_ndjson_until_shutdown(
+                    ConnectionBinding::new(
+                        backend.clone(),
+                        StaticConnectionIdentityResolver::new(identity),
+                        SystemConnectionTime,
+                        CancellationSignal::default(),
+                    ),
+                    NdjsonIo::new(reader, writer, tokio::io::sink()),
+                    std::future::pending(),
+                ));
+            }
+        });
+        Self {
+            _lease: lease,
+            serving,
+        }
+    }
+}
+
+impl Drop for ServedEndpoint {
+    fn drop(&mut self) {
+        self.serving.abort();
+    }
+}
 
 struct Fixture {
     _root: tempfile::TempDir,
@@ -155,4 +211,35 @@ async fn permission_failures_are_unknown_and_read_only_leases_are_probeable() {
         std::fs::Permissions::from_mode(0o600),
     )
     .unwrap();
+}
+
+#[tokio::test]
+async fn control_connection_needs_an_accepting_endpoint_but_no_status_reply() {
+    let fixture = Fixture::new();
+    let lease = ControllerLease::acquire(fixture.paths.lease()).unwrap();
+    fixture.ready(std::process::id(), &lease);
+    // Readiness without an endpoint that accepts connects nothing.
+    assert!(
+        connect_controller(&fixture.paths, &fixture.id)
+            .await
+            .is_none()
+    );
+    let listener = super::super::transport::Listener::bind(&fixture.paths.socket()).unwrap();
+    let silent = tokio::spawn(async move {
+        let _stream = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    // This endpoint never answers a status read, yet a control request can be sent to it.
+    assert!(
+        connect_controller(&fixture.paths, &fixture.id)
+            .await
+            .is_some()
+    );
+    assert!(
+        connect_controller(&fixture.paths, &RunId::new("another-run"))
+            .await
+            .is_none()
+    );
+    silent.abort();
+    let _ = silent.await;
 }

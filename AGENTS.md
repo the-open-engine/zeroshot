@@ -917,11 +917,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   process with its original released lease establishes lost. Availability is optional controller
   metadata with observedAt, never a durable status, terminal outcome or inferred death time.
   Inspection never binds a controller, claims recovery, repairs permissions or rewrites readiness.
+  When the recorded read fails, inspection still returns a responding controller's status and
+  follows its streams; without that answer the read error stands.
   Recorded reads exit 0; unavailable watch/logs/attach replay through their captured durable head
   and exit 1 naming resume and force-stop. Only those controls confirm original lease ownership
   and process absence before recording runtime_lost. Finished stream exit semantics stay unchanged.
   Control fast paths require a terminal recorded in the ledger; a controller's unpersisted
   runtime_failed projection does not bypass force cleanup or resume ownership checks.
+  A force request goes to any endpoint that accepts the connection for its readiness identity,
+  without a status reply first, so a controller whose ledger is busy still stops owned work. An
+  endpoint that accepts nothing is taken over only after confirmed loss.
   Loss recovery retains the original readiness evidence until reconciliation is durable, so
   failed or interrupted persistence cannot strand subsequent resume or force-stop attempts.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.

@@ -5,35 +5,29 @@ use crate::native_v2_portable_controller::availability::{ControllerAvailability,
 use crate::native_v2_cli::CliSubscriptionItem;
 use openengine_cluster_protocol::{RunStatus, SubscriptionCloseReason};
 
-struct Inspection {
-    observation: NativeV2Observability,
-    status: RunStatusResult,
-    transport: Option<Arc<PortableControllerTransport>>,
+enum Inspection {
+    /// The run's controller answered: its status is current and streams follow it.
+    Controller(Arc<PortableControllerTransport>, RunStatusResult),
+    /// Retained history alone: a finished run, or one whose controller does not answer.
+    Recorded(NativeV2Observability, RunStatusResult),
 }
 
 impl LocalCliBackend {
-    async fn read_recorded_run(&self, id: &RunId) -> Result<Inspection, NativeV2CliError> {
+    /// Applies the retained-history reader's directory boundary, including native reparse
+    /// checks. The returned handle keeps that directory open while its ledger is read.
+    fn recorded_storage(
+        &self,
+        id: &RunId,
+    ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
         let paths = self.existing_run_paths(id)?;
-        // Match the retained-history reader's directory boundary, including native reparse checks.
-        let _directory =
+        let directory =
             crate::execution::platform::open_directory(paths.storage()).map_err(local_io)?;
         if !require_existing_ledger(&paths.ledger())? {
             return Err(NativeV2CliError::RunNotFound {
                 run_id: id.as_str().to_owned(),
             });
         }
-        let ledger =
-            Arc::new(SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?);
-        let observation = NativeV2Observability::new(ledger);
-        let status = observation
-            .status(RunStatusParams { run_id: id.clone() })
-            .await
-            .map_err(local_error)?;
-        Ok(Inspection {
-            observation,
-            status,
-            transport: None,
-        })
+        Ok((paths, directory))
     }
 
     // Control fast paths require a durable terminal, not a live runtime-failure projection.
@@ -41,22 +35,29 @@ impl LocalCliBackend {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
-        Ok(self.read_recorded_run(&params.run_id).await?.status)
+        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        Ok(read_ledger(&paths, &params.run_id).await?.1)
     }
 
     async fn inspect_run(&self, id: &RunId) -> Result<Inspection, NativeV2CliError> {
-        let Inspection {
-            observation,
-            mut status,
-            ..
-        } = self.read_recorded_run(id).await?;
-        let paths = self.existing_run_paths(id)?;
-        let mut transport = None;
+        let (paths, _directory) = self.recorded_storage(id)?;
+        let (observation, mut status) = match read_ledger(&paths, id).await {
+            Ok(recorded) => recorded,
+            // A controller that still answers reports what its ledger cannot, such as a runtime
+            // failure it could not persist. Without such an answer the read error stands.
+            Err(error) => {
+                return match check_controller(&paths, id).await {
+                    ControllerAvailability::Responding(connection, current) => {
+                        Ok(Inspection::Controller(connection, *current))
+                    }
+                    _ => Err(error),
+                };
+            }
+        };
         if !matches!(status.status, RunStatus::Finished { .. }) {
             match check_controller(&paths, id).await {
                 ControllerAvailability::Responding(connection, current) => {
-                    status = *current;
-                    transport = Some(connection);
+                    return Ok(Inspection::Controller(connection, *current));
                 }
                 ControllerAvailability::Embedded(controller)
                 | ControllerAvailability::Unavailable(controller) => {
@@ -74,37 +75,31 @@ impl LocalCliBackend {
                 }
             }
         }
-        Ok(Inspection {
-            observation,
-            status,
-            transport,
-        })
+        Ok(Inspection::Recorded(observation, status))
     }
 
     pub(super) async fn inspect_status(
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
-        Ok(self.inspect_run(&params.run_id).await?.status)
+        Ok(match self.inspect_run(&params.run_id).await? {
+            Inspection::Controller(_, status) | Inspection::Recorded(_, status) => status,
+        })
     }
 
     pub(super) async fn inspect_watch(
         &self,
         params: RunWatchParams,
     ) -> Result<ChannelSubscription<CliRunWatchEventNotification>, NativeV2CliError> {
-        let inspected = self.inspect_run(&params.run_id).await?;
-        if let Some(transport) = inspected.transport {
-            return Ok(spawn_watch(transport, params));
-        }
-        let (_, mut replay) = inspected
-            .observation
-            .watch(params)
-            .await
-            .map_err(local_error)?;
+        let (observation, status) = match self.inspect_run(&params.run_id).await? {
+            Inspection::Controller(transport, _) => return Ok(spawn_watch(transport, params)),
+            Inspection::Recorded(observation, status) => (observation, status),
+        };
+        let (_, mut replay) = observation.watch(params).await.map_err(local_error)?;
         Ok(ChannelSubscription::recorded(move |sender| async move {
             let result = async {
                 while let Some(event) = replay
-                    .recv_recorded(&inspected.status.at_cursor)
+                    .recv_recorded(&status.at_cursor)
                     .await
                     .map_err(local_error)?
                 {
@@ -116,7 +111,7 @@ impl LocalCliBackend {
                         return Ok(());
                     }
                 }
-                finish_recorded(&sender, &inspected.status).await
+                finish_recorded(&sender, &status).await
             }
             .await;
             if let Err(error) = result {
@@ -129,19 +124,15 @@ impl LocalCliBackend {
         &self,
         params: RunLogsParams,
     ) -> Result<ChannelSubscription<RunLogEventNotification>, NativeV2CliError> {
-        let inspected = self.inspect_run(&params.run_id).await?;
-        if let Some(transport) = inspected.transport {
-            return Ok(spawn_logs(transport, params));
-        }
-        let (_, mut replay) = inspected
-            .observation
-            .logs(params)
-            .await
-            .map_err(local_error)?;
+        let (observation, status) = match self.inspect_run(&params.run_id).await? {
+            Inspection::Controller(transport, _) => return Ok(spawn_logs(transport, params)),
+            Inspection::Recorded(observation, status) => (observation, status),
+        };
+        let (_, mut replay) = observation.logs(params).await.map_err(local_error)?;
         Ok(ChannelSubscription::recorded(move |sender| async move {
             let result = async {
                 while let Some(event) = replay
-                    .recv_recorded(&inspected.status.at_cursor)
+                    .recv_recorded(&status.at_cursor)
                     .await
                     .map_err(local_error)?
                 {
@@ -153,7 +144,7 @@ impl LocalCliBackend {
                         return Ok(());
                     }
                 }
-                finish_recorded(&sender, &inspected.status).await
+                finish_recorded(&sender, &status).await
             }
             .await;
             if let Err(error) = result {
@@ -166,15 +157,14 @@ impl LocalCliBackend {
         &self,
         params: RunAttachParams,
     ) -> Result<ChannelSubscription<RunAttachEventNotification>, NativeV2CliError> {
-        let inspected = self.inspect_run(&params.run_id).await?;
-        if let Some(transport) = inspected.transport {
-            return Ok(spawn_attach(transport, params));
-        }
-        if matches!(inspected.status.status, RunStatus::Finished { .. }) {
+        let (observation, status) = match self.inspect_run(&params.run_id).await? {
+            Inspection::Controller(transport, _) => return Ok(spawn_attach(transport, params)),
+            Inspection::Recorded(observation, status) => (observation, status),
+        };
+        if matches!(status.status, RunStatus::Finished { .. }) {
             return Err(local_message("execution is not active"));
         }
-        let (_, mut replay) = inspected
-            .observation
+        let (_, mut replay) = observation
             .logs(RunLogsParams {
                 run_id: params.run_id.clone(),
                 from_cursor: None,
@@ -185,7 +175,7 @@ impl LocalCliBackend {
         Ok(ChannelSubscription::recorded(move |sender| async move {
             let result = async {
                 while let Some(log) = replay
-                    .recv_recorded(&inspected.status.at_cursor)
+                    .recv_recorded(&status.at_cursor)
                     .await
                     .map_err(local_error)?
                 {
@@ -208,7 +198,7 @@ impl LocalCliBackend {
                         return Ok(());
                     }
                 }
-                finish_recorded(&sender, &inspected.status).await
+                finish_recorded(&sender, &status).await
             }
             .await;
             if let Err(error) = result {
@@ -242,6 +232,20 @@ impl LocalCliBackend {
             id.as_str()
         )))
     }
+}
+
+/// Opens the retained ledger without a controller, a schema change or a write.
+async fn read_ledger(
+    paths: &PortableControllerPaths,
+    id: &RunId,
+) -> Result<(NativeV2Observability, RunStatusResult), NativeV2CliError> {
+    let ledger = Arc::new(SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?);
+    let observation = NativeV2Observability::new(ledger);
+    let status = observation
+        .status(RunStatusParams { run_id: id.clone() })
+        .await
+        .map_err(local_error)?;
+    Ok((observation, status))
 }
 
 async fn finish_recorded<E>(

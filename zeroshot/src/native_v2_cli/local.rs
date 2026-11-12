@@ -232,13 +232,19 @@ impl LocalCliBackend {
         run_id: &RunId,
     ) -> Result<Arc<PortableControllerTransport>, NativeV2CliError> {
         use crate::native_v2_portable_controller::availability::{
-            check_controller, ControllerAvailability,
+            ControllerAvailability, check_controller, connect_controller,
         };
         let paths = self.existing_run_paths(run_id)?;
         if read_ready(&paths).is_ok_and(|ready| ready.run_id != *run_id) {
             return Err(local_message(
                 "controller readiness has a different run identity",
             ));
+        }
+        // A live controller stops owned work before it waits for storage, so a control request
+        // needs an endpoint that accepts it, never a status reply first. An endpoint that
+        // accepts nothing is taken over only after its loss is confirmed below.
+        if let Some(transport) = connect_controller(&paths, run_id).await {
+            return Ok(transport);
         }
         match check_controller(&paths, run_id).await {
             ControllerAvailability::Responding(transport, _) => return Ok(transport),
