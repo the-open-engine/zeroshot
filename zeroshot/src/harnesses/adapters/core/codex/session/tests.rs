@@ -64,16 +64,19 @@ async fn thread_ids_reject_only_missing_empty_nul_or_conflicting_values() {
 }
 
 #[tokio::test]
-async fn cumulative_usage_is_normalized_before_commit() {
+async fn cumulative_usage_excludes_both_cache_buckets_after_the_resume_delta() {
     let session = CodexSession::new();
     let first = usage(10, 4, Some(3), Some(2));
-    assert_eq!(session.usage_delta(Some(first), false).await, Some(first));
+    assert_eq!(
+        session.usage_delta(Some(first), false).await,
+        Some(usage(5, 4, Some(3), Some(2)))
+    );
     session.commit_usage(Some(first), false).await;
 
     let second = usage(16, 9, Some(5), Some(7));
     assert_eq!(
         session.usage_delta(Some(second), true).await,
-        Some(usage(6, 5, Some(2), Some(5)))
+        Some(usage(0, 5, Some(2), Some(5)))
     );
     assert_eq!(session.usage_delta(None, true).await, None);
 }
@@ -85,13 +88,21 @@ async fn resets_and_fresh_turns_start_new_usage_generations() {
         .commit_usage(Some(usage(10, 4, Some(3), Some(2))), false)
         .await;
 
-    for (resumed, observed) in [
-        (true, usage(2, 1, Some(1), Some(1))),
-        (false, usage(16, 9, Some(5), Some(7))),
+    for (resumed, observed, expected) in [
+        (
+            true,
+            usage(2, 1, Some(1), Some(1)),
+            usage(0, 1, Some(1), Some(1)),
+        ),
+        (
+            false,
+            usage(16, 9, Some(5), Some(7)),
+            usage(4, 9, Some(5), Some(7)),
+        ),
     ] {
         assert_eq!(
             session.usage_delta(Some(observed), resumed).await,
-            Some(observed)
+            Some(expected)
         );
     }
 }
@@ -108,12 +119,52 @@ async fn missing_usage_preserves_only_a_resumed_threads_baseline() {
 
         let observed = usage(20, 8, Some(7), Some(6));
         let expected = if resumed {
-            usage(7, 3, Some(3), Some(4))
+            usage(0, 3, Some(3), Some(4))
         } else {
-            observed
+            usage(7, 8, Some(7), Some(6))
         };
         assert_eq!(
             session.usage_delta(Some(observed), true).await,
+            Some(expected)
+        );
+    }
+}
+
+#[tokio::test]
+async fn resumed_usage_keeps_native_baselines_when_uncached_totals_decrease() {
+    let session = CodexSession::new();
+    let first = usage(100, 4, Some(10), Some(20));
+    assert_eq!(
+        session.usage_delta(Some(first), false).await,
+        Some(usage(70, 4, Some(10), Some(20)))
+    );
+    session.commit_usage(Some(first), false).await;
+
+    // All native counters increase, but cumulative uncached input falls from 70 to 60.
+    let second = usage(130, 9, Some(30), Some(40));
+    assert_eq!(
+        session.usage_delta(Some(second), true).await,
+        Some(usage(0, 5, Some(20), Some(20)))
+    );
+    session.commit_usage(Some(second), true).await;
+    assert_eq!(
+        session
+            .usage_delta(Some(usage(200, 12, Some(40), Some(50))), true)
+            .await,
+        Some(usage(50, 3, Some(10), Some(10)))
+    );
+}
+
+#[tokio::test]
+async fn normalization_preserves_unknown_cache_counters_and_clamps_input() {
+    for (observed, expected) in [
+        (usage(10, 4, None, None), usage(10, 4, None, None)),
+        (usage(10, 4, Some(3), None), usage(7, 4, Some(3), None)),
+        (usage(10, 4, None, Some(2)), usage(8, 4, None, Some(2))),
+        (usage(2, 4, Some(3), Some(5)), usage(0, 4, Some(3), Some(5))),
+    ] {
+        assert_eq!(
+            CodexSession::new().usage_delta(Some(observed), false).await,
             Some(expected)
         );
     }

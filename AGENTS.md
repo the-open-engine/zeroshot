@@ -162,6 +162,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
+- Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`
+  while running or stopping, including postmortem/finalization. Finished status carries only
+  `terminalResult`. Graph-result logging and its watch event publish with `PrimaryGraphCompleted`;
+  terminalization never repeats that graph-result log. Foreground follow still waits for Finished.
 - Initial input remains caller-owned and is validated unchanged. A root group may add required
   state fields only when their payload types have deterministic implicit empty values; verification
   proves this and reduction materializes missing null, string, array, and recursively empty record values.
@@ -492,8 +496,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   staged candidate tree without recommitting when no merge is pending. Pending merges retain the
   existing reconciliation path; different local work still requires review. Review
   discovery uses the source repository/run branch before target validation, refusing retargeted or
-  ambiguous reviews. GitLab rechecks MR/ref lag twice locally, then reports persistent disagreement
-  as a terminal identity error.
+  ambiguous reviews. GitLab rechecks MR/ref lag twice locally during observation and post-push
+  metadata synchronization, then reports persistent disagreement as a terminal identity error.
 - `source_code_provider` owns effect-free source and delivery contracts and one provider registry.
   Maintained implementations live in `source_code/adapters/core`; contributed implementations
   live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,
@@ -507,7 +511,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. GitLab's complete HTTP 400 missing-source-branch
+  merges; required merge trains remain pending. A merged fast-forward MR without explicit merge
+  or squash SHAs confirms its bound reviewed head only when the validated target equals that head
+  or their captured-SHA merge base proves the head is a target ancestor. Other merge methods and
+  invalid explicit SHAs never fall back to the candidate. GitLab's complete HTTP 400 missing-source-branch
   creation validation retries only within the existing review-sync batch, rechecking the published
   candidate before each POST; uncertain creation responses retain their at-most-once fence.
   `need_rebase` merges the captured target into a
@@ -636,6 +643,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retry policy, event parsing, and final-answer semantics. Shared provider text publication batches deltas, redacts credentials
   across event/stream boundaries, and emits bounded UTF-8 records. `HarnessProcessEnvironment`
   owns the minimal nonsecret environment for Claude and Pi in local and hosted composition.
+  `inputTokens` means uncached input; input, output, cache reads and cache writes are disjoint.
+  Adapters normalize native counters before publication: Codex subtracts cache reads and writes
+  after its resumed-session delta while retaining native baselines; Copilot subtracts both per call.
+  Recorded usage remains unchanged and omitted cache counters remain unknown.
   `TokenUsageDelta::checked_add` owns bounded provider-neutral usage arithmetic. Overflow or
   malformed claimed Pi usage makes the turn total incomplete permanently rather than publishing
   an earlier partial total. Native

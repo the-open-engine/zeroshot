@@ -25,7 +25,9 @@ async fn status_lists_every_parallel_execution_with_opaque_selectors() {
     assert_eq!(&status.source, &admitted.source);
     assert_eq!(Some(&status.size), admitted.runtime.size());
     let active_executions = match status.status {
-        RunStatus::Running { active_executions } => Some(active_executions),
+        RunStatus::Running {
+            active_executions, ..
+        } => Some(active_executions),
         _ => None,
     };
     let active_executions = active_executions.assert_value_with("run must be running");

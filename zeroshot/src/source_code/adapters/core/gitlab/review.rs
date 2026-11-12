@@ -76,7 +76,8 @@ pub(super) async fn observe(
                 head_branch: request.head_branch.to_owned(),
                 head_revision: value.sha.clone(),
             };
-            let mut observed = observation(&value, &receipt, &project)?;
+            let mut observed =
+                observation(authority, &value, (&receipt, &project), credential).await?;
             super::ci::include_failure_details(
                 authority,
                 super::ci::PipelineContext {
@@ -302,7 +303,7 @@ pub(super) async fn open_or_update(
     let request = normalized_request(request)?;
     let request = &request;
     let description = generated_description(request);
-    let found = observed_review(authority, review_read(request), credential).await?;
+    let (found, _) = consistent_review_ref(authority, review_read(request), credential).await?;
     if let Some(found) = found {
         return update(authority, (request, &found, &description), credential).await;
     }
@@ -543,7 +544,7 @@ pub(super) async fn inspect(
 ) -> Result<SourceReviewObservation, SourceDeliveryError> {
     let project = authority.project(&receipt.repository, credential).await?;
     let value = authority.merge_request(receipt, credential).await?;
-    let mut observed = observation(&value, receipt, &project)?;
+    let mut observed = observation(authority, &value, (receipt, &project), credential).await?;
     super::ci::include_failure_details(
         authority,
         super::ci::PipelineContext {
@@ -557,27 +558,70 @@ pub(super) async fn inspect(
     Ok(observed)
 }
 
-fn integrated_revision(value: &MergeRequest) -> Result<String, SourceDeliveryError> {
+async fn integrated_revision(
+    authority: &GitLabDeliveryAuthority,
+    value: &MergeRequest,
+    receipt: &SourceReviewReceipt,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<String, SourceDeliveryError> {
     let revision = value
         .merge_commit_sha
         .as_ref()
         .or(value.squash_commit_sha.as_ref());
-    revision
-        .filter(|revision| valid_git_revision(revision))
-        .cloned()
-        .ok_or_else(|| {
-            SourceDeliveryError::api(None, "GitLab merged revision is not visible").temporary()
-        })
+    if let Some(revision) = revision.filter(|revision| valid_git_revision(revision)) {
+        return Ok(revision.clone());
+    }
+    // Fast-forward merges need not create either kind of commit. A missing SHA alone does not
+    // prove completion: require the bound merged MR's head to be on the captured target history.
+    if revision.is_none()
+        && authority
+            .project(&receipt.repository, credential)
+            .await?
+            .merge_method
+            == "ff"
+        && target_contains_review(authority, receipt, credential).await?
+    {
+        return Ok(receipt.head_revision.clone());
+    }
+    Err(SourceDeliveryError::api(None, "GitLab merged revision is not visible").temporary())
 }
 
-fn observation(
-    value: &MergeRequest,
+async fn target_contains_review(
+    authority: &GitLabDeliveryAuthority,
     receipt: &SourceReviewReceipt,
-    project: &Project,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<bool, SourceDeliveryError> {
+    let Some(target) = authority
+        .branch_revision(&receipt.repository, &receipt.target_branch, credential)
+        .await?
+    else {
+        return Ok(false);
+    };
+    if target == receipt.head_revision {
+        return Ok(true);
+    }
+    let base: wire::Commit = authority
+        .api
+        .json(
+            ApiRequest::get(&["projects", &receipt.repository, "repository", "merge_base"])
+                .query("refs[]", &receipt.head_revision)
+                .query("refs[]", target),
+            credential,
+        )
+        .await?;
+    Ok(base.id == receipt.head_revision)
+}
+
+async fn observation(
+    authority: &GitLabDeliveryAuthority,
+    value: &MergeRequest,
+    context: (&SourceReviewReceipt, &Project),
+    credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewObservation, SourceDeliveryError> {
+    let (receipt, project) = context;
     let state = match value.state.as_str() {
         "merged" => SourceReviewState::Merged {
-            merge_revision: integrated_revision(value)?,
+            merge_revision: integrated_revision(authority, value, receipt, credential).await?,
         },
         "closed" => SourceReviewState::Closed,
         "opened"
@@ -675,7 +719,7 @@ pub(super) async fn merge(
     let project = authority.project(&receipt.repository, credential).await?;
     let current = authority.merge_request(receipt, credential).await?;
     if current.state == "merged" {
-        integrated_revision(&current)?;
+        integrated_revision(authority, &current, receipt, credential).await?;
         return Ok(SourceMergeRequestOutcome::Accepted);
     }
     if matches!(
@@ -745,7 +789,7 @@ pub(super) async fn merge(
         result => result,
     };
     let rejection = result.as_ref().err().cloned();
-    let settled = settle_merge(authority, (receipt, &project, &key), result, credential);
+    let settled = settle_merge(authority, (receipt, &project, &key), result, credential).await;
     if rejection
         .as_ref()
         .is_some_and(|error| matches!(error.api_status(), Some(405 | 409 | 422)))
@@ -763,7 +807,7 @@ pub(super) async fn merge(
     settled
 }
 
-fn settle_merge(
+async fn settle_merge(
     authority: &GitLabDeliveryAuthority,
     context: (&SourceReviewReceipt, &Project, &str),
     result: Result<MergeRequest, SourceDeliveryError>,
@@ -774,7 +818,7 @@ fn settle_merge(
         Ok(value) => {
             value.require_review(receipt, project.id, credential)?;
             if value.state == "merged" {
-                integrated_revision(&value)?;
+                integrated_revision(authority, &value, receipt, credential).await?;
                 authority
                     .effects
                     .lock()
@@ -806,7 +850,7 @@ pub(super) async fn withdraw(
     let value = authority.merge_request(receipt, credential).await?;
     if value.state == "merged" {
         return Ok(SourceMergeWithdrawal::Merged {
-            merge_revision: integrated_revision(&value)?,
+            merge_revision: integrated_revision(authority, &value, receipt, credential).await?,
         });
     }
     let key = effect_key(&receipt.repository, &receipt.review_id);

@@ -103,6 +103,52 @@ def local_status() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("phase", ["running", "stopping"])
+@pytest.mark.parametrize("succeeded", [False, True])
+def test_graph_result_is_visible_without_becoming_a_terminal_result(
+    phase: str, succeeded: bool
+) -> None:
+    value = local_status()
+    graph = (
+        {"status": "succeeded", "output": {"answer": 42}}
+        if succeeded
+        else {"status": "failed", "reason": "worker_failed", "context": {"incomplete": True}}
+    )
+    value["status"] = {"phase": phase, "activeExecutions": [], "graphResult": graph}
+    status = _status(value)
+    assert status.phase == phase
+    assert status.result is None
+    assert status.graph_result is not None
+    assert status.graph_result.run_id == "folder-run"
+    assert status.graph_result.succeeded == succeeded
+    assert status.graph_result.output == ({"answer": 42} if succeeded else None)
+    assert status.graph_result.failure == (None if succeeded else "worker_failed")
+    if not succeeded:
+        assert status.graph_result.context is not None
+        assert status.graph_result.context.incomplete
+    assert _summary(status).graph_result == status.graph_result
+
+
+@pytest.mark.parametrize("phase", ["admitted", "running", "stopping", "finished"])
+def test_absent_graph_result_stays_absent(phase: str) -> None:
+    value = local_status()
+    value["status"] = (
+        {"phase": phase, "terminalResult": {"status": "succeeded", "output": None}}
+        if phase == "finished"
+        else {"phase": phase}
+    )
+    assert _status(value).graph_result is None
+    assert _summary(_status(value)).graph_result is None
+
+
+@pytest.mark.parametrize("graph", [False, {"status": "failed"}, {"status": "succeeded"}])
+def test_malformed_graph_result_is_rejected(graph: object) -> None:
+    value = local_status()
+    value["status"] = {"phase": "running", "activeExecutions": [], "graphResult": graph}
+    with pytest.raises(ProtocolError):
+        _status(value)
+
+
 @pytest.mark.parametrize("explicit_null", [False, True])
 def test_local_status_and_inventory_preserve_source_absence(explicit_null: bool) -> None:
     value = local_status()

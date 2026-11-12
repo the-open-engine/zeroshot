@@ -250,13 +250,18 @@ the changed candidate returns through repair and review before it is published a
 requires a rebase although the candidate already contains that target, delivery stops with a refusal
 naming the merge method and target revision.
 
+GitLab can omit both merge and squash commit SHAs after a fast-forward merge. Delivery confirms
+completion by proving that the exact reviewed head is on the target branch, including when the
+target has advanced again. Missing evidence keeps the merge unconfirmed.
+
 Resuming accepts intentional commits pushed to the run branch. If the complete restored candidate
 already matches its published tree and no merge is pending, delivery reuses that commit without another
 work round. Pending merges retain their normal reconciliation path. Different
 local content is preserved and returns to the review loop. Discovery checks every review from the run
 branch across bounded complete pages before validating its target; retargeted or ambiguous reviews
 are refused rather than duplicated.
-GitLab briefly rechecks a lagging merge-request head against the branch ref. Persistent disagreement
+GitLab briefly rechecks a lagging merge-request head against the branch ref, including after
+publishing an integration and before updating MR metadata. Persistent disagreement
 stops with both revisions in the diagnostic instead of polling indefinitely.
 
 If a worker rewrites history after publication, delivery refuses further publication. For a local

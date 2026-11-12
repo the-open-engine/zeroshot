@@ -382,9 +382,12 @@ mod subprocess {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn cancellation_reaps_the_helper_and_its_descendant() {
-        let (root, validator) = fixture(
-            "/bin/cat >/dev/null\n/bin/sleep 60 &\nprintf '%s' \"$!\" > \"$0.child\"\nwait",
-        );
+        // File existence signals readiness only after the complete PID has been published.
+        let (root, validator) = fixture(concat!(
+            "/bin/cat >/dev/null\n/bin/sleep 60 &\n",
+            "printf '%s' \"$!\" > \"$0.child.tmp\"\n",
+            "/bin/mv \"$0.child.tmp\" \"$0.child\"\nwait",
+        ));
         let (signal, cancel) = cancellation();
         let running = tokio::spawn(async move { validator.validate(request(), cancel).await });
         let marker = root.path().join("validator.sh.child");

@@ -14,6 +14,7 @@ enum Mode {
 struct Postmortem {
     mode: Mode,
     started: tokio::sync::Notify,
+    release: tokio::sync::Notify,
     calls: AtomicUsize,
     drained: AtomicBool,
 }
@@ -23,6 +24,7 @@ impl Postmortem {
         Arc::new(Self {
             mode,
             started: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
             calls: AtomicUsize::new(0),
             drained: AtomicBool::new(false),
         })
@@ -57,14 +59,19 @@ impl RunPostmortem for Postmortem {
             Mode::Unconfirmed => Err(PostmortemError::CleanupUnconfirmed),
             Mode::Panics => panic!("test postmortem panic"),
             Mode::Wait => {
-                while !*cancellation.borrow_and_update() {
-                    if cancellation.changed().await.is_err() {
-                        break;
-                    }
+                tokio::select! {
+                    () = self.release.notified() => {},
+                    () = async {
+                        while !*cancellation.borrow_and_update() {
+                            if cancellation.changed().await.is_err() {
+                                break;
+                            }
+                        }
+                    } => {},
                 }
                 self.drained.store(true, Ordering::Release);
                 Ok(PostmortemReport {
-                    cancelled: true,
+                    cancelled: *cancellation.borrow(),
                     ..Default::default()
                 })
             }
@@ -73,13 +80,28 @@ impl RunPostmortem for Postmortem {
 }
 
 async fn with_postmortem(postmortem: Arc<Postmortem>) -> Harness {
-    let mut harness = harness(
-        resolution::worker_graph(None),
-        Value::Null,
-        FakeDriver::default(),
-    )
-    .await;
-    harness.supervisor = harness.supervisor.with_postmortem(Some(postmortem));
+    with_graph_postmortem(Some(postmortem), false).await
+}
+
+async fn with_graph_postmortem(postmortem: Option<Arc<Postmortem>>, failed: bool) -> Harness {
+    let graph = if failed {
+        graph(
+            sequence(
+                vec![
+                    step("worker", 1_000),
+                    json!({"kind":"fail","name":"failed","reason":"work_rejected"}),
+                ],
+                null_type(),
+            ),
+            null_type(),
+        )
+    } else {
+        resolution::worker_graph(None)
+    };
+    let mut harness = harness(graph, Value::Null, FakeDriver::default()).await;
+    harness.supervisor = harness
+        .supervisor
+        .with_postmortem(postmortem.map(|value| value as Arc<dyn RunPostmortem>));
     harness
 }
 
@@ -243,7 +265,7 @@ async fn postmortem_skips_rejected_source_credentials_or_model_but_runs_after_cr
         )
         .await;
         harness.supervisor = harness.supervisor.with_postmortem(Some(postmortem.clone()));
-        harness.supervisor.drive().await.assert_value();
+        let result = harness.supervisor.drive().await.assert_value();
         assert_eq!(
             postmortem.calls.load(Ordering::SeqCst),
             usize::from(skip_reason.is_none())
@@ -258,6 +280,14 @@ async fn postmortem_skips_rejected_source_credentials_or_model_but_runs_after_cr
                 .auxiliary_pending
         );
         if let Some(reason) = skip_reason {
+            assert!(matches!(
+                observed_status(&harness).await,
+                openengine_cluster_protocol::RunStatus::Finished { terminal_result, .. }
+                    if terminal_result == result
+            ));
+            let result_logs = graph_result_logs(&harness).await;
+            assert_eq!(result_logs.len(), 1);
+            assert!(!result_logs[0].contains("postmortem is running"));
             let mut logs = failure_logs::public_subscription(&harness).await;
             let records = logs.read_available().await.assert_value();
             assert!(
@@ -396,5 +426,153 @@ async fn restored_source_rejections_skip_postmortem_after_an_authored_refusal_br
         } else {
             assert!(skipped.is_none());
         }
+    }
+}
+
+async fn observed_status(harness: &Harness) -> openengine_cluster_protocol::RunStatus {
+    crate::native_v2_observability::NativeV2Observability::new(harness.ledger.clone())
+        .status(openengine_cluster_protocol::RunStatusParams {
+            run_id: harness.supervisor.run_id.clone(),
+        })
+        .await
+        .assert_value()
+        .status
+}
+
+async fn graph_result_logs(harness: &Harness) -> Vec<String> {
+    harness
+        .ledger
+        .snapshot_and_tail(&harness.supervisor.run_id, None)
+        .await
+        .assert_value()
+        .events
+        .into_iter()
+        .filter_map(|stored| match stored.event {
+            RunEvent::SafeLog { line, .. }
+                if line.as_str().starts_with("Run failed:")
+                    || line.as_str().starts_with("Run succeeded") =>
+            {
+                Some(line.as_str().to_owned())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn graph_result_is_visible_and_logged_while_postmortem_waits_then_only_terminal_remains() {
+    use openengine_cluster_protocol::{RunStatus, RunWatchParams};
+    for failed in [false, true] {
+        let postmortem = Postmortem::new(Mode::Wait);
+        let harness = with_graph_postmortem(Some(postmortem.clone()), failed).await;
+        let service =
+            crate::native_v2_observability::NativeV2Observability::new(harness.ledger.clone());
+        let (_, mut watch) = service
+            .watch(RunWatchParams {
+                run_id: harness.supervisor.run_id.clone(),
+                from_cursor: None,
+            })
+            .await
+            .assert_value();
+        assert!(matches!(
+            observed_status(&harness).await,
+            RunStatus::Admitted {}
+        ));
+        let drive = harness.spawn_drive();
+        tokio::time::timeout(Duration::from_secs(5), postmortem.started.notified())
+            .await
+            .assert_value();
+        assert!(!drive.is_finished());
+        let result = stored_run(&harness.ledger)
+            .await
+            .snapshot
+            .primary_graph
+            .assert_value()
+            .result;
+        assert_eq!(matches!(result, TerminalResult::Failed { .. }), failed);
+        let pending = RunStatus::Running {
+            active_executions: vec![],
+            graph_result: Some(result.clone()),
+        };
+        assert_eq!(observed_status(&harness).await, pending);
+        let events = watch.read_available().await.assert_value();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.status == pending)
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            event.status,
+            RunStatus::Running {
+                graph_result: None,
+                ..
+            }
+        )));
+        let logs = graph_result_logs(&harness).await;
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].contains("Active Memory postmortem is running"));
+        postmortem.release.notify_one();
+        assert_eq!(drive.await.assert_value().assert_value(), result);
+        assert!(
+            matches!(observed_status(&harness).await, RunStatus::Finished { terminal_result, .. } if terminal_result == result)
+        );
+        assert_eq!(graph_result_logs(&harness).await, logs);
+        assert!(matches!(
+            watch
+                .read_available()
+                .await
+                .assert_value()
+                .last()
+                .assert_value()
+                .status,
+            RunStatus::Finished { .. }
+        ));
+    }
+}
+
+#[tokio::test]
+async fn force_stop_during_postmortem_keeps_success_and_failure_graph_results_until_finished() {
+    use openengine_cluster_protocol::RunStatus;
+    for failed in [false, true] {
+        let postmortem = Postmortem::new(Mode::Wait);
+        let harness = with_graph_postmortem(Some(postmortem.clone()), failed).await;
+        let drive = harness.spawn_drive();
+        tokio::time::timeout(Duration::from_secs(5), postmortem.started.notified())
+            .await
+            .assert_value();
+        let result = stored_run(&harness.ledger)
+            .await
+            .snapshot
+            .primary_graph
+            .assert_value()
+            .result;
+        let logs = graph_result_logs(&harness).await;
+        harness.supervisor.force_stop().await.assert_value();
+        assert_eq!(drive.await.assert_value().assert_value(), result);
+        assert!(postmortem.drained.load(Ordering::Acquire));
+        assert!(
+            matches!(observed_status(&harness).await, RunStatus::Finished { terminal_result, .. } if terminal_result == result)
+        );
+        assert_eq!(graph_result_logs(&harness).await, logs);
+    }
+}
+
+#[tokio::test]
+async fn graphs_without_postmortem_finish_normally_and_log_the_result_once() {
+    for failed in [false, true] {
+        let harness = with_graph_postmortem(None, failed).await;
+        let result = harness.supervisor.drive().await.assert_value();
+        assert_eq!(matches!(result, TerminalResult::Failed { .. }), failed);
+        let logs = graph_result_logs(&harness).await;
+        assert_eq!(logs.len(), 1);
+        assert!(!logs[0].contains("postmortem"));
+        let value = serde_json::to_value(observed_status(&harness).await).assert_value();
+        assert!(value.get("graphResult").is_none());
+        assert_eq!(
+            value["terminalResult"],
+            serde_json::to_value(result).assert_value()
+        );
     }
 }

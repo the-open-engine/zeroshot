@@ -250,6 +250,8 @@ fn token(value: &Value) -> Option<TokenCount> {
     TokenCount::new(value.as_u64()?).ok()
 }
 
+// OpenCode's SessionUsage.tokens maps nonCachedInputTokens to input and keeps cache buckets
+// separate. https://github.com/anomalyco/opencode/blob/101776024cc69bafb3f9dc90027ab4d1eab40a2a/packages/core/src/session/usage.ts
 fn usage(value: &Value) -> Option<TokenUsageDelta> {
     Some(TokenUsageDelta {
         input_tokens: token(value.get("input")?)?,

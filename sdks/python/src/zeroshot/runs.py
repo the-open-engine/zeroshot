@@ -148,6 +148,7 @@ class RunStatus:
         phase: admitted, running, stopping, or finished.
         active_executions: Every currently active graph execution.
         result: Terminal result only when phase is finished.
+        graph_result: Recorded graph result while running or stopping, before finalization ends.
     """
 
     run_id: str
@@ -158,6 +159,7 @@ class RunStatus:
     phase: Literal["admitted", "running", "stopping", "finished"]
     active_executions: tuple[ActiveExecution, ...] = ()
     result: RunResult | None = None
+    graph_result: RunResult | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -172,6 +174,7 @@ class RunSummary:
         cursor: Opaque durable status cursor.
         phase: admitted, running, stopping, or finished.
         force_stop_requested: Whether the current projection reflects a force-stop request.
+        graph_result: Recorded graph result while running or stopping, before finalization ends.
     """
 
     run_id: str
@@ -181,6 +184,7 @@ class RunSummary:
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
     force_stop_requested: bool
+    graph_result: RunResult | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

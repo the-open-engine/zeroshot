@@ -11,13 +11,15 @@ fn oecp_status_conversion_never_synthesizes_queued() {
         json!({"phase":"admitted"}),
         json!({"phase":"running","activeExecutions":[]}),
         json!({"phase":"stopping","activeExecutions":[]}),
+        json!({"phase":"running","activeExecutions":[],"graphResult":{"status":"succeeded","output":42}}),
+        json!({"phase":"stopping","activeExecutions":[],"graphResult":{"status":"failed","reason":"worker_failed"}}),
         json!({
             "phase":"finished",
             "terminalResult":{"status":"succeeded","output":null},
             "metadata":{}
         }),
     ] {
-        let oecp = serde_json::from_value::<RunStatus>(value);
+        let oecp = serde_json::from_value::<RunStatus>(value.clone());
         assert!(oecp.is_ok());
         let Ok(oecp) = oecp else {
             return;
@@ -25,6 +27,7 @@ fn oecp_status_conversion_never_synthesizes_queued() {
         let hosted = HostedRunStatus::target(oecp);
         assert!(hosted.as_target().is_some());
         assert!(!matches!(hosted, HostedRunStatus::Queued(_)));
+        assert_eq!(serde_json::to_value(hosted).expect("hosted status"), value);
     }
 }
 

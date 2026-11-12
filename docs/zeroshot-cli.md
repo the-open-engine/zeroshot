@@ -26,8 +26,8 @@ Commands:
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
-  status             Read a run's current status as JSON, including separate native delivery evidence when available
-  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
+  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
+  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
   logs               Follow a run's log stream as NDJSON
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
@@ -1101,7 +1101,7 @@ Submit a graph run locally or to a named target.
 
 Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named targets require a committed Git source. Local workspaces must not overlap Zeroshot state. Local delivery commits on the checked-out branch and pushes that same branch, including existing unpushed commits. PR/merge targets a different upstream branch, or the remote's default branch; starting on that target is refused. Start from a feature branch or use --worktree. Explicit --push can publish any branch, including main, without force-pushing. --worktree creates a retained worktree and managed run branch from local HEAD by default. --worktree-base remote fetches the invoking branch's upstream and requires one to be set. Worktree PR/merge targets the invoking branch's upstream, or its name without an upstream. Preparation verifies the target before agents start. Worktrees contain committed files only; dependencies and untracked resources are not copied or installed. Resume reuses the same workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
 
-A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
+A foreground run follows NDJSON events until completion. --detach returns after submission. It prints graphResult when the graph ends and keeps waiting through the Active Memory postmortem and finalization; its exit code follows the final terminalResult. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
 
 Usage: zeroshot run [OPTIONS] --title <TITLE>
 
@@ -1343,7 +1343,7 @@ Options:
 ### `zeroshot status`
 
 ```text
-Read a run's current status as JSON, including separate native delivery evidence when available
+Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
 
 Usage: zeroshot status [OPTIONS] <RUN_ID>
 
@@ -1362,7 +1362,7 @@ Options:
 ### `zeroshot watch`
 
 ```text
-Follow durable status as NDJSON, including native delivery evidence independently of graph output
+Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
 
 Usage: zeroshot watch [OPTIONS] <RUN_ID>
 
@@ -1599,8 +1599,8 @@ Commands:
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
-  status             Read a run's current status as JSON, including separate native delivery evidence when available
-  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
+  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
+  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
   logs               Follow a run's log stream as NDJSON
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON

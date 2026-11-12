@@ -43,10 +43,36 @@ fn active(execution_ref: &str, node: &str) -> ActiveExecution {
 
 fn running_status() -> RunStatus {
     RunStatus::Running {
+        graph_result: None,
         active_executions: vec![
             active("opaque-verifier-a", "verify-a"),
             active("opaque-verifier-b", "verify-b"),
         ],
+    }
+}
+
+#[test]
+fn graph_result_round_trips_only_in_unfinished_started_phases() {
+    for phase in ["running", "stopping"] {
+        for result in [
+            json!({"status":"succeeded","output":{"answer":42}}),
+            json!({"status":"failed","reason":"worker_failed","context":{"recorded":[],"incomplete":true}}),
+        ] {
+            let value = json!({"phase":phase,"activeExecutions":[],"graphResult":result});
+            let status: RunStatus = serde_json::from_value(value.clone()).assert_value();
+            assert_eq!(serde_json::to_value(status).assert_value(), value);
+        }
+        let legacy = json!({"phase":phase,"activeExecutions":[]});
+        let status: RunStatus = serde_json::from_value(legacy.clone()).assert_value();
+        assert_eq!(serde_json::to_value(status).assert_value(), legacy);
+    }
+    for value in [
+        json!({"phase":"admitted","graphResult":{"status":"succeeded","output":null}}),
+        json!({"phase":"finished","terminalResult":{"status":"succeeded","output":null},
+            "graphResult":{"status":"succeeded","output":null}}),
+        json!({"phase":"running","activeExecutions":[],"graphResult":{"status":"failed"}}),
+    ] {
+        assert!(serde_json::from_value::<RunStatus>(value).is_err());
     }
 }
 
@@ -302,6 +328,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
         size: RunSize::new("medium").assert_value(),
         at_cursor: Cursor::new("v2:10"),
         status: RunStatus::Stopping {
+            graph_result: None,
             active_executions: vec![active("opaque-verifier-b", "verify-b")],
         },
         workspace_recovery: Default::default(),

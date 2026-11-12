@@ -110,13 +110,27 @@ fn require_session(rpc: &CopilotRpc<'_>, params: &Value) -> Result<(), NodeRunne
 }
 
 async fn usage(rpc: &CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {
-    let usage = TokenUsageDelta {
+    rpc.control
+        .record_token_usage(Some(parse_usage(data)?))
+        .await
+}
+
+fn parse_usage(data: &Value) -> Result<TokenUsageDelta, NodeRunnerError> {
+    let mut usage = TokenUsageDelta {
         input_tokens: count(data, "inputTokens")?,
         output_tokens: count(data, "outputTokens")?,
         cache_read_input_tokens: optional_count(data, "cacheReadTokens")?,
         cache_creation_input_tokens: optional_count(data, "cacheWriteTokens")?,
     };
-    rpc.control.record_token_usage(Some(usage)).await
+    // Copilot input includes both cache buckets; subtract them once per API call.
+    // https://github.com/github/copilot-sdk/blob/540dc4e1ccd4aa174e7602465099a2aa93fab176/docs/features/usage-and-billing.md#per-call-token-counts
+    let uncached = usage
+        .input_tokens
+        .get()
+        .saturating_sub(usage.cache_read_input_tokens.unwrap_or_default().get())
+        .saturating_sub(usage.cache_creation_input_tokens.unwrap_or_default().get());
+    usage.input_tokens = TokenCount::new(uncached).unwrap_or_default();
+    Ok(usage)
 }
 
 fn count(data: &Value, name: &str) -> Result<TokenCount, NodeRunnerError> {

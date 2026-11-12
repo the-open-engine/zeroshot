@@ -47,15 +47,40 @@ A run ID belongs to the controller or target that created it. Pass `--target NAM
 from a named target. Finished status separates graph-authored `terminalResult.output` from optional
 runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the receipt.
 
+When the graph ends, `status` and `list` expose its recorded outcome as `status.graphResult`,
+using the same shape as `terminalResult`, while `phase` remains `running` during the Active Memory
+postmortem and finalization. For example:
+
+```json
+{
+  "phase": "running",
+  "activeExecutions": [],
+  "graphResult": { "status": "failed", "reason": "worker_failed" }
+}
+```
+
+`graphResult` is absent before the graph ends and after the run finishes, when `terminalResult`
+is the only result. It remains visible if finalization enters `stopping`. `watch` emits the result
+as soon as it is recorded, and foreground `run` prints that event and keeps waiting for finalization.
+The log records the graph result once and says when the postmortem is running. Exit codes still
+follow the final run result.
+
+The recorded graph result does not guarantee the final run result. A force stop during the
+postmortem cancels and drains that work and preserves the recorded graph result; ordinary
+postmortem failures and controller restart after confirmed cleanup preserve it too. A runtime or
+cleanup failure during finalization can instead prevent completion or end the run with
+`runtime_failed` or `runtime_lost`. Read `terminalResult` once the run is finished.
+
 ## Token usage
 
 `metadata.tokenUsage` contains run totals summed across agent invocations, including retries,
-correction turns and auxiliary agents such as postmortem specialists. Counters are summed as each
-harness reports them; input-token accounting can differ between harnesses.
+correction turns and auxiliary agents such as postmortem specialists. `inputTokens` means uncached
+input only for every harness. Cache reads and cache writes appear only in their respective cache
+counters, so the four token counters do not overlap and can be added.
 
 | Field                      | Meaning                                               |
 | -------------------------- | ----------------------------------------------------- |
-| `inputTokens`              | Input tokens reported by the harness.                 |
+| `inputTokens`              | Uncached input tokens, excluding cache reads/writes.  |
 | `outputTokens`             | Output tokens reported by the harness.                |
 | `cacheReadInputTokens`     | Input tokens reported as read from a prompt cache.    |
 | `cacheCreationInputTokens` | Input tokens reported as written to a prompt cache.   |
@@ -65,6 +90,7 @@ When `complete` is `false`, the totals retain known usage but at least one invoc
 missing or unusable. An omitted cache counter means at least one invocation did not report that
 counter; its run total is unknown, not zero. Cache counters can be omitted even when `complete` is
 `true`. Script steps record zero for all four counters and preserve known cache totals.
+Previously recorded runs retain their original numbers.
 
 ## Failure evidence and mapped executions
 

@@ -352,6 +352,16 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(self.events, [])
         self.assertEqual(len(self.manager._hooks["pre_auxiliary_call"]), 2)
 
+    def test_native_uncached_input_and_cache_buckets_remain_separate_on_resume(self):
+        # Hermes normalize_usage already separates cache reads/writes before session accumulation.
+        for _ in range(2):
+            self.usage.begin(self.agent)
+            self.call(input_tokens=2, output_tokens=3)
+            self.agent.session_cache_read_tokens += 5
+            self.agent.session_cache_write_tokens += 7
+            self.assertEqual(self.usage.result({"completed": True}),
+                             {"input": 2, "output": 3, "cacheRead": 5, "cacheWrite": 7})
+
     def test_unreported_request_preserves_counts_without_claiming_completeness(self):
         self.usage.begin(self.agent)
         self.call(reported=False)
