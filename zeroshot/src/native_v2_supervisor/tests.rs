@@ -461,6 +461,8 @@ mod verifier_evidence;
 
 #[path = "tests/failure_logs.rs"]
 mod failure_logs;
+#[path = "tests/provider_quotas.rs"]
+mod provider_quotas;
 
 #[path = "tests/versions.rs"]
 mod versions;

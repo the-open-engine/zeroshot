@@ -38,7 +38,11 @@ pub(super) use crate::native_v2_capsule::provider_process::{
 
 enum ClaudeTerminal {
     Complete(Value),
-    Failed(String),
+    Failed {
+        diagnostic: String,
+        /// A recognized native error result, rather than a malformed-result fallback.
+        native_failure: bool,
+    },
 }
 
 /// One `--print` process writes a result per main-loop turn: background subagent and shell
@@ -52,6 +56,7 @@ pub(super) struct ClaudeTranscript {
     retryable_failure_seen: bool,
     authentication_rejected: bool,
     unavailable_model: Option<String>,
+    quota_rejection: Option<String>,
     visible_text_emitted: bool,
     result_usage: ResultUsage,
     /// Streamed message usage since the last result, or since the start without one.
@@ -73,6 +78,7 @@ impl ClaudeTranscript {
             retryable_failure_seen: false,
             authentication_rejected: false,
             unavailable_model: None,
+            quota_rejection: None,
             visible_text_emitted: false,
             result_usage: ResultUsage::default(),
             provisional_usage: ProvisionalUsage::default(),
@@ -114,7 +120,13 @@ impl ProviderTranscript for ClaudeTranscript {
 
     fn failure_diagnostic(&self, process_detail: Option<&str>) -> Option<String> {
         let terminal = match &self.terminal {
-            Some(ClaudeTerminal::Failed(detail)) => Some(detail.as_str()),
+            Some(ClaudeTerminal::Failed {
+                diagnostic,
+                native_failure,
+            }) => Some(match &self.quota_rejection {
+                Some(limit) if *native_failure => quota_diagnostic(limit, diagnostic),
+                _ => diagnostic.clone(),
+            }),
             _ => None,
         };
         self.pending.failure_diagnostic(
@@ -122,7 +134,7 @@ impl ProviderTranscript for ClaudeTranscript {
             self.session_failure
                 .as_deref()
                 .into_iter()
-                .chain(terminal)
+                .chain(terminal.as_deref())
                 .chain(process_detail),
         )
     }
@@ -135,15 +147,18 @@ impl ProviderTranscript for ClaudeTranscript {
             .as_ref()
             .map(|failure| failure.detail.as_str())
             .filter(|detail| !detail.trim().is_empty());
-        let rejected = matches!(self.terminal, Some(ClaudeTerminal::Failed(_)));
+        let rejected = matches!(self.terminal, Some(ClaudeTerminal::Failed { .. }));
         let missing_terminal = self.missing_terminal_detail();
-        let terminal = self
-            .terminal
-            .take()
-            .unwrap_or(ClaudeTerminal::Failed(missing_terminal));
+        let terminal = self.terminal.take().unwrap_or(ClaudeTerminal::Failed {
+            diagnostic: missing_terminal,
+            native_failure: false,
+        });
         match terminal {
             ClaudeTerminal::Complete(result) => self.finish_complete(result, process_failure),
-            ClaudeTerminal::Failed(diagnostic) => {
+            ClaudeTerminal::Failed {
+                diagnostic,
+                native_failure,
+            } => {
                 if rejected && self.session_failure.is_none() {
                     if self.authentication_rejected {
                         return Err(NodeRunnerError::AuthenticationRequired(diagnostic));
@@ -151,6 +166,12 @@ impl ProviderTranscript for ClaudeTranscript {
                     if let Some(model) = &self.unavailable_model {
                         return Err(NodeRunnerError::ModelUnavailable(format!(
                             "model {model}: {diagnostic}"
+                        )));
+                    }
+                    if let Some(limit) = self.quota_rejection.as_ref().filter(|_| native_failure) {
+                        return Err(NodeRunnerError::QuotaExhausted(quota_diagnostic(
+                            limit,
+                            &diagnostic,
                         )));
                     }
                 }
@@ -300,7 +321,7 @@ impl ClaudeTranscript {
     }
 
     fn parse_rate_limit_event(
-        &self,
+        &mut self,
         event: &serde_json::Map<String, Value>,
         emissions: &mut Vec<ClaudeEmission>,
     ) {
@@ -329,16 +350,20 @@ impl ClaudeTranscript {
                 fields.push(format!("type={rate_limit_type}"));
             }
         }
-        if let Some(resets_at) = info.get("resetsAt").and_then(Value::as_f64) {
-            if resets_at.is_finite() {
-                fields.push(format!("resetsAt={}", format_resets_at(resets_at)));
-            }
+        if let Some(reset) = info.get("resetsAt").and_then(format_resets_at) {
+            fields.push(format!("resetsAt={reset}"));
+        }
+        let summary = fields.join(", ");
+        match info.get("status").and_then(Value::as_str) {
+            Some("rejected") => self.quota_rejection = Some(summary.clone()),
+            Some("allowed" | "allowed_warning") => self.quota_rejection = None,
+            _ => {}
         }
         if !fields.is_empty() {
             self.pending.emit(
                 emissions,
                 LiveOutputStream::System,
-                &format!("Claude rate limit: {}", fields.join(", ")),
+                &format!("Claude rate limit: {summary}"),
             );
         }
     }
@@ -520,10 +545,23 @@ impl ClaudeTranscript {
                             .unwrap_or("failed")
                     )
                 });
-            self.terminal = Some(ClaudeTerminal::Failed(diagnostic));
+            self.terminal = Some(ClaudeTerminal::Failed {
+                diagnostic,
+                native_failure: match event.get("subtype").and_then(Value::as_str) {
+                    Some("success") => event.get("is_error").and_then(Value::as_bool) == Some(true),
+                    Some(
+                        "error_during_execution"
+                        | "error_max_turns"
+                        | "error_max_budget_usd"
+                        | "error_max_structured_output_retries",
+                    ) => true,
+                    _ => false,
+                },
+            });
             return;
         }
         self.authentication_rejected = false;
+        self.quota_rejection = None;
         // `subagent_stats` holds this process's running totals. `killed.system` counts subagents
         // Claude Code stopped itself, as at its background wait ceiling; their work is missing.
         if let Some(stopped) = event
@@ -532,9 +570,12 @@ impl ClaudeTranscript {
             .and_then(Value::as_u64)
             .filter(|stopped| *stopped > 0)
         {
-            self.terminal = Some(ClaudeTerminal::Failed(format!(
-                "Claude Code stopped unfinished subagents itself (subagent_stats.killed.system = {stopped}); the final result does not include their work"
-            )));
+            self.terminal = Some(ClaudeTerminal::Failed {
+                diagnostic: format!(
+                    "Claude Code stopped unfinished subagents itself (subagent_stats.killed.system = {stopped}); the final result does not include their work"
+                ),
+                native_failure: false,
+            });
             return;
         }
         self.terminal = Some(ClaudeTerminal::Complete(
@@ -588,26 +629,46 @@ fn format_decimal(value: f64) -> String {
     formatted
 }
 
-fn format_resets_at(value: f64) -> String {
-    // The SDK currently reports Unix seconds, but accept milliseconds as its account shape evolves.
-    let seconds = if value.abs() >= 1_000_000_000_000.0 {
-        value / 1000.0
-    } else {
-        value
+fn quota_diagnostic(limit: &str, native_result: &str) -> String {
+    format!(
+        "Claude usage quota exhausted. Resume with `zeroshot resume RUN_ID` after provider usage becomes available. Limit: {limit}. Native result: {native_result}"
+    )
+}
+
+fn format_resets_at(value: &Value) -> Option<String> {
+    // Text can be a local clock hint. Preserve it without inferring a date or timezone.
+    if let Some(text) = value.as_str() {
+        return (!text.trim().is_empty()).then(|| text.to_owned());
+    }
+    let Some(number) = value.as_i64().filter(|number| *number >= 0) else {
+        // Unrepresentable or fractional numbers remain native hints, without a guessed instant.
+        return value.as_number().map(ToString::to_string);
     };
-    time::OffsetDateTime::from_unix_timestamp(seconds.round() as i64)
-        .map(|timestamp| {
-            format!(
-                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-                timestamp.year(),
-                u8::from(timestamp.month()),
-                timestamp.day(),
-                timestamp.hour(),
-                timestamp.minute(),
-                timestamp.second()
-            )
-        })
-        .unwrap_or_else(|_| format_decimal(value))
+    // The SDK currently reports Unix seconds, but accept milliseconds as its account shape evolves.
+    let seconds = if number >= 1_000_000_000_000 {
+        // Retain subsecond values as supplied rather than rounding to a different instant.
+        if number % 1000 != 0 {
+            return Some(value.to_string());
+        }
+        number / 1000
+    } else {
+        number
+    };
+    Some(
+        time::OffsetDateTime::from_unix_timestamp(seconds)
+            .map(|timestamp| {
+                format!(
+                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                    timestamp.year(),
+                    u8::from(timestamp.month()),
+                    timestamp.day(),
+                    timestamp.hour(),
+                    timestamp.minute(),
+                    timestamp.second()
+                )
+            })
+            .unwrap_or_else(|_| value.to_string()),
+    )
 }
 
 #[cfg(test)]

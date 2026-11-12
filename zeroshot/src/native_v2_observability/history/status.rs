@@ -59,41 +59,32 @@ impl RuntimeStatusReader {
         if snapshot.terminal.is_some() {
             return Ok(None);
         }
+        #[cfg(feature = "ui")]
+        if let Self::Local(root) = self {
+            use crate::native_v2_portable_controller::availability::{
+                check_controller, ControllerAvailability,
+            };
+            let paths = crate::native_v2_portable_controller::PortableControllerPaths::new(
+                root.join("runs").join(snapshot.run_id.as_str()),
+            );
+            return match check_controller(&paths, &snapshot.run_id).await {
+                ControllerAvailability::Responding(_, status)
+                    if valid_status(snapshot, &status) =>
+                {
+                    Ok(confirmed_failure(snapshot, *status))
+                }
+                ControllerAvailability::Embedded(_) => Ok(None),
+                _ => Err(()),
+            };
+        }
         let status = tokio::time::timeout(STATUS_TIMEOUT, self.status(&snapshot.run_id))
             .await
-            .map_err(|_| ())?;
-        let Some(status) = status else {
-            return if self.local_owner_is_live(&snapshot.run_id) {
-                Ok(None)
-            } else {
-                Err(())
-            };
-        };
+            .map_err(|_| ())?
+            .ok_or(())?;
         if !valid_status(snapshot, &status) {
             return Err(());
         }
         Ok(confirmed_failure(snapshot, status))
-    }
-
-    #[cfg(feature = "ui")]
-    fn local_owner_is_live(&self, id: &RunId) -> bool {
-        let Self::Local(root) = self else {
-            return false;
-        };
-        let paths = crate::native_v2_portable_controller::PortableControllerPaths::new(
-            root.join("runs").join(id.as_str()),
-        );
-        crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
-            .unwrap_or(false)
-            && crate::native_v2_portable_controller::ControllerLease::is_held(
-                &paths.acp_turn_lease(),
-            )
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(feature = "ui"))]
-    fn local_owner_is_live(&self, _id: &RunId) -> bool {
-        false
     }
 
     async fn status(&self, id: &RunId) -> Option<RunStatusResult> {
@@ -103,7 +94,7 @@ impl RuntimeStatusReader {
                 .await
                 .ok(),
             #[cfg(feature = "ui")]
-            Self::Local(root) => local_status(root, id).await,
+            Self::Local(_) => None,
         }
     }
 }
@@ -137,27 +128,4 @@ fn valid_status(snapshot: &RunSnapshot, status: &RunStatusResult) -> bool {
     status.run_id == snapshot.run_id
         && cursor_sequence(&status.at_cursor)
             .is_ok_and(|at| at <= i64::MAX as u64 && cursor_for(at) == status.at_cursor)
-}
-
-#[cfg(all(feature = "ui", any(unix, windows)))]
-async fn local_status(root: &std::path::Path, id: &RunId) -> Option<RunStatusResult> {
-    use crate::native_v2_portable_controller::{connect_transport, read_ready, PortableControllerPaths};
-    use openengine_cluster_client::ClusterClient;
-
-    let paths = PortableControllerPaths::new(root.join("runs").join(id.as_str()));
-    if read_ready(&paths).ok()?.run_id != *id {
-        return None;
-    }
-    // Connect only to an existing controller. CLI recovery would acquire a lease, create an
-    // observer, and possibly persist runtime_lost, none of which belongs to this reader.
-    let transport = connect_transport(&paths).await.ok()?;
-    ClusterClient::new(transport.as_ref())
-        .run_status(RunStatusParams { run_id: id.clone() })
-        .await
-        .ok()
-}
-
-#[cfg(all(feature = "ui", not(any(unix, windows))))]
-async fn local_status(_root: &std::path::Path, _id: &RunId) -> Option<RunStatusResult> {
-    None
 }

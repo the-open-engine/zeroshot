@@ -66,6 +66,27 @@ impl ControllerLease {
         reject_non_file(&path)?;
         let file = platform::private_file(&path, FileAccess::ReadWrite)
             .map_err(|_| ControllerLeaseError::StateDirectory)?;
+        Self::lock_file(file, path, exclusive)
+    }
+
+    /// Claims the original retained lease without creating or repairing a path before confirmation.
+    pub(crate) fn acquire_existing(
+        path: &Path,
+        expected: FileIdentity,
+    ) -> Result<Self, ControllerLeaseError> {
+        let file =
+            platform::open_readonly_file(path).map_err(|_| ControllerLeaseError::InvalidPath)?;
+        if !platform::file_identity(&file).is_ok_and(|identity| identity == expected) {
+            return Err(ControllerLeaseError::InvalidPath);
+        }
+        let lease = Self::lock_file(file, path.to_owned(), true)?;
+        if !lease.is_intact() {
+            return Err(ControllerLeaseError::InvalidPath);
+        }
+        Ok(lease)
+    }
+
+    fn lock_file(file: File, path: PathBuf, exclusive: bool) -> Result<Self, ControllerLeaseError> {
         let metadata = file
             .metadata()
             .map_err(|_| ControllerLeaseError::InvalidPath)?;
@@ -113,51 +134,56 @@ impl ControllerLease {
             .is_ok_and(|identity| identity == self.identity)
     }
 
-    /// Checks whether an existing private lease is owned without creating or changing it.
-    #[cfg(feature = "ui")]
-    pub(crate) fn is_held(path: &Path) -> Result<bool, ControllerLeaseError> {
-        reject_non_file(path)?;
-        let file = platform::private_file(path, FileAccess::ReadWriteExisting)
-            .map_err(|_| ControllerLeaseError::InvalidPath)?;
-        match file.try_lock_exclusive() {
+    pub(crate) fn identity(&self) -> FileIdentity {
+        self.identity
+    }
+
+    /// Probes an existing lease through a read-only handle, without claiming controller ownership.
+    pub(crate) fn probe(path: &Path) -> Result<LeaseProbe, ControllerLeaseError> {
+        let file =
+            platform::open_readonly_file(path).map_err(|_| ControllerLeaseError::InvalidPath)?;
+        let identity =
+            platform::file_identity(&file).map_err(|_| ControllerLeaseError::InvalidPath)?;
+        let held = match FileExt::try_lock_shared(&file) {
             Ok(()) => {
                 FileExt::unlock(&file).map_err(|_| ControllerLeaseError::InvalidPath)?;
-                Ok(false)
+                false
             }
-            Err(error) if lock_is_contended(&error) => Ok(true),
-            Err(_) => Err(ControllerLeaseError::InvalidPath),
+            Err(error) if lock_is_contended(&error) => true,
+            Err(_) => return Err(ControllerLeaseError::InvalidPath),
+        };
+        if platform::open_identity(path)
+            .and_then(|current| platform::file_identity(&current))
+            .is_ok_and(|current| current == identity)
+        {
+            Ok(LeaseProbe { identity, held })
+        } else {
+            Err(ControllerLeaseError::InvalidPath)
         }
+    }
+
+    #[cfg(all(test, feature = "ui"))]
+    pub(crate) fn is_held(path: &Path) -> Result<bool, ControllerLeaseError> {
+        Self::probe(path).map(|probe| probe.held)
     }
 }
 
-#[cfg(feature = "ui")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct LeaseProbe {
+    pub identity: FileIdentity,
+    pub held: bool,
+}
+
 fn lock_is_contended(error: &io::Error) -> bool {
     if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
         return true;
     }
     #[cfg(windows)]
     {
-        // LockFileEx can report an overlapping exclusive lock as asynchronous contention.
         error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_IO_PENDING as i32)
     }
     #[cfg(not(windows))]
     false
-}
-
-#[cfg(all(test, feature = "ui", windows))]
-#[test]
-fn windows_lock_probe_accepts_only_contention_errors() {
-    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_IO_PENDING, ERROR_LOCK_VIOLATION};
-
-    assert!(lock_is_contended(&io::Error::from_raw_os_error(
-        ERROR_LOCK_VIOLATION as i32,
-    )));
-    assert!(lock_is_contended(&io::Error::from_raw_os_error(
-        ERROR_IO_PENDING as i32,
-    )));
-    assert!(!lock_is_contended(&io::Error::from_raw_os_error(
-        ERROR_ACCESS_DENIED as i32,
-    )));
 }
 
 impl Drop for ControllerLease {

@@ -38,9 +38,8 @@ use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
 use crate::native_v2_supervisor::RunEnvironment;
 use crate::native_v2_portable_controller::{
     ControllerLease, ControllerLeaseError, DEFAULT_PREPARATION_TIMEOUT,
-    PortableControllerBootstrap, PortableControllerError, PortableControllerPaths,
-    PortableControllerServer, PortableRunController, read_ready, take_startup_failure,
-    write_bootstrap_file,
+    PortableControllerBootstrap, PortableControllerPaths, PortableRunController, read_ready,
+    take_startup_failure, write_bootstrap_file,
 };
 use crate::native_v2_portable_controller::process::{PortableControllerTransport, connect_transport};
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
@@ -56,6 +55,9 @@ use connections::LocalConnectionStore;
 
 #[path = "local/backend.rs"]
 mod backend;
+
+#[path = "local/inspection.rs"]
+mod inspection;
 
 #[path = "local/branch.rs"]
 mod branch;
@@ -176,7 +178,6 @@ impl LocalCliBackend {
                 PREPARATION_TIMEOUT_ENV,
             ))?,
         };
-        backend.remove_stale_bootstraps(STALE_BOOTSTRAP_AGE)?;
         Ok(backend)
     }
 
@@ -227,36 +228,49 @@ impl LocalCliBackend {
         Ok(paths)
     }
 
+    // Control operations alone may recover a controller after confirmed loss.
     async fn connect_run(
         &self,
-        run_id: &openengine_cluster_protocol::RunId,
+        run_id: &RunId,
     ) -> Result<Arc<PortableControllerTransport>, NativeV2CliError> {
+        use crate::native_v2_portable_controller::availability::{
+            ControllerAvailability, check_controller, connect_controller,
+        };
         let paths = self.existing_run_paths(run_id)?;
-        let deadline = Instant::now() + self.ready_timeout;
-        loop {
-            if read_ready(&paths).is_ok_and(|ready| &ready.run_id != run_id) {
-                return Err(local_message(
-                    "controller readiness has a different run identity",
-                ));
-            }
-            if let Ok(transport) = connect_transport(&paths).await {
-                return Ok(transport);
-            }
-
-            match bind_observer(paths.clone(), run_id.clone()).await {
-                Ok(server) => {
-                    tokio::spawn(async move {
-                        let _ = server.serve().await;
-                    });
-                    // The observer owns the lease now; reconnect through the same bounded loop so
-                    // Windows does not fail the handoff on one unavailable named-pipe instance.
-                }
-                Err(error) if retryable_controller_handoff(&error) && Instant::now() < deadline => {
-                    sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
-                }
-                Err(error) => return Err(local_error(error)),
+        if read_ready(&paths).is_ok_and(|ready| ready.run_id != *run_id) {
+            return Err(local_message(
+                "controller readiness has a different run identity",
+            ));
+        }
+        // A live controller stops owned work before it waits for storage, so a control request
+        // needs an endpoint that accepts it, never a status reply first. An endpoint that
+        // accepts nothing is taken over only after its loss is confirmed below.
+        if let Some(transport) = connect_controller(&paths, run_id).await {
+            return Ok(transport);
+        }
+        match check_controller(&paths, run_id).await {
+            ControllerAvailability::Responding(transport, _) => return Ok(transport),
+            ControllerAvailability::Unavailable(observed)
+                if observed.state == openengine_cluster_protocol::ControllerState::Lost => {}
+            _ => {
+                return Err(local_message(format!(
+                    "controller availability is unknown; run {} is still owned or unreachable",
+                    run_id.as_str()
+                )));
             }
         }
+        let server = Arc::new(
+            PortableRunController::confirm_loss(paths.clone(), run_id.clone())
+                .await
+                .map_err(local_error)?,
+        )
+        .bind()
+        .await
+        .map_err(local_error)?;
+        tokio::spawn(async move {
+            let _ = server.serve().await;
+        });
+        connect_transport(&paths).await.map_err(local_error)
     }
 
     fn existing_run_paths(
@@ -556,6 +570,7 @@ impl LocalCliBackend {
     }
 
     async fn acquire_submission_lock(&self) -> Result<ControllerLease, NativeV2CliError> {
+        self.remove_stale_bootstraps(STALE_BOOTSTRAP_AGE)?;
         let path = self.state_root.join(SUBMISSION_LOCK_FILE);
         loop {
             match ControllerLease::acquire(&path) {
@@ -768,15 +783,12 @@ impl LocalCliBackend {
     }
 
     async fn list_entry_once(&self, run_id: &RunId) -> Result<RunListResult, NativeV2CliError> {
-        let transport = self.connect_run(run_id).await?;
-        let mut result = ClusterClient::new(transport.as_ref())
-            .run_list(RunListParams::default())
-            .await
-            .map_err(protocol_error)?;
-        for status in &mut result.runs {
-            status.workspace_recovery = self.workspace_recovery(status).await?;
-        }
-        Ok(result)
+        let result = self
+            .status_local(RunStatusParams {
+                run_id: run_id.clone(),
+            })
+            .await?;
+        Ok(RunListResult { runs: vec![result] })
     }
 
     async fn status_local(
@@ -828,17 +840,10 @@ impl LocalCliBackend {
     }
 
     fn recovery_workspace_is_unclaimed(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
-        match self.claim_recovery_workspace(run_id) {
-            Ok(claim) => {
-                drop(claim);
-                Ok(true)
-            }
-            Err(NativeV2CliError::Local(message))
-                if message == "retained workspace is already being resumed" =>
-            {
-                Ok(false)
-            }
-            Err(error) => Err(error),
+        let path = self.recovery_claim_path(run_id)?;
+        match std::fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            _ => Ok(ControllerLease::probe(&path).is_ok_and(|probe| !probe.held)),
         }
     }
 
@@ -1012,7 +1017,10 @@ impl LocalCliBackend {
                 ..
             }
         );
-        let unclaimed = failed
+        let loss_observed = status.controller.as_ref().is_some_and(|observation| {
+            observation.state == openengine_cluster_protocol::ControllerState::Lost
+        });
+        let unclaimed = (failed || loss_observed)
             && document.workspace.is_dir()
             && self.recovery_workspace_is_unclaimed(&status.run_id)?;
         // With the recovery claim released, a successor that neither runs nor was admitted is
@@ -1039,14 +1047,20 @@ impl LocalCliBackend {
         let Ok(storage) = self.run_storage(successor_run_id) else {
             return false;
         };
-        !storage.exists()
-            || matches!(
-                self.successor_claim_is_live_or_admitted(
-                    successor_run_id,
-                    &storage,
-                    Duration::ZERO
-                )
-                .await,
+        if !storage.exists() {
+            return true;
+        }
+        let Ok(paths) = self.paths(successor_run_id) else {
+            return false;
+        };
+        let released = match std::fs::symlink_metadata(paths.lease()) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            _ => ControllerLease::probe(&paths.lease()).is_ok_and(|probe| !probe.held),
+        };
+        released
+            && matches!(
+                self.local_successor_was_admitted(&storage.join("runs.sqlite3"), successor_run_id)
+                    .await,
                 Ok(false)
             )
     }
@@ -1055,11 +1069,7 @@ impl LocalCliBackend {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
-        let transport = self.connect_run(&params.run_id).await?;
-        ClusterClient::new(transport.as_ref())
-            .run_status(params)
-            .await
-            .map_err(protocol_error)
+        self.inspect_status(params).await
     }
 
     async fn force_local(
@@ -1083,11 +1093,34 @@ impl LocalCliBackend {
             size: status.size,
             at_cursor: status.at_cursor,
             status: status.status,
+            controller: None,
             workspace_recovery: status.workspace_recovery,
         })
     }
 
     async fn force_once(&self, params: RunForceParams) -> Result<RunForceResult, NativeV2CliError> {
+        let recorded = self
+            .read_recorded_status(RunStatusParams {
+                run_id: params.run_id.clone(),
+            })
+            .await;
+        if let Ok(recorded) = recorded
+            && matches!(
+                recorded.status,
+                openengine_cluster_protocol::RunStatus::Finished { .. }
+            )
+        {
+            return Ok(RunForceResult {
+                run_id: recorded.run_id,
+                title: recorded.title,
+                source: recorded.source,
+                size: recorded.size,
+                at_cursor: recorded.at_cursor,
+                status: recorded.status,
+                controller: None,
+                workspace_recovery: recorded.workspace_recovery,
+            });
+        }
         let transport = self.connect_run(&params.run_id).await?;
         ClusterClient::new(transport.as_ref())
             .run_force(params)
@@ -1185,22 +1218,6 @@ fn preparation_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, Na
                 "{PREPARATION_TIMEOUT_ENV} must be a whole number of seconds from 1 to {MAX_PREPARATION_TIMEOUT_SECONDS}"
             ))
         })
-}
-
-async fn bind_observer(
-    paths: PortableControllerPaths,
-    run_id: RunId,
-) -> Result<PortableControllerServer, PortableControllerError> {
-    Arc::new(PortableRunController::open_observer(paths, run_id).await?)
-        .bind()
-        .await
-}
-
-fn retryable_controller_handoff(error: &PortableControllerError) -> bool {
-    matches!(
-        error,
-        PortableControllerError::Lease(ControllerLeaseError::Held) | PortableControllerError::Io(_)
-    )
 }
 
 fn require_local(target: Option<&str>) -> Result<(), NativeV2CliError> {

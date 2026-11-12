@@ -28,10 +28,15 @@ if (process.argv.includes('--version')) {
     if (mode === 'volume' && inputBytes < 256 * 1024) process.exit(42);
     fs.writeFileSync('mutation.txt', 'native worker ran');
     emit({ type: 'thread.started', thread_id: 'portable-session' });
-    if (mode === 'block') {
+    if (mode === 'block' || mode === 'block-quiet') {
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
       fs.writeFileSync('child.pid', String(child.pid));
-      setInterval(() => emit({ type: 'turn.started' }), 50);
+      if (mode === 'block-quiet') {
+        emit({ type: 'turn.started' });
+        setInterval(() => {}, 1000);
+      } else {
+        setInterval(() => emit({ type: 'turn.started' }), 50);
+      }
       return;
     }
     const correction = mode === 'correction' && !process.argv.includes('resume');

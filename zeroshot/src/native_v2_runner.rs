@@ -158,6 +158,9 @@ pub enum NodeRunnerError {
     /// The provider, rather than a runtime model catalog, rejected the requested model.
     #[error("provider rejected model: {0}")]
     ModelUnavailable(String),
+    /// Confirmed native usage exhaustion, without a new public outcome code or reason.
+    #[error("provider quota exhausted: {0}")]
+    QuotaExhausted(String),
     #[error("the remote node runtime connection was lost")]
     ConnectionLost,
     #[error("provider process cleanup could not be confirmed")]

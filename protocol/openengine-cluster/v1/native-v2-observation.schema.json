@@ -82,6 +82,33 @@
         }
       ]
     },
+    "ControllerObservation": {
+      "additionalProperties": false,
+      "description": "Availability observed by a reader, separate from the run's durable status.",
+      "properties": {
+        "observedAt": {
+          "description": "Time of this check, not the time the controller stopped.",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/ControllerState"
+        }
+      },
+      "required": [
+        "state",
+        "observedAt"
+      ],
+      "type": "object"
+    },
+    "ControllerState": {
+      "enum": [
+        "lost",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "DomainErrorData": {
       "properties": {
         "code": {
@@ -822,6 +849,17 @@
           "description": "Durable cursor after the force request was recorded.",
           "type": "string"
         },
+        "controller": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ControllerObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omitted for responding controllers and finished runs. Never durable run state."
+        },
         "runId": {
           "description": "Public identity of the run whose force request was recorded.",
           "type": "string"
@@ -1104,6 +1142,17 @@
       "properties": {
         "atCursor": {
           "type": "string"
+        },
+        "controller": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ControllerObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omitted for responding controllers and finished runs. Never durable run state."
         },
         "runId": {
           "type": "string"

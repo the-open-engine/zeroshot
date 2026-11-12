@@ -671,7 +671,8 @@ pub(crate) fn provider_error_output(
         NodeRunnerError::Driver => None,
         NodeRunnerError::DriverDetail(detail)
         | NodeRunnerError::AuthenticationRequired(detail)
-        | NodeRunnerError::ModelUnavailable(detail) => Some(detail.as_str()),
+        | NodeRunnerError::ModelUnavailable(detail)
+        | NodeRunnerError::QuotaExhausted(detail) => Some(detail.as_str()),
         _ => return Ok(None),
     };
     let diagnostic = provider_failure_diagnostic(provider, detail, None, redactions);

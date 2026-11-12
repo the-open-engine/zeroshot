@@ -36,7 +36,7 @@ use super::{
 
 const WORKSPACE_MONITOR_INTERVAL: Duration = Duration::from_millis(100);
 /// Covers SQLite's 5 s busy timeout for both the failure append's snapshot read and its write.
-/// A hung ledger cannot keep the controller alive; observer recovery then owns the run.
+/// A hung ledger cannot keep the controller alive; explicit recovery then owns the run.
 const RUNTIME_FAILURE_SETTLEMENT_LIMIT: Duration = Duration::from_secs(15);
 
 #[derive(Clone)]
@@ -79,14 +79,34 @@ struct PreparedControllerStart {
 }
 
 impl PortableRunController {
-    /// Acquires a dead controller's lease and opens its durable one-run ledger for observation.
+    /// Acquires a dead controller's lease and recovers its durable one-run ledger.
     /// Any nonterminal run is finalized as `runtime_lost`; no runtime factory is consulted and no
     /// node can be dispatched. The returned backend may be bound to the ordinary local socket.
     pub async fn open_observer(
         paths: PortableControllerPaths,
         run_id: RunId,
     ) -> Result<Self, PortableControllerError> {
-        let (lease, ledger) = open_observer_storage(&paths)?;
+        Self::open_recovered(paths, run_id, None).await
+    }
+
+    /// Explicit local controls confirm the original lease and absent process before writing.
+    pub(crate) async fn confirm_loss(
+        paths: PortableControllerPaths,
+        run_id: RunId,
+    ) -> Result<Self, PortableControllerError> {
+        let ready = super::read_ready(&paths)?;
+        if ready.run_id != run_id {
+            return Err(PortableControllerError::DurableIdentity);
+        }
+        Self::open_recovered(paths, run_id, Some(ready)).await
+    }
+
+    async fn open_recovered(
+        paths: PortableControllerPaths,
+        run_id: RunId,
+        expected: Option<super::PortableControllerReady>,
+    ) -> Result<Self, PortableControllerError> {
+        let (lease, ledger) = open_observer_storage(&paths, expected.as_ref())?;
         if !validate_existing_run(ledger.as_ref(), &run_id).await? {
             return Err(PortableControllerError::DurableIdentity);
         }
@@ -101,6 +121,9 @@ impl PortableRunController {
                 .await?
                 .with_harness_registry(crate::harnesses::HarnessRegistry::local()),
         );
+        // Keep the original lease evidence until reconciliation is durable, including across
+        // failed writes or cancellation. A later explicit control must still be able to retry.
+        clear_stale_endpoint(&paths)?;
         Ok(Self {
             run_id,
             inner,
@@ -214,6 +237,10 @@ impl PortableRunController {
         &self.paths
     }
 
+    pub(super) fn lease_identity(&self) -> crate::execution::platform::FileIdentity {
+        self._lease.identity()
+    }
+
     /// Returns once the run is finished and a published runtime failure has had a bounded chance
     /// to make its terminal durable, so ending the controller process cannot discard that append.
     pub(super) async fn wait_terminal(&self) -> Result<(), PortableControllerError> {
@@ -277,12 +304,29 @@ impl PortableRunController {
 
 fn open_observer_storage(
     paths: &PortableControllerPaths,
+    expected: Option<&super::PortableControllerReady>,
 ) -> Result<(Arc<ControllerLease>, Arc<SqliteRunLedger>), PortableControllerError> {
     require_absolute(paths.storage())?;
     validate_existing_storage(paths.storage())?;
     validate_existing_ledger_path(&paths.ledger())?;
-    let lease = Arc::new(ControllerLease::acquire(paths.lease())?);
-    clear_stale_endpoint(paths)?;
+    let lease = Arc::new(match expected {
+        Some(ready) => ControllerLease::acquire_existing(
+            &paths.lease(),
+            ready
+                .lease_identity
+                .ok_or(PortableControllerError::Readiness)?,
+        )?,
+        None => ControllerLease::acquire(paths.lease())?,
+    });
+    if let Some(ready) = expected {
+        if ready.lease_identity != Some(lease.identity())
+            || !lease.is_intact()
+            || !crate::execution::platform::process_exists(ready.pid).is_ok_and(|exists| !exists)
+            || !super::read_ready(paths).is_ok_and(|current| current == *ready)
+        {
+            return Err(PortableControllerError::Readiness);
+        }
+    }
     // Staging is disposable scratch. Its deletion must not block durable status recovery.
     let _ = remove_directory_if_present(&paths.storage().join("checkpoints/staging"));
     let ledger = Arc::new(SqliteRunLedger::open(paths.ledger())?);

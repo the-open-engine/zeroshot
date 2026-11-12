@@ -605,6 +605,7 @@ fn write_ready(controller: &PortableRunController) -> Result<(), PortableControl
         run_id: controller.run_id().clone(),
         socket: controller.paths().socket(),
         pid: std::process::id(),
+        lease_identity: Some(controller.lease_identity()),
     };
     let bytes = serde_json::to_vec(&ready).map_err(|_| PortableControllerError::Readiness)?;
     let mut random = [0_u8; 8];

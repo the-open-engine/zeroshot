@@ -146,7 +146,8 @@ impl TerminalMetadata {
         if let Err(
             error @ (NodeRunnerError::DriverDetail(_)
             | NodeRunnerError::AuthenticationRequired(_)
-            | NodeRunnerError::ModelUnavailable(_)),
+            | NodeRunnerError::ModelUnavailable(_)
+            | NodeRunnerError::QuotaExhausted(_)),
         ) = &completion
         {
             let diagnostic =

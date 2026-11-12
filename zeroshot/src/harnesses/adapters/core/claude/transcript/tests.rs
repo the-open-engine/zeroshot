@@ -6,6 +6,8 @@ use crate::native_v2_capsule::provider_process::ProviderProcessFailureKind;
 
 #[path = "tests/limits.rs"]
 mod limit_tests;
+#[path = "tests/quota.rs"]
+mod quota_tests;
 #[path = "tests/redaction.rs"]
 mod redaction_tests;
 #[path = "tests/unicode.rs"]

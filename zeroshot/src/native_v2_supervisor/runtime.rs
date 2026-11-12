@@ -541,7 +541,9 @@ pub(super) fn runner_failure(error: &NodeRunnerError) -> WorkerOutcome {
             return WorkerOutcome::authentication_refusal();
         }
         NodeRunnerError::ModelUnavailable(_) => return WorkerOutcome::model_refusal(),
-        NodeRunnerError::Cancelled | NodeRunnerError::RunClosed => WorkerErrorCode::Refusal,
+        NodeRunnerError::QuotaExhausted(_)
+        | NodeRunnerError::Cancelled
+        | NodeRunnerError::RunClosed => WorkerErrorCode::Refusal,
         NodeRunnerError::InvalidRole
         | NodeRunnerError::SessionOpen
         | NodeRunnerError::SessionLost

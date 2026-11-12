@@ -243,6 +243,7 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
             size: RunSize::new("small").assert_value(),
             at_cursor: openengine_cluster_protocol::Cursor::new("v2:1"),
             status: RunStatus::Admitted {},
+            controller: None,
             workspace_recovery: Default::default(),
         }],
     };

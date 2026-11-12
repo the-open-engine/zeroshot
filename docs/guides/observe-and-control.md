@@ -71,6 +71,30 @@ postmortem failures and controller restart after confirmed cleanup preserve it t
 cleanup failure during finalization can instead prevent completion or end the run with
 `runtime_failed` or `runtime_lost`. Read `terminalResult` once the run is finished.
 
+Local inspection (`status`, `list`, `checkpoints`, `watch`, `logs` and `attach`) reads retained
+history without taking recovery ownership or writing to the run directory. Finished runs need no
+controller and retain their usual exit codes.
+
+For an unfinished local run whose controller does not answer, `status` and each `list` entry keep
+the recorded status and add an optional entry beside it:
+
+```json
+{ "controller": { "state": "lost", "observedAt": 1794470707000 } }
+```
+
+`lost` means the original controller process is confirmed absent and its original lease is released.
+`unknown` means the evidence is insufficient, including an unreachable endpoint, a stalled process,
+a reused PID, a replaced lease or a permission failure. `observedAt` is the time of this check in
+Unix epoch milliseconds, not the time the controller died. The entry is omitted when the controller
+answers and for finished runs. `checkpoints` also includes it when applicable. These three commands
+exit 0 after a successful read, including when controller availability is lost or unknown.
+
+`watch`, `logs` and `attach` print the recorded part, then exit 1 when the local controller is
+unavailable. Their error names `zeroshot resume RUN_ID` and `zeroshot force-stop RUN_ID`. Inspection
+does not record a terminal result: an unclaimed lost run keeps its recorded status on every read.
+Only these explicit controls confirm loss under the controller lease before recording `runtime_lost`;
+they refuse to take over a controller that still owns its lease or whose loss cannot be confirmed.
+
 ## Token usage
 
 `metadata.tokenUsage` contains run totals summed across agent invocations, including retries,
@@ -208,6 +232,13 @@ with:
 ```console
 zeroshot resume RUN_ID
 ```
+
+Confirmed Claude account/session quota exhaustion fails promptly as `refusal`, with the affected
+node, available reset information and manual-resume guidance in `status` and terminal failure
+context. Resume after provider usage becomes available; Zeroshot does not wait or resume
+automatically. A clock hint without a date or timezone stays as supplied. Codex's message-only
+usage-limit errors retain their existing crash retries; see the
+[native failure signals](../reference/cluster/graph.md#graph-contract).
 
 A local restart uses your checkout as it is now. You can fix files after a failure and resume:
 commits, staged and unstaged edits, untracked and ignored files, the current branch, and the index

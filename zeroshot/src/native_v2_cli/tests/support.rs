@@ -1099,6 +1099,7 @@ impl NativeV2CliBackend for FakeBackend {
             params: params.clone(),
         });
         Ok(RunCheckpointsResult {
+            controller: None,
             run_id: params.run_id,
             checkpoints: vec![RunCheckpoint {
                 checkpoint_id: CheckpointId::new("entry-8").assert_value(),

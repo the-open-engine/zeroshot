@@ -136,6 +136,19 @@ class RunResult:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ControllerObservation:
+    """Local controller availability, separate from durable run status.
+
+    Args:
+        state: lost when absence is confirmed, otherwise unknown.
+        observed_at: Time of this check as Unix epoch milliseconds, not the death time.
+    """
+
+    state: Literal["lost", "unknown"]
+    observed_at: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RunStatus:
     """Current durable projection for one run.
 
@@ -149,6 +162,7 @@ class RunStatus:
         active_executions: Every currently active graph execution.
         result: Terminal result only when phase is finished.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
+        controller: Availability observation, omitted for responding controllers and finished runs.
     """
 
     run_id: str
@@ -160,6 +174,7 @@ class RunStatus:
     active_executions: tuple[ActiveExecution, ...] = ()
     result: RunResult | None = None
     graph_result: RunResult | None = None
+    controller: ControllerObservation | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -175,6 +190,7 @@ class RunSummary:
         phase: admitted, running, stopping, or finished.
         force_stop_requested: Whether the current projection reflects a force-stop request.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
+        controller: Availability observation, omitted for responding controllers and finished runs.
     """
 
     run_id: str
@@ -185,6 +201,7 @@ class RunSummary:
     phase: Literal["admitted", "running", "stopping", "finished"]
     force_stop_requested: bool
     graph_result: RunResult | None = None
+    controller: ControllerObservation | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

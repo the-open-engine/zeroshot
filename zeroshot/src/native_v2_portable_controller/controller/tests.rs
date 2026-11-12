@@ -10,6 +10,130 @@ use openengine_cluster_server::{ClusterBackend, ConnectionContext};
 
 use super::*;
 
+struct ForceCleanup(std::sync::atomic::AtomicUsize);
+
+#[async_trait]
+impl CapsuleCleanup for ForceCleanup {
+    async fn destroy_or_confirm_absent(
+        &self,
+        exit: RunRuntimeExit,
+    ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
+        assert_eq!(exit, RunRuntimeExit::ForceStopped);
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(CapsuleDestroyed::confirmed())
+    }
+}
+
+#[tokio::test]
+async fn local_force_confirms_cleanup_despite_an_unpersisted_runtime_failure() {
+    use crate::native_v2_cli::{NativeV2CliBackend, local::LocalCliBackend};
+    use crate::v2_run_ledger::RunEvent;
+
+    let root = tempfile::tempdir().assert_value();
+    let runs = private_directory(root.path(), "runs");
+    let run_id = RunId::new(uuid::Uuid::now_v7().to_string());
+    let paths = PortableControllerPaths::new(private_directory(&runs, run_id.as_str()));
+    let lease = Arc::new(ControllerLease::acquire(paths.lease()).assert_value());
+    let ledger = Arc::new(SqliteRunLedger::open(paths.ledger()).assert_value());
+    let cleanup = Arc::new(ForceCleanup(std::sync::atomic::AtomicUsize::new(0)));
+    let runtime = PortableRuntime {
+        cleanup: cleanup.clone(),
+        ..PortableRuntime::new(Arc::new(super::super::tests::NeverDispatched))
+    };
+    let allocator = Arc::new(SingleRunAllocator::new(
+        run_id.clone(),
+        Some(runtime),
+        lease.clone(),
+        paths.storage().join("checkpoints"),
+    ));
+    let inner = Arc::new(
+        NativeV2PlatformController::new(ledger.clone(), allocator)
+            .await
+            .assert_value(),
+    );
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: IdempotencyKey::new("force-runtime-failure").assert_value(),
+            submission_digest: Sha256Digest::new("a".repeat(64)).assert_value(),
+            admitted: crate::native_v2_runner::test_support::admitted(),
+        })
+        .await
+        .assert_value();
+    let stored = ledger
+        .append(&run_id, vec![RunEvent::RunStarted])
+        .await
+        .assert_value();
+    // A controller can publish failure while its owned runtime still needs cleanup.
+    let observation = inner.observations();
+    observation.track_runtime(&stored.snapshot).assert_value();
+    observation.runtime_failed_with_cause(&run_id, "cleanup is unconfirmed");
+    assert!(stored.snapshot.terminal.is_none());
+    let controller = Arc::new(PortableRunController {
+        run_id: run_id.clone(),
+        inner,
+        paths,
+        _lease: lease,
+        _workspace_lease: None,
+    });
+    let server = controller.bind().await.assert_value();
+    let serving = tokio::spawn(server.serve());
+    let backend = LocalCliBackend::new(
+        root.path().to_owned(),
+        "unused".into(),
+        root.path().to_owned(),
+        "git".into(),
+    );
+    let before = backend
+        .run_status(
+            None,
+            RunStatusParams {
+                run_id: run_id.clone(),
+            },
+        )
+        .await
+        .assert_value();
+    assert!(
+        matches!(before.status, openengine_cluster_protocol::HostedRunStatus::Target(RunStatus::Finished {
+        terminal_result: TerminalResult::Failed { reason, .. }, ..
+    }) if reason.as_str() == "runtime_failed")
+    );
+    assert!(
+        backend
+            .run_resume_status(
+                None,
+                RunStatusParams {
+                    run_id: run_id.clone()
+                }
+            )
+            .await
+            .is_err(),
+        "a live failure projection cannot authorize resume"
+    );
+    let forced = tokio::time::timeout(
+        Duration::from_secs(20),
+        backend.run_force(
+            None,
+            RunForceParams {
+                run_id: run_id.clone(),
+            },
+        ),
+    )
+    .await;
+    serving.abort();
+    let _ = serving.await;
+    let forced = forced.assert_value().assert_value();
+    assert_eq!(cleanup.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let recorded = ledger.get(&run_id).await.assert_value().assert_value();
+    assert!(matches!(recorded.snapshot.terminal,
+        Some(TerminalResult::Failed { reason, .. }) if reason.as_str() == "force_stopped"));
+    assert!(
+        matches!(forced.status, openengine_cluster_protocol::HostedRunStatus::Target(RunStatus::Finished {
+        terminal_result: TerminalResult::Failed { reason, .. }, ..
+    }) if reason.as_str() == "force_stopped")
+    );
+}
+
 #[tokio::test]
 async fn shutdown_before_runtime_composition_never_dispatches_or_admits_a_run() {
     let root = tempfile::tempdir().assert_value();
@@ -493,7 +617,7 @@ async fn observer_opens_durable_status_when_checkpoint_scratch_gc_fails() {
     let staging = paths.storage().join("checkpoints/staging");
     std::fs::write(&staging, "uncollectable scratch").assert_value();
 
-    let (_lease, reopened_ledger) = open_observer_storage(&paths).assert_value();
+    let (_lease, reopened_ledger) = open_observer_storage(&paths, None).assert_value();
 
     assert!(reopened_ledger.list().await.is_ok());
     assert_eq!(
@@ -517,7 +641,7 @@ async fn observer_removes_legacy_readonly_checkpoint_stage() {
     std::fs::write(readonly.join("source"), "copied").assert_value();
     std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o555)).assert_value();
 
-    let (_lease, reopened_ledger) = open_observer_storage(&paths).assert_value();
+    let (_lease, reopened_ledger) = open_observer_storage(&paths, None).assert_value();
 
     assert!(reopened_ledger.list().await.is_ok());
     assert!(!paths.storage().join("checkpoints/staging").exists());
