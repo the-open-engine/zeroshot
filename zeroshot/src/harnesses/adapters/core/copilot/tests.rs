@@ -1281,30 +1281,39 @@ async fn cancellation_during_cleanup_preserves_an_already_received_provider_erro
 
 #[tokio::test]
 async fn unconfirmed_cleanup_preserves_a_redacted_bounded_provider_diagnostic() {
-    let (_, control, mut output) = crate::native_v2_runner::test_support::control();
     let secret = "gho_private-cleanup-cause";
     let detail = format!(
         "provider rejected {secret} \u{1b} {} final cause",
         "λ🦀".repeat(5000)
     );
-    let outcome = Err(NodeRunnerError::DriverDetail(detail));
-    assert_eq!(
-        rpc_cleanup_failure(&outcome, &[secret.to_owned()], &control).await,
-        NodeRunnerError::CleanupUnconfirmed
-    );
-    let DurableNodeEvent::Output {
-        output: diagnostic, ..
-    } = output.recv().await.assert_value()
-    else {
-        panic!("expected provider diagnostic before cleanup settlement");
-    };
-    assert_eq!(diagnostic.diagnostic, Some(FailureDiagnosticKind::Failure));
-    assert_eq!(diagnostic.stream, LiveOutputStream::Error);
-    assert!(diagnostic.text.contains("provider rejected [REDACTED]"));
-    assert!(diagnostic.text.contains("final cause"));
-    assert!(diagnostic.text.len() <= 8192);
-    assert!(!diagnostic.text.contains(secret));
-    assert!(!diagnostic.text.contains('\u{1b}'));
+    for error in [
+        NodeRunnerError::DriverDetail(detail.clone()),
+        NodeRunnerError::AuthenticationRequired(detail.clone()),
+        NodeRunnerError::ModelUnavailable(detail),
+    ] {
+        let (_, control, mut output) = crate::native_v2_runner::test_support::control();
+        let outcome = Err(error);
+        assert_eq!(
+            rpc_cleanup_failure(&outcome, &[secret.to_owned()], &control).await,
+            NodeRunnerError::CleanupUnconfirmed
+        );
+        let DurableNodeEvent::Output {
+            output: diagnostic, ..
+        } = tokio::time::timeout(Duration::from_secs(5), output.recv())
+            .await
+            .assert_value()
+            .assert_value()
+        else {
+            panic!("expected provider diagnostic before cleanup settlement");
+        };
+        assert_eq!(diagnostic.diagnostic, Some(FailureDiagnosticKind::Failure));
+        assert_eq!(diagnostic.stream, LiveOutputStream::Error);
+        assert!(diagnostic.text.contains("provider rejected [REDACTED]"));
+        assert!(diagnostic.text.contains("final cause"));
+        assert!(diagnostic.text.len() <= 8192);
+        assert!(!diagnostic.text.contains(secret));
+        assert!(!diagnostic.text.contains('\u{1b}'));
+    }
 }
 
 #[tokio::test]
