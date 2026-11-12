@@ -16,11 +16,12 @@ const MAX_DIAGNOSTIC_BYTES: usize =
 pub use crate::source_code_provider::GitCommandFailure;
 
 /// Private command output separates protocol bytes from printable diagnostics.
-/// Only trusted Git parsers read stdout; Debug and Display expose the sanitized record.
+/// Only trusted parsers read protocol streams; Debug and Display expose the sanitized record.
 pub(crate) struct GitCommandOutput {
     raw_stdout: String,
     raw_stdout_valid_utf8: bool,
     raw_stdout_truncated: bool,
+    raw_stderr: Option<String>,
     diagnostic: GitCommandFailure,
 }
 
@@ -37,6 +38,10 @@ impl GitCommandOutput {
         self.raw_stdout_truncated
     }
 
+    pub(crate) fn stderr(&self) -> Option<&str> {
+        self.raw_stderr.as_deref()
+    }
+
     pub(crate) const fn diagnostic(&self) -> &GitCommandFailure {
         &self.diagnostic
     }
@@ -50,12 +55,14 @@ impl GitCommandOutput {
             raw_stdout,
             raw_stdout_valid_utf8,
             raw_stdout_truncated,
+            raw_stderr,
             diagnostic,
         } = self;
         Ok(Self {
             raw_stdout,
             raw_stdout_valid_utf8,
             raw_stdout_truncated,
+            raw_stderr,
             diagnostic: diagnostic.require_success()?,
         })
     }
@@ -240,6 +247,9 @@ async fn capture_exchange(
     let raw_stdout_valid_utf8 = std::str::from_utf8(&captured_stdout.bytes).is_ok();
     let raw_stdout = String::from_utf8_lossy(&captured_stdout.bytes).into_owned();
     let raw_stdout_truncated = captured_stdout.truncated;
+    let raw_stderr = (!captured_stderr.truncated)
+        .then(|| String::from_utf8(captured_stderr.bytes.clone()).ok())
+        .flatten();
     (diagnostic.stdout, diagnostic.stdout_truncated) = sanitize(captured_stdout, &secrets);
     diagnostic.classify_stderr(&String::from_utf8_lossy(&captured_stderr.bytes));
     (diagnostic.stderr, diagnostic.stderr_truncated) = sanitize(captured_stderr, &secrets);
@@ -248,6 +258,7 @@ async fn capture_exchange(
             raw_stdout,
             raw_stdout_valid_utf8,
             raw_stdout_truncated,
+            raw_stderr,
             diagnostic,
         }),
         other => {

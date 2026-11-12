@@ -430,9 +430,96 @@ async fn conversation_merge_rejection_race_refreshes_blockers_without_masking_ot
     ] {
         assert!(
             provider
-                .classify_rejected_merge(&review(), credential, &failure)
+                .classify_rejected_merge(
+                    &review(),
+                    credential,
+                    &api::CommandFailure::unknown(failure)
+                )
                 .await
                 .is_err()
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn merge_rejection_routing_ignores_command_paths_and_credential_redaction() {
+    use super::super::conversations::test_support::{fixture, save, state};
+    let rejected = json!({"data":{"enqueuePullRequest":null},"errors":[{
+        "type":"UNPROCESSABLE","path":["enqueuePullRequest"],
+        "message":"A conversation must be resolved before this pull request can be merged."}]});
+    let schema = json!({"errors":[{"type":"GRAPHQL_VALIDATION_FAILED",
+        "message":"Unknown schema field enqueuePullRequest"}]});
+    let mut incomplete = rejected.clone();
+    incomplete.as_object_mut().unwrap().remove("data");
+    for (directory, token, response, repair) in [
+        ("ordinary", "test-token", rejected.clone(), true),
+        (
+            "credential-collision",
+            "conversation",
+            rejected.clone(),
+            true,
+        ),
+        ("type-collision", "UNPROCESSABLE", rejected.clone(), true),
+        (
+            "mutation-collision",
+            "enqueuePullRequest",
+            rejected.clone(),
+            true,
+        ),
+        ("ordinary-schema", "test-token", schema.clone(), false),
+        (
+            "schema-A conversation must be resolved",
+            "test-token",
+            schema,
+            false,
+        ),
+        (
+            "incomplete-A conversation must be resolved",
+            "test-token",
+            incomplete,
+            false,
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join(directory);
+        std::fs::create_dir(&home).unwrap();
+        let program = fixture(&home, &review(), "Bot");
+        let mut data = state(&program);
+        let mut policy = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+        policy["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
+        data["policy"] = policy;
+        data["expected_token"] = json!(token);
+        data["merge_rejection"] = response;
+        data["threads"][0]["resolved"] = json!(true);
+        save(&program, &data);
+        let provider = authority(program.clone(), &home);
+        let outcome = provider
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token(token),
+                &TestReviewCheckpoint,
+            )
+            .await;
+        if repair {
+            assert_eq!(outcome.unwrap(), SourceMergeRequestOutcome::ReviewBlocked);
+            // Retained queue rejection evidence must still allow confirmed withdrawal.
+            assert_eq!(
+                provider
+                    .withdraw_merge_request(&review(), SourceDeliveryCredential::token(token))
+                    .await
+                    .unwrap(),
+                SourceMergeWithdrawal::Withdrawn
+            );
+        } else {
+            let failure = outcome.unwrap_err();
+            assert!(matches!(failure, SourceDeliveryError::Api(_)));
+            assert!(!failure.to_string().contains(token));
+        }
+        assert_eq!(
+            state(&program)["threads"][0]["resolved"],
+            json!(false),
+            "each rejection races with the same authoritative unresolved blocker"
         );
     }
 }

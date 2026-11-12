@@ -4,9 +4,9 @@ import os
 import sys
 from pathlib import Path
 
-assert os.environ.get('GH_TOKEN') in ('test-token', 'refreshed-token')
 path = Path(sys.argv[0] + '.state')
 state = json.loads(path.read_text())
+assert os.environ.get('GH_TOKEN') in ('test-token', 'refreshed-token', state.get('expected_token', 'test-token'))
 args = sys.argv[1:]
 endpoint = args[1]
 review = json.loads(Path(sys.argv[0] + '.review').read_text())
@@ -102,7 +102,7 @@ if 'resolveReviewThread' in query:
 if 'enqueuePullRequest' in query:
     state['threads'][0]['resolved'] = False
     save()
-    print(json.dumps({'data': {'enqueuePullRequest': None}, 'errors': [{'type': 'UNPROCESSABLE', 'path': ['enqueuePullRequest'], 'message': 'A conversation must be resolved before this pull request can be merged.'}]}))
+    print(json.dumps(state.get('merge_rejection', {'data': {'enqueuePullRequest': None}, 'errors': [{'type': 'UNPROCESSABLE', 'path': ['enqueuePullRequest'], 'message': 'A conversation must be resolved before this pull request can be merged.'}]})))
     sys.exit(1)
 if 'dequeuePullRequest' in query or 'disablePullRequestAutoMerge' in query:
     emit({'data': {'dequeuePullRequest': {'clientMutationId': None}, 'disablePullRequestAutoMerge': {'clientMutationId': None}}})

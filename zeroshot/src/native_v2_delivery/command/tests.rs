@@ -297,7 +297,7 @@ async fn helper_pipe_inheritance_preserves_the_main_exit_status() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn sensitive_capture_keeps_protocol_stdout_private_and_errors_sanitized() {
+async fn sensitive_capture_keeps_protocol_streams_private_and_errors_sanitized() {
     let stdout = "private-protocol-output-marker";
     let stderr = "private-protocol-error-marker";
     let secrets = [stdout.to_owned(), stderr.to_owned()];
@@ -314,6 +314,7 @@ async fn sensitive_capture_keeps_protocol_stdout_private_and_errors_sanitized() 
             assert!(!diagnostic.contains(stdout));
             assert!(!diagnostic.contains(stderr));
         }
+        assert_eq!(output.stderr(), Some(stderr));
         assert_eq!(output.diagnostic().stdout, "[REDACTED]");
         assert_eq!(output.diagnostic().stderr, "[REDACTED]");
         assert!(!output.stdout_truncated());

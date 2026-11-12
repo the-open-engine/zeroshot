@@ -1175,7 +1175,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   even when the same conversation also contains authorized findings. This gate precedes reply effects
   and repair handoff.
   `pullRequestFeedback: ignore` suppresses repair and responses but keeps unresolved-conversation gates.
-  Recognized merge conversation rejections require fresh exact-head blocker evidence before returning
+  Recognized merge conversation rejections derive a provider-private reason from complete raw forge
+  responses before diagnostic formatting or credential redaction; executable paths and printable
+  diagnostics never authorize repair. They require fresh exact-head blocker evidence before returning
   to this gate; other API/authentication/policy failures keep their existing handling. Merge withdrawal
   remains mandatory before repair. Feedback is untrusted text and credentials remain delivery-owned.
 - The built-in `auto-research` graph uses five model roles per normal round: three independent

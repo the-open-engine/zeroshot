@@ -330,12 +330,14 @@ impl GhCliDeliveryAuthority {
         review: &SourceReviewReceipt,
         selected: (merge_policy::MergeMethod, &str),
         credential: SourceDeliveryCredential<'_>,
-    ) -> Result<(), SourceDeliveryError> {
+    ) -> Result<(), api::CommandFailure> {
         let (merge_method, pull_request_id) = selected;
         if merge_method == merge_policy::MergeMethod::Queue {
             return queue::enqueue(self, review, pull_request_id, credential).await;
         }
-        self.ensure_instance(credential).await?;
+        self.ensure_instance(credential)
+            .await
+            .map_err(api::CommandFailure::unknown)?;
         let mut command = self.api_command(credential);
         command.args([
             "pr",
@@ -354,17 +356,16 @@ impl GhCliDeliveryAuthority {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
-        failure: &SourceDeliveryError,
+        failure: &api::CommandFailure,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
-        if failure.cleanup_unconfirmed() {
-            return Err(failure.clone());
+        let error = &failure.error;
+        if error.cleanup_unconfirmed() {
+            return Err(error.clone());
         }
         let snapshot = self.policy_snapshot(review, credential).await?;
-        if !failure.authentication_failed()
-            && matches!(failure.api_status(), None | Some(405 | 409 | 422))
-            && failure
-                .to_string()
-                .contains("A conversation must be resolved")
+        if !error.authentication_failed()
+            && matches!(error.api_status(), None | Some(405 | 409 | 422))
+            && failure.rejection == Some(api::MutationRejection::Conversation)
             && !matches!(
                 snapshot.state,
                 SourceReviewState::Merged { .. } | SourceReviewState::Closed
@@ -373,7 +374,7 @@ impl GhCliDeliveryAuthority {
         {
             return Ok(SourceMergeRequestOutcome::ReviewBlocked);
         }
-        let permanent_response = !failure.retryable_operation();
+        let permanent_response = !error.retryable_operation();
         match snapshot.state {
             SourceReviewState::Merged { .. } => Ok(SourceMergeRequestOutcome::Accepted),
             _ if permanent_response => Err(SourceDeliveryError::Rejected),
@@ -520,12 +521,12 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
             .await;
         match submitted {
             Ok(()) => Ok(SourceMergeRequestOutcome::Accepted),
-            Err(error) => match self
-                .classify_rejected_merge(review, credential, &error)
+            Err(failure) => match self
+                .classify_rejected_merge(review, credential, &failure)
                 .await
             {
                 Ok(outcome) => Ok(outcome),
-                Err(_) => Err(error.with_context(format!(
+                Err(_) => Err(failure.error.with_context(format!(
                     "Merge request for {}#{} into {} using {merge_method:?} failed. \
                      Check GitHub's rejection and base-branch policy before retrying delivery.",
                     review.repository, review.review_id, review.target_branch,

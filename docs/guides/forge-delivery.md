@@ -165,6 +165,9 @@ further automated replies and resolution with a maintainer intervention diagnost
 When a reviewed response is replayed after recovery, an unrecognized resolved revision requires
 reassessment through the same repair loop.
 
+A GitHub merge rejection returns to conversation repair only when its complete forge response names
+that blocker and a fresh read confirms it. Unknown API/schema failures retain their normal handling.
+
 Delivery failures name the project, source and target branches, and the review and head revision
 when known. They also list the last confirmed publication, so a failed `--ship` can still identify
 the branch and PR/MR already available on the forge. A closed review must be reopened with its
