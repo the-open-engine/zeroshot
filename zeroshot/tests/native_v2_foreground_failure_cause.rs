@@ -87,7 +87,7 @@ fn install_failing_codex_turn(fixture: &LocalFixture) {
         &bin.join("codex"),
         format!(
             r#"#!/bin/sh
-if test "${{1-}}" = app-server; then
+if test "${{1-}}" = app-server || test "${{1-}}" = --version; then
   exec '{probe}' "$@"
 fi
 cat >/dev/null

@@ -11,8 +11,22 @@ use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 
 use super::{HermesAdapter, HermesConfig};
 
+// v0.22.5 passed the live memory/session/verifier contract. v0.23.1 renamed
+// tools.browser_tool_lifecycle and cannot acknowledge native agent cleanup.
+const CLI_VERSION: crate::harnesses::HarnessCliVersion = crate::harnesses::HarnessCliVersion {
+    minimum: [0, 22, 5],
+    first_unsupported: Some([0, 23, 1]),
+    arguments: &["--version"],
+    parse: |reported| {
+        crate::harnesses::cli_version::release(reported.strip_prefix("Hermes Agent v")?)
+    },
+    upgrade: "Install Hermes v0.22.5 from https://github.com/NousResearch/hermes-agent/tree/v0.22.5; v0.23.1 has incompatible agent cleanup.",
+    local_environment: |native| native.selected(super::command::LOCAL_ENVIRONMENT),
+};
+
 pub(crate) fn registration() -> HarnessRegistration {
     HarnessRegistration {
+        cli_version: Some(CLI_VERSION),
         descriptor: HarnessDescriptor {
             id: "hermes",
             label: "Hermes",

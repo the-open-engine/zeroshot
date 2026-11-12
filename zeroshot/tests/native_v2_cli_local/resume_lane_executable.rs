@@ -172,3 +172,67 @@ async fn worker_checkpoint(fixture: &LocalFixture, run_id: &str) -> String {
         .assert_value_with("checkpoint identity")
         .to_owned()
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn local_run_and_checkpoint_resume_refuse_old_or_unreadable_cli_before_dispatch() {
+    let fixture = LocalFixture::new();
+    let failed_run_id = failed_run(&fixture).await;
+    let checkpoint_id = worker_checkpoint(&fixture, &failed_run_id).await;
+    let executable = fixture.root.path("bin/codex");
+    let unexpected_turns = fixture.root.path("unexpected-turns");
+    for version in ["codex-cli 0.154.0", "unknown"] {
+        openengine_cluster_testkit::fixture::write_executable(
+            &executable,
+            format!("#!/bin/sh\nif [ \"$*\" = --version ]; then printf '%s\\n' '{version}'; exit 0; fi\nprintf turn >> '{}'\nexit 91\n", unexpected_turns.display()),
+            0o700,
+        )
+        .assert_value();
+        for arguments in [
+            vec![
+                "run",
+                "--title",
+                "Unsupported CLI",
+                "--graph",
+                fixture.graph.to_str().assert_value(),
+                "--input",
+                fixture.input.to_str().assert_value(),
+                "--runtime-config",
+                fixture.runtime.to_str().assert_value(),
+            ],
+            vec![
+                "resume",
+                &failed_run_id,
+                "--from-checkpoint",
+                &checkpoint_id,
+                "--discard-workspace-changes",
+            ],
+        ] {
+            let output = fixture.output(&arguments, "finish").await;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{stderr}");
+            for expected in [
+                "lane codex/openai",
+                "codex",
+                version,
+                "0.155.0 or newer",
+                "npm install -g @openai/codex@latest",
+            ] {
+                assert!(stderr.contains(expected), "missing {expected}: {stderr}");
+            }
+            assert!(output.stdout.is_empty());
+            assert!(
+                !unexpected_turns.exists(),
+                "version refusal dispatched a model turn"
+            );
+        }
+        let listed = fixture.json(&["list"], "finish").await;
+        assert_eq!(listed.assert_key("runs").as_array().assert_value().len(), 1);
+        let recovery = fixture.json(&["status", &failed_run_id], "finish").await;
+        assert!(
+            recovery
+                .assert_key("workspaceRecovery")
+                .get("successorRunId")
+                .is_none()
+        );
+    }
+}

@@ -13,6 +13,7 @@ use super::{OpenCodeAdapter, OpenCodeConfig};
 
 pub(crate) fn registration() -> HarnessRegistration {
     HarnessRegistration {
+        cli_version: None,
         descriptor: HarnessDescriptor {
             id: "opencode",
             label: "OpenCode",

@@ -118,7 +118,7 @@ impl PortableRunController {
         F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
         E: std::error::Error + Send + Sync + 'static,
     {
-        Self::start_with_shutdown(bootstrap, runtime_factory, None).await
+        Self::start_with_shutdown(bootstrap, async |admitted| runtime_factory(admitted), None).await
     }
 
     pub(super) async fn start_with_shutdown<F, E>(
@@ -127,7 +127,7 @@ impl PortableRunController {
         stopping: Option<watch::Receiver<bool>>,
     ) -> Result<Self, PortableControllerError>
     where
-        F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
+        F: AsyncFnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
         E: std::error::Error + Send + Sync + 'static,
     {
         let preparation_deadline = tokio::time::Instant::now() + bootstrap.preparation_timeout;
@@ -345,7 +345,7 @@ async fn prepare_runtime<F, E>(
     preparation_deadline: tokio::time::Instant,
 ) -> Result<PreparedRuntime, PortableControllerError>
 where
-    F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
+    F: AsyncFnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
     E: std::error::Error + Send + Sync + 'static,
 {
     if prepared.existing {
@@ -375,7 +375,9 @@ where
     .await?;
     require_not_stopping(prepared)?;
     let mut runtime = runtime_factory(&prepared.admitted)
+        .await
         .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
+    require_not_stopping(prepared)?;
     runtime.execution_seed = execution_seed;
     let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
     Ok(PreparedRuntime {

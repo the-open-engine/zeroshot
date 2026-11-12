@@ -622,6 +622,7 @@ async fn host_selected_harness_registry_controls_profiles_intents_and_run_admiss
     let mut registry = HarnessRegistry::core();
     registry
         .register(HarnessRegistration {
+            cli_version: None,
             descriptor: HarnessDescriptor {
                 id: "fixture-contribution",
                 label: "Fixture contribution",

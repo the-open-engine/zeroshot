@@ -42,7 +42,7 @@ printf '%s%s%s\n' \
     assert_ne!(run_ids[0], run_ids[1]);
     assert_eq!(
         std::fs::read_to_string(checks).unwrap(),
-        "checked\nchecked\n"
+        "checked\nchecked\nchecked\n"
     );
     fixture.assert_durable_runs(&run_ids).await;
 
@@ -78,4 +78,102 @@ printf '%s%s%s\n' \
         }
         assert_eq!(claude, 1);
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_refuses_older_and_unreadable_cli_versions_before_model_work() {
+    for reported in ["codex-cli 0.154.0", "unknown"] {
+        let fixture = AcpFixture::new();
+        fixture.install_profile();
+        let executable = fixture._root.path().join("bin/codex");
+        openengine_cluster_testkit::fixture::write_executable(
+            &executable,
+            format!("#!/bin/sh\nprintf '%s\\n' '{reported}'\n"),
+            0o700,
+        )
+        .unwrap();
+        let error = refused_version_session(
+            &fixture,
+            fixture.server_command(&fixture.workspace, &fixture.path),
+        )
+        .await;
+        for expected in [
+            "lane codex/openai",
+            "codex",
+            reported,
+            "0.155.0 or newer",
+            "npm install -g @openai/codex@latest",
+        ] {
+            assert!(
+                error.message.contains(expected),
+                "missing {expected}: {}",
+                error.message
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn version_refusals_do_not_expose_credentials_crossing_the_output_limit_or_writes() {
+    let secret = "SYNTHETIC-1517-CREDENTIAL-abcdefghijklmno";
+    for (padding, split) in [(0, false), (0, true), (1000, false), (1000, true)] {
+        let fixture = AcpFixture::new();
+        fixture.install_profile();
+        let output = if split {
+            format!(
+                "printf '%s' '{}'\n/bin/sleep 0.05\nprintf '%s\\n' '{}'\n",
+                &secret[..12],
+                &secret[12..]
+            )
+        } else {
+            "printf '%s\\n' \"$CODEX_API_KEY\"\n".to_owned()
+        };
+        openengine_cluster_testkit::fixture::write_executable(
+            &fixture._root.path().join("bin/codex"),
+            format!("#!/bin/sh\nprintf '%s' '{}'\n{output}", "x".repeat(padding)),
+            0o700,
+        )
+        .unwrap();
+        let mut command = fixture.server_command(&fixture.workspace, &fixture.path);
+        command.env("CODEX_API_KEY", secret);
+        let error = refused_version_session(&fixture, command).await;
+        assert!(!error.message.contains(&secret[..12]), "{}", error.message);
+        assert!(!error.message.contains(&secret[12..]), "{}", error.message);
+        let expected = if padding == 0 {
+            "[REDACTED]"
+        } else {
+            "omitted"
+        };
+        assert!(error.message.contains(expected), "{}", error.message);
+    }
+}
+
+async fn refused_version_session(
+    fixture: &AcpFixture,
+    mut command: tokio::process::Command,
+) -> acp::Error {
+    let mut child = command.spawn().unwrap();
+    let outgoing = child.stdin.take().unwrap();
+    let incoming = child.stdout.take().unwrap();
+    let workspace = fixture.workspace.clone();
+    let error = tokio::task::LocalSet::new()
+        .run_until(async move {
+            let (connection, io) =
+                connect(outgoing, incoming, Arc::new(RecordingClient::default())).await;
+            let error = connection
+                .new_session(acp::NewSessionRequest::new(workspace))
+                .await
+                .unwrap_err();
+            drop(connection);
+            disconnect_client(io).await;
+            error
+        })
+        .await;
+    assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+    assert_server_exits(&mut child).await;
+    assert!(
+        !fixture.capture.exists(),
+        "a refused session started model work"
+    );
+    error
 }

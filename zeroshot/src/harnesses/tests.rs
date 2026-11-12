@@ -4,6 +4,7 @@ use crate::native_v2_contract::{RuntimeLane, RuntimePlan};
 
 fn registration(id: &'static str, providers: &'static [&'static str]) -> HarnessRegistration {
     HarnessRegistration {
+        cli_version: None,
         descriptor: HarnessDescriptor {
             id,
             label: "Fixture harness",

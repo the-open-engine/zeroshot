@@ -212,7 +212,13 @@ async fn start_controller_process(
     let controller = Arc::new(
         PortableRunController::start_with_shutdown(
             bootstrap,
-            move |admitted| {
+            async move |admitted| {
+                crate::native_v2_local::check_lane_versions(
+                    &admitted.runtime,
+                    &native_environment,
+                    &workspace,
+                )
+                .await?;
                 crate::native_v2_local::build_local_process_candidate(
                     crate::native_v2_local::LocalProcessCandidateRequest {
                         delivery_receipt,

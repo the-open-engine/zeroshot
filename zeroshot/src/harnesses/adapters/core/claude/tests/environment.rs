@@ -366,3 +366,14 @@ fn explicit_providers_reject_active_incompatible_transports_only() {
         }
     }
 }
+
+#[test]
+fn contained_claude_disables_the_native_auto_updater_after_declared_values() {
+    let environment =
+        provider_environment(ClaudeProvider::Anthropic, &[("DISABLE_AUTOUPDATER", "0")])
+            .assert_value();
+    assert_eq!(
+        environment.get("DISABLE_AUTOUPDATER").map(String::as_str),
+        Some("1")
+    );
+}

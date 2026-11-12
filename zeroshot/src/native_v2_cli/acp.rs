@@ -530,11 +530,12 @@ impl AcpSession {
         let invoking_directory = std::env::current_dir().map_err(AcpServeError::Storage)?;
         let native_environment =
             crate::native_v2_local::capture_local_native_environment(&invoking_directory)?;
-        crate::native_v2_local::check_lane_executables(
+        crate::native_v2_local::check_lane_versions(
             &profile.runtime,
             &native_environment,
             &prepared.workspace,
         )
+        .await
         .map_err(|error| AcpServeError::MissingLaneExecutable(error.to_string()))?;
         let environment = Arc::new(RunEnvironment::exact(
             &profile.runtime,
