@@ -13,6 +13,8 @@ mod conversation_tests;
 mod feedback_tests;
 #[path = "http_fixture.rs"]
 mod http_fixture;
+#[path = "merge_completion_tests.rs"]
+mod merge_completion_tests;
 #[path = "metadata_tests.rs"]
 mod metadata_tests;
 #[path = "review_selection_tests.rs"]
@@ -305,6 +307,9 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
         return Response::disconnected();
     }
     let query = uri.query().unwrap_or("");
+    if path.ends_with("/repository/merge_base") {
+        merge_completion_tests::require_merge_base_refs(&state, &uri);
+    }
     if state.disconnect_membership && path.contains("/members/all/") {
         return Response::disconnected();
     }
@@ -462,7 +467,18 @@ fn merge_response(state: &mut StateData, body: Value) -> Response {
     }
     assert_eq!(body["auto_merge"], false);
     review["state"] = json!("merged");
-    review["merge_commit_sha"] = json!(MERGED);
+    if state.project["merge_method"] == "ff" {
+        review["merge_commit_sha"] = Value::Null;
+        state.responses.insert(
+            ("GET".into(), "/repository/branches/main".into()),
+            (
+                StatusCode::OK,
+                json!({"name":"main","commit":{"id":review["sha"]}}),
+            ),
+        );
+    } else {
+        review["merge_commit_sha"] = json!(MERGED);
+    }
     if state.lose_merge {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
@@ -1005,20 +1021,21 @@ fn pure_note_permalink_validation_rejects_wrong_resources_and_noncanonical_ids()
 async fn unknown_integrated_revision_never_falls_back_to_the_candidate_head() {
     let fixture = Fixture::new().await;
     fixture.open_review();
-    fixture.state.lock().unwrap().review.as_mut().unwrap()["state"] = json!("merged");
-    fixture
-        .authority
-        .project(REPOSITORY, credential())
-        .await
-        .unwrap();
-    fixture
-        .authority
-        .projects
-        .lock()
-        .unwrap()
-        .get_mut(REPOSITORY)
-        .unwrap()
-        .merge_method = "ff".into();
+    {
+        let mut state = fixture.state.lock().unwrap();
+        state.review.as_mut().unwrap()["state"] = json!("merged");
+        state.project["merge_method"] = json!("ff");
+    }
+    fixture.response(
+        "GET",
+        "/repository/branches/main",
+        (StatusCode::OK, json!({"name":"main","commit":{"id":BASE}})),
+    );
+    fixture.response(
+        "GET",
+        "/repository/merge_base",
+        (StatusCode::OK, json!({"id":BASE})),
+    );
     assert!(
         fixture
             .authority
