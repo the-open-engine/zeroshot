@@ -45,7 +45,7 @@ async fn missing_source_branch_can_create_after_rechecking_the_published_head() 
     assert_eq!(
         calls,
         [
-            "find", "branch", "create", "find", "find", "branch", "create"
+            "find", "branch", "branch", "create", "find", "find", "branch", "branch", "create"
         ]
     );
 }

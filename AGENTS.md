@@ -496,8 +496,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   staged candidate tree without recommitting when no merge is pending. Pending merges retain the
   existing reconciliation path; different local work still requires review. Review
   discovery uses the source repository/run branch before target validation, refusing retargeted or
-  ambiguous reviews. GitLab rechecks MR/ref lag twice locally, then reports persistent disagreement
-  as a terminal identity error.
+  ambiguous reviews. GitLab rechecks MR/ref lag twice locally during observation and post-push
+  metadata synchronization, then reports persistent disagreement as a terminal identity error.
 - `source_code_provider` owns effect-free source and delivery contracts and one provider registry.
   Maintained implementations live in `source_code/adapters/core`; contributed implementations
   live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,
@@ -511,7 +511,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. GitLab's complete HTTP 400 missing-source-branch
+  merges; required merge trains remain pending. A merged fast-forward MR without explicit merge
+  or squash SHAs confirms its bound reviewed head only when the validated target equals that head
+  or their captured-SHA merge base proves the head is a target ancestor. Other merge methods and
+  invalid explicit SHAs never fall back to the candidate. GitLab's complete HTTP 400 missing-source-branch
   creation validation retries only within the existing review-sync batch, rechecking the published
   candidate before each POST; uncertain creation responses retain their at-most-once fence.
   `need_rebase` merges the captured target into a
