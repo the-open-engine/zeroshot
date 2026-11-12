@@ -43,7 +43,7 @@ impl WorkspaceFixture {
         openengine_cluster_testkit::fixture::write_executable(
             &bin.join("codex"),
             format!(
-                "#!/bin/sh\ncase \"$*\" in *app-server*) ;; *) /bin/pwd >> {} ;; esac\nexec {} {} \"$@\"\n",
+                "#!/bin/sh\ncase \"$*\" in *app-server*|--version) ;; *) /bin/pwd >> {} ;; esac\nexec {} {} \"$@\"\n",
                 quote(&root.path("provider-starts.txt").to_string_lossy()),
                 quote(node.trim()),
                 quote(&harness.to_string_lossy())

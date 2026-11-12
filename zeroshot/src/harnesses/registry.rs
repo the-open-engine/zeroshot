@@ -25,6 +25,7 @@ pub struct HarnessDescriptor {
 
 pub struct HarnessRegistration {
     pub descriptor: HarnessDescriptor,
+    pub cli_version: Option<super::HarnessCliVersion>,
     pub build: fn(
         HarnessBuildContext,
         Option<Arc<ActiveMemoryHooks>>,
@@ -108,6 +109,13 @@ impl HarnessRegistry {
     pub fn descriptor(&self, lane: &RuntimeLane) -> Result<&HarnessDescriptor, HarnessError> {
         let entry = self.entry(lane)?;
         Ok(&entry.descriptor)
+    }
+
+    pub(crate) fn cli_version(
+        &self,
+        lane: &RuntimeLane,
+    ) -> Result<Option<&super::HarnessCliVersion>, HarnessError> {
+        Ok(self.entry(lane)?.cli_version.as_ref())
     }
 
     fn entry(&self, lane: &RuntimeLane) -> Result<&HarnessRegistration, HarnessError> {

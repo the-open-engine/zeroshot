@@ -653,7 +653,8 @@ fn codex_configuration_probe(response: &ProbeResponse) -> String {
         }
     };
     format!(
-        r#"if test "${{1-}}" = app-server; then
+        r#"if test "$*" = --version; then printf '%s\n' 'codex-cli 0.155.0'; exit 0; fi
+if test "${{1-}}" = app-server; then
   while IFS= read -r request; do
     case "$request" in
       *'"method":"initialize"'*) printf '%s\n' '{{"id":1,"result":{{}}}}' ;;

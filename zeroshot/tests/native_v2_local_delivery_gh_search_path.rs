@@ -305,6 +305,7 @@ printf '%s\n' 'fixture gh returns no GitHub data'
             &self.bin.join("codex"),
             format!(
                 r#"#!/bin/sh
+if [ "$*" = --version ]; then printf 'codex-cli 0.155.0\n'; exit 0; fi
 if test "${{1-}}" = app-server; then
   while IFS= read -r request; do
     case "$request" in

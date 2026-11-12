@@ -2,7 +2,9 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 const { spawn } = require('node:child_process');
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
-if (process.argv.includes('app-server')) {
+if (process.argv.includes('--version')) {
+  console.log('codex-cli 0.155.0');
+} else if (process.argv.includes('app-server')) {
   readline.createInterface({ input: process.stdin }).on('line', (line) => {
     const request = JSON.parse(line);
     if (request.method === 'initialize') emit({ id: request.id, result: {} });

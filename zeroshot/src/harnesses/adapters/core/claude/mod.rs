@@ -272,6 +272,9 @@ impl ClaudeAdapter {
                 "Claude provider credentials are missing or conflict with other credentials",
             )
         })?;
+        if self.runners.is_hosted() {
+            environment.insert("DISABLE_AUTOUPDATER".to_owned(), "1".to_owned());
+        }
         Ok(environment)
     }
 }

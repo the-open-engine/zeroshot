@@ -24,7 +24,7 @@ async fn shutdown_before_runtime_composition_never_dispatches_or_admits_a_run() 
             workspace,
             storage.clone(),
         ),
-        |_| -> Result<PortableRuntime, std::io::Error> {
+        async |_| -> Result<PortableRuntime, std::io::Error> {
             panic!("a stopped startup must not compose a runtime")
         },
         Some(stopping),
@@ -119,7 +119,9 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
         let result = prepare_runtime(
             &prepared,
             &bootstrap,
-            |_| Err::<PortableRuntime, _>(std::io::Error::other("stop before graph dispatch")),
+            async |_| {
+                Err::<PortableRuntime, _>(std::io::Error::other("stop before graph dispatch"))
+            },
             deadline,
         )
         .await;
@@ -629,7 +631,7 @@ async fn workspace_checkpoint_store_follows_runtime_policy() {
         let runtime = prepare_runtime(
             &prepared,
             &bootstrap,
-            |_| {
+            async |_| {
                 Ok::<_, std::io::Error>(PortableRuntime {
                     checkpoints: None,
                     execution_seed: Vec::new(),

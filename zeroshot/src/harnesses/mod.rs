@@ -1,7 +1,9 @@
 //! Host-selected harness registrations. Core and contributed adapters share execution contracts.
 
 pub mod adapters;
+pub(crate) mod cli_version;
 mod contracts;
+pub use cli_version::HarnessCliVersion;
 pub(crate) mod native_config;
 mod registry;
 pub(crate) mod runtime;

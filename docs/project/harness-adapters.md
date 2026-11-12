@@ -15,9 +15,24 @@ Official local builds include every adapter below. Install each native CLI separ
 | `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`, `github`, `opencode`, `opencode-go` | Contributed  |
 | `hermes`   | `openai`, `anthropic`, `openrouter`, `gateway`, `github`, `bedrock`                            | Contributed  |
 
-The `claude` adapter requires Claude Code 2.1.310 or newer. Before its first model turn it runs the
-selected executable with `--version` and fails the node, naming the reported version, when that
-release is older or the output can't be read.
+Each adapter owns its CLI version range. Local `run`, checkpoint `resume` and ACP sessions check
+all agent lanes before any node starts, using the captured launch search path and native environment.
+Each distinct executable is probed once with a 60-second deadline. An older, incompatible or unreadable
+version is refused with the lane, executable, reported version, supported range and installation step.
+
+| Harness    | Minimum | First unsupported release | Basis                                                                     |
+| ---------- | ------- | ------------------------- | ------------------------------------------------------------------------- |
+| `claude`   | 2.1.310 | Open                      | Per-result usage and stopped-subagent fields                              |
+| `codex`    | 0.155.0 | Open                      | Verified adapter fixtures                                                 |
+| `copilot`  | 1.0.70  | Open                      | Oldest CLI explicitly handled by the adapter                              |
+| `pi`       | 1.4.0   | Open                      | Tested hosted release                                                     |
+| `hermes`   | 0.22.5  | 0.22.6                    | Live memory/session/verifier contract; 0.22.6 breaks native agent cleanup |
+| `opencode` | None    | None                      | Version 2 compatibility and its minimum belong to the version 2 port      |
+
+An open upper bound accepts newer releases; an exclusive upper bound marks a known incompatibility.
+Copilot also checks its RPC protocol at session connection. Claude retains its first-turn check using
+the same range declaration. Contained Claude launches disable the native auto-updater to preserve the
+image's exact tested pin.
 
 Local builds enable `contributed-harnesses` by default. Platform and the default target image disable
 default features and independently admit only the core registry. Targets advertise enabled pairs
@@ -100,7 +115,8 @@ directory's `register` function. Core implementations live beside it under `adap
 existing public `native_v2_codex`, `native_v2_claude`, `native_v2_copilot` and `native_v2_pi` module
 paths remain available to embedders.
 
-A registration supplies a descriptor, provider-access declarations, local path normalization, pure
+A registration supplies a descriptor, an optional `HarnessCliVersion` declaration (range, version
+arguments/parser, native environment selector and upgrade step), provider-access declarations, local path normalization, pure
 reserved-control validation for `harnessConfig`, and a factory. Keep descriptors pure: no credential reads, filesystem inspection, process launches or
 provider requests. The registry validates bounded harness/provider IDs and compatible pairs.
 Factories receive `HarnessBuildContext` and return `HarnessAdapter` with `NodeDriver` and

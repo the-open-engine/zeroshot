@@ -4,10 +4,14 @@
 //! in `model_usage_since_last_result` and stopped subagents in `subagent_stats`. Older releases
 //! report only session running totals, which a resumed session cannot divide into invocations.
 //! The selected executable is checked once per run, before its first model turn, through the
-//! same launch path and environment as that turn. Newer releases have no upper bound.
+//! same launch path and environment as that turn. Local admission uses the same declaration.
 
 use std::sync::Arc;
-use std::time::Duration;
+
+use super::registration::CLI_VERSION;
+use crate::harnesses::cli_version::{CHECK_BUDGET, VersionOutput};
+#[cfg(test)]
+use crate::harnesses::cli_version::release;
 
 use super::{ClaudeAdapter, ClaudeAttempt, ClaudeProcessStart, ClaudeTurn, turn_process};
 use crate::execution::process::{ProcessSessionCommand, ProcessSessionOutput};
@@ -16,10 +20,6 @@ use crate::native_v2_capsule::provider_process::{
     report_cleanup_failure, require_process_cleanup,
 };
 use crate::native_v2_runner::{LiveOutput, LiveOutputStream, NodeRunnerError};
-
-const MINIMUM: [u64; 3] = [2, 1, 310];
-const CHECK_BUDGET: Duration = Duration::from_secs(60);
-const MAX_REPORTED_BYTES: usize = 1024;
 
 impl ClaudeAdapter {
     /// Returns a failed start when the executable is not a supported Claude Code release.
@@ -50,10 +50,9 @@ impl ClaudeAdapter {
         // The check takes no input; an executable that reads stdin sees EOF at once.
         let _ = process.close_stdin().await;
         let mut stdout = process.detach_stdout();
-        let mut reported = Vec::new();
+        let mut reported = VersionOutput::default();
         while let Some(chunk) = stdout.recv().await {
-            let room = MAX_REPORTED_BYTES.saturating_sub(reported.len());
-            reported.extend(chunk.as_slice().iter().take(room));
+            reported.push(chunk.as_slice());
         }
         let completion = process.wait().await;
         let Ok(output) = require_process_cleanup(&completion) else {
@@ -68,11 +67,8 @@ impl ClaudeAdapter {
         if output.cancelled || control.is_cancelled() {
             return Err(NodeRunnerError::Cancelled);
         }
-        let reported = String::from_utf8_lossy(&reported);
-        let reported = reported.trim();
         if process_failure_evidence(output, false).is_none()
-            && let Some([major, minor, patch]) =
-                release(reported).filter(|release| *release >= MINIMUM)
+            && let Some([major, minor, patch]) = reported.accepted_version(&CLI_VERSION)
         {
             control
                 .emit(LiveOutput::new(
@@ -84,30 +80,23 @@ impl ClaudeAdapter {
             return Ok(None);
         }
         Ok(Some(ClaudeProcessStart::Failed(
-            ClaudeAttempt::process_failure(unsupported(reported, output)),
+            ClaudeAttempt::process_failure(unsupported(
+                &format!("claude/{}", self.provider.name()),
+                &command.program,
+                reported.diagnostic().trim(),
+                output,
+            )),
         )))
     }
 }
 
-/// Reads the leading `MAJOR.MINOR.PATCH` of `claude --version` output, such as
-/// `2.1.318 (Claude Code)`.
-fn release(reported: &str) -> Option<[u64; 3]> {
-    let mut parts = reported.split_whitespace().next()?.split('.').map(|part| {
-        part.bytes()
-            .all(|byte| byte.is_ascii_digit())
-            .then(|| part.parse::<u64>().ok())
-            .flatten()
-    });
-    let release = [parts.next()??, parts.next()??, parts.next()??];
-    parts.next().is_none().then_some(release)
-}
-
-fn unsupported(reported: &str, output: &ProcessSessionOutput) -> String {
-    let [major, minor, patch] = MINIMUM;
-    let reported = reported.lines().next().unwrap_or_default();
-    let mut detail = format!(
-        "Claude Code {major}.{minor}.{patch} or newer is required; the executable's --version reported {reported:?}"
-    );
+fn unsupported(
+    lane: &str,
+    executable: &str,
+    reported: &str,
+    output: &ProcessSessionOutput,
+) -> String {
+    let mut detail = CLI_VERSION.refusal(lane, std::path::Path::new(executable), reported);
     if let Some(failure) = process_failure_evidence(output, false) {
         detail.push_str("; ");
         detail.push_str(&failure.detail);

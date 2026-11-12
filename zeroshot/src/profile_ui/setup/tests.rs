@@ -118,6 +118,7 @@ fn setup_materializes_access_through_the_selected_custom_registry() {
     let mut registry = HarnessRegistry::core();
     registry
         .register(HarnessRegistration {
+            cli_version: None,
             descriptor: HarnessDescriptor {
                 id: "fixture",
                 label: "Fixture",

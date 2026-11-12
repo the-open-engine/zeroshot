@@ -12,8 +12,19 @@ use crate::harnesses::runtime::{
 };
 use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 
+pub(super) const CLI_VERSION: crate::harnesses::HarnessCliVersion =
+    crate::harnesses::HarnessCliVersion {
+        minimum: [2, 1, 310],
+        first_unsupported: None,
+        arguments: &["--version"],
+        parse: |reported| crate::harnesses::cli_version::release(reported),
+        upgrade: "Upgrade with `claude update`.",
+        local_environment: |native| native.selected(super::command::LOCAL_ENVIRONMENT),
+    };
+
 pub(crate) fn registration() -> HarnessRegistration {
     HarnessRegistration {
+        cli_version: Some(CLI_VERSION),
         descriptor: HarnessDescriptor {
             id: "claude",
             label: "Claude Code",

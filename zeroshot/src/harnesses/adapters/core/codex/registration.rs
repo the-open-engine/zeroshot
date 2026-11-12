@@ -9,8 +9,25 @@ use crate::harnesses::{
 use crate::harnesses::runtime::{NativeFactoryInputs, parsed_provider_access, normalize_paths};
 use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 
+pub(super) const CLI_VERSION: crate::harnesses::HarnessCliVersion =
+    crate::harnesses::HarnessCliVersion {
+        minimum: [0, 155, 0],
+        first_unsupported: None,
+        arguments: &["--version"],
+        parse: |reported| {
+            crate::harnesses::cli_version::release(reported.strip_prefix("codex-cli ")?)
+        },
+        upgrade: "Upgrade with `npm install -g @openai/codex@latest`.",
+        local_environment: |native| {
+            let mut environment = native.selected(super::command::LOCAL_ENVIRONMENT);
+            environment.extend(native.selected(&["CODEX_HOME"]));
+            environment
+        },
+    };
+
 pub(crate) fn registration() -> HarnessRegistration {
     HarnessRegistration {
+        cli_version: Some(CLI_VERSION),
         descriptor: HarnessDescriptor {
             id: "codex",
             label: "Codex",

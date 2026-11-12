@@ -9,8 +9,27 @@ use crate::harnesses::{
 use crate::harnesses::runtime::{NativeFactoryInputs, parsed_provider_access, normalize_paths};
 use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 
+pub(super) const CLI_VERSION: crate::harnesses::HarnessCliVersion =
+    crate::harnesses::HarnessCliVersion {
+        minimum: [1, 0, 70],
+        first_unsupported: None,
+        arguments: &["--version"],
+        parse: |reported| {
+            let line = reported.lines().next()?;
+            let version = line.strip_prefix("GitHub Copilot CLI ").unwrap_or(line);
+            crate::harnesses::cli_version::release(version.strip_suffix('.').unwrap_or(version))
+        },
+        upgrade: "Upgrade with `npm install -g @github/copilot@latest`.",
+        local_environment: |native| {
+            let mut environment = native.selected(super::command::LOCAL_ENVIRONMENT);
+            environment.extend(native.selected(&["COPILOT_HOME"]));
+            environment
+        },
+    };
+
 pub(crate) fn registration() -> HarnessRegistration {
     HarnessRegistration {
+        cli_version: Some(CLI_VERSION),
         descriptor: HarnessDescriptor {
             id: "copilot",
             label: "GitHub Copilot",

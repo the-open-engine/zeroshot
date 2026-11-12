@@ -3,6 +3,36 @@ use crate::native_v2_observability::NativeV2Observability;
 use crate::native_v2_supervisor::{NativeV2Supervisor, RunEnvironment};
 use crate::v2_run_ledger::{CreateRun, RunLedger, sqlite::SqliteRunLedger};
 use openengine_cluster_protocol::{RunId, RunLogsParams, Sha256Digest, TerminalResult};
+use openengine_cluster_testkit::assertions::AssertError;
+
+#[tokio::test]
+async fn first_turn_version_refusal_omits_credentials_crossing_the_output_limit() {
+    let secret = "SYNTHETIC-1517-CREDENTIAL-abcdefghijklmno";
+    let workspace = TestDirectory::new("claude-version-secret-boundary");
+    workspace.write(
+        "fake-claude.sh",
+        &format!(
+            "if [ \"$*\" != --version ]; then : > model-turn; exit 91; fi\n\
+             printf '%s' '{}'\nprintf '%s' '{}'\n/bin/sleep 0.05\nprintf '%s\\n' '{}'\n",
+            "x".repeat(1000),
+            &secret[..12],
+            &secret[12..]
+        ),
+    );
+    let (runner, binding) =
+        anthropic_runner(&workspace, "claude-test", None, SessionScope::Execution).await;
+    let handle = runner
+        .start(request(binding, 1, &[(ANTHROPIC_KEY, secret)]))
+        .await
+        .assert_value();
+    let (captured, completion) = failure::complete_with_durable(handle).await;
+    let error = completion.assert_error();
+    let public = format!("{}\n{error}", captured.logs.join("\n"));
+    assert!(public.contains("omitted"), "{public}");
+    assert!(!public.contains(&secret[..12]), "{public}");
+    assert!(!public.contains(&secret[12..]), "{public}");
+    assert!(!workspace.child("model-turn").exists());
+}
 
 #[tokio::test]
 async fn finished_owner_runs_release_version_checks_and_keep_versions_once_per_run() {

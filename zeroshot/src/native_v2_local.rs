@@ -111,6 +111,8 @@ pub enum LocalCompositionError {
         lane: RuntimeLane,
         executable: &'static str,
     },
+    #[error("{0}")]
+    UnsupportedLaneVersion(String),
     #[error("Git delivery needs the `{executable}` executable on PATH")]
     MissingDeliveryExecutable { executable: &'static str },
     #[error(
@@ -629,6 +631,47 @@ pub(crate) fn check_lane_executables(
         let executable = registry.descriptor(&lane)?.executable;
         if find_local_executable(executable, native_environment, working_directory).is_none() {
             return Err(LocalCompositionError::MissingLaneExecutable { lane, executable });
+        }
+    }
+    Ok(())
+}
+
+/// Local admission probes each distinct native executable before dispatching any lane.
+pub(crate) async fn check_lane_versions(
+    runtime: &RuntimePlan,
+    native_environment: &BTreeMap<String, String>,
+    working_directory: &Path,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Result<(), LocalCompositionError> {
+    check_lane_executables(runtime, native_environment, working_directory)?;
+    let registry = crate::harnesses::HarnessRegistry::local();
+    let native = LocalHarnessEnvironment::new(native_environment.clone());
+    let search_path = local_search_path(&native);
+    let mut checked = std::collections::BTreeSet::new();
+    for lane in runtime.lanes() {
+        let Some(version) = registry.cli_version(&lane)? else {
+            continue;
+        };
+        let executable = registry.descriptor(&lane)?.executable;
+        let path = find_local_executable(executable, native_environment, working_directory)
+            .ok_or_else(|| LocalCompositionError::MissingLaneExecutable {
+                lane: lane.clone(),
+                executable,
+            })?;
+        if checked.insert(path.clone()) {
+            version
+                .check_local(
+                    &lane.to_string(),
+                    crate::harnesses::cli_version::LocalCliContext {
+                        executable: &path,
+                        native: &native,
+                        search_path: &search_path,
+                        workspace: working_directory,
+                        stopping: stopping.clone(),
+                    },
+                )
+                .await
+                .map_err(LocalCompositionError::UnsupportedLaneVersion)?;
         }
     }
     Ok(())

@@ -834,6 +834,7 @@ fn install_fake_codex(bin: &Path, capture: &Path, state: &Path) {
     let script = format!(
         r#"#!/bin/sh
 set -eu
+if [ "${{1-}}" = --version ]; then printf 'codex-cli 0.155.0\n'; exit 0; fi
 if [ "${{1-}}" = app-server ]; then
   exit 1
 fi
@@ -875,7 +876,7 @@ fn install_fake_claude(bin: &Path) {
     std::fs::create_dir_all(bin).unwrap();
     openengine_cluster_testkit::fixture::write_executable(
         &bin.join("claude"),
-        "#!/bin/sh\nexit 1\n",
+        "#!/bin/sh\nif [ \"$*\" = --version ]; then printf '2.1.310 (Claude Code)\\n'; exit 0; fi\nexit 1\n",
         0o755,
     )
     .unwrap();
