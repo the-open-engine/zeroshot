@@ -358,7 +358,7 @@ fn parser_exposes_workspace_recovery_commands() {
         parse_native_v2_args(args(&["resume", "run-7", "--target", "docker"])).assert_value();
     assert!(matches!(
         resume,
-        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id }, from: None, forward_github_token: false })
+        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id }, from: None, discard_workspace_changes: false, forward_github_token: false })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-7"
     ));
 
@@ -387,10 +387,39 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
         NativeV2CliCommand::Resume(RunResumeCommand {
             run: RunSelector { target, run_id },
             from: Some(RunResumeFrom::Checkpoint { checkpoint_id }),
+            discard_workspace_changes: false,
             forward_github_token: false,
         }) if target.as_deref() == Some("docker")
             && run_id.as_str() == "run-7" && checkpoint_id.as_str() == "entry:opaque-2"
     ));
+    // Consent to replace the checkout is local; a named target restores its own retained copy.
+    let rollback = parse_native_v2_args(args(&[
+        "resume",
+        "run-7",
+        "--from-checkpoint",
+        "entry-2",
+        "--discard-workspace-changes",
+    ]))
+    .assert_value();
+    assert!(matches!(
+        rollback,
+        NativeV2CliCommand::Resume(RunResumeCommand {
+            run: RunSelector { target: None, .. },
+            from: Some(RunResumeFrom::Checkpoint { .. }),
+            discard_workspace_changes: true,
+            ..
+        })
+    ));
+    assert!(
+        parse_native_v2_args(args(&[
+            "resume",
+            "run-7",
+            "--discard-workspace-changes",
+            "--target",
+            "docker",
+        ]))
+        .is_err()
+    );
     let listing = parse_native_v2_args(args(&[
         "checkpoints",
         "run-7",

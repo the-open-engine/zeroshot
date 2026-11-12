@@ -15,7 +15,7 @@ use openengine_cluster_protocol::{
     RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileSelector,
     RunProfileSetRequest, RunStatus, RunStatusParams, RunSubmitResult, RunWatchParams,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatus, CliRunStatusResult,
@@ -100,6 +100,21 @@ where
 pub struct ChannelSubscription<E> {
     receiver: mpsc::Receiver<Result<CliSubscriptionItem<E>, NativeV2CliError>>,
     task: tokio::task::JoinHandle<()>,
+    established: oneshot::Receiver<()>,
+}
+
+impl<E> ChannelSubscription<E> {
+    /// A connected transport alone does not establish observation. Keep setup owned by this
+    /// subscription so cancellation aborts it, and return only after the OECP acknowledgement.
+    async fn established(mut self) -> Result<Self, NativeV2CliError> {
+        if (&mut self.established).await.is_ok() {
+            return Ok(self);
+        }
+        match self.receiver.recv().await {
+            Some(Err(error)) => Err(error),
+            _ => Err(NativeV2CliError::Disconnected),
+        }
+    }
 }
 
 impl<E> Drop for ChannelSubscription<E> {
@@ -369,7 +384,9 @@ where
             .connector
             .connect(target, Some(params.run_id.clone()))
             .await?;
-        Ok(BoxedSubscription::new(spawn_watch(transport, params)))
+        Ok(BoxedSubscription::new(
+            spawn_watch(transport, params).established().await?,
+        ))
     }
 
     async fn run_logs(
@@ -401,7 +418,9 @@ where
             .connector
             .connect(target, Some(params.run_id.clone()))
             .await?;
-        Ok(BoxedSubscription::new(spawn_logs(transport, params)))
+        Ok(BoxedSubscription::new(
+            spawn_logs(transport, params).established().await?,
+        ))
     }
 
     async fn run_attach(
@@ -413,7 +432,9 @@ where
             .connector
             .connect(require_named_target(target)?, Some(params.run_id.clone()))
             .await?;
-        Ok(BoxedSubscription::new(spawn_attach(transport, params)))
+        Ok(BoxedSubscription::new(
+            spawn_attach(transport, params).established().await?,
+        ))
     }
 
     async fn run_force(
@@ -497,6 +518,7 @@ where
         &self,
         target: Option<&str>,
         params: openengine_cluster_protocol::RunResumeParams,
+        _discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let target = require_named_target(target)?;
         if let Some(result) = self
@@ -580,18 +602,26 @@ where
     T: SubscriptionTransport + Send + Sync + 'static,
 {
     let (sender, receiver) = mpsc::channel(32);
+    let (ready, established) = oneshot::channel();
     let task = tokio::spawn(async move {
         match RunSubscriptionClient::new(transport.as_ref())
             .run_watch(params)
             .await
         {
-            Ok((_result, mut stream)) => forward(&mut stream, sender).await,
+            Ok((_result, mut stream)) => {
+                let _ = ready.send(());
+                forward(&mut stream, sender).await;
+            }
             Err(error) => {
                 let _ = sender.send(Err(subscription_error(error))).await;
             }
         }
     });
-    ChannelSubscription { receiver, task }
+    ChannelSubscription {
+        receiver,
+        task,
+        established,
+    }
 }
 
 pub(super) fn spawn_logs<T>(
@@ -602,18 +632,26 @@ where
     T: SubscriptionTransport + Send + Sync + 'static,
 {
     let (sender, receiver) = mpsc::channel(32);
+    let (ready, established) = oneshot::channel();
     let task = tokio::spawn(async move {
         match RunSubscriptionClient::new(transport.as_ref())
             .run_logs(params)
             .await
         {
-            Ok((_result, mut stream)) => forward(&mut stream, sender).await,
+            Ok((_result, mut stream)) => {
+                let _ = ready.send(());
+                forward(&mut stream, sender).await;
+            }
             Err(error) => {
                 let _ = sender.send(Err(subscription_error(error))).await;
             }
         }
     });
-    ChannelSubscription { receiver, task }
+    ChannelSubscription {
+        receiver,
+        task,
+        established,
+    }
 }
 
 pub(super) fn spawn_attach<T>(
@@ -624,18 +662,26 @@ where
     T: SubscriptionTransport + Send + Sync + 'static,
 {
     let (sender, receiver) = mpsc::channel(32);
+    let (ready, established) = oneshot::channel();
     let task = tokio::spawn(async move {
         match RunSubscriptionClient::new(transport.as_ref())
             .run_attach(params)
             .await
         {
-            Ok((_result, mut stream)) => forward(&mut stream, sender).await,
+            Ok((_result, mut stream)) => {
+                let _ = ready.send(());
+                forward(&mut stream, sender).await;
+            }
             Err(error) => {
                 let _ = sender.send(Err(subscription_error(error))).await;
             }
         }
     });
-    ChannelSubscription { receiver, task }
+    ChannelSubscription {
+        receiver,
+        task,
+        established,
+    }
 }
 
 async fn forward<T, E, O>(

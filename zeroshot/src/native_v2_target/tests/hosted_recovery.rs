@@ -46,6 +46,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
                     commit_identity: None,
                     commit_co_author: None,
                 },
+                false,
             )
             .await
             .assert_value();

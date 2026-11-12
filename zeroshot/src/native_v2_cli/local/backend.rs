@@ -1,42 +1,80 @@
 use super::*;
-use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, remove_restore_stage};
+use crate::native_v2_supervisor::checkpoints::{
+    CheckpointRestore, CheckpointRestoreSelection, remove_restore_stage,
+};
+use openengine_cluster_protocol::RunResumeFrom;
 
-fn validate_checkpoint_policy(
-    enabled: bool,
-    from: Option<&openengine_cluster_protocol::RunResumeFrom>,
-) -> Result<(), NativeV2CliError> {
-    if !enabled
-        && matches!(
-            from,
-            Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { .. })
-        )
-    {
-        return Err(local_message(
-            "workspace checkpoint restore is unavailable because workspaceCheckpoints is false",
-        ));
+/// Chooses the snapshot a local successor restores, if any. Plain resume keeps the user-owned
+/// checkout as it is. Replacing it needs `--discard-workspace-changes`: to roll back to a selected
+/// checkpoint, or to complete an interrupted restore of the latest snapshot, which earlier plain
+/// resumes recorded. While an interrupted restore remains, a resume that would not complete a
+/// restore is refused, so no agent runs on a partially restored checkout.
+fn local_restore_selection(
+    run_id: &RunId,
+    from: Option<&RunResumeFrom>,
+    recovery: &LocalRecoveryDocument,
+    discard_workspace_changes: bool,
+) -> Result<Option<CheckpointRestoreSelection>, NativeV2CliError> {
+    if let Some(RunResumeFrom::Checkpoint { checkpoint_id }) = from {
+        if !recovery.submission.runtime.workspace_checkpoints {
+            return Err(local_message(
+                "workspace checkpoint restore is unavailable because workspaceCheckpoints is false",
+            ));
+        }
+        let selection = CheckpointRestoreSelection::Checkpoint {
+            checkpoint_id: checkpoint_id.clone(),
+        };
+        if !discard_workspace_changes {
+            return Err(NativeV2CliError::Usage(format!(
+                "restoring checkpoint {} discards this workspace's tracked, staged, untracked, \
+                 and ignored files and its index, replacing them with the checkpoint's; attached \
+                 HEAD, branches and commits are kept. To roll \
+                 back, run `{}`",
+                checkpoint_id.as_str(),
+                restore_command(run_id, &selection),
+            )));
+        }
+        return Ok(Some(selection));
     }
-    Ok(())
+    match &recovery.pending_restore {
+        Some(pending)
+            if discard_workspace_changes
+                && pending.selection == CheckpointRestoreSelection::Latest =>
+        {
+            Ok(Some(CheckpointRestoreSelection::Latest))
+        }
+        Some(pending) => Err(local_message(format!(
+            "an interrupted checkpoint restore may have left this workspace partially restored; \
+             complete it with `{}`",
+            restore_command(run_id, &pending.selection)
+        ))),
+        None if discard_workspace_changes => Err(NativeV2CliError::Usage(
+            "--discard-workspace-changes requires --from-checkpoint; a plain resume keeps the \
+             current checkout"
+                .to_owned(),
+        )),
+        None => Ok(None),
+    }
 }
 
-fn interrupted_restore_error(pending: &PendingRestore) -> NativeV2CliError {
-    let selection = match &pending.selection {
-        crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Latest => {
-            "plain resume".to_owned()
+fn restore_command(run_id: &RunId, selection: &CheckpointRestoreSelection) -> String {
+    let selection = match selection {
+        CheckpointRestoreSelection::Latest => String::new(),
+        CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
+            format!(" --from-checkpoint {}", checkpoint_id.as_str())
         }
-        crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Checkpoint {
-            checkpoint_id,
-        } => format!("--from-checkpoint {}", checkpoint_id.as_str()),
     };
-    local_message(format!(
-        "an interrupted checkpoint restore may have left this workspace partially restored; \
-         resume with {selection} to complete it"
-    ))
+    format!(
+        "zeroshot resume {}{selection} --discard-workspace-changes",
+        run_id.as_str()
+    )
 }
 
 impl LocalCliBackend {
     async fn resume_local(
         &self,
         params: openengine_cluster_protocol::RunResumeParams,
+        discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         if params.commit_identity.is_some() || params.commit_co_author.is_some() {
             return Err(local_message(
@@ -54,7 +92,8 @@ impl LocalCliBackend {
         let recovery = self
             .claimable_recovery_document(&params.run_id, status.workspace_recovery.recoverable)?;
         let _claim = self.claim_recovery_workspace(&params.run_id)?;
-        self.start_local_successor(params, recovery).await
+        self.start_local_successor(params, recovery, discard_workspace_changes)
+            .await
     }
 
     fn claimable_recovery_document(
@@ -73,38 +112,29 @@ impl LocalCliBackend {
     }
 
     /// Selects the restore for a successor and pins the snapshot it installs. After an
-    /// interrupted restore, the same selection must still resolve to its pinned snapshot, and a
-    /// resume that would start without any restore is refused until one completes.
+    /// interrupted restore, the same selection must still resolve to its pinned snapshot.
     fn checkpoint_selection(
         &self,
         params: &openengine_cluster_protocol::RunResumeParams,
         recovery: &LocalRecoveryDocument,
+        discard_workspace_changes: bool,
     ) -> Result<Option<(CheckpointRestore, PendingRestore)>, NativeV2CliError> {
-        use crate::native_v2_supervisor::checkpoints::{
-            CheckpointRestoreSelection, latest_available, pin, restore_selection,
-        };
-        let enabled = recovery.submission.runtime.workspace_checkpoints;
-        validate_checkpoint_policy(enabled, params.from.as_ref())?;
-        if !enabled {
+        let Some(selection) = local_restore_selection(
+            &params.run_id,
+            params.from.as_ref(),
+            recovery,
+            discard_workspace_changes,
+        )?
+        else {
             return Ok(None);
-        }
-        let directory = self.paths(&params.run_id)?.storage().join("checkpoints");
-        let selection = restore_selection(params.from.as_ref());
-        let pending = recovery.pending_restore.as_ref();
-        if matches!(&selection, CheckpointRestoreSelection::Latest)
-            && !latest_available(&directory).map_err(local_error)?
-        {
-            return match pending {
-                None => Ok(None),
-                Some(pending) => Err(interrupted_restore_error(pending)),
-            };
-        }
+        };
         let restore = CheckpointRestore {
-            directory,
+            directory: self.paths(&params.run_id)?.storage().join("checkpoints"),
             selection,
         };
-        let snapshot = pin(&restore).map_err(local_error)?;
-        if pending.is_some_and(|pending| {
+        let snapshot =
+            crate::native_v2_supervisor::checkpoints::pin(&restore).map_err(local_error)?;
+        if recovery.pending_restore.as_ref().is_some_and(|pending| {
             pending.selection == restore.selection && pending.snapshot != snapshot
         }) {
             return Err(local_message(
@@ -123,8 +153,23 @@ impl LocalCliBackend {
         &self,
         params: openengine_cluster_protocol::RunResumeParams,
         mut recovery: LocalRecoveryDocument,
+        discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
-        let (checkpoint, restore) = self.checkpoint_selection(&params, &recovery)?.unzip();
+        if recovery.local_branch.is_none()
+            && !crate::native_v2_admission::delivery_capabilities(&recovery.submission.graph.root)
+                .is_empty()
+        {
+            return Err(NativeV2CliError::Usage(
+                "cannot resume this legacy local Git-delivery run: its recovery metadata does not \
+                 record the working branch. Preserve the retained workspace, return to the intended \
+                 branch with `git switch BRANCH`, and start a new run from a feature branch or with \
+                 --worktree; no checkpoint was restored and no agent was started"
+                    .to_owned(),
+            ));
+        }
+        let (checkpoint, restore) = self
+            .checkpoint_selection(&params, &recovery, discard_workspace_changes)?
+            .unzip();
         let prepared = self.prepare_successor(&params, &recovery).await?;
         if let Some(interrupted) = &recovery.pending_restore {
             // Reconciliation confirmed that the interrupted attempt's controller released its
@@ -420,10 +465,13 @@ impl NativeV2CliBackend for LocalCliBackend {
     ) -> Result<(), NativeV2CliError> {
         require_local(command.run.target.as_deref())?;
         let recovery = self.read_recovery_document(&command.run.run_id)?;
-        validate_checkpoint_policy(
-            recovery.submission.runtime.workspace_checkpoints,
+        local_restore_selection(
+            &command.run.run_id,
             command.from.as_ref(),
+            &recovery,
+            command.discard_workspace_changes,
         )
+        .map(|_| ())
     }
 
     async fn run_checkpoints(
@@ -447,9 +495,10 @@ impl NativeV2CliBackend for LocalCliBackend {
         &self,
         target: Option<&str>,
         params: openengine_cluster_protocol::RunResumeParams,
+        discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         require_local(target)?;
-        self.resume_local(params).await
+        self.resume_local(params, discard_workspace_changes).await
     }
 
     async fn run_discard_workspace(

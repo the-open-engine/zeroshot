@@ -22,7 +22,8 @@ prefix (such as `https://gitlab.example/install`). GitHub uses a root web URL.
 Local `--push`, `--pr` and `--ship` runs require a clean checkout before agents start. Commit, stash
 or remove staged, unstaged and unignored untracked changes named in the refusal. Finish or abort a
 pending merge first. Changed submodule commit pointers count; files inside submodules do not.
-Runs without Git
+A plain `zeroshot resume` does not repeat this check: the successor works on the checkout as it is,
+so changes you make after a failure can be delivered with the run's own work. Runs without Git
 delivery keep their normal behavior. Delivery shows Git's warning when a run adds an unregistered
 embedded repository, but permits the gitlink; register it as a submodule when others need to clone it.
 
@@ -58,6 +59,9 @@ The invoking checkout's files, index, HEAD and branch tips stay unchanged. The n
 contains committed files only: dependencies, `.env` and other untracked resources are not copied,
 linked or installed. Resume reuses the same workspace and attached run branch, while preserving
 shared branch tips. If another checkout owns the saved branch, release it there before resuming.
+Older local Git-delivery records without the working branch cannot resume safely. Preserve the
+retained workspace, return to the intended attached branch, and start a new run from a feature
+branch or with `--worktree`; zeroshot refuses recovery before restoring files or starting agents.
 Worktrees remain after success and failure; inspect and remove them explicitly
 with `git worktree remove PATH`. Use `git worktree list` from the invoking repository to find its
 path. Hosted and named-target delivery keep their managed run branches.
@@ -212,7 +216,30 @@ are refused rather than duplicated.
 GitLab briefly rechecks a lagging merge-request head against the branch ref. Persistent disagreement
 stops with both revisions in the diagnostic instead of polling indefinitely.
 
-If a worker rewrites local history after publication, delivery refuses further publication; list
-checkpoints with `zeroshot checkpoints RUN_ID`, then run
-`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` using a checkpoint taken before the rewrite
-to continue with the existing published branch and review.
+If a worker rewrites history after publication, delivery refuses further publication. For a local
+run, restoring a checkpoint replaces files and the index but keeps the attached branch at its
+current tip. A checkpoint alone therefore cannot recover the published ancestry.
+
+To continue the same local run and review without rewinding the branch, first preserve any work
+you need by committing it on the run branch or saving it outside the checkout. Fetch the published
+branch from its delivery remote, merge its head into the run's attached branch, and resolve and
+commit any conflicts. Run the Git commands in the retained run workspace, using its managed
+worktree for `--worktree` runs. Then select a checkpoint taken before the rewrite:
+
+```console
+git fetch REMOTE refs/heads/BRANCH
+git merge --no-edit FETCH_HEAD
+zeroshot checkpoints RUN_ID
+zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-changes
+```
+
+Use the actual delivery remote and branch for `REMOTE` and `BRANCH`. The merge preserves the
+rewritten local commits and adds the published ancestry. The checkpoint restores its candidate
+files and index while keeping that merged tip attached; it discards current tracked, staged,
+untracked, and ignored files. If you cannot merge the histories, keep the old workspace for
+inspection and start a new run on a new feature branch based on the fetched published head.
+Neither procedure requires a force-push.
+
+For a named target, use `zeroshot checkpoints RUN_ID --target NAME`, then
+`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --target NAME` with a checkpoint taken
+before the rewrite. The target restores its own retained checkout; omit `--discard-workspace-changes`.

@@ -433,7 +433,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
         connection_resolver: None,
         github_token: None,
     };
-    assert!(backend.run_resume(None, resume).await.is_err());
+    assert!(backend.run_resume(None, resume, false).await.is_err());
     assert!(
         backend
             .run_discard_workspace(

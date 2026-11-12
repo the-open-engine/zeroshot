@@ -181,6 +181,19 @@ async fn failed_worktree_run_resumes_in_the_retained_attached_worktree() {
     assert_eq!(recovery["workspaceRevision"], fixture.head);
     assert!(workspace.is_dir());
     assert!(!workspace.join(".env").exists());
+    // Plain resume keeps work done in the retained worktree after failure, including a newer
+    // branch tip and index. It must not reinstall the failed run's latest checkpoint.
+    fs::write(workspace.join("fix.txt"), "committed recovery\n").unwrap();
+    fs::write(workspace.join(".gitignore"), "build.log\n").unwrap();
+    git(&workspace, &["add", "fix.txt", ".gitignore"]);
+    git(&workspace, &["commit", "-m", "fix after failure"]);
+    let resumed_head = git(&workspace, &["rev-parse", "HEAD"]);
+    fs::write(workspace.join("staged.txt"), "staged recovery\n").unwrap();
+    git(&workspace, &["add", "staged.txt"]);
+    let resumed_index = git(&workspace, &["ls-files", "--stage"]);
+    fs::write(workspace.join("seed.txt"), "unstaged recovery\n").unwrap();
+    fs::write(workspace.join("untracked.txt"), "untracked recovery\n").unwrap();
+    fs::write(workspace.join("build.log"), "ignored recovery\n").unwrap();
     let resumed = fixture.json(&["resume", run_id], "finish").await;
     let successor = resumed["runId"].as_str().unwrap();
     fixture.wait_succeeded(successor, "finish").await;
@@ -202,6 +215,18 @@ async fn failed_worktree_run_resumes_in_the_retained_attached_worktree() {
         git(&workspace, &["symbolic-ref", "--short", "HEAD"]),
         run_branch
     );
+    assert_eq!(git(&workspace, &["rev-parse", "HEAD"]), resumed_head);
+    assert_eq!(git(&workspace, &["rev-parse", run_branch]), resumed_head);
+    assert_eq!(git(&workspace, &["ls-files", "--stage"]), resumed_index);
+    for (name, contents) in [
+        ("fix.txt", "committed recovery\n"),
+        ("staged.txt", "staged recovery\n"),
+        ("seed.txt", "unstaged recovery\n"),
+        ("untracked.txt", "untracked recovery\n"),
+        ("build.log", "ignored recovery\n"),
+    ] {
+        assert_eq!(fs::read_to_string(workspace.join(name)).unwrap(), contents);
+    }
     assert_eq!(
         git(&fixture.repository, &["symbolic-ref", "--short", "HEAD"]),
         branch

@@ -1123,3 +1123,103 @@ async fn local_non_fast_forward_push_and_reconciliation_preserve_history() {
     );
     assert!(!repository.workspace.join("remote").exists());
 }
+
+#[tokio::test]
+async fn local_checkpoint_after_rewrite_needs_a_merge_to_recover_published_ancestry() {
+    use crate::native_v2_supervisor::checkpoints::filesystem;
+    use crate::source_code_provider::{
+        SourceHeadReconciliation, SourceReconciliationOutcome, SourceReviewReceipt,
+    };
+
+    let repository = Repository::new();
+    let branch = "feature/recovery";
+    let workspace = &repository.workspace;
+    git(workspace, &["checkout", "-b", branch]);
+    let published = repository.commit("published");
+    let remote = repository.remote.to_str().assert_value();
+    git(workspace, &["push", remote, branch]);
+    let snapshots = repository.root.path().join("checkpoints");
+    let checkpoint = filesystem::capture(workspace, &snapshots, &()).assert_value();
+    git(workspace, &["reset", "--hard", &repository.base]);
+    let rewritten = repository.commit("rewritten");
+
+    // The selected snapshot restores its candidate and index, but cannot rewind the live branch
+    // to its old published tip. Reconciliation must still refuse the rewritten history.
+    filesystem::restore(&snapshots, &checkpoint, workspace).assert_value();
+    assert_eq!(git(workspace, &["rev-parse", "HEAD"]), rewritten);
+    assert_eq!(
+        git(workspace, &["write-tree"]),
+        git(workspace, &["rev-parse", &format!("{published}^{{tree}}")])
+    );
+    assert_eq!(
+        git(workspace, &["symbolic-ref", "HEAD"]),
+        format!("refs/heads/{branch}")
+    );
+    let mut config = repository
+        .transport(Path::new("git"), workspace, repository.remote.as_os_str())
+        .config()
+        .clone();
+    config.local_environment =
+        Some(crate::native_v2_capsule::provider_process::current_process_environment());
+    let transport = GitTransport::new(config, &repository.remote);
+    let receipt = SourceReviewReceipt {
+        review_id: String::new(),
+        repository: "acme/project".to_owned(),
+        target_branch: "main".to_owned(),
+        head_branch: branch.to_owned(),
+        head_revision: published.clone(),
+    };
+    let request = || SourceHeadReconciliation {
+        workspace,
+        published: &receipt,
+        observed: &receipt,
+        require_fast_forward: true,
+        commit_message: "checkpoint recovery",
+        authorized_update: false,
+        adopting_existing: false,
+    };
+    let credential = SourceDeliveryCredential::token("");
+    let outcome = reconcile_head(&transport, request(), credential)
+        .await
+        .assert_value();
+    assert!(
+        matches!(outcome, SourceReconciliationOutcome::Refused(message) if message.contains(branch))
+    );
+    assert_eq!(git(workspace, &["rev-parse", "HEAD"]), rewritten);
+    assert_eq!(git(&repository.remote, &["rev-parse", branch]), published);
+
+    // Preserve the restored work, then follow the documented manual merge. This creates a
+    // descendant of both histories, and a subsequent checkpoint restore keeps that merged tip.
+    git(workspace, &["commit", "-m", "preserve restored candidate"]);
+    let saved = git(workspace, &["rev-parse", "HEAD"]);
+    git(
+        workspace,
+        &["fetch", remote, &format!("refs/heads/{branch}")],
+    );
+    git(workspace, &["merge", "--no-edit", "FETCH_HEAD"]);
+    let merged = git(workspace, &["rev-parse", "HEAD"]);
+    assert_eq!(git(workspace, &["rev-parse", "HEAD^1"]), saved);
+    assert_eq!(git(workspace, &["rev-parse", "HEAD^2"]), published);
+    filesystem::restore(&snapshots, &checkpoint, workspace).assert_value();
+    assert_eq!(git(workspace, &["rev-parse", "HEAD"]), merged);
+    assert_eq!(
+        git(workspace, &["symbolic-ref", "HEAD"]),
+        format!("refs/heads/{branch}")
+    );
+    git(
+        workspace,
+        &["merge-base", "--is-ancestor", &rewritten, "HEAD"],
+    );
+    assert_eq!(
+        reconcile_head(&transport, request(), credential)
+            .await
+            .assert_value(),
+        SourceReconciliationOutcome::Unchanged
+    );
+    transport
+        .push(branch, &merged, credential)
+        .await
+        .assert_value();
+    assert_eq!(git(&repository.remote, &["rev-parse", branch]), merged);
+    assert_eq!(git(workspace, &["rev-parse", "HEAD"]), merged);
+}

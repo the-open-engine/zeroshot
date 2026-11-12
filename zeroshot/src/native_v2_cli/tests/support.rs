@@ -29,7 +29,7 @@ mod failure;
 use failure::{error_logs, runtime_failure_status, runtime_failure_watch};
 #[path = "support/lifecycle.rs"]
 mod lifecycle;
-use lifecycle::{permanent_reopen_watch, queued_watch};
+use lifecycle::{ObservationOutage, permanent_reopen_watch, queued_watch};
 
 pub(in crate::native_v2_cli) fn prepared_review_fixture() -> crate::native_v2_review::PreparedReview
 {
@@ -131,6 +131,7 @@ pub(in crate::native_v2_cli) enum Call {
     Resume {
         target: Option<String>,
         params: RunResumeParams,
+        discard_workspace_changes: bool,
     },
     Checkpoints {
         target: Option<String>,
@@ -224,6 +225,7 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     reconnect_watch: bool,
     permanent_reopen_watch: bool,
     target_transport_reopen_watch: bool,
+    observation_outage: Option<ObservationOutage>,
     reconnect_logs: bool,
     attach_behavior: AttachBehavior,
     failed_watch: bool,
@@ -876,6 +878,9 @@ impl NativeV2CliBackend for FakeBackend {
                 execution: None,
             },
         );
+        if let Some(outage) = self.observation_outage.filter(|_| attempt > 1) {
+            return outage.reopen().await;
+        }
         if self.pending_watch {
             return Ok(FakeSubscription::pending());
         }
@@ -941,6 +946,9 @@ impl NativeV2CliBackend for FakeBackend {
                 execution: params.execution.as_ref(),
             },
         );
+        if let Some(outage) = self.observation_outage.filter(|_| attempt > 1) {
+            return outage.reopen().await;
+        }
         if self.pending_logs {
             return Ok(FakeSubscription::pending());
         }
@@ -983,19 +991,24 @@ impl NativeV2CliBackend for FakeBackend {
         target: Option<&str>,
         params: RunAttachParams,
     ) -> Result<Self::Attach, NativeV2CliError> {
-        let mut calls = self.calls.lock().assert_value();
-        let attempt = calls
-            .iter()
-            .filter(|call| matches!(call, Call::Attach { .. }))
-            .count()
-            + 1;
-        calls.push(Call::Attach {
-            target: target.map(str::to_owned),
-            run_id: params.run_id.as_str().to_owned(),
-            execution: params.execution.as_str().to_owned(),
-        });
-        drop(calls);
+        let attempt = {
+            let mut calls = self.calls.lock().assert_value();
+            let attempt = calls
+                .iter()
+                .filter(|call| matches!(call, Call::Attach { .. }))
+                .count()
+                + 1;
+            calls.push(Call::Attach {
+                target: target.map(str::to_owned),
+                run_id: params.run_id.as_str().to_owned(),
+                execution: params.execution.as_str().to_owned(),
+            });
+            attempt
+        };
 
+        if let Some(outage) = self.observation_outage.filter(|_| attempt > 1) {
+            return outage.reopen().await;
+        }
         match (self.attach_behavior, attempt) {
             (AttachBehavior::Done, _) => {
                 Ok(FakeSubscription::items(vec![CliSubscriptionItem::Closed {
@@ -1103,10 +1116,12 @@ impl NativeV2CliBackend for FakeBackend {
         &self,
         target: Option<&str>,
         params: RunResumeParams,
+        discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         self.calls.lock().assert_value().push(Call::Resume {
             target: target.map(str::to_owned),
             params: params.clone(),
+            discard_workspace_changes,
         });
         Ok(openengine_cluster_protocol::RunResumeResult {
             run_id: params.successor_run_id,

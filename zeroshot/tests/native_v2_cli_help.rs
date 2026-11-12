@@ -72,9 +72,11 @@ fn recovery_help_distinguishes_restart_from_checkpoint_continuation() {
     assert_prose(
         &resume,
         &[
-            "latest retained workspace",
+            "retained workspace",
+            "checkout as it is now",
             "--from-checkpoint",
             "saved graph boundary",
+            "--discard-workspace-changes",
         ],
     );
     let checkpoints = successful_stdout(&["checkpoints", "--help"]);

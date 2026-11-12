@@ -223,6 +223,7 @@ impl RunResumeArgs {
         Ok(NativeV2CliCommand::Resume(RunResumeCommand {
             run: self.run.into_selector()?,
             from,
+            discard_workspace_changes: self.discard_workspace_changes,
             forward_github_token: self.forward_gh_token,
         }))
     }

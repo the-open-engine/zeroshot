@@ -440,6 +440,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   workspace and attached branch; local request fingerprints preserve replay before remote I/O.
   Resume reuses that workspace and attaches its branch without rewinding shared refs, refusing
   attachment when another registered checkout owns the branch.
+  Legacy local Git-delivery recovery without recorded branch ownership refuses before checkpoint
+  restore, successor publication or controller launch; preserve the workspace and start a new run
+  from the intended attached branch rather than selecting contained delivery's managed fallback.
   Detached-HEAD guidance prefers a unique retained workspace branch, verified against local refs,
   ancestry and worktree ownership; checkout history is a fallback, never a guessed default branch.
   Publishing already committed work may confirm the admitted source commit without a new commit,
@@ -460,7 +463,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   candidates can integrate a diverged target and return through review; contained runs retain their
   mutation requirement. Git integration pins
   delivery identity per command and never writes it into shared worktree configuration.
-  Existing attached HEAD survives checkpoint restore while files/index restore independently. Worktree
+  Existing attached HEAD survives checkpoint restore while files/index restore independently. Local
+  checkpoint restore requires `--discard-workspace-changes` and cannot recover rewritten ancestry:
+  merge the fetched published head into the run branch first, or start a new feature branch/run
+  from that head; never rewind shared refs to make a checkpoint deliverable. Worktree
   removal is explicit; hosted/named-target managed branch behavior is unchanged. These flags
   are local CLI state and do not change MCP tools, protocol source types or remote plugins.
 - New local PR/merge submissions verify the remote target branch before controller startup,
@@ -783,7 +789,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
   not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
-  retained workspace recovery. Default resume starts a fresh graph on the latest retained workspace;
+  retained workspace recovery. Default resume starts a fresh graph on the retained workspace;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
   imports old provider sessions, secrets, or token usage. Checkpoint IDs never become filesystem paths.
   The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
@@ -795,7 +801,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
   Versioned execution seeds live in separate files and are read only for selected continuation.
-  Restart restores the latest published snapshot without importing a seed. Restore staging is a
+  Target restart restores the latest published snapshot without importing a seed. Local restart
+  restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
+  after a failure enters the successor. A selected local checkpoint is an explicit rollback that
+  requires the CLI-only `--discard-workspace-changes` (rejected with `--target`); without it resume
+  fails before credential resolution, successor claim or workspace change and names the opt-in
+  command. Rollback keeps the shared-Git restore contract below. Restore staging is a
   private sibling of the workspace so final replacement stays on one filesystem. A restore reads
   the selected seed and extracts and validates its complete stage before changing the workspace.
   Restic runs in a contained process tree that is confirmed stopped on failure or at the deadline.
@@ -805,8 +816,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   selected snapshot and records it with the successor as the attempt in the predecessor's recovery
   metadata before launch, and clears it once that successor is ready. The local stage is named
   after its attempt, so the next resume removes only that stage. The same selection must still
-  resolve to the pinned snapshot; another selection that restores a snapshot replaces the record,
-  and a resume that would start without restoring is refused while it remains. Successful lineages
+  resolve to the pinned snapshot; another consented checkpoint selection replaces the record, and a
+  plain resume is refused while it remains. A `Latest` record left by an older plain resume is
+  completed only with consent: `resume RUN_ID --discard-workspace-changes` replays its pinned
+  snapshot. Outside that case the flag requires `--from-checkpoint`. Successful lineages
   delete their catalogs and repository only after durable terminal success; failed lineages retain
   both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable
@@ -1282,6 +1295,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   identity stays private and unredacted for exact watch matching; its printable message is redacted.
   ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
   context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
+- After opening observation, `run`, `watch`, `logs` and `attach` on direct or hosted named targets
+  announce the first connection loss once on stderr and state that the run continues there.
+  Reconnects back off from 100 ms to a five-second cap, preserving durable watch/log cursors.
+  Ten continuous minutes without reconnecting ends the command with exit 1, the transport error
+  and `zeroshot watch RUN_ID --target NAME`. Reconnect requests share that deadline. Ctrl-C
+  detaches during requests and waits; neither detachment nor giving up stops the target run.
+  Local controller observation keeps its existing lifetime; no reconnect setting is exposed.
+  Named-target OECP observation opens only after the subscription acknowledgement, and dropping
+  setup aborts its task. Python accepts a complete JSON error or the final stderr line after
+  notices, preserving typed diagnostics; an earlier diagnostic never overrides the terminal line.
 - Graph verification errors display their first safe diagnostic, its path and the count of further
   diagnostics through the shared verifier error, so local validation and hosted rejection report the
   same cause. Within the 1,024-byte target problem message bound, the count and then the path's
@@ -1650,6 +1673,8 @@ python -m mkdocs build --strict
   filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
   Tests limiting a child's file size direct only that child's `LLVM_PROFILE_FILE` to `/dev/null`
   so the intentional write failure cannot corrupt collected profiles.
+  Local CLI fixture repositories exclude `*.profraw` through their shared Git exclude file,
+  keeping profiles from environment-cleared instrumented processes out of delivery and status.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.

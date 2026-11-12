@@ -215,6 +215,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
                     connection_resolver: None,
                     github_token: None,
                 },
+                false,
             )
             .await,
     );
@@ -321,6 +322,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
                     connection_resolver: None,
                     github_token: None,
                 },
+                false,
             )
             .await
             .is_err()
@@ -426,18 +428,21 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
     );
 
     let error = backend
-        .resume_local(RunResumeParams {
-            git_credentials: None,
-            commit_identity: None,
-            commit_co_author: None,
+        .resume_local(
+            RunResumeParams {
+                git_credentials: None,
+                commit_identity: None,
+                commit_co_author: None,
 
-            run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
-            successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
-            from: None,
-            connections: BTreeMap::new(),
-            connection_resolver: None,
-            github_token: None,
-        })
+                run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
+                successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
+                from: None,
+                connections: BTreeMap::new(),
+                connection_resolver: None,
+                github_token: None,
+            },
+            false,
+        )
         .await
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
@@ -460,17 +465,20 @@ async fn local_resume_rejects_a_commit_identity_or_co_author_before_touching_loc
         (None, Some(co_author_identity())),
     ] {
         let error = backend
-            .resume_local(RunResumeParams {
-                run_id: run_id("0199f33f-3b44-7d21-9000-000000000044"),
-                successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000045"),
-                from: None,
-                connections: BTreeMap::new(),
-                connection_resolver: None,
-                github_token: None,
-                git_credentials: None,
-                commit_identity,
-                commit_co_author,
-            })
+            .resume_local(
+                RunResumeParams {
+                    run_id: run_id("0199f33f-3b44-7d21-9000-000000000044"),
+                    successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000045"),
+                    from: None,
+                    connections: BTreeMap::new(),
+                    connection_resolver: None,
+                    github_token: None,
+                    git_credentials: None,
+                    commit_identity,
+                    commit_co_author,
+                },
+                false,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -532,18 +540,21 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
         .assert_value();
 
     let error = backend
-        .resume_local(RunResumeParams {
-            git_credentials: None,
-            commit_identity: None,
-            commit_co_author: None,
+        .resume_local(
+            RunResumeParams {
+                git_credentials: None,
+                commit_identity: None,
+                commit_co_author: None,
 
-            run_id: original.clone(),
-            successor_run_id: successor.clone(),
-            from: None,
-            connections: BTreeMap::new(),
-            connection_resolver: None,
-            github_token: None,
-        })
+                run_id: original.clone(),
+                successor_run_id: successor.clone(),
+                from: None,
+                connections: BTreeMap::new(),
+                connection_resolver: None,
+                github_token: None,
+            },
+            false,
+        )
         .await
         .assert_error();
 
@@ -602,4 +613,120 @@ fn local_resume_claimability_fails_closed_before_controller_effects() {
         .claimable_recovery_document(&original_run_id, true)
         .assert_value();
     assert_eq!(available.delivery_run_id, Some(original_run_id));
+}
+
+#[tokio::test]
+async fn legacy_git_delivery_resume_without_branch_ownership_refuses_before_any_restore_or_launch()
+{
+    use crate::native_v2_candidate::test_support::{
+        TestGitRepository, git, git_delivery_node, git_output,
+    };
+    use openengine_cluster_protocol::{CheckpointId, NodeName, NodeRuntimeBinding, RunResumeFrom};
+
+    for detached in [false, true] {
+        let repo = TestGitRepository::candidate();
+        git(&repo.workspace, &["checkout", "-b", "feature/legacy"]);
+        if detached {
+            // Earlier restores installed a raw SHA without a checkout reflog entry.
+            std::fs::write(repo.workspace.join(".git/HEAD"), format!("{}\n", repo.base))
+                .assert_value();
+        }
+        let backend = LocalCliBackend::new(
+            repo.root.child("state"),
+            repo.root.child("must-not-launch"),
+            repo.workspace.clone(),
+            PathBuf::from("git"),
+        );
+        let original = run_id("0199f33f-3b44-7d21-9000-000000000061");
+        let successor = run_id("0199f33f-3b44-7d21-9000-000000000062");
+        let mut submission = contract_submission("legacy-delivery-branch");
+        submission.graph = full_graph(vec![git_delivery_node(), success_node()]);
+        submission.runtime.nodes_mut().insert(
+            NodeName::new("deliver").assert_value(),
+            NodeRuntimeBinding::GitDelivery {
+                connections: Default::default(),
+                pull_request_feedback: Default::default(),
+            },
+        );
+        let ledger = create_contract_run(&backend, &original, &submission).await;
+        ledger
+            .append(
+                &original,
+                vec![
+                    crate::v2_run_ledger::RunEvent::RunStarted,
+                    crate::v2_run_ledger::RunEvent::Terminal {
+                        result: TerminalResult::Failed {
+                            context: None,
+                            reason: EnumLabel::new("worker_failed").assert_value(),
+                        },
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        let legacy = json!({"submission": submission, "workspace": repo.workspace});
+        let recovery: LocalRecoveryDocument = serde_json::from_value(legacy).assert_value();
+        assert!(recovery.local_branch.is_none());
+        backend
+            .write_recovery_document(&original, &recovery)
+            .assert_value();
+        let path = backend
+            .paths(&original)
+            .assert_value()
+            .storage()
+            .join(RECOVERY_FILE);
+        let saved = std::fs::read(&path).assert_value();
+        let head = std::fs::read(repo.workspace.join(".git/HEAD")).assert_value();
+        let index = git_output(&repo.workspace, &["ls-files", "--stage"]);
+
+        for (from, discard) in [
+            (None, false),
+            (Some(RunResumeFrom::Restart {}), false),
+            (
+                Some(RunResumeFrom::Checkpoint {
+                    checkpoint_id: CheckpointId::new("entry-1").assert_value(),
+                }),
+                true,
+            ),
+        ] {
+            let error = backend
+                .resume_local(
+                    RunResumeParams {
+                        run_id: original.clone(),
+                        successor_run_id: successor.clone(),
+                        from,
+                        connections: Default::default(),
+                        connection_resolver: None,
+                        github_token: None,
+                        git_credentials: None,
+                        commit_identity: None,
+                        commit_co_author: None,
+                    },
+                    discard,
+                )
+                .await
+                .assert_error();
+            assert!(matches!(error, NativeV2CliError::Usage(_)), "{error}");
+            for expected in [
+                "legacy local Git-delivery",
+                "working branch",
+                "git switch BRANCH",
+                "new run",
+                "--worktree",
+            ] {
+                assert!(error.to_string().contains(expected), "{error}");
+            }
+            assert!(!backend.run_storage(&successor).assert_value().exists());
+            assert_eq!(std::fs::read(&path).assert_value(), saved);
+            assert_eq!(
+                std::fs::read(repo.workspace.join(".git/HEAD")).assert_value(),
+                head
+            );
+            assert_eq!(git_output(&repo.workspace, &["ls-files", "--stage"]), index);
+            assert_eq!(
+                git_output(&repo.workspace, &["rev-parse", "feature/legacy"]),
+                repo.base
+            );
+        }
+    }
 }

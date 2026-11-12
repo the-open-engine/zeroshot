@@ -1,5 +1,5 @@
 ---
-description: 'Installer verification, update behavior, managed skills and building the workspace UI.'
+description: 'Installer verification, update behavior, network access, managed skills and building the workspace UI.'
 ---
 
 # Installation and updates
@@ -53,6 +53,23 @@ the package's `bin/native` directory without changing `package.json` or npm's in
 `zeroshot --version` reports the updated executable. A later npm install uses its selected package
 version to replace the executables again. To synchronize npm's records with the CLI, reinstall the
 desired version with `npm install --global @the-open-engine-company/zeroshot@X.Y.Z`.
+
+## Network access
+
+zeroshot has no telemetry, analytics or crash reporting. The CLI makes network requests only for
+these:
+
+| When                                  | What it contacts                                                                                                    |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| npm install                           | GitHub release downloads, for the platform executable                                                              |
+| `zeroshot update`                     | The GitHub API for the latest release, then its downloads. Requests are anonymous. Nothing checks in the background |
+| A run                                 | The model providers, gateways and connections in your runtime plan, through the agents and scripts it starts       |
+| Delivery and review                   | The GitHub or GitLab host of the repository                                                                         |
+| `--target` or `zeroshot target login` | That target only, self-hosted or zeroshot Platform                                                                  |
+
+zeroshot starts Pi with `PI_TELEMETRY=0` and Copilot with session telemetry off. Claude Code and
+Codex follow their own settings. Agents and scripts can also reach whatever their own tools reach.
+`zeroshot ui` serves the workspace UI from your machine and loads nothing from other hosts.
 
 ## Managed skills
 

@@ -1463,7 +1463,7 @@ Options:
 ```text
 Start a new attempt from a failed run's retained workspace or a saved checkpoint.
 
-By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves its original connection requirements again; make those credentials available.
+By default, restart the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
 
 Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 
@@ -1480,6 +1480,11 @@ Options:
       --from-checkpoint <ID>
           Restore this checkpoint and continue from its saved graph boundary
 
+      --discard-workspace-changes
+          Allow a local checkpoint restore to replace the current checkout.
+
+          The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Attached HEAD, branch tips, commits, and Git configuration are kept. Restoring files does not recover published ancestry after a history rewrite. Named targets restore their own retained copy and do not accept this flag.
+
       --forward-gh-token
           Send the GH_TOKEN from this shell with the resume.
 
@@ -1494,7 +1499,7 @@ Options:
 ```text
 List one page of a run's saved workspace checkpoints as JSON.
 
-Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. When nextAfter is present, pass it as --after to fetch the next page.
+Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. Local restores also require --discard-workspace-changes and keep attached HEAD and branch tips. When nextAfter is present, pass it as --after to fetch the next page.
 
 Usage: zeroshot checkpoints [OPTIONS] <RUN_ID>
 
