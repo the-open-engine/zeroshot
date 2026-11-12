@@ -41,6 +41,7 @@ use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::native_v2_supervisor::checkpoints::{
     self, CheckpointError, CheckpointRestore, CheckpointRestoreSelection, ResticCheckpointStore,
+    RunCheckpointStore,
 };
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use serde::{Deserialize, Serialize};
@@ -857,6 +858,27 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             &checkpoint_directory(&self.config.storage_root, &params.run_id),
             params,
         )
+    }
+
+    async fn retain_delivery_state(
+        &self,
+        run_id: &RunId,
+        state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), CheckpointError> {
+        let _turn = self.allocation_turns.lock(run_id).await;
+        if let Some(storage) = &self.config.workspace_storage {
+            return storage.retain_delivery_state(run_id, state).await;
+        }
+        let document = read_recovery(&recovery_path(&self.config.storage_root, run_id))
+            .filter(|document| document.recoverable && document.successor_run_id.is_none())
+            .ok_or_else(|| std::io::Error::other("delivery recovery lineage is unavailable"))?;
+        let delivery_run_id = document.delivery_run_id.as_ref().unwrap_or(run_id);
+        checkpoints::DeliveryCheckpointStore::new(checkpoint_repository(
+            &self.config.storage_root,
+            delivery_run_id,
+        ))
+        .retain_delivery_state(state)
+        .await
     }
 
     async fn workspace_recovery(

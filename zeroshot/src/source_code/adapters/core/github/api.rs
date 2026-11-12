@@ -149,25 +149,37 @@ pub(super) async fn command_status(
     mut command: Command,
     deadline: Duration,
     credential: SourceDeliveryCredential<'_>,
-) -> Result<(), SourceDeliveryError> {
-    capture(&mut command, deadline)
+) -> Result<(), CommandFailure> {
+    let output = crate::native_v2_delivery::command::capture_sensitive(&mut command, deadline, &[])
         .await
-        .and_then(|output| output.require_success())
+        .map_err(|failure| CommandFailure::unknown(command_failure(failure, credential)))?;
+    let rejection = native_merge_rejection(&output);
+    output
+        .require_success()
         .map(|_| ())
-        .map_err(|failure| command_failure(failure, credential))
+        .map_err(|failure| CommandFailure {
+            error: command_failure(failure, credential),
+            rejection,
+        })
 }
 
-#[derive(Debug)]
-pub(super) struct JsonCommandFailure {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum MutationRejection {
+    Policy,
+    Conversation,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct CommandFailure {
     pub error: SourceDeliveryError,
-    pub rejected: bool,
+    pub rejection: Option<MutationRejection>,
 }
 
-impl JsonCommandFailure {
-    fn unknown(error: SourceDeliveryError) -> Self {
+impl CommandFailure {
+    pub(super) fn unknown(error: SourceDeliveryError) -> Self {
         Self {
             error,
-            rejected: false,
+            rejection: None,
         }
     }
 }
@@ -177,27 +189,25 @@ pub(super) async fn command_json(
     deadline: Duration,
     credential: SourceDeliveryCredential<'_>,
     mutation: Option<&str>,
-) -> Result<Value, JsonCommandFailure> {
+) -> Result<Value, CommandFailure> {
     let output = crate::native_v2_delivery::command::capture_sensitive(&mut command, deadline, &[])
         .await
-        .map_err(|failure| JsonCommandFailure::unknown(command_failure(failure, credential)))?;
+        .map_err(|failure| CommandFailure::unknown(command_failure(failure, credential)))?;
     // Inspect protocol bytes before converting the failed output to redacted diagnostics.
-    let rejected = mutation.is_some_and(|mutation| rejected_mutation(&output, mutation));
-    let output = output
-        .require_success()
-        .map_err(|failure| JsonCommandFailure {
-            error: command_failure(failure, credential),
-            rejected,
-        })?;
+    let rejection = mutation.and_then(|mutation| rejected_mutation(&output, mutation));
+    let output = output.require_success().map_err(|failure| CommandFailure {
+        error: command_failure(failure, credential),
+        rejection,
+    })?;
     if output.stdout_truncated() {
-        return Err(JsonCommandFailure::unknown(redacted_api_error(
+        return Err(CommandFailure::unknown(redacted_api_error(
             None,
             "GitHub command response exceeded its byte bound",
             credential,
         )));
     }
     serde_json::from_str(output.stdout()).map_err(|error| {
-        JsonCommandFailure::unknown(redacted_api_error(
+        CommandFailure::unknown(redacted_api_error(
             None,
             format!("GitHub returned invalid JSON: {error}\n{output}"),
             credential,
@@ -205,24 +215,48 @@ pub(super) async fn command_json(
     })
 }
 
+fn complete_rejection(output: &crate::native_v2_delivery::command::GitCommandOutput) -> bool {
+    let diagnostic = output.diagnostic();
+    output.stdout_valid_utf8()
+        && !output.stdout_truncated()
+        && output.stderr().is_some()
+        && !diagnostic.cleanup_unconfirmed
+        && !diagnostic.timed_out
+        && diagnostic.exit_status.is_some_and(|status| status > 0)
+}
+
+fn conversation_message(message: &str) -> bool {
+    message.starts_with("A conversation must be resolved")
+}
+
+fn native_merge_rejection(
+    output: &crate::native_v2_delivery::command::GitCommandOutput,
+) -> Option<MutationRejection> {
+    if !complete_rejection(output) {
+        return None;
+    }
+    // gh pr merge wraps GitHub's mutation error in this native GraphQL response line.
+    let message = output
+        .stderr()?
+        .trim()
+        .strip_prefix("GraphQL: ")?
+        .strip_suffix(" (mergePullRequest)")?;
+    (!message.contains(['\r', '\n']) && conversation_message(message))
+        .then_some(MutationRejection::Conversation)
+}
+
 fn rejected_mutation(
     output: &crate::native_v2_delivery::command::GitCommandOutput,
     mutation: &str,
-) -> bool {
-    let diagnostic = output.diagnostic();
-    if output.stdout_truncated()
-        || diagnostic.stderr_truncated
-        || diagnostic.cleanup_unconfirmed
-        || diagnostic.timed_out
-        || !diagnostic.exit_status.is_some_and(|status| status > 0)
-    {
-        return false;
+) -> Option<MutationRejection> {
+    if !complete_rejection(output) {
+        return None;
     }
     let Ok(value) = serde_json::from_str::<Value>(output.stdout()) else {
-        return false;
+        return None;
     };
     let path = serde_json::json!([mutation]);
-    value
+    let rejected = value
         .get("data")
         .and_then(Value::as_object)
         .is_some_and(|data| data.len() == 1 && data.get(mutation).is_some_and(Value::is_null))
@@ -235,7 +269,19 @@ fn rejected_mutation(
                         error.get("type").and_then(Value::as_str) == Some("UNPROCESSABLE")
                             && error.get("path") == Some(&path)
                     })
-            })
+            });
+    if !rejected {
+        return None;
+    }
+    let conversations = value["errors"]
+        .as_array()?
+        .iter()
+        .all(|error| error["message"].as_str().is_some_and(conversation_message));
+    Some(if conversations {
+        MutationRejection::Conversation
+    } else {
+        MutationRejection::Policy
+    })
 }
 
 pub(super) fn command_failure(

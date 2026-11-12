@@ -240,6 +240,7 @@ async fn finish(mut handle: NodeHandle) -> Finished {
         while let Ok(event) = durable.recv().await {
             match event {
                 DurableNodeEvent::Output { output, .. } => logs.push(output.text),
+                DurableNodeEvent::DeliveryState(_) => panic!("unexpected delivery receipts"),
                 DurableNodeEvent::TokenUsage(usage) => usages.push(counts(usage)),
             }
         }

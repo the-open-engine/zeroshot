@@ -81,6 +81,9 @@ pub enum DurableExecutionState {
 /// one verified graph and one run-local history.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DurableExecution {
+    /// Opaque, host-owned delivery receipts; never graph state or worker output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_state: Option<identity_contract::DeliveryCheckpoint>,
     pub dispatch_position: HistoryPosition,
     pub node_instance: NodeInstanceId,
     pub execution: ExecutionId,

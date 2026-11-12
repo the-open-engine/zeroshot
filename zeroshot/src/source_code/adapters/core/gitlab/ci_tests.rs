@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 async fn ci_fixture(required: Option<Value>, status: Option<&str>) -> Fixture {
@@ -40,7 +41,7 @@ async fn assert_ci_policy(fixture: &Fixture, expected: SourceChecks) {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         if can_merge {
@@ -751,7 +752,7 @@ async fn approval_handoff_uses_required_ci_policy_without_authorizing_merge() {
                 assert_eq!(
                     fixture
                         .authority
-                        .request_merge(&receipt(), credential())
+                        .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                         .await
                         .unwrap(),
                     SourceMergeRequestOutcome::Pending
@@ -816,7 +817,7 @@ async fn optional_ci_preserves_non_ci_readiness_and_merge_gates() {
         assert_eq!(
             fixture
                 .authority
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap(),
             if conflict {
@@ -852,7 +853,7 @@ async fn optional_ci_cannot_bypass_project_review_or_captured_head_identity() {
         assert!(
             fixture
                 .authority
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err()
         );
@@ -870,7 +871,7 @@ async fn optional_ci_cannot_bypass_project_review_or_captured_head_identity() {
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );

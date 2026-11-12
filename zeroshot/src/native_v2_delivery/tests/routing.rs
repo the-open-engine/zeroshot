@@ -13,7 +13,7 @@ fn hosted_delivery_polling_has_no_work_duration_limit() {
     );
 }
 
-struct RepairSession;
+pub(super) struct RepairSession;
 
 #[async_trait]
 impl NodeSession for RepairSession {
@@ -491,6 +491,7 @@ fn settled_execution(
     let (execution, node_instance) = identity;
     let (dispatch_position, settle_position) = positions;
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(dispatch_position).assert_value(),
         node_instance: native_v2_contract::NodeInstanceId::new(node_instance).assert_value(),
         execution: native_v2_contract::ExecutionId::new(execution).assert_value(),

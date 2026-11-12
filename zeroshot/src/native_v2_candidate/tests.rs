@@ -194,6 +194,7 @@ impl SourceDeliveryAuthority for ScriptedGitHub {
         &self,
         _review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         if credential.expose() != "test-github-token" {
             return Err(SourceDeliveryError::Rejected);

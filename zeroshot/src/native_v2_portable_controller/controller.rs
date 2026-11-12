@@ -402,14 +402,13 @@ fn configure_workspace_checkpoints(
     bootstrap: &PortableControllerBootstrap,
     mut runtime: PortableRuntime,
 ) -> Result<PortableRuntime, PortableControllerError> {
-    runtime.checkpoints = None;
+    runtime.cleanup = Arc::new(PortableCheckpointCleanup {
+        stopping: prepared.stopping.clone(),
+        inner: runtime.cleanup,
+        directory: prepared.paths.storage().join("checkpoints"),
+        repository: bootstrap.checkpoint_repository.clone(),
+    });
     if prepared.admitted.runtime.workspace_checkpoints {
-        runtime.cleanup = Arc::new(PortableCheckpointCleanup {
-            stopping: prepared.stopping.clone(),
-            inner: runtime.cleanup,
-            directory: prepared.paths.storage().join("checkpoints"),
-            repository: bootstrap.checkpoint_repository.clone(),
-        });
         runtime.checkpoints = Some(Arc::new(
             crate::native_v2_supervisor::checkpoints::ResticCheckpointStore::new(
                 prepared.paths.storage().join("checkpoints"),
@@ -419,6 +418,12 @@ fn configure_workspace_checkpoints(
             )
             .map_err(|error| PortableControllerError::Io(error.0))?
             .with_stop_request(prepared.stopping.clone()),
+        ));
+    } else {
+        runtime.checkpoints = Some(Arc::new(
+            crate::native_v2_supervisor::checkpoints::DeliveryCheckpointStore::new(
+                bootstrap.checkpoint_repository.clone(),
+            ),
         ));
     }
     Ok(runtime)

@@ -522,6 +522,7 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
     .assert_value();
     runner
         .start(NodeRunRequest {
+            delivery_state: None,
             dispatch: Default::default(),
             invocation: contract::NodeInvocation {
                 reference: contract::ExecutionRef {

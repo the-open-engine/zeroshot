@@ -122,7 +122,7 @@ async fn finish(fixture: &Fixture, reference: ExecutionRef, verdict: Option<&str
             artifacts: Vec::new(),
         },
         None => WorkerOutcome::Verified {
-            output: Value::Null,
+            output: json!({"reviewResponses":[]}),
             artifacts: Vec::new(),
         },
     };

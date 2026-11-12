@@ -1,3 +1,4 @@
+mod delivery_recovery;
 mod workspace_storage;
 
 use std::sync::Arc;

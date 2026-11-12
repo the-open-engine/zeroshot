@@ -411,3 +411,28 @@ fn contract_labels(values: &[&str]) -> Result<NonEmptyEnumSet, ContractValueErro
         .collect::<Result<Vec<_>, _>>()?;
     NonEmptyEnumSet::new(values)
 }
+
+/// Shared worker/reviewer/delivery carrier; credentials never enter graph state.
+pub(crate) fn review_responses_schema() -> Result<PayloadType, ContractValueError> {
+    let disposition = NonEmptyEnumSet::new(vec![
+        EnumLabel::new("addressed")?,
+        EnumLabel::new("declined")?,
+    ])?;
+    Ok(PayloadType::Array {
+        items: Box::new(PayloadType::Record {
+            fields: [
+                contract_field("threadId", PayloadType::String)?,
+                contract_field("version", PayloadType::String)?,
+                contract_field(
+                    "disposition",
+                    PayloadType::Enum {
+                        values: disposition,
+                    },
+                )?,
+                contract_field("response", PayloadType::String)?,
+            ]
+            .into_iter()
+            .collect(),
+        }),
+    })
+}

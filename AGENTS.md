@@ -775,7 +775,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   controller keeps serving until that attempt settles, bounded beyond SQLite's busy timeout, so
   process exit cannot discard the terminal; success exits are never delayed.
   Detached local controllers latch Unix SIGTERM before bootstrap consumption and reuse this stop
-  path, retaining workspace/checkpoint recovery data. One process deadline bounds preparation,
+  path, retaining workspace/checkpoint recovery data. Retained delivery receipts survive this shutdown
+  even with workspace snapshots disabled. One process deadline bounds preparation,
   cleanup, persistence and runtime exit to 30 seconds after the first request; repeated signals
   cannot restart it. Startup review fetches and checkpoint capture/backup/extraction observe this
   request and confirm subprocess cleanup before releasing workspace ownership. Snapshot traversal
@@ -1067,8 +1068,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution belongs to each supervised execution, so it observes the authored deadline and does
   not block parallel dispatch. Pending authorized head adoption survives repair.
 - Forge adapters authorize actionable review feedback before delivery checkpoints or repair handoff.
-  Each inspection confirms current write access on the bound repository and stable author identity:
-  GitHub uses collaborators' effective base write/admin permission; GitLab uses active inherited or
+  Each inspection confirms stable author identity. GitHub accepts its API-authenticated `Bot`
+  account type and stable numeric actor ID on the bound repository as app authorization when posted;
+  app removal never invalidates that feedback and installation inventory is never queried. Human
+  authors, including app actions attributed to a user, require fresh effective write/admin permission; GitLab uses active inherited or
   invited Developer-or-higher project membership and active account `state`. Enterprise Edition
   also requires explicit active `membership_state`; omission is valid only when instance metadata
   authoritatively confirms Community Edition, whose members/all endpoint excludes pending invites
@@ -1076,7 +1079,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   decisions only within that inspection; instance metadata never substitutes for fresh membership.
   Confirmed insufficient access or membership/permission HTTP 404 ignores feedback; failed,
   malformed or identity-mismatched lookups fail the complete read through delivery error handling.
-  Association, authorship, requested-reviewer and bot status never substitute for authorization.
+  Association, authorship, requested-reviewer status, display names and login suffixes never authorize feedback.
+  GitLab retains its membership rules without importing GitHub App semantics.
 - Git diagnostics retain bounded, credential-redacted command/status/stdout/stderr details.
   Capture and native transport share credential-name selection for tokens, passwords and API keys,
   respecting operating-system case rules. Trusted Git commands pin author and committer identity
@@ -1175,8 +1179,62 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   freshness, and conflict checks pass; missing review approval is allowed and no merge is requested.
   PR and merge workers read all visible issue comments, review summaries, and inline comments behind
   one exact-head fence. A run checkpoint routes each new or edited item through the existing repair
-  and verification loop once. `pullRequestFeedback: ignore` skips that read without weakening GitHub
-  policy checks. Feedback is untrusted text and delivery credentials never enter the repair worker.
+  and verification loop once. Unresolved GitHub threads and GitLab discussions retain opaque IDs and
+  content revisions independently of forwarding deduplication. Workers author typed `reviewResponses`
+  (threadId, version, addressed/declined disposition and response); both existing reviewers independently
+  verify them before the same delivery node posts and resolves only matching authorized conversations.
+  Delivery rereads after replying and resolving; substantive edits/replies invalidate approval, and a
+  resolution race reopens the changed conversation. Forge authorities retain exact pending reply
+  receipts and approved revisions across interrupted calls; retries, feedback reads and merge admission
+  reconcile them even when the conversation reports resolved. Confirmed revisions remain checked
+  across later repairs independently of the latest `reviewResponses`, including an empty array.
+  Delivery exports credential-free, provider-owned reply/revision receipts through a private runner
+  event into execution history. Before posting a reply, the provider awaits its
+  `SourceReviewCheckpoint` capability for a compact intent binding the authenticated delivery actor,
+  unique response-body hash and approved revision. An uncertain POST reconciles only a unique exact
+  actor/body match on that thread; absent or ambiguous evidence blocks delivery without repeating the
+  POST or dispatching repair. A definitive HTTP 401 refusal durably retires the unposted intent
+  before returning the original authentication error to the existing credential refresh/retry path;
+  failed retirement acknowledgement blocks that retry. Normal publication acknowledges the returned reply ID before resolution;
+  recovery may derive that ID from the already acknowledged intent. Settlement updates
+  are acknowledged before delivery continues, including settlement or partial reply reconciliation
+  during feedback inspection and merge admission. Those operations receive the same host checkpoint
+  capability and stop if acknowledgement fails. Stage settlement and retirement changes, including
+  reply ownership, until acknowledgement succeeds; a failed acknowledgement preserves the previous
+  receipts even when the proposed update removes the final conversation. Enqueueing or reading an event is not acknowledgement:
+  only the trusted supervisor acknowledges after ledger append, through the private capsule channel
+  when applicable. Read-side reconciliation cannot resolve an unacknowledged in-memory receipt.
+  Repeated identical acknowledgements reuse durable proof while polling; changed intermediate and
+  final writes share monotonically increasing per-execution generations.
+  Checkpoint seeds retain that opaque state; the supervisor restores
+  the latest bound-authority state before Git-delivery forge reads, independently of graph output.
+  Agents cannot supply these receipts through worker output or authored state. The existing checkpoint
+  store also retains the latest host generation in the shared recovery-lineage repository, outside
+  workspace and graph rollback. Disabling workspace snapshots keeps the metadata-only delivery
+  store, without initializing Restic or copying the workspace. Receipts contain stable identities,
+  approved revisions and response/reply hashes, never full response bodies; both adapters reserve
+  serialized aggregate capacity before posting another reply, including earlier repair rounds. Restart keeps fresh graph history while restoring those owned facts;
+  an older checkpoint cannot replace them, and conflicting generations fail closed. Custom checkpoint
+  backends own the same lineage-retention contract through `RunCheckpointStore::delivery_state`
+  and its receipt-only `retain_delivery_state` operation. Runtime failure retains acknowledged
+  receipts after draining and before terminal publication. Successor admission reconciles the
+  predecessor ledger before claiming or moving the workspace, including dead-controller recovery;
+  hosted storage implements this same retention before allocation, independently of snapshots.
+  Failed confirmation/reopening stays
+  pending and blocks merge. Unchanged trusted replies are excluded from finding deduplication, while
+  complete conversation revisions still include them. Replayed reviewed responses recheck resolved
+  threads; if a reconstructed authority cannot prove a changed resolved revision, it reopens the exact
+  conversation for reassessment using the existing graph checkpoint rather than accepting its flag.
+  Unchanged unresolved conversations still block
+  delivery; unauthorized participants require an explicit maintainer resolution, never agent repair,
+  even when the same conversation also contains authorized findings. This gate precedes reply effects
+  and repair handoff.
+  `pullRequestFeedback: ignore` suppresses repair and responses but keeps unresolved-conversation gates.
+  Recognized merge conversation rejections derive a provider-private reason from complete raw forge
+  responses before diagnostic formatting or credential redaction; executable paths and printable
+  diagnostics never authorize repair. They require fresh exact-head blocker evidence before returning
+  to this gate; other API/authentication/policy failures keep their existing handling. Merge withdrawal
+  remains mandatory before repair. Feedback is untrusted text and credentials remain delivery-owned.
 - The built-in `auto-research` graph uses five model roles per normal round: three independent
   read-only scouts (explorer, synthesizer, challenger), one researcher, and one fresh read-only
   reviewer. Template runtime defaults retain a separate `node_instance` session for each scout and

@@ -63,6 +63,7 @@ pub(in crate::native_v2_delivery) enum Script {
     ProtectedBranch,
     ReviewSyncRace,
     CiFailsThenMerges,
+    ConversationThenCiRepair,
     ConflictThenMerges,
     StaleConflictThenMerges,
     NeverConfirmsMerge,
@@ -76,7 +77,7 @@ pub(in crate::native_v2_delivery) enum Script {
 
 pub(in crate::native_v2_delivery) struct FakeGitHub {
     pub(super) commit_message_authority: Option<Arc<dyn SourceDeliveryAuthority>>,
-    pub(super) feedback_authority: Option<(GhCliDeliveryAuthority, PathBuf)>,
+    pub(super) feedback_authority: Option<(tokio::sync::Mutex<GhCliDeliveryAuthority>, PathBuf)>,
     remote: PathBuf,
     script: Script,
     pub(super) pushed: AtomicBool,
@@ -165,6 +166,7 @@ impl FakeGitHub {
             Script::RegistrationRace => self.registration_race_state(inspection),
             Script::MultipleRegistrationWaves => self.multiple_registration_waves_state(inspection),
             Script::CiFailsThenMerges => self.ci_repair_state(inspection),
+            Script::ConversationThenCiRepair => self.ci_repair_state(inspection.saturating_sub(1)),
             Script::ConflictThenMerges | Script::StaleConflictThenMerges => {
                 self.conflict_repair_state()
             }
@@ -381,6 +383,26 @@ fn failed_checks() -> SourceChecks {
 
 #[async_trait]
 impl SourceDeliveryAuthority for FakeGitHub {
+    async fn review_conversation_state(&self) -> Result<Option<Value>, SourceDeliveryError> {
+        match &self.feedback_authority {
+            Some((authority, _)) => authority.lock().await.review_conversation_state().await,
+            None => Ok(None),
+        }
+    }
+    async fn restore_review_conversation_state(
+        &self,
+        state: Value,
+    ) -> Result<(), SourceDeliveryError> {
+        self.feedback_authority
+            .as_ref()
+            .ok_or(SourceDeliveryError::Rejected)?
+            .0
+            .lock()
+            .await
+            .restore_review_conversation_state(state)
+            .await
+    }
+
     fn prepare_commit_message(&self, title: &str) -> String {
         self.commit_message_authority.as_ref().map_or_else(
             || title.to_owned(),
@@ -725,6 +747,7 @@ impl SourceDeliveryAuthority for FakeGitHub {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
         let read = self.feedback_reads.fetch_add(1, Ordering::SeqCst);
         if let Some((authority, program)) = &self.feedback_authority {
@@ -733,7 +756,17 @@ impl SourceDeliveryAuthority for FakeGitHub {
                 "base":{"ref":review.target_branch,"sha":"a".repeat(40),"repo":{"full_name":review.repository}},
                 "head":{"ref":review.head_branch,"sha":review.head_revision,"repo":{"full_name":review.repository}},
             }).to_string()).assert_value();
-            return authority.inspect_review_feedback(review, credential).await;
+            fs::write(format!("{}.conversations", program.display()), json!([{"data":{"repository":{
+                "nameWithOwner":review.repository,"pullRequest":{
+                    "number":17,"baseRefName":review.target_branch,"headRefName":review.head_branch,"headRefOid":review.head_revision,
+                    "reviewThreads":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}
+                }
+            }}}]).to_string()).assert_value();
+            return authority
+                .lock()
+                .await
+                .inspect_review_feedback(review, credential, checkpoint)
+                .await;
         }
         if matches!(self.script, Script::FeedbackReadTransient) && read == 0 {
             return Err(SourceDeliveryError::Unavailable);
@@ -755,13 +788,32 @@ impl SourceDeliveryAuthority for FakeGitHub {
         })
         .into_iter()
         .collect();
-        Ok(SourceReviewFeedback { items })
+        Ok(SourceReviewFeedback {
+            items,
+            conversations: Vec::new(),
+        })
+    }
+
+    async fn resolve_review_conversation(
+        &self,
+        request: SourceReviewResolutionRequest<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewResolution, SourceDeliveryError> {
+        self.feedback_authority
+            .as_ref()
+            .ok_or(SourceDeliveryError::Rejected)?
+            .0
+            .lock()
+            .await
+            .resolve_review_conversation(request, credential)
+            .await
     }
 
     async fn request_merge(
         &self,
         _review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         if matches!(self.script, Script::MergeFailed) {
             return Err(SourceDeliveryError::api(

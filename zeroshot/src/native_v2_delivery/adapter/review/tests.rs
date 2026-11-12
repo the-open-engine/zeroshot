@@ -28,6 +28,7 @@ fn passed_ci_without_the_approval_exception_is_mergeable() {
 mod queued_handoff {
     use super::*;
     use crate::native_v2_delivery::tests::github_fixture::{FakeGitHub, Script};
+    use crate::source_code_provider::TestReviewCheckpoint;
     use std::sync::atomic::Ordering;
 
     struct Fixture {
@@ -50,7 +51,11 @@ mod queued_handoff {
                 head_revision: "b".repeat(40),
             };
             authority
-                .request_merge(&review, SourceDeliveryCredential::token("test-token"))
+                .request_merge(
+                    &review,
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint,
+                )
                 .await
                 .unwrap();
             let adapter = NativeV2DeliveryAdapter::new(

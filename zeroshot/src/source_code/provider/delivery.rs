@@ -200,6 +200,38 @@ pub struct SourceReviewObservation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceReviewFeedback {
     pub items: Vec<SourceReviewFeedbackItem>,
+    /// Unresolved conversations, including those that cannot authorize agent repair.
+    pub conversations: Vec<SourceReviewConversation>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceReviewConversation {
+    pub id: String,
+    pub version: String,
+    pub authorized: bool,
+}
+
+/// Worker-authored dispositions passed to delivery only after independent review.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SourceReviewResponse {
+    pub thread_id: String,
+    pub version: String,
+    pub disposition: SourceReviewDisposition,
+    pub response: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceReviewDisposition {
+    Addressed,
+    Declined,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceReviewResolution {
+    Resolved,
+    Changed,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -229,9 +261,43 @@ pub enum SourceConflictOutcome {
     ObservationChanged,
 }
 
+/// Host-owned durable receipt writer. An acknowledged return permits the next forge effect.
+/// This capability is never exposed to agent output or forge credentials.
+#[async_trait]
+pub trait SourceReviewCheckpoint: Send + Sync {
+    async fn retain(&self, state: serde_json::Value) -> Result<(), SourceDeliveryError>;
+}
+
+pub struct SourceReviewResolutionRequest<'a> {
+    pub review: &'a SourceReviewReceipt,
+    pub response: &'a SourceReviewResponse,
+    pub checkpoint: &'a dyn SourceReviewCheckpoint,
+}
+
+#[cfg(test)]
+#[path = "delivery_tests.rs"]
+mod tests;
+#[cfg(test)]
+pub(crate) use tests::{TestReviewCheckpoint, RefuseReviewCheckpoint, RecordingReviewCheckpoint};
+
 /// Target-owned, bounded source-provider effects. Implementations must bound every network operation.
 #[async_trait]
 pub trait SourceDeliveryAuthority: Send + Sync {
+    /// Export owned, credential-free conversation receipts for the existing execution checkpoint.
+    async fn review_conversation_state(
+        &self,
+    ) -> Result<Option<serde_json::Value>, SourceDeliveryError> {
+        Ok(None)
+    }
+
+    /// Restore only host-recorded state, independently of current worker review responses.
+    async fn restore_review_conversation_state(
+        &self,
+        _state: serde_json::Value,
+    ) -> Result<(), SourceDeliveryError> {
+        Err(SourceDeliveryError::Rejected)
+    }
+
     /// Pure provider-owned formatting before a generated title becomes a delivery commit message.
     fn prepare_commit_message(&self, title: &str) -> String {
         title.to_owned()
@@ -292,23 +358,47 @@ pub trait SourceDeliveryAuthority: Send + Sync {
     ) -> Result<SourceReviewObservation, SourceDeliveryError>;
 
     /// Reads every actionable review surface behind one stable review/head identity fence.
-    /// Return only feedback whose author has current write access to the bound repository.
+    /// Return only feedback authorized by the forge on the bound repository.
     /// Authorization is provider-owned and rechecked per inspection, with stable author identity.
     /// Confirmed insufficient access is ignored; incomplete or failed lookups fail the read.
+    /// Acknowledge changed retained conversation receipts before returning, including partial
+    /// settlement on a forge error; failed acknowledgement prevents delivery from continuing.
     async fn inspect_review_feedback(
         &self,
         _review: &SourceReviewReceipt,
         _credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
-        Ok(SourceReviewFeedback { items: Vec::new() })
+        Ok(SourceReviewFeedback {
+            items: Vec::new(),
+            conversations: Vec::new(),
+        })
+    }
+
+    /// Responds to and resolves exactly one verified, unchanged, authorized conversation.
+    /// Await the host checkpoint after recording the exact posted reply and before resolution;
+    /// checkpoint settlement before allowing delivery to continue.
+    /// Recheck identity/revision before publication and confirm resolution with the forge.
+    /// Retain pending effects across interrupted calls; retries must reconcile their exact
+    /// reply and revision even when the conversation already reports resolved. Feedback and
+    /// merge reads must recheck retained revisions, including confirmed resolutions from earlier
+    /// repairs, independently of the latest response array before omitting a resolved conversation.
+    async fn resolve_review_conversation(
+        &self,
+        _request: SourceReviewResolutionRequest<'_>,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewResolution, SourceDeliveryError> {
+        Err(SourceDeliveryError::Rejected)
     }
 
     /// Requests provider-native integration after the provider reports its merge policy ready.
     /// Acceptance is not proof; only a later merged observation confirms success.
+    /// Acknowledge conversation reconciliation before requesting any merge effect.
     async fn request_merge(
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError>;
 
     /// Confirms that no deferred merge can race a repair/error handoff, or reports an exact merge.
@@ -387,6 +477,8 @@ impl SourceReviewReceipt {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceMergeRequestOutcome {
+    /// A fresh authoritative read confirmed an unresolved review conversation.
+    ReviewBlocked,
     Accepted,
     Pending,
     HeadUpdateRequired,

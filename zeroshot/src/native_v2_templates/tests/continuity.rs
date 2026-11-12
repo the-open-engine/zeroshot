@@ -16,8 +16,7 @@ async fn review_and_delivery_repairs_share_the_budget_and_worker_instance() {
                 &reduce(&verified, &input, &history),
                 &["acceptance", "code"],
             );
-            let review_input =
-                json!({"task":"repair checkout", "deliveryFeedback":delivery_feedback});
+            let review_input = json!({"task":"repair checkout", "deliveryFeedback":delivery_feedback,"reviewResponses":[]});
             history.push(settled_review_execution_with_output(
                 SettledExecutionSpec {
                     execution: execution + 1,

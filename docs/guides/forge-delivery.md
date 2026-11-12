@@ -164,6 +164,49 @@ reporting a merge. Comment retries reuse the original publication; captured MR s
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
 pipelines do not prove required CI for the captured head.
 
+Delivery checks unresolved review conversations before requesting merge. Human feedback requires
+fresh repository write/admin access on GitHub or active Developer-or-higher membership on GitLab.
+GitHub App bot feedback is authorized by GitHub's API actor type and stable identity on the bound
+repository when posted; removing the app later does not invalidate it. App actions attributed to a
+human follow that human's permission rule. Names, bot suffixes and comment text confer no authority.
+
+Authorized findings return through the existing worker and both reviewers. The worker supplies each
+addressed conversation's exact ID and revision, a disposition (`addressed` or `declined`) and a concise
+response. After both reviewers accept, trusted delivery posts the response and resolves only that
+unchanged conversation, then confirms resolution with the forge. Edits or new replies require
+reassessment. Forwarding a finding once never counts as resolving it. Unauthorized blocking
+conversations require a repository maintainer; delivery explains the blocker without dispatching
+repair or resolving it. Interrupted confirmation retains the exact reply receipt and approved
+revision: delivery rechecks resolved conversations too and confirms reopening any changed thread
+before repair can proceed. Failed receipt persistence or confirmation keeps resolution and merge blocked. Ignoring PR feedback suppresses
+automated repair and responses while retaining these conversation gates and all forge protections.
+Earlier verified conversation revisions remain checked during later repairs, including CI repairs
+whose worker returns no conversation responses.
+
+Trusted execution checkpoints preserve the exact reply and verified conversation revision across
+controller recovery, including when a later CI repair returns an empty response list. Restarting or
+rewinding graph work retains the latest owned conversation evidence, even with workspace
+snapshots disabled. Before posting a reply, delivery waits for durable acknowledgement of its
+authenticated author, unique response hash and approved conversation revision. It records the reply ID
+and resolution confirmation as the effects settle. If the forge accepts
+the reply but loses its acknowledgement, delivery reconciles that exact reply; it does not post again
+or ask the worker to repair its own response. Missing or ambiguous publication evidence blocks delivery
+for a maintainer to reconcile. A definitive authentication rejection retires the unposted intent
+before delivery refreshes credentials and retries. These receipts
+remain recoverable while delivery waits on CI or approvals. Delivery rechecks these retained conversations before feedback and merge
+admission. Changes discovered there are durably acknowledged before delivery continues or requests
+a merge, including partial settlement when a forge read fails. Failed acknowledgement preserves the
+previous receipts, including when removing the last conversation, so subsequent feedback and merge
+attempts must retry that checkpoint. Recovery reconciles receipts acknowledged before a runtime or controller failure before
+starting a successor. Compact receipt storage is bounded across repair rounds; reaching its limit stops
+further automated replies and resolution with a maintainer intervention diagnostic.
+
+When a reviewed response is replayed after recovery, an unrecognized resolved revision requires
+reassessment through the same repair loop.
+
+A GitHub merge rejection returns to conversation repair only when its complete forge response names
+that blocker and a fresh read confirms it. Unknown API/schema failures retain their normal handling.
+
 Delivery failures name the project, source and target branches, and the review and head revision
 when known. They also list the last confirmed publication, so a failed `--ship` can still identify
 the branch and PR/MR already available on the forge. A closed review must be reopened with its

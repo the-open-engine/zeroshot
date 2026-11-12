@@ -143,6 +143,9 @@ async fn proxy_terminal_lane_overflow_is_sticky_and_marks_usage_incomplete() {
     let mut unexpected_outputs = 0;
     while let Ok(event) = durable.recv().await {
         match event {
+            crate::native_v2_runner::DurableNodeEvent::DeliveryState(_) => {
+                panic!("unexpected delivery receipts")
+            }
             crate::native_v2_runner::DurableNodeEvent::TokenUsage(Some(usage)) => {
                 known_events += 1;
                 input_tokens += usage.input_tokens.get();

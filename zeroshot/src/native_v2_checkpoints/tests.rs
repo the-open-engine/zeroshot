@@ -350,6 +350,7 @@ fn settled(node: &str, sequence: u64) -> DurableExecution {
         map_indices: Vec::new(),
     };
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(sequence * 2).assert_value(),
         node_instance: NodeInstanceId::new(sequence).assert_value(),
         execution: ExecutionId::new(sequence).assert_value(),
@@ -798,4 +799,168 @@ async fn damaged_selected_seed_fails_before_the_workspace_changes() {
         "{error}"
     );
     assert_eq!(fixture.source(), "live edits");
+}
+
+#[tokio::test]
+async fn workspace_checkpoint_restores_owned_delivery_receipts_independently_of_worker_output() {
+    let fixture = Fixture::new();
+    fixture.input_checkpoint("writer").await;
+    let mut delivery = settled("deliver", 1);
+    delivery.delivery_state = Some(crate::native_v2_runner::test_support::delivery_checkpoint(
+        json!({"github":[["thread","verified-version","reply-id"]]}),
+        2,
+    ));
+    let mut later_repair = settled("writer", 2);
+    if let DurableExecutionState::Settled { outcome, .. } = &mut later_repair.state {
+        *outcome = WorkerOutcome::Verified {
+            output: json!({"reviewResponses":[]}),
+            artifacts: Vec::new(),
+        };
+    }
+    let history = vec![delivery, later_repair];
+    fixture
+        .store
+        .enter(&boundary("reader"), &history)
+        .await
+        .assert_value();
+    let point = fixture.points().pop().assert_value();
+    let restored = fixture.restore(&point).await;
+    assert_eq!(restored, history);
+    assert!(restored[0].delivery_state.is_some());
+    fixture.store.finish(&history).await.assert_value();
+    assert!(
+        fixture.restore_latest().await.is_empty(),
+        "restart keeps its fresh graph semantics"
+    );
+    let recovered = ResticCheckpointStore::with_program(ResticCheckpointStoreTestConfig {
+        directory: fixture.directory.join("successor"),
+        repository: fixture.store.repository.clone(),
+        workspace: fixture.workspace.clone(),
+        writers: fixture.store.writers.clone(),
+        program: fixture.store.program.clone(),
+    });
+    assert_eq!(
+        recovered.delivery_state().await.assert_value(),
+        restored[0].delivery_state
+    );
+    let mut older = history.clone();
+    older[0].delivery_state = Some(crate::native_v2_runner::test_support::delivery_checkpoint(
+        json!({"github":[]}),
+        1,
+    ));
+    recovered
+        .enter(&boundary("writer"), &older)
+        .await
+        .assert_value();
+    assert_eq!(
+        recovered.delivery_state().await.assert_value(),
+        restored[0].delivery_state,
+        "rewinding graph history cannot roll back external-effect facts"
+    );
+}
+
+#[tokio::test]
+async fn disabled_workspace_snapshots_keep_newest_delivery_generation_and_discard_only_owned_metadata()
+ {
+    let root = tempfile::tempdir().assert_value();
+    let repository = root.path().join("lineage");
+    let history =
+        crate::native_v2_runner::test_support::delivery_history(json!({"receipts":"verified"}));
+    let original = DeliveryCheckpointStore::new(repository.clone());
+    original
+        .enter(&boundary("worker"), &history)
+        .await
+        .assert_value();
+    drop(original);
+    let recovered = DeliveryCheckpointStore::new(repository.clone());
+    recovered
+        .enter(&boundary("deliver"), &[])
+        .await
+        .assert_value();
+    let mut older = history.clone();
+    older[0].delivery_state.as_mut().assert_value().generation =
+        PositiveInteger::new(1).assert_value();
+    recovered.finish(&older).await.assert_value();
+    assert_eq!(
+        recovered.delivery_state().await.assert_value(),
+        history[0].delivery_state
+    );
+    let mut conflict = history.clone();
+    conflict[0].delivery_state.as_mut().assert_value().state = json!({"receipts":"conflicting"});
+    assert!(recovered.finish(&conflict).await.is_err());
+    assert_eq!(
+        recovered.delivery_state().await.assert_value(),
+        history[0].delivery_state
+    );
+    assert_eq!(std::fs::read_dir(&repository).assert_value().count(), 1);
+    std::fs::write(repository.join("unrelated"), "retained").assert_value();
+    recovered.discard().await.assert_value();
+    recovered.discard().await.assert_value();
+    assert!(recovered.delivery_state().await.assert_value().is_none());
+    assert!(repository.join("unrelated").is_file());
+}
+
+#[tokio::test]
+async fn delivery_only_retention_does_not_capture_workspace_and_keeps_generation_fences() {
+    let fixture = Fixture::new();
+    let latest = crate::native_v2_runner::test_support::delivery_checkpoint(
+        json!({"owned":"verified revision"}),
+        2,
+    );
+    fixture
+        .store
+        .retain_delivery_state(&latest)
+        .await
+        .assert_value();
+    let older = crate::native_v2_runner::test_support::delivery_checkpoint(json!({}), 1);
+    fixture
+        .store
+        .retain_delivery_state(&older)
+        .await
+        .assert_value();
+    assert_eq!(
+        fixture.store.delivery_state().await.assert_value(),
+        Some(latest)
+    );
+    let conflict = crate::native_v2_runner::test_support::delivery_checkpoint(json!({}), 2);
+    assert!(
+        fixture
+            .store
+            .retain_delivery_state(&conflict)
+            .await
+            .is_err()
+    );
+    assert!(!fixture.store.directory.join("latest.json").exists());
+    assert!(!fixture.store.directory.join("index.json").exists());
+}
+
+#[tokio::test]
+async fn stopped_snapshot_operations_preserve_acknowledged_delivery_generation() {
+    for final_snapshot in [false, true] {
+        let fixture = Fixture::new();
+        let (_stop, stopping) = tokio::sync::watch::channel(true);
+        let store = fixture.store.with_stop_request(Some(stopping));
+        let mut history = crate::native_v2_runner::test_support::delivery_history(
+            json!({"owned":"verified conversation revision"}),
+        );
+        history[0].delivery_state.as_mut().assert_value().generation =
+            openengine_cluster_protocol::PositiveInteger::new(2).assert_value();
+        let result = if final_snapshot {
+            store.finish(&history).await
+        } else {
+            store.enter(&boundary("writer"), &history).await
+        };
+        assert!(result.unwrap_err().was_stopped());
+        assert_eq!(
+            store.delivery_state().await.assert_value(),
+            history[0].delivery_state
+        );
+        let recovered = DeliveryCheckpointStore::new(store.repository.clone());
+        assert_eq!(
+            recovered.delivery_state().await.assert_value(),
+            history[0].delivery_state
+        );
+        assert!(!fixture.directory.join("latest.json").exists());
+        assert!(!fixture.directory.join("index.json").exists());
+    }
 }

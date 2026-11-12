@@ -90,6 +90,7 @@ async fn observe(label: &str, records: &[Value]) -> Observed {
         while let Ok(event) = durable.recv().await {
             match event {
                 DurableNodeEvent::Output { output, .. } => records.push(output),
+                DurableNodeEvent::DeliveryState(_) => panic!("unexpected delivery receipts"),
                 DurableNodeEvent::TokenUsage(usage) => usages.push(usage),
             }
         }

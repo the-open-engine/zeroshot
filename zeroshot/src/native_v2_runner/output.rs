@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use openengine_cluster_protocol::{FailureDiagnosticKind, MAX_SAFE_GENERATION, UnixTimestampMillis};
@@ -91,6 +91,29 @@ pub(super) struct TerminalOverflow {
     diagnostics: AtomicBool,
 }
 
+/// Acknowledgement belongs to the trusted durable consumer, never the producer.
+#[derive(Clone)]
+pub(crate) struct DeliveryStateAcknowledgement {
+    persisted: watch::Sender<u64>,
+    observed: Arc<AtomicU64>,
+}
+
+impl DeliveryStateAcknowledgement {
+    pub(crate) fn acknowledge(&self, generation: u64) -> Result<(), NodeRunnerError> {
+        if generation > self.observed.load(Ordering::Acquire) {
+            return Err(NodeRunnerError::Driver);
+        }
+        self.persisted.send_if_modified(|current| {
+            if generation <= *current {
+                return false;
+            }
+            *current = generation;
+            true
+        });
+        Ok(())
+    }
+}
+
 /// Lossless run-local bridge into the durable log writer.
 ///
 /// Provider adapters emit bounded chunks while continuously draining the child process. The
@@ -106,23 +129,39 @@ pub struct DurableOutput {
     usage_incomplete_emitted: bool,
     diagnostics_incomplete_emitted: bool,
     saturated: Arc<Notify>,
+    delivery_ack: DeliveryStateAcknowledgement,
 }
 
 impl DurableOutput {
     pub(super) fn new(
         receiver: mpsc::Receiver<DurableNodeEvent>,
         cancelled_terminal: mpsc::Receiver<DurableNodeEvent>,
-        terminal_overflow: Arc<TerminalOverflow>,
-        saturated: Arc<Notify>,
+        metadata: (
+            Arc<TerminalOverflow>,
+            Arc<Notify>,
+            DeliveryStateAcknowledgement,
+        ),
     ) -> Self {
         Self {
             receiver,
             cancelled_terminal,
-            terminal_overflow,
+            terminal_overflow: metadata.0,
+            delivery_ack: metadata.2,
             usage_incomplete_emitted: false,
             diagnostics_incomplete_emitted: false,
-            saturated,
+            saturated: metadata.1,
         }
+    }
+
+    pub(crate) fn delivery_acknowledgement(&self) -> DeliveryStateAcknowledgement {
+        self.delivery_ack.clone()
+    }
+
+    pub(crate) fn acknowledge_delivery_state(
+        &self,
+        generation: u64,
+    ) -> Result<(), NodeRunnerError> {
+        self.delivery_ack.acknowledge(generation)
     }
 
     pub(crate) async fn wait_until_saturated(&self) {
@@ -168,6 +207,11 @@ impl DurableOutput {
     }
 
     fn observe(&mut self, event: DurableNodeEvent) -> DurableNodeEvent {
+        if let DurableNodeEvent::DeliveryState(state) = &event {
+            self.delivery_ack
+                .observed
+                .fetch_max(state.generation.get(), Ordering::AcqRel);
+        }
         if matches!(event, DurableNodeEvent::TokenUsage(None)) {
             self.usage_incomplete_emitted = true;
         }
@@ -246,6 +290,7 @@ impl DurableOutput {
 
 #[derive(Clone)]
 pub(super) struct DurableEventSender {
+    delivery_ack: watch::Receiver<u64>,
     events: mpsc::Sender<DurableNodeEvent>,
     cancelled_terminal: mpsc::Sender<DurableNodeEvent>,
     cancelled_terminal_active: Arc<AtomicBool>,
@@ -254,6 +299,18 @@ pub(super) struct DurableEventSender {
 }
 
 impl DurableEventSender {
+    pub(super) async fn wait_delivery_ack(&self, generation: u64) -> Result<(), NodeRunnerError> {
+        let mut ack = self.delivery_ack.clone();
+        loop {
+            if *ack.borrow_and_update() >= generation {
+                return Ok(());
+            }
+            ack.changed()
+                .await
+                .map_err(|_| NodeRunnerError::DurableOutputClosed)?;
+        }
+    }
+
     pub(super) fn mark_diagnostics_incomplete(&self) {
         self.terminal_overflow
             .diagnostics
@@ -321,7 +378,9 @@ impl DurableEventSender {
             Err(mpsc::error::TrySendError::Full(event)) => {
                 match event {
                     DurableNodeEvent::TokenUsage(_) => &self.terminal_overflow.usage,
-                    DurableNodeEvent::Output { .. } => &self.terminal_overflow.diagnostics,
+                    DurableNodeEvent::Output { .. } | DurableNodeEvent::DeliveryState(_) => {
+                        &self.terminal_overflow.diagnostics
+                    }
                 }
                 .store(true, Ordering::Release);
                 Err(NodeRunnerError::DriverDetail(
@@ -351,8 +410,14 @@ pub(super) fn durable_event_channel_with_capacity(
     let cancelled_terminal_active = Arc::new(AtomicBool::new(false));
     let terminal_overflow = Arc::new(TerminalOverflow::default());
     let saturated = Arc::new(Notify::new());
+    let (persisted, delivery_ack) = watch::channel(0);
+    let acknowledgement = DeliveryStateAcknowledgement {
+        persisted,
+        observed: Arc::new(AtomicU64::new(0)),
+    };
     (
         DurableEventSender {
+            delivery_ack,
             events,
             cancelled_terminal,
             cancelled_terminal_active,
@@ -362,8 +427,7 @@ pub(super) fn durable_event_channel_with_capacity(
         DurableOutput::new(
             receiver,
             cancelled_terminal_receiver,
-            terminal_overflow,
-            saturated,
+            (terminal_overflow, saturated, acknowledgement),
         ),
     )
 }

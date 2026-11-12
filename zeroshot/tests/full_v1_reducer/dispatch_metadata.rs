@@ -88,6 +88,7 @@ async fn dispatch_metadata_tracks_leaf_loops_retries_resets_and_exit_during_repl
             success(1)
         };
         history.push(DurableExecution {
+            delivery_state: None,
             dispatch_position: HistoryPosition::new(execution.get() * 2).assert_value(),
             execution,
             node_instance,
@@ -164,6 +165,7 @@ async fn dispatch_metadata_uses_inner_loop_inside_map_and_parallel_boundaries() 
                 assert_eq!(iteration, 0);
             }
             history.push(DurableExecution {
+                delivery_state: None,
                 dispatch_position: HistoryPosition::new(execution.get() * 2).assert_value(),
                 execution,
                 node_instance,

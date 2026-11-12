@@ -15,6 +15,10 @@ pub mod git_auth;
 mod review_head;
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, unix))]
+pub(crate) use tests::conversation_checkpoint::{
+    ConversationFixture, assert_interrupted_conversation_driver,
+};
 pub mod transport;
 #[cfg(all(test, unix))]
 #[path = "native_v2_delivery/tests/transport_http.rs"]

@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 #[tokio::test]
@@ -193,7 +194,7 @@ async fn explicit_merge_rejection_can_retry_while_an_ambiguous_response_stops_ef
         assert_eq!(
             fixture
                 .authority
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap_err()
                 .api_status(),
@@ -208,7 +209,7 @@ async fn explicit_merge_rejection_can_retry_while_an_ambiguous_response_stops_ef
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -216,7 +217,7 @@ async fn explicit_merge_rejection_can_retry_while_an_ambiguous_response_stops_ef
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -239,7 +240,7 @@ async fn accepted_but_unconfirmed_merge_retains_its_effect_fence() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Accepted
@@ -247,7 +248,7 @@ async fn accepted_but_unconfirmed_merge_retains_its_effect_fence() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -414,7 +415,7 @@ async fn malformed_project_or_review_identity_cannot_cross_the_effect_boundary()
         assert!(
             fixture
                 .authority
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err()
         );
@@ -434,7 +435,7 @@ async fn feedback_ignores_system_and_empty_notes_but_retains_position_and_edit_i
         assert!(
             fixture
                 .authority
-                .inspect_review_feedback(&receipt(), credential())
+                .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap()
                 .items
@@ -446,7 +447,7 @@ async fn feedback_ignores_system_and_empty_notes_but_retains_position_and_edit_i
     fixture.state.lock().unwrap().discussion_note = current;
     let first = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap()
         .items
@@ -458,7 +459,7 @@ async fn feedback_ignores_system_and_empty_notes_but_retains_position_and_edit_i
     fixture.state.lock().unwrap().discussion_note["resolved"] = json!(true);
     let edited = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap()
         .items

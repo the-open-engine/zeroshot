@@ -43,6 +43,114 @@ fn recovery(root: &TestDirectory, checkpoints: bool) -> LocalRecoveryDocument {
     }
 }
 
+#[tokio::test]
+async fn dead_controller_resume_retains_acknowledged_receipts_without_importing_graph_history() {
+    use crate::native_v2_contract::NodeRuntimeBinding;
+    use crate::native_v2_candidate::test_support::{full_graph, git_delivery_node, success_node};
+    use crate::native_v2_supervisor::checkpoints::{DeliveryCheckpointStore, RunCheckpointStore};
+    use crate::native_v2_runner::test_support::{delivery_checkpoint, node_started};
+    use crate::v2_run_ledger::RunEvent;
+    use openengine_cluster_protocol::{DeclaredConnections, NodeName};
+    use crate::native_v2_contract::{ExecutionId, ExecutionRef, NodeInstanceId};
+    use serde_json::{Value, json};
+    for enabled in [false, true] {
+        let root = TestDirectory::new("dead-delivery");
+        let backend = backend(&root);
+        let mut recovery = recovery(&root, enabled);
+        recovery.submission.graph = full_graph(vec![git_delivery_node(), success_node()]);
+        recovery.submission.runtime.nodes.insert(
+            NodeName::new("deliver").assert_value(),
+            NodeRuntimeBinding::GitDelivery {
+                connections: DeclaredConnections::empty(),
+                pull_request_feedback: Default::default(),
+            },
+        );
+        let run_id = params(None).run_id;
+        let ledger = super::super::local_contract_tests::create_contract_run(
+            &backend,
+            &run_id,
+            &recovery.submission,
+        )
+        .await;
+        let repository = backend.checkpoint_repository(&run_id).assert_value();
+        let store = DeliveryCheckpointStore::new(repository.clone());
+        let old = delivery_checkpoint(json!({"receipts":[]}), 1);
+        store.retain_delivery_state(&old).await.assert_value();
+        let latest = delivery_checkpoint(json!({"owned":"resolved revision"}), 2);
+        let reference = ExecutionRef {
+            run_id: run_id.clone(),
+            node: NodeName::new("deliver").assert_value(),
+            node_instance: NodeInstanceId::new(1).assert_value(),
+            execution: ExecutionId::new(1).assert_value(),
+        };
+        ledger
+            .append(
+                &run_id,
+                vec![
+                    RunEvent::RunStarted,
+                    node_started(&reference, Value::Null),
+                    RunEvent::DeliveryState {
+                        execution: reference.execution,
+                        state: latest.clone(),
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        drop(ledger);
+        assert_eq!(store.delivery_state().await.assert_value(), Some(old));
+        // Opening an observer reconciles a hard process exit without constructing a runtime.
+        let observer = PortableRunController::open_observer(
+            backend.paths(&run_id).assert_value(),
+            run_id.clone(),
+        )
+        .await
+        .assert_value();
+        drop(observer);
+        for _ in 0..2 {
+            backend
+                .retain_predecessor_delivery(&run_id, &recovery)
+                .await
+                .assert_value();
+        }
+        assert_eq!(
+            store.delivery_state().await.assert_value(),
+            Some(latest.clone())
+        );
+        assert_eq!(std::fs::read_dir(repository).assert_value().count(), 1);
+        assert!(
+            !backend
+                .paths(&run_id)
+                .assert_value()
+                .storage()
+                .join("checkpoints/index.json")
+                .exists()
+        );
+        let predecessor = SqliteRunLedger::open(backend.paths(&run_id).assert_value().ledger())
+            .assert_value()
+            .get(&run_id)
+            .await
+            .assert_value()
+            .assert_value();
+        assert!(predecessor.snapshot.execution_seed.is_empty());
+        assert!(
+            matches!(predecessor.snapshot.terminal, Some(TerminalResult::Failed { reason, .. })
+            if reason.as_str() == "runtime_lost")
+        );
+        // A same-generation disagreement blocks successor preparation and preserves retained bytes.
+        store.discard().await.assert_value();
+        let conflict = delivery_checkpoint(json!({"conflicting":"receipt"}), 2);
+        store.retain_delivery_state(&conflict).await.assert_value();
+        assert!(
+            backend
+                .retain_predecessor_delivery(&run_id, &recovery)
+                .await
+                .is_err()
+        );
+        assert_eq!(store.delivery_state().await.assert_value(), Some(conflict));
+    }
+}
+
 /// Publishes a latest snapshot of `workspace` for the predecessor of [`params`].
 async fn publish_latest(root: &TestDirectory, backend: &LocalCliBackend, workspace: &Path) {
     use crate::native_v2_supervisor::checkpoints::{RunCheckpointStore, fake_checkpoint_store};

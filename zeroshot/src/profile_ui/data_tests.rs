@@ -125,6 +125,7 @@ async fn verify(graph: Value) -> Result<VerifiedGraph, String> {
 }
 fn settled(name: &str, id: u64, outcome: WorkerOutcome) -> DurableExecution {
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(id * 2 - 1).assert_value(),
         node_instance: NodeInstanceId::new(id).assert_value(),
         execution: ExecutionId::new(id).assert_value(),

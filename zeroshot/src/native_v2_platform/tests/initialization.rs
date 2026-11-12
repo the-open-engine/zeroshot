@@ -50,6 +50,7 @@ async fn oversized_seed_start(harness: &Harness) -> AllocatedRunStart {
 
 fn oversized_seed() -> Vec<DurableExecution> {
     vec![DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(1).assert_value(),
         node_instance: NodeInstanceId::new(1).assert_value(),
         execution: ExecutionId::new(1).assert_value(),

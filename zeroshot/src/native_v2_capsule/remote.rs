@@ -222,6 +222,33 @@ async fn handle_remote_event(
         Some(CapsuleNodeEvent::Output { output, timestamp }) => {
             handle_remote_output(output, timestamp, context).await
         }
+        Some(CapsuleNodeEvent::DeliveryState { state }) => {
+            let result = await_remote_bridge(
+                async {
+                    let generation = state.generation.get();
+                    context.bridge.checkpoint_delivery_state(state).await?;
+                    let mut loss = context.runtime.connection_loss.clone();
+                    if control_rpc(
+                        context
+                            .runtime
+                            .channel
+                            .acknowledge_delivery_state(context.reference, generation),
+                        &mut loss,
+                        context.runtime.control_timeout,
+                    )
+                    .await
+                    {
+                        Ok(())
+                    } else {
+                        context.runtime.loss.promote();
+                        Err(NodeRunnerError::ConnectionLost)
+                    }
+                },
+                context.connection_loss,
+            )
+            .await;
+            handle_remote_bridge(result, context).await
+        }
         Some(CapsuleNodeEvent::TokenUsage { usage }) => {
             let result = await_remote_bridge(
                 context.bridge.record_token_usage(usage),

@@ -289,7 +289,7 @@ printf '%s\n' 'fixture gh returns no GitHub data'
             let text = json!({ "response": response }).to_string();
             json!({"type":"item.completed","item":{"type":"agent_message","text":text}}).to_string()
         };
-        let worker = message(Value::Null);
+        let worker = message(json!({"reviewResponses": []}));
         let reviewer = message(json!({
             "output": null,
             "signals": {"verdict": "accepted"},

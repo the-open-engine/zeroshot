@@ -117,6 +117,7 @@ impl SourceDeliveryAuthority for ContributedForge {
         &self,
         review: &SourceReviewReceipt,
         _credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         git(
             &self.remote,

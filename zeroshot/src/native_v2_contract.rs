@@ -314,6 +314,27 @@ pub struct NodeInvocation {
     pub binding: NodeRuntimeBinding,
 }
 
+/// Credential-free delivery facts retained independently of graph and workspace rollback.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DeliveryCheckpoint {
+    pub generation: openengine_cluster_protocol::PositiveInteger,
+    pub state: Value,
+}
+
+impl DeliveryCheckpoint {
+    pub fn latest(left: Option<Self>, right: Option<Self>) -> Result<Option<Self>, &'static str> {
+        match (left, right) {
+            (Some(left), Some(right)) if left.generation == right.generation && left != right => {
+                Err("conflicting delivery checkpoint generations")
+            }
+            (Some(left), Some(right)) if right.generation > left.generation => Ok(Some(right)),
+            (Some(left), _) => Ok(Some(left)),
+            (_, right) => Ok(right),
+        }
+    }
+}
+
 /// Normalized completion returned to the supervisor and safe to append to the run ledger.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

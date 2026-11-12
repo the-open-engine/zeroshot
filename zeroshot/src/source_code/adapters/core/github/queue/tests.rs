@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 pub(super) fn enqueue_response() -> Value {
@@ -123,7 +124,11 @@ async fn queue_admission_is_explicit_exact_head_and_keeps_direct_policy_out() {
     );
     assert_eq!(
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint
+            )
             .await
             .assert_value(),
         SourceMergeRequestOutcome::Accepted
@@ -186,7 +191,11 @@ async fn malformed_queue_receipts_never_become_accepted_requests() {
         let action = response(&reply);
         let provider = admission(root.path(), &action);
         let error = provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_error();
         assert!(matches!(error, SourceDeliveryError::Api(_)), "{error}");
@@ -210,7 +219,11 @@ async fn queue_auth_policy_and_transport_failures_keep_the_native_error_boundary
         );
         let provider = admission(root.path(), &action);
         let error = provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_error();
         assert_eq!(error.api_status(), status, "{error}");
@@ -303,7 +316,11 @@ async fn unresolved_enqueue_cannot_turn_an_empty_observation_into_safe_withdrawa
         )],
     );
     provider
-        .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+        .request_merge(
+            &review(),
+            SourceDeliveryCredential::token("test-token"),
+            &TestReviewCheckpoint,
+        )
         .await
         .assert_error();
     let error = provider
@@ -319,7 +336,11 @@ async fn explicit_graphql_enqueue_rejection_allows_confirmed_withdrawal() {
     let action = format!("{}; exit 1", response(&rejected_enqueue()));
     let provider = admission(root.path(), &action);
     let rejected = provider
-        .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+        .request_merge(
+            &review(),
+            SourceDeliveryCredential::token("test-token"),
+            &TestReviewCheckpoint,
+        )
         .await;
     assert!(matches!(&rejected, Err(SourceDeliveryError::Api(_))));
     let error = rejected.assert_error();
@@ -363,7 +384,11 @@ async fn ambiguous_graphql_errors_cannot_authorize_empty_queue_withdrawal() {
             &format!("{}; exit 1", response(&response_value)),
         );
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_error();
         let result = provider
@@ -385,7 +410,11 @@ async fn explicit_rejection_does_not_erase_prior_submission_uncertainty() {
     let provider = admission(root.path(), &action);
     for _ in 0..2 {
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
             .assert_error();
     }
@@ -411,7 +440,11 @@ async fn explicit_rejection_never_waives_changed_review_identity() {
         )],
     );
     provider
-        .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+        .request_merge(
+            &review(),
+            SourceDeliveryCredential::token("test-token"),
+            &TestReviewCheckpoint,
+        )
         .await
         .assert_error();
     assert!(
@@ -444,7 +477,11 @@ async fn cancelled_enqueue_drains_the_owned_submission_before_withdrawing() {
     let owner = provider.clone();
     let task = tokio::spawn(async move {
         owner
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await
     });
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -499,7 +536,11 @@ async fn successful_queue_admission_is_not_resubmitted_by_polling_and_rejected_a
     ] {
         assert_eq!(
             provider
-                .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                .request_merge(
+                    &review(),
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint
+                )
                 .await
                 .assert_value(),
             expected
@@ -515,14 +556,22 @@ async fn successful_queue_admission_is_not_resubmitted_by_polling_and_rejected_a
     let provider = admission(root.path(), &action);
     assert!(
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint
+            )
             .await
             .assert_error()
             .authentication_failed()
     );
     assert_eq!(
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("rotated-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("rotated-token"),
+                &TestReviewCheckpoint
+            )
             .await
             .assert_value(),
         SourceMergeRequestOutcome::Accepted
@@ -594,13 +643,21 @@ async fn completed_transient_enqueues_retry_without_discarding_withdrawal_uncert
         );
         assert!(
             provider
-                .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                .request_merge(
+                    &review(),
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint
+                )
                 .await
                 .assert_error()
                 .retryable_operation()
         );
         let retried = provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
             .await;
         if accepted {
             assert_eq!(retried.assert_value(), SourceMergeRequestOutcome::Accepted);
@@ -638,7 +695,11 @@ async fn malformed_or_truncated_queue_output_is_redacted_and_never_resubmitted()
         let provider = admission(root.path(), action);
         for _ in 0..2 {
             let error = provider
-                .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                .request_merge(
+                    &review(),
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint,
+                )
                 .await
                 .assert_error();
             assert!(error.to_string().contains(diagnostic), "{error}");
@@ -693,7 +754,11 @@ fn enqueue_count(root: &std::path::Path) -> usize {
 async fn enqueue_accepted(provider: &GhCliDeliveryAuthority) {
     assert_eq!(
         provider
-            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint
+            )
             .await
             .assert_value(),
         SourceMergeRequestOutcome::Accepted

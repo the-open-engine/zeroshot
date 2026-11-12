@@ -124,6 +124,28 @@ pub struct RunSnapshot {
 }
 
 impl RunSnapshot {
+    /// Acknowledged delivery facts include interrupted executions, independently of graph replay.
+    pub(crate) fn delivery_checkpoint(
+        &self,
+    ) -> Result<Option<crate::native_v2_contract::DeliveryCheckpoint>, RunLedgerError> {
+        let mut latest = None;
+        for state in self
+            .execution_seed
+            .iter()
+            .filter_map(|execution| execution.delivery_state.as_ref())
+            .chain(
+                self.executions
+                    .values()
+                    .filter_map(|node| node.delivery_state.as_ref()),
+            )
+        {
+            latest =
+                crate::native_v2_contract::DeliveryCheckpoint::latest(latest, Some(state.clone()))
+                    .map_err(RunLedgerError::InvalidEvent)?;
+        }
+        Ok(latest)
+    }
+
     pub fn admitted(run_id: RunId, admitted: &AdmittedRun) -> Result<Self, RunLedgerError> {
         let size = admitted
             .runtime
@@ -221,6 +243,8 @@ pub struct PrimaryGraphCompletion {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct NodeSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_state: Option<crate::native_v2_contract::DeliveryCheckpoint>,
     pub reference: ExecutionRef,
     pub occurrence: StructuralOccurrence,
     pub attempt: PositiveInteger,
@@ -258,6 +282,10 @@ pub enum NodeState {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunEvent {
+    DeliveryState {
+        execution: ExecutionId,
+        state: crate::native_v2_contract::DeliveryCheckpoint,
+    },
     /// Completed prerequisite work imported before this attempt starts. It contributes no usage.
     PriorExecution {
         execution: crate::full_v1_reducer::DurableExecution,

@@ -246,7 +246,8 @@ impl ControlReplay {
 
     fn project_event(&mut self, event: RunEvent) -> Result<(), &'static str> {
         match event {
-            RunEvent::SafeLog { .. }
+            RunEvent::DeliveryState { .. }
+            | RunEvent::SafeLog { .. }
             | RunEvent::TokenUsageObserved { .. }
             | RunEvent::RunTokenUsageObserved { .. }
             | RunEvent::PrimaryGraphCompleted { .. } => Ok(()),

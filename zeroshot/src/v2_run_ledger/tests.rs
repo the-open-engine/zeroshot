@@ -688,6 +688,7 @@ async fn prerequisites_are_replayable_but_never_counted_as_new_work() {
         .assert_value();
     let original = reference(&run, 1);
     let prior = DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(1).assert_value(),
         node_instance: original.node_instance,
         execution: original.execution,

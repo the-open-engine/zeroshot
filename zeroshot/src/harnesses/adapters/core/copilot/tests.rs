@@ -711,7 +711,7 @@ async fn schema_permissions_usage_and_resume_preserve_the_session() {
         .iter()
         .filter_map(|event| match event {
             DurableNodeEvent::Output { output, .. } => Some(output.text.as_str()),
-            DurableNodeEvent::TokenUsage(_) => None,
+            DurableNodeEvent::TokenUsage(_) | DurableNodeEvent::DeliveryState(_) => None,
         })
         .collect::<Vec<_>>();
     assert!(logs.contains(&"Copilot tool: contract-check"));

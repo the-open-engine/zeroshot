@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 const PROJECT: &str = "/projects/group%2Fsub%2Fproject";
@@ -92,7 +93,7 @@ async fn merge_401_distinguishes_missing_permission_from_a_rejected_token() {
         }
         let error = fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap_err()
             .with_context("delivery refused");

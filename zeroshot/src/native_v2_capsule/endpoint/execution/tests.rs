@@ -151,11 +151,13 @@ async fn boundary_contract_completion_and_reservation_helpers_fail_closed_withou
     let state = Mutex::new(EndpointState {
         active: vec![
             EndpointExecution {
+                delivery_ack: None,
                 reference: reference.clone(),
                 cancel: first_cancel,
                 done: first_receiver,
             },
             EndpointExecution {
+                delivery_ack: None,
                 reference: reference.clone(),
                 cancel: second_cancel,
                 done: second_receiver,
@@ -335,5 +337,33 @@ fn verifier_system_evidence_survives_capsule_terminal_buffer_and_wire_validation
     assert_eq!(
         diagnostic_kind(&events[0]),
         Some(FailureDiagnosticKind::Verifier)
+    );
+}
+
+#[test]
+fn cancellation_retains_latest_delivery_receipts_before_terminal_failure() {
+    let mut metadata = TerminalMetadata::default();
+    metadata.retain(CapsuleNodeEvent::DeliveryState {
+        state: crate::native_v2_runner::test_support::delivery_checkpoint(
+            serde_json::json!({"revision":"old"}),
+            1,
+        ),
+    });
+    let latest = crate::native_v2_runner::test_support::delivery_checkpoint(
+        serde_json::json!({"revision":"verified", "reply":7}),
+        2,
+    );
+    metadata.retain(CapsuleNodeEvent::DeliveryState {
+        state: latest.clone(),
+    });
+    let events = metadata.into_events(Err(NodeRunnerError::Cancelled));
+    assert_eq!(
+        events,
+        vec![
+            CapsuleNodeEvent::DeliveryState { state: latest },
+            CapsuleNodeEvent::Failed {
+                failure: CapsuleNodeFailure::Cancelled
+            }
+        ]
     );
 }

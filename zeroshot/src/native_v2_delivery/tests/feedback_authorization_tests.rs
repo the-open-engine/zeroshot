@@ -21,6 +21,7 @@ repos/acme/project/pulls/17) cat "$0.review" ;;
 repos/acme/project/collaborators/reviewer/permission)
   if [ -f "$0.error" ]; then cat "$0.error" >&2; exit 1; fi
   cat "$0.permission" ;;
+graphql) cat "$0.conversations" ;;
 *) exit 19 ;;
 esac
 "#,
@@ -41,7 +42,7 @@ esac
         ..GhCliAuthorityConfig::hosted(repo.root.path().to_owned())
     });
     let mut authority = FakeGitHub::new(repo.remote.clone(), Script::RegistrationRace);
-    authority.feedback_authority = Some((forge, program));
+    authority.feedback_authority = Some((tokio::sync::Mutex::new(forge), program));
     Arc::new(authority)
 }
 
