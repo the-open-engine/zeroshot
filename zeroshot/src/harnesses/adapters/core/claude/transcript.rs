@@ -20,6 +20,9 @@ mod session_id;
 #[path = "transcript/usage.rs"]
 mod usage;
 
+#[path = "transcript/rejection.rs"]
+mod rejection;
+
 use diagnostic::{combine_failure_detail, error_list, record_count};
 use permission_denials::PermissionDenials;
 use session_id::record_session_id;
@@ -47,6 +50,8 @@ pub(super) struct ClaudeTranscript {
     session_failure: Option<String>,
     terminal: Option<ClaudeTerminal>,
     retryable_failure_seen: bool,
+    authentication_rejected: bool,
+    unavailable_model: Option<String>,
     visible_text_emitted: bool,
     result_usage: ResultUsage,
     /// Streamed message usage since the last result, or since the start without one.
@@ -66,6 +71,8 @@ impl ClaudeTranscript {
             session_failure: None,
             terminal: None,
             retryable_failure_seen: false,
+            authentication_rejected: false,
+            unavailable_model: None,
             visible_text_emitted: false,
             result_usage: ResultUsage::default(),
             provisional_usage: ProvisionalUsage::default(),
@@ -101,6 +108,10 @@ impl ProviderTranscript for ClaudeTranscript {
         self.session_failure.is_none() && matches!(self.terminal, Some(ClaudeTerminal::Complete(_)))
     }
 
+    fn observe_stderr(&mut self, stderr: &[u8]) {
+        self.unavailable_model = rejection::unrecognized_model(stderr);
+    }
+
     fn failure_diagnostic(&self, process_detail: Option<&str>) -> Option<String> {
         let terminal = match &self.terminal {
             Some(ClaudeTerminal::Failed(detail)) => Some(detail.as_str()),
@@ -124,6 +135,7 @@ impl ProviderTranscript for ClaudeTranscript {
             .as_ref()
             .map(|failure| failure.detail.as_str())
             .filter(|detail| !detail.trim().is_empty());
+        let rejected = matches!(self.terminal, Some(ClaudeTerminal::Failed(_)));
         let missing_terminal = self.missing_terminal_detail();
         let terminal = self
             .terminal
@@ -132,6 +144,16 @@ impl ProviderTranscript for ClaudeTranscript {
         match terminal {
             ClaudeTerminal::Complete(result) => self.finish_complete(result, process_failure),
             ClaudeTerminal::Failed(diagnostic) => {
+                if rejected && self.session_failure.is_none() {
+                    if self.authentication_rejected {
+                        return Err(NodeRunnerError::AuthenticationRequired(diagnostic));
+                    }
+                    if let Some(model) = &self.unavailable_model {
+                        return Err(NodeRunnerError::ModelUnavailable(format!(
+                            "model {model}: {diagnostic}"
+                        )));
+                    }
+                }
                 Ok(self.finish_failed(diagnostic, process_failure))
             }
         }
@@ -256,7 +278,11 @@ impl ClaudeTranscript {
         if event.get("subtype").and_then(Value::as_str) != Some("api_retry") {
             return;
         }
-        self.retryable_failure_seen = true;
+        if event.get("error").and_then(Value::as_str) == Some("authentication_failed") {
+            self.authentication_rejected = true;
+        } else {
+            self.retryable_failure_seen = true;
+        }
         let attempt = event.get("attempt").and_then(Value::as_u64).unwrap_or(0);
         let maximum = event
             .get("max_retries")
@@ -404,6 +430,9 @@ impl ClaudeTranscript {
         let Some(message) = event.get("message").and_then(Value::as_object) else {
             return;
         };
+        if event.get("error").and_then(Value::as_str) == Some("authentication_failed") {
+            self.authentication_rejected = true;
+        }
         self.record_assistant_usage(event, message);
         if self.visible_text_emitted {
             return;
@@ -474,6 +503,8 @@ impl ClaudeTranscript {
         let unsuccessful = event.get("subtype").and_then(Value::as_str) != Some("success")
             || event.get("is_error").and_then(Value::as_bool) == Some(true);
         if unsuccessful {
+            self.authentication_rejected |=
+                event.get("api_error_status").and_then(Value::as_u64) == Some(401);
             let diagnostic = event
                 .get("result")
                 .and_then(Value::as_str)
@@ -492,6 +523,7 @@ impl ClaudeTranscript {
             self.terminal = Some(ClaudeTerminal::Failed(diagnostic));
             return;
         }
+        self.authentication_rejected = false;
         // `subagent_stats` holds this process's running totals. `killed.system` counts subagents
         // Claude Code stopped itself, as at its background wait ceiling; their work is missing.
         if let Some(stopped) = event

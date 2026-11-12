@@ -76,6 +76,13 @@ class FailureDiagnosticTests(unittest.TestCase):
         self.assertNotIn("fixture-private-credential", fields["error"])
         self.assertEqual(len(fields["error"]), 4096)
 
+    def test_native_rejection_reasons_cross_the_private_bridge_without_text_matching(self):
+        for reason in ("auth", "auth_permanent", "model_not_found", "model_entitlement"):
+            self.assertEqual(self.bridge.failure_error({"failed": True, "failure_reason": reason}),
+                             {"failure_reason": reason})
+        self.assertEqual(self.bridge.failure_error({"failed": True, "failure_reason": "unknown"}), {})
+        self.assertEqual(self.bridge.failure_error({"completed": True, "failure_reason": "auth"}), {})
+
     def test_success_and_missing_native_errors_never_use_final_response(self):
         for result in ({"completed": True, "error": "stale", "final_response": "successful output"},
                        {"failed": True, "final_response": "response is not a diagnostic"}):
@@ -106,7 +113,8 @@ class CleanupDiagnosticTests(unittest.TestCase):
         live = SimpleNamespace(pid=73, status=lambda: "sleeping", name=lambda: "fixture-private-credential")
         children = [dead, live]
         psutil = _processes(children, [dead])
-        sanitize = lambda name: name.replace("fixture-private-credential", "[REDACTED]")
+        def sanitize(name):
+            return name.replace("fixture-private-credential", "[REDACTED]")
         with patch.dict("sys.modules", {"psutil": psutil}):
             with self.assertRaises(runtime.BridgeError) as refusal:
                 runtime.confirm_children(children, sanitize)

@@ -468,6 +468,8 @@
         "policy_denied",
         "interactive_input_required",
         "authentication_required",
+        "model_unavailable",
+        "stopped",
         "malformed_result"
       ],
       "type": "string"
@@ -509,7 +511,9 @@
                     "enum": [
                       "policy_denied",
                       "interactive_input_required",
-                      "authentication_required"
+                      "authentication_required",
+                      "model_unavailable",
+                      "stopped"
                     ]
                   }
                 },

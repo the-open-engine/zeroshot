@@ -177,6 +177,8 @@ fn builtin_binding_round_trips_and_rejects_invalid_variants() {
 fn strict_autonomy_has_only_typed_fail_closed_outcomes() {
     for (outcome, reason) in [
         (WorkerOutcome::policy_refusal(), "policy_denied"),
+        (WorkerOutcome::model_refusal(), "model_unavailable"),
+        (WorkerOutcome::stopped(), "stopped"),
         (
             WorkerOutcome::interactive_refusal(),
             "interactive_input_required",
@@ -204,6 +206,17 @@ fn strict_autonomy_has_only_typed_fail_closed_outcomes() {
             reason
         );
         assert!(value.get("callback").is_none());
+        let validator = jsonschema::validator_for(
+            &serde_json::to_value(schemars::schema_for!(WorkerOutcome)).assert_value(),
+        )
+        .assert_value();
+        assert!(validator.is_valid(&value));
+        assert_eq!(
+            serde_json::from_value::<WorkerOutcome>(value.clone())
+                .assert_value()
+                .error_code(),
+            Some(openengine_cluster_protocol::WorkerErrorCode::Refusal)
+        );
     }
     let malformed = serde_json::to_value(WorkerOutcome::malformed()).assert_value();
     assert_eq!(
@@ -226,6 +239,8 @@ fn strict_autonomy_has_only_typed_fail_closed_outcomes() {
     }
     for invalid in [
         json!({ "status": "error", "code": "timeout", "reason": "policy_denied" }),
+        json!({ "status": "error", "code": "crash", "reason": "model_unavailable" }),
+        json!({ "status": "error", "code": "timeout", "reason": "stopped" }),
         json!({ "status": "error", "code": "malformed", "reason": "authentication_required" }),
         json!({ "status": "error", "code": "refusal", "reason": "malformed_result" }),
     ] {

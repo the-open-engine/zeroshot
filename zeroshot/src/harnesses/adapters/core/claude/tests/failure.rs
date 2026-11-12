@@ -482,3 +482,6 @@ fn cleanup_preview_keeps_native_errors_and_excludes_successful_response_text() {
     transcript.push(record.as_bytes());
     assert!(transcript.failure_diagnostic(None).is_none());
 }
+
+#[path = "failure/rejections.rs"]
+mod rejections;

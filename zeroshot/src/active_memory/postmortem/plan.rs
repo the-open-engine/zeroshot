@@ -146,19 +146,22 @@ pub(super) async fn build(main: &AdmittedRun) -> Result<AdmittedRun, PostmortemE
 }
 
 fn inherited_binding(main: &AdmittedRun) -> Result<NodeRuntimeBinding, PostmortemError> {
-    let name = main
-        .runtime
+    let name = source_node(main).ok_or(PostmortemError::Preparation)?;
+    match main.runtime.nodes().get(name) {
+        Some(binding @ NodeRuntimeBinding::Agent { .. }) => Ok(binding.clone()),
+        _ => Err(PostmortemError::Preparation),
+    }
+}
+
+/// Shares the exact binding selection with the supervisor's provider rejection gate.
+pub(crate) fn source_node(main: &AdmittedRun) -> Option<&NodeName> {
+    main.runtime
         .global_agents()
         .postmortem
         .source_node
         .as_ref()
         .or_else(|| first_agent(&main.graph.root, main.runtime.nodes(), false))
         .or_else(|| first_agent(&main.graph.root, main.runtime.nodes(), true))
-        .ok_or(PostmortemError::Preparation)?;
-    match main.runtime.nodes().get(name) {
-        Some(binding @ NodeRuntimeBinding::Agent { .. }) => Ok(binding.clone()),
-        _ => Err(PostmortemError::Preparation),
-    }
 }
 
 fn first_agent<'a>(

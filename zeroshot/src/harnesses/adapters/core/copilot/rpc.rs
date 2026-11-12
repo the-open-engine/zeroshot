@@ -12,7 +12,7 @@ use crate::execution::process::{
 };
 use crate::native_v2_capsule::provider_process::{
     ProviderProcess, ProviderExecutionFiles, provider_error_output, redaction_values,
-    report_provider_error, safe_provider_text,
+    redact_provider_error, report_provider_error, safe_provider_text,
 };
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
@@ -62,6 +62,7 @@ pub(super) fn process_error(error: ProcessRunnerError) -> NodeRunnerError {
 enum RpcReply {
     Result(Value),
     Error(String),
+    Rejected(NodeRunnerError),
     Ended,
 }
 
@@ -69,6 +70,7 @@ impl RpcReply {
     fn into_value(self, method: &str) -> Result<Value, NodeRunnerError> {
         match self {
             Self::Result(value) => Ok(value),
+            Self::Rejected(error) => Err(error),
             Self::Error(message) => Err(failure(format!("Copilot RPC failed: {message}"))),
             Self::Ended => Err(request_ended(method)),
         }
@@ -191,12 +193,7 @@ impl<'a> CopilotRpc<'a> {
         self.sender = Some(sender);
         let result = self.run_session(turn).await;
         self.sender.take();
-        result.map_err(|error| match error {
-            NodeRunnerError::DriverDetail(message) => {
-                failure(safe_provider_text(&message, &self.redactions))
-            }
-            error => error,
-        })
+        result.map_err(|error| redact_provider_error(error, &self.redactions))
     }
 
     async fn run_session(
@@ -248,6 +245,7 @@ impl<'a> CopilotRpc<'a> {
                 "Copilot session could not be detached".to_owned()
             }
             RpcReply::Error(message) => format!("Copilot RPC failed: {message}"),
+            RpcReply::Rejected(error) => error.to_string(),
             RpcReply::Ended => "Copilot exited before replying to session.detach".to_owned(),
         };
         let error = failure(format!(
@@ -428,7 +426,7 @@ impl<'a> CopilotRpc<'a> {
     ) -> NodeRunnerError {
         let mut detail = match failure_detail(error) {
             Ok(detail) => detail,
-            Err(error) => return error,
+            Err(error) => return redact_provider_error(error, &self.redactions),
         };
         append_stderr_detail(&mut detail, completion);
         failure(safe_provider_text(&detail, &self.redactions))
@@ -543,6 +541,15 @@ fn resolve_response_message(
 fn response_payload(message: &Value) -> Result<RpcReply, NodeRunnerError> {
     match (message.get("result"), message.get("error")) {
         (Some(result), None) => Ok(RpcReply::Result(result.clone())),
+        (None, Some(error))
+            if error["data"]["errorType"] == "authentication"
+                && error["code"].as_i64().is_some()
+                && error["message"].as_str().is_some() =>
+        {
+            Ok(RpcReply::Rejected(NodeRunnerError::AuthenticationRequired(
+                error["message"].as_str().unwrap_or_default().to_owned(),
+            )))
+        }
         (None, Some(error)) => match (error["code"].as_i64(), error["message"].as_str()) {
             (Some(_), Some(message)) => Ok(RpcReply::Error(message.to_owned())),
             _ => Err(failure("Copilot RPC error is invalid")),

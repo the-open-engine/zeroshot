@@ -15,8 +15,8 @@ use openengine_cluster_protocol::{
     RunDiscardWorkspaceResult, RunLogEventNotification, RunLogsParams, RunLogsResult,
     RunResumeParams, RunResumeResult, RunStatus, RunStatusParams, RunStatusResult, RunSubmitParams,
     RunSubmitResult, RunWatchEventNotification, RunWatchParams, RunWatchResult, ServerCapabilities,
-    Sha256Digest, SubscriptionCloseReason, TerminalResult, WorkerErrorCode, GONE, GRAPH_INVALID,
-    IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, NOT_FOUND, SCHEMA_VIOLATION,
+    Sha256Digest, SubscriptionCloseReason, TerminalResult, WorkerErrorCode, WorkerOutcome, GONE,
+    GRAPH_INVALID, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, NOT_FOUND, SCHEMA_VIOLATION,
 };
 use openengine_cluster_server::native_v2::{
     RunAttachEventStream, RunLogEventStream, RunSubscriptionItem, RunSubscriptionSource,
@@ -229,7 +229,13 @@ impl NativeV2PlatformController {
             .destroy_or_confirm_absent(run_id, RunRuntimeExit::RuntimeLost)
             .await
             .map_err(|_| NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable))?;
-        append_interrupted(self.ledger.as_ref(), stored, "runtime_lost").await?;
+        append_interrupted(
+            self.ledger.as_ref(),
+            stored,
+            "runtime_lost",
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+        )
+        .await?;
         if stored
             .snapshot
             .primary_graph
@@ -673,7 +679,13 @@ impl NativeV2PlatformController {
             .get(run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        append_terminal_failure(self.ledger.as_ref(), &stored, code).await?;
+        append_terminal_failure(
+            self.ledger.as_ref(),
+            &stored,
+            code,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+        )
+        .await?;
         self.observability.runtime_finished(run_id);
         Ok(())
     }
@@ -822,7 +834,13 @@ impl NativeV2PlatformController {
             .get(run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        append_interrupted(self.ledger.as_ref(), &stored, "force_stopped").await?;
+        append_interrupted(
+            self.ledger.as_ref(),
+            &stored,
+            "force_stopped",
+            WorkerOutcome::stopped(),
+        )
+        .await?;
         Ok(())
     }
 

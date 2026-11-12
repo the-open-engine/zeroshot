@@ -92,6 +92,72 @@ async fn interrupted_parallel_run(ledger: &Arc<FakeRunLedger>) -> RunId {
 }
 
 #[tokio::test]
+async fn force_reconstructed_active_nodes_records_stopped_and_preserves_completed_work() {
+    let harness = harness(Behavior::Complete).await;
+    let run_id = interrupted_parallel_run(&harness.ledger).await;
+    let forced = harness
+        .controller
+        .force(RunForceParams {
+            run_id: run_id.clone(),
+        })
+        .await
+        .assert_value();
+    assert_eq!(
+        forced.status,
+        RunStatus::Finished {
+            terminal_result: TerminalResult::Failed {
+                context: None,
+                reason: EnumLabel::new("force_stopped").assert_value(),
+            },
+            metadata: Default::default(),
+        }
+    );
+    assert_eq!(harness.allocator.allocation_count(), 0);
+    assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::ForceStopped]);
+    assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
+    let stored = harness
+        .ledger
+        .get(&run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(stored.snapshot.active_executions().count(), 0);
+    assert_eq!(stored.snapshot.executions.len(), 3);
+    for node in stored.snapshot.executions.values() {
+        let expected = if node.reference.node.as_str() == "worker" {
+            WorkerOutcome::Verified {
+                output: Value::Null,
+                artifacts: Vec::new(),
+            }
+        } else {
+            WorkerOutcome::stopped()
+        };
+        assert_eq!(node.outcome(), Some(&expected));
+    }
+    let records = read_logs(
+        &harness.controller,
+        RunLogsParams {
+            run_id,
+            from_cursor: None,
+            execution: None,
+        },
+    )
+    .await;
+    assert_eq!(records.len(), 3);
+    for (record, name) in records.iter().take(2).zip(["left", "right"]) {
+        assert!(record.execution.is_some());
+        assert_eq!(
+            record.record.message.as_str(),
+            format!("Node {name} was stopped")
+        );
+    }
+    assert_eq!(
+        records[2].record.message.as_str(),
+        "Run failed: force_stopped"
+    );
+}
+
+#[tokio::test]
 async fn restarted_active_nodes_keep_public_failure_logs_and_replay_without_duplication() {
     let Harness {
         controller,
@@ -110,6 +176,18 @@ async fn restarted_active_nodes_keep_public_failure_logs_and_replay_without_dupl
         execution: None,
     };
     let records = read_logs(&controller, params()).await;
+    let stored = ledger.get(&run_id).await.assert_value().assert_value();
+    for node in stored.snapshot.executions.values() {
+        let expected = if node.reference.node.as_str() == "worker" {
+            WorkerOutcome::Verified {
+                output: Value::Null,
+                artifacts: Vec::new(),
+            }
+        } else {
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+        };
+        assert_eq!(node.outcome(), Some(&expected));
+    }
     assert_eq!(records.len(), 3);
     for (record, name) in records.iter().take(2).zip(["left", "right"]) {
         assert_eq!(record.record.level, LogLevel::Error);

@@ -90,7 +90,7 @@ impl<'a> HermesConnection<'a> {
         );
         loop {
             send(process, &json!({"type":"prompt","text":response.prompt()})).await?;
-            let message = self.turn().await?;
+            let message = self.turn(invocation).await?;
             let answer =
                 resolve_agent_response_with_schema(&invocation.response, &message, dialect)?;
             feedback
@@ -136,7 +136,7 @@ impl<'a> HermesConnection<'a> {
         Ok(())
     }
 
-    async fn turn(&mut self) -> Result<String, NodeRunnerError> {
+    async fn turn(&mut self, invocation: &DriverInvocation) -> Result<String, NodeRunnerError> {
         loop {
             let event = self.required().await?;
             if event["type"] == "result" {
@@ -145,7 +145,7 @@ impl<'a> HermesConnection<'a> {
                     || event["interrupted"] == true
                     || event["completed"] != true
                 {
-                    return Err(self.turn_failure(&event));
+                    return Err(self.turn_failure(&event, invocation));
                 }
                 return event["message"]
                     .as_str()
@@ -156,17 +156,25 @@ impl<'a> HermesConnection<'a> {
         }
     }
 
-    fn turn_failure(&self, event: &Value) -> NodeRunnerError {
+    fn turn_failure(&self, event: &Value, invocation: &DriverInvocation) -> NodeRunnerError {
         let detail = event["error"]
             .as_str()
             .filter(|detail| !detail.trim().is_empty());
-        match detail {
-            Some(detail) => failure(&format!(
-                "Hermes native model turn failed: {}",
-                self.output.redact(detail)
-            )),
-            None => failure("Hermes native model turn did not complete"),
-        }
+        let detail = detail.map_or_else(
+            || "Hermes native model turn did not complete".to_owned(),
+            |detail| {
+                format!(
+                    "Hermes native model turn failed: {}",
+                    self.output.redact(detail)
+                )
+            },
+        );
+        let crate::native_v2_contract::NodeRuntimeBinding::Agent { model, .. } =
+            &invocation.node.binding
+        else {
+            return failure(&detail);
+        };
+        super::rejection::classify(event, model.as_str(), detail)
     }
 
     async fn record_usage(&mut self, value: Option<&Value>) -> Result<(), NodeRunnerError> {

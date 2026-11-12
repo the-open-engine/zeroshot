@@ -237,6 +237,198 @@ async fn a_ready_stop_is_seen_without_polling_optional_postmortem_work() {
     assert!(!polled);
 }
 
+#[tokio::test]
+async fn postmortem_skips_rejected_source_credentials_or_model_but_runs_after_crash() {
+    for (outcome, skip_reason) in [
+        (
+            WorkerOutcome::authentication_refusal(),
+            Some("authentication_required"),
+        ),
+        (WorkerOutcome::model_refusal(), Some("model_unavailable")),
+        (
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+            None,
+        ),
+        (WorkerOutcome::policy_refusal(), None),
+    ] {
+        let postmortem = Postmortem::new(Mode::Fails);
+        let mut harness = harness(
+            resolution::worker_graph(None),
+            Value::Null,
+            FakeDriver::scripted([(
+                "worker",
+                vec![Behavior::Complete {
+                    delay: Duration::ZERO,
+                    outcome,
+                }],
+            )]),
+        )
+        .await;
+        harness.supervisor = harness.supervisor.with_postmortem(Some(postmortem.clone()));
+        let result = harness.supervisor.drive().await.assert_value();
+        assert_eq!(
+            postmortem.calls.load(Ordering::SeqCst),
+            usize::from(skip_reason.is_none())
+        );
+        let stored = stored_run(&harness.ledger).await;
+        assert!(
+            !stored
+                .snapshot
+                .primary_graph
+                .as_ref()
+                .assert_value()
+                .auxiliary_pending
+        );
+        if let Some(reason) = skip_reason {
+            assert!(matches!(
+                observed_status(&harness).await,
+                openengine_cluster_protocol::RunStatus::Finished { terminal_result, .. }
+                    if terminal_result == result
+            ));
+            let result_logs = graph_result_logs(&harness).await;
+            assert_eq!(result_logs.len(), 1);
+            assert!(!result_logs[0].contains("postmortem is running"));
+            let mut logs = failure_logs::public_subscription(&harness).await;
+            let records = logs.read_available().await.assert_value();
+            assert!(
+                records
+                    .iter()
+                    .any(|record| record.record.message.as_str().contains(&format!(
+                        "postmortem skipped: source node worker ended with {reason}"
+                    )))
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn postmortem_gate_uses_the_selected_source_not_an_unrelated_rejected_node() {
+    let postmortem = Postmortem::new(Mode::Fails);
+    let mut harness = harness(
+        graph(
+            sequence(
+                vec![
+                    step("healthy", 1_000),
+                    step("rejected", 1_000),
+                    succeed("done"),
+                ],
+                null_type(),
+            ),
+            null_type(),
+        ),
+        Value::Null,
+        FakeDriver::scripted([(
+            "rejected",
+            vec![Behavior::Complete {
+                delay: Duration::ZERO,
+                outcome: WorkerOutcome::model_refusal(),
+            }],
+        )]),
+    )
+    .await;
+    harness.supervisor = harness.supervisor.with_postmortem(Some(postmortem.clone()));
+    harness.supervisor.drive().await.assert_value();
+    assert_eq!(postmortem.calls.load(Ordering::SeqCst), 1);
+    let stored = stored_run(&harness.ledger).await;
+    let mut admitted = stored.admitted;
+    admitted.runtime.global_agents_mut().postmortem.source_node =
+        Some(NodeName::new("rejected").assert_value());
+    assert!(
+        harness
+            .supervisor
+            .enabled_postmortem(&admitted, &stored.snapshot)
+            .is_none()
+    );
+    admitted.runtime.global_agents_mut().postmortem.source_node =
+        Some(NodeName::new("healthy").assert_value());
+    assert!(
+        harness
+            .supervisor
+            .enabled_postmortem(&admitted, &stored.snapshot)
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn restored_source_rejections_skip_postmortem_after_an_authored_refusal_branch() {
+    for (outcome, reason) in [
+        (
+            WorkerOutcome::authentication_refusal(),
+            Some("authentication_required"),
+        ),
+        (WorkerOutcome::model_refusal(), Some("model_unavailable")),
+        (WorkerOutcome::policy_refusal(), None),
+    ] {
+        let postmortem = Postmortem::new(Mode::Fails);
+        let route = json!({
+            "kind":"choice", "name":"handle_refusal", "state":null_type(),
+            "promotedStatePaths":[],
+            "branches":[{
+                "when":{"kind":"in","value":{"name":"worker","source":"error"},"labels":["refusal"]},
+                "node":step("recovery", 10_000)
+            }],
+            "otherwise":{"kind":"fail","name":"unexpected","reason":"unexpected_failure"}
+        });
+        let mut harness = harness(
+            graph(
+                sequence(
+                    vec![step("worker", 10_000), route, succeed("done")],
+                    null_type(),
+                ),
+                null_type(),
+            ),
+            Value::Null,
+            FakeDriver::default(),
+        )
+        .await;
+        harness.supervisor = harness.supervisor.with_postmortem(Some(postmortem.clone()));
+        harness
+            .ledger
+            .append(
+                &harness.supervisor.run_id,
+                vec![RunEvent::PriorExecution {
+                    execution: checkpoint_tests::prerequisite(1, "worker", outcome),
+                }],
+            )
+            .await
+            .assert_value();
+        assert!(matches!(
+            harness.supervisor.drive().await.assert_value(),
+            TerminalResult::Succeeded { .. }
+        ));
+        assert_eq!(harness.driver.starts("worker"), 0);
+        assert_eq!(harness.driver.starts("recovery"), 1);
+        assert_eq!(
+            postmortem.calls.load(Ordering::SeqCst),
+            usize::from(reason.is_none())
+        );
+        let stored = stored_run(&harness.ledger).await;
+        assert_eq!(stored.snapshot.execution_seed.len(), 1);
+        assert_eq!(stored.snapshot.executions.len(), 1);
+        let mut logs = failure_logs::public_subscription(&harness).await;
+        let records = logs.read_available().await.assert_value();
+        let skipped = records.iter().find(|record| {
+            record
+                .record
+                .message
+                .as_str()
+                .contains("postmortem skipped: source node worker")
+        });
+        if let Some(reason) = reason {
+            assert!(
+                skipped
+                    .assert_value()
+                    .record
+                    .message
+                    .as_str()
+                    .contains(reason)
+            );
+        } else {
+            assert!(skipped.is_none());
+        }
+    }
+}
+
 async fn observed_status(harness: &Harness) -> openengine_cluster_protocol::RunStatus {
     crate::native_v2_observability::NativeV2Observability::new(harness.ledger.clone())
         .status(openengine_cluster_protocol::RunStatusParams {

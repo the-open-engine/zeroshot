@@ -439,10 +439,14 @@ class Runtime:
     def failure_error(self, result):
         if not any(result.get(flag) for flag in ("failed", "partial", "interrupted")):
             return {}
+        fields = {}
+        reason = result.get("failure_reason")
+        if reason in ("auth", "auth_permanent", "model_not_found", "model_entitlement"):
+            fields["failure_reason"] = reason
         error = result.get("error")
-        if error is None:
-            return {}
-        return {"error": self.authority.sanitize_owned_error(error)[:4096]}
+        if error is not None:
+            fields["error"] = self.authority.sanitize_owned_error(error)[:4096]
+        return fields
 
     def wait_for_titles(self):
         from agent import title_generator

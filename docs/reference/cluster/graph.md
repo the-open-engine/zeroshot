@@ -1,5 +1,5 @@
 ---
-description: "The graph contract defines node types, control flow, state, signals and bounds for the full-graph and single-worker protocol profiles."
+description: 'The graph contract defines node types, control flow, state, signals and bounds for the full-graph and single-worker protocol profiles.'
 ---
 
 # Graph contract
@@ -28,17 +28,17 @@ separate from verification.
 `GraphSpec` has the required camel-case fields `profile`, `initialInput`, `policy`, and `root`.
 Every graph node is tagged by `kind`. Node payloads reject unknown fields.
 
-| `kind`     | Contract                                                                                                                                      |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `step`     | Stable name and versioned worker reference; optional bounded authored instructions; declared input/output types and bindings; positive bounds |
-| `verifier` | The bounded worker surface plus optional bounded authored instructions, named finite-enum signals, and a declared diagnostic type             |
-| `seq`      | Declared state, non-empty ordered children, promoted state paths                                                                              |
-| `choice`   | Declared state, non-empty authored-order guarded branches, optional `otherwise`, promoted paths                                               |
-| `par`      | Declared state, non-empty branches, promoted paths, and a tagged join                                                                         |
+| `kind`     | Contract                                                                                                                                                   |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `step`     | Stable name and versioned worker reference; optional bounded authored instructions; declared input/output types and bindings; positive bounds              |
+| `verifier` | The bounded worker surface plus optional bounded authored instructions, named finite-enum signals, and a declared diagnostic type                          |
+| `seq`      | Declared state, non-empty ordered children, promoted state paths                                                                                           |
+| `choice`   | Declared state, non-empty authored-order guarded branches, optional `otherwise`, promoted paths                                                            |
+| `par`      | Declared state, non-empty branches, promoted paths, and a tagged join                                                                                      |
 | `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
-| `map`      | Declared state, body, structured array selector `over`, positive `maxItems`, promoted paths                                                   |
-| `succeed`  | Declared output type and structured state-to-output bindings                                                                                  |
-| `fail`     | Finite-enum reason; `unhandled` is reserved for a future compiler's implicit sink                                                             |
+| `map`      | Declared state, body, structured array selector `over`, positive `maxItems`, promoted paths                                                                |
+| `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
+| `fail`     | Finite-enum reason; `unhandled` is reserved for a future compiler's implicit sink                                                                          |
 
 Parallel joins are `all`, `any`, `quorum { count }`, or `first { when }`. The closed worker error
 channel is `timeout`, `crash`, `malformed`, and `refusal`. Choice reachability/exhaustiveness, loop
@@ -60,6 +60,32 @@ to each item's joint join/branch-control outcome before `k_of_map` aggregates la
 For `first`, a winning branch must complete, guarantee the controls read by `when`, and make
 `when` true. The `raced=satisfied|no_satisfier` control is correlated with those legal winner
 assignments; a non-satisfying completion cannot contribute promotion guarantees.
+
+Worker failures retain those four codes. Native machine-readable credential rejections use
+`refusal` with reason `authentication_required`; rejected models use `refusal` with reason
+`model_unavailable`, and their diagnostic names the requested model. A force-stopped node uses
+`refusal` with reason `stopped` and logs that it was stopped. Guards on `refusal` see all three
+cases as well as task and policy refusals. These outcomes receive neither an adapter continuation
+nor another node attempt. Active Memory skips its postmortem, with an explanation in the log,
+when the selected source node's final outcome is an authentication or model rejection, including
+restored checkpoint prerequisites.
+
+Classification uses each harness's native signals, without a Zeroshot model catalog or matching
+human-readable error wording:
+
+| Harness  | Rejected credential                                                                                                                         | Model not accepted                                                                                                                                                                                 |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude   | `authentication_failed` on `system/api_retry` or an assistant error, or numeric `api_error_status: 401`, followed by a failed result        | A failed result with the native stderr marker `[claude-code:unrecognized_model]` and its JSON `model` field. A successful result keeps its answer despite this warning.                            |
+| Codex    | No distinct signal in exec JSON: `error` and `turn.failed.error` expose only `message`; remains `crash`/`declared_failure`.                 | Same message-only exec error; remains `crash`/`declared_failure`.                                                                                                                                  |
+| Copilot  | `session.error.data.errorType: authentication`, including the equivalent request-correlated RPC error data                                  | Generic `query` errors do not distinguish model rejection; remains `crash`/`declared_failure` when no specific signal is available.                                                                |
+| Pi       | Failed assistant messages expose `stopReason` and `errorMessage`, without a credential rejection class; remains `crash`/`declared_failure`. | Native model selection and failed assistant messages provide no distinct model rejection class; remains `crash`/`declared_failure`.                                                                |
+| OpenCode | Native `ProviderAuthError`, or `APIError.data.statusCode: 401`                                                                              | Native `ProviderModelNotFoundError`, or `APIError.data.responseBody` containing JSON `error.code: model_not_found`. A bare 404 or a message-only startup error remains `crash`/`declared_failure`. |
+| Hermes   | Failed native result `failure_reason: auth` or `auth_permanent`                                                                             | Failed native result `failure_reason: model_not_found` or `model_entitlement`. Older native results without `failure_reason` remain `crash`/`declared_failure` for either case.                    |
+
+These mappings apply locally and through hosted capsule transport. A cut or malformed provider
+response stream remains `crash`/`declared_failure` and retains the harness's existing continuation
+policy and the node's crash attempts. A malformed **worker response contract** instead remains
+`malformed`/`malformed_result` after its allowed corrections.
 
 ## Data and control separation
 

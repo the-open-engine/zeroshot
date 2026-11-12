@@ -387,7 +387,12 @@ async fn rpc_cleanup_failure(
     redactions: &[String],
     control: &DriverControl,
 ) -> NodeRunnerError {
-    if let Err(NodeRunnerError::DriverDetail(detail)) = outcome {
+    if let Err(
+        NodeRunnerError::DriverDetail(detail)
+        | NodeRunnerError::AuthenticationRequired(detail)
+        | NodeRunnerError::ModelUnavailable(detail),
+    ) = outcome
+    {
         let diagnostic = provider_failure_diagnostic("Copilot", Some(detail), None, redactions);
         report_cleanup_failure(control, diagnostic).await;
     }

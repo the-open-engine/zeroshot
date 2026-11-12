@@ -203,3 +203,14 @@ fn coverage_contract_rpc_protocol_session_and_dispatch_decisions_fail_closed() {
         Err(NodeRunnerError::Cancelled)
     ));
 }
+
+#[test]
+fn request_correlated_authentication_rejection_retains_its_class() {
+    let reply = response_payload(&json!({"error":{"code":-32000,"message":"denied",
+        "data":{"errorType":"authentication"}}}))
+    .assert_value();
+    assert!(matches!(
+        reply.into_value("session.send"),
+        Err(NodeRunnerError::AuthenticationRequired(_))
+    ));
+}

@@ -152,6 +152,12 @@ pub enum NodeRunnerError {
     /// User-visible error context. Producers must redact credentials before returning it.
     #[error("node execution failed: {0}")]
     DriverDetail(String),
+    /// Machine-readable provider rejection. Producers redact credentials before returning it.
+    #[error("provider rejected authentication: {0}")]
+    AuthenticationRequired(String),
+    /// The provider, rather than a runtime model catalog, rejected the requested model.
+    #[error("provider rejected model: {0}")]
+    ModelUnavailable(String),
     #[error("the remote node runtime connection was lost")]
     ConnectionLost,
     #[error("provider process cleanup could not be confirmed")]

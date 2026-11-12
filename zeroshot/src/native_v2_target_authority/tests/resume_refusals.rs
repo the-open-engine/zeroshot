@@ -121,7 +121,7 @@ async fn failed_run_declaring_a_connection() -> Arc<FakeRunLedger> {
     let failure = crate::native_v2_supervisor::logging::terminal_failure_events(
         &stored.snapshot,
         "runtime_unavailable",
-        WorkerErrorCode::Crash,
+        openengine_cluster_protocol::WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
     )
     .assert_value();
     ledger.append(&run_id(), failure).await.assert_value();

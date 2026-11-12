@@ -374,3 +374,51 @@ mod providers;
 #[cfg(unix)]
 #[path = "tests/github.rs"]
 mod github;
+
+#[test]
+fn native_authentication_and_model_errors_preserve_machine_classification() {
+    for error in [
+        json!({"name":"ProviderAuthError","data":{"providerID":"openai","message":"denied"}}),
+        json!({"name":"APIError","data":{"statusCode":401,"message":"denied"}}),
+        json!({"name":"APIError","data":{"statusCode":404,"message":"missing-model rejected",
+            "responseBody":"{\"error\":{\"code\":\"model_not_found\"}}"}}),
+        json!({"name":"ProviderModelNotFoundError","data":{"modelID":"missing-model"}}),
+    ] {
+        let auth = error["name"] == "ProviderAuthError" || error["data"]["statusCode"] == 401;
+        let mut transcript = transcript::OpenCodeTranscript::new(None, vec![]);
+        push(
+            &mut transcript,
+            &json!({"type":"error","sessionID":"ses_fixture","error":error}),
+        );
+        let result = transcript.finish(None);
+        if auth {
+            assert!(matches!(
+                result,
+                Err(NodeRunnerError::AuthenticationRequired(_))
+            ));
+        } else {
+            assert!(
+                matches!(result, Err(NodeRunnerError::ModelUnavailable(detail)) if detail.contains("missing-model"))
+            );
+        }
+    }
+}
+
+#[test]
+fn unclassified_native_errors_and_cut_streams_remain_crashes() {
+    for error in [
+        json!({"name":"APIError","data":{"statusCode":404,"message":"model not found"}}),
+        json!({"name":"UnknownError","data":{"message":"invalid API key"}}),
+        json!({"name":"APIError","data":{"message":"connection reset","isRetryable":true}}),
+    ] {
+        let mut transcript = transcript::OpenCodeTranscript::new(None, vec![]);
+        push(
+            &mut transcript,
+            &json!({"type":"error","sessionID":"ses_fixture","error":error}),
+        );
+        assert!(matches!(
+            transcript.finish(None),
+            Ok(ProviderAttempt::Failed(_))
+        ));
+    }
+}

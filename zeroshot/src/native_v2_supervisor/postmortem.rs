@@ -6,10 +6,12 @@ impl NativeV2Supervisor {
     pub(super) fn enabled_postmortem(
         &self,
         admitted: &AdmittedRun,
+        snapshot: &RunSnapshot,
     ) -> Option<&Arc<dyn RunPostmortem>> {
         if admitted.runtime.active_memory().enabled()
             && admitted.runtime.global_agents().postmortem.enabled
             && !*self.resolution_stop.borrow()
+            && provider_rejection(admitted, snapshot).is_none()
         {
             self.postmortem.as_ref()
         } else {
@@ -23,7 +25,19 @@ impl NativeV2Supervisor {
         snapshot: &RunSnapshot,
         terminal: &TerminalResult,
     ) -> Result<(), NativeV2SupervisorError> {
-        let Some(postmortem) = self.enabled_postmortem(admitted) else {
+        if let Some((node, reason)) = provider_rejection(admitted, snapshot) {
+            if self.postmortem.is_some()
+                && admitted.runtime.active_memory().enabled()
+                && admitted.runtime.global_agents().postmortem.enabled
+            {
+                self.postmortem_log(format!(
+                    "Active Memory postmortem skipped: source node {node} ended with {reason}"
+                ))
+                .await;
+            }
+            return Ok(());
+        }
+        let Some(postmortem) = self.enabled_postmortem(admitted, snapshot) else {
             return Ok(());
         };
         self.postmortem_log("Active Memory postmortem started".to_owned())
@@ -105,5 +119,36 @@ pub(super) async fn stop_requested(mut stopping: watch::Receiver<bool>) {
         if stopping.changed().await.is_err() {
             break;
         }
+    }
+}
+
+fn provider_rejection<'a>(
+    admitted: &'a AdmittedRun,
+    snapshot: &RunSnapshot,
+) -> Option<(&'a openengine_cluster_protocol::NodeName, &'static str)> {
+    use openengine_cluster_protocol::{WorkerFailureReason, WorkerOutcome};
+    let source = crate::active_memory::postmortem::source_node(admitted)?;
+    let latest = durable_history(snapshot)
+        .ok()?
+        .into_iter()
+        .filter(|execution| execution.occurrence.node == *source)
+        .filter_map(|execution| match execution.state {
+            DurableExecutionState::Settled { position, outcome } => Some((position, outcome)),
+            _ => None,
+        })
+        .max_by_key(|(position, _)| *position)?
+        .1;
+    match latest {
+        WorkerOutcome::Error {
+            code: WorkerErrorCode::Refusal,
+            reason,
+        } => match reason {
+            WorkerFailureReason::AuthenticationRequired => {
+                Some((source, "authentication_required"))
+            }
+            WorkerFailureReason::ModelUnavailable => Some((source, "model_unavailable")),
+            _ => None,
+        },
+        _ => None,
     }
 }

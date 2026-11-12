@@ -89,3 +89,26 @@ fn coverage_contract_event_chunking_preserves_utf8_and_the_exact_text() {
     assert_eq!(format!("{first}{rest}"), text);
     assert_eq!(split_output_chunk("short"), ("short", ""));
 }
+
+#[test]
+fn session_authentication_category_is_terminal_but_query_wording_is_not_classification() {
+    for data in [
+        json!({"errorType":"authentication", "message":"denied"}),
+        json!({"errorType":"authentication", "message":"different provider wording"}),
+    ] {
+        assert!(matches!(
+            session_error(&data),
+            Err(NodeRunnerError::AuthenticationRequired(_))
+        ));
+    }
+    for data in [
+        json!({"errorType":"query", "message":"model not found"}),
+        json!({"message":"invalid API key"}),
+        json!({"errorType":"query", "message":"stream cut"}),
+    ] {
+        assert!(matches!(
+            session_error(&data),
+            Err(NodeRunnerError::DriverDetail(_))
+        ));
+    }
+}

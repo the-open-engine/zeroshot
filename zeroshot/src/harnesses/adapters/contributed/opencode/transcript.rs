@@ -35,6 +35,7 @@ pub(super) struct OpenCodeTranscript {
     step_open: bool,
     step_used_tools: bool,
     failure: Option<String>,
+    rejection: Option<NodeRunnerError>,
     seen: BTreeSet<String>,
     usage: Option<TokenUsageDelta>,
     usage_invalid: bool,
@@ -53,6 +54,7 @@ impl OpenCodeTranscript {
             step_open: false,
             step_used_tools: false,
             failure: None,
+            rejection: None,
             seen: BTreeSet::new(),
             usage: None,
             usage_invalid: false,
@@ -94,6 +96,7 @@ impl OpenCodeTranscript {
             return;
         }
         if kind == "error" {
+            self.rejection = rejection::classify(&value["error"]);
             self.failure = Some(
                 value
                     .pointer("/error/data/message")
@@ -332,6 +335,9 @@ impl ProviderTranscript for OpenCodeTranscript {
             .output
             .failure_diagnostic("OpenCode", [detail.as_str()])
             .unwrap_or_else(|| "OpenCode provider execution failed".to_owned());
+        if let Some(error) = self.rejection {
+            return Err(error);
+        }
         Ok(ProviderAttempt::Failed(ProviderTurnFailure {
             session_id: self.session_id,
             retryable: false,
@@ -339,3 +345,6 @@ impl ProviderTranscript for OpenCodeTranscript {
         }))
     }
 }
+
+#[path = "rejection.rs"]
+mod rejection;

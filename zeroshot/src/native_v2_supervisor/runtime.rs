@@ -537,6 +537,10 @@ fn record_execution_metadata(
 
 pub(super) fn runner_failure(error: &NodeRunnerError) -> WorkerOutcome {
     let code = match error {
+        NodeRunnerError::AuthenticationRequired(_) => {
+            return WorkerOutcome::authentication_refusal();
+        }
+        NodeRunnerError::ModelUnavailable(_) => return WorkerOutcome::model_refusal(),
         NodeRunnerError::Cancelled | NodeRunnerError::RunClosed => WorkerErrorCode::Refusal,
         NodeRunnerError::InvalidRole
         | NodeRunnerError::SessionOpen
@@ -559,7 +563,7 @@ pub(super) fn settled_outcome(
     force: bool,
 ) -> Result<WorkerOutcome, NativeV2SupervisorError> {
     if force {
-        return Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Refusal));
+        return Ok(WorkerOutcome::stopped());
     }
     match result {
         DispatchResult::Completed(Ok(completion)) if completion.reference == *reference => {
