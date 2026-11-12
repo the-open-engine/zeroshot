@@ -533,10 +533,22 @@ fn github_api_status(value: &Value) -> Option<u16> {
 
 fn github_api_status_from_text(text: &str) -> Option<u16> {
     if let Some(status) = text.lines().find_map(|line| {
-        let response = line.strip_prefix("HTTP ")?;
-        let (status, _) = response
-            .split_once(": ")
-            .or_else(|| response.split_once(" ("))?;
+        // gh api reports an error response without a message as a bare `gh: HTTP NNN` line;
+        // gh's GraphQL client, used by `gh pr merge`, reports `non-200 OK status code: NNN …`.
+        let status = line
+            .strip_prefix("gh: HTTP ")
+            .or_else(|| {
+                line.strip_prefix("non-200 OK status code: ")?
+                    .split(' ')
+                    .next()
+            })
+            .or_else(|| {
+                let response = line.strip_prefix("HTTP ")?;
+                let (status, _) = response
+                    .split_once(": ")
+                    .or_else(|| response.split_once(" ("))?;
+                Some(status)
+            })?;
         status.parse().ok()
     }) {
         return Some(status);

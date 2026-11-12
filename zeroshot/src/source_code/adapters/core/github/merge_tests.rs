@@ -239,22 +239,32 @@ async fn permanent_merge_rejection_preserves_diagnostics_and_cannot_become_pendi
 #[tokio::test]
 async fn merge_transport_errors_preserve_authentication_and_retry_classification() {
     let page = policy_page_with_merge_capabilities(true, true, true);
-    for status in [401, 429, 503] {
-        let root = tempfile::tempdir().assert_value();
-        let action = format!(
-            "printf '%s\\n' 'HTTP {status}: request failed (https://api.github.com/graphql)' >&2; exit 1"
-        );
-        let error = merge_authority(root.path(), &page, &page, &action)
-            .request_merge(
-                &review(),
-                SourceDeliveryCredential::token("test-token"),
-                &TestReviewCheckpoint,
-            )
-            .await
-            .assert_error();
-        assert_eq!(error.api_status(), Some(status));
-        assert_eq!(error.authentication_failed(), status == 401);
-        assert_eq!(error.retryable_operation(), status != 401);
+    for (status, reason) in [
+        (503, "Service Unavailable"),
+        (429, "Too Many Requests"),
+        (401, "Unauthorized"),
+    ] {
+        // gh pr merge reports a failed merge mutation through its GraphQL client's non-200 form.
+        for message in [
+            format!("HTTP {status}: request failed (https://api.github.com/graphql)"),
+            format!(
+                r#"non-200 OK status code: {status} {reason} body: "{{\"message\": \"{reason}\"}}""#
+            ),
+        ] {
+            let root = tempfile::tempdir().assert_value();
+            let action = format!("printf '%s\\n' {} >&2; exit 1", shell_literal(&message));
+            let error = merge_authority(root.path(), &page, &page, &action)
+                .request_merge(
+                    &review(),
+                    SourceDeliveryCredential::token("test-token"),
+                    &TestReviewCheckpoint,
+                )
+                .await
+                .assert_error();
+            assert_eq!(error.api_status(), Some(status), "{message}");
+            assert_eq!(error.authentication_failed(), status == 401, "{message}");
+            assert_eq!(error.retryable_operation(), status != 401, "{message}");
+        }
     }
 }
 
