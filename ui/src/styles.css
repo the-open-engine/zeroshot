@@ -598,12 +598,14 @@ h2 {
   min-width: 0;
   position: relative;
 }
+/* Wraps instead of overlapping when its groups no longer fit beside each other. */
 .canvas-toolbar {
-  height: 59px;
+  min-height: 59px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 0 21px;
+  padding: 8px 21px;
   gap: 10px;
   border-bottom: 1px solid var(--hairline);
   background: var(--canvas);
@@ -614,6 +616,20 @@ h2 {
   gap: 7px;
   align-items: center;
   flex-shrink: 0;
+  margin-left: auto;
+}
+.canvas-start {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.canvas-host-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 12px;
+  border-left: 1px solid var(--hairline);
 }
 .flow {
   flex: 1;
@@ -1097,7 +1113,7 @@ h2 {
     gap: 5px;
   }
   .canvas-toolbar {
-    padding: 0 13px;
+    padding: 8px 13px;
   }
   .profile-title h1 {
     font-size: 24px;
@@ -1184,9 +1200,13 @@ h2 {
     --inspector-default-width: 310px;
     box-shadow: -5px 0 24px var(--shadow-panel);
   }
+  /* The inspector overlays the canvas below a fixed-height toolbar here, so the toolbar keeps one
+     row and scrolls sideways rather than wrapping under it. */
   .canvas-toolbar {
     height: 54px;
     min-height: 54px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     padding: 0 10px;
   }
   .canvas-actions {

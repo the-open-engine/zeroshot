@@ -149,6 +149,7 @@ type CanvasOptions = {
   view?: CanvasView;
   size?: typeof canvas;
   observer?: typeof MeasuringObserver;
+  toolbarStart?: ReturnType<typeof createElement>;
 };
 
 /** A page where React Flow measures its nodes and ELK lays them out. */
@@ -249,6 +250,7 @@ async function mountRunGraph(
           view,
           inspectorHidden: false,
           showInspector: () => {},
+          toolbarStart: options.toolbarStart,
         })
       )
     )
@@ -345,6 +347,17 @@ async function expandInPlace(container: HTMLElement) {
   assert.equal(after.zoom, before.zoom);
   assert.deepEqual(onScreen(box(nodeWith(container, 'Collapse rounds')), after), card);
 }
+
+test('a host without its own header gets its controls beside the settings button', async (t) => {
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    readOnly: false,
+    toolbarStart: createElement('button', { 'aria-label': 'Undo' }),
+  });
+  const start = container.querySelector('.canvas-toolbar .canvas-start');
+  assert.match(start?.textContent ?? '', /Run settings/);
+  assert.ok(start?.querySelector('.canvas-host-actions [aria-label="Undo"]'));
+  assert.equal(container.querySelectorAll('.canvas-host-actions').length, 1);
+});
 
 test('expanding and collapsing a group keep it where it was on screen, at the same zoom', async (t) => {
   const container = await mountRunGraph(t, layoutWorker());

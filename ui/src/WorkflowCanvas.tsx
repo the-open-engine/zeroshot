@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import {
   ReactFlow,
   Background,
@@ -361,7 +369,7 @@ function CanvasToolbar({
   collapseAll,
   arrange,
 }: {
-  p: Parameters<typeof WorkflowCanvas>[0];
+  p: WorkflowCanvasProps;
   readOnly: boolean;
   selectedNode: GraphNode | undefined;
   collapseAll: () => void;
@@ -369,10 +377,13 @@ function CanvasToolbar({
 }) {
   return (
     <div className="canvas-toolbar">
-      <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
-        {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
-        {readOnly ? 'Run overview' : 'Run settings'}
-      </button>
+      <div className="canvas-start">
+        <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
+          {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
+          {readOnly ? 'Run overview' : 'Run settings'}
+        </button>
+        {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
+      </div>
       <div className="canvas-actions">
         {readOnly ? (
           <button
@@ -494,7 +505,7 @@ function workflowEdges(
   activities: Node[],
   dims: Record<string, { width: number; height: number }>,
   readOnly: boolean,
-  p: Parameters<typeof WorkflowCanvas>[0]
+  p: WorkflowCanvasProps
 ): Edge[] {
   const edges: Edge[] = projection.edges.map((edge, index) => ({
     ...edge,
@@ -523,7 +534,7 @@ function workflowEdges(
   return edges;
 }
 
-export function WorkflowCanvas(p: {
+type WorkflowCanvasProps = {
   document: Document;
   selected: string;
   positions: Positions;
@@ -542,7 +553,11 @@ export function WorkflowCanvas(p: {
   info?: () => void;
   inspectorHidden: boolean;
   showInspector: () => void;
-}) {
+  /** Controls a host places beside the settings button when it has no header of its own. */
+  toolbarStart?: ReactNode;
+};
+
+export function WorkflowCanvas(p: WorkflowCanvasProps) {
   const { fitView, setCenter, setViewport } = useReactFlow();
   const fitGraph = () => void fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 });
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -844,7 +859,7 @@ function fitRenderedLayout(
   );
 }
 
-function useCanvasView(p: Parameters<typeof WorkflowCanvas>[0], readOnly: boolean) {
+function useCanvasView(p: WorkflowCanvasProps, readOnly: boolean) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() =>
     p.view
       ? new Set(p.view.collapsed)
