@@ -65,6 +65,7 @@ fn native_usage_accumulates_steps_and_deduplicates_part_updates() {
     assert_eq!(usage.input_tokens.get(), 22);
     assert_eq!(usage.output_tokens.get(), 14);
     assert_eq!(usage.cache_read_input_tokens.assert_value().get(), 6);
+    assert_eq!(usage.cache_creation_input_tokens.assert_value().get(), 4);
     match transcript.finish(None).assert_value() {
         ProviderAttempt::Complete(result) => assert_eq!(result.message, "{\"response\":null}"),
         ProviderAttempt::Failed(_) => panic!("complete native step must settle successfully"),

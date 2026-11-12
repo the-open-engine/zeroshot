@@ -358,6 +358,10 @@ fn response_state(invocation: &DriverInvocation) -> Result<AgentResponseState, N
         .map_err(|_| failure("Hermes prompt could not be serialized"))
 }
 
+// The bridge deltas session_input_tokens, already uncached: Hermes normalize_usage separates
+// both cache buckets, and record_response_usage accumulates that canonical input unchanged.
+// NousResearch/hermes-agent at 12736af2af95561477476eb0faf185acf6f1135f:
+// agent/usage_pricing.py (normalize_usage) and agent/turn_usage.py (record_response_usage).
 fn usage(value: &Value) -> Option<TokenUsageDelta> {
     Some(TokenUsageDelta {
         input_tokens: TokenCount::new(value["input"].as_u64()?).ok()?,

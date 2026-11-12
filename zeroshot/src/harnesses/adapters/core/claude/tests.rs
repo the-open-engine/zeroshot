@@ -15,6 +15,8 @@ mod final_result;
 mod limits;
 #[path = "tests/local_identity.rs"]
 mod local_identity;
+#[path = "tests/mixed_usage.rs"]
+mod mixed_usage;
 #[path = "tests/permission_denials.rs"]
 mod permission_denials;
 #[path = "tests/permission_inspection.rs"]

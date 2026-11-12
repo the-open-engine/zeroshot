@@ -3,7 +3,7 @@
 //! Kept outside the production-named source file so production coverage totals exclude them
 //! (`AGENTS.md`, `COVERAGE_IGNORE_REGEX` in `.github/workflows/coverage.yml`).
 
-use super::{PiTranscript, ProviderTranscript, assistant_text};
+use super::{PiTranscript, ProviderTranscript, assistant_text, parse_usage};
 use crate::native_v2_runner::LiveOutputStream;
 use crate::native_v2_capsule::provider_process::{ProviderProcessFailure, ProviderProcessFailureKind};
 use serde_json::json;
@@ -341,6 +341,17 @@ fn usage_is_reported_and_replaced_by_the_latest_cumulative_value() {
         usage.cache_read_input_tokens.map(|count| count.get()),
         Some(1)
     );
+}
+
+#[test]
+fn native_uncached_input_is_preserved_with_both_cache_buckets() {
+    // Pi already subtracts caches at its provider boundary, even when they exceed uncached input.
+    let usage = parse_usage(&json!({"input": 2, "output": 3, "cacheRead": 5, "cacheWrite": 7}))
+        .expect("native Pi usage");
+    assert_eq!(usage.input_tokens.get(), 2);
+    assert_eq!(usage.output_tokens.get(), 3);
+    assert_eq!(usage.cache_read_input_tokens.unwrap().get(), 5);
+    assert_eq!(usage.cache_creation_input_tokens.unwrap().get(), 7);
 }
 
 #[test]

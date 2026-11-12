@@ -146,9 +146,9 @@ else
   /usr/bin/printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":{\"answer\":42}}"}}'
 fi
 if [ "$resumed" = true ]; then
-  /usr/bin/printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_tokens":2,"cache_write_input_tokens":4,"output_tokens":5}}'
+  /usr/bin/printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":30,"cached_input_tokens":2,"cache_write_input_tokens":4,"output_tokens":5}}'
 else
-  /usr/bin/printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":1,"cache_write_input_tokens":3,"output_tokens":2}}'
+  /usr/bin/printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":1,"cache_write_input_tokens":3,"output_tokens":2}}'
 fi
 "#;
 
@@ -500,7 +500,7 @@ async fn openrouter_script_observes_exact_configuration_environment_output_and_a
     assert_eq!(
         serde_json::to_value(usage).assert_value(),
         json!({
-            "inputTokens": 1,
+            "inputTokens": 0,
             "outputTokens": 2,
             "cacheReadInputTokens": 1,
             "cacheCreationInputTokens": 3
@@ -600,7 +600,7 @@ async fn node_instance_session_reports_per_turn_codex_usage_deltas() {
             .await
             .assert_value()
             .assert_value(),
-        token_usage(1, 2, Some(1), Some(3))
+        token_usage(6, 2, Some(1), Some(3))
     );
 
     let mut second_handle = start(&runtime, &admitted, 2, &values).await;
@@ -615,7 +615,7 @@ async fn node_instance_session_reports_per_turn_codex_usage_deltas() {
             .await
             .assert_value()
             .assert_value(),
-        token_usage(2, 3, Some(1), Some(1))
+        token_usage(18, 3, Some(1), Some(1))
     );
 }
 
@@ -645,11 +645,11 @@ async fn execution_session_normalizes_usage_for_correction_resume() {
     ));
     assert_eq!(
         output.recv_usage().await.assert_value().assert_value(),
-        token_usage(1, 2, Some(1), Some(3))
+        token_usage(6, 2, Some(1), Some(3))
     );
     assert_eq!(
         output.recv_usage().await.assert_value().assert_value(),
-        token_usage(2, 3, Some(1), Some(1))
+        token_usage(18, 3, Some(1), Some(1))
     );
 }
 

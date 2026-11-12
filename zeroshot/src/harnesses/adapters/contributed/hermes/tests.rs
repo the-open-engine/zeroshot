@@ -97,6 +97,32 @@ async fn run(
 
 #[cfg(unix)]
 #[tokio::test]
+async fn native_uncached_input_is_preserved_with_both_cache_buckets() {
+    let directory = TestDirectory::new("hermes-uncached-usage");
+    let source = fixture("{\"response\":null}", true).replace(
+        "'input':11,'output':7",
+        "'input':2,'output':3,'cacheRead':5,'cacheWrite':7",
+    );
+    let adapter = adapter(&directory, &source);
+    let (_cancel, control, mut durable) = control();
+    let drain = async {
+        let usage = durable.recv_usage().await.assert_value().assert_value();
+        while durable.recv().await.is_ok() {}
+        usage
+    };
+    let (outcome, usage) = tokio::join!(adapter.run(invocation(&[]), control), drain);
+    assert!(matches!(
+        outcome.assert_value(),
+        WorkerOutcome::Verified { .. }
+    ));
+    assert_eq!(usage.input_tokens.get(), 2);
+    assert_eq!(usage.output_tokens.get(), 3);
+    assert_eq!(usage.cache_read_input_tokens.assert_value().get(), 5);
+    assert_eq!(usage.cache_creation_input_tokens.assert_value().get(), 7);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn private_handshake_credentials_and_native_node_session_reuse() {
     let directory = TestDirectory::new("hermes-session");
     let mut source = fixture("{\"response\":null}", true).replace(

@@ -50,12 +50,13 @@ runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the r
 ## Token usage
 
 `metadata.tokenUsage` contains run totals summed across agent invocations, including retries,
-correction turns and auxiliary agents such as postmortem specialists. Counters are summed as each
-harness reports them; input-token accounting can differ between harnesses.
+correction turns and auxiliary agents such as postmortem specialists. `inputTokens` means uncached
+input only for every harness. Cache reads and cache writes appear only in their respective cache
+counters, so the four token counters do not overlap and can be added.
 
 | Field                      | Meaning                                               |
 | -------------------------- | ----------------------------------------------------- |
-| `inputTokens`              | Input tokens reported by the harness.                 |
+| `inputTokens`              | Uncached input tokens, excluding cache reads/writes.  |
 | `outputTokens`             | Output tokens reported by the harness.                |
 | `cacheReadInputTokens`     | Input tokens reported as read from a prompt cache.    |
 | `cacheCreationInputTokens` | Input tokens reported as written to a prompt cache.   |
@@ -65,6 +66,7 @@ When `complete` is `false`, the totals retain known usage but at least one invoc
 missing or unusable. An omitted cache counter means at least one invocation did not report that
 counter; its run total is unknown, not zero. Cache counters can be omitted even when `complete` is
 `true`. Script steps record zero for all four counters and preserve known cache totals.
+Previously recorded runs retain their original numbers.
 
 ## Failure evidence and mapped executions
 

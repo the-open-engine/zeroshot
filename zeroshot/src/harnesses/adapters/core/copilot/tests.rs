@@ -703,7 +703,7 @@ async fn schema_permissions_usage_and_resume_preserve_the_session() {
     let events = verified_events(&fixture).await;
     assert!(events.iter().any(
         |event| matches!(event, DurableNodeEvent::TokenUsage(Some(usage))
-        if usage.input_tokens.get() == 7 && usage.output_tokens.get() == 3
+        if usage.input_tokens.get() == 4 && usage.output_tokens.get() == 3
             && usage.cache_read_input_tokens.is_some_and(|value| value.get() == 2)
             && usage.cache_creation_input_tokens.is_some_and(|value| value.get() == 1))
     ));
@@ -1168,6 +1168,8 @@ async fn cancellation_preserves_usage_and_reaps_the_runtime() {
     let mut output = handle.take_initial_output().assert_value();
     let usage = output.recv_usage().await.assert_value().assert_value();
     assert_eq!(usage.input_tokens.get(), 7);
+    assert_eq!(usage.cache_read_input_tokens, None);
+    assert_eq!(usage.cache_creation_input_tokens, None);
     assert_cancelled(&mut handle).await;
 }
 
