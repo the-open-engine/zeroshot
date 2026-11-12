@@ -4,6 +4,32 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
 
+#[test]
+fn recovery_claim_requires_the_existing_original_released_lease() {
+    let root = tempfile::tempdir().assert_value();
+    // The lease creates its own private state directory. Windows refuses to protect a directory
+    // that an elevated token created with its default owner, as the temporary root can be.
+    let path = root.path().join("state").join("controller.lock");
+    let lease = ControllerLease::acquire(&path).assert_value();
+    let identity = lease.identity();
+    assert!(matches!(
+        ControllerLease::acquire_existing(&path, identity),
+        Err(ControllerLeaseError::Held)
+    ));
+    drop(lease);
+    assert!(
+        ControllerLease::acquire_existing(&path, identity)
+            .assert_value()
+            .is_intact()
+    );
+    std::fs::rename(&path, root.path().join("old.lock")).assert_value();
+    assert!(ControllerLease::acquire_existing(&path, identity).is_err());
+    assert!(!path.exists(), "recovery must not recreate a missing lease");
+    let replacement = ControllerLease::acquire(&path).assert_value();
+    drop(replacement);
+    assert!(ControllerLease::acquire_existing(&path, identity).is_err());
+}
+
 #[cfg(unix)]
 #[test]
 fn coverage_contract_lease_rejects_unsafe_entries_and_detects_path_replacement() {
@@ -126,4 +152,19 @@ fn replacing_an_ancestor_lock_invalidates_the_workspace_lease() {
     std::fs::remove_file(&ancestor_lock).assert_value();
     std::fs::write(&ancestor_lock, b"replacement").assert_value();
     assert!(!lease.is_intact());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_lock_probe_accepts_only_contention_errors() {
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_IO_PENDING, ERROR_LOCK_VIOLATION};
+    assert!(lock_is_contended(&io::Error::from_raw_os_error(
+        ERROR_LOCK_VIOLATION as i32
+    )));
+    assert!(lock_is_contended(&io::Error::from_raw_os_error(
+        ERROR_IO_PENDING as i32
+    )));
+    assert!(!lock_is_contended(&io::Error::from_raw_os_error(
+        ERROR_ACCESS_DENIED as i32
+    )));
 }

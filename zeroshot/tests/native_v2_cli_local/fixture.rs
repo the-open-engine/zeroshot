@@ -145,7 +145,7 @@ impl LocalFixture {
         run_id
     }
 
-    async fn output(&self, args: &[&str], mode: &str) -> Output {
+    pub(super) async fn output(&self, args: &[&str], mode: &str) -> Output {
         timeout(CLI_TIMEOUT, self.command(args, mode).output())
             .await
             .assert_value_with(&format!("local CLI deadline: {args:?}"))

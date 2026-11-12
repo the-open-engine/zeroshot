@@ -19,12 +19,14 @@ async fn boundary_contract_readiness_rejects_malformed_or_mismatched_documents_a
             run_id: run_id.clone(),
             socket: paths.socket(),
             pid: 1,
+            lease_identity: None,
         },
         PortableControllerReady {
             kind: READY_KIND.to_owned(),
             run_id: run_id.clone(),
             socket: storage.join("wrong.sock"),
             pid: 1,
+            lease_identity: None,
         },
     ] {
         let bytes = serde_json::to_vec(&ready).assert_value();
@@ -48,6 +50,7 @@ async fn boundary_contract_readiness_rejects_malformed_or_mismatched_documents_a
         run_id: run_id.clone(),
         socket: paths.socket(),
         pid: 7,
+        lease_identity: None,
     };
     write_private_new_file(
         &paths.ready(),

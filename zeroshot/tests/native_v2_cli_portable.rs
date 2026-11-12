@@ -2,6 +2,9 @@
 
 #[path = "native_v2_cli_portable/fixture.rs"]
 mod fixture;
+
+#[path = "native_v2_cli_portable/inspection.rs"]
+mod inspection;
 use fixture::{Fixture, success};
 
 #[cfg(unix)]
@@ -146,7 +149,21 @@ fn controller_death_closes_its_job_and_replays_runtime_loss() {
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
     let status = fixture.json(&["status", id]);
+    assert_eq!(status["status"]["phase"], "running");
+    assert_eq!(status["controller"]["state"], "lost");
+    assert_eq!(
+        fixture
+            .command(&["logs", id])
+            .output()
+            .unwrap()
+            .status
+            .code(),
+        Some(1)
+    );
+    success(&fixture.command(&["force-stop", id]).output().unwrap());
+    let status = fixture.json(&["status", id]);
     assert_eq!(status["status"]["phase"], "finished");
+    assert!(status.get("controller").is_none());
     assert_eq!(status["status"]["terminalResult"]["reason"], "runtime_lost");
     success(&fixture.command(&["logs", id]).output().unwrap());
 }

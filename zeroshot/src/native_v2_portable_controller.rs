@@ -1,5 +1,6 @@
 //! Auth-free, one-run native-v2 controller and deterministic local transport.
 
+pub(crate) mod availability;
 mod controller;
 mod engine;
 mod lease;
@@ -177,6 +178,9 @@ pub struct PortableControllerReady {
     pub run_id: RunId,
     pub socket: PathBuf,
     pub pid: u32,
+    // Older readiness files lack this evidence and can only establish unknown availability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) lease_identity: Option<crate::execution::platform::FileIdentity>,
 }
 
 #[derive(Debug, Error)]

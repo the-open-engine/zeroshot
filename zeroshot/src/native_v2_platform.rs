@@ -852,6 +852,7 @@ impl NativeV2PlatformController {
             size,
             at_cursor,
             status,
+            controller,
             workspace_recovery,
         } = self
             .observability
@@ -866,6 +867,7 @@ impl NativeV2PlatformController {
             size,
             at_cursor,
             status,
+            controller,
             workspace_recovery,
         })
     }

@@ -251,6 +251,19 @@ async fn dead_controller_reconciles_runtime_loss_and_keeps_durable_observation()
     signal(controller_pid, libc::SIGKILL).assert_value_with("kill detached controller");
     wait_for_exit(controller_pid).await;
 
+    let observed = fixture.json(&["status", &run_id], "block").await;
+    assert_eq!(observed["status"]["phase"], "running");
+    assert_eq!(observed["controller"]["state"], "lost");
+    assert_eq!(
+        fixture.listed_run(&run_id).await["controller"]["state"],
+        "lost"
+    );
+    let logs = fixture.output(&["logs", &run_id], "block").await;
+    assert_eq!(logs.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&logs.stdout).contains("Codex turn started"));
+    assert!(String::from_utf8_lossy(&logs.stderr).contains("zeroshot resume"));
+    fixture.json(&["force-stop", &run_id], "block").await;
+
     let terminal = fixture
         .wait_terminal(&run_id, "block", "runtime_lost")
         .await;

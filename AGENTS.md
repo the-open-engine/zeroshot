@@ -374,7 +374,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   never stopped halfway on purpose. The CLI waits a short stop grace longer, then stops the
   controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
   their separate short bound.
-  A later local CLI startup scavenges orphaned bootstrap files after the bounded controller handoff
+  A later local submission or resume scavenges orphaned bootstrap files after the bounded controller handoff
   window without removing other run state.
   The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
   provider variables; provider children still start from an empty environment. Snapshot values
@@ -805,6 +805,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   loss.
 - SQLite operations acquire the single connection asynchronously before running on a blocking
   thread; cancelling a caller does not release an in-flight database operation's ownership.
+  Read-only ledger opens recover hot rollback journals only in a private image copied under
+  SQLite's native shared read lock, with no reserved writer. SQLite's VFS supplies both the
+  lock and database bytes, preserving native and same-process lock bookkeeping. The image
+  excludes WAL and foreign super-journal references, reopens read-only after rollback, and
+  shares the connection's lifetime through clones and cancelled blocking operations. Inspection
+  never rolls back the retained ledger. Explicit local resume prepares its status through the
+  control boundary; resume and force-stop can confirm the original lease and recover even when
+  read-only access or temporary image creation failed.
   The connection is granted in request order, also to a pending request that is no longer
   polled, which then blocks every later operation: drop such a request before awaiting other
   ledger work in its place. The local controller's serving loop drops its terminal wait before
@@ -909,6 +917,25 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   it after source checkout and before provider dispatch, imports settled prerequisites, and
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
+  Local CLI inspection opens finished runs directly from read-only ledgers. Unfinished local CLI
+  and UI history readers share the bounded portable-controller availability probe: original lease
+  identity bound in readiness, read-only shared-lock probes, endpoint response and process evidence.
+  Missing/inaccessible/replaced evidence and live or reused PIDs remain unknown; only an absent
+  process with its original released lease establishes lost. Availability is optional controller
+  metadata with observedAt, never a durable status, terminal outcome or inferred death time.
+  Inspection never binds a controller, claims recovery, repairs permissions or rewrites readiness.
+  When the recorded read fails, inspection still returns a responding controller's status and
+  follows its streams; without that answer the read error stands.
+  Recorded reads exit 0; unavailable watch/logs/attach replay through their captured durable head
+  and exit 1 naming resume and force-stop. Only those controls confirm original lease ownership
+  and process absence before recording runtime_lost. Finished stream exit semantics stay unchanged.
+  Control fast paths require a terminal recorded in the ledger; a controller's unpersisted
+  runtime_failed projection does not bypass force cleanup or resume ownership checks.
+  A force request goes to any endpoint that accepts the connection for its readiness identity,
+  without a status reply first, so a controller whose ledger is busy still stops owned work. An
+  endpoint that accepts nothing is taken over only after confirmed loss.
+  Loss recovery retains the original readiness evidence until reconciliation is durable, so
+  failed or interrupted persistence cannot strand subsequent resume or force-stop attempts.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
   A retiring local controller closes connection writers and joins their request cleanup before
   ending its runtime. EOF remains a reconnect signal; durable observation resumes from the last

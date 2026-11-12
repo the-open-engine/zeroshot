@@ -104,6 +104,22 @@ pub struct ChannelSubscription<E> {
 }
 
 impl<E> ChannelSubscription<E> {
+    pub(super) fn recorded<F, Fut>(produce: F) -> Self
+    where
+        E: Send + 'static,
+        F: FnOnce(mpsc::Sender<Result<CliSubscriptionItem<E>, NativeV2CliError>>) -> Fut,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let (sender, receiver) = mpsc::channel(32);
+        let (ready, established) = oneshot::channel();
+        let _ = ready.send(());
+        Self {
+            receiver,
+            task: tokio::spawn(produce(sender)),
+            established,
+        }
+    }
+
     /// A connected transport alone does not establish observation. Keep setup owned by this
     /// subscription so cancellation aborts it, and return only after the OECP acknowledgement.
     async fn established(mut self) -> Result<Self, NativeV2CliError> {

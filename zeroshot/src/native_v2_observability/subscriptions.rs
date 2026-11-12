@@ -90,6 +90,24 @@ trait DurableSubscription {
 macro_rules! durable_subscription {
     ($subscription:ty, $notification:ty) => {
         impl $subscription {
+            /// Replays only the head captured by a read-only local inspector, without waiting
+            /// for a controller or inventing a terminal event.
+            pub(crate) async fn recv_recorded(
+                &mut self,
+                through: &Cursor,
+            ) -> Result<Option<$notification>, NativeV2ObservationError> {
+                let head = cursor_sequence(through)?;
+                loop {
+                    if let Some(event) = self.pending.pop_front() {
+                        return Ok((cursor_sequence(&event.cursor)? <= head).then_some(event));
+                    }
+                    if cursor_sequence(&self.scanned_through)? >= head {
+                        return Ok(None);
+                    }
+                    self.refresh().await?;
+                }
+            }
+
             /// Returns one bounded batch of currently durable notifications.
             pub async fn read_available(
                 &mut self,

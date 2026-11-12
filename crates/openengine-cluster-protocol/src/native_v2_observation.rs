@@ -76,7 +76,7 @@ impl JsonSchema for TokenCount {
 #[error("token count {0} exceeds the JavaScript-safe integer maximum {MAX_SAFE_GENERATION}")]
 pub struct TokenCountOutOfRange(pub u64);
 
-/// Milliseconds since the Unix epoch for one durable observation.
+/// Milliseconds since the Unix epoch for one observation.
 ///
 /// Timestamps are positive and bounded to integers JavaScript represents exactly. Unix
 /// milliseconds remain within that range for hundreds of thousands of years.
@@ -198,6 +198,22 @@ pub struct RunStatusParams {
     pub run_id: RunId,
 }
 
+/// Availability observed by a reader, separate from the run's durable status.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ControllerObservation {
+    pub state: ControllerState,
+    /// Time of this check, not the time the controller stopped.
+    pub observed_at: UnixTimestampMillis,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerState {
+    Lost,
+    Unknown,
+}
+
 macro_rules! define_run_status_projection {
     (
         $(#[$attribute:meta])*
@@ -230,6 +246,9 @@ macro_rules! define_run_status_projection {
             pub at_cursor: Cursor,
             $(#[$status_attribute])?
             pub status: RunStatus,
+            /// Omitted for responding controllers and finished runs. Never durable run state.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            pub controller: Option<ControllerObservation>,
             #[serde(default, skip_serializing_if = "WorkspaceRecovery::is_empty")]
             pub workspace_recovery: WorkspaceRecovery,
         }

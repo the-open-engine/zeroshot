@@ -156,10 +156,17 @@ enum UtilityCommand {
     /// updating the executable.
     Update,
 
-    /// List runs as JSON.
+    /// List runs as JSON. Local reads never change run state.
+    ///
+    /// An unfinished local run whose controller does not answer includes optional controller
+    /// metadata: state (lost or unknown) and observedAt (Unix epoch milliseconds). Exit status is 0.
     List(TargetRouteArgs),
 
     /// Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence.
+    ///
+    /// Local reads leave durable status unchanged. An unavailable controller is reported separately
+    /// as controller.state (lost or unknown) and controller.observedAt (Unix epoch milliseconds).
+    /// Finished runs need no controller and omit this entry. A successful read exits 0.
     Status(RunSelectorArgs),
 
     /// Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization.
@@ -169,6 +176,9 @@ enum UtilityCommand {
     Logs(RunLogsArgs),
 
     /// Attach to an execution's interactive event stream as NDJSON.
+    ///
+    /// If a local controller is unavailable, prints retained execution output, then exits 1 and
+    /// names the resume and force-stop commands. Closing this read-only stream never stops work.
     Attach(AttachArgs),
 
     /// Force a run to stop and write the result as JSON.
@@ -199,6 +209,8 @@ enum UtilityCommand {
     /// parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`.
     /// Local restores also require --discard-workspace-changes and keep attached HEAD and branch tips.
     /// When nextAfter is present, pass it as --after to fetch the next page.
+    /// Local reads exit 0 and include controller.state and controller.observedAt when an unfinished
+    /// run's controller is unavailable, without changing recorded state.
     Checkpoints(RunCheckpointsArgs),
 
     /// Download a retained workspace or selected checkpoint as a tar archive.
@@ -849,7 +861,9 @@ struct RunCheckpointsArgs {
 #[command(after_long_help = r#"EXIT STATUS
   0  The run succeeded, or Ctrl-C detached before it finished.
   1  The run finished failed, or observation failed. A failed run prints the same failure summary
-     on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event."#)]
+     on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event.
+     An unavailable local controller replays recorded events, then names `zeroshot resume RUN_ID`
+     and `zeroshot force-stop RUN_ID`. Inspection leaves durable state unchanged."#)]
 struct RunWatchArgs {
     #[command(flatten)]
     run: RunSelectorArgs,
@@ -864,7 +878,8 @@ struct RunWatchArgs {
   0  The log stream ended or Ctrl-C detached, whatever the run's result. Read the result with
      `zeroshot watch` or `zeroshot status`.
   1  The command failed, for example because the run was not found or its logs could not be
-     read."#)]
+     read. An unavailable local controller replays recorded logs, then names `zeroshot resume RUN_ID`
+     and `zeroshot force-stop RUN_ID`. Inspection leaves durable state unchanged."#)]
 struct RunLogsArgs {
     #[command(flatten)]
     run: RunSelectorArgs,

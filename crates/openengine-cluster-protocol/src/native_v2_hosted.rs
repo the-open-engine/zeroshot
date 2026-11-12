@@ -70,6 +70,8 @@ pub struct HostedRunStatusResult {
     pub size: RunSize,
     pub at_cursor: Cursor,
     pub status: HostedRunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller: Option<crate::ControllerObservation>,
     #[serde(default, skip_serializing_if = "crate::WorkspaceRecovery::is_empty")]
     pub workspace_recovery: crate::WorkspaceRecovery,
 }
@@ -83,6 +85,7 @@ impl From<RunStatusResult> for HostedRunStatusResult {
             size: result.size,
             at_cursor: result.at_cursor,
             status: result.status.into(),
+            controller: result.controller,
             workspace_recovery: result.workspace_recovery,
         }
     }
@@ -97,6 +100,7 @@ impl From<RunForceResult> for HostedRunStatusResult {
             size: result.size,
             at_cursor: result.at_cursor,
             status: result.status.into(),
+            controller: result.controller,
             workspace_recovery: result.workspace_recovery,
         }
     }

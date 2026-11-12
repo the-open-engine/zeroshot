@@ -21,10 +21,42 @@ pub(crate) use controller::{
     stop_controller,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct FileIdentity {
     volume: u32,
     index: u64,
+}
+
+pub(crate) fn process_exists(pid: u32) -> io::Result<bool> {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+    if pid == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid process ID",
+        ));
+    }
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if handle.is_null() {
+        let error = io::Error::last_os_error();
+        return if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+            Ok(false)
+        } else {
+            Err(error)
+        };
+    }
+    let wait = unsafe { WaitForSingleObject(handle, 0) };
+    let result = match wait {
+        WAIT_OBJECT_0 => Ok(false),
+        WAIT_TIMEOUT => Ok(true),
+        _ => Err(io::Error::last_os_error()),
+    };
+    unsafe {
+        CloseHandle(handle);
+    }
+    result
 }
 
 pub(crate) fn file_identity(file: &File) -> io::Result<FileIdentity> {
@@ -178,8 +210,6 @@ fn file_access(access: FileAccess) -> (u32, u32) {
     match access {
         FileAccess::Read => (GENERIC_READ, OPEN_EXISTING),
         FileAccess::ReadWrite => (GENERIC_READ | GENERIC_WRITE | WRITE_DAC, OPEN_ALWAYS),
-        #[cfg(feature = "ui")]
-        FileAccess::ReadWriteExisting => (GENERIC_READ | GENERIC_WRITE, OPEN_EXISTING),
         FileAccess::CreateNew => (GENERIC_READ | GENERIC_WRITE | WRITE_DAC, CREATE_NEW),
     }
 }

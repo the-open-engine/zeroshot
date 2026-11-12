@@ -46,6 +46,17 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
             serde_json::to_value(status()).assert_value(),
         ),
         json_artifact(
+            format!("{ROOT}/fixtures/native_v2_observation/status-unavailable.json"),
+            {
+                let mut result = status();
+                result.controller = Some(openengine_cluster_protocol::ControllerObservation {
+                    state: openengine_cluster_protocol::ControllerState::Lost,
+                    observed_at: UnixTimestampMillis::new(1_794_470_707_000).assert_value(),
+                });
+                serde_json::to_value(result).assert_value()
+            },
+        ),
+        json_artifact(
             format!("{ROOT}/fixtures/native_v2_observation/watch.json"),
             watch_fixture(),
         ),
@@ -115,6 +126,7 @@ fn status() -> RunStatusResult {
                 },
             ],
         },
+        controller: None,
         workspace_recovery: Default::default(),
     }
 }
@@ -244,6 +256,7 @@ fn force_fixture() -> Value {
             size: result.size,
             at_cursor: result.at_cursor,
             status: result.status,
+            controller: None,
             workspace_recovery: result.workspace_recovery,
         }
     })

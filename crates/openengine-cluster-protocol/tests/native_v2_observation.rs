@@ -85,6 +85,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
         size: RunSize::new("medium").assert_value(),
         at_cursor: Cursor::new("v2:7"),
         status: running_status(),
+        controller: None,
         workspace_recovery: Default::default(),
     };
     let value = serde_json::to_value(&result).assert_value();
@@ -331,6 +332,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
             graph_result: None,
             active_executions: vec![active("opaque-verifier-b", "verify-b")],
         },
+        controller: None,
         workspace_recovery: Default::default(),
     };
     let value = serde_json::to_value(result).assert_value();
@@ -351,4 +353,34 @@ fn every_operation_rejects_unknown_or_missing_public_run_identity() {
         }))
         .is_err()
     );
+}
+
+#[test]
+fn controller_availability_is_optional_observation_metadata() {
+    use openengine_cluster_protocol::{ControllerObservation, ControllerState};
+    for state in [ControllerState::Lost, ControllerState::Unknown] {
+        let result = RunStatusResult {
+            run_id: RunId::new("run-1"),
+            title: title(),
+            source: None,
+            size: RunSize::new("host").assert_value(),
+            at_cursor: Cursor::new("v2:7"),
+            status: running_status(),
+            workspace_recovery: Default::default(),
+            controller: Some(ControllerObservation {
+                state,
+                observed_at: UnixTimestampMillis::new(1_794_470_707_000).assert_value(),
+            }),
+        };
+        let value = serde_json::to_value(&result).assert_value();
+        assert_eq!(
+            serde_json::from_value::<RunStatusResult>(value.clone()).assert_value(),
+            result
+        );
+        assert_eq!(value["status"]["phase"], "running");
+        assert_eq!(value["controller"]["observedAt"], 1_794_470_707_000_u64);
+        let mut invalid = value;
+        invalid["controller"]["observedAt"] = json!(0);
+        assert!(serde_json::from_value::<RunStatusResult>(invalid).is_err());
+    }
 }

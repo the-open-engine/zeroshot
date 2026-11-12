@@ -103,6 +103,9 @@ impl RunCheckpointsParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunCheckpointsResult {
     pub run_id: RunId,
+    /// Local controller availability, separate from retained checkpoint history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller: Option<crate::ControllerObservation>,
     #[serde(deserialize_with = "deserialize_checkpoints")]
     #[schemars(length(max = 100))]
     pub checkpoints: Vec<RunCheckpoint>,

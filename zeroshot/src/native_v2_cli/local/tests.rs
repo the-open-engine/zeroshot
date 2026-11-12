@@ -91,6 +91,7 @@ fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> R
         } else {
             RunStatus::Admitted {}
         },
+        controller: None,
         workspace_recovery: Default::default(),
     }
 }
@@ -1190,16 +1191,6 @@ async fn assert_successor_claim_and_submission_lock_edges(
             .assert_value()
             .assert_value(),
     );
-
-    assert!(retryable_controller_handoff(
-        &PortableControllerError::Lease(ControllerLeaseError::Held)
-    ));
-    assert!(retryable_controller_handoff(&PortableControllerError::Io(
-        std::io::Error::other("retryable handoff")
-    )));
-    assert!(!retryable_controller_handoff(
-        &PortableControllerError::Readiness
-    ));
 }
 
 #[cfg(unix)]
@@ -1324,15 +1315,6 @@ fn local_backend_guards_named_targets_and_controller_handoff_errors() {
     require_local(None).assert_value();
     assert!(require_local(Some("named-target")).is_err());
 
-    assert!(retryable_controller_handoff(&PortableControllerError::Io(
-        std::io::Error::other("busy")
-    )));
-    assert!(retryable_controller_handoff(
-        &PortableControllerError::Lease(ControllerLeaseError::Held)
-    ));
-    assert!(!retryable_controller_handoff(
-        &PortableControllerError::Readiness
-    ));
     assert!(local_error("detail").to_string().contains("detail"));
     assert!(
         local_io(std::io::Error::other("io"))

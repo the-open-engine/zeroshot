@@ -306,6 +306,15 @@ fn unix_controller_blocked_ledger_has_bounded_shutdown_without_a_fabricated_stop
     run.wait_closed(STOP_LIMIT);
     assert!(run.terminal().is_null());
     ledger.execute_batch("ROLLBACK").unwrap();
+    let observed = run.fixture.json(&["status", &run.id]);
+    assert_eq!(observed["status"]["phase"], "running");
+    assert_eq!(observed["controller"]["state"], "lost");
+    success(
+        &run.fixture
+            .command(&["force-stop", &run.id])
+            .output()
+            .unwrap(),
+    );
     assert_eq!(
         run.fixture.json(&["status", &run.id])["status"]["terminalResult"]["reason"],
         "runtime_lost"

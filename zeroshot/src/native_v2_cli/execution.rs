@@ -192,7 +192,7 @@ where
     let run = &command.run;
     let status = context
         .backend
-        .run_status(
+        .run_resume_status(
             run.target.as_deref(),
             RunStatusParams {
                 run_id: run.run_id.clone(),
