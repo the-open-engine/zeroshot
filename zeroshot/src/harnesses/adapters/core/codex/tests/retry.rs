@@ -272,6 +272,61 @@ async fn terminal_error_is_retried_only_once() {
 }
 
 #[tokio::test]
+async fn message_only_usage_limit_keeps_native_continuation_and_crash_semantics() {
+    // Codex exec ThreadErrorEvent exposes only `message`, including in v0.166.0.
+    // A usage-looking message cannot authorize machine-readable classification.
+    let directory = TestDirectory::new("codex-message-only-quota");
+    let state = directory.child("retry-state");
+    let script = script_with_success(
+        &RETRY_SCRIPT_PREFIX
+            .replace(
+                "provider lost sentinel-secret",
+                "You’ve hit your usage limit; try again at 5:08 PM sentinel-secret",
+            )
+            .replace(
+                "provider still unavailable",
+                "You’ve hit your usage limit; try again at 5:08 PM",
+            ),
+    );
+    let adapter = scripted_adapter_with(&directory, CodexProvider::OpenAi, "codex-quota", &script);
+    let admitted = admitted(
+        binding(
+            SessionScope::Execution,
+            &[
+                "FAIL_TWICE",
+                "NO_FIRST_SESSION",
+                "OPENAI_API_KEY",
+                "STATE_PATH",
+                "TEST_SECRET",
+            ],
+        ),
+        CodexProvider::OpenAi,
+    )
+    .await;
+    let runtime = runner(&admitted, adapter);
+    let mut handle = start(&runtime, &admitted, 1, &retry_values(&state, true, false)).await;
+    let mut output = handle.take_initial_output().assert_value();
+    let collect = async {
+        let mut logs = String::new();
+        while let Ok(event) = output.recv().await {
+            if let crate::native_v2_runner::DurableNodeEvent::Output { output, .. } = event {
+                logs.push_str(&output.text);
+            }
+        }
+        logs
+    };
+    let (logs, result) = tokio::join!(collect, handle.completion());
+    assert!(
+        matches!(result, Err(NodeRunnerError::DriverDetail(detail)) if detail.contains("5:08 PM"))
+    );
+    assert!(logs.contains("continuing once"));
+    assert_eq!(
+        fs::read_to_string(state.with_extension("prompt.2")).assert_value(),
+        "Continue"
+    );
+}
+
+#[tokio::test]
 async fn process_failure_detail_and_stderr_are_preserved_before_retry() {
     let rendered = process_retry_logs(
         "codex-process-failure-script",

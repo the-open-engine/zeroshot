@@ -121,6 +121,12 @@ pub(crate) fn redact_provider_error(
                 MAX_PROVIDER_DIAGNOSTIC_BYTES,
             ))
         }
+        NodeRunnerError::QuotaExhausted(detail) => {
+            NodeRunnerError::QuotaExhausted(bounded_log_text(
+                safe_provider_text(&detail, redactions),
+                MAX_PROVIDER_DIAGNOSTIC_BYTES,
+            ))
+        }
         error => error,
     }
 }

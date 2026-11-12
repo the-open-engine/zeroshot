@@ -209,6 +209,13 @@ with:
 zeroshot resume RUN_ID
 ```
 
+Confirmed Claude account/session quota exhaustion fails promptly as `refusal`, with the affected
+node, available reset information and manual-resume guidance in `status` and terminal failure
+context. Resume after provider usage becomes available; Zeroshot does not wait or resume
+automatically. A clock hint without a date or timezone stays as supplied. Codex's message-only
+usage-limit errors retain their existing crash retries; see the
+[native failure signals](../reference/cluster/graph.md#graph-contract).
+
 A local restart uses your checkout as it is now. You can fix files after a failure and resume:
 commits, staged and unstaged edits, untracked and ignored files, the current branch, and the index
 are kept. Agents then change the checkout as in any run. Named targets restart on the latest

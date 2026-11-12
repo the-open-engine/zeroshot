@@ -1,6 +1,65 @@
 use super::*;
 
 #[tokio::test]
+async fn rejected_limit_with_malformed_result_retains_continuation_and_crash_behavior() {
+    for result in [
+        r#"{"type":"result"}"#,
+        r#"{"type":"result","subtype":17,"is_error":false}"#,
+    ] {
+        let script = r#"
+set -eu
+cat >/dev/null
+printf 'started\n' >> starts
+printf '%s\n' '{"type":"system","subtype":"api_retry","error":"rate_limit"}'
+printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1893456000}}'
+printf '%s\n' 'MALFORMED_RESULT'
+exit 1
+"#
+        .replace("MALFORMED_RESULT", result);
+        let (workspace, mut handle, mut durable) =
+            scripted_failure("claude-malformed-quota-result", &script).await;
+        let (captured, result) = tokio::join!(collect_durable(&mut durable), handle.completion());
+        assert!(matches!(result, Err(NodeRunnerError::DriverDetail(_))));
+        assert_eq!(workspace.read("starts").lines().count(), 2);
+        let logs = captured.logs.join("\n");
+        assert_eq!(logs.matches("continuing once").count(), 1);
+        assert!(!logs.contains("usage quota exhausted"));
+    }
+}
+
+#[tokio::test]
+async fn rejected_quota_prevents_continuation_and_retains_usage_and_safe_diagnostics() {
+    let script = r#"
+set -eu
+cat >/dev/null
+printf 'started\n' >> starts
+printf '%s\n' '{"type":"system","subtype":"api_retry","error":"rate_limit"}'
+printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","resetsAt":1893456000}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"limited sentinel-secret","model_usage_since_last_result":{"model":{"inputTokens":11,"outputTokens":4}}}'
+exit 1
+"#;
+    let (workspace, mut handle, mut durable) = scripted_failure("claude-quota", script).await;
+    let (captured, result) = tokio::join!(collect_durable(&mut durable), handle.completion());
+    let Err(NodeRunnerError::QuotaExhausted(detail)) = result else {
+        panic!("expected quota exhaustion")
+    };
+    assert!(detail.contains("usage quota exhausted"));
+    assert!(detail.contains("2030-01-01T00:00:00Z"));
+    assert!(detail.contains("zeroshot resume"));
+    assert!(!detail.contains("sentinel-secret"));
+    assert_eq!(workspace.read("starts").lines().count(), 1);
+    assert!(!captured.logs.join("\n").contains("continuing once"));
+    assert!(!captured.logs.join("\n").contains("sentinel-secret"));
+    assert!(
+        captured
+            .usages
+            .iter()
+            .flatten()
+            .any(|usage| usage.input_tokens.get() == 11 && usage.output_tokens.get() == 4)
+    );
+}
+
+#[tokio::test]
 async fn authentication_signals_prevent_continuation_and_redact_details() {
     for signal in [
         r#"{"type":"system","subtype":"api_retry","error":"authentication_failed"}"#,

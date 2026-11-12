@@ -103,6 +103,7 @@ pub enum CapsuleNodeFailure {
     ExecutionFailed,
     AuthenticationRequired,
     ModelUnavailable,
+    QuotaExhausted,
 }
 
 impl CapsuleNodeFailure {
@@ -110,6 +111,7 @@ impl CapsuleNodeFailure {
         match error {
             NodeRunnerError::AuthenticationRequired(_) => Self::AuthenticationRequired,
             NodeRunnerError::ModelUnavailable(_) => Self::ModelUnavailable,
+            NodeRunnerError::QuotaExhausted(_) => Self::QuotaExhausted,
             NodeRunnerError::CleanupUnconfirmed => Self::CleanupUnconfirmed,
             NodeRunnerError::Cancelled => Self::Cancelled,
             NodeRunnerError::SessionLost => Self::SessionLost,
@@ -133,6 +135,10 @@ impl CapsuleNodeFailure {
             ),
             Self::ModelUnavailable => NodeRunnerError::ModelUnavailable(
                 "remote provider rejected the model; see node diagnostics".to_owned(),
+            ),
+            Self::QuotaExhausted => NodeRunnerError::QuotaExhausted(
+                "remote provider usage exhausted; see node diagnostics for reset and resume guidance"
+                    .to_owned(),
             ),
         }
     }

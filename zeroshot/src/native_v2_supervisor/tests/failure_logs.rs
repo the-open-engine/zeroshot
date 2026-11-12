@@ -565,6 +565,10 @@ async fn provider_rejections_do_not_consume_a_second_verifier_attempt() {
                 NodeRunnerError::ModelUnavailable("model missing-model".into()),
                 WorkerOutcome::model_refusal(),
             ),
+            (
+                NodeRunnerError::QuotaExhausted("usage quota exhausted; resume later".into()),
+                WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+            ),
         ] {
             let mut review = verifier("review", 1_000);
             review["attempts"] = json!(2);
