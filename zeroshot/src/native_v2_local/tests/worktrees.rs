@@ -51,6 +51,83 @@ fn commit(repo: &TestGitRepository, message: &str) -> String {
     git_output(&repo.workspace, &["rev-parse", "HEAD"])
 }
 
+async fn assert_overlapping_worktree_root_is_untouched(repo: &TestGitRepository, state: &Path) {
+    let snapshot = || {
+        [
+            git_output(&repo.workspace, &["symbolic-ref", "HEAD"]),
+            git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+            git_output(&repo.workspace, &["ls-files", "--stage"]),
+            git_output(&repo.workspace, &["status", "--porcelain=v1"]),
+            git_output(&repo.workspace, &["show-ref"]),
+            git_output(&repo.workspace, &["worktree", "list", "--porcelain"]),
+            std::fs::read_to_string(repo.workspace.join("README.md")).assert_value(),
+        ]
+    };
+    let before = snapshot();
+    #[cfg(unix)]
+    let permissions = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(&repo.workspace)
+            .assert_value()
+            .permissions()
+            .mode()
+    };
+    let mut prepared = prepared(repo, None);
+    let invoking = prepared.workspace.clone();
+    // The state itself is disjoint: only its derived worktree root collides with the checkout.
+    workspace::validate_workspace_state(&repo.workspace, state).assert_value();
+    prepare_branch_source(
+        &mut prepared,
+        Some(LocalWorktreeBase::Local),
+        Path::new("git"),
+        state,
+    )
+    .await
+    .assert_value();
+    assert!(matches!(
+        create_run_worktree(&mut prepared, Path::new("git"), state).await,
+        Err(LocalCompositionError::WorkspaceStateOverlap { .. })
+    ));
+    assert_eq!(snapshot(), before);
+    assert_eq!(prepared.workspace, invoking);
+    assert!(prepared.invoking_workspace.is_none());
+    assert!(!repo.workspace.join(prepared.run_id.as_str()).exists());
+    assert!(!state.exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&repo.workspace)
+                .assert_value()
+                .permissions()
+                .mode(),
+            permissions
+        );
+    }
+}
+
+#[tokio::test]
+async fn overlapping_worktree_root_is_rejected_before_preparation() {
+    for layout in ["state-worktrees", "state-worktrees/nested"] {
+        let mut repo = TestGitRepository::candidate();
+        let checkout = repo.root.child(layout);
+        std::fs::create_dir_all(checkout.parent().assert_value()).assert_value();
+        std::fs::rename(&repo.workspace, &checkout).assert_value();
+        repo.workspace = checkout;
+        let state = repo.root.child("state");
+        assert_overlapping_worktree_root_is_untouched(&repo, &state).await;
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinked_worktree_root_is_rejected_before_preparation() {
+    let repo = TestGitRepository::candidate();
+    std::os::unix::fs::symlink(&repo.workspace, repo.root.child("state-worktrees")).assert_value();
+    let state = repo.root.child("state");
+    assert_overlapping_worktree_root_is_untouched(&repo, &state).await;
+}
+
 #[tokio::test]
 async fn local_and_remote_worktree_bases_preserve_the_invoking_checkout() {
     for base in [LocalWorktreeBase::Local, LocalWorktreeBase::Remote] {

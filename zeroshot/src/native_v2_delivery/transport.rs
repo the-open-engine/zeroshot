@@ -10,7 +10,8 @@ use crate::execution::process::HostedProcessIdentity;
 use crate::native_v2_target_authority::{NewOperatorDiagnostic, OperatorDiagnosticStore};
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError, valid_git_revision};
 use super::command::{
-    GitCommandContext, GitCommandFailure, GitCommandOutput, capture_sensitive, git_command,
+    GitCommandContext, GitCommandFailure, GitCommandOutput, capture_sensitive_until_stopped,
+    git_command,
 };
 
 mod authentication;
@@ -56,6 +57,7 @@ impl std::fmt::Debug for GitTransportConfig {
 
 #[derive(Clone, Debug)]
 pub struct GitTransport {
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
     config: Arc<GitTransportConfig>,
     remote: OsString,
     commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
@@ -76,6 +78,7 @@ impl GitTransport {
     #[must_use]
     pub fn new(config: GitTransportConfig, remote: impl AsRef<OsStr>) -> Self {
         Self {
+            stopping: None,
             config: Arc::new(config),
             remote: remote.as_ref().to_owned(),
             commit_identity: None,
@@ -83,6 +86,14 @@ impl GitTransport {
             checkout_references: Vec::new(),
             diagnostics: None,
         }
+    }
+
+    pub(crate) fn with_stop_request(
+        mut self,
+        stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> Self {
+        self.stopping = stopping;
+        self
     }
 
     /// Selects the author and committer of every commit this transport's workspace Git creates.
@@ -461,7 +472,13 @@ impl GitTransport {
             authentication.configure(&mut command);
         }
         command.args(arguments);
-        capture_sensitive(&mut command, deadline, authentication.secrets()).await
+        capture_sensitive_until_stopped(
+            &mut command,
+            deadline,
+            authentication.secrets(),
+            self.stopping.clone(),
+        )
+        .await
     }
 
     pub(crate) fn workspace_git(&self) -> super::git::SystemGit {

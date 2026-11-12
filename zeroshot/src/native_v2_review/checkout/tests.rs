@@ -311,7 +311,7 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
     ) -> Result<(), PortableControllerError> {
         let mut bootstrap = bootstrap(admitted, repository, false);
         bootstrap.github_token = Some(format!("{TOKEN}\n"));
-        let result = prepare_local_checkout(admitted, &bootstrap).await;
+        let result = prepare_local_checkout(admitted, &bootstrap, None).await;
         assert!(!bootstrap.storage.exists());
         assert_workspace_unchanged(repository);
         result
@@ -393,7 +393,7 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
         let mut bootstrap = bootstrap(&admitted, &repository, false);
         bootstrap.github_token = Some(format!("{TOKEN}\n"));
         let Err(PortableControllerError::Io(error)) =
-            prepare_local_checkout(&admitted, &bootstrap).await
+            prepare_local_checkout(&admitted, &bootstrap, None).await
         else {
             panic!("missing Git must refuse preparation")
         };
@@ -413,7 +413,7 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
             path_text(&repository.root.child(TOKEN)).to_owned(),
         );
         let Err(PortableControllerError::Io(error)) =
-            prepare_local_checkout(&admitted, &bootstrap).await
+            prepare_local_checkout(&admitted, &bootstrap, None).await
         else {
             panic!("missing remote must refuse preparation")
         };
@@ -447,7 +447,7 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
                 bootstrap.github_token = Some(format!("{TOKEN}\n"));
             }
             let Err(PortableControllerError::Io(error)) =
-                prepare_local_checkout(&admitted, &bootstrap).await
+                prepare_local_checkout(&admitted, &bootstrap, None).await
             else {
                 panic!("invalid authority must refuse preparation")
             };
@@ -519,7 +519,7 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
                 )
                 .assert_value(),
             );
-            prepare_local_checkout(&admitted, &bootstrap)
+            prepare_local_checkout(&admitted, &bootstrap, None)
                 .await
                 .assert_value();
             assert_eq!(

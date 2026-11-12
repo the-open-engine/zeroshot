@@ -179,6 +179,7 @@ pub(crate) async fn create_run_worktree(
         .ok_or(LocalCompositionError::Storage)?
         .to_string_lossy();
     let root = state_root.with_file_name(format!("{name}-worktrees"));
+    validate_workspace_state(&prepared.workspace, &root)?;
     super::prepare_private_directory(&root)?;
     let workspace = root.join(prepared.run_id.as_str());
     // Run IDs also name storage directories and must be one bounded path component.

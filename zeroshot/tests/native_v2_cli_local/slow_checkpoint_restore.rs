@@ -104,6 +104,29 @@ async fn interrupted_checkpoint_restores_keep_recovery_for_a_retry_of_the_same_c
         true
     );
 
+    // SIGTERM during startup stops the in-flight extraction and confirms its whole process tree
+    // before returning the startup failure. No successor was admitted, so recovery remains owned
+    // by the predecessor and the same pinned selection can be retried.
+    let stopped = slow
+        .fixture
+        .command(&resume, "finish")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .assert_value_with("start the resume stopped by SIGTERM");
+    let stopped_processes = slow.restore_processes(2).await;
+    signal(stopped_processes[1], libc::SIGTERM).assert_value_with("terminate restoring controller");
+    let stopped = timeout(Duration::from_secs(15), stopped.wait_with_output())
+        .await
+        .assert_value_with("SIGTERM settles preparation promptly")
+        .assert_value();
+    assert!(!stopped.status.success());
+    assert!(String::from_utf8_lossy(&stopped.stderr).contains("controller is stopping"));
+    for pid in stopped_processes {
+        wait_for_exit(pid).await;
+    }
+    slow.assert_checkout_untouched();
+
     let mut crashed = slow
         .fixture
         .command(&resume, "finish")
@@ -111,7 +134,7 @@ async fn interrupted_checkpoint_restores_keep_recovery_for_a_retry_of_the_same_c
         .stderr(std::process::Stdio::null())
         .spawn()
         .assert_value_with("start the resume that crashes");
-    let [wrapper, controller, sleeper] = slow.restore_processes(2).await;
+    let [wrapper, controller, sleeper] = slow.restore_processes(3).await;
     crashed
         .start_kill()
         .assert_value_with("kill the resume CLI");

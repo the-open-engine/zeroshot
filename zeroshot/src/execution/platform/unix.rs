@@ -99,6 +99,14 @@ pub(crate) fn guard_controller_console() -> io::Result<()> {
     Ok(())
 }
 
+/// Register before bootstrap consumption so a termination during startup is retained too.
+pub(crate) fn controller_termination() -> io::Result<impl Future<Output = ()> + Send> {
+    let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    Ok(async move {
+        signal.recv().await;
+    })
+}
+
 pub(crate) fn spawn_controller(
     command: &mut tokio::process::Command,
 ) -> io::Result<ControllerChild> {

@@ -43,6 +43,69 @@ fn initialize_git(directory: &Path) {
     git(directory, &["commit", "-m", "initial"]);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn checkpoint_git_never_rewrites_invalid_utf8_as_a_different_reference() {
+    let operation = super::SnapshotOperation::current(None);
+    let error = tokio::task::spawn_blocking(move || {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "printf '\\377'"]);
+        operation.git(command).unwrap_err()
+    })
+    .await
+    .assert_value();
+    assert!(error.to_string().contains("invalid UTF-8"));
+}
+
+#[tokio::test]
+async fn cancellation_during_snapshot_copy_leaves_no_published_tree() {
+    use super::{SnapshotOperation, capture_with};
+    use std::time::Duration;
+
+    let fixture = Fixture::new();
+    // Enough separate entries to observe an in-progress copy even on clone-capable filesystems.
+    for index in 0..4_000 {
+        fs::write(
+            fixture.workspace.join(format!("source-{index}")),
+            b"retained",
+        )
+        .assert_value();
+    }
+    let workspace = fixture.workspace.clone();
+    let snapshots = fixture.snapshots.clone();
+    let (request, stopping) = tokio::sync::watch::channel(false);
+    let operation = SnapshotOperation::current(Some(stopping));
+    let capture =
+        tokio::task::spawn_blocking(move || capture_with(&workspace, &snapshots, &(), &operation));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let copying = fs::read_dir(&fixture.snapshots)
+                .ok()
+                .and_then(|mut entries| entries.next())
+                .and_then(Result::ok)
+                .is_some_and(|entry| entry.path().join("workspace").exists());
+            if copying {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .assert_value();
+    request.send_replace(true);
+    let error = tokio::time::timeout(Duration::from_secs(10), capture)
+        .await
+        .assert_value()
+        .assert_value()
+        .unwrap_err();
+    assert!(crate::native_v2_supervisor::checkpoints::CheckpointError(error).was_stopped());
+    assert_eq!(fs::read_dir(&fixture.snapshots).assert_value().count(), 0);
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("source-0")).assert_value(),
+        "retained"
+    );
+}
+
 fn add_submodule(directory: &Path, source: &Path, name: &str) {
     git(
         directory,

@@ -722,7 +722,7 @@ Options:
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
-          Commit and push the managed run branch without opening a pull request
+          Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
 
       --pr
           Materialize pull-request delivery for the software-change template
@@ -889,7 +889,7 @@ Options:
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
-          Commit and push the managed run branch without opening a pull request
+          Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
 
       --pr
           Materialize pull-request delivery for the software-change template
@@ -1200,7 +1200,7 @@ Options:
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
-          Commit and push the managed run branch without opening a pull request
+          Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
 
       --pr
           Materialize pull-request delivery for the software-change template

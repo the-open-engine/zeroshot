@@ -306,8 +306,16 @@ impl NativeV2Supervisor {
             if self.force_requested.load(Ordering::Acquire) || snapshot.force_stop_requested {
                 return self.terminalize_force(&mut active.tasks).await;
             }
-            if let Some(terminal) = self.advance(program, &snapshot, active).await? {
-                return Ok(terminal);
+            match self.advance(program, &snapshot, active).await {
+                Ok(Some(terminal)) => return Ok(terminal),
+                Ok(None) => {}
+                Err(NativeV2SupervisorError::Checkpoint(error)) if error.was_stopped() => {
+                    // Checkpoint operations drain their native processes before acknowledging a
+                    // stop. Latch the same intent even if the process listener won the race with
+                    // the server's force request, then let the ordinary stop path settle it.
+                    self.force_stop().await?;
+                }
+                Err(error) => return Err(error),
             }
         }
     }
@@ -431,7 +439,10 @@ impl NativeV2Supervisor {
         snapshot: &RunSnapshot,
     ) -> Result<(), NativeV2SupervisorError> {
         if !succeeded && let Some(store) = &self.checkpoints {
-            store.finish(&durable_history(snapshot)?).await?;
+            match store.finish(&durable_history(snapshot)?).await {
+                Err(error) if error.was_stopped() => {}
+                result => result?,
+            }
         }
         Ok(())
     }

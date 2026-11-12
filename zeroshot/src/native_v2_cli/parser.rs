@@ -473,7 +473,7 @@ struct DeliveryArgs {
     #[arg(long, value_name = "MODE", conflicts_with_all = ["push", "pr", "ship"])]
     delivery: Option<String>,
 
-    /// Commit and push the managed run branch without opening a pull request.
+    /// Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target.
     #[arg(long, conflicts_with_all = ["pr", "ship"])]
     push: bool,
 

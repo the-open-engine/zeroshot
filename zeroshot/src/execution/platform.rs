@@ -21,9 +21,9 @@ pub(crate) use native::validate_private_file;
 pub(crate) use native::private_inherited_file;
 
 pub(crate) use native::{
-    ControllerChild, FileIdentity, commit_file, create_private_directory, file_identity,
-    guard_controller_console, open_directory, open_identity, open_readonly_file, private_directory,
-    spawn_controller, stop_controller,
+    ControllerChild, FileIdentity, commit_file, controller_termination, create_private_directory,
+    file_identity, guard_controller_console, open_directory, open_identity, open_readonly_file,
+    private_directory, spawn_controller, stop_controller,
 };
 
 #[derive(Clone, Copy)]

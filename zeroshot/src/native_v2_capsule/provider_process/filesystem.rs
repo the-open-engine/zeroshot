@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::io;
-#[cfg(target_os = "linux")]
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -501,13 +500,11 @@ fn copy_file(
     check_cancelled(cancellation)
 }
 
-#[cfg(target_os = "linux")]
 struct CancellableReader<'a> {
     source: fs::File,
     cancellation: &'a DriverCancellation,
 }
 
-#[cfg(target_os = "linux")]
 impl Read for CancellableReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         check_cancelled(self.cancellation)?;
@@ -549,8 +546,17 @@ fn preserve_times(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
 
 /// Copies one entry into a new, caller-owned private destination without sharing mutable inodes.
 /// The caller owns source quiescence and ensures the destination lies outside the source tree.
-#[cfg(target_os = "linux")]
 pub(crate) fn copy_workspace_entry(source: &Path, destination: &Path) -> io::Result<()> {
+    let (_signal, receiver) = tokio::sync::watch::channel(false);
+    copy_workspace_entry_until_stopped(source, destination, &DriverCancellation::new(receiver))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn copy_workspace_entry_until_stopped(
+    source: &Path,
+    destination: &Path,
+    cancellation: &DriverCancellation,
+) -> io::Result<()> {
     use std::os::fd::AsRawFd;
 
     let source = std::path::absolute(source)?;
@@ -563,26 +569,29 @@ pub(crate) fn copy_workspace_entry(source: &Path, destination: &Path) -> io::Res
         .file_name()
         .ok_or_else(|| io::Error::other("workspace entry has no name"))?;
     let pinned = open_copy_source(parent.as_raw_fd(), Path::new(name))?;
-    let (_signal, receiver) = tokio::sync::watch::channel(false);
-    let cancellation = DriverCancellation::new(receiver);
     copy_owned_entry(
         pinned,
         destination,
         &CopySpecification {
             identity: None,
-            cancellation: &cancellation,
+            cancellation,
         },
     )
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn copy_workspace_entry(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn copy_workspace_entry_until_stopped(
+    source: &Path,
+    destination: &Path,
+    cancellation: &DriverCancellation,
+) -> io::Result<()> {
+    check_cancelled(cancellation)?;
     let metadata = fs::symlink_metadata(source)?;
     if metadata.file_type().is_symlink() {
         return copy_workspace_symlink(source, destination, &metadata);
     }
     if metadata.is_dir() {
-        return copy_workspace_directory(source, destination, &metadata);
+        return copy_workspace_directory(source, destination, &metadata, cancellation);
     }
     if !metadata.is_file() {
         return Err(io::Error::other(format!(
@@ -590,7 +599,7 @@ pub(crate) fn copy_workspace_entry(source: &Path, destination: &Path) -> io::Res
             source.file_name().unwrap_or_default()
         )));
     }
-    copy_workspace_file(source, destination, &metadata)
+    copy_workspace_file(source, destination, &metadata, cancellation)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -598,11 +607,16 @@ fn copy_workspace_directory(
     source: &Path,
     destination: &Path,
     metadata: &fs::Metadata,
+    cancellation: &DriverCancellation,
 ) -> io::Result<()> {
     create_private_directory(destination)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
-        copy_workspace_entry(&entry.path(), &destination.join(entry.file_name()))?;
+        copy_workspace_entry_until_stopped(
+            &entry.path(),
+            &destination.join(entry.file_name()),
+            cancellation,
+        )?;
     }
     fs::set_permissions(destination, metadata.permissions())
 }
@@ -612,8 +626,9 @@ fn copy_workspace_file(
     source: &Path,
     destination: &Path,
     metadata: &fs::Metadata,
+    cancellation: &DriverCancellation,
 ) -> io::Result<()> {
-    let mut input = open_workspace_file(source)?;
+    let input = open_workspace_file(source)?;
     #[cfg(target_os = "macos")]
     if let Some(output) = clone_workspace_file(&input, destination, metadata) {
         output.set_permissions(metadata.permissions())?;
@@ -623,7 +638,14 @@ fn copy_workspace_file(
         .write(true)
         .create_new(true)
         .open(destination)?;
-    io::copy(&mut input, &mut output)?;
+    io::copy(
+        &mut CancellableReader {
+            source: input,
+            cancellation,
+        },
+        &mut output,
+    )?;
+    check_cancelled(cancellation)?;
     output.set_permissions(metadata.permissions())?;
     preserve_workspace_file_times(&output, metadata)
 }

@@ -18,6 +18,21 @@ successor cannot resume while that command's descendants can still write. This u
 subreaper support and procfs; it needs no root access or cgroup setup. Windows uses Job Objects.
 macOS retains process-group cleanup; descendants that detach can outlive the command there.
 
+On Linux and macOS, `SIGTERM` requests a cooperative stop of a detached local controller. It
+cancels owned work, confirms cleanup and records the existing `force_stopped` terminal result
+before exiting. An already recorded terminal result is preserved. The workspace and checkpoints
+remain available for `zeroshot resume`; explicit `zeroshot force-stop` keeps its checkpoint
+discard behavior. Closing the invoking terminal still leaves a detached run running.
+
+The controller allows up to 30 seconds from its first termination request for shutdown, including
+startup, cleanup and terminal persistence. Repeated signals do not extend that deadline. An earlier
+OS grace deadline, `SIGKILL`, OOM or unavailable storage can prevent cleanup or a terminal record;
+later recovery reports an unrecorded controller loss as `runtime_lost`.
+
+On Windows, detached controllers retain their Ctrl-C and Ctrl-Break protections. They install no
+handler for console close, logoff or system shutdown events, which can terminate them without
+cleanup or a terminal record. Use `zeroshot force-stop` for a cooperative stop on Windows.
+
 ## Auto-research
 
 `auto-research` runs ten iterations by default. Optional run input `options.iterations` selects a
