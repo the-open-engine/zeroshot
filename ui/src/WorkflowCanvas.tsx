@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import {
   ReactFlow,
   Background,
@@ -369,10 +377,13 @@ function CanvasToolbar({
 }) {
   return (
     <div className="canvas-toolbar">
-      <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
-        {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
-        {readOnly ? 'Run overview' : 'Run settings'}
-      </button>
+      <div className="canvas-start">
+        <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
+          {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
+          {readOnly ? 'Run overview' : 'Run settings'}
+        </button>
+        {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
+      </div>
       <div className="canvas-actions">
         {readOnly ? (
           <button
@@ -542,6 +553,8 @@ export function WorkflowCanvas(p: {
   info?: () => void;
   inspectorHidden: boolean;
   showInspector: () => void;
+  /** Controls a host places beside the settings button when it has no header of its own. */
+  toolbarStart?: ReactNode;
 }) {
   const { fitView, setCenter, setViewport } = useReactFlow();
   const fitGraph = () => void fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 });

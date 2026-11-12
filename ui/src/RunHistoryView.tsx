@@ -70,6 +70,8 @@ type RunHistoryViewProps = {
   workers: WorkerOption[];
   emptyAction?: ReactNode;
   viewKey?: string;
+  /** Set when a host page already shows the run's title and status above this view. */
+  embedded?: boolean;
 };
 export function RunHistoryView({
   runId,
@@ -77,6 +79,7 @@ export function RunHistoryView({
   workers,
   emptyAction,
   viewKey,
+  embedded = false,
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
@@ -274,6 +277,7 @@ export function RunHistoryView({
             momentsCount={moments.length}
             openLog={() => inspect(document.graph.root.name)}
             retry={() => void loadHistory(run.runId, source, false)}
+            embedded={embedded}
           />
           <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
             <ReactFlowProvider>
@@ -454,6 +458,7 @@ function RunHistoryHeader({
   momentsCount,
   openLog,
   retry,
+  embedded,
 }: {
   run: RunDetail;
   terminal: RunTerminal | undefined;
@@ -462,6 +467,7 @@ function RunHistoryHeader({
   momentsCount: number;
   openLog: () => void;
   retry: () => void;
+  embedded: boolean;
 }) {
   const preparing = isPreparingEnvironment(run, history.events);
   const shownStatus =
@@ -470,16 +476,18 @@ function RunHistoryHeader({
       : 'Replay';
   return (
     <>
-      <div className="workspace-header history-header">
-        <div className="profile-title">
-          <h1 title={run.title}>{run.title}</h1>
-          <span
-            className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
-          >
-            {run.example ? 'Simulated' : humanize(shownStatus)}
-          </span>
+      {!embedded && (
+        <div className="workspace-header history-header">
+          <div className="profile-title">
+            <h1 title={run.title}>{run.title}</h1>
+            <span
+              className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
+            >
+              {run.example ? 'Simulated' : humanize(shownStatus)}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
       <RunHistoryAlerts
         run={run}
         error={history.error}

@@ -69,6 +69,7 @@ export function EmbeddedApp() {
             }
             source={loaded.services.history}
             workers={loaded.bootstrap.workers ?? []}
+            embedded
           />
         </RunHistoryBoundary>
       )}

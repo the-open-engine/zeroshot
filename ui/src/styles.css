@@ -615,6 +615,19 @@ h2 {
   align-items: center;
   flex-shrink: 0;
 }
+.canvas-start {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.canvas-host-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 12px;
+  border-left: 1px solid var(--hairline);
+}
 .flow {
   flex: 1;
   min-height: 0;

@@ -750,49 +750,56 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
     error,
     setError,
   } = model;
+  const historyControls = (
+    <>
+      <div className="history-actions">
+        <button
+          className="icon-button"
+          aria-label="Undo"
+          title="Undo"
+          disabled={!past.length || busy}
+          onClick={undo}
+        >
+          <Undo2 size={17} />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Redo"
+          title="Redo"
+          disabled={!future.length || busy}
+          onClick={redo}
+        >
+          <Redo2 size={17} />
+        </button>
+      </div>
+      <button
+        className="icon-button"
+        aria-label="Export JSON"
+        title="Export JSON"
+        onClick={exportDocument}
+      >
+        <Download size={18} />
+      </button>
+    </>
+  );
   return (
     <main className="workspace" inert={loading} aria-busy={loading}>
       {doc ? (
         <>
-          <div className="workspace-header">
-            <div className="profile-title">
-              <h1>{doc.name || 'Untitled profile'}</h1>
-              {(dirty || pendingEdits) && (
-                <span className="unsaved" title="Unsaved changes">
-                  Unsaved
-                </span>
-              )}
-            </div>
-            <div className="header-actions">
-              <div className="history-actions">
-                <button
-                  className="icon-button"
-                  aria-label="Undo"
-                  title="Undo"
-                  disabled={!past.length || busy}
-                  onClick={undo}
-                >
-                  <Undo2 size={17} />
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label="Redo"
-                  title="Redo"
-                  disabled={!future.length || busy}
-                  onClick={redo}
-                >
-                  <Redo2 size={17} />
-                </button>
+          {/* A host page already shows the profile's name, its unsaved state and saving, so the
+              editor's own header goes and its history controls join the canvas toolbar. */}
+          {!host && (
+            <div className="workspace-header">
+              <div className="profile-title">
+                <h1>{doc.name || 'Untitled profile'}</h1>
+                {(dirty || pendingEdits) && (
+                  <span className="unsaved" title="Unsaved changes">
+                    Unsaved
+                  </span>
+                )}
               </div>
-              <button
-                className="icon-button"
-                aria-label="Export JSON"
-                title="Export JSON"
-                onClick={exportDocument}
-              >
-                <Download size={18} />
-              </button>
-              {!host && (
+              <div className="header-actions">
+                {historyControls}
                 <button
                   className="button save-copy"
                   disabled={busy}
@@ -800,8 +807,6 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
                 >
                   Save as
                 </button>
-              )}
-              {!host && (
                 <button
                   className="button primary"
                   disabled={busy || (!dirty && !pendingEdits && !!base)}
@@ -810,13 +815,14 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
                   {busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />}{' '}
                   {busy ? 'Saving' : 'Save profile'}
                 </button>
-              )}
+              </div>
             </div>
-          </div>
+          )}
           <div className={`editor-body ${inspector ? '' : 'inspector-closed'}`}>
             <ReactFlowProvider>
               <WorkflowCanvas
                 document={doc}
+                toolbarStart={host ? historyControls : undefined}
                 selected={selected}
                 positions={positions}
                 setPositions={setPositions}
