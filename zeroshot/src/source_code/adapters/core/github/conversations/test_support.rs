@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use openengine_cluster_testkit::fixture::{python3_script, write_executable};
-use crate::source_code_provider::SourceReviewReceipt;
+use crate::source_code_provider::{SourceReviewFeedback, SourceReviewReceipt, SourceReviewResponse};
 
 pub(crate) fn fixture(root: &Path, receipt: &SourceReviewReceipt, kind: &str) -> PathBuf {
     let program = root.join("gh-conversations");
@@ -27,4 +27,13 @@ pub(crate) fn state(program: &Path) -> Value {
 
 pub(crate) fn save(program: &Path, state: &Value) {
     std::fs::write(format!("{}.state", program.display()), state.to_string()).unwrap();
+}
+
+pub(crate) fn response(feedback: &SourceReviewFeedback) -> SourceReviewResponse {
+    SourceReviewResponse {
+        thread_id: feedback.conversations[0].id.clone(),
+        version: feedback.conversations[0].version.clone(),
+        disposition: crate::source_code_provider::SourceReviewDisposition::Addressed,
+        response: "Added the empty-input guard and checked the regression.".into(),
+    }
 }

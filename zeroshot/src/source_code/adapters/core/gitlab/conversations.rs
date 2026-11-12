@@ -249,6 +249,34 @@ async fn current_discussion(
     Ok(value)
 }
 
+async fn recheck_unmatched_response(
+    authority: &GitLabDeliveryAuthority,
+    input: (&SourceReviewReceipt, &SourceReviewResponse),
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<SourceReviewResolution, SourceDeliveryError> {
+    let (receipt, response) = input;
+    let current =
+        match current_discussion(authority, (receipt, &response.thread_id), credential).await {
+            Ok(current) => current,
+            Err(error) if error.api_status() == Some(404) => {
+                return Ok(SourceReviewResolution::Changed);
+            }
+            Err(error) => return Err(error),
+        };
+    if !unresolved(&current) {
+        if version(&current.notes, None)? == response.version {
+            return Ok(SourceReviewResolution::Resolved);
+        }
+        return reopen(
+            authority,
+            (receipt, &response.thread_id, &current),
+            credential,
+        )
+        .await;
+    }
+    Ok(SourceReviewResolution::Changed)
+}
+
 pub(super) async fn resolve(
     authority: &GitLabDeliveryAuthority,
     request: crate::source_code_provider::SourceReviewResolutionRequest<'_>,
@@ -283,26 +311,7 @@ pub(super) async fn resolve(
     if !feedback.conversations.iter().any(|thread| {
         thread.id == response.thread_id && thread.version == response.version && thread.authorized
     }) {
-        let current =
-            match current_discussion(authority, (receipt, &response.thread_id), credential).await {
-                Ok(current) => current,
-                Err(error) if error.api_status() == Some(404) => {
-                    return Ok(SourceReviewResolution::Changed);
-                }
-                Err(error) => return Err(error),
-            };
-        if !unresolved(&current) {
-            if version(&current.notes, None)? == response.version {
-                return Ok(SourceReviewResolution::Resolved);
-            }
-            return reopen(
-                authority,
-                (receipt, &response.thread_id, &current),
-                credential,
-            )
-            .await;
-        }
-        return Ok(SourceReviewResolution::Changed);
+        return recheck_unmatched_response(authority, (receipt, response), credential).await;
     }
     let segments = [
         "projects",

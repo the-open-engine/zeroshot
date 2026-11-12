@@ -261,6 +261,61 @@ pub(super) async fn read(
     snapshot(authority, (review, comments, None), credential).await
 }
 
+fn thread_page(
+    review: &SourceReviewReceipt,
+    page: &serde_json::Value,
+    pagination: (usize, usize, &mut Option<u64>),
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<Vec<Thread>, SourceDeliveryError> {
+    let (index, pages, total) = pagination;
+    let repository = &page["data"]["repository"];
+    let pr = &repository["pullRequest"];
+    if repository["nameWithOwner"].as_str() != Some(&review.repository)
+        || pr["number"].as_u64().map(|id| id.to_string()).as_deref() != Some(&review.review_id)
+        || pr["baseRefName"].as_str() != Some(&review.target_branch)
+        || pr["headRefName"].as_str() != Some(&review.head_branch)
+        || pr["headRefOid"].as_str() != Some(&review.head_revision)
+    {
+        return Err(SourceDeliveryError::identity(
+            "GitHub conversation review/head identity changed",
+        ));
+    }
+    let connection = &pr["reviewThreads"];
+    let count = connection["totalCount"].as_u64().ok_or_else(invalid)?;
+    if count > 100_000 || total.is_some_and(|previous| previous != count) {
+        return Err(invalid());
+    }
+    *total = Some(count);
+    let has_next = connection["pageInfo"]["hasNextPage"]
+        .as_bool()
+        .ok_or_else(invalid)?;
+    if has_next != (index + 1 < pages)
+        || (has_next
+            && connection["pageInfo"]["endCursor"]
+                .as_str()
+                .is_none_or(str::is_empty))
+    {
+        return Err(invalid());
+    }
+    super::api::decode_response(connection["nodes"].clone(), credential)
+}
+
+fn thread_comments<'a>(
+    thread: &Thread,
+    comments_by_root: &BTreeMap<u64, Vec<&'a ReviewCommentWire>>,
+) -> Result<Vec<&'a ReviewCommentWire>, SourceDeliveryError> {
+    let [root] = thread.comments.nodes.as_slice() else {
+        return Err(invalid());
+    };
+    let root = database_id(&root.full_database_id)?;
+    let entries = comments_by_root.get(&root).cloned().unwrap_or_default();
+    if entries.len() != thread.comments.total_count || !entries.iter().any(|c| c.id == root) {
+        return Err(SourceDeliveryError::Unavailable
+            .with_context("GitHub conversation comments changed during inspection"));
+    }
+    Ok(entries)
+}
+
 async fn snapshot(
     authority: &GhCliDeliveryAuthority,
     input: (&SourceReviewReceipt, &[ReviewCommentWire], Option<u64>),
@@ -294,51 +349,12 @@ async fn snapshot(
     let mut permissions = BTreeMap::new();
     let mut total = None;
     for (index, page) in pages.iter().enumerate() {
-        let repository = &page["data"]["repository"];
-        let pr = &repository["pullRequest"];
-        if repository["nameWithOwner"].as_str() != Some(&review.repository)
-            || pr["number"].as_u64().map(|id| id.to_string()).as_deref() != Some(&review.review_id)
-            || pr["baseRefName"].as_str() != Some(&review.target_branch)
-            || pr["headRefName"].as_str() != Some(&review.head_branch)
-            || pr["headRefOid"].as_str() != Some(&review.head_revision)
-        {
-            return Err(SourceDeliveryError::identity(
-                "GitHub conversation review/head identity changed",
-            ));
-        }
-        let connection = &pr["reviewThreads"];
-        let count = connection["totalCount"].as_u64().ok_or_else(invalid)?;
-        if count > 100_000 || total.is_some_and(|previous| previous != count) {
-            return Err(invalid());
-        }
-        total = Some(count);
-        let has_next = connection["pageInfo"]["hasNextPage"]
-            .as_bool()
-            .ok_or_else(invalid)?;
-        if has_next != (index + 1 < pages.len())
-            || (has_next
-                && connection["pageInfo"]["endCursor"]
-                    .as_str()
-                    .is_none_or(str::is_empty))
-        {
-            return Err(invalid());
-        }
-        let threads: Vec<Thread> =
-            super::api::decode_response(connection["nodes"].clone(), credential)?;
+        let threads = thread_page(review, page, (index, pages.len(), &mut total), credential)?;
         for thread in threads {
-            if thread.id.is_empty()
-                || !seen.insert(thread.id.clone())
-                || thread.comments.nodes.len() != 1
-            {
+            if thread.id.is_empty() || !seen.insert(thread.id.clone()) {
                 return Err(invalid());
             }
-            let root = database_id(&thread.comments.nodes[0].full_database_id)?;
-            let mut entries = comments_by_root.get(&root).cloned().unwrap_or_default();
-            if entries.len() != thread.comments.total_count || !entries.iter().any(|c| c.id == root)
-            {
-                return Err(SourceDeliveryError::Unavailable
-                    .with_context("GitHub conversation comments changed during inspection"));
-            }
+            let mut entries = thread_comments(&thread, &comments_by_root)?;
             for comment in &entries {
                 if result
                     .comment_threads
@@ -713,3 +729,7 @@ pub(crate) mod test_support;
 #[cfg(all(test, unix))]
 #[path = "conversations/tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "conversations/recovery_tests.rs"]
+mod recovery_tests;
