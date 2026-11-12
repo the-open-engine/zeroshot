@@ -28,9 +28,11 @@ async fn checkpointed_run(fixture: &DeliveryFixture) -> CheckpointedRun {
         &["commit", "-m", "carry delivery executable"],
     );
     // Exclude system gh while retaining the host programs the fake harness and checkpoints need.
+    // Outside Linux, contained commands also confirm their process group's cleanup with `ps`.
     let host = fixture.root.path("host-tools");
     fs::create_dir(&host).assert_value();
-    for program in ["cat", "grep"] {
+    let cleanup = cfg!(not(target_os = "linux")).then_some("ps");
+    for program in ["cat", "grep"].into_iter().chain(cleanup) {
         std::os::unix::fs::symlink(host_executable(program), host.join(program)).assert_value();
     }
     let sibling = Path::new(env!("CARGO_BIN_EXE_zeroshot")).with_file_name("restic");
