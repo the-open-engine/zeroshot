@@ -36,6 +36,8 @@ const PUBLIC_SHELL_NAMES: &[&str] = &[
     "PATHEXT",
     "PWD",
     "SHELL",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
     "SYSTEMROOT",
     "TEMP",
     "TERM",

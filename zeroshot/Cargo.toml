@@ -50,7 +50,7 @@ openengine_cluster_client.workspace = true
 openengine-cluster-server.workspace = true
 rusqlite.workspace = true
 self-replace.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["socks"] }
 rpassword.workspace = true
 ring.workspace = true
 serde.workspace = true
@@ -84,6 +84,9 @@ windows-sys = { workspace = true, features = [
 dbus.workspace = true
 
 [dev-dependencies]
+rcgen.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 openengine-cluster-testkit.workspace = true
 

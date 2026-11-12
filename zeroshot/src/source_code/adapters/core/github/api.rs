@@ -19,10 +19,12 @@ impl GhCliDeliveryAuthority {
     ) -> Result<Value, SourceDeliveryError> {
         let output = self.api_output(arguments, credential).await?;
         serde_json::from_slice(&output).map_err(|error| {
-            let (text, truncated) = api_diagnostic_text(output, false, MAX_API_OUTPUT_BYTES, credential);
-            redacted_api_error(None, format!(
+            let secrets = api_secrets(self.network.secrets(), credential);
+            let (text, truncated) =
+                api_diagnostic_text(output, false, MAX_API_OUTPUT_BYTES, &secrets);
+            redacted_api_error(None, self.network.redact(&format!(
                 "GitHub returned invalid JSON: {error}\nresponse (truncated={truncated}):\n{text}"
-            ), credential)
+            )), credential)
         })
     }
 
@@ -46,22 +48,30 @@ impl GhCliDeliveryAuthority {
             .args(arguments)
             .args(["--header", "X-GitHub-Api-Version: 2026-03-10"])
             .stdout(Stdio::piped());
-        let context = format!("command: {:?} api {arguments:?}", self.config.gh_program);
-        bounded_output(command, self.config.api_deadline, credential)
-            .await
-            .map_err(|error| {
-                let retryable = error.retryable_operation();
-                let wrapped = redacted_api_error(
-                    error.api_status(),
-                    format!("{context}\n{error}"),
-                    credential,
-                );
-                if retryable {
-                    wrapped.temporary()
-                } else {
-                    wrapped
-                }
-            })
+        let context = self.network.redact(&format!(
+            "command: {:?} api {arguments:?}",
+            self.config.gh_program
+        ));
+        bounded_output(
+            command,
+            self.config.api_deadline,
+            credential,
+            self.network.secrets(),
+        )
+        .await
+        .map_err(|error| {
+            let retryable = error.retryable_operation();
+            let wrapped = redacted_api_error(
+                error.api_status(),
+                format!("{context}\n{error}"),
+                credential,
+            );
+            if retryable {
+                wrapped.temporary()
+            } else {
+                wrapped
+            }
+        })
     }
 
     pub(super) async fn job_log_output(
@@ -120,29 +130,31 @@ impl GhCliDeliveryAuthority {
                 credential,
             )
             .await?;
-        decode_response(value, credential)
+        self.decode_response(value, credential)
     }
-}
 
-pub(super) fn decode_response<T: serde::de::DeserializeOwned>(
-    value: Value,
-    credential: SourceDeliveryCredential<'_>,
-) -> Result<T, SourceDeliveryError> {
-    T::deserialize(&value).map_err(|error| {
+    pub(super) fn decode_response<T: serde::de::DeserializeOwned>(
+        &self,
+        value: Value,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<T, SourceDeliveryError> {
+        T::deserialize(&value).map_err(|error| {
+        let secrets = api_secrets(self.network.secrets(), credential);
         let (text, truncated) = api_diagnostic_text(
             value.to_string().into_bytes(),
             false,
             MAX_API_OUTPUT_BYTES,
-            credential,
+            &secrets,
         );
         redacted_api_error(
             None,
-            format!(
+            self.network.redact(&format!(
                 "GitHub returned an invalid response: {error}\nresponse (truncated={truncated}):\n{text}"
-            ),
+            )),
             credential,
         )
-    })
+        })
+    }
 }
 
 pub(super) async fn command_status(
@@ -310,6 +322,7 @@ async fn bounded_output(
     mut command: Command,
     deadline: Duration,
     credential: SourceDeliveryCredential<'_>,
+    secrets: Vec<String>,
 ) -> Result<Vec<u8>, SourceDeliveryError> {
     command
         .kill_on_drop(true)
@@ -328,7 +341,10 @@ async fn bounded_output(
     let stderr = child.stderr.take().ok_or_else(|| {
         redacted_api_error(None, "command stderr pipe is unavailable", credential)
     })?;
-    let mut output = ApiOutput::default();
+    let mut output = ApiOutput {
+        secrets,
+        ..Default::default()
+    };
     let result = timeout(deadline, async {
         tokio::try_join!(
             async {
@@ -367,6 +383,7 @@ async fn bounded_output(
 struct ApiOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    secrets: Vec<String>,
 }
 
 impl ApiOutput {
@@ -379,18 +396,15 @@ impl ApiOutput {
         // Incomplete stderr is not an authoritative HTTP response.
         let api_error = status.map(|_| github_api_error(&self.stderr));
         let api_status = api_error.as_ref().and_then(SourceDeliveryError::api_status);
+        let secrets = api_secrets(self.secrets, credential);
         let (stdout, stdout_truncated) = api_diagnostic_text(
             self.stdout,
             status.is_none(),
             MAX_API_OUTPUT_BYTES,
-            credential,
+            &secrets,
         );
-        let (stderr, stderr_truncated) = api_diagnostic_text(
-            self.stderr,
-            status.is_none(),
-            MAX_API_ERROR_BYTES,
-            credential,
-        );
+        let (stderr, stderr_truncated) =
+            api_diagnostic_text(self.stderr, status.is_none(), MAX_API_ERROR_BYTES, &secrets);
         let rate_limited = api_error
             .as_ref()
             .is_some_and(|error| error.api_status() == Some(403) && error.retryable_operation());
@@ -424,15 +438,23 @@ fn redacted_api_error(
     SourceDeliveryError::api(status, diagnostic)
 }
 
+fn api_secrets(mut secrets: Vec<String>, credential: SourceDeliveryCredential<'_>) -> Vec<String> {
+    secrets.extend([
+        credential.expose().to_owned(),
+        encode_basic_credential(credential.expose()),
+    ]);
+    secrets
+}
+
 fn api_diagnostic_text(
     bytes: Vec<u8>,
     incomplete: bool,
     capture_limit: usize,
-    credential: SourceDeliveryCredential<'_>,
+    secrets: &[String],
 ) -> (String, bool) {
     let truncated = incomplete || bytes.len() > capture_limit;
     let (mut text, truncated) =
-        crate::native_v2_delivery::command::diagnostic_text(bytes, truncated, credential.expose());
+        crate::native_v2_delivery::command::diagnostic_text_with_secrets(bytes, truncated, secrets);
     // Reserve space for both streams inside the combined API diagnostic budget.
     // Redact before truncating so a credential cannot be exposed as a partial suffix.
     let truncated = truncated || text.len() > MAX_API_DIAGNOSTIC_STREAM_BYTES;

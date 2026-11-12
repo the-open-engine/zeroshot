@@ -1059,8 +1059,14 @@ async fn slow_remote_preflight_does_not_block_unrelated_submission() {
     );
 
     let slow_request = preflight_tests::with_declared_github_token(slow_request);
-    let slow_submission =
-        tokio::spawn(async move { slow_backend.start_controller(slow_request).await });
+    let slow_submission = tokio::spawn(async move {
+        let mut prepared = slow_backend.prepare_run(slow_request).await?;
+        preflight_tests::install_forge_fixture(
+            &mut prepared,
+            &slow_backend.state_root.join("forge-bin"),
+        );
+        slow_backend.submit_prepared(prepared, None).await
+    });
     let reached_remote_check = tokio::time::timeout(Duration::from_secs(5), async {
         while !remote_check_started.exists() {
             tokio::time::sleep(Duration::from_millis(10)).await;

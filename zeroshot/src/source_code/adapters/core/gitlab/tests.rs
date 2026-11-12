@@ -11,12 +11,14 @@ mod ci_tests;
 mod conversation_tests;
 #[path = "feedback_tests.rs"]
 mod feedback_tests;
-#[path = "http_fixture.rs"]
+#[path = "tests/http_fixture.rs"]
 mod http_fixture;
 #[path = "merge_completion_tests.rs"]
 mod merge_completion_tests;
 #[path = "metadata_tests.rs"]
 mod metadata_tests;
+#[path = "network_tests.rs"]
+mod network_tests;
 #[path = "review_selection_tests.rs"]
 mod review_selection_tests;
 use http_fixture::{IntoResponse, Json, Response};
@@ -394,15 +396,15 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
 }
 
 fn simple_response(state: &StateData, path: &str) -> Option<Response> {
-    let value = if path == "/api/v4/version" {
+    let value = if path.ends_with("/api/v4/version") {
         json!({"version":state.version,"enterprise":true})
     } else if path.ends_with("/repository/branches/main") {
         json!({"name":"main","commit":{"id":BASE}})
     } else if path.contains("/repository/branches/") {
         json!({"name":"zeroshot/test","commit":{"id":HEAD}})
-    } else if path == "/api/v4/user" {
+    } else if path.ends_with("/api/v4/user") {
         json!({"id":31})
-    } else if path == "/api/v4/projects/group%2Fsub%2Fproject/members/all/31" {
+    } else if path.ends_with("/api/v4/projects/group%2Fsub%2Fproject/members/all/31") {
         json!({"id":31,"state":"active","membership_state":"active","access_level":30})
     } else {
         return None;

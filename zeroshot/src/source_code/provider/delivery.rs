@@ -283,6 +283,18 @@ pub(crate) use tests::{TestReviewCheckpoint, RefuseReviewCheckpoint, RecordingRe
 /// Target-owned, bounded source-provider effects. Implementations must bound every network operation.
 #[async_trait]
 pub trait SourceDeliveryAuthority: Send + Sync {
+    /// One read-only authenticated observation of project access and supported server version.
+    /// A stop request ends it early after confirming cleanup of any process it started. A stopped
+    /// observation is an error and never proves access.
+    async fn check_access(
+        &self,
+        _repository: &str,
+        _credential: SourceDeliveryCredential<'_>,
+        _stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> Result<(), SourceDeliveryError> {
+        Err(SourceDeliveryError::Unavailable)
+    }
+
     /// Export owned, credential-free conversation receipts for the existing execution checkpoint.
     async fn review_conversation_state(
         &self,

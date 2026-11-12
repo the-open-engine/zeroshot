@@ -180,7 +180,7 @@ pub(super) async fn can_repair(
         Err(error) if error.api_status() == Some(404) => return Ok(false),
         Err(error) => return Err(error),
     };
-    let permission: PermissionWire = super::api::decode_response(value, credential)?;
+    let permission: PermissionWire = authority.decode_response(value, credential)?;
     if permission.user.id != author.id {
         return Err(SourceDeliveryError::identity(
             "GitHub feedback permission changed author identity",
@@ -302,7 +302,7 @@ pub(super) async fn pages<T: serde::de::DeserializeOwned>(
             credential,
         )
         .await?;
-    let pages: Vec<Vec<T>> = super::api::decode_response(value, credential)?;
+    let pages: Vec<Vec<T>> = authority.decode_response(value, credential)?;
     let count = pages
         .iter()
         .map(Vec::len)

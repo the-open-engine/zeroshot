@@ -402,6 +402,14 @@ jobs:
           npm --prefix ui run build
       - name: Check macOS product and test compilation
         run: cargo check --locked --workspace --all-targets --features ui
+      - name: Run macOS forge network and access regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          source_code_provider::adapters::core::network::tests
+          source_code_provider::adapters::core::github::access::tests
+          source_code_provider::adapters::core::github::api::tests
+          source_code_provider::adapters::core::gitlab::tests::network_tests
+          native_v2_local::token_file::tests::caller_network_snapshot
       - name: Run macOS controller socket and workspace clone regressions
         run: >-
           ZEROSHOT_REQUIRE_APFS_CLONE=1
@@ -430,6 +438,11 @@ jobs:
           mkdir -p target/debug
           cp "$output_root/$target/restic" target/debug/restic
           target/debug/restic version
+      - name: Run macOS checkpoint forge access regression
+        run: >-
+          cargo test --locked --package zeroshot --features ui
+          --test native_v2_local_delivery_gh_search_path
+          checkpoint_resume_checks_the_restored_gh_once_before_agents_start
       - name: Run native macOS controller termination regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unix_controller

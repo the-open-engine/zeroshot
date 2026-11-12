@@ -301,7 +301,10 @@ mod token_file;
 pub use token_file::TrustedGitHubTokenFile;
 pub(crate) use token_file::{GITHUB_TOKEN_FILE_ENV, validate_token as validate_github_delivery_token};
 
-fn forge_credential<'a>(environment: &'a ResolvedEnvironment, field: &str) -> Option<&'a str> {
+pub(crate) fn forge_credential<'a>(
+    environment: &'a ResolvedEnvironment,
+    field: &str,
+) -> Option<&'a str> {
     let name = EnvironmentVariableName::new(field).ok()?;
     let token = environment.get(&name)?;
     (!token.trim().is_empty() && token.len() <= MAX_TOKEN_BYTES).then_some(token)

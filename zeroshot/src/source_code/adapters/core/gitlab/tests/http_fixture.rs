@@ -19,6 +19,13 @@ pub(super) struct Response {
 }
 
 impl Response {
+    pub(super) fn replace_origin(mut self, origin: &str) -> Self {
+        self.body = String::from_utf8(self.body)
+            .unwrap()
+            .replace(super::ORIGIN, origin)
+            .into_bytes();
+        self
+    }
     pub(super) fn raw(body: Vec<u8>) -> Self {
         Self {
             status: StatusCode::OK,
@@ -89,37 +96,64 @@ pub(super) async fn serve(
 ) {
     let handler = Arc::new(handler);
     loop {
-        let Ok((mut stream, _)) = listener.accept().await else {
+        let Ok((stream, _)) = listener.accept().await else {
             return;
         };
         let handler = handler.clone();
         tokio::spawn(async move {
-            let response = match read(&mut stream).await {
-                Some(request) => handler(request),
-                None => StatusCode::BAD_REQUEST.into_response(),
-            };
-            if response.disconnect {
-                return;
-            }
-            let extras = response
-                .headers
-                .iter()
-                .map(|(name, value)| format!("{name}: {value}\r\n"))
-                .collect::<String>();
-            let header = format!(
-                "HTTP/1.1 {} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extras}\r\n",
-                response.status.as_u16(),
-                response.body.len()
-            );
-            if stream.write_all(header.as_bytes()).await.is_ok() {
-                // A bounded client may intentionally stop reading an oversized fixture response.
-                let _ = stream.write_all(&response.body).await;
+            respond(stream, handler).await;
+        });
+    }
+}
+
+pub(super) async fn serve_tls(
+    listener: tokio::net::TcpListener,
+    acceptor: tokio_rustls::TlsAcceptor,
+    handler: impl Fn(Request) -> Response + Send + Sync + 'static,
+) {
+    let handler = Arc::new(handler);
+    loop {
+        let Ok((stream, _)) = listener.accept().await else {
+            return;
+        };
+        let handler = handler.clone();
+        let acceptor = acceptor.clone();
+        tokio::spawn(async move {
+            if let Ok(stream) = acceptor.accept(stream).await {
+                respond(stream, handler).await;
             }
         });
     }
 }
 
-async fn read(stream: &mut tokio::net::TcpStream) -> Option<Request> {
+async fn respond<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    mut stream: S,
+    handler: Arc<impl Fn(Request) -> Response>,
+) {
+    let response = match read(&mut stream).await {
+        Some(request) => handler(request),
+        None => StatusCode::BAD_REQUEST.into_response(),
+    };
+    if response.disconnect {
+        return;
+    }
+    let extras = response
+        .headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect::<String>();
+    let header = format!(
+        "HTTP/1.1 {} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extras}\r\n",
+        response.status.as_u16(),
+        response.body.len()
+    );
+    if stream.write_all(header.as_bytes()).await.is_ok() {
+        // A bounded client may intentionally stop reading an oversized fixture response.
+        let _ = stream.write_all(&response.body).await;
+    }
+}
+
+async fn read(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> Option<Request> {
     let mut bytes = Vec::new();
     let boundary = read_header(stream, &mut bytes).await?;
     let header = std::str::from_utf8(&bytes[..boundary]).ok()?;
@@ -159,7 +193,10 @@ fn parse_header(header: &str) -> Option<(Method, Url, HeaderMap, usize)> {
     (length <= 2 * 1024 * 1024).then_some((method, uri, headers, length))
 }
 
-async fn read_header(stream: &mut tokio::net::TcpStream, bytes: &mut Vec<u8>) -> Option<usize> {
+async fn read_header(
+    stream: &mut (impl tokio::io::AsyncRead + Unpin),
+    bytes: &mut Vec<u8>,
+) -> Option<usize> {
     loop {
         let mut chunk = [0_u8; 4096];
         let count = stream.read(&mut chunk).await.ok()?;

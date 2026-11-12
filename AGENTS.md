@@ -367,7 +367,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Zeroshot's own checkpoint tool rather than harness context. A controller that fails before
   readiness leaves one bounded, control-safe startup failure report in its run storage, redacted
   before it is written of the bootstrap's credentials and of every captured shell value except
-  short or known-public ones; the waiting CLI consumes it and appends it to its startup error.
+  short or known-public ones, including certificate trust paths so unreadable files stay named;
+  the waiting CLI consumes it and appends it to its startup error.
   Preparation before readiness, including a checkpoint restore, has one finite deadline: 600 s, or
   `ZEROSHOT_PREPARATION_TIMEOUT` whole seconds from 1 to 86400. The controller stops a restore
   that is still extracting there; workspace replacement, once begun, runs to completion so it is
@@ -483,6 +484,25 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   delivery binding's resolved credentials; native Git starts in the selected workspace so relative
   search paths resolve consistently. Shared delivery credential helpers preserve declared
   GitHub token precedence and source-only Git authority; forge API tokens remain provider-owned.
+  Local PR/merge submissions and resumes also perform one authenticated, read-only forge project
+  and server-version check before controller launch. A plain resume makes it under its recovery
+  claim with the shared submission lock released, then rechecks the retained workspace record
+  under that lock before it publishes the successor. Checkpoint resumes defer that single check
+  until restoration under the controller's workspace lease, before runtime construction and agents.
+  The deferred check observes the controller's stop request: the GitHub project read runs in the
+  shared stop-aware capture, which ends the `gh` process tree with confirmed cleanup, the GitLab
+  request is dropped, and a stopped check never admits the run.
+  The source adapter factory shares the ten
+  proxy/CA fields in `source_code/adapters/core/network` between that check and delivery, filtering
+  the same private caller snapshot used by Git; the controller OS environment remains minimal.
+  Capture anchors relative CA paths to the invoking directory once, so worktree creation and resume
+  cannot reinterpret them. Empty uppercase proxy/bypass values fall back to populated lowercase values.
+  Preflight reuses delivery's `source_target` repository selection; caller source IDs may differ
+  from forge repository IDs. GitLab applies captured HTTP/HTTPS/SOCKS proxies, bypasses and PEM trust paths explicitly without changing the
+  process environment. GitHub forwards only those network fields to its isolated `gh` child;
+  on macOS and Windows `gh` honors the CA paths only when built with Go 1.27 or newer and
+  otherwise uses system certificate trust. Proxy URL credentials are redacted
+  before diagnostic bounds and remain private in Git, forge and final delivery feedback.
   Fresh review delivery reconciles the target and returns changed candidates through review before
   its first publication, including when the local feature branch already exists on the remote.
 - Git checkout and push use credential-free HTTPS or SSH locators independently of a forge.
@@ -1804,7 +1824,7 @@ python -m mkdocs build --strict
   head to complete; findings remain review input for the worker rather than automatic CI failures.
   Merge groups use the completed PR gate because Greptile does not review merge-group commits.
   Native changes also require macOS product and test compilation with the UI
-  feature, workspace export integration and private publication regressions, focused Unix controller
+  feature, forge network/access and certificate trust regressions, workspace export integration and private publication regressions, focused Unix controller
   socket regression tests, and APFS workspace clone tests that
   `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. `.github/ci-path-classifier.js` owns
   fail-closed path routing and cross-lane

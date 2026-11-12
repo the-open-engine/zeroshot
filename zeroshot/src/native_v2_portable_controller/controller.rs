@@ -411,6 +411,10 @@ where
     let execution_seed =
         restore_execution_seed(bootstrap, preparation_deadline, prepared.stopping.clone()).await?;
     require_not_stopping(prepared)?;
+    crate::native_v2_local::check_restored_forge_access(bootstrap, prepared.stopping.clone())
+        .await
+        .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
+    require_not_stopping(prepared)?;
     crate::native_v2_review::prepare_local_checkout(
         &prepared.admitted,
         bootstrap,

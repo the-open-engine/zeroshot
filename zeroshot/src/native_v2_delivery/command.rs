@@ -140,6 +140,26 @@ pub(crate) async fn capture_sensitive_until_stopped(
     .await
 }
 
+/// Stop-aware capture of one bounded forge response, which can exceed printable diagnostics.
+pub(crate) async fn capture_sensitive_response_until_stopped(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Result<GitCommandOutput, GitCommandFailure> {
+    capture_exchange(
+        command,
+        deadline,
+        private_secrets,
+        CaptureOptions {
+            stdout_limit: Some(8 * 1024 * 1024),
+            stopping,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
 /// Sends bounded private request bytes concurrently with output and confirmed process cleanup.
 pub(crate) async fn capture_sensitive_with_input(
     command: &mut Command,
@@ -365,6 +385,9 @@ pub(super) fn native_credential_name(name: &str) -> bool {
         || name.ends_with("_TOKEN")
         || name.ends_with("_PASSWORD")
         || name.ends_with("_API_KEY")
+        || name.eq_ignore_ascii_case("HTTPS_PROXY")
+        || name.eq_ignore_ascii_case("HTTP_PROXY")
+        || name.eq_ignore_ascii_case("ALL_PROXY")
 }
 
 fn command_secrets(command: &Command) -> Vec<String> {
@@ -376,7 +399,10 @@ fn command_secrets(command: &Command) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .flat_map(|value| {
             let value = value.to_string_lossy().into_owned();
-            [super::git_auth::encode_basic_credential(&value), value]
+            let mut secrets =
+                crate::source_code_provider::adapters::core::network::proxy_secrets(&value);
+            secrets.push(super::git_auth::encode_basic_credential(&value));
+            secrets
         })
         .collect()
 }
@@ -620,17 +646,6 @@ impl Drop for ProcessGroup {
             }
         }
     }
-}
-
-pub(crate) fn diagnostic_text(bytes: Vec<u8>, truncated: bool, token: &str) -> (String, bool) {
-    diagnostic_text_with_secrets(
-        bytes,
-        truncated,
-        &[
-            token.to_owned(),
-            super::git_auth::encode_basic_credential(token),
-        ],
-    )
 }
 
 pub(crate) fn diagnostic_text_with_secrets(

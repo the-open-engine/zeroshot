@@ -88,6 +88,11 @@ fn startup_redactions_cover_bootstrap_credentials_but_not_ordinary_context() {
         ),
         ("Home".to_owned(), "/Users/someone".to_owned()),
         ("PWD".to_owned(), "/Users/someone/project".to_owned()),
+        (
+            "SSL_CERT_FILE".to_owned(),
+            "/private-ca/missing.pem".to_owned(),
+        ),
+        ("SSL_CERT_DIR".to_owned(), "/private-ca/certs".to_owned()),
         ("LC_ALL".to_owned(), "en_US.UTF-8".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("FEATURE_FLAG".to_owned(), "enabled".to_owned()),
@@ -109,6 +114,8 @@ fn startup_redactions_cover_bootstrap_credentials_but_not_ordinary_context() {
     for public in [
         "/Users/someone",
         "/Users/someone/project",
+        "/private-ca/missing.pem",
+        "/private-ca/certs",
         "en_US.UTF-8",
         "C.UTF-8",
         "enabled",

@@ -38,6 +38,16 @@ fn local_controller_receives_only_minimal_non_harness_environment() {
         "COPILOT_GITHUB_TOKEN",
         "DBUS_SESSION_BUS_ADDRESS",
         "XDG_RUNTIME_DIR",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
     ] {
         assert!(!environment.contains_key(std::ffi::OsStr::new(name)));
     }

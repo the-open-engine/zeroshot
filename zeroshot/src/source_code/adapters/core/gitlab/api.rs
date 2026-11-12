@@ -22,6 +22,7 @@ pub(super) struct Api {
     endpoint: Url,
     client: Client,
     metadata: Arc<OnceCell<ServerMetadata>>,
+    network: super::super::network::ForgeNetwork,
 }
 
 #[derive(Clone)]
@@ -82,16 +83,35 @@ impl Api {
     }
 
     fn build(endpoint: Url) -> Result<Self, SourceDeliveryError> {
+        Self::build_with_network(endpoint, None)
+    }
+
+    pub(super) fn with_network(
+        self,
+        network: super::super::network::ForgeNetwork,
+    ) -> Result<Self, SourceDeliveryError> {
+        Self::build_with_network(self.endpoint, Some(network))
+    }
+
+    fn build_with_network(
+        endpoint: Url,
+        network: Option<super::super::network::ForgeNetwork>,
+    ) -> Result<Self, SourceDeliveryError> {
         let client = Client::builder()
             .timeout(Duration::from_secs(90))
             .connect_timeout(Duration::from_secs(10))
-            .redirect(Policy::none())
-            .build()
-            .map_err(|_| SourceDeliveryError::Unavailable)?;
+            .redirect(Policy::none());
+        let client = match &network {
+            Some(network) => network.client(client)?,
+            None => client,
+        }
+        .build()
+        .map_err(|_| SourceDeliveryError::Unavailable)?;
         Ok(Self {
             endpoint,
             client,
             metadata: Arc::new(OnceCell::new()),
+            network: network.unwrap_or_default(),
         })
     }
 
@@ -184,6 +204,7 @@ impl Api {
             self.response(request, credential).await?,
             credential,
             RESPONSE_LIMIT,
+            &self.network,
         )
         .await
     }
@@ -197,6 +218,7 @@ impl Api {
             self.response(ApiRequest::get(segments), credential).await?,
             credential,
             MAX_JOB_LOG_BYTES,
+            &self.network,
         )
         .await
     }
@@ -214,7 +236,7 @@ impl Api {
         // Error statuses fail first, so a rejection without pagination headers keeps its status.
         let response = self.response(request, credential).await?;
         let has_more = notes_have_next_page(response.headers(), page)?;
-        let bytes = response_bytes(response, credential, RESPONSE_LIMIT).await?;
+        let bytes = response_bytes(response, credential, RESPONSE_LIMIT, &self.network).await?;
         let values: Vec<T> = serde_json::from_slice(&bytes)
             .map_err(|_| SourceDeliveryError::api(None, "GitLab returned invalid JSON"))?;
         if values.len() > PAGE_SIZE {
@@ -271,10 +293,17 @@ impl Api {
                 format!("GitLab API {resource} transport failed"),
                 error,
                 credential,
+                &self.network,
             )
         })?;
         if !response.status().is_success() {
-            return Err(rejection(&resource, response, credential, creating_review).await);
+            return Err(rejection(
+                (&resource, creating_review),
+                response,
+                credential,
+                &self.network,
+            )
+            .await);
         }
         Ok(response)
     }
@@ -282,10 +311,10 @@ impl Api {
 
 /// Only a complete missing-source-branch validation response can specialize the status policy.
 async fn rejection(
-    resource: &str,
+    (resource, creating_review): (&str, bool),
     mut response: reqwest::Response,
     credential: SourceDeliveryCredential<'_>,
-    creating_review: bool,
+    network: &super::super::network::ForgeNetwork,
 ) -> SourceDeliveryError {
     let status = response.status().as_u16();
     let mut body = Vec::new();
@@ -313,7 +342,7 @@ async fn rejection(
         && super::review::missing_source_branch(&body);
     let error = SourceDeliveryError::api(
         Some(status),
-        display_text(diagnostic, truncated, credential),
+        display_text_with_secrets(diagnostic, truncated, credential, &network.secrets()),
     );
     if retry_visibility {
         error.temporary_review_sync()
@@ -326,6 +355,7 @@ fn transport_failure(
     context: String,
     error: reqwest::Error,
     credential: SourceDeliveryCredential<'_>,
+    network: &super::super::network::ForgeNetwork,
 ) -> SourceDeliveryError {
     let error = error.without_url();
     let mut detail = context;
@@ -342,7 +372,11 @@ fn transport_failure(
         }
         cause = current.source();
     }
-    SourceDeliveryError::api(None, display_text(detail.into_bytes(), false, credential)).temporary()
+    SourceDeliveryError::api(
+        None,
+        display_text(network.redact(&detail).into_bytes(), false, credential),
+    )
+    .temporary()
 }
 
 /// Forge and transport text is redacted before truncation and kept on one control-free line.
@@ -351,12 +385,21 @@ pub(super) fn display_text(
     truncated: bool,
     credential: SourceDeliveryCredential<'_>,
 ) -> String {
+    display_text_with_secrets(bytes, truncated, credential, &[])
+}
+
+fn display_text_with_secrets(
+    bytes: Vec<u8>,
+    truncated: bool,
+    credential: SourceDeliveryCredential<'_>,
+    extra_secrets: &[String],
+) -> String {
     use crate::native_v2_delivery::git_auth;
     use crate::source_code_provider::SourceGitCredential;
 
     let mut values = vec![credential.expose()];
     values.extend(credential.github_git_token());
-    let mut secrets = Vec::new();
+    let mut secrets = extra_secrets.to_vec();
     match credential.git() {
         Some(SourceGitCredential::Https { username, password }) => {
             values.extend([username, password]);
@@ -417,6 +460,7 @@ async fn response_bytes(
     mut response: reqwest::Response,
     credential: SourceDeliveryCredential<'_>,
     maximum_bytes: usize,
+    network: &super::super::network::ForgeNetwork,
 ) -> Result<Vec<u8>, SourceDeliveryError> {
     if response
         .content_length()
@@ -434,6 +478,7 @@ async fn response_bytes(
             format!("GitLab API response from {source} transport failed"),
             error,
             credential,
+            network,
         )
     })? {
         if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
@@ -447,7 +492,7 @@ async fn response_bytes(
     Ok(bytes)
 }
 
-fn require_version(version: &str) -> Result<(), SourceDeliveryError> {
+pub(super) fn require_version(version: &str) -> Result<(), SourceDeliveryError> {
     let mut numbers = version.split('-').next().unwrap_or("").split('.');
     let parsed = (
         numbers.next().and_then(|v| v.parse::<u64>().ok()),
