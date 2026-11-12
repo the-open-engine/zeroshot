@@ -7,7 +7,9 @@ use super::*;
 #[test]
 fn recovery_claim_requires_the_existing_original_released_lease() {
     let root = tempfile::tempdir().assert_value();
-    let path = root.path().join("controller.lock");
+    // The lease creates its own private state directory. Windows refuses to protect a directory
+    // that an elevated token created with its default owner, as the temporary root can be.
+    let path = root.path().join("state").join("controller.lock");
     let lease = ControllerLease::acquire(&path).assert_value();
     let identity = lease.identity();
     assert!(matches!(

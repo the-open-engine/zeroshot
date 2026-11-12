@@ -30,12 +30,35 @@ fn tree(path: &Path) -> BTreeMap<PathBuf, Entry> {
     result.insert(
         path.to_owned(),
         Entry {
-            bytes: metadata.is_file().then(|| std::fs::read(path).unwrap()),
+            bytes: if metadata.is_file() {
+                contents(path)
+            } else {
+                None
+            },
             modified: metadata.modified().unwrap(),
             permissions: metadata.permissions(),
         },
     );
     result
+}
+
+/// A live controller locks its lease for the whole length, and Windows refuses a read of a
+/// range that another process locked. Only that file's bytes may stay out of a snapshot.
+fn contents(path: &Path) -> Option<Vec<u8>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        #[cfg(windows)]
+        Err(error) if locked_lease(path, &error) => None,
+        Err(error) => panic!("{}: {error}", path.display()),
+    }
+}
+
+#[cfg(windows)]
+fn locked_lease(path: &Path, error: &std::io::Error) -> bool {
+    use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
+    path.file_name()
+        .is_some_and(|name| name == "controller.lock")
+        && error.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32)
 }
 
 fn make_readonly(entries: &BTreeMap<PathBuf, Entry>) {
