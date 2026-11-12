@@ -3451,7 +3451,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunStatus" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3563,6 +3563,16 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
             <p>Recorded graph result while running or stopping, before finalization ends.</p>
           </div>
         </li>
+        <li class="doc-section-item field-body">
+            <b><code>controller</code></b>
+              (<code><span title="zeroshot.runs.ControllerObservation">ControllerObservation</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Availability observation, omitted for responding controllers and finished runs.</p>
+          </div>
+        </li>
     </ul>
 
 
@@ -3599,7 +3609,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunSummary" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSummary</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">force_stop_requested</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSummary</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">force_stop_requested</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3689,6 +3699,16 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
           –
           <div class="doc-md-description">
             <p>Recorded graph result while running or stopping, before finalization ends.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>controller</code></b>
+              (<code><span title="zeroshot.runs.ControllerObservation">ControllerObservation</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Availability observation, omitted for responding controllers and finished runs.</p>
           </div>
         </li>
     </ul>

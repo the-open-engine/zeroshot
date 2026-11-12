@@ -2298,6 +2298,10 @@ merge base with the captured base revision, without changing tracked files. A ch
 runs 5N + 8 agent executions. A crashed agent is retried once. Any other agent failure, or a
 triage result with more units than the maps allow, stops the run before publication. Finding
 problems is a successful review.</p>
+<p>A confirmed Claude usage quota refusal bypasses crash retries. Its failure context preserves
+reset information and guidance to <a href="../observe-and-control/#restart-or-resume-a-failed-run">resume after usage becomes available</a>.
+Codex's message-only usage failures retain crash retries; see the
+<a href="../../reference/cluster/graph/">native failure signals</a>.</p>
 <h2 id="prepare-the-runtime-and-credentials">Prepare the runtime and credentials<a class="headerlink" href="#prepare-the-runtime-and-credentials" title="Permanent link">&para;</a></h2>
 <p>The supplied <a href="../../assets/code-review/runtime.json">runtime plan</a> splits the agents across Claude
 Code and Codex, so that each unit and the whole change are reviewed by both model families. Save it
@@ -2352,7 +2356,7 @@ PR base branch, for example <code>origin/main</code>. <code>--task-from</code> s
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-10">10 November 2026</time>
+    Last updated <time datetime="2026-11-12">12 November 2026</time>
   </span>
 
     

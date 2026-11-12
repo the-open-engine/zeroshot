@@ -3626,7 +3626,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>  stack              Validate, submit, and observe hosted stacks of dependent runs
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>  run                Submit a graph run locally or to a named target
 <a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  update             Update this executable and managed agent skills to the newest canonical release
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  list               List runs as JSON
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  list               List runs as JSON. Local reads never change run state
 <a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
 <a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
 <a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>  logs               Follow a run's log stream as NDJSON
@@ -4785,32 +4785,36 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-47-9" name="__codelineno-47-9" href="#__codelineno-47-9"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-list"><code>zeroshot list</code><a class="headerlink" href="#zeroshot-list" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>List runs as JSON
+<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>List runs as JSON. Local reads never change run state.
 <a id="__codelineno-48-2" name="__codelineno-48-2" href="#__codelineno-48-2"></a>
-<a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a>Usage: zeroshot list [OPTIONS]
+<a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a>An unfinished local run whose controller does not answer includes optional controller metadata: state (lost or unknown) and observedAt (Unix epoch milliseconds). Exit status is 0.
 <a id="__codelineno-48-4" name="__codelineno-48-4" href="#__codelineno-48-4"></a>
-<a id="__codelineno-48-5" name="__codelineno-48-5" href="#__codelineno-48-5"></a>Options:
-<a id="__codelineno-48-6" name="__codelineno-48-6" href="#__codelineno-48-6"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-48-7" name="__codelineno-48-7" href="#__codelineno-48-7"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-48-8" name="__codelineno-48-8" href="#__codelineno-48-8"></a>
-<a id="__codelineno-48-9" name="__codelineno-48-9" href="#__codelineno-48-9"></a>  -h, --help
-<a id="__codelineno-48-10" name="__codelineno-48-10" href="#__codelineno-48-10"></a>          Print help
+<a id="__codelineno-48-5" name="__codelineno-48-5" href="#__codelineno-48-5"></a>Usage: zeroshot list [OPTIONS]
+<a id="__codelineno-48-6" name="__codelineno-48-6" href="#__codelineno-48-6"></a>
+<a id="__codelineno-48-7" name="__codelineno-48-7" href="#__codelineno-48-7"></a>Options:
+<a id="__codelineno-48-8" name="__codelineno-48-8" href="#__codelineno-48-8"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-48-9" name="__codelineno-48-9" href="#__codelineno-48-9"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-48-10" name="__codelineno-48-10" href="#__codelineno-48-10"></a>
+<a id="__codelineno-48-11" name="__codelineno-48-11" href="#__codelineno-48-11"></a>  -h, --help
+<a id="__codelineno-48-12" name="__codelineno-48-12" href="#__codelineno-48-12"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-status"><code>zeroshot status</code><a class="headerlink" href="#zeroshot-status" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence.
 <a id="__codelineno-49-2" name="__codelineno-49-2" href="#__codelineno-49-2"></a>
-<a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a>Usage: zeroshot status [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a>Local reads leave durable status unchanged. An unavailable controller is reported separately as controller.state (lost or unknown) and controller.observedAt (Unix epoch milliseconds). Finished runs need no controller and omit this entry. A successful read exits 0.
 <a id="__codelineno-49-4" name="__codelineno-49-4" href="#__codelineno-49-4"></a>
-<a id="__codelineno-49-5" name="__codelineno-49-5" href="#__codelineno-49-5"></a>Arguments:
-<a id="__codelineno-49-6" name="__codelineno-49-6" href="#__codelineno-49-6"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-49-7" name="__codelineno-49-7" href="#__codelineno-49-7"></a>          Public run ID
-<a id="__codelineno-49-8" name="__codelineno-49-8" href="#__codelineno-49-8"></a>
-<a id="__codelineno-49-9" name="__codelineno-49-9" href="#__codelineno-49-9"></a>Options:
-<a id="__codelineno-49-10" name="__codelineno-49-10" href="#__codelineno-49-10"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-49-11" name="__codelineno-49-11" href="#__codelineno-49-11"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-49-12" name="__codelineno-49-12" href="#__codelineno-49-12"></a>
-<a id="__codelineno-49-13" name="__codelineno-49-13" href="#__codelineno-49-13"></a>  -h, --help
-<a id="__codelineno-49-14" name="__codelineno-49-14" href="#__codelineno-49-14"></a>          Print help
+<a id="__codelineno-49-5" name="__codelineno-49-5" href="#__codelineno-49-5"></a>Usage: zeroshot status [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-49-6" name="__codelineno-49-6" href="#__codelineno-49-6"></a>
+<a id="__codelineno-49-7" name="__codelineno-49-7" href="#__codelineno-49-7"></a>Arguments:
+<a id="__codelineno-49-8" name="__codelineno-49-8" href="#__codelineno-49-8"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-49-9" name="__codelineno-49-9" href="#__codelineno-49-9"></a>          Public run ID
+<a id="__codelineno-49-10" name="__codelineno-49-10" href="#__codelineno-49-10"></a>
+<a id="__codelineno-49-11" name="__codelineno-49-11" href="#__codelineno-49-11"></a>Options:
+<a id="__codelineno-49-12" name="__codelineno-49-12" href="#__codelineno-49-12"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-49-13" name="__codelineno-49-13" href="#__codelineno-49-13"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-49-14" name="__codelineno-49-14" href="#__codelineno-49-14"></a>
+<a id="__codelineno-49-15" name="__codelineno-49-15" href="#__codelineno-49-15"></a>  -h, --help
+<a id="__codelineno-49-16" name="__codelineno-49-16" href="#__codelineno-49-16"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-watch"><code>zeroshot watch</code><a class="headerlink" href="#zeroshot-watch" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
@@ -4835,6 +4839,8 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-50-20" name="__codelineno-50-20" href="#__codelineno-50-20"></a>  0  The run succeeded, or Ctrl-C detached before it finished.
 <a id="__codelineno-50-21" name="__codelineno-50-21" href="#__codelineno-50-21"></a>  1  The run finished failed, or observation failed. A failed run prints the same failure summary
 <a id="__codelineno-50-22" name="__codelineno-50-22" href="#__codelineno-50-22"></a>     on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event.
+<a id="__codelineno-50-23" name="__codelineno-50-23" href="#__codelineno-50-23"></a>     An unavailable local controller replays recorded events, then names `zeroshot resume RUN_ID`
+<a id="__codelineno-50-24" name="__codelineno-50-24" href="#__codelineno-50-24"></a>     and `zeroshot force-stop RUN_ID`. Inspection leaves durable state unchanged.
 </code></pre></div>
 <h3 id="zeroshot-logs"><code>zeroshot logs</code><a class="headerlink" href="#zeroshot-logs" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a>Follow a run's log stream as NDJSON
@@ -4862,26 +4868,29 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-51-23" name="__codelineno-51-23" href="#__codelineno-51-23"></a>  0  The log stream ended or Ctrl-C detached, whatever the run's result. Read the result with
 <a id="__codelineno-51-24" name="__codelineno-51-24" href="#__codelineno-51-24"></a>     `zeroshot watch` or `zeroshot status`.
 <a id="__codelineno-51-25" name="__codelineno-51-25" href="#__codelineno-51-25"></a>  1  The command failed, for example because the run was not found or its logs could not be
-<a id="__codelineno-51-26" name="__codelineno-51-26" href="#__codelineno-51-26"></a>     read.
+<a id="__codelineno-51-26" name="__codelineno-51-26" href="#__codelineno-51-26"></a>     read. An unavailable local controller replays recorded logs, then names `zeroshot resume RUN_ID`
+<a id="__codelineno-51-27" name="__codelineno-51-27" href="#__codelineno-51-27"></a>     and `zeroshot force-stop RUN_ID`. Inspection leaves durable state unchanged.
 </code></pre></div>
 <h3 id="zeroshot-attach"><code>zeroshot attach</code><a class="headerlink" href="#zeroshot-attach" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>Attach to an execution's interactive event stream as NDJSON
+<div class="highlight"><pre><span></span><code><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>Attach to an execution's interactive event stream as NDJSON.
 <a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a>
-<a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a>Usage: zeroshot attach [OPTIONS] &lt;RUN_ID&gt; &lt;EXECUTION_REF&gt;
+<a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a>If a local controller is unavailable, prints retained execution output, then exits 1 and names the resume and force-stop commands. Closing this read-only stream never stops work.
 <a id="__codelineno-52-4" name="__codelineno-52-4" href="#__codelineno-52-4"></a>
-<a id="__codelineno-52-5" name="__codelineno-52-5" href="#__codelineno-52-5"></a>Arguments:
-<a id="__codelineno-52-6" name="__codelineno-52-6" href="#__codelineno-52-6"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-52-7" name="__codelineno-52-7" href="#__codelineno-52-7"></a>          Public run ID
-<a id="__codelineno-52-8" name="__codelineno-52-8" href="#__codelineno-52-8"></a>
-<a id="__codelineno-52-9" name="__codelineno-52-9" href="#__codelineno-52-9"></a>  &lt;EXECUTION_REF&gt;
-<a id="__codelineno-52-10" name="__codelineno-52-10" href="#__codelineno-52-10"></a>          Execution reference emitted by the run
-<a id="__codelineno-52-11" name="__codelineno-52-11" href="#__codelineno-52-11"></a>
-<a id="__codelineno-52-12" name="__codelineno-52-12" href="#__codelineno-52-12"></a>Options:
-<a id="__codelineno-52-13" name="__codelineno-52-13" href="#__codelineno-52-13"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-52-14" name="__codelineno-52-14" href="#__codelineno-52-14"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-52-15" name="__codelineno-52-15" href="#__codelineno-52-15"></a>
-<a id="__codelineno-52-16" name="__codelineno-52-16" href="#__codelineno-52-16"></a>  -h, --help
-<a id="__codelineno-52-17" name="__codelineno-52-17" href="#__codelineno-52-17"></a>          Print help
+<a id="__codelineno-52-5" name="__codelineno-52-5" href="#__codelineno-52-5"></a>Usage: zeroshot attach [OPTIONS] &lt;RUN_ID&gt; &lt;EXECUTION_REF&gt;
+<a id="__codelineno-52-6" name="__codelineno-52-6" href="#__codelineno-52-6"></a>
+<a id="__codelineno-52-7" name="__codelineno-52-7" href="#__codelineno-52-7"></a>Arguments:
+<a id="__codelineno-52-8" name="__codelineno-52-8" href="#__codelineno-52-8"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-52-9" name="__codelineno-52-9" href="#__codelineno-52-9"></a>          Public run ID
+<a id="__codelineno-52-10" name="__codelineno-52-10" href="#__codelineno-52-10"></a>
+<a id="__codelineno-52-11" name="__codelineno-52-11" href="#__codelineno-52-11"></a>  &lt;EXECUTION_REF&gt;
+<a id="__codelineno-52-12" name="__codelineno-52-12" href="#__codelineno-52-12"></a>          Execution reference emitted by the run
+<a id="__codelineno-52-13" name="__codelineno-52-13" href="#__codelineno-52-13"></a>
+<a id="__codelineno-52-14" name="__codelineno-52-14" href="#__codelineno-52-14"></a>Options:
+<a id="__codelineno-52-15" name="__codelineno-52-15" href="#__codelineno-52-15"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-52-16" name="__codelineno-52-16" href="#__codelineno-52-16"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-52-17" name="__codelineno-52-17" href="#__codelineno-52-17"></a>
+<a id="__codelineno-52-18" name="__codelineno-52-18" href="#__codelineno-52-18"></a>  -h, --help
+<a id="__codelineno-52-19" name="__codelineno-52-19" href="#__codelineno-52-19"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-force-stop"><code>zeroshot force-stop</code><a class="headerlink" href="#zeroshot-force-stop" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-53-1" name="__codelineno-53-1" href="#__codelineno-53-1"></a>Force a run to stop and write the result as JSON
@@ -4935,7 +4944,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <h3 id="zeroshot-checkpoints"><code>zeroshot checkpoints</code><a class="headerlink" href="#zeroshot-checkpoints" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>List one page of a run's saved workspace checkpoints as JSON.
 <a id="__codelineno-55-2" name="__codelineno-55-2" href="#__codelineno-55-2"></a>
-<a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a>Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. Local restores also require --discard-workspace-changes and keep attached HEAD and branch tips. When nextAfter is present, pass it as --after to fetch the next page.
+<a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a>Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. Local restores also require --discard-workspace-changes and keep attached HEAD and branch tips. When nextAfter is present, pass it as --after to fetch the next page. Local reads exit 0 and include controller.state and controller.observedAt when an unfinished run's controller is unavailable, without changing recorded state.
 <a id="__codelineno-55-4" name="__codelineno-55-4" href="#__codelineno-55-4"></a>
 <a id="__codelineno-55-5" name="__codelineno-55-5" href="#__codelineno-55-5"></a>Usage: zeroshot checkpoints [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-55-6" name="__codelineno-55-6" href="#__codelineno-55-6"></a>
@@ -5022,7 +5031,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-59-14" name="__codelineno-59-14" href="#__codelineno-59-14"></a>  stack              Validate, submit, and observe hosted stacks of dependent runs
 <a id="__codelineno-59-15" name="__codelineno-59-15" href="#__codelineno-59-15"></a>  run                Submit a graph run locally or to a named target
 <a id="__codelineno-59-16" name="__codelineno-59-16" href="#__codelineno-59-16"></a>  update             Update this executable and managed agent skills to the newest canonical release
-<a id="__codelineno-59-17" name="__codelineno-59-17" href="#__codelineno-59-17"></a>  list               List runs as JSON
+<a id="__codelineno-59-17" name="__codelineno-59-17" href="#__codelineno-59-17"></a>  list               List runs as JSON. Local reads never change run state
 <a id="__codelineno-59-18" name="__codelineno-59-18" href="#__codelineno-59-18"></a>  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
 <a id="__codelineno-59-19" name="__codelineno-59-19" href="#__codelineno-59-19"></a>  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
 <a id="__codelineno-59-20" name="__codelineno-59-20" href="#__codelineno-59-20"></a>  logs               Follow a run's log stream as NDJSON

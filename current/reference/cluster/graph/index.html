@@ -2507,6 +2507,29 @@ human-readable error wording:</p>
 response stream remains <code>crash</code>/<code>declared_failure</code> and retains the harness's existing continuation
 policy and the node's crash attempts. A malformed <strong>worker response contract</strong> instead remains
 <code>malformed</code>/<code>malformed_result</code> after its allowed corrections.</p>
+<p>Claude account/session quota exhaustion uses <code>refusal</code> with the existing <code>declared_failure</code> reason
+when a native <code>rate_limit_event</code> has <code>rate_limit_info.status: rejected</code> and the native turn ends
+with an explicitly failed native result. Confirmed quota exhaustion bypasses adapter continuation
+and automatic crash attempts. Missing, wrongly typed or unrecognized result subtypes cannot
+confirm quota exhaustion; their existing failure handling stays in place. The ordinary
+failure context identifies the affected node and retains available reset information plus manual
+resume guidance. Whole-second numeric reset timestamps are displayed in UTC; other numeric hints
+and ambiguous text such as <code>5:08 PM</code> retain their values without an inferred date or timezone.
+Missing or malformed reset data does not hide a
+confirmed quota failure. Allowed events, warnings (including <code>overageStatus: rejected</code> with an
+allowed status), and rejected limits followed by a successful result do not fail a node. Ordinary
+transient throttling without that confirmed rejection keeps its existing retry behavior.</p>
+<p>Codex exec usage-limit failures remain <code>crash</code>/<code>declared_failure</code>: its native <code>error</code> and
+<code>turn.failed.error</code> expose only <code>message</code>, including in
+<a href="https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/exec/src/exec_events.rs">Codex 0.166.0</a>.
+That interface has no machine-readable quota class or reset timestamp. Zeroshot does not classify
+the message wording, so these failures retain continue-once and authored crash attempts. The
+provider's reset hint remains in its diagnostic.</p>
+<p>Built-in graphs take their existing failure route for a confirmed quota refusal. Custom guards
+and loops retain control of recovery; there is no global abort, cooldown, waiting until reset, or
+automatic resumption. After usage becomes available,
+<a href="../../../guides/observe-and-control/#restart-or-resume-a-failed-run">resume the failed run</a> using its
+retained workspace or an available checkpoint.</p>
 <h2 id="data-and-control-separation">Data and control separation<a class="headerlink" href="#data-and-control-separation" title="Permanent link">&para;</a></h2>
 <p>No selector or guard is source text. <code>DataSelector</code> is tagged by <code>source</code> and reads only a bounded,
 non-empty <code>FieldPath</code> from <code>state</code> or the current map <code>item</code>. An input binding has an explicit target
