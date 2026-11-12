@@ -158,18 +158,18 @@ async fn native_github_cli_certificate_trust_matches_the_platform() {
     let result = authority
         .check_access("acme/project", credential(), None)
         .await;
-    if cfg!(any(target_os = "macos", windows)) {
-        let error =
-            result.expect_err("gh requires private CAs in the system trust store on this platform");
-        assert!(
+    // Go reads SSL_CERT_FILE on Linux. On macOS and Windows it does so from Go 1.27; a `gh` built
+    // with an older Go trusts only the system certificate store and refuses the private CA.
+    match result {
+        Ok(()) => {}
+        Err(error) if cfg!(any(target_os = "macos", windows)) => assert!(
             error
                 .to_string()
                 .to_ascii_lowercase()
                 .contains("certificate"),
-            "{error}"
-        );
-    } else {
-        result.unwrap();
+            "an older gh may refuse only the untrusted certificate: {error}"
+        ),
+        Err(error) => panic!("gh must trust the captured CA file on this platform: {error}"),
     }
 }
 

@@ -498,7 +498,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Preflight reuses delivery's `source_target` repository selection; caller source IDs may differ
   from forge repository IDs. GitLab applies captured HTTP/HTTPS/SOCKS proxies, bypasses and PEM trust paths explicitly without changing the
   process environment. GitHub forwards only those network fields to its isolated `gh` child;
-  on macOS and Windows `gh` uses system certificate trust. Proxy URL credentials are redacted
+  on macOS and Windows `gh` honors the CA paths only when built with Go 1.27 or newer and
+  otherwise uses system certificate trust. Proxy URL credentials are redacted
   before diagnostic bounds and remain private in Git, forge and final delivery feedback.
   Fresh review delivery reconciles the target and returns changed candidates through review before
   its first publication, including when the local feature branch already exists on the remote.

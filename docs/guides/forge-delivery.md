@@ -18,9 +18,11 @@ the invoking shell's `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, their
 `SSL_CERT_FILE` and `SSL_CERT_DIR`. Git transport, the early forge check and delivery use the same
 captured settings, including after `resume`; no stored network configuration is needed. GitLab
 accepts private CA certificates from the named PEM file or certificate directories. On Linux the
-GitHub CLI also honors those CA paths; on macOS and Windows it uses the system certificate store,
-so install your forge's CA there. An unreadable certificate file is reported by name. Proxy
-credentials are kept private.
+GitHub CLI also honors those CA paths. On macOS and Windows that depends on the installed GitHub
+CLI: a release built with Go 1.27 or newer honors them, and an older release uses only the system
+certificate store. If the early check reports an untrusted certificate there, update the GitHub
+CLI or install your forge's CA in the system store. An unreadable certificate file is reported by
+name. Proxy credentials are kept private.
 Relative CA paths are anchored to the invoking directory before a delivery worktree is created.
 GitLab also supports `socks5://` and `socks5h://` proxy URLs through these same variables.
 
