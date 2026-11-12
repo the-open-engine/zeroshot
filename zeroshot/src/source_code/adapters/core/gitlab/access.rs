@@ -35,14 +35,23 @@ pub(super) async fn check(
     authority: &GitLabDeliveryAuthority,
     repository: &str,
     credential: SourceDeliveryCredential<'_>,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<(), SourceDeliveryError> {
-    let response: AccessResponse = authority
-        .api
-        .json(
-            ApiRequest::graphql(QUERY, json!({"project": repository})),
-            credential,
-        )
-        .await?;
+    let request = authority.api.json::<AccessResponse>(
+        ApiRequest::graphql(QUERY, json!({"project": repository})),
+        credential,
+    );
+    // A stop request drops the HTTP request; this client starts no process to clean up.
+    let response = tokio::select! {
+        biased;
+        () = crate::execution::process::wait_for_stop_request(stopping) => {
+            return Err(SourceDeliveryError::api(
+                None,
+                "GitLab project access request was stopped before it completed",
+            ));
+        }
+        response = request => response?,
+    };
     if response.errors.is_some_and(|errors| !errors.is_empty()) {
         return Err(SourceDeliveryError::identity(
             "GitLab authenticated project/version query returned GraphQL errors; project access or server metadata is unavailable",

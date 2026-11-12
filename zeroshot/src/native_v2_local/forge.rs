@@ -10,6 +10,7 @@ struct ForgeAccessRequest<'a> {
     workspace: &'a Path,
     github_token: Option<&'a str>,
     github_token_file: Option<&'a TrustedGitHubTokenFile>,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 pub(crate) async fn check_forge_access(
@@ -24,6 +25,8 @@ pub(crate) async fn check_forge_access(
             workspace: &prepared.workspace,
             github_token: prepared.github_token.as_deref(),
             github_token_file: prepared.github_token_file.as_ref(),
+            // The invoking CLI owns this request; no detached controller exists to stop yet.
+            stopping: None,
         },
         &state_root.join("forge-preflight"),
     )
@@ -31,8 +34,11 @@ pub(crate) async fn check_forge_access(
 }
 
 /// Checkpoint restores resolve executables only after restoration under the controller lease.
+/// The controller's stop request ends the request with confirmed cleanup, and a stopped check
+/// is refused even when the forge answered.
 pub(crate) async fn check_restored_forge_access(
     bootstrap: &crate::native_v2_portable_controller::PortableControllerBootstrap,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<(), LocalCompositionError> {
     if bootstrap.checkpoint.is_none() {
         return Ok(());
@@ -45,6 +51,7 @@ pub(crate) async fn check_restored_forge_access(
             workspace: &bootstrap.workspace,
             github_token: bootstrap.github_token.as_deref(),
             github_token_file: bootstrap.github_token_file.as_ref(),
+            stopping,
         },
         &bootstrap.storage.join("forge-preflight"),
     )
@@ -154,8 +161,29 @@ async fn check_access(
             format!("required forge credential {field} was not supplied"),
         )
     })?;
-    authority
-        .check_access(&target.repository, SourceDeliveryCredential::token(token))
-        .await
-        .map_err(|error| failure("authenticated project/version read", error.to_string()))
+    let step = "authenticated project/version read";
+    let outcome = authority
+        .check_access(
+            &target.repository,
+            SourceDeliveryCredential::token(token),
+            prepared.stopping.clone(),
+        )
+        .await;
+    if prepared
+        .stopping
+        .as_ref()
+        .is_some_and(|request| *request.borrow())
+    {
+        // Stop intent wins a race with the answer: a cancelled check never admits the run.
+        let unconfirmed = outcome
+            .as_ref()
+            .is_err_and(crate::source_code_provider::SourceDeliveryError::cleanup_unconfirmed);
+        let reason = if unconfirmed {
+            "forge access check cleanup could not be confirmed"
+        } else {
+            "forge access check was cancelled"
+        };
+        return Err(failure(step, reason.to_owned()));
+    }
+    outcome.map_err(|error| failure(step, error.to_string()))
 }

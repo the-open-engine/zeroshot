@@ -487,6 +487,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Local PR/merge submissions and resumes also perform one authenticated, read-only forge project
   and server-version check before controller launch. Checkpoint resumes defer that single check
   until restoration under the controller's workspace lease, before runtime construction and agents.
+  The deferred check observes the controller's stop request: the GitHub project read runs in the
+  shared stop-aware capture, which ends the `gh` process tree with confirmed cleanup, the GitLab
+  request is dropped, and a stopped check never admits the run.
   The source adapter factory shares the ten
   proxy/CA fields in `source_code/adapters/core/network` between that check and delivery, filtering
   the same private caller snapshot used by Git; the controller OS environment remains minimal.

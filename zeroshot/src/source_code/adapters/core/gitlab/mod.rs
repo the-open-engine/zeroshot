@@ -163,8 +163,9 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         &self,
         repository: &str,
         credential: SourceDeliveryCredential<'_>,
+        stopping: Option<tokio::sync::watch::Receiver<bool>>,
     ) -> Result<(), SourceDeliveryError> {
-        access::check(self, repository, credential).await
+        access::check(self, repository, credential, stopping).await
     }
 
     async fn review_conversation_state(

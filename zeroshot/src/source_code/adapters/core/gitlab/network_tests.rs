@@ -155,7 +155,9 @@ async fn native_github_cli_certificate_trust_matches_the_platform() {
     .with_base_url(SourceForgeBaseUrl::new(format!("https://{}", fixture.address)).unwrap())
     .unwrap()
     .with_network(ForgeNetwork::from_snapshot(&fixture.ca_environment()));
-    let result = authority.check_access("acme/project", credential()).await;
+    let result = authority
+        .check_access("acme/project", credential(), None)
+        .await;
     if cfg!(any(target_os = "macos", windows)) {
         let error =
             result.expect_err("gh requires private CAs in the system trust store on this platform");
@@ -189,7 +191,7 @@ async fn captured_ca_and_proxy_support_access_and_merge_delivery() {
         // Build independent authorities, just as preflight and a detached/resumed controller do.
         fixture
             .authority(&environment)
-            .check_access(REPOSITORY, credential())
+            .check_access(REPOSITORY, credential(), None)
             .await
             .unwrap();
         assert_eq!(
@@ -222,7 +224,7 @@ async fn private_ca_is_required_and_certificate_directory_is_honored() {
     let fixture = TlsFixture::new().await;
     let error = fixture
         .authority(&BTreeMap::new())
-        .check_access(REPOSITORY, credential())
+        .check_access(REPOSITORY, credential(), None)
         .await
         .unwrap_err();
     assert!(error.to_string().contains("certificate"), "{error}");
@@ -238,7 +240,7 @@ async fn private_ca_is_required_and_certificate_directory_is_honored() {
     )]);
     fixture
         .authority(&environment)
-        .check_access(REPOSITORY, credential())
+        .check_access(REPOSITORY, credential(), None)
         .await
         .unwrap();
 }
@@ -252,6 +254,7 @@ async fn access_refuses_rejected_tokens_unreadable_projects_and_unsupported_vers
         .check_access(
             REPOSITORY,
             SourceDeliveryCredential::token("rejected-token"),
+            None,
         )
         .await
         .unwrap_err();
@@ -259,7 +262,7 @@ async fn access_refuses_rejected_tokens_unreadable_projects_and_unsupported_vers
     assert!(!error.to_string().contains("rejected-token"));
     let error = fixture
         .authority(&environment)
-        .check_access("private/unreadable", credential())
+        .check_access("private/unreadable", credential(), None)
         .await
         .unwrap_err();
     assert!(error.to_string().contains("token cannot read"));
@@ -267,7 +270,7 @@ async fn access_refuses_rejected_tokens_unreadable_projects_and_unsupported_vers
         fixture.inner.state.lock().unwrap().version = version.into();
         let error = fixture
             .authority(&environment)
-            .check_access(REPOSITORY, credential())
+            .check_access(REPOSITORY, credential(), None)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("19.5.1"));
@@ -291,7 +294,7 @@ async fn lower_case_proxy_and_no_proxy_use_the_snapshot() {
         environment.insert(name.into(), proxy.url());
         fixture
             .authority(&environment)
-            .check_access(REPOSITORY, credential())
+            .check_access(REPOSITORY, credential(), None)
             .await
             .unwrap();
     }
@@ -301,7 +304,7 @@ async fn lower_case_proxy_and_no_proxy_use_the_snapshot() {
     environment.insert("https_proxy".into(), proxy.url());
     fixture
         .authority(&environment)
-        .check_access(REPOSITORY, credential())
+        .check_access(REPOSITORY, credential(), None)
         .await
         .unwrap();
     assert_eq!(proxy.count(), 4);
@@ -312,7 +315,7 @@ async fn lower_case_proxy_and_no_proxy_use_the_snapshot() {
     environment.insert("no_proxy".into(), "127.0.0.1".into());
     fixture
         .authority(&environment)
-        .check_access(REPOSITORY, credential())
+        .check_access(REPOSITORY, credential(), None)
         .await
         .unwrap();
 }
@@ -338,13 +341,128 @@ async fn proxy_credentials_never_enter_transport_errors() {
     });
     let error = fixture
         .authority(&environment)
-        .check_access(REPOSITORY, credential())
+        .check_access(REPOSITORY, credential(), None)
         .await
         .unwrap_err();
     let text = format!("{error:?}\n{error}");
     assert!(!text.contains("proxy-user"), "{text}");
     assert!(!text.contains("proxy-password"), "{text}");
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn restored_check_reads_the_forge_once_and_stops_with_the_controller() {
+    use crate::native_v2_delivery::DeliveryMode;
+    use crate::native_v2_local::check_restored_forge_access;
+    let fixture = TlsFixture::new().await;
+    let state = tempfile::tempdir().unwrap();
+    // A new run was already checked by the invoking CLI.
+    let mut fresh = fixture.restored(DeliveryMode::PullRequest, state.path());
+    fresh.checkpoint = None;
+    check_restored_forge_access(&fresh, None).await.unwrap();
+    assert!(fixture.calls().is_empty());
+
+    let restored = fixture.restored(DeliveryMode::Merge, state.path());
+    check_restored_forge_access(&restored, None).await.unwrap();
+    assert_eq!(fixture.calls().len(), 1);
+
+    let (_stop, stopping) = tokio::sync::watch::channel(true);
+    let error = check_restored_forge_access(&restored, Some(stopping))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("authenticated project/version read")
+            && error.contains("forge access check was cancelled"),
+        "{error}"
+    );
+    assert_eq!(
+        fixture.calls().len(),
+        1,
+        "a stopped check must not reach the forge"
+    );
+}
+
+#[tokio::test]
+async fn preflight_refusals_name_the_client_setup_and_authentication_steps() {
+    use crate::native_v2_delivery::DeliveryMode;
+    use crate::native_v2_local::check_forge_access;
+    let fixture = TlsFixture::new().await;
+    let state = tempfile::tempdir().unwrap();
+    let mut unreadable = fixture.prepared(DeliveryMode::PullRequest, "test-private-token");
+    unreadable.native_environment.insert(
+        "SSL_CERT_FILE".into(),
+        state
+            .path()
+            .join("missing-ca.pem")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    let error = check_forge_access(&unreadable, state.path())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("source.gitlab")
+            && error.contains("client setup")
+            && error.contains("missing-ca.pem"),
+        "{error}"
+    );
+
+    let blank = fixture.prepared(DeliveryMode::Merge, " ");
+    let error = check_forge_access(&blank, state.path())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("authentication")
+            && error.contains("required forge credential GITLAB_TOKEN was not supplied"),
+        "{error}"
+    );
+
+    let mut sourceless = fixture.prepared(DeliveryMode::PullRequest, "test-private-token");
+    sourceless.submission.source = None;
+    assert!(check_forge_access(&sourceless, state.path()).await.is_err());
+    assert!(
+        fixture.calls().is_empty(),
+        "a refusal before the request must not reach the forge"
+    );
+}
+
+#[tokio::test]
+async fn stop_request_ends_a_stalled_access_request() {
+    // The listener accepts and never completes TLS, like a forge that stopped answering.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = SourceForgeBaseUrl::new(format!("https://{}", listener.local_addr().unwrap()));
+    let held = tokio::spawn(async move {
+        let mut connections = Vec::new();
+        while let Ok((connection, _)) = listener.accept().await {
+            connections.push(connection);
+        }
+    });
+    let authority = GitLabDeliveryAuthority::new(base.unwrap(), None)
+        .unwrap()
+        .with_network(ForgeNetwork::from_snapshot(&BTreeMap::new()))
+        .unwrap();
+    let (stop, stopping) = tokio::sync::watch::channel(false);
+    let check = authority.check_access(REPOSITORY, credential(), Some(stopping));
+    tokio::pin!(check);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut check)
+            .await
+            .is_err(),
+        "the stalled request must still be pending"
+    );
+    stop.send(true).unwrap();
+    let error = tokio::time::timeout(Duration::from_secs(5), check)
+        .await
+        .expect("a stop request must end the stalled request")
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("stopped before it completed"),
+        "{error}"
+    );
+    held.abort();
 }
 
 #[test]

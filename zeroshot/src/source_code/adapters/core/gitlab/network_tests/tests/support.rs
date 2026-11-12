@@ -68,6 +68,41 @@ impl TlsFixture {
         }
     }
 
+    /// The controller's bootstrap for a checkpoint resume of the same prepared run.
+    pub fn restored(
+        &self,
+        mode: crate::native_v2_delivery::DeliveryMode,
+        storage: &std::path::Path,
+    ) -> crate::native_v2_portable_controller::PortableControllerBootstrap {
+        use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, CheckpointRestoreSelection};
+        let prepared = self.prepared(mode, "test-private-token");
+        crate::native_v2_portable_controller::PortableControllerBootstrap {
+            delivery_receipt: None,
+            checkpoint: Some(CheckpointRestore {
+                directory: storage.join("checkpoints"),
+                selection: CheckpointRestoreSelection::Latest,
+            }),
+            preparation_timeout: crate::native_v2_portable_controller::DEFAULT_PREPARATION_TIMEOUT,
+            run_id: prepared.run_id,
+            delivery_run_id: prepared.delivery_run_id,
+            adopt_existing_delivery: false,
+            submission: prepared.submission,
+            environment: prepared.environment,
+            native_environment: prepared.native_environment,
+            github_token: None,
+            github_token_file: None,
+            delivery_validator: None,
+            git_credentials: None,
+            workspace: prepared.workspace,
+            local_branch: prepared.local_branch,
+            workspace_lease: storage.join("workspace.lock"),
+            checkpoint_repository: storage.join("checkpoint-repository"),
+            memory_storage: None,
+            storage: storage.to_owned(),
+            delivery_policy: Default::default(),
+        }
+    }
+
     pub async fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let mut ca_params = rcgen::CertificateParams::new(vec![]).unwrap();

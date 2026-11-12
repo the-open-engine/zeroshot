@@ -140,6 +140,26 @@ pub(crate) async fn capture_sensitive_until_stopped(
     .await
 }
 
+/// Stop-aware capture of one bounded forge response, which can exceed printable diagnostics.
+pub(crate) async fn capture_sensitive_response_until_stopped(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Result<GitCommandOutput, GitCommandFailure> {
+    capture_exchange(
+        command,
+        deadline,
+        private_secrets,
+        CaptureOptions {
+            stdout_limit: Some(8 * 1024 * 1024),
+            stopping,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
 /// Sends bounded private request bytes concurrently with output and confirmed process cleanup.
 pub(crate) async fn capture_sensitive_with_input(
     command: &mut Command,
