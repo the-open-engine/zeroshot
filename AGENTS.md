@@ -749,10 +749,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   after workspace restoration and before runtime composition/admission; ACP probes before creating a
   session. Shared version probes use the existing process runner, captured search path and native
   environment, a 60-second deadline and bounded output, including npm Windows command shims.
+  Controller shutdown cancels in-flight probes and awaits confirmed process-tree cleanup before
+  returning the startup failure; a cancelled probe cannot admit even a valid reported version.
   Truncated version output remains available only for classification; omit it from diagnostics so
   credentials crossing the byte limit cannot escape exact-match redaction, including Claude's first-turn check.
   Unknown versions fail closed. Minimums are Claude 2.1.310, Codex 0.155.0, Copilot 1.0.70,
-  Pi 1.4.0 and Hermes 0.22.5. Hermes 0.23.1 is the exclusive upper bound because native agent cleanup
+  Pi 1.4.0 and Hermes 0.22.5. Hermes 0.22.6 is the exclusive upper bound because native agent cleanup
   is incompatible; all other upper bounds remain open. OpenCode has no range until the version 2 port.
   Contained Claude sets `DISABLE_AUTOUPDATER=1` after environment merges to preserve image pins.
 - Claude reads its adapter registration's range before each run's first model turn, running the

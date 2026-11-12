@@ -641,6 +641,7 @@ pub(crate) async fn check_lane_versions(
     runtime: &RuntimePlan,
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<(), LocalCompositionError> {
     check_lane_executables(runtime, native_environment, working_directory)?;
     let registry = crate::harnesses::HarnessRegistry::local();
@@ -666,6 +667,7 @@ pub(crate) async fn check_lane_versions(
                         native: &native,
                         search_path: &search_path,
                         workspace: working_directory,
+                        stopping: stopping.clone(),
                     },
                 )
                 .await

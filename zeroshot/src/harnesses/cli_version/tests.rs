@@ -97,6 +97,7 @@ async fn every_declared_minimum_admits_the_boundary_and_refuses_older_or_unreada
                 &plan(descriptor.id, &[descriptor.providers[0]]),
                 &environment(root.path()),
                 root.path(),
+                None,
             )
             .await;
             if accepted {
@@ -125,6 +126,7 @@ async fn distinct_provider_lanes_probe_the_same_executable_once() {
         &plan("codex", &["openai", "openrouter", "gateway"]),
         &environment(root.path()),
         root.path(),
+        None,
     )
     .await
     .assert_value();
@@ -140,6 +142,7 @@ async fn a_valid_version_with_a_failed_command_is_refused() {
         &plan("codex", &["openai"]),
         &environment(root.path()),
         root.path(),
+        None,
     )
     .await
     .assert_error()
@@ -157,6 +160,7 @@ async fn opencode_keeps_admitting_without_a_version_probe() {
         &plan("opencode", &["openai"]),
         &environment(root.path()),
         root.path(),
+        None,
     )
     .await
     .assert_value();
@@ -167,17 +171,18 @@ async fn opencode_keeps_admitting_without_a_version_probe() {
 #[tokio::test]
 async fn hermes_refuses_the_known_incompatible_release_and_newer_versions() {
     let root = tempfile::tempdir().assert_value();
-    for version in ["0.23.1", "0.24.0", "1.0.0"] {
+    for version in ["0.22.6", "0.22.7", "0.23.0", "0.23.1", "0.24.0", "1.0.0"] {
         install(root.path(), "hermes", &reported("hermes", version), 0);
         let detail = check_lane_versions(
             &plan("hermes", &["openai"]),
             &environment(root.path()),
             root.path(),
+            None,
         )
         .await
         .assert_error()
         .to_string();
-        assert!(detail.contains(">=0.22.5, <0.23.1"), "{detail}");
+        assert!(detail.contains(">=0.22.5, <0.22.6"), "{detail}");
     }
 }
 
@@ -206,7 +211,7 @@ async fn probe_deadline_refuses_a_stalled_command_even_after_a_valid_version() {
         },
         deadline: Some(tokio::time::Instant::now() + Duration::from_millis(500)),
     };
-    let (_, failure) = tokio::time::timeout(Duration::from_secs(20), probe(command))
+    let (_, failure) = tokio::time::timeout(Duration::from_secs(20), probe(command, None))
         .await
         .assert_value();
     assert!(failure.assert_value().contains("timed out"));
@@ -257,7 +262,7 @@ async fn probe_uses_the_captured_native_environment_and_bounds_its_output() {
         "UNDECLARED_SECRET".to_owned(),
         "must-not-inherit".to_owned(),
     );
-    check_lane_versions(&plan("codex", &["openai"]), &native, root.path())
+    check_lane_versions(&plan("codex", &["openai"]), &native, root.path(), None)
         .await
         .assert_value();
     let captured = std::fs::read_to_string(root.path().join("native-environment")).assert_value();
@@ -268,7 +273,7 @@ async fn probe_uses_the_captured_native_environment_and_bounds_its_output() {
     );
     assert!(!captured.contains("must-not-inherit"));
     install(root.path(), "codex", &"x".repeat(MAX_REPORTED_BYTES * 4), 0);
-    let error = check_lane_versions(&plan("codex", &["openai"]), &native, root.path())
+    let error = check_lane_versions(&plan("codex", &["openai"]), &native, root.path(), None)
         .await
         .assert_error()
         .to_string();

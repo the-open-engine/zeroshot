@@ -236,3 +236,105 @@ async fn local_run_and_checkpoint_resume_refuse_old_or_unreadable_cli_before_dis
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn controller_shutdown_cancels_version_probes_before_run_or_checkpoint_resume_admission() {
+    let fixture = LocalFixture::new();
+    let failed_run_id = failed_run(&fixture).await;
+    let checkpoint_id = worker_checkpoint(&fixture, &failed_run_id).await;
+    let pids = fixture.root.path("version-probe-pids");
+    let turns = fixture.root.path("unexpected-turns");
+    // Linux's process runner inserts a private subreaper between the controller and the CLI.
+    #[cfg(target_os = "linux")]
+    let controller = "$(/bin/ps -o ppid= -p \"$PPID\")";
+    #[cfg(not(target_os = "linux"))]
+    let controller = "$PPID";
+    openengine_cluster_testkit::fixture::write_executable(
+        &fixture.root.path("bin/codex"),
+        format!(
+            "#!/bin/sh\nif [ \"$*\" != --version ]; then printf turn >> {turns}; exit 91; fi\n\
+             printf 'codex-cli 0.155.0\\n'\n/bin/sleep 60 &\n\
+             printf '%s %s %s %s\\n' \"{controller}\" \"$PPID\" \"$$\" \"$!\" > {pids}\nwait\n",
+            turns = shell_literal(turns.to_str().assert_value()),
+            pids = shell_literal(pids.to_str().assert_value()),
+        ),
+        0o700,
+    )
+    .assert_value();
+    for arguments in [
+        vec![
+            "run",
+            "--title",
+            "Cancelled version probe",
+            "--graph",
+            fixture.graph.to_str().assert_value(),
+            "--input",
+            fixture.input.to_str().assert_value(),
+            "--runtime-config",
+            fixture.runtime.to_str().assert_value(),
+        ],
+        vec![
+            "resume",
+            &failed_run_id,
+            "--from-checkpoint",
+            &checkpoint_id,
+            "--discard-workspace-changes",
+        ],
+    ] {
+        let child = fixture
+            .command(&arguments, "finish")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .assert_value();
+        let processes = timeout(CLI_TIMEOUT, async {
+            loop {
+                if let Ok(text) = fs::read_to_string(&pids) {
+                    let processes = text
+                        .split_whitespace()
+                        .map(|pid| pid.parse::<u32>().assert_value())
+                        .collect::<Vec<_>>();
+                    if processes.len() == 4 {
+                        break processes;
+                    }
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .assert_value_with("the version probe must start");
+        signal(processes[0], libc::SIGTERM).assert_value();
+        let output = timeout(CLI_TIMEOUT, child.wait_with_output())
+            .await
+            .assert_value_with("shutdown must settle before the controller's 30-second deadline")
+            .assert_value();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{stderr}");
+        assert!(
+            stderr.contains("CLI version probe was cancelled"),
+            "{stderr}"
+        );
+        assert!(
+            !stderr.contains("cleanup could not be confirmed"),
+            "{stderr}"
+        );
+        assert!(output.stdout.is_empty(), "cancelled startup admitted a run");
+        assert!(!turns.exists(), "cancelled startup dispatched a model turn");
+        for pid in &processes[2..] {
+            assert!(
+                !process_exists(*pid),
+                "startup reported before probe process {pid} cleanup"
+            );
+        }
+        for pid in processes {
+            wait_for_exit(pid).await;
+        }
+        fs::remove_file(&pids).assert_value();
+        let runs = fixture.json(&["list"], "finish").await;
+        assert_eq!(runs.assert_key("runs").as_array().assert_value().len(), 1);
+        let status = fixture.json(&["status", &failed_run_id], "finish").await;
+        let recovery = status.assert_key("workspaceRecovery");
+        assert_eq!(recovery.assert_key("recoverable"), true);
+        assert!(recovery.get("successorRunId").is_none());
+    }
+}

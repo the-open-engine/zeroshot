@@ -209,6 +209,7 @@ async fn start_controller_process(
     let git_credentials = bootstrap.git_credentials.clone();
     let native_environment = bootstrap.native_environment.clone();
     let memory_storage = bootstrap.memory_storage.clone();
+    let version_stopping = stopping.clone();
     let controller = Arc::new(
         PortableRunController::start_with_shutdown(
             bootstrap,
@@ -217,6 +218,7 @@ async fn start_controller_process(
                     &admitted.runtime,
                     &native_environment,
                     &workspace,
+                    Some(version_stopping),
                 )
                 .await?;
                 crate::native_v2_local::build_local_process_candidate(

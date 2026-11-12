@@ -61,6 +61,7 @@ pub(crate) struct LocalCliContext<'a> {
     pub(crate) native: &'a LocalHarnessEnvironment,
     pub(crate) search_path: &'a str,
     pub(crate) workspace: &'a Path,
+    pub(crate) stopping: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 impl HarnessCliVersion {
@@ -98,6 +99,7 @@ impl HarnessCliVersion {
             native,
             search_path,
             workspace,
+            stopping,
         } = context;
         let mut environment = (self.local_environment)(native);
         for name in ["LANG", "LC_ALL", "TERM", "TMPDIR"] {
@@ -120,7 +122,7 @@ impl HarnessCliVersion {
             },
             deadline: Some(tokio::time::Instant::now() + CHECK_BUDGET),
         };
-        let (reported, failure) = probe(command).await;
+        let (reported, failure) = probe(command, stopping).await;
         if failure.is_none() && reported.accepted_version(self).is_some() {
             return Ok(());
         }
@@ -134,10 +136,16 @@ impl HarnessCliVersion {
     }
 }
 
-async fn probe(command: ProcessSessionCommand) -> (VersionOutput, Option<String>) {
+async fn probe(
+    command: ProcessSessionCommand,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> (VersionOutput, Option<String>) {
     let (_request, cancellation) = tokio::sync::watch::channel(false);
     let mut process = match LocalProcessRunner::new()
-        .open(command, DriverCancellation::new(cancellation))
+        .open(
+            command,
+            DriverCancellation::new(stopping.unwrap_or(cancellation)),
+        )
         .await
     {
         Ok(process) => process,
@@ -151,6 +159,7 @@ async fn probe(command: ProcessSessionCommand) -> (VersionOutput, Option<String>
     }
     let completion = process.wait().await;
     let failure = match require_process_cleanup(&completion) {
+        Ok(output) if output.cancelled => Some("CLI version probe was cancelled".to_owned()),
         Ok(output) => process_failure_evidence(output, false).map(|failure| failure.detail),
         Err(_) => Some("CLI version probe cleanup could not be confirmed".to_owned()),
     };

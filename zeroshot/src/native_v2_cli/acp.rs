@@ -534,6 +534,7 @@ impl AcpSession {
             &profile.runtime,
             &native_environment,
             &prepared.workspace,
+            None,
         )
         .await
         .map_err(|error| AcpServeError::MissingLaneExecutable(error.to_string()))?;

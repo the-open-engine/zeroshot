@@ -26,7 +26,7 @@ version is refused with the lane, executable, reported version, supported range 
 | `codex`    | 0.155.0 | Open                      | Verified adapter fixtures                                                 |
 | `copilot`  | 1.0.70  | Open                      | Oldest CLI explicitly handled by the adapter                              |
 | `pi`       | 1.4.0   | Open                      | Tested hosted release                                                     |
-| `hermes`   | 0.22.5  | 0.23.1                    | Live memory/session/verifier contract; 0.23.1 breaks native agent cleanup |
+| `hermes`   | 0.22.5  | 0.22.6                    | Live memory/session/verifier contract; 0.22.6 breaks native agent cleanup |
 | `opencode` | None    | None                      | Version 2 compatibility and its minimum belong to the version 2 port      |
 
 An open upper bound accepts newer releases; an exclusive upper bound marks a known incompatibility.
