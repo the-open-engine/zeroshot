@@ -667,6 +667,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Claude's authentication `api_retry` does not authorize continuation. Force stops use
   `refusal`/`stopped`; cut or malformed streams stay retryable `crash`. Classification belongs to
   each adapter and survives capsule transport; never infer it from provider message wording.
+  Claude's native rejected `rate_limit_event` followed by an explicitly failed native result uses the same typed
+  rejection plumbing as `refusal`/`declared_failure`, with reset details and manual-resume guidance.
+  Missing, wrongly typed or unrecognized result subtypes cannot confirm quota exhaustion;
+  their existing failure handling stays in place.
+  Successful results and subsequent allowed events clear that quota evidence. Quota exhaustion
+  bypasses continuation and crash attempts without changing authored recovery or postmortem policy.
+  Codex exec message-only usage errors remain crashes until a native structured signal exists.
   Terminalization helpers preserve the complete worker outcome: live and reconstructed force stops
   use `stopped`, while runtime loss stays `crash`.
   Postmortem source outcomes use canonical durable history, including restored checkpoint

@@ -45,6 +45,11 @@ runs 5N + 8 agent executions. A crashed agent is retried once. Any other agent f
 triage result with more units than the maps allow, stops the run before publication. Finding
 problems is a successful review.
 
+A confirmed Claude usage quota refusal bypasses crash retries. Its failure context preserves
+reset information and guidance to [resume after usage becomes available](observe-and-control.md#restart-or-resume-a-failed-run).
+Codex's message-only usage failures retain crash retries; see the
+[native failure signals](../reference/cluster/graph.md).
+
 ## Prepare the runtime and credentials
 
 The supplied [runtime plan](../assets/code-review/runtime.json) splits the agents across Claude

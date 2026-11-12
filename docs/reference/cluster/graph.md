@@ -87,6 +87,32 @@ response stream remains `crash`/`declared_failure` and retains the harness's exi
 policy and the node's crash attempts. A malformed **worker response contract** instead remains
 `malformed`/`malformed_result` after its allowed corrections.
 
+Claude account/session quota exhaustion uses `refusal` with the existing `declared_failure` reason
+when a native `rate_limit_event` has `rate_limit_info.status: rejected` and the native turn ends
+with an explicitly failed native result. Confirmed quota exhaustion bypasses adapter continuation
+and automatic crash attempts. Missing, wrongly typed or unrecognized result subtypes cannot
+confirm quota exhaustion; their existing failure handling stays in place. The ordinary
+failure context identifies the affected node and retains available reset information plus manual
+resume guidance. Whole-second numeric reset timestamps are displayed in UTC; other numeric hints
+and ambiguous text such as `5:08 PM` retain their values without an inferred date or timezone.
+Missing or malformed reset data does not hide a
+confirmed quota failure. Allowed events, warnings (including `overageStatus: rejected` with an
+allowed status), and rejected limits followed by a successful result do not fail a node. Ordinary
+transient throttling without that confirmed rejection keeps its existing retry behavior.
+
+Codex exec usage-limit failures remain `crash`/`declared_failure`: its native `error` and
+`turn.failed.error` expose only `message`, including in
+[Codex 0.166.0](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/exec/src/exec_events.rs).
+That interface has no machine-readable quota class or reset timestamp. Zeroshot does not classify
+the message wording, so these failures retain continue-once and authored crash attempts. The
+provider's reset hint remains in its diagnostic.
+
+Built-in graphs take their existing failure route for a confirmed quota refusal. Custom guards
+and loops retain control of recovery; there is no global abort, cooldown, waiting until reset, or
+automatic resumption. After usage becomes available,
+[resume the failed run](../../guides/observe-and-control.md#restart-or-resume-a-failed-run) using its
+retained workspace or an available checkpoint.
+
 ## Data and control separation
 
 No selector or guard is source text. `DataSelector` is tagged by `source` and reads only a bounded,

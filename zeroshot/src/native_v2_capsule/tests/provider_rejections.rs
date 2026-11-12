@@ -26,6 +26,12 @@ async fn provider_rejection_class_and_model_diagnostic_survive_the_capsule_trans
             CapsuleNodeFailure::ModelUnavailable,
         ),
         (
+            NodeRunnerError::QuotaExhausted(
+                "reset at 2030-01-01T00:00:00Z; resume after usage becomes available".into(),
+            ),
+            CapsuleNodeFailure::QuotaExhausted,
+        ),
+        (
             NodeRunnerError::DriverDetail("response stream cut".into()),
             CapsuleNodeFailure::ExecutionFailed,
         ),
