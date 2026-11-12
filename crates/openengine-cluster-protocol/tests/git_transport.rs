@@ -126,6 +126,7 @@ fn source_omission_and_null_never_materialize_a_dummy_repository() {
         size: openengine_cluster_protocol::RunSize::new("small").assert_value(),
         at_cursor: openengine_cluster_protocol::Cursor::new("v2:0"),
         status: openengine_cluster_protocol::RunStatus::Admitted {},
+        controller: None,
         workspace_recovery: Default::default(),
     })
     .assert_value();

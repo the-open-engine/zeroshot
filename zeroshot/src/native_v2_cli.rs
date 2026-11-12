@@ -797,6 +797,14 @@ pub trait NativeV2CliBackend: Send + Sync {
         target: Option<&str>,
         params: RunStatusParams,
     ) -> Result<CliRunStatusResult, NativeV2CliError>;
+    /// Explicit resume may confirm local controller loss before reading interrupted storage.
+    async fn run_resume_status(
+        &self,
+        target: Option<&str>,
+        params: RunStatusParams,
+    ) -> Result<CliRunStatusResult, NativeV2CliError> {
+        self.run_status(target, params).await
+    }
     async fn run_watch(
         &self,
         target: Option<&str>,

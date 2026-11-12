@@ -326,3 +326,33 @@ def test_provider_rejection_and_stopped_diagnostics_preserve_native_messages(mes
     wire = log_event()
     wire["record"] = {"level": "error", "target": "node", "message": message}
     assert _log_event(wire).message == message
+
+
+@pytest.mark.parametrize("state", ["lost", "unknown"])
+def test_controller_observation_stays_separate_from_recorded_status(state: str) -> None:
+    value = local_status()
+    value["controller"] = {"state": state, "observedAt": 1_794_470_707_000}
+    status = _status(value)
+    assert status.controller is not None
+    assert status.controller.state == state
+    assert status.controller.observed_at == 1_794_470_707_000
+    assert status.result is None
+    assert _summary(status).controller == status.controller
+    assert _status(local_status()).controller is None
+
+
+@pytest.mark.parametrize(
+    "observation",
+    [
+        {"state": "dead", "observedAt": 1},
+        {"state": "lost"},
+        {"state": "unknown", "observedAt": 0},
+        {"state": "lost", "observedAt": True},
+        {"state": "lost", "observedAt": 9_007_199_254_740_992},
+    ],
+)
+def test_invalid_controller_observation_is_rejected(observation: object) -> None:
+    value = local_status()
+    value["controller"] = observation
+    with pytest.raises(ProtocolError):
+        _status(value)

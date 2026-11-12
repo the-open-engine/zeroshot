@@ -33,9 +33,19 @@ CREATE TABLE IF NOT EXISTS v2_run_events (
 ) STRICT;
 ";
 
+#[path = "sqlite/readonly.rs"]
+mod readonly;
+
+// The temporary recovered image must live through clones and cancelled blocking operations,
+// and must be removed only after SQLite has closed its handles (including on Windows).
+struct LedgerConnection {
+    connection: Connection,
+    _snapshot: Option<tempfile::TempDir>,
+}
+
 #[derive(Clone)]
 pub struct SqliteRunLedger {
-    connection: Arc<Mutex<Connection>>,
+    connection: Arc<Mutex<LedgerConnection>>,
 }
 
 impl SqliteRunLedger {
@@ -46,13 +56,8 @@ impl SqliteRunLedger {
 
     /// Opens retained history without creating a database, changing schema, or admitting writes.
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, RunLedgerError> {
-        let connection = Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(sqlite_error)?;
         Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
+            connection: Arc::new(Mutex::new(readonly::open(path.as_ref())?)),
         })
     }
 
@@ -64,7 +69,10 @@ impl SqliteRunLedger {
     fn from_connection(connection: Connection) -> Result<Self, RunLedgerError> {
         connection.execute_batch(SCHEMA).map_err(sqlite_error)?;
         Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
+            connection: Arc::new(Mutex::new(LedgerConnection {
+                connection,
+                _snapshot: None,
+            })),
         })
     }
 
@@ -105,7 +113,7 @@ impl SqliteRunLedger {
         // Wait asynchronously before reserving a blocking thread. The closure owns the guard,
         // so cancelling its caller cannot admit another operation before this one finishes.
         let mut connection = self.connection.clone().lock_owned().await;
-        tokio::task::spawn_blocking(move || operation(&mut connection))
+        tokio::task::spawn_blocking(move || operation(&mut connection.connection))
             .await
             .map_err(|_| RunLedgerError::Storage)?
     }

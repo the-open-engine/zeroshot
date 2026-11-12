@@ -84,6 +84,7 @@ impl LocalCliBackend {
         let _submission_lock = self.acquire_submission_lock().await?;
         self.reconcile_local_resume_claim(&params.run_id, self.ready_timeout)
             .await?;
+        self.confirm_loss_for_resume(&params.run_id).await?;
         let status = self
             .status_local(RunStatusParams {
                 run_id: params.run_id.clone(),
@@ -449,14 +450,23 @@ impl NativeV2CliBackend for LocalCliBackend {
         self.status_local(params).await.map(Into::into)
     }
 
+    async fn run_resume_status(
+        &self,
+        target: Option<&str>,
+        params: RunStatusParams,
+    ) -> Result<CliRunStatusResult, NativeV2CliError> {
+        require_local(target)?;
+        self.confirm_loss_for_resume(&params.run_id).await?;
+        self.status_local(params).await.map(Into::into)
+    }
+
     async fn run_watch(
         &self,
         target: Option<&str>,
         params: RunWatchParams,
     ) -> Result<Self::Watch, NativeV2CliError> {
         require_local(target)?;
-        let transport = self.connect_run(&params.run_id).await?;
-        Ok(spawn_watch(transport, params))
+        self.inspect_watch(params).await
     }
 
     async fn run_logs(
@@ -465,8 +475,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunLogsParams,
     ) -> Result<Self::Logs, NativeV2CliError> {
         require_local(target)?;
-        let transport = self.connect_run(&params.run_id).await?;
-        Ok(spawn_logs(transport, params))
+        self.inspect_logs(params).await
     }
 
     async fn run_attach(
@@ -475,8 +484,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunAttachParams,
     ) -> Result<Self::Attach, NativeV2CliError> {
         require_local(target)?;
-        let transport = self.connect_run(&params.run_id).await?;
-        Ok(spawn_attach(transport, params))
+        self.inspect_attach(params).await
     }
 
     async fn run_force(
@@ -509,15 +517,18 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: openengine_cluster_protocol::RunCheckpointsParams,
     ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2CliError> {
         require_local(target)?;
-        self.status_local(RunStatusParams {
-            run_id: params.run_id.clone(),
-        })
-        .await?;
-        crate::native_v2_supervisor::checkpoints::list(
+        let status = self
+            .status_local(RunStatusParams {
+                run_id: params.run_id.clone(),
+            })
+            .await?;
+        let mut result = crate::native_v2_supervisor::checkpoints::list(
             &self.paths(&params.run_id)?.storage().join("checkpoints"),
             params,
         )
-        .map_err(local_error)
+        .map_err(local_error)?;
+        result.controller = status.controller;
+        Ok(result)
     }
 
     async fn run_resume(

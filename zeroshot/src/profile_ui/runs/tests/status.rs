@@ -330,6 +330,7 @@ async fn only_exact_acp_leases_keep_an_embedded_owner_live_without_a_socket() {
             run_id: fixture.id.clone(),
             socket: paths.socket(),
             pid: std::process::id(),
+            lease_identity: None,
         },
     )
     .assert_value_with("write unusable controller readiness");
@@ -423,6 +424,7 @@ mod local {
                     run_id: ready_id.clone(),
                     socket: paths.socket(),
                     pid: std::process::id(),
+                    lease_identity: None,
                 },
             )
             .assert_value();

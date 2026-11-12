@@ -8,6 +8,7 @@ from typing import Literal, TypeAlias, cast
 from .errors import ProtocolError
 from .runs import (
     ActiveExecution,
+    ControllerObservation,
     ExhaustedLoop,
     FailureContext,
     FailureDiagnostic,
@@ -72,6 +73,7 @@ def _status(value: object) -> RunStatus:
         active_executions=active,
         result=result,
         graph_result=graph_result,
+        controller=_controller(root.get("controller")),
     )
 
 
@@ -86,6 +88,20 @@ def _summary(status: RunStatus) -> RunSummary:
         phase=status.phase,
         force_stop_requested=status.phase == "stopping" or failure == "force_stopped",
         graph_result=status.graph_result,
+        controller=status.controller,
+    )
+
+
+def _controller(value: object) -> ControllerObservation | None:
+    if value is None:
+        return None
+    root = _mapping(value, "run status.controller")
+    return ControllerObservation(
+        state=cast(
+            Literal["lost", "unknown"],
+            _enum_string(root, "state", {"lost", "unknown"}, "run status.controller"),
+        ),
+        observed_at=_positive_javascript_safe_integer(root, "observedAt", "run status.controller"),
     )
 
 

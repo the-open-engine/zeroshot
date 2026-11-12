@@ -86,7 +86,7 @@ fn private_state_and_workspace_reject_fifos_without_waiting_for_a_writer() {
 
 #[cfg(all(unix, feature = "ui"))]
 #[test]
-fn existing_read_write_probe_neither_repairs_nor_creates_files() {
+fn read_only_probe_neither_repairs_nor_creates_files() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = TemporaryDirectory::for_test("private-probe");
@@ -94,7 +94,7 @@ fn existing_read_write_probe_neither_repairs_nor_creates_files() {
     fs::write(&insecure, []).unwrap();
     fs::set_permissions(&insecure, fs::Permissions::from_mode(0o644)).unwrap();
 
-    let error = private_file(&insecure, FileAccess::ReadWriteExisting).unwrap_err();
+    let error = private_file(&insecure, FileAccess::Read).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     assert_eq!(
         fs::metadata(&insecure).unwrap().permissions().mode() & 0o777,
@@ -103,9 +103,7 @@ fn existing_read_write_probe_neither_repairs_nor_creates_files() {
 
     let missing = root.path("missing");
     assert_eq!(
-        private_file(&missing, FileAccess::ReadWriteExisting)
-            .unwrap_err()
-            .kind(),
+        private_file(&missing, FileAccess::Read).unwrap_err().kind(),
         std::io::ErrorKind::NotFound
     );
     assert!(!missing.exists());

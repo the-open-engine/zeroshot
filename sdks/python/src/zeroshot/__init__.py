@@ -35,6 +35,9 @@ from .runs import (
     ActiveExecution as ActiveExecution,
 )
 from .runs import (
+    ControllerObservation as ControllerObservation,
+)
+from .runs import (
     ExhaustedLoop as ExhaustedLoop,
 )
 from .runs import (

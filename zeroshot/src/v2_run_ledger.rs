@@ -509,3 +509,7 @@ impl fmt::Display for RunPhase {
 #[cfg(test)]
 #[path = "v2_run_ledger/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/support/sqlite_crash.rs"]
+pub(crate) mod sqlite_crash;

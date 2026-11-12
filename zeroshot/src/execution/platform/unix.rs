@@ -5,10 +5,34 @@ use std::path::Path;
 
 use super::FileAccess;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct FileIdentity {
     device: u64,
     inode: u64,
+}
+
+pub(crate) fn process_exists(pid: u32) -> io::Result<bool> {
+    let pid = i32::try_from(pid)
+        .ok()
+        .filter(|pid| *pid > 0)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid process ID"))?;
+    // Signal zero checks existence without sending a signal. EPERM remains unknown.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        #[cfg(target_os = "linux")]
+        if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit_once(") ")
+                .is_some_and(|(_, fields)| fields.starts_with('Z'))
+        }) {
+            return Ok(false);
+        }
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
 }
 
 pub(crate) fn file_identity(file: &File) -> io::Result<FileIdentity> {
