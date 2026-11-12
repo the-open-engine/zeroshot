@@ -113,6 +113,53 @@ fn completed_after(millis: u64) -> Behavior {
     }
 }
 
+#[tokio::test]
+async fn checkpoint_shutdown_stops_before_dispatch_and_preserves_a_latched_graph_failure() {
+    use crate::native_v2_supervisor::checkpoints::fake_checkpoint_store;
+    for terminal_graph in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).assert_value();
+        let root_node = if terminal_graph {
+            json!({"kind":"fail", "name":"failed", "reason":"rejected"})
+        } else {
+            sequence(vec![step("worker", 1_000), succeed("done")], null_type())
+        };
+        let harness = harness(
+            graph(root_node, null_type()),
+            Value::Null,
+            FakeDriver::default(),
+        )
+        .await;
+        let (_request, stopping) = watch::channel(true);
+        let store = fake_checkpoint_store(
+            root.path(),
+            root.path().join("catalog"),
+            workspace,
+            BTreeSet::new(),
+        )
+        .with_stop_request(Some(stopping));
+        let supervisor = harness
+            .supervisor
+            .clone()
+            .with_checkpoints(Some(Arc::new(store)));
+        let terminal = supervisor.drive().await.assert_value();
+        let expected_reason = if terminal_graph {
+            "rejected"
+        } else {
+            "force_stopped"
+        };
+        assert!(
+            matches!(terminal, TerminalResult::Failed { ref reason, .. } if reason.as_str() == expected_reason)
+        );
+        assert_eq!(
+            stored_run(&harness.ledger).await.snapshot.terminal,
+            Some(terminal)
+        );
+        assert!(harness.driver.state().starts.is_empty());
+    }
+}
+
 fn mapped_waves_graph() -> GraphSpec {
     let state = record_type();
     let item_work = json!({

@@ -114,7 +114,8 @@ impl Fixture {
                 command.env(name, value);
             }
         }
-        #[cfg(unix)]
+        // macOS lowers RLIMIT_STACK only from the main thread, and test spawns fork from another.
+        #[cfg(target_os = "linux")]
         {
             use std::os::unix::process::CommandExt;
 
@@ -136,6 +137,10 @@ impl Fixture {
     }
 
     pub(super) fn run(&self, mode: &str, detach: bool) -> Output {
+        self.run_command(mode, detach).output().unwrap()
+    }
+
+    pub(super) fn run_command(&self, mode: &str, detach: bool) -> Command {
         if mode == "volume" {
             let mut graph = local_graph::graph();
             let payload = json!({"kind":"record","fields":{"blob":{"type":{"kind":"string"},"required":true}}});
@@ -159,7 +164,8 @@ impl Fixture {
         if detach {
             command.arg("--detach");
         }
-        command.env("FIXTURE_MODE", mode).output().unwrap()
+        command.env("FIXTURE_MODE", mode);
+        command
     }
 
     pub(super) fn json(&self, args: &[&str]) -> Value {
@@ -182,7 +188,7 @@ impl Fixture {
         )
     }
 
-    fn await_child(&self) -> u32 {
+    pub(super) fn await_child(&self) -> u32 {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Ok(pid) = std::fs::read_to_string(self.workspace.join("child.pid")) {

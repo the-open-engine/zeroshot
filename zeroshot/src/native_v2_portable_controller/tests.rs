@@ -66,6 +66,7 @@ fn checkpoint_cleanup_fixture(
     std::fs::create_dir(&directory).assert_value();
     std::fs::create_dir(&repository).assert_value();
     let cleanup = PortableCheckpointCleanup {
+        stopping: None,
         inner: Arc::new(super::engine::ConfirmedCleanup),
         directory: directory.clone(),
         repository: repository.clone(),

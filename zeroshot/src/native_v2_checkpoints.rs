@@ -35,6 +35,23 @@ use filesystem::SnapshotId;
 #[error("workspace checkpoint is unavailable: {0}")]
 pub struct CheckpointError(#[from] pub std::io::Error);
 
+#[derive(Debug, Error)]
+#[error("controller is stopping")]
+struct CheckpointStopped;
+
+fn stopped() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Interrupted, CheckpointStopped)
+}
+
+impl CheckpointError {
+    /// Only an explicit stop with confirmed native process cleanup carries this marker.
+    pub(crate) fn was_stopped(&self) -> bool {
+        self.0
+            .get_ref()
+            .is_some_and(|cause| cause.is::<CheckpointStopped>())
+    }
+}
+
 /// Workspace operations run only at an engine-defined boundary with no live executions.
 /// Delivery receipt retention is independent of workspace capture and graph history.
 #[async_trait]
@@ -276,6 +293,7 @@ struct CaptureState {
 
 /// Deduplicated local and direct-target storage backed by one Restic recovery-lineage repository.
 pub struct ResticCheckpointStore {
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
     directory: PathBuf,
     repository: PathBuf,
     program: restic::ResticProgram,
@@ -308,6 +326,7 @@ impl ResticCheckpointStore {
             restic::ResticProgram::fake(&repository)
         });
         Ok(Self {
+            stopping: None,
             delivery: DeliveryCheckpointStore::new(repository.clone()),
             directory,
             repository,
@@ -321,6 +340,7 @@ impl ResticCheckpointStore {
     #[cfg(test)]
     pub(crate) fn with_program(config: ResticCheckpointStoreTestConfig) -> Self {
         Self {
+            stopping: None,
             delivery: DeliveryCheckpointStore::new(config.repository.clone()),
             directory: config.directory,
             repository: config.repository,
@@ -329,6 +349,14 @@ impl ResticCheckpointStore {
             writers: config.writers,
             state: Arc::default(),
         }
+    }
+
+    pub(crate) fn with_stop_request(
+        mut self,
+        stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> Self {
+        self.stopping = stopping;
+        self
     }
 
     fn last_writer(&self, history: &[DurableExecution]) -> Result<Option<u64>, CheckpointError> {
@@ -361,11 +389,17 @@ impl ResticCheckpointStore {
         }
         let directory = self.directory.clone();
         let workspace = self.workspace.clone();
+        let operation = filesystem::SnapshotOperation::current(self.stopping.clone());
         let (stage, snapshot) = tokio::task::spawn_blocking(move || {
             let stages = directory.join("staging");
             crate::execution::platform::private_directory(&stages)?;
             let stage = filesystem::private_stage(&stages, ".capture-")?;
-            let snapshot = filesystem::capture(&workspace, &stage.path().join("snapshots"), &())?;
+            let snapshot = filesystem::capture_with(
+                &workspace,
+                &stage.path().join("snapshots"),
+                &(),
+                &operation,
+            )?;
             Ok::<_, std::io::Error>((stage, snapshot))
         })
         .await
@@ -400,6 +434,7 @@ impl ResticCheckpointStore {
 
     fn restic(&self) -> restic::Repository {
         restic::Repository::new(self.program.clone(), self.repository.clone())
+            .with_stop_request(self.stopping.clone())
     }
 }
 
@@ -553,7 +588,7 @@ pub async fn restore(
     selection: &CheckpointRestore,
     workspace: &Path,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
-    restore_with(selection, workspace, None).await
+    restore_with(selection, workspace, None, None).await
 }
 
 /// Restores like [`restore`] within one bounded, owner-named attempt. Repeating the same pinned
@@ -563,7 +598,20 @@ pub async fn restore_attempt(
     workspace: &Path,
     attempt: RestoreAttempt<'_>,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
-    restore_with(selection, workspace, Some(attempt)).await
+    restore_with(selection, workspace, Some(attempt), None).await
+}
+
+/// The local process can stop extraction without abandoning its confirmed process cleanup.
+///
+/// With a stop request, workspace replacement runs on the blocking pool and outlives a dropped
+/// future. Await this restore to its end before cleaning up or releasing the workspace.
+pub(crate) async fn restore_attempt_until_stopped(
+    selection: &CheckpointRestore,
+    workspace: &Path,
+    attempt: RestoreAttempt<'_>,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Result<Vec<DurableExecution>, CheckpointError> {
+    restore_with(selection, workspace, Some(attempt), stopping).await
 }
 
 /// Removes the stage an interrupted attempt by `owner` left beside `workspace`, if any.
@@ -590,6 +638,7 @@ async fn restore_with(
     selection: &CheckpointRestore,
     workspace: &Path,
     attempt: Option<RestoreAttempt<'_>>,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
     let progress = RestoreProgress {
         started: Instant::now(),
@@ -607,6 +656,7 @@ async fn restore_with(
         Some(deadline) => repository.with_deadline(deadline),
         None => repository,
     };
+    let repository = repository.with_stop_request(stopping.clone());
     repository
         .initialize()
         .await
@@ -631,8 +681,25 @@ async fn restore_with(
     // The complete stage is validated before the first workspace change. Replacement ignores the
     // deadline: stopping it halfway would itself leave a partial checkout. The CLI's stop grace
     // covers it; a hard stop from here on is repaired by repeating this restore completely.
-    filesystem::restore_staged(&restored, workspace)
-        .map_err(|error| progress.failed("replacing the workspace", error))?;
+    let replaced = match stopping {
+        // Only the local controller passes a stop request, and it awaits this restore to its end.
+        // The blocking pool lets replacement observe the request; nothing abandons that task.
+        Some(stopping) => {
+            let operation = filesystem::SnapshotOperation::current(Some(stopping));
+            let workspace = workspace.to_owned();
+            tokio::task::spawn_blocking(move || {
+                // Retain the disposable stage until validation and replacement have both completed.
+                let _stage = stage;
+                filesystem::restore_staged_with(&restored, &workspace, &operation)
+            })
+            .await
+            .map_err(|_| catalog::invalid("checkpoint replacement task failed"))?
+        }
+        // Hosted preparation drops this future on force-stop or at its timeout and then cleans up
+        // the workspace. Replacement therefore stays inside one poll: no writer outlives the drop.
+        None => filesystem::restore_staged(&restored, workspace),
+    };
+    replaced.map_err(|error| progress.failed("replacing the workspace", error))?;
     Ok(seed)
 }
 

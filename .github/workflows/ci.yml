@@ -412,6 +412,28 @@ jobs:
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace
           cargo test --locked --package zeroshot --features ui --lib native_v2_cli::execution::export_workspace::tests
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.1
+          cache: false
+      - name: Prepare pinned Restic for native controller tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$(uname -m)" in
+            arm64) target=aarch64-apple-darwin ;;
+            x86_64) target=x86_64-apple-darwin ;;
+            *) exit 2 ;;
+          esac
+          output_root="$RUNNER_TEMP/zeroshot-restic"
+          scripts/distribution/build-restic.sh "$output_root" "$target"
+          mkdir -p target/debug
+          cp "$output_root/$target/restic" target/debug/restic
+          target/debug/restic version
+      - name: Run native macOS controller termination regressions
+        run: |
+          cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unix_controller
+          cargo test --locked --package zeroshot --features ui --lib native_v2_portable_controller::process::shutdown_tests
 
   python-check:
     name: Python SDK

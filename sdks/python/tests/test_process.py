@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from zeroshot import ProtocolError, TargetError
+from zeroshot import (
+    InvalidRequestError,
+    ProtocolError,
+    RunNotFoundError,
+    SubmissionConflictError,
+    TargetError,
+)
 from zeroshot._process import NativeProcess, _RunFailed
 
 
@@ -68,3 +74,47 @@ def test_failed_run_kind_requires_the_failed_run_code(tmp_path: Path) -> None:
     )
 
     assert isinstance(error, ProtocolError)
+
+
+@pytest.mark.parametrize(
+    ("kind", "code", "details", "expected"),
+    [
+        ("run_failed", "run.failed", {"runId": "failed-run"}, _RunFailed),
+        ("target", "target.unavailable", {}, TargetError),
+        ("invalid_request", "request.invalid", {}, InvalidRequestError),
+        ("protocol", "protocol.invalid", {}, ProtocolError),
+        ("run_not_found", "run.not_found", {}, RunNotFoundError),
+        (
+            "submission_conflict",
+            "submission.conflict",
+            {"existingRunId": "other"},
+            SubmissionConflictError,
+        ),
+        ("run_failed", "run.failed", {}, ProtocolError),
+    ],
+)
+def test_notice_before_terminal_diagnostic_keeps_error_type(
+    tmp_path: Path, kind: str, code: str, details: dict[str, str], expected: type[Exception]
+) -> None:
+    value = json.loads(diagnostic(code=code, details=details))
+    value["kind"] = kind
+    stderr = (
+        b'Connection to target "prod" lost; the run continues there.\n' + json.dumps(value).encode()
+    )
+    error = native_process(tmp_path)._error(stderr, 1)
+    assert isinstance(error, expected)
+    assert "provider-secret" not in str(error)
+
+
+def test_terminal_line_takes_precedence_over_earlier_diagnostic(tmp_path: Path) -> None:
+    earlier = diagnostic(details={"runId": "failed-run"})
+    error = native_process(tmp_path)._error(earlier + b"\ntransport failed: provider-secret", 1)
+    assert type(error) is TargetError
+    assert "transport failed: <redacted>" in str(error)
+
+
+def test_complete_multiline_diagnostic_remains_supported(tmp_path: Path) -> None:
+    stderr = json.dumps(json.loads(diagnostic(details={"runId": "failed-run"})), indent=2).encode()
+    error = native_process(tmp_path)._error(stderr, 1)
+    assert isinstance(error, _RunFailed)
+    assert error.run_id == "failed-run"

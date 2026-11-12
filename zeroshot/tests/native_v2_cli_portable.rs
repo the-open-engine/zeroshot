@@ -4,6 +4,10 @@
 mod fixture;
 use fixture::{Fixture, success};
 
+#[cfg(unix)]
+#[path = "native_v2_cli_portable/unix_controller_tests.rs"]
+mod unix_controller;
+
 #[test]
 fn native_local_run_handles_unicode_paths_correction_and_large_output() {
     for mode in ["finish", "correction", "volume"] {

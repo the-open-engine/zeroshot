@@ -19,6 +19,7 @@ pub use crate::source_code_provider::GitCommandFailure;
 /// Only trusted Git parsers read stdout; Debug and Display expose the sanitized record.
 pub(crate) struct GitCommandOutput {
     raw_stdout: String,
+    raw_stdout_valid_utf8: bool,
     raw_stdout_truncated: bool,
     diagnostic: GitCommandFailure,
 }
@@ -26,6 +27,10 @@ pub(crate) struct GitCommandOutput {
 impl GitCommandOutput {
     pub(crate) fn stdout(&self) -> &str {
         &self.raw_stdout
+    }
+
+    pub(crate) const fn stdout_valid_utf8(&self) -> bool {
+        self.raw_stdout_valid_utf8
     }
 
     pub(crate) const fn stdout_truncated(&self) -> bool {
@@ -43,11 +48,13 @@ impl GitCommandOutput {
     pub(crate) fn require_success(self) -> Result<Self, GitCommandFailure> {
         let Self {
             raw_stdout,
+            raw_stdout_valid_utf8,
             raw_stdout_truncated,
             diagnostic,
         } = self;
         Ok(Self {
             raw_stdout,
+            raw_stdout_valid_utf8,
             raw_stdout_truncated,
             diagnostic: diagnostic.require_success()?,
         })
@@ -108,6 +115,24 @@ pub(crate) async fn capture_sensitive(
     .await
 }
 
+pub(crate) async fn capture_sensitive_until_stopped(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Result<GitCommandOutput, GitCommandFailure> {
+    capture_exchange(
+        command,
+        deadline,
+        private_secrets,
+        CaptureOptions {
+            stopping,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
 /// Sends bounded private request bytes concurrently with output and confirmed process cleanup.
 pub(crate) async fn capture_sensitive_with_input(
     command: &mut Command,
@@ -150,6 +175,7 @@ pub(crate) async fn capture_sensitive_with_stdout_limit(
 struct CaptureOptions<'a> {
     input: Option<&'a [u8]>,
     stdout_limit: Option<usize>,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 async fn capture_exchange(
@@ -162,6 +188,14 @@ async fn capture_exchange(
     let mut secrets = command_secrets(command);
     secrets.extend_from_slice(private_secrets);
     let mut diagnostic = command_diagnostic(command, &secrets);
+    if options
+        .stopping
+        .as_ref()
+        .is_some_and(|request| *request.borrow())
+    {
+        diagnostic.context = "command stopped before start".into();
+        return Err(diagnostic);
+    }
     configure_capture(command, input.is_some());
     let (mut child, process_group) = spawn_contained(command).map_err(|error| {
         diagnostic.context = format!("could not start contained command: {error}").into_boxed_str();
@@ -176,7 +210,7 @@ async fn capture_exchange(
     let stdout_retain = options
         .stdout_limit
         .unwrap_or_else(|| input.map_or(retain, |_| 8 * 1024 * 1024));
-    let result = tokio::time::timeout(deadline, async {
+    let completion = tokio::time::timeout(deadline, async {
         let completion = wait_and_cleanup(&mut child, &process_group, &mut diagnostic);
         let (status, (), (), sent) = tokio::join!(
             completion,
@@ -186,8 +220,13 @@ async fn capture_exchange(
         );
         sent?;
         status
-    })
-    .await;
+    });
+    let result = tokio::select! {
+        result = completion => result,
+        () = crate::execution::process::wait_for_stop_request(options.stopping) => {
+            Ok(Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "command stopped")))
+        },
+    };
     diagnostic.exit_status = result
         .as_ref()
         .ok()
@@ -198,6 +237,7 @@ async fn capture_exchange(
         captured_stdout.truncated = true;
         captured_stderr.truncated = true;
     }
+    let raw_stdout_valid_utf8 = std::str::from_utf8(&captured_stdout.bytes).is_ok();
     let raw_stdout = String::from_utf8_lossy(&captured_stdout.bytes).into_owned();
     let raw_stdout_truncated = captured_stdout.truncated;
     (diagnostic.stdout, diagnostic.stdout_truncated) = sanitize(captured_stdout, &secrets);
@@ -206,12 +246,14 @@ async fn capture_exchange(
     match result {
         Ok(Ok(_)) => Ok(GitCommandOutput {
             raw_stdout,
+            raw_stdout_valid_utf8,
             raw_stdout_truncated,
             diagnostic,
         }),
         other => {
             let cleanup = terminate_process_tree(&process_group.tree, &mut child).await;
-            diagnostic.cleanup_unconfirmed |= !cleanup.cleanup.proves_tree_empty();
+            diagnostic.cleanup_unconfirmed |=
+                !cleanup.cleanup.proves_tree_empty() || cleanup.error.is_some();
             diagnostic.context = match other {
                 Err(_) => format!("command timed out after {} seconds", deadline.as_secs()),
                 Ok(Err(error)) => format!("command status unavailable: {error}"),

@@ -2,6 +2,105 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+async fn follow_during_outage<S: DetachSignal>(
+    command: &str,
+    backend: &FakeBackend,
+    signal: &mut S,
+) -> Result<CliOutcome, NativeV2CliError> {
+    let mut argv = vec![command, "run-public", "--target", "prod"];
+    if command == "attach" {
+        argv.push("exec-9");
+    }
+    execute_native_v2_cli(
+        parse_native_v2_args(args(&argv)).assert_value(),
+        backend,
+        signal,
+        &mut Vec::new(),
+    )
+    .await
+}
+
+#[tokio::test(start_paused = true)]
+async fn target_follows_give_up_after_ten_minutes_without_stopping_the_run() {
+    use std::time::Duration;
+    use tokio::time::Instant;
+
+    // Foreground run shares watch's follow loop; the shipped-CLI test covers its submission.
+    // Its preparation includes real verification work and must not run under an auto-advancing clock.
+    for command in ["watch", "logs", "attach"] {
+        for pending in [false, true] {
+            let backend = FakeBackend::with_observation_outage(pending);
+            let start = Instant::now();
+            let error = follow_during_outage(command, &backend, &mut NeverDetach)
+                .await
+                .assert_error();
+            assert_eq!(start.elapsed(), Duration::from_secs(600));
+            assert!(
+                matches!(error, NativeV2CliError::FollowConnectionLost { .. }),
+                "{command}, pending={pending}: {error}"
+            );
+            let message = error.to_string();
+            assert!(
+                message.contains("zeroshot watch run-public --target prod"),
+                "{message}"
+            );
+            assert!(
+                message.contains(if pending {
+                    "transport disconnected"
+                } else {
+                    "connection refused"
+                }),
+                "{message}"
+            );
+            assert!(
+                !backend
+                    .calls()
+                    .iter()
+                    .any(|call| matches!(call, Call::Force { .. }))
+            );
+            let attempts = backend.calls().len();
+            assert!(
+                attempts < 130,
+                "backoff must cap the retry rate: {attempts}"
+            );
+        }
+    }
+}
+
+struct TimedDetach(std::time::Duration);
+
+#[async_trait::async_trait]
+impl DetachSignal for TimedDetach {
+    async fn wait(&mut self) {
+        tokio::time::sleep(self.0).await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn target_follows_detach_during_backoff_and_pending_reconnects() {
+    use std::time::Duration;
+    use tokio::time::Instant;
+
+    for command in ["watch", "logs", "attach"] {
+        for pending in [false, true] {
+            let backend = FakeBackend::with_observation_outage(pending);
+            let delay = Duration::from_secs(8);
+            let start = Instant::now();
+            let outcome = follow_during_outage(command, &backend, &mut TimedDetach(delay))
+                .await
+                .assert_value();
+            assert_eq!(outcome, CliOutcome::Detached);
+            assert_eq!(start.elapsed(), delay);
+            assert!(
+                !backend
+                    .calls()
+                    .iter()
+                    .any(|call| matches!(call, Call::Force { .. }))
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn foreground_watch_reports_queued_before_oecp_admission() {
     let backend = FakeBackend::with_queued_lifecycle();

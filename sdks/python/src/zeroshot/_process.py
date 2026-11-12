@@ -153,7 +153,12 @@ class NativeProcess:
         try:
             value = json.loads(raw)
         except json.JSONDecodeError:
-            value = None
+            # Follow commands may print a reconnect notice before their terminal diagnostic.
+            # Only the last line is authoritative; never select an earlier error over it.
+            try:
+                value = json.loads(raw.rsplit("\n", 1)[-1])
+            except json.JSONDecodeError:
+                value = None
         if isinstance(value, dict) and value.get("schema") == _ERROR_SCHEMA:
             if value.get("kind") == "run_failed":
                 # Keep the private run identity intact for the watcher's equality check.

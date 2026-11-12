@@ -492,6 +492,43 @@ async fn failed_backup_does_not_publish_and_the_prior_checkpoint_stays_restorabl
     assert_eq!(fixture.source(), "initial");
 }
 
+/// Hosted preparation drops a pending restore on force-stop or at its timeout and then cleans up
+/// the workspace. Replacement must therefore never run beside a restore that is still pending.
+#[tokio::test]
+async fn restore_without_a_stop_request_replaces_the_workspace_within_one_poll() {
+    use std::future::Future;
+    use std::task::Poll;
+
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    fs::write(fixture.workspace.join("source"), "live edits").assert_value();
+    let selection = CheckpointRestore {
+        directory: fixture.directory.clone(),
+        selection: CheckpointRestoreSelection::Checkpoint {
+            checkpoint_id: point.checkpoint_id.clone(),
+        },
+    };
+    let mut restoring = std::pin::pin!(restore(&selection, &fixture.workspace));
+
+    loop {
+        let polled =
+            std::future::poll_fn(|context| Poll::Ready(restoring.as_mut().poll(context))).await;
+        if let Poll::Ready(result) = polled {
+            result.assert_value();
+            break;
+        }
+        // A replacement that had moved off this future would finish during this pause.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(
+            fixture.source(),
+            "live edits",
+            "the workspace changed while its restore was still pending"
+        );
+    }
+
+    assert_eq!(fixture.source(), "initial");
+}
+
 #[tokio::test]
 async fn failed_restore_does_not_touch_the_live_workspace_and_can_be_retried() {
     let fixture = Fixture::new();
@@ -895,4 +932,35 @@ async fn delivery_only_retention_does_not_capture_workspace_and_keeps_generation
     );
     assert!(!fixture.store.directory.join("latest.json").exists());
     assert!(!fixture.store.directory.join("index.json").exists());
+}
+
+#[tokio::test]
+async fn stopped_snapshot_operations_preserve_acknowledged_delivery_generation() {
+    for final_snapshot in [false, true] {
+        let fixture = Fixture::new();
+        let (_stop, stopping) = tokio::sync::watch::channel(true);
+        let store = fixture.store.with_stop_request(Some(stopping));
+        let mut history = crate::native_v2_runner::test_support::delivery_history(
+            json!({"owned":"verified conversation revision"}),
+        );
+        history[0].delivery_state.as_mut().assert_value().generation =
+            openengine_cluster_protocol::PositiveInteger::new(2).assert_value();
+        let result = if final_snapshot {
+            store.finish(&history).await
+        } else {
+            store.enter(&boundary("writer"), &history).await
+        };
+        assert!(result.unwrap_err().was_stopped());
+        assert_eq!(
+            store.delivery_state().await.assert_value(),
+            history[0].delivery_state
+        );
+        let recovered = DeliveryCheckpointStore::new(store.repository.clone());
+        assert_eq!(
+            recovered.delivery_state().await.assert_value(),
+            history[0].delivery_state
+        );
+        assert!(!fixture.directory.join("latest.json").exists());
+        assert!(!fixture.directory.join("index.json").exists());
+    }
 }

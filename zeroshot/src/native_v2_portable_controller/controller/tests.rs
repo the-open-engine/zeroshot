@@ -9,6 +9,32 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use openengine_cluster_server::{ClusterBackend, ConnectionContext};
 
 use super::*;
+
+#[tokio::test]
+async fn shutdown_before_runtime_composition_never_dispatches_or_admits_a_run() {
+    let root = tempfile::tempdir().assert_value();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let storage = root.path().join("state");
+    let (_request, stopping) = watch::channel(true);
+    let result = PortableRunController::start_with_shutdown(
+        crate::native_v2_portable_controller::tests::bootstrap(
+            RunId::new("stopped-startup"),
+            crate::native_v2_portable_controller::tests::submission("stopped-startup"),
+            workspace,
+            storage.clone(),
+        ),
+        |_| -> Result<PortableRuntime, std::io::Error> {
+            panic!("a stopped startup must not compose a runtime")
+        },
+        Some(stopping),
+    )
+    .await;
+    assert!(matches!(result, Err(PortableControllerError::Shutdown)));
+    let ledger = SqliteRunLedger::open_read_only(PortableControllerPaths::new(storage).ledger())
+        .assert_value();
+    assert!(ledger.list().await.assert_value().is_empty());
+}
 use crate::v2_run_ledger::{CreateRun, RunLedger, fake::FakeRunLedger};
 
 async fn insert_fake_run(ledger: &FakeRunLedger, run: &str, key: &str, digest: char) {
@@ -649,5 +675,98 @@ async fn workspace_checkpoint_store_follows_runtime_policy() {
                 1
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn shutdown_retains_delivery_receipts_for_both_snapshot_policies_until_explicit_discard() {
+    use crate::native_v2_portable_controller::tests::{bootstrap, submission, NeverDispatched};
+
+    for enabled in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).assert_value();
+        let mut submitted = submission("shutdown-delivery-receipts");
+        submitted.runtime.workspace_checkpoints = enabled;
+        let bootstrap = bootstrap(
+            RunId::new("shutdown-delivery-receipts"),
+            submitted,
+            workspace.clone(),
+            root.path().join("state"),
+        );
+        let mut prepared = prepare_controller_start(&bootstrap).await.assert_value();
+        let (stop, stopping) = watch::channel(false);
+        prepared.stopping = Some(stopping);
+        let runtime = configure_workspace_checkpoints(
+            &prepared,
+            &bootstrap,
+            PortableRuntime::new(Arc::new(NeverDispatched)),
+        )
+        .assert_value();
+        let receipt = crate::native_v2_runner::test_support::delivery_checkpoint(
+            serde_json::json!({"owned":"verified conversation revision"}),
+            2,
+        );
+        runtime
+            .checkpoints
+            .as_ref()
+            .assert_value()
+            .retain_delivery_state(&receipt)
+            .await
+            .assert_value();
+        let staging = prepared.paths.storage().join("checkpoints/staging");
+        std::fs::create_dir_all(&staging).assert_value();
+        std::fs::write(staging.join("interrupted"), "disposable scratch").assert_value();
+        stop.send_replace(true);
+        runtime
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
+            .await
+            .assert_value();
+        assert!(!staging.exists());
+        assert!(
+            bootstrap
+                .checkpoint_repository
+                .join("delivery-state.json")
+                .exists()
+        );
+        assert_eq!(
+            runtime
+                .checkpoints
+                .as_ref()
+                .assert_value()
+                .delivery_state()
+                .await
+                .assert_value(),
+            Some(receipt.clone())
+        );
+        assert!(workspace.exists());
+
+        // A later explicit force-stop still discards the recovered lineage for either policy.
+        prepared.stopping = None;
+        let recovered = configure_workspace_checkpoints(
+            &prepared,
+            &bootstrap,
+            PortableRuntime::new(Arc::new(NeverDispatched)),
+        )
+        .assert_value();
+        assert_eq!(
+            recovered
+                .checkpoints
+                .as_ref()
+                .assert_value()
+                .delivery_state()
+                .await
+                .assert_value(),
+            Some(receipt)
+        );
+        recovered
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
+            .await
+            .assert_value();
+        assert!(!bootstrap.checkpoint_repository.exists());
+        assert!(!prepared.paths.storage().join("checkpoints").exists());
+        assert!(workspace.exists());
     }
 }

@@ -12,6 +12,9 @@ use crate::native_v2_capsule::provider_process::copy_workspace_entry;
 
 #[path = "filesystem/git.rs"]
 mod git;
+#[path = "filesystem/operation.rs"]
+mod operation;
+pub(crate) use operation::SnapshotOperation;
 #[cfg(test)]
 #[path = "filesystem/tests.rs"]
 mod tests;
@@ -67,28 +70,38 @@ pub fn capture<T: Serialize>(
     snapshots_root: &Path,
     metadata: &T,
 ) -> io::Result<SnapshotId> {
+    capture_with(
+        workspace,
+        snapshots_root,
+        metadata,
+        &SnapshotOperation::uncancelled(),
+    )
+}
+
+pub(crate) fn capture_with<T: Serialize>(
+    workspace: &Path,
+    snapshots_root: &Path,
+    metadata: &T,
+    operation: &SnapshotOperation,
+) -> io::Result<SnapshotId> {
+    operation.check()?;
     let workspace = existing_directory(workspace)?;
     let snapshots_root = prepare_snapshots_root(&workspace, snapshots_root)?;
     let stage = private_stage(&snapshots_root, ".capture-")?;
     let tree = stage.path().join("workspace");
-    copy_workspace_entry(&workspace, &tree)?;
-    publish_capture(&workspace, stage.path(), &snapshots_root, metadata)
-}
-
-fn publish_capture<T: Serialize>(
-    workspace: &Path,
-    stage: &Path,
-    snapshots_root: &Path,
-    metadata: &T,
-) -> io::Result<SnapshotId> {
-    let tree = stage.join("workspace");
+    operation.copy(&workspace, &tree)?;
     let manifest = SnapshotMetadata {
         format: FORMAT,
-        git: git::capture(workspace, &tree)?,
+        git: git::capture(&workspace, &tree, operation)?,
         user_metadata: metadata,
     };
-    write_metadata(stage, &manifest)?;
-    sync_tree(&tree)?;
+    write_metadata(stage.path(), &manifest)?;
+    sync_tree(&tree, operation)?;
+    operation.check()?;
+    publish_capture(stage.path(), &snapshots_root)
+}
+
+fn publish_capture(stage: &Path, snapshots_root: &Path) -> io::Result<SnapshotId> {
     sync_directory(stage)?;
     let id = SnapshotId::new();
     fs::rename(stage, snapshots_root.join(id.as_str()))?;
@@ -112,8 +125,11 @@ pub fn restore(snapshots_root: &Path, id: &SnapshotId, workspace: &Path) -> io::
     let workspace = restore_destination(workspace)?;
     ensure_disjoint(&workspace, &fs::canonicalize(snapshots_root)?)?;
     let snapshot_git = snapshot.join("workspace/.git");
-    let target_git =
-        git::restore_target(&workspace, manifest.git.then_some(snapshot_git.as_path()))?;
+    let target_git = git::restore_target(
+        &workspace,
+        manifest.git.then_some(snapshot_git.as_path()),
+        &SnapshotOperation::uncancelled(),
+    )?;
     let parent = workspace
         .parent()
         .ok_or_else(|| invalid("workspace has no parent"))?;
@@ -128,6 +144,15 @@ pub fn restore(snapshots_root: &Path, id: &SnapshotId, workspace: &Path) -> io::
 /// This consumes entries from `snapshot/workspace`. The caller must retain another durable copy
 /// when restoration needs to be retryable after interruption.
 pub fn restore_staged(snapshot: &Path, workspace: &Path) -> io::Result<()> {
+    restore_staged_with(snapshot, workspace, &SnapshotOperation::uncancelled())
+}
+
+pub(crate) fn restore_staged_with(
+    snapshot: &Path,
+    workspace: &Path,
+    operation: &SnapshotOperation,
+) -> io::Result<()> {
+    operation.check()?;
     let snapshot = existing_directory(snapshot)?;
     platform::private_directory(&snapshot)?;
     let tree = existing_directory(&snapshot.join("workspace"))?;
@@ -135,8 +160,12 @@ pub fn restore_staged(snapshot: &Path, workspace: &Path) -> io::Result<()> {
     let workspace = restore_destination(workspace)?;
     ensure_disjoint(&workspace, &snapshot)?;
     let snapshot_git = tree.join(".git");
-    let target_git =
-        git::restore_target(&workspace, manifest.git.then_some(snapshot_git.as_path()))?;
+    let target_git = git::restore_target(
+        &workspace,
+        manifest.git.then_some(snapshot_git.as_path()),
+        operation,
+    )?;
+    operation.check()?;
     apply_restore(&tree, &workspace, target_git)
 }
 
@@ -367,14 +396,15 @@ fn parse_metadata<T: DeserializeOwned>(file: fs::File) -> io::Result<SnapshotMet
     Ok(metadata)
 }
 
-fn sync_tree(path: &Path) -> io::Result<()> {
+fn sync_tree(path: &Path, operation: &SnapshotOperation) -> io::Result<()> {
+    operation.check()?;
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Ok(());
     }
     if metadata.is_dir() {
         for entry in fs::read_dir(path)? {
-            sync_tree(&entry?.path())?;
+            sync_tree(&entry?.path(), operation)?;
         }
         sync_directory(path)
     } else {

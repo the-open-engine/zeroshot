@@ -17,7 +17,8 @@ use super::FileAccess;
 mod controller;
 pub(crate) mod security;
 pub(crate) use controller::{
-    ControllerChild, guard_controller_console, spawn_controller, stop_controller,
+    ControllerChild, controller_termination, guard_controller_console, spawn_controller,
+    stop_controller,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

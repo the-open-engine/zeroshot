@@ -1,5 +1,4 @@
 use std::io::Write;
-use std::time::Duration;
 
 use openengine_cluster_protocol::{RunAttachParams, SubscriptionCloseReason};
 
@@ -8,7 +7,7 @@ use super::super::{
     NativeV2CliError,
 };
 
-use super::{SubscriptionStep, next_or_detach, retry_disconnected, write_json};
+use super::{Reconnect, SubscriptionStep, next_or_detach, write_json};
 
 pub(super) struct RoutedAttach<'a> {
     pub(super) target: Option<&'a str>,
@@ -30,21 +29,28 @@ where
     let detach = signal.wait();
     tokio::pin!(detach);
     let mut opened = false;
+    let mut reconnect = Reconnect::new(target, &params.run_id);
     loop {
         let mut subscription = tokio::select! {
             biased;
             () = &mut detach => return Ok(CliOutcome::Detached),
+            error = reconnect.expired() => return Err(error),
             result = backend.run_attach(target, params.clone()) => match result {
-                Ok(subscription) => subscription,
+                Ok(subscription) => {
+                    reconnect.connected();
+                    subscription
+                },
                 Err(error) if !opened => return Err(error),
                 Err(error) => {
-                    retry_disconnected(error).await?;
+                    if reconnect.wait(error, detach.as_mut()).await? {
+                        return Ok(CliOutcome::Detached);
+                    }
                     continue;
                 }
             },
         };
         opened = true;
-        loop {
+        let error = loop {
             let step = next_or_detach(subscription.next(), detach.as_mut()).await?;
             match step {
                 SubscriptionStep::Detached => return Ok(CliOutcome::Detached),
@@ -57,8 +63,8 @@ where
                 SubscriptionStep::Item(Some(CliSubscriptionItem::Closed {
                     reason: SubscriptionCloseReason::SlowConsumer,
                 }))
-                | SubscriptionStep::Item(None)
-                | SubscriptionStep::Reconnect => break,
+                | SubscriptionStep::Item(None) => break NativeV2CliError::Disconnected,
+                SubscriptionStep::Reconnect(error) => break error,
                 SubscriptionStep::Item(Some(CliSubscriptionItem::Closed {
                     reason: SubscriptionCloseReason::SourceUnavailable,
                 })) => {
@@ -67,11 +73,9 @@ where
                     ));
                 }
             }
-        }
-        tokio::select! {
-            biased;
-            () = &mut detach => return Ok(CliOutcome::Detached),
-            () = tokio::time::sleep(Duration::from_millis(100)) => {}
+        };
+        if reconnect.wait(error, detach.as_mut()).await? {
+            return Ok(CliOutcome::Detached);
         }
     }
 }
