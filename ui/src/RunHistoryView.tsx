@@ -169,20 +169,16 @@ export function RunHistoryView({
     window.document.title = `${run?.title ?? 'Runs'} · Zeroshot`;
   }, [run?.title]);
 
-  useEffect(() => {
-    if (!playing) return;
-    const next = nextReplayPosition(safePosition, moments.length, replayScope);
-    if (next === undefined) {
-      setPlaying(false);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setCursorIndex(moments[next].index);
-      if (nextReplayPosition(next, moments.length, replayScope) === undefined) setPlaying(false);
-    }, 950);
-    return () => clearTimeout(timer);
-    // Each step owns its checkpoint until the timer fires; incoming live logs cannot postpone it.
-  }, [playing, cursorIndex, playbackNode]);
+  useReplayTimer({
+    playing,
+    setPlaying,
+    position: safePosition,
+    moments,
+    scope: replayScope,
+    cursorIndex,
+    playbackNode,
+    setCursorIndex,
+  });
   function scrub(next: number) {
     failureView.replay();
     setPlaying(false);
@@ -448,6 +444,34 @@ function currentHistoryState(
   if (preparing) return 'Preparing environment';
   if (atStart) return 'Before run';
   return run.phase === 'finished' ? 'Recorded history' : 'In progress';
+}
+
+/** Steps a playing replay one moment at a time and stops at the end of its scope. */
+function useReplayTimer(replay: {
+  playing: boolean;
+  setPlaying: (playing: boolean) => void;
+  position: number;
+  moments: ReturnType<typeof historyMoments>;
+  scope: ReturnType<typeof nodeReplayPositions> | undefined;
+  cursorIndex: number;
+  playbackNode: string | undefined;
+  setCursorIndex: (index: number) => void;
+}) {
+  const { playing, setPlaying, position, moments, scope, cursorIndex, playbackNode } = replay;
+  useEffect(() => {
+    if (!playing) return;
+    const next = nextReplayPosition(position, moments.length, scope);
+    if (next === undefined) {
+      setPlaying(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      replay.setCursorIndex(moments[next].index);
+      if (nextReplayPosition(next, moments.length, scope) === undefined) setPlaying(false);
+    }, 950);
+    return () => clearTimeout(timer);
+    // Each step owns its checkpoint until the timer fires; incoming live logs cannot postpone it.
+  }, [playing, cursorIndex, playbackNode]);
 }
 
 function RunHistoryHeader({

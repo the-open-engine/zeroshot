@@ -369,7 +369,7 @@ function CanvasToolbar({
   collapseAll,
   arrange,
 }: {
-  p: Parameters<typeof WorkflowCanvas>[0];
+  p: WorkflowCanvasProps;
   readOnly: boolean;
   selectedNode: GraphNode | undefined;
   collapseAll: () => void;
@@ -505,7 +505,7 @@ function workflowEdges(
   activities: Node[],
   dims: Record<string, { width: number; height: number }>,
   readOnly: boolean,
-  p: Parameters<typeof WorkflowCanvas>[0]
+  p: WorkflowCanvasProps
 ): Edge[] {
   const edges: Edge[] = projection.edges.map((edge, index) => ({
     ...edge,
@@ -534,7 +534,7 @@ function workflowEdges(
   return edges;
 }
 
-export function WorkflowCanvas(p: {
+type WorkflowCanvasProps = {
   document: Document;
   selected: string;
   positions: Positions;
@@ -555,7 +555,9 @@ export function WorkflowCanvas(p: {
   showInspector: () => void;
   /** Controls a host places beside the settings button when it has no header of its own. */
   toolbarStart?: ReactNode;
-}) {
+};
+
+export function WorkflowCanvas(p: WorkflowCanvasProps) {
   const { fitView, setCenter, setViewport } = useReactFlow();
   const fitGraph = () => void fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 });
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -857,7 +859,7 @@ function fitRenderedLayout(
   );
 }
 
-function useCanvasView(p: Parameters<typeof WorkflowCanvas>[0], readOnly: boolean) {
+function useCanvasView(p: WorkflowCanvasProps, readOnly: boolean) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() =>
     p.view
       ? new Set(p.view.collapsed)
