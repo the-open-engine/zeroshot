@@ -196,11 +196,10 @@ zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-chang
 ```
 
 Restoring a local checkpoint rolls back your checkout, so it requires `--discard-workspace-changes`.
-The checkpoint replaces tracked, staged, untracked, and ignored files and the checkout's own Git
-state, such as HEAD and the index. Without the flag the resume fails before it changes anything and
-shows the command to opt in. Branches, tags, commits, Git configuration, and other worktrees are
-kept, so later commits stay reachable from their branch while HEAD is detached at the checkpoint's
-commit.
+The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Without the
+flag the resume fails before it changes anything and shows the command to opt in. HEAD stays
+attached to its branch at the current tip while files and the index return to the checkpoint.
+Branches, tags, commits, Git configuration, and other worktrees are kept.
 
 For a named target, add `--target NAME` to both commands and omit `--discard-workspace-changes`:
 the target restores its own retained copy, never your checkout. Checkpoint listings are paginated;

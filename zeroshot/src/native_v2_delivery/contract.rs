@@ -87,7 +87,8 @@ fn receipt_matches_target(
         && result.repository == target.repository
         && result.target_branch == target.target_branch
         && valid_revision(&result.head_revision)
-        && result.head_revision != target.base_revision
+        // Admission captures the starting commit, not the remote branch tip. Publishing
+        // committed, unpushed work can confirm that exact commit without creating another.
         && receipt_mode_matches(result, mode)
 }
 
@@ -103,6 +104,93 @@ fn valid_result_links(result: &DeliveryResultWire) -> bool {
         }
         _ => false,
     }
+}
+
+/// Private identity-only evidence using the existing non-success result shape.
+pub(crate) fn review_binding_receipt(
+    mode: DeliveryMode,
+    review: &super::SourceReviewReceipt,
+) -> Value {
+    super::delivery_result(&super::DeliveryResult {
+        mode,
+        outcome: DELIVERY_REPAIR_REQUIRED_LABEL,
+        review,
+        merge_revision: None,
+        links: None,
+    })
+}
+
+/// Private lifecycle evidence. Binding an observed review does not prove first publication.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewRecoveryWire {
+    receipt: Value,
+    published: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RecoveredReview {
+    pub(crate) review: super::SourceReviewReceipt,
+    pub(crate) published: bool,
+}
+
+pub(crate) fn review_recovery(
+    mode: DeliveryMode,
+    review: &super::SourceReviewReceipt,
+    published: bool,
+) -> Value {
+    serde_json::json!({"receipt": review_binding_receipt(mode, review), "published": published})
+}
+
+pub(crate) fn review_from_recovery(
+    value: &Value,
+    mode: DeliveryMode,
+    target: &DeliveryTarget,
+    branch: &str,
+) -> Option<RecoveredReview> {
+    if value.get("receipt").is_some() || value.get("published").is_some() {
+        let saved: ReviewRecoveryWire = serde_json::from_value(value.clone()).ok()?;
+        Some(RecoveredReview {
+            review: review_from_receipt(&saved.receipt, mode, target, branch)?,
+            published: saved.published,
+        })
+    } else {
+        // Older metadata and settled ledger outcomes were recorded after publication.
+        Some(RecoveredReview {
+            review: review_from_receipt(value, mode, target, branch)?,
+            published: true,
+        })
+    }
+}
+
+/// Recovers review identity, not delivery confirmation, from an owned delivery execution.
+pub(crate) fn review_from_receipt(
+    output: &Value,
+    mode: DeliveryMode,
+    target: &DeliveryTarget,
+    branch: &str,
+) -> Option<super::SourceReviewReceipt> {
+    let result: DeliveryResultWire = serde_json::from_value(output.clone()).ok()?;
+    if !mode.creates_review()
+        || result.version != mode.result_version()
+        || result.mode != mode.label()
+        || !super::valid_mode_outcome(mode, &result.outcome)
+        || result.repository != target.repository
+        || result.target_branch != target.target_branch
+        || !valid_result_links(&result)
+        || !valid_revision(&result.head_revision)
+        || !valid_branch(branch)
+    {
+        return None;
+    }
+    let review_id = result.pull_request_id.filter(|id| valid_review_id(id))?;
+    Some(super::SourceReviewReceipt {
+        review_id,
+        repository: result.repository,
+        target_branch: result.target_branch,
+        head_branch: branch.to_owned(),
+        head_revision: result.head_revision,
+    })
 }
 
 fn receipt_mode_matches(result: &DeliveryResultWire, mode: DeliveryMode) -> bool {

@@ -108,7 +108,7 @@ impl NativeV2DeliveryAdapter {
                 .await
             {
                 Ok(()) => {
-                    self.record_published(updated.clone());
+                    self.record_published(updated.clone())?;
                     return Ok(());
                 }
                 Err(error) => self
@@ -175,6 +175,7 @@ impl NativeV2DeliveryAdapter {
         loop {
             ensure_active(drive.control)?;
             let request = SourceDeliveryRead {
+                include_terminal_reviews: true,
                 target: &self.config.target,
                 head_branch: &drive.review.head_branch,
                 known_review: Some(&drive.review),
@@ -213,6 +214,7 @@ impl NativeV2DeliveryAdapter {
         loop {
             ensure_active(drive.control)?;
             let request = SourceHeadReconciliation {
+                require_fast_forward: self.config.local_branch.is_some(),
                 workspace: &self.config.workspace,
                 published: &drive.review,
                 observed,
@@ -327,7 +329,7 @@ impl NativeV2DeliveryAdapter {
         failure.diagnostic = self.redact_feedback(drive.credentials, &failure.diagnostic);
         match outcome {
             SourceReconciliationOutcome::NeedsWork(diagnostic) => {
-                self.record_published(observed.clone());
+                self.record_published(observed.clone())?;
                 Err(
                     recovery::repair(format!("{}\n{diagnostic}", failure.diagnostic))
                         .with_review(&observed),

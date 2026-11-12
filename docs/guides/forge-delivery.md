@@ -27,6 +27,45 @@ so changes you make after a failure can be delivered with the run's own work. Ru
 delivery keep their normal behavior. Delivery shows Git's warning when a run adds an unregistered
 embedded repository, but permits the gitlink; register it as a submodule when others need to clone it.
 
+**Breaking change:** in-place delivery commits on the branch you checked out and pushes the
+remote branch with that same name, including earlier unpushed commits. It creates no
+`zeroshot/v2-…` branch. `--pr` and `--ship` open the PR/MR from that branch into a different
+upstream branch when configured, otherwise the remote's default branch. Starting on the target
+itself is refused before agents start: use a feature branch or `--worktree`. Explicit `--push`
+may publish `main`. Delivery never force-pushes; non-fast-forward and forge policy refusals name
+the branch and stop without an agent repair round.
+
+Delivery can publish existing committed work without creating another commit and confirm that same
+published commit again on resume. Before a fresh
+PR/MR publication, it reconciles the target and sends an updated candidate through review,
+including when the feature branch already exists on the remote.
+Runs without a bound review reuse an unambiguous active review or open a new one, including
+resumes before any delivery was recorded. Closed and merged reviews on a reused feature branch
+belong to earlier runs. Bound review IDs retain terminal-review safeguards.
+Resume recovers the current review's identity from the run lineage's
+recorded delivery, including a confirmed review whose target reconciliation required repair,
+timed out or was cancelled,
+so older reviews on that branch do not make recovery ambiguous. A committed
+candidate can still incorporate a diverged target without requiring another edit first; the integrated
+result returns through review before publication.
+
+For isolation, add `--worktree`. zeroshot creates a managed run branch in a retained worktree
+and commits and pushes that matching branch. Its PR/MR targets the invoking branch's upstream,
+or its own name without an upstream. The default base is your exact local HEAD, including
+unpushed commits. To start from the upstream instead, use `--worktree --worktree-base remote`;
+configure an upstream first, or explicitly choose `--worktree-base local`.
+
+The invoking checkout's files, index, HEAD and branch tips stay unchanged. The new worktree
+contains committed files only: dependencies, `.env` and other untracked resources are not copied,
+linked or installed. Resume reuses the same workspace and attached run branch, while preserving
+shared branch tips. If another checkout owns the saved branch, release it there before resuming.
+Older local Git-delivery records without the working branch cannot resume safely. Preserve the
+retained workspace, return to the intended attached branch, and start a new run from a feature
+branch or with `--worktree`; zeroshot refuses recovery before restoring files or starting agents.
+Worktrees remain after success and failure; inspect and remove them explicitly
+with `git worktree remove PATH`. Use `git worktree list` from the invoking repository to find its
+path. Hosted and named-target delivery keep their managed run branches.
+
 GitHub delivery requires `gh`. GitLab needs `glab` only to reuse its native login. Sign in to the host you use:
 
 ```console
@@ -189,7 +228,9 @@ characters; shortened titles retain the complete original once in the generated 
 The same title normalization runs before generated delivery commits, including repair commits pushed
 to an existing MR, so GitLab's push processing cannot mark it draft from zeroshot's commit message.
 Creation, refresh, and confirmation use the same canonical metadata, including for custom graphs.
-Refresh replaces only the generated markers' contents and preserves surrounding human text. A draft
+An existing MR without generated markers keeps its description and gains an appended generated section.
+Refresh replaces only the generated markers' contents and preserves surrounding human text; incomplete,
+duplicated or reversed markers are refused. A draft
 deliberately applied after creation keeps its existing title and draft status during refresh.
 
 GitLab `--pr` readiness, human-review handoff and `--ship` merging use the same required-CI policy.
@@ -213,11 +254,35 @@ Resuming accepts intentional commits pushed to the run branch. If the complete r
 already matches its published tree and no merge is pending, delivery reuses that commit without another
 work round. Pending merges retain their normal reconciliation path. Different
 local content is preserved and returns to the review loop. Discovery checks every review from the run
-branch before validating its target; retargeted or ambiguous reviews are refused rather than duplicated.
+branch across bounded complete pages before validating its target; retargeted or ambiguous reviews
+are refused rather than duplicated.
 GitLab briefly rechecks a lagging merge-request head against the branch ref. Persistent disagreement
 stops with both revisions in the diagnostic instead of polling indefinitely.
 
-If a worker rewrites local history after publication, delivery refuses further publication; list
-checkpoints with `zeroshot checkpoints RUN_ID`, then run
-`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` using a checkpoint taken before the rewrite
-to continue with the existing published branch and review.
+If a worker rewrites history after publication, delivery refuses further publication. For a local
+run, restoring a checkpoint replaces files and the index but keeps the attached branch at its
+current tip. A checkpoint alone therefore cannot recover the published ancestry.
+
+To continue the same local run and review without rewinding the branch, first preserve any work
+you need by committing it on the run branch or saving it outside the checkout. Fetch the published
+branch from its delivery remote, merge its head into the run's attached branch, and resolve and
+commit any conflicts. Run the Git commands in the retained run workspace, using its managed
+worktree for `--worktree` runs. Then select a checkpoint taken before the rewrite:
+
+```console
+git fetch REMOTE refs/heads/BRANCH
+git merge --no-edit FETCH_HEAD
+zeroshot checkpoints RUN_ID
+zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-changes
+```
+
+Use the actual delivery remote and branch for `REMOTE` and `BRANCH`. The merge preserves the
+rewritten local commits and adds the published ancestry. The checkpoint restores its candidate
+files and index while keeping that merged tip attached; it discards current tracked, staged,
+untracked, and ignored files. If you cannot merge the histories, keep the old workspace for
+inspection and start a new run on a new feature branch based on the fetched published head.
+Neither procedure requires a force-push.
+
+For a named target, use `zeroshot checkpoints RUN_ID --target NAME`, then
+`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --target NAME` with a checkpoint taken
+before the rewrite. The target restores its own retained checkout; omit `--discard-workspace-changes`.

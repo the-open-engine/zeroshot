@@ -37,9 +37,10 @@ const MAX_GIT_OUTPUT_BYTES: usize = 16 * 1024;
 mod source;
 use source::resolved_git_source;
 pub(crate) use source::validate_remote_base_branch;
+pub(crate) use source::verified_detached_branch;
 mod workspace;
-pub(crate) use workspace::validate_workspace_state;
-use workspace::resolve_workspace;
+pub(crate) use workspace::{validate_workspace_state, create_run_worktree, prepare_branch_source};
+pub(crate) use workspace::resolve_workspace;
 
 #[derive(Debug, Error)]
 pub enum LocalCompositionError {
@@ -51,8 +52,24 @@ pub enum LocalCompositionError {
         "workspace {workspace:?} overlaps state {state:?}; choose another folder or external ZEROSHOT_STATE_DIR"
     )]
     WorkspaceStateOverlap { workspace: PathBuf, state: PathBuf },
-    #[error("current Git workspace must have an attached branch")]
-    DetachedHead,
+    #[error(
+        "HEAD is detached; return to branch `{branch}` with `git switch {branch}` before starting Git delivery"
+    )]
+    DetachedHead { branch: String },
+    #[error(
+        "HEAD is detached; switch to the run's branch with `git switch BRANCH` before starting Git delivery; its branch could not be verified from retained recovery metadata or checkout history"
+    )]
+    DetachedHeadUnknown,
+    #[error(
+        "local review delivery cannot start on its target branch `{branch}`; start from a feature branch, or use --worktree"
+    )]
+    DeliveryOnTarget { branch: String },
+    #[error(
+        "--worktree-base remote requires an upstream; configure one with `git branch --set-upstream-to=REMOTE/BRANCH`, or choose --worktree-base local"
+    )]
+    MissingWorktreeUpstream,
+    #[error("could not prepare the retained Git worktree: {0}")]
+    Worktree(String),
     #[error("Git delivery needs a credential-free HTTPS or SSH remote")]
     RepositoryIdentity,
     #[error("multiple eligible Git remotes were found; configure a branch upstream")]
@@ -119,14 +136,20 @@ pub struct PreparedLocalRun {
     pub delivery_validator: Option<TrustedDeliveryValidator>,
     pub git_credentials: Option<GitTransportCredentials>,
     pub workspace: PathBuf,
+    pub local_branch: Option<String>,
+    pub invoking_workspace: Option<PathBuf>,
+    pub request_digest: Option<openengine_cluster_protocol::Sha256Digest>,
+    pub workspace_revision: Option<openengine_cluster_protocol::SourceRevisionId>,
     pub native_environment: BTreeMap<String, String>,
 }
 
 pub struct LocalProcessCandidateRequest<'a> {
+    pub delivery_receipt: Option<serde_json::Value>,
     pub admitted: &'a AdmittedRun,
     pub delivery_run_id: RunId,
     pub adopt_existing_delivery: bool,
     pub workspace: &'a Path,
+    pub local_branch: Option<String>,
     pub storage: &'a Path,
     pub memory_storage: Option<&'a Path>,
     pub github_token: Option<String>,
@@ -174,6 +197,16 @@ pub fn prepare_local_run(
     )?;
     let delivery_validator = take_delivery_validator(&mut native_environment, &workspace)?;
     Ok(PreparedLocalRun {
+        local_branch: if request.worktree.is_some()
+            || !crate::native_v2_admission::delivery_capabilities(&submission.graph.root).is_empty()
+        {
+            source::attached_branch(&workspace, git_program).ok()
+        } else {
+            None
+        },
+        invoking_workspace: None,
+        request_digest: None,
+        workspace_revision: None,
         delivery_run_id: request.run_id.clone(),
         run_id: request.run_id,
         submission,
@@ -380,7 +413,14 @@ fn build_local_candidate_config(
     active_memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 ) -> Result<NativeNodeRunner, LocalCompositionError> {
     validate_local_environment(request.admitted.environment.as_ref())?;
+    if let Some(branch) = &request.local_branch {
+        let git = find_local_executable("git", request.native_environment, request.workspace)
+            .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "git" })?;
+        workspace::attach_run_branch(request.workspace, &git, branch)?;
+    }
     let LocalProcessCandidateRequest {
+        delivery_receipt,
+        local_branch,
         admitted,
         delivery_run_id,
         adopt_existing_delivery,
@@ -393,7 +433,42 @@ fn build_local_candidate_config(
         git_credentials,
         native_environment,
     } = request;
+    let recovered_review = delivery_receipt
+        .as_ref()
+        .map(|output| {
+            let mode = crate::native_v2_admission::delivery_mode(&admitted.graph.root)
+                .ok_or(LocalCompositionError::ResolvedSource)?;
+            let target = crate::native_v2_delivery::source_target(
+                admitted
+                    .source
+                    .as_ref()
+                    .ok_or(LocalCompositionError::ResolvedSource)?,
+                mode,
+            )
+            .map_err(|_| LocalCompositionError::ResolvedSource)?;
+            crate::native_v2_delivery::contract::review_from_recovery(
+                output,
+                mode,
+                &target,
+                local_branch
+                    .as_deref()
+                    .ok_or(LocalCompositionError::ResolvedSource)?,
+            )
+            .ok_or(LocalCompositionError::ResolvedSource)
+        })
+        .transpose()?;
     let runtime_home = storage.join("runtime");
+    let review_binding_recorder = if owner_scoped {
+        None
+    } else {
+        crate::native_v2_cli::local::review_binding_recorder(
+            storage,
+            workspace,
+            local_branch.as_deref(),
+            &delivery_run_id,
+        )
+        .map_err(|_| LocalCompositionError::Storage)?
+    };
     prepare_private_directory(&runtime_home)?;
     let lanes = local_lanes(admitted, workspace, &runtime_home, native_environment)?;
     let required_capabilities =
@@ -416,6 +491,7 @@ fn build_local_candidate_config(
             workspace,
         )?;
         let config = NativeV2DeliveryConfig {
+            local_branch,
             delivery_run_id: delivery_run_id.clone(),
             adopt_existing_delivery,
             git_identity: None,
@@ -468,6 +544,8 @@ fn build_local_candidate_config(
             admitted,
             config,
             TrustedDeliveryCapabilities {
+                review_binding_recorder,
+                recovered_review,
                 token: github_token.map(Arc::<str>::from),
                 token_file: github_token_file,
                 validator: delivery_validator,

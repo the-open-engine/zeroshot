@@ -80,6 +80,7 @@ async fn observe_fixture(
     observe(
         &authority,
         SourceDeliveryRead {
+            include_terminal_reviews: true,
             target: &target,
             head_branch: "zeroshot/v2-test",
             known_review: options.known_review,

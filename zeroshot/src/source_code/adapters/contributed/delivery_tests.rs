@@ -267,6 +267,7 @@ async fn registered_contribution_executes_existing_pr_and_merge_nodes_with_opaqu
         .assert_value();
         let adapter = NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
+                local_branch: None,
                 delivery_run_id: RunId::new("contributed-forge"),
                 adopt_existing_delivery: false,
                 workspace: repo.workspace.clone(),

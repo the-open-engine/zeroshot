@@ -7,6 +7,10 @@ use super::observation::test_support::{authority, shell_literal, write_executabl
 use super::merge_policy::MergeMethod;
 use crate::native_v2_delivery::SourceChecks;
 
+#[cfg(unix)]
+#[path = "review_selection_tests.rs"]
+mod review_selection_tests;
+
 #[tokio::test]
 async fn configured_transport_owns_workspace_git_context_and_hosted_isolation() {
     use crate::native_v2_delivery::git::test_support::{ConfigLocation, GitFixture};
@@ -300,6 +304,9 @@ fn write_review_fixture(
         "#!/bin/sh\ncase \"$*\" in\n\
          *'--header X-GitHub-Api-Version: 2026-03-10') ;;\n\
          *) exit 18 ;;\n\
+         esac\nprintf '%s\\n' \"$*\" >> \"$HOME/review-calls\"\n\
+         case \"$*\" in\n\
+         *state=open*) if test -f \"$HOME/active-reviews.json\"; then /bin/cat \"$HOME/active-reviews.json\"; exit; fi ;;\n\
          esac\ncase \"$2:$4\" in\n\
          repos/acme/project/pulls:GET) printf '%s\\n' {} ;;\n\
          repos/acme/project/pulls:POST) printf '%s\\n' {} ;;\n\

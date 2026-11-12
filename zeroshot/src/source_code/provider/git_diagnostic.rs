@@ -22,6 +22,7 @@ pub(crate) struct GitCommandClassification {
     authentication_rejection: bool,
     transient_transport_failure: bool,
     policy_rejection: bool,
+    non_fast_forward: bool,
 }
 
 impl fmt::Display for GitCommandFailure {
@@ -59,6 +60,20 @@ impl GitCommandFailure {
 
     pub(crate) fn classify_stderr(&mut self, stderr: &str) {
         self.classification = Some(GitCommandClassification::from_stderr(stderr));
+    }
+
+    pub(crate) fn classify_stdout(&mut self, stdout: &str) {
+        let mut classification = self.stderr_classification();
+        classification.non_fast_forward = stdout.lines().any(|line| {
+            line.starts_with("!\t")
+                && line.contains("[rejected]")
+                && (line.ends_with("(non-fast-forward)") || line.ends_with("(fetch first)"))
+        });
+        self.classification = Some(classification);
+    }
+
+    pub(crate) fn non_fast_forward(&self) -> bool {
+        self.stderr_classification().non_fast_forward
     }
 
     fn stderr_classification(&self) -> GitCommandClassification {
@@ -133,6 +148,7 @@ impl GitCommandClassification {
             authentication_rejection,
             transient_transport_failure,
             policy_rejection,
+            non_fast_forward: false,
         }
     }
 }

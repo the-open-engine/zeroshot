@@ -46,6 +46,8 @@ async fn source_less_comment_composition_requires_gh_but_no_git_program_or_provi
     check_delivery_executables(&submission, &environment, &workspace).assert_value();
     for owner in [false, true] {
         let request = LocalProcessCandidateRequest {
+            delivery_receipt: None,
+            local_branch: None,
             admitted: &admitted,
             delivery_run_id: RunId::new("root-comment"),
             adopt_existing_delivery: false,
@@ -189,6 +191,8 @@ async fn software_change_pr_composition_checks_source_and_programs_without_dispa
     };
     let admitted = NativeV2Admission.admit(submission).await.assert_value();
     let request = || LocalProcessCandidateRequest {
+        delivery_receipt: None,
+        local_branch: None,
         admitted: &admitted,
         delivery_run_id: RunId::new("root-pr"),
         adopt_existing_delivery: false,
@@ -205,6 +209,7 @@ async fn software_change_pr_composition_checks_source_and_programs_without_dispa
     missing_source.source = None;
     assert!(matches!(
         build_local_process_candidate(LocalProcessCandidateRequest {
+            local_branch: None,
             admitted: &missing_source,
             ..request()
         }),

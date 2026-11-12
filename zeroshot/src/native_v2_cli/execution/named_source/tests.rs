@@ -348,6 +348,7 @@ fn test_run_command() -> RunCommand {
         environment: None,
         target: None,
         cwd: None,
+        worktree: None,
         source_connection: None,
         source_forge: None,
         title: RunTitle::new("Source selection").assert_value(),

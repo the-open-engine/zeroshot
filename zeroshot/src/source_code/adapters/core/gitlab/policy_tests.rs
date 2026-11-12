@@ -63,6 +63,7 @@ async fn git_effects_require_the_admitted_transport_before_mutating_a_workspace(
         commit_message: "Integrate target",
     };
     let head = SourceHeadReconciliation {
+        require_fast_forward: false,
         workspace: workspace.path(),
         published: &review,
         observed: &review,
@@ -144,6 +145,7 @@ async fn branch_only_observation_distinguishes_absence_from_invalid_identity_and
     let fixture = Fixture::new().await;
     let request = request();
     let read = SourceDeliveryRead {
+        include_terminal_reviews: true,
         target: &request.target,
         head_branch: &request.head_branch,
         known_review: None,

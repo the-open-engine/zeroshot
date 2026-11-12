@@ -59,6 +59,11 @@ fn recovery_document(
     resumed_from: Option<RunId>,
 ) -> LocalRecoveryDocument {
     LocalRecoveryDocument {
+        delivery_receipt: None,
+        local_branch: None,
+        invoking_workspace: None,
+        request_digest: None,
+        workspace_revision: None,
         submission,
         workspace,
         resumed_from,
@@ -128,6 +133,10 @@ fn prepared_local_run(
     workspace: PathBuf,
 ) -> PreparedLocalRun {
     PreparedLocalRun {
+        local_branch: None,
+        invoking_workspace: None,
+        request_digest: None,
+        workspace_revision: None,
         git_credentials: None,
 
         delivery_run_id: run_id.clone(),
@@ -154,6 +163,7 @@ fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
         git_credentials: None,
 
         cwd: None,
+        worktree: None,
         source_connection: None,
 
         run_id,
@@ -672,6 +682,11 @@ fn local_recovery_lineage_is_bounded_and_honors_root_delivery() {
         backend.create_run_storage(run_id).assert_value();
     }
     let direct = LocalRecoveryDocument {
+        delivery_receipt: None,
+        local_branch: None,
+        invoking_workspace: None,
+        request_digest: None,
+        workspace_revision: None,
         submission: submission.clone(),
         workspace: root.child("workspace"),
         resumed_from: None,
@@ -993,6 +1008,14 @@ async fn slow_remote_preflight_does_not_block_unrelated_submission() {
     std::fs::create_dir(&remote_workspace).assert_value();
     std::fs::create_dir(&unrelated_workspace).assert_value();
     initialize_local_repository(&remote_workspace);
+    crate::native_v2_candidate::test_support::git(
+        &remote_workspace,
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    crate::native_v2_candidate::test_support::git(
+        &remote_workspace,
+        &["checkout", "-b", "feature/slow", "--track", "origin/main"],
+    );
     initialize_local_repository(&unrelated_workspace);
 
     let state = root.child("shared-state");

@@ -286,6 +286,7 @@ async fn run_conversation_loop(kind: &str, respond: bool, race: Option<&str>) {
         NativeV2DeliveryConfig {
             delivery_run_id: RunId::new("conversation-repair"),
             adopt_existing_delivery: false,
+            local_branch: None,
             git_identity: None,
             commit_identity: None,
             commit_co_author: None,

@@ -15,6 +15,8 @@ mod feedback_tests;
 mod http_fixture;
 #[path = "metadata_tests.rs"]
 mod metadata_tests;
+#[path = "review_selection_tests.rs"]
+mod review_selection_tests;
 use http_fixture::{IntoResponse, Json, Response};
 
 const HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -27,6 +29,7 @@ struct StateData {
     version: String,
     project: Value,
     review: Option<Value>,
+    historical_reviews: Vec<Value>,
     review_sequence: Vec<Value>,
     notes: Vec<Value>,
     note_pages: BTreeMap<u32, Vec<Value>>,
@@ -74,6 +77,7 @@ impl Fixture {
             version: "19.5.1-ee".into(),
             project: project(),
             review: None,
+            historical_reviews: Vec::new(),
             review_sequence: Vec::new(),
             notes: Vec::new(),
             note_pages: BTreeMap::new(),
@@ -151,6 +155,7 @@ impl Fixture {
             Duration::from_secs(10),
             self.authority.observe_delivery(
                 SourceDeliveryRead {
+                    include_terminal_reviews: true,
                     target: &request.target,
                     head_branch: &request.head_branch,
                     known_review: known.then_some(&receipt),
@@ -219,6 +224,8 @@ fn note(id: u64, body: &str) -> Value {
 
 fn request() -> SourceReviewRequest {
     SourceReviewRequest {
+        include_terminal_reviews: true,
+        known_review: None,
         target: DeliveryTarget::new(REPOSITORY, "main", BASE).unwrap(),
         head_branch: "zeroshot/test".into(),
         head_revision: HEAD.into(),
@@ -401,16 +408,27 @@ fn simple_response(state: &StateData, path: &str) -> Option<Response> {
 fn list_or_create(state: &mut StateData, method: &Method, body: Value, query: &str) -> Response {
     if method == Method::GET {
         let url = reqwest::Url::parse(&format!("http://fixture/?{query}")).unwrap();
+        let page = url
+            .query_pairs()
+            .find(|(key, _)| key == "page")
+            .map_or(1, |(_, value)| value.parse::<usize>().unwrap());
+        let size = url
+            .query_pairs()
+            .find(|(key, _)| key == "per_page")
+            .map_or(20, |(_, value)| value.parse::<usize>().unwrap());
         let values = state
-            .review
-            .clone()
-            .into_iter()
+            .historical_reviews
+            .iter()
+            .cloned()
+            .chain(state.review.clone())
             .filter(|review| {
                 url.query_pairs().all(|(key, value)| {
                     !matches!(key.as_ref(), "source_branch" | "target_branch")
                         || review[key.as_ref()] == value.as_ref()
                 })
             })
+            .skip((page - 1) * size)
+            .take(size)
             .collect::<Vec<_>>();
         return Json(values).into_response();
     }
@@ -1029,6 +1047,7 @@ async fn known_review_cannot_replace_admitted_target_identity() {
             .authority
             .observe_delivery(
                 SourceDeliveryRead {
+                    include_terminal_reviews: true,
                     target: &request.target,
                     head_branch: &request.head_branch,
                     known_review: Some(&known),

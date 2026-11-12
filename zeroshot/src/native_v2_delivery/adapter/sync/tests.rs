@@ -18,6 +18,7 @@ async fn gitlab_review_changes_after_preflight_redact_every_synchronization_reco
             .authority
             .observe_delivery(
                 SourceDeliveryRead {
+                    include_terminal_reviews: true,
                     target: &request.target,
                     head_branch: branch,
                     known_review: None,
@@ -29,7 +30,11 @@ async fn gitlab_review_changes_after_preflight_redact_every_synchronization_reco
             .assert_value();
         let review = snapshot.review.assert_value();
         assert!(matches!(review.state, SourceReviewState::Open { .. }));
-        adapter.record_published(SourceReviewReceipt::for_request(&request, "17"));
+        assert!(
+            adapter
+                .record_published(SourceReviewReceipt::for_request(&request, "17"))
+                .is_ok()
+        );
 
         // The successful preflight must not hide a later human change from synchronization.
         fixture.change_review(field, serde_json::json!(value));
@@ -171,6 +176,8 @@ fn gitlab_sync(
     DeliveryCredentials<'static>,
 ) {
     let request = SourceReviewRequest {
+        include_terminal_reviews: true,
+        known_review: None,
         target: DeliveryTarget::new("group/sub/project", "main", "a".repeat(40)).assert_value(),
         head_branch: "zeroshot/test".to_owned(),
         head_revision: "b".repeat(40),
@@ -180,6 +187,7 @@ fn gitlab_sync(
     };
     let adapter = NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: openengine_cluster_protocol::RunId::new("sync-redaction"),
             adopt_existing_delivery: false,
             git_identity: None,

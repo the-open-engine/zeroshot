@@ -1113,3 +1113,42 @@ fn source_instance_flags_preserve_opaque_provider_and_require_a_canonical_pair()
         assert!(parse(flags).is_err());
     }
 }
+
+#[test]
+fn worktrees_are_opt_in_and_local_only() {
+    let basic = [
+        "run",
+        "--title",
+        "change",
+        "--input",
+        "task.json",
+        "--profile",
+        "local:change",
+    ];
+    for (extra, expected) in [
+        (vec![], None),
+        (vec!["--worktree"], Some(LocalWorktreeBase::Local)),
+        (
+            vec!["--worktree", "--worktree-base", "remote"],
+            Some(LocalWorktreeBase::Remote),
+        ),
+        (
+            vec!["--worktree", "--worktree-base", "local"],
+            Some(LocalWorktreeBase::Local),
+        ),
+    ] {
+        let command =
+            parse_native_v2_args(args(&[basic.as_slice(), &extra].concat())).assert_value();
+        let NativeV2CliCommand::Run(run) = command else {
+            panic!("run expected");
+        };
+        assert_eq!(run.worktree, expected);
+    }
+    for extra in [
+        vec!["--worktree-base", "remote"],
+        vec!["--worktree", "--target", "platform"],
+        vec!["--worktree", "--worktree-base", "other"],
+    ] {
+        assert!(parse_native_v2_args(args(&[basic.as_slice(), &extra].concat())).is_err());
+    }
+}

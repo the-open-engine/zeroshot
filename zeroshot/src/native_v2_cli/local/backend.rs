@@ -27,8 +27,8 @@ fn local_restore_selection(
         if !discard_workspace_changes {
             return Err(NativeV2CliError::Usage(format!(
                 "restoring checkpoint {} discards this workspace's tracked, staged, untracked, \
-                 and ignored files and its checkout-private Git state such as HEAD and the index, \
-                 replacing them with the checkpoint's; branches and commits are kept. To roll \
+                 and ignored files and its index, replacing them with the checkpoint's; attached \
+                 HEAD, branches and commits are kept. To roll \
                  back, run `{}`",
                 checkpoint_id.as_str(),
                 restore_command(run_id, &selection),
@@ -184,6 +184,18 @@ impl LocalCliBackend {
         mut recovery: LocalRecoveryDocument,
         discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        if recovery.local_branch.is_none()
+            && !crate::native_v2_admission::delivery_capabilities(&recovery.submission.graph.root)
+                .is_empty()
+        {
+            return Err(NativeV2CliError::Usage(
+                "cannot resume this legacy local Git-delivery run: its recovery metadata does not \
+                 record the working branch. Preserve the retained workspace, return to the intended \
+                 branch with `git switch BRANCH`, and start a new run from a feature branch or with \
+                 --worktree; no checkpoint was restored and no agent was started"
+                    .to_owned(),
+            ));
+        }
         let (checkpoint, restore) = self
             .checkpoint_selection(&params, &recovery, discard_workspace_changes)?
             .unzip();
@@ -278,6 +290,10 @@ impl LocalCliBackend {
         )
         .map_err(local_error)?;
         Ok(PreparedLocalRun {
+            local_branch: recovery.local_branch.clone(),
+            invoking_workspace: recovery.invoking_workspace.clone(),
+            request_digest: recovery.request_digest.clone(),
+            workspace_revision: recovery.workspace_revision.clone(),
             run_id: params.successor_run_id.clone(),
             delivery_run_id: self.delivery_run_id(&params.run_id, recovery)?,
             submission,

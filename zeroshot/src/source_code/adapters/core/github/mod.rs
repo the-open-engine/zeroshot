@@ -151,9 +151,44 @@ impl GhCliDeliveryAuthority {
         request: &SourceReviewRequest,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Option<SourceReviewReceipt>, SourceDeliveryError> {
+        if let Some(known) = &request.known_review {
+            if known.repository != request.target.repository
+                || known.target_branch != request.target.target_branch
+                || known.head_branch != request.head_branch
+            {
+                return Err(SourceDeliveryError::identity(
+                    "known PR differs from the admitted delivery target",
+                ));
+            }
+            let value = self
+                .api(
+                    &[
+                        format!(
+                            "repos/{}/pulls/{}",
+                            request.target.repository, known.review_id
+                        ),
+                        "--method".to_owned(),
+                        "GET".to_owned(),
+                    ],
+                    credential,
+                )
+                .await?;
+            let wire: PullRequestWire = api::decode_response(value, credential)?;
+            let receipt = review_receipt(wire, request)?;
+            if receipt.review_id != known.review_id {
+                return Err(SourceDeliveryError::identity(
+                    "the bound PR identity changed",
+                ));
+            }
+            return Ok(Some(receipt));
+        }
         let value = self
             .api(
-                &review_list_arguments(&request.target, &request.head_branch)?,
+                &review_list_arguments(
+                    &request.target,
+                    &request.head_branch,
+                    request.include_terminal_reviews,
+                )?,
                 credential,
             )
             .await?;
@@ -657,6 +692,8 @@ use wire::{PullRequestWire, require_review_identity, review_receipt};
 #[cfg(test)]
 pub(super) fn test_review_request() -> SourceReviewRequest {
     SourceReviewRequest {
+        include_terminal_reviews: true,
+        known_review: None,
         target: super::DeliveryTarget::new(
             "acme/project",
             "main",
@@ -704,6 +741,7 @@ fn review_query_arguments(
 fn review_list_arguments(
     target: &super::DeliveryTarget,
     head_branch: &str,
+    include_terminal_reviews: bool,
 ) -> Result<Vec<String>, SourceDeliveryError> {
     let owner = target
         .repository
@@ -715,7 +753,14 @@ fn review_list_arguments(
         "--method".to_owned(),
         "GET".to_owned(),
         "-f".to_owned(),
-        "state=all".to_owned(),
+        format!(
+            "state={}",
+            if include_terminal_reviews {
+                "all"
+            } else {
+                "open"
+            }
+        ),
         "-f".to_owned(),
         format!("head={owner}:{head_branch}"),
     ])

@@ -436,6 +436,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
     .assert_value();
     let run = RunCommand {
         cwd: None,
+        worktree: None,
         source_connection: None,
         source_forge: None,
 
@@ -733,6 +734,7 @@ fn intent_command(selection: RunSelection) -> RunCommand {
         environment: None,
         target: None,
         cwd: None,
+        worktree: None,
         source_connection: None,
         source_forge: None,
         title: RunTitle::new("Intent validation").assert_value(),
@@ -924,6 +926,7 @@ fn named_comment_request(url: &str) -> (RunCommand, PreparedRunRequest) {
         github_token: None,
         git_credentials: None,
         cwd: None,
+        worktree: None,
         source_connection: None,
         source: None,
         profile: None,

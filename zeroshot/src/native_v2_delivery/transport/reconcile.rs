@@ -159,6 +159,12 @@ async fn reconcile_workspace(
     if request.adopting_existing {
         return reconcile_adopted_delivery(context, request, head).await;
     }
+    if request.require_fast_forward && !authorizes_fast_forward(&request, &head, dirty) {
+        return Ok(SourceReconciliationOutcome::Refused(format!(
+            "remote branch `{}` cannot be fast-forwarded from local HEAD {head}; remote head {}; local work was preserved",
+            request.observed.head_branch, request.observed.head_revision,
+        )));
+    }
     if !is_ancestor(context, &request.published.head_revision, &head).await? {
         return Ok(SourceReconciliationOutcome::Refused(format!(
             "local history no longer contains published head {} on branch {}; local head {head}; \

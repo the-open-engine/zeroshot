@@ -377,6 +377,7 @@ pub(super) fn run_intent() -> TargetRunIntent {
 pub(super) fn run_request() -> PreparedRunRequest {
     PreparedRunRequest {
         cwd: None,
+        worktree: None,
         source_connection: None,
         git_credentials: None,
         run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991"),

@@ -610,8 +610,11 @@ fn linked_worktree_restore_preserves_shared_refs_and_configuration() {
         fs::read(linked.join(".git")).assert_value(),
         original_marker
     );
-    assert_eq!(git(&linked, &["rev-parse", "HEAD"]), head);
-    assert_eq!(git(&linked, &["rev-parse", "--abbrev-ref", "HEAD"]), "HEAD");
+    assert_eq!(git(&linked, &["rev-parse", "HEAD"]), branch);
+    assert_eq!(
+        git(&linked, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "writer"
+    );
     assert_eq!(git(&linked, &["rev-parse", "refs/heads/writer"]), branch);
     assert_eq!(
         git(&fixture.workspace, &["config", "checkpoint.shared"]),
@@ -661,7 +664,6 @@ fn main_checkout_restore_does_not_rewind_linked_peers_or_shared_branches() {
     let shared_cache = fixture.workspace.join(".git/rr-cache");
     fs::create_dir(&shared_cache).assert_value();
     fs::write(shared_cache.join("shared"), "earlier cache").assert_value();
-    let head = git(&fixture.workspace, &["rev-parse", "HEAD"]);
     let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
     assert!(!fixture.tree(&id).join(".git/worktrees").exists());
     fs::write(shared_cache.join("shared"), "new peer resolution").assert_value();
@@ -674,7 +676,11 @@ fn main_checkout_restore_does_not_rewind_linked_peers_or_shared_branches() {
 
     restore(&fixture.snapshots, &id, &fixture.workspace)
         .unwrap_or_else(|error| panic!("checkpoint restore failed: {error:?}"));
-    assert_eq!(git(&fixture.workspace, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&fixture.workspace, &["rev-parse", "HEAD"]), main_branch);
+    assert_eq!(
+        git(&fixture.workspace, &["symbolic-ref", "--short", "HEAD"]),
+        "main"
+    );
     assert_eq!(git(&fixture.workspace, &["rev-parse", "main"]), main_branch);
     assert_eq!(git(&peer, &["rev-parse", "HEAD"]), peer_head);
     assert_eq!(
@@ -1222,10 +1228,10 @@ fn restore_repeated_after_failed_git_publication_installs_the_complete_checkout(
     let fixture = Fixture::new();
     fixture.initialize_git();
     fs::write(fixture.workspace.join("untracked"), "checkpoint").assert_value();
-    let expected = git(&fixture.workspace, &["rev-parse", "HEAD"]);
     let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
     fs::write(fixture.workspace.join("tracked"), "later").assert_value();
     git(&fixture.workspace, &["commit", "-am", "later"]);
+    let expected = git(&fixture.workspace, &["rev-parse", "HEAD"]);
     fs::remove_file(fixture.workspace.join("untracked")).assert_value();
     fs::write(fixture.workspace.join("later-only"), "later").assert_value();
 
@@ -1251,7 +1257,7 @@ fn restore_repeated_after_failed_git_publication_installs_the_complete_checkout(
     assert_eq!(git(&fixture.workspace, &["rev-parse", "HEAD"]), expected);
     assert_eq!(
         git(&fixture.workspace, &["status", "--porcelain"]),
-        "?? untracked"
+        "M  tracked\n?? untracked"
     );
     git(&fixture.workspace, &["fsck", "--no-dangling"]);
     assert_eq!(

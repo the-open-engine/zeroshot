@@ -42,7 +42,7 @@ async fn plain_resume_keeps_the_work_done_after_a_failure() {
 async fn checkpoint_rollback_requires_consent_and_changes_nothing_without_it() {
     let fixture = LocalFixture::new();
     ignore_build_logs(&fixture);
-    let snapshot_head = git(&fixture.repository, &["rev-parse", "HEAD"]);
+    let snapshot_index = git(&fixture.repository, &["ls-files", "--stage"]);
     let failed = fixture.failed_run("Checkpoint rollback consent").await;
     let checkpoint_id = fixture
         .checkpoints(&failed)
@@ -127,8 +127,14 @@ async fn checkpoint_rollback_requires_consent_and_changes_nothing_without_it() {
         fs::read_to_string(repository.join("seed.txt")).assert_value_with("restored seed"),
         "seed\n"
     );
-    // The checkpoint installs its own HEAD and index; shared branch refs keep the later commit.
-    assert_eq!(git(repository, &["rev-parse", "HEAD"]), snapshot_head);
+    // Restore the checkpoint's files and index while keeping HEAD attached at the live branch
+    // tip. Neither the invoking branch nor any shared ref is rewound to the snapshot.
+    assert_eq!(git(repository, &["ls-files", "--stage"]), snapshot_index);
+    assert_eq!(git(repository, &["rev-parse", "HEAD"]), work.head);
+    assert_eq!(
+        git(repository, &["symbolic-ref", "HEAD"]),
+        "refs/heads/feature/local"
+    );
     assert_eq!(
         git(repository, &["rev-parse", "refs/heads/feature/local"]),
         work.head

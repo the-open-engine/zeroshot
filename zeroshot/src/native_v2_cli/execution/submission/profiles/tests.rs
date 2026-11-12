@@ -139,6 +139,7 @@ async fn wave6_cli_contract_remote_profile_resolution_preserves_selector_and_pay
     let backend = FakeBackend::default();
     let run = RunCommand {
         cwd: None,
+        worktree: None,
         source_connection: None,
         source_forge: None,
 

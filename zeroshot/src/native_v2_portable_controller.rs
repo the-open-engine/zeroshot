@@ -120,6 +120,7 @@ impl PortableControllerPaths {
 pub const DEFAULT_PREPARATION_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub struct PortableControllerBootstrap {
+    pub delivery_receipt: Option<serde_json::Value>,
     pub checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     /// Bounds preparation work measured from controller start; a checkpoint restore stops here.
     pub preparation_timeout: Duration,
@@ -134,6 +135,7 @@ pub struct PortableControllerBootstrap {
     pub delivery_validator: Option<crate::native_v2_delivery::validation::TrustedDeliveryValidator>,
     pub git_credentials: Option<GitTransportCredentials>,
     pub workspace: PathBuf,
+    pub local_branch: Option<String>,
     pub workspace_lease: PathBuf,
     pub checkpoint_repository: PathBuf,
     /// Host-owned shared memory; omitted by embedders that have not configured a namespace.

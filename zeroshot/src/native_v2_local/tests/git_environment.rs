@@ -111,6 +111,8 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
         let run_id = RunId::new("local-git-context");
         let runner = build_local_candidate_config(
             LocalProcessCandidateRequest {
+                delivery_receipt: None,
+                local_branch: None,
                 admitted: &admitted,
                 delivery_run_id: run_id.clone(),
                 adopt_existing_delivery: false,

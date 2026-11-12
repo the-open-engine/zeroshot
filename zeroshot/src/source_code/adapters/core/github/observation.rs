@@ -62,7 +62,11 @@ async fn find_identity(
 ) -> Result<Option<SourceReviewReceipt>, SourceDeliveryError> {
     let value = authority
         .api(
-            &review_list_arguments(request.target, request.head_branch)?,
+            &review_list_arguments(
+                request.target,
+                request.head_branch,
+                request.include_terminal_reviews,
+            )?,
             credential,
         )
         .await?;

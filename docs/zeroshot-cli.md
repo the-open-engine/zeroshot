@@ -722,7 +722,7 @@ Options:
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
-          Commit and push the managed run branch without opening a pull request
+          Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
 
       --pr
           Materialize pull-request delivery for the software-change template
@@ -889,7 +889,7 @@ Options:
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
-          Commit and push the managed run branch without opening a pull request
+          Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
 
       --pr
           Materialize pull-request delivery for the software-change template
@@ -1099,7 +1099,7 @@ Commands:
 ```text
 Submit a graph run locally or to a named target.
 
-Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named targets require a committed Git source. Local workspaces must not overlap Zeroshot state. For local PR and merge delivery, the target is the branch's upstream when configured, otherwise the local branch name. Preparation verifies that the remote contains the target before agents start. To target `main` from a fresh worktree, run `git branch --set-upstream-to=origin/main`, or create the worktree from `origin/main`.
+Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named targets require a committed Git source. Local workspaces must not overlap Zeroshot state. Local delivery commits on the checked-out branch and pushes that same branch, including existing unpushed commits. PR/merge targets a different upstream branch, or the remote's default branch; starting on that target is refused. Start from a feature branch or use --worktree. Explicit --push can publish any branch, including main, without force-pushing. --worktree creates a retained worktree and managed run branch from local HEAD by default. --worktree-base remote fetches the invoking branch's upstream and requires one to be set. Worktree PR/merge targets the invoking branch's upstream, or its name without an upstream. Preparation verifies the target before agents start. Worktrees contain committed files only; dependencies and untracked resources are not copied or installed. Resume reuses the same workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
 
 A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
 
@@ -1152,6 +1152,14 @@ Options:
       --cwd <FOLDER>
           Working folder (default: invoking folder). File arguments stay relative to the invoking folder
 
+      --worktree
+          Run in a retained Git worktree on a new managed branch. Local runs only
+
+      --worktree-base <BASE>
+          Start the worktree at local HEAD (default) or fetch the invoking branch's upstream
+
+          [possible values: local, remote]
+
       --source-connection <KEY>
           Named connection for Git checkout and push.
 
@@ -1192,7 +1200,7 @@ Options:
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
-          Commit and push the managed run branch without opening a pull request
+          Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
 
       --pr
           Materialize pull-request delivery for the software-change template
@@ -1455,7 +1463,7 @@ Options:
 ```text
 Start a new attempt from a failed run's retained workspace or a saved checkpoint.
 
-By default, restart the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. The successor resolves its original connection requirements again; make those credentials available.
+By default, restart the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
 
 Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 
@@ -1475,7 +1483,7 @@ Options:
       --discard-workspace-changes
           Allow a local checkpoint restore to replace the current checkout.
 
-          The checkpoint replaces tracked, staged, untracked, and ignored files and the checkout's own Git state, such as HEAD and the index. Branches, commits, and Git configuration are kept. Named targets restore their own retained copy and do not accept this flag.
+          The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Attached HEAD, branch tips, commits, and Git configuration are kept. Restoring files does not recover published ancestry after a history rewrite. Named targets restore their own retained copy and do not accept this flag.
 
       --forward-gh-token
           Send the GH_TOKEN from this shell with the resume.
@@ -1491,7 +1499,7 @@ Options:
 ```text
 List one page of a run's saved workspace checkpoints as JSON.
 
-Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. When nextAfter is present, pass it as --after to fetch the next page.
+Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. Local restores also require --discard-workspace-changes and keep attached HEAD and branch tips. When nextAfter is present, pass it as --after to fetch the next page.
 
 Usage: zeroshot checkpoints [OPTIONS] <RUN_ID>
 

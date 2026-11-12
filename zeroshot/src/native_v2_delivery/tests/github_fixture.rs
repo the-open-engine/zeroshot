@@ -22,9 +22,11 @@ pub(in crate::native_v2_delivery) enum Script {
     FeedbackReadTransient,
     FeedbackTooLarge,
     PushRejected,
+    PushNonFastForward,
     PolicyForbidden,
     PolicySchemaInvalid,
     PreflightClosed,
+    HistoricalClosed,
     PreflightMerged,
     PreflightRefusedAfterTransientRead,
     InspectFailed,
@@ -33,6 +35,7 @@ pub(in crate::native_v2_delivery) enum Script {
     ReconcileCompletesThenUnavailable,
     TargetIntegrationResponseLost,
     TargetDeferred,
+    TargetUnavailable,
     TargetIntegrationThenDeferred,
     LaterTargetIntegrationFails,
     ConflictMaterializationFailsAfterMutation,
@@ -78,6 +81,7 @@ pub(in crate::native_v2_delivery) struct FakeGitHub {
     remote: PathBuf,
     script: Script,
     pub(super) pushed: AtomicBool,
+    pub(super) closed: AtomicBool,
     merge_requested: AtomicBool,
     pub(super) merge_requests: AtomicUsize,
     pub(in crate::native_v2_delivery) queue_live: AtomicBool,
@@ -89,6 +93,7 @@ pub(in crate::native_v2_delivery) struct FakeGitHub {
     pub(super) feedback_reads: AtomicUsize,
     pub(super) delivery_reads: AtomicUsize,
     pub(super) delivery_read_branches: Mutex<Vec<String>>,
+    pub(super) delivery_read_reviews: Mutex<Vec<Option<String>>>,
     pub(super) reviews: Mutex<Vec<SourceReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
     pub(super) reject_review_sync: AtomicBool,
@@ -104,6 +109,7 @@ impl FakeGitHub {
             remote,
             script,
             pushed: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
             merge_requested: AtomicBool::new(false),
             merge_requests: AtomicUsize::new(0),
             queue_live: AtomicBool::new(false),
@@ -118,6 +124,7 @@ impl FakeGitHub {
             feedback_reads: AtomicUsize::new(0),
             delivery_reads: AtomicUsize::new(0),
             delivery_read_branches: Mutex::new(Vec::new()),
+            delivery_read_reviews: Mutex::new(Vec::new()),
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
             reject_review_sync: AtomicBool::new(false),
@@ -148,6 +155,7 @@ impl FakeGitHub {
             | Script::PolicyForbidden
             | Script::PolicySchemaInvalid
             | Script::PreflightClosed
+            | Script::HistoricalClosed
             | Script::PreflightMerged
             | Script::PreflightRefusedAfterTransientRead
             | Script::InspectFailed
@@ -411,6 +419,10 @@ impl SourceDeliveryAuthority for FakeGitHub {
         _credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
         let read = self.delivery_reads.fetch_add(1, Ordering::SeqCst);
+        self.delivery_read_reviews
+            .lock()
+            .assert_value()
+            .push(request.known_review.map(|review| review.review_id.clone()));
         self.delivery_read_branches
             .lock()
             .assert_value()
@@ -435,18 +447,46 @@ impl SourceDeliveryAuthority for FakeGitHub {
                 .trim()
                 .to_owned()
         });
+        let historical = matches!(self.script, Script::HistoricalClosed)
+            && request.include_review
+            && (request.known_review.is_none() && request.include_terminal_reviews
+                || request
+                    .known_review
+                    .is_some_and(|review| review.review_id == "1"));
         let review = head_revision.as_ref().and_then(|head| {
+            if historical {
+                return Some(
+                    SourceReviewReceipt {
+                        review_id: "1".to_owned(),
+                        repository: request.target.repository.clone(),
+                        target_branch: request.target.target_branch.clone(),
+                        head_branch: request.head_branch.to_owned(),
+                        head_revision: head.clone(),
+                    }
+                    .observation(SourceReviewState::Closed),
+                );
+            }
             if matches!(self.script, Script::HeadRecoveryReviewMissing) {
                 return None;
             }
             let reviews = self.reviews.lock().assert_value();
+            if self.closed.load(Ordering::SeqCst)
+                && !request.include_terminal_reviews
+                && request.known_review.is_none()
+            {
+                return None;
+            }
             let request = reviews.last()?;
-            let state = match self.script {
-                Script::HeadRecoveryClosed => SourceReviewState::Closed,
-                Script::HeadRecoveryMerged => merged_review(),
-                Script::PreflightClosed => SourceReviewState::Closed,
-                Script::PreflightMerged => merged_review(),
-                _ => self.no_ci_state(),
+            let state = if self.closed.load(Ordering::SeqCst) {
+                SourceReviewState::Closed
+            } else {
+                match self.script {
+                    Script::HeadRecoveryClosed => SourceReviewState::Closed,
+                    Script::HeadRecoveryMerged => merged_review(),
+                    Script::PreflightClosed => SourceReviewState::Closed,
+                    Script::PreflightMerged => merged_review(),
+                    _ => self.no_ci_state(),
+                }
             };
             Some(
                 SourceReviewReceipt {
@@ -471,6 +511,9 @@ impl SourceDeliveryAuthority for FakeGitHub {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceTargetIntegration, SourceDeliveryError> {
         let attempt = self.target_reconciliations.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.script, Script::TargetUnavailable) {
+            return Err(SourceDeliveryError::Unavailable);
+        }
         if matches!(self.script, Script::TargetDeferred)
             || matches!(self.script, Script::TargetIntegrationThenDeferred) && attempt > 0
         {
@@ -578,6 +621,18 @@ impl SourceDeliveryAuthority for FakeGitHub {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<(), SourceDeliveryError> {
         assert_eq!(credential.expose(), "test-token");
+        if matches!(self.script, Script::PushNonFastForward) {
+            let mut command = tokio::process::Command::new("/bin/sh");
+            command.args(["-c", "printf '!\\tHEAD:refs/heads/feature/refused\\t[rejected] (fetch first)\\n'; exit 1"]);
+            return Err(crate::native_v2_delivery::command::capture(
+                &mut command,
+                Duration::from_secs(1),
+            )
+            .await
+            .and_then(GitCommandFailure::require_success)
+            .expect_err("non-fast-forward")
+            .into());
+        }
         if matches!(self.script, Script::PushRejected) {
             let mut command = tokio::process::Command::new("/bin/sh");
             command.args([
@@ -798,6 +853,11 @@ impl SourceDeliveryAuthority for FakeGitHub {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
         self.withdrawn_reviews.lock().unwrap().push(review.clone());
+        if matches!(self.script, Script::PreflightMerged) {
+            return Ok(SourceMergeWithdrawal::Merged {
+                merge_revision: "c".repeat(40),
+            });
+        }
         if !self.queue_live.load(Ordering::SeqCst) {
             return Ok(SourceMergeWithdrawal::Withdrawn);
         }

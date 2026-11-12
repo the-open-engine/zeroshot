@@ -127,10 +127,19 @@ pub struct ConnectionSetCommand {
     pub input: ConnectionInput,
 }
 
+/// Starting commit for an explicitly isolated local run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LocalWorktreeBase {
+    Local,
+    Remote,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunCommand {
     pub target: Option<String>,
     pub cwd: Option<PathBuf>,
+    pub worktree: Option<LocalWorktreeBase>,
     pub source_connection: Option<ConnectionKey>,
     pub source_forge: Option<RunSourceForge>,
     pub title: RunTitle,
@@ -217,6 +226,7 @@ pub struct PreparedRunRequest {
     pub github_token: Option<String>,
     pub git_credentials: Option<GitTransportCredentials>,
     pub cwd: Option<PathBuf>,
+    pub worktree: Option<LocalWorktreeBase>,
     pub source_connection: Option<ConnectionKey>,
     pub source: Option<NamedRunSource>,
     /// Remote selector retained so the hosted target can resolve the profile atomically.
@@ -237,6 +247,7 @@ impl fmt::Debug for PreparedRunRequest {
             )
             .field("git_credentials", &self.git_credentials)
             .field("cwd", &self.cwd)
+            .field("worktree", &self.worktree)
             .field("source_connection", &self.source_connection)
             .field("source", &self.source)
             .field("profile", &self.profile)

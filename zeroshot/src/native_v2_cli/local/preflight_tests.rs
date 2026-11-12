@@ -16,6 +16,20 @@ impl Fixture {
         let workspace = root.child("w");
         std::fs::create_dir(&workspace).assert_value();
         initialize_local_repository(&workspace);
+        git(
+            &workspace,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        git(
+            &workspace,
+            &[
+                "checkout",
+                "-b",
+                "feature/preflight",
+                "--track",
+                "origin/main",
+            ],
+        );
         let queries = root.child("queries");
         let git_program = root.child("git");
         openengine_cluster_testkit::fixture::write_executable(
@@ -119,37 +133,39 @@ fn assert_controller_start(result: Result<RunId, NativeV2CliError>) {
 }
 
 #[tokio::test]
-async fn fresh_branch_is_rejected_until_its_upstream_selects_a_remote_base() {
+async fn fresh_branch_uses_the_remote_default_without_an_upstream() {
     for mode in [DeliveryMode::PullRequest, DeliveryMode::Merge] {
-        let fixture = Fixture::new(MAIN_REF);
-        let workspace = &fixture.backend.current_directory;
-        git(workspace, &["checkout", "-b", "my-change"]);
-        let rejected = fixture
-            .backend
-            .start_controller(with_declared_github_token(fixture.request(mode)))
-            .await;
-        assert!(
-            matches!(rejected, Err(NativeV2CliError::Usage(ref message))
-                if message.contains("remote does not have target branch `my-change`")
-                    && message.contains("--set-upstream-to=origin/main")),
-            "a fresh local branch must fail before controller startup: {rejected:?}"
+        let reply = format!(
+            "if [ -z \"$reference\" ]; then printf 'ref: refs/heads/main\\tHEAD\\n'; exit 0; fi\n{MAIN_REF}"
         );
-        assert!(!fixture.backend.state_root.join("runs").exists());
+        let fixture = Fixture::new(&reply);
         git(
-            workspace,
-            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+            &fixture.backend.current_directory,
+            &["checkout", "-b", "my-change"],
         );
-        git(workspace, &["branch", "--set-upstream-to=origin/main"]);
         assert_controller_start(
             fixture
                 .backend
                 .start_controller(with_declared_github_token(fixture.request(mode)))
                 .await,
         );
-        assert_eq!(
-            fixture.observations(),
-            ["refs/heads/my-change", "refs/heads/main"]
+        assert_eq!(fixture.observations(), ["", "refs/heads/main"]);
+    }
+}
+
+#[tokio::test]
+async fn target_branch_refuses_review_delivery_before_controller_start() {
+    for mode in [DeliveryMode::PullRequest, DeliveryMode::Merge] {
+        let fixture = Fixture::new("printf 'ref: refs/heads/main\\tHEAD\\n'; exit 0");
+        git(&fixture.backend.current_directory, &["checkout", "main"]);
+        let result = fixture
+            .backend
+            .start_controller(with_declared_github_token(fixture.request(mode)))
+            .await;
+        assert!(
+            matches!(result, Err(NativeV2CliError::Usage(message)) if message.contains("target branch `main`") && message.contains("feature branch") && message.contains("--worktree"))
         );
+        assert!(!fixture.backend.state_root.join("runs").exists());
     }
 }
 
@@ -315,6 +331,93 @@ async fn another_forge_uses_git_transport_without_reading_github_authority() {
     .await
     .assert_value();
     assert_eq!(fixture.observations(), ["refs/heads/main"]);
+}
+
+#[tokio::test]
+async fn detached_linked_worktree_uses_verified_retained_branch_after_checkout_history_is_truncated()
+ {
+    use crate::native_v2_candidate::test_support::git_output;
+
+    let mut fixture = Fixture::new("exit 128");
+    git(&fixture.backend.current_directory, &["checkout", "main"]);
+    let linked = fixture.root.child("linked");
+    git(
+        &fixture.backend.current_directory,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/retained",
+            linked.to_str().assert_value(),
+        ],
+    );
+    fixture.backend.current_directory = linked.clone();
+    let prepared = fixture
+        .backend
+        .prepare_run(with_declared_github_token(
+            fixture.request(DeliveryMode::PullRequest),
+        ))
+        .await
+        .assert_value();
+    create_contract_run(&fixture.backend, &prepared.run_id, &prepared.submission).await;
+    let mut recovery = recovery_document(prepared.submission, prepared.workspace, None);
+    recovery.local_branch = prepared.local_branch;
+    fixture
+        .backend
+        .write_recovery_document(&prepared.run_id, &recovery)
+        .assert_value();
+    for _ in 0..40 {
+        git(
+            &linked,
+            &[
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "later shared work",
+            ],
+        );
+    }
+    let head = git_output(&linked, &["rev-parse", "HEAD"]);
+    let git_directory = git_output(&linked, &["rev-parse", "--absolute-git-dir"]);
+    std::fs::write(Path::new(&git_directory).join("HEAD"), format!("{head}\n")).assert_value();
+    assert!(
+        !git_output(
+            &linked,
+            &["reflog", "show", "-n", "32", "--format=%gs", "HEAD"]
+        )
+        .contains("checkout:")
+    );
+
+    let error = fixture
+        .backend
+        .start_controller(with_declared_github_token(
+            fixture.request(DeliveryMode::PullRequest),
+        ))
+        .await
+        .expect_err("detached HEAD must be refused before launch")
+        .to_string();
+    assert!(error.contains("HEAD is detached"), "{error}");
+    assert!(error.contains("git switch feature/retained"), "{error}");
+    assert!(!error.contains("git switch main"), "{error}");
+    assert!(fixture.observations().is_empty());
+    assert_eq!(git_output(&linked, &["rev-parse", "HEAD"]), head);
+
+    // Stale recovery metadata must not recommend a branch that no longer exists.
+    git(&linked, &["branch", "-D", "feature/retained"]);
+    let error = fixture
+        .backend
+        .start_controller(with_declared_github_token(
+            fixture.request(DeliveryMode::PullRequest),
+        ))
+        .await
+        .expect_err("unknown branch must not be guessed")
+        .to_string();
+    assert!(error.contains("HEAD is detached"), "{error}");
+    assert!(
+        !error.contains("git switch main") && !error.contains("git switch feature/retained"),
+        "{error}"
+    );
 }
 
 #[tokio::test]

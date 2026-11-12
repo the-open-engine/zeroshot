@@ -170,10 +170,26 @@ core adapters only. Check [harness support](../project/harness-adapters.md) befo
 Local Git operations can reuse your Git authentication. PR and merge delivery support GitHub and
 GitLab; other Git hosts support checkout and push. See [forge setup](../guides/forge-delivery.md).
 
-For local PR and merge runs, the target branch is the current branch's upstream, or its local name
-when no upstream is set. To target `main` from a fresh worktree, run
-`git branch --set-upstream-to=origin/main`, or create the worktree from `origin/main`. zeroshot
-verifies that the remote contains the branch before starting agents.
+**Breaking change:** in-place local delivery commits on the checked-out branch and pushes the
+remote branch of the same name, including existing unpushed commits. It creates no managed run
+branch. PR/MR targets use a different upstream branch, otherwise the remote's default branch.
+`--pr` and `--ship` refuse to start on that target; use a feature branch or `--worktree`.
+Explicit `--push` can publish any checked-out branch, including `main`. Non-fast-forward pushes
+and forge policy refusals stop delivery without asking agents to repair them.
+
+`--worktree` selects a separate retained worktree on a managed run branch. It starts at local HEAD,
+including committed unpushed work. `--worktree-base remote` fetches the invoking branch's upstream;
+without one, configure it or choose `--worktree-base local`. Delivery commits and publishes that
+same managed branch. PR/MR targets use the invoking branch's upstream, or its own name when none
+is set. zeroshot verifies the target before starting agents.
+
+The invoking checkout's files, index, HEAD and branch tips remain unchanged in worktree mode.
+Only committed files enter the new worktree; ignored dependencies, `.env` and untracked resources
+are neither copied nor linked, and zeroshot performs no dependency setup. Both successful and
+failed worktrees remain for inspection. Resume uses the recorded workspace and keeps HEAD attached
+to its run branch without rewinding shared refs. Remove it explicitly with
+`git worktree remove PATH` after inspection. Named targets and hosted runs keep their managed run
+branches and do not use these local flags.
 
 Contained targets do not inherit your Git login. `--source-connection KEY` selects transport
 credentials: `GIT_USERNAME` and `GIT_PASSWORD` for HTTPS, or `GIT_SSH_PRIVATE_KEY` and

@@ -355,6 +355,7 @@ async fn concurrent_identical_submissions_create_one_local_run() {
 #[tokio::test(flavor = "multi_thread")]
 async fn failed_local_run_restarts_on_its_retained_workspace_with_fresh_connections() {
     let fixture = LocalFixture::new();
+    let branch = git(&fixture.repository, &["symbolic-ref", "--short", "HEAD"]);
     let failed = fixture.run("Recoverable local run", "fail", false).await;
     assert!(
         !failed.status.success(),
@@ -413,6 +414,10 @@ async fn failed_local_run_restarts_on_its_retained_workspace_with_fresh_connecti
             .assert_value_with("workspace edit made after the failure"),
         "retained\n",
         "a restart must keep workspace edits made after the failure"
+    );
+    assert_eq!(
+        git(&fixture.repository, &["symbolic-ref", "--short", "HEAD"]),
+        branch
     );
     let turns = fs::read_to_string(fixture.repository.join("local-session.args"))
         .assert_value_with("local session arguments");

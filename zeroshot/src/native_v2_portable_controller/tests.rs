@@ -175,6 +175,8 @@ pub(super) fn bootstrap(
     )
     .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
+        delivery_receipt: None,
+        local_branch: None,
         memory_storage: None,
         git_credentials: None,
 
@@ -495,11 +497,17 @@ fn bootstrap_is_private_bounded_consumed_and_exact() {
             "private-value".to_owned(),
         ),
     ]);
+    bootstrap.delivery_receipt = Some(serde_json::json!({
+        "version":"v1", "mode":"pr", "outcome":"opened",
+        "repository":"open-engine/zeroshot", "targetBranch":"main",
+        "headRevision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "pullRequestId":"17"
+    }));
     assert!(!format!("{bootstrap:?}").contains("private-value"));
     write_bootstrap_file(&path, &bootstrap).assert_value_with("write bootstrap");
     let loaded = load_bootstrap_file(&path).assert_value_with("load bootstrap");
     assert_eq!(loaded.run_id, run_id);
     assert_eq!(loaded.native_environment, bootstrap.native_environment);
+    assert_eq!(loaded.delivery_receipt, bootstrap.delivery_receipt);
     assert!(!path.exists(), "bootstrap must be consumed exactly once");
 }
 

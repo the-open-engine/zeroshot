@@ -77,6 +77,27 @@ impl TargetFixture {
         );
     }
 
+    fn enable_local_transport(&mut self) {
+        use crate::native_v2_delivery::transport::{GitTransport, GitTransportConfig};
+        let home = self.repository.root.path().to_owned();
+        let transport = GitTransport::new(
+            GitTransportConfig {
+                git_program: self.git_program.clone(),
+                workspace: self.repository.workspace.clone(),
+                home_directory: home.clone(),
+                private_directory: home.clone(),
+                identity: None,
+                local_environment: Some(std::collections::BTreeMap::from([
+                    ("HOME".to_owned(), path_text(&home).to_owned()),
+                    ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+                ])),
+                deadline: Duration::from_secs(10),
+            },
+            "https://github.com/acme/project.git",
+        );
+        self.authority = self.authority.clone().with_git_transport(transport);
+    }
+
     async fn reconcile(&self) -> (String, SourceReconciliationOutcome) {
         let SourceTargetIntegration::Integrated {
             target_revision,
@@ -101,6 +122,157 @@ impl TargetFixture {
                 SourceDeliveryCredential::token("test-token"),
             )
             .await
+    }
+}
+
+#[tokio::test]
+async fn local_source_equal_committed_candidate_integrates_the_diverged_target_for_review() {
+    for managed_worktree in [false, true] {
+        let mut fixture = TargetFixture::new();
+        let invoking = fixture.repository.workspace.clone();
+        git(&invoking, &["checkout", "-b", "feature/committed"]);
+        commit_all(&invoking, "already committed candidate");
+        let source = git_output(&invoking, &["rev-parse", "HEAD"]);
+        fixture.repository.base = source.clone();
+        let config = fs::read(invoking.join(".git/config")).assert_value();
+        if managed_worktree {
+            let worktree = fixture.repository.root.child("committed-worktree");
+            git(
+                &invoking,
+                &[
+                    "worktree",
+                    "add",
+                    "-b",
+                    "zeroshot/v2-committed-target",
+                    path_text(&worktree),
+                    &source,
+                ],
+            );
+            fixture.repository.workspace = worktree;
+        }
+        fixture.enable_local_transport();
+
+        let (_, outcome) = fixture.reconcile().await;
+
+        assert!(
+            matches!(outcome, SourceReconciliationOutcome::NeedsWork(_)),
+            "integration must return through review"
+        );
+        let workspace = &fixture.repository.workspace;
+        assert_ne!(git_output(workspace, &["rev-parse", "HEAD"]), source);
+        for ancestor in [&source, &fixture.target_revision] {
+            git(
+                workspace,
+                &["merge-base", "--is-ancestor", ancestor, "HEAD"],
+            );
+        }
+        assert_eq!(git_output(workspace, &["status", "--porcelain=v1"]), "");
+        assert_eq!(
+            fs::read_to_string(workspace.join("result.txt")).assert_value(),
+            "feature work\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join(".github/workflows/ci.yml")).assert_value(),
+            "new workflow\n"
+        );
+        assert_eq!(
+            fs::read(invoking.join(".git/config")).assert_value(),
+            config
+        );
+        if managed_worktree {
+            assert_eq!(git_output(&invoking, &["rev-parse", "HEAD"]), source);
+            assert_eq!(
+                git_output(&invoking, &["symbolic-ref", "--short", "HEAD"]),
+                "feature/committed"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn local_target_integration_preserves_git_config_and_invoking_worktree() {
+    for managed_worktree in [false, true] {
+        for conflict in [false, true] {
+            let mut fixture = TargetFixture::new();
+            if conflict {
+                fixture.advance_target("README.md", "upstream readme\n");
+            }
+            let invoking = fixture.repository.workspace.clone();
+            git(&invoking, &["config", "user.name", "Human User"]);
+            git(
+                &invoking,
+                &["config", "user.email", "human@example.invalid"],
+            );
+            let config = fs::read(invoking.join(".git/config")).assert_value();
+            let index = fs::read(invoking.join(".git/index")).assert_value();
+            let head = git_output(&invoking, &["rev-parse", "HEAD"]);
+            let status = git_output(&invoking, &["status", "--porcelain=v1"]);
+            let branch = git_output(&invoking, &["symbolic-ref", "--short", "HEAD"]);
+            if managed_worktree {
+                let worktree = fixture.repository.root.child("managed-worktree");
+                git(
+                    &invoking,
+                    &[
+                        "worktree",
+                        "add",
+                        "-b",
+                        "zeroshot/v2-local-config",
+                        path_text(&worktree),
+                        &head,
+                    ],
+                );
+                fs::write(worktree.join("result.txt"), "feature work\n").assert_value();
+                fixture.repository.workspace = worktree;
+            }
+            if conflict {
+                fs::write(
+                    fixture.repository.workspace.join("README.md"),
+                    "worker readme\n",
+                )
+                .assert_value();
+            }
+            fixture.enable_local_transport();
+
+            let (_, outcome) = fixture.reconcile().await;
+
+            assert!(matches!(outcome, SourceReconciliationOutcome::NeedsWork(_)));
+            assert_eq!(
+                fs::read(invoking.join(".git/config")).assert_value(),
+                config
+            );
+            assert_eq!(
+                git_output(
+                    &fixture.repository.workspace,
+                    &["show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD"]
+                ),
+                "Zeroshot <delivery@zeroshot.invalid>|Zeroshot <delivery@zeroshot.invalid>"
+            );
+            if managed_worktree {
+                assert_eq!(fs::read(invoking.join(".git/index")).assert_value(), index);
+                assert_eq!(git_output(&invoking, &["rev-parse", "HEAD"]), head);
+                assert_eq!(
+                    git_output(&invoking, &["symbolic-ref", "--short", "HEAD"]),
+                    branch
+                );
+                assert_eq!(git_output(&invoking, &["status", "--porcelain=v1"]), status);
+            }
+            if conflict {
+                assert_eq!(
+                    git_output(&fixture.repository.workspace, &["rev-parse", "MERGE_HEAD"]),
+                    fixture.target_revision
+                );
+            } else {
+                git(
+                    &fixture.repository.workspace,
+                    &[
+                        "merge-base",
+                        "--is-ancestor",
+                        &fixture.target_revision,
+                        "HEAD",
+                    ],
+                );
+            }
+        }
     }
 }
 

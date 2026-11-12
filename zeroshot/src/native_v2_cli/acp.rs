@@ -550,6 +550,8 @@ impl AcpSession {
         )?)
         .await?;
         let runner = build_local_owner_process_candidate(LocalProcessCandidateRequest {
+            delivery_receipt: None,
+            local_branch: None,
             memory_storage: None,
             admitted: &admitted,
             delivery_run_id: seed_run_id,

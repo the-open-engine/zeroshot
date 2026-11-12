@@ -305,6 +305,7 @@ async fn known_review_and_branch_observation_are_fenced_against_head_movement() 
     let request = request();
     let known = receipt();
     let read = SourceDeliveryRead {
+        include_terminal_reviews: true,
         target: &request.target,
         head_branch: &request.head_branch,
         known_review: Some(&known),
@@ -338,9 +339,12 @@ async fn known_review_and_branch_observation_are_fenced_against_head_movement() 
 async fn incomplete_or_reordered_generated_sections_are_never_overwritten() {
     let fixture = Fixture::new().await;
     for description in [
-        "Human report without a generated section.".to_owned(),
         format!("{DELIVERY_GENERATED_BODY_START}\nMissing end"),
+        format!("Missing start\n{DELIVERY_GENERATED_BODY_END}"),
         format!("{DELIVERY_GENERATED_BODY_END}\n{DELIVERY_GENERATED_BODY_START}"),
+        format!(
+            "{DELIVERY_GENERATED_BODY_START}\n{DELIVERY_GENERATED_BODY_START}\nReport\n{DELIVERY_GENERATED_BODY_END}"
+        ),
         format!(
             "{DELIVERY_GENERATED_BODY_START}\nReport\n{DELIVERY_GENERATED_BODY_END}\n{DELIVERY_GENERATED_BODY_END}"
         ),

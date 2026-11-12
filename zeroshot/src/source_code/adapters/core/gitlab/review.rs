@@ -10,22 +10,25 @@ fn effect_key(repository: &str, branch: &str) -> String {
 
 async fn find(
     authority: &GitLabDeliveryAuthority,
-    target: &DeliveryTarget,
-    branch: &str,
+    request: SourceDeliveryRead<'_>,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<Option<MergeRequest>, SourceDeliveryError> {
+    let target = request.target;
+    let branch = request.head_branch;
     let project = authority.project(&target.repository, credential).await?;
     let mut matches: Vec<MergeRequest> = authority
         .api
-        .json(
+        .pages_request(
             ApiRequest::get(&["projects", &target.repository, "merge_requests"])
                 .query("scope", "all")
                 .query("state", "all")
-                .query("source_branch", branch)
-                .query("per_page", "100"),
+                .query("source_branch", branch),
             credential,
         )
         .await?;
+    if !request.include_terminal_reviews {
+        matches.retain(|review| matches!(review.state.as_str(), "opened" | "locked"));
+    }
     if matches.len() > 1 {
         return Err(super::api::identity_error(
             format!(
@@ -157,7 +160,7 @@ async fn observed_review(
         value.require_review(&current, project.id, credential)?;
         Ok(Some(value))
     } else {
-        find(authority, request.target, request.head_branch, credential).await
+        find(authority, request, credential).await
     }
 }
 
@@ -245,6 +248,15 @@ fn generated_description(request: &SourceReviewRequest) -> String {
 }
 
 fn refresh_description(existing: &str, replacement: &str) -> Result<String, SourceDeliveryError> {
+    if !existing.contains(DELIVERY_GENERATED_BODY_START)
+        && !existing.contains(DELIVERY_GENERATED_BODY_END)
+    {
+        return Ok(if existing.is_empty() {
+            replacement.to_owned()
+        } else {
+            format!("{existing}\n\n{replacement}")
+        });
+    }
     let Some(start) = existing.find(DELIVERY_GENERATED_BODY_START) else {
         return Err(SourceDeliveryError::identity(
             "GitLab review lacks its generated metadata section",
@@ -269,6 +281,16 @@ fn refresh_description(existing: &str, replacement: &str) -> Result<String, Sour
     Ok(body)
 }
 
+fn review_read(request: &SourceReviewRequest) -> SourceDeliveryRead<'_> {
+    SourceDeliveryRead {
+        target: &request.target,
+        head_branch: &request.head_branch,
+        known_review: request.known_review.as_ref(),
+        include_review: true,
+        include_terminal_reviews: request.include_terminal_reviews,
+    }
+}
+
 pub(super) async fn open_or_update(
     authority: &GitLabDeliveryAuthority,
     request: &SourceReviewRequest,
@@ -280,7 +302,7 @@ pub(super) async fn open_or_update(
     let request = normalized_request(request)?;
     let request = &request;
     let description = generated_description(request);
-    let found = find(authority, &request.target, &request.head_branch, credential).await?;
+    let found = observed_review(authority, review_read(request), credential).await?;
     if let Some(found) = found {
         return update(authority, (request, &found, &description), credential).await;
     }
@@ -390,7 +412,7 @@ async fn reconcile_creation(
     original: SourceDeliveryError,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<MergeRequest, SourceDeliveryError> {
-    match find(authority, &request.target, &request.head_branch, credential).await? {
+    match observed_review(authority, review_read(request), credential).await? {
         Some(value) => Ok(value),
         None if matches!(original.api_status(), Some(400..=499)) => {
             let key = effect_key(&request.target.repository, &request.head_branch);

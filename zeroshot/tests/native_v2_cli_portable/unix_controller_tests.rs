@@ -122,6 +122,126 @@ fn unix_controller_sigterm_persists_stop_retains_checkpoints_and_resumes() {
 }
 
 #[test]
+fn unix_controller_sigterm_worktree_resume_restores_files_without_rewinding_the_run_branch() {
+    fn git(workspace: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(workspace)
+            .args(args)
+            .output()
+            .unwrap();
+        success(&output);
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
+
+    let mut fixture = Fixture::new();
+    let invoking = fixture.workspace.clone();
+    let invoking_state = || {
+        [
+            git(&invoking, &["symbolic-ref", "HEAD"]),
+            git(&invoking, &["rev-parse", "HEAD"]),
+            git(&invoking, &["ls-files", "--stage"]),
+            git(&invoking, &["status", "--porcelain=v1"]),
+        ]
+    };
+    let before = invoking_state();
+    let output = fixture
+        .run_command("block", true)
+        .arg("--worktree")
+        .output()
+        .unwrap();
+    success(&output);
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = receipt["runId"].as_str().unwrap().to_owned();
+    let recovery: Value = serde_json::from_slice(
+        &std::fs::read(
+            fixture
+                .root
+                .path(&format!("state/runs/{id}/workspace-recovery.json")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    fixture.workspace = PathBuf::from(recovery["workspace"].as_str().unwrap());
+    let branch = recovery["localBranch"].as_str().unwrap();
+    let child = fixture.await_child();
+    let run = Run::from_started(fixture, id, child);
+    run.signal(libc::SIGTERM);
+    run.wait_closed(STOP_LIMIT);
+    assert_eq!(run.terminal()["reason"], "force_stopped");
+    assert_eq!(invoking_state(), before);
+
+    let checkpoints = run.fixture.json(&["checkpoints", &run.id]);
+    let checkpoint = checkpoints["checkpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["node"] == "worker")
+        .unwrap()["checkpointId"]
+        .as_str()
+        .unwrap();
+    std::fs::write(
+        run.fixture.workspace.join("seed"),
+        "later committed recovery",
+    )
+    .unwrap();
+    git(&run.fixture.workspace, &["commit", "-am", "later recovery"]);
+    let live_head = git(&run.fixture.workspace, &["rev-parse", "HEAD"]);
+    // Recovery must carry the saved branch through the shutdown-aware controller factory,
+    // even when the retained checkout was detached after the stop.
+    git(
+        &run.fixture.workspace,
+        &["checkout", "--detach", &live_head],
+    );
+    let output = run
+        .fixture
+        .command(&[
+            "resume",
+            &run.id,
+            "--from-checkpoint",
+            checkpoint,
+            "--discard-workspace-changes",
+        ])
+        .env("FIXTURE_MODE", "finish")
+        .output()
+        .unwrap();
+    success(&output);
+    let resumed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let successor = resumed["runId"].as_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = run.fixture.json(&["status", successor]);
+        if status["status"]["phase"] == "finished" {
+            assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
+            break;
+        }
+        assert!(Instant::now() < deadline, "successor did not finish");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert_eq!(
+        git(&run.fixture.workspace, &["symbolic-ref", "HEAD"]),
+        format!("refs/heads/{branch}")
+    );
+    assert_eq!(
+        git(&run.fixture.workspace, &["rev-parse", "HEAD"]),
+        live_head
+    );
+    assert_eq!(
+        git(&run.fixture.workspace, &["rev-parse", branch]),
+        live_head
+    );
+    assert_eq!(
+        std::fs::read_to_string(run.fixture.workspace.join("seed")).unwrap(),
+        "seed"
+    );
+    assert_eq!(
+        std::fs::read_to_string(run.fixture.workspace.join("mutation.txt")).unwrap(),
+        "native worker ran"
+    );
+    assert_eq!(invoking_state(), before);
+    assert!(run.fixture.workspace.is_dir());
+}
+
+#[test]
 fn unix_controller_repeated_sigterm_waits_for_durable_stop_after_slow_ledger() {
     let run = Run::start();
     let ledger = rusqlite::Connection::open(run.storage.join("runs.sqlite3")).unwrap();

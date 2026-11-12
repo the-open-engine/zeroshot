@@ -61,6 +61,9 @@ impl Fixture {
                     .unwrap(),
             );
         }
+        // Environment-cleared instrumented processes write default profiles in their checkout.
+        // Keep them out of Git status and commits; linked worktrees share this exclude file.
+        std::fs::write(fixture.workspace.join(".git/info/exclude"), "*.profraw\n").unwrap();
         std::fs::write(fixture.workspace.join("seed"), "seed").unwrap();
         success(
             &Command::new("git")

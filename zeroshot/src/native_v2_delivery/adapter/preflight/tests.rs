@@ -12,6 +12,7 @@ async fn gitlab_existing_run_branch_refusal_names_the_observed_branch_and_revisi
         .authority
         .observe_delivery(
             SourceDeliveryRead {
+                include_terminal_reviews: true,
                 target: &target,
                 head_branch: "zeroshot/test",
                 known_review: None,

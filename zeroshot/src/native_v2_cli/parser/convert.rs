@@ -391,6 +391,10 @@ impl RunArgs {
         Ok(NativeV2CliCommand::Run(Box::new(RunCommand {
             target: route.target,
             cwd: self.cwd,
+            worktree: self.worktree.then_some(
+                self.worktree_base
+                    .unwrap_or(super::super::LocalWorktreeBase::Local),
+            ),
             source_connection: self
                 .source_connection
                 .map(openengine_cluster_protocol::ConnectionKey::new)

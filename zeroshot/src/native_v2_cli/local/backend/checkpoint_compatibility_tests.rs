@@ -29,6 +29,11 @@ fn recovery(root: &TestDirectory, checkpoints: bool) -> LocalRecoveryDocument {
     let mut submission = contract_submission("checkpoint-compatibility");
     submission.runtime.workspace_checkpoints = checkpoints;
     LocalRecoveryDocument {
+        delivery_receipt: None,
+        local_branch: None,
+        invoking_workspace: None,
+        request_digest: None,
+        workspace_revision: None,
         submission,
         workspace: root.child("workspace"),
         resumed_from: None,
@@ -213,7 +218,8 @@ fn selected_checkpoint_requires_consent_before_it_is_pinned() {
     for expected in [
         "restoring checkpoint entry-1 discards this workspace's",
         "untracked, and ignored files",
-        "HEAD and the index",
+        "and its index",
+        "attached HEAD",
         "branches and commits are kept",
         "zeroshot resume 0199f33f-3b44-7d21-9000-000000000001 --from-checkpoint entry-1 \
          --discard-workspace-changes",

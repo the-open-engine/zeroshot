@@ -5,6 +5,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 fn adapter() -> NativeV2DeliveryAdapter {
     NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            local_branch: None,
             delivery_run_id: RunId::new("cleanup-publication"),
             adopt_existing_delivery: false,
             git_identity: None,

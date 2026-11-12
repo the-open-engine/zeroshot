@@ -136,6 +136,10 @@ pub struct SourcePushRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceReviewRequest {
+    /// An owned review is refreshed by identity rather than rediscovered from branch history.
+    pub known_review: Option<SourceReviewReceipt>,
+    /// Unbound lineage recovery may discover terminal reviews; fresh local runs select active ones.
+    pub include_terminal_reviews: bool,
     pub target: DeliveryTarget,
     pub head_branch: String,
     pub head_revision: String,
@@ -497,6 +501,7 @@ pub enum SourceHeadUpdateOutcome {
 /// Identity-constrained read before any delivery mutation.
 #[derive(Clone, Copy)]
 pub struct SourceDeliveryRead<'a> {
+    pub include_terminal_reviews: bool,
     pub target: &'a DeliveryTarget,
     pub head_branch: &'a str,
     pub known_review: Option<&'a SourceReviewReceipt>,
@@ -511,6 +516,8 @@ pub struct SourceDeliverySnapshot {
 
 #[derive(Clone, Copy)]
 pub struct SourceHeadReconciliation<'a> {
+    /// Local delivery may publish only a fast-forward of the existing remote branch.
+    pub require_fast_forward: bool,
     pub workspace: &'a std::path::Path,
     pub published: &'a SourceReviewReceipt,
     pub observed: &'a SourceReviewReceipt,

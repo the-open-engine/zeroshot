@@ -109,8 +109,21 @@ to export the complete `GraphSpec`.
 | `--pr`            | Open or update a PR, address feedback and wait for CI; leave merging to you |
 | `--ship`          | Follow the same review loop, then merge under the repository's policy       |
 
-Required approval blocks `--ship`, but not `--pr`. For local PR and merge runs, the target branch
-is the current branch's upstream, or its local name when no upstream is set. See
+Required approval blocks `--ship`, but not `--pr`.
+
+**Breaking change:** local delivery commits on the checked-out branch and publishes the remote
+branch of the same name, including existing unpushed commits. In-place runs create no managed
+`zeroshot/v2-…` branch. `--pr` and `--ship` target a different upstream branch when configured,
+otherwise the remote's default branch. Starting on that target is refused before agents start;
+use a feature branch or `--worktree`. Explicit `--push` can publish `main`; delivery never force-pushes.
+
+Add `--worktree` to work on a managed run branch in a separate, retained Git worktree. Its default
+base is the invoking branch's exact local HEAD. `--worktree-base remote` fetches its upstream and
+requires one to be configured. Delivery commits and publishes the matching managed run branch;
+PR/MR targets remain the invoking branch's upstream, or its name when none is set. The invoking
+checkout stays unchanged. Worktrees contain committed files only, with no dependency setup or
+untracked resources copied. Resume reuses the worktree and keeps HEAD attached without rewinding
+shared branch tips. Remove the worktree explicitly when finished. See
 [source and delivery setup](targets.md#source-and-delivery-credentials).
 
 PR feedback is enabled by default and restricted to repository writers. `--no-pr-feedback`

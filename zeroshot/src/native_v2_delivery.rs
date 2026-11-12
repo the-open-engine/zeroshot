@@ -1,7 +1,7 @@
 //! Native-v2's graph-visible Git delivery node.
 //!
 //! Two graph worker references select PR or merge completion on one shared implementation. Both
-//! commit the workspace, push one deterministic run branch, and create or rediscover one stable
+//! commit the workspace, publish its configured local or managed run branch, and rediscover one stable
 //! review. Only authoritative open/merge observations produce successful inline receipts;
 //! conflict and CI failure remain routable attempt results.
 
@@ -233,6 +233,8 @@ impl Default for DeliveryPollPolicy {
 pub struct NativeV2DeliveryConfig {
     pub delivery_run_id: RunId,
     pub adopt_existing_delivery: bool,
+    /// Local delivery publishes this attached branch; contained runs use the managed run name.
+    pub local_branch: Option<String>,
     /// Pinned workspace owner for hosted Git; local execution inherits the caller.
     pub git_identity: Option<crate::execution::process::HostedProcessIdentity>,
     /// Host-selected author and committer of delivered commits; absent keeps
@@ -265,6 +267,12 @@ impl DeliveryLineage {
 }
 
 impl NativeV2DeliveryConfig {
+    pub(crate) fn head_branch(&self) -> String {
+        self.local_branch
+            .clone()
+            .unwrap_or_else(|| delivery_head_branch(&self.delivery_run_id))
+    }
+
     #[must_use]
     pub fn for_hosted_workspace(
         lineage: DeliveryLineage,
@@ -273,6 +281,7 @@ impl NativeV2DeliveryConfig {
         identity: crate::execution::process::HostedProcessIdentity,
     ) -> Self {
         Self {
+            local_branch: None,
             delivery_run_id: lineage.delivery_run_id,
             adopt_existing_delivery: lineage.adopt_existing_delivery,
             workspace,
@@ -287,6 +296,7 @@ impl NativeV2DeliveryConfig {
 }
 
 pub use adapter::NativeV2DeliveryAdapter;
+pub(crate) use adapter::ReviewBindingRecorder;
 mod token_file;
 pub use token_file::TrustedGitHubTokenFile;
 pub(crate) use token_file::{GITHUB_TOKEN_FILE_ENV, validate_token as validate_github_delivery_token};

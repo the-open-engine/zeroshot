@@ -527,6 +527,11 @@ pub(super) fn assert_local_run_id(run_id: &str) {
 
 fn initialize_repository(repository: &Path) {
     git(repository, &["init"]);
+    // Instrumented CLI/controller processes clear their environment and write default LLVM
+    // profiles in this checkout. Keep test instrumentation out of delivery commits and status;
+    // linked worktrees share this repository-local exclude file.
+    fs::write(repository.join(".git/info/exclude"), "*.profraw\n")
+        .assert_value_with("exclude test coverage profiles");
     git(repository, &["config", "user.name", "Local CLI Test"]);
     git(
         repository,
@@ -841,3 +846,6 @@ impl LocalFixture {
         );
     }
 }
+
+#[path = "worktree_runs.rs"]
+mod worktree_runs;

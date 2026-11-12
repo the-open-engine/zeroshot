@@ -186,6 +186,42 @@ impl GitTransport {
         parse_ref(output.stdout(), &reference)
     }
 
+    /// Reads the remote's authoritative default branch without changing checkout refs.
+    pub(crate) async fn default_branch(
+        &self,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<String, SourceDeliveryError> {
+        let output = self
+            .execute(
+                &[
+                    "ls-remote".into(),
+                    "--symref".into(),
+                    "--".into(),
+                    self.remote.clone(),
+                    "HEAD".into(),
+                ],
+                credential,
+                self.config.deadline,
+            )
+            .await?
+            .require_success()?;
+        if !output.stdout_truncated() && output.stdout().len() <= 4096 {
+            for line in output.stdout().lines() {
+                if let Some(branch) = line
+                    .strip_prefix("ref: refs/heads/")
+                    .and_then(|line| line.strip_suffix("\tHEAD"))
+                {
+                    if crate::source_code_provider::valid_git_branch(branch) {
+                        return Ok(branch.to_owned());
+                    }
+                }
+            }
+        }
+        Err(SourceDeliveryError::identity(
+            "remote default branch could not be resolved",
+        ))
+    }
+
     pub async fn confirm_ref(
         &self,
         branch: &str,
@@ -380,7 +416,9 @@ impl GitTransport {
                         Err(error.with_context(failure))
                     }
                     Err(error) => Err(failure
-                        .with_context(format!("push confirmation failed: {error}"))
+                        .with_context(format!(
+                            "push to branch `{branch}` failed; push confirmation failed: {error}"
+                        ))
                         .into()),
                 }
             }

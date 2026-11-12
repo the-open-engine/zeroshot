@@ -19,6 +19,8 @@ fn github_authority(
 
 fn review_request(source_issue: Option<u64>) -> SourceReviewRequest {
     SourceReviewRequest {
+        include_terminal_reviews: true,
+        known_review: None,
         target: DeliveryTarget::new(
             "acme/project",
             "main",

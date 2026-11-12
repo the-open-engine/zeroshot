@@ -270,6 +270,8 @@ fn review_bootstrap(fixture: &Fixture, bin: &Path) -> PortableControllerBootstra
             "nodes":{"reviewer":{"kind":"agent", "model":"fixture"}, "deliver":{"kind":"comment_delivery"}}}
     })).unwrap();
     PortableControllerBootstrap {
+        delivery_receipt: None,
+        local_branch: None,
         checkpoint: None,
         preparation_timeout: Duration::from_secs(120),
         run_id: RunId::new("review-stop"),

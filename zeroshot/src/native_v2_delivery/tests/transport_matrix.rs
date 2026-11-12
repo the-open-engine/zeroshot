@@ -575,6 +575,7 @@ async fn http_remote_update_preserves_dirty_repairs_without_reusing_old_approval
     let result = authority
         .reconcile_delivery_head(
             SourceHeadReconciliation {
+                require_fast_forward: false,
                 workspace: &repo.workspace,
                 published: &published,
                 observed: &observed,
@@ -617,15 +618,32 @@ async fn http_remote_update_preserves_dirty_repairs_without_reusing_old_approval
 
 #[tokio::test]
 async fn resumed_delivery_checkpoint_reuses_the_identical_complete_candidate() {
-    resumed_candidate(&TempRepo::delivery(), false).await;
+    resumed_candidate(&TempRepo::delivery(), false, false).await;
 }
 
 #[tokio::test]
 async fn resumed_delivery_checkpoint_preserves_different_candidate_content() {
-    resumed_candidate(&TempRepo::delivery(), true).await;
+    resumed_candidate(&TempRepo::delivery(), true, false).await;
 }
 
-async fn resumed_candidate(repo: &TempRepo, different: bool) {
+#[tokio::test]
+async fn resumed_local_delivery_reuses_the_identical_complete_candidate_without_rewriting_history()
+{
+    resumed_candidate(&TempRepo::delivery(), false, true).await;
+}
+
+#[tokio::test]
+async fn resumed_local_delivery_refuses_a_different_candidate_behind_the_remote_without_repair() {
+    resumed_candidate(&TempRepo::delivery(), true, true).await;
+}
+
+async fn resumed_candidate(repo: &TempRepo, different: bool, local: bool) {
+    let branch = if local {
+        git(&repo.workspace, &["checkout", "-b", "feature/resumed"]);
+        "feature/resumed".to_owned()
+    } else {
+        delivery_head_branch(&RunId::new(RUN))
+    };
     let base = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
     fs::write(repo.workspace.join("staged.txt"), "staged\n").assert_value();
     git(&repo.workspace, &["add", "staged.txt"]);
@@ -645,7 +663,6 @@ async fn resumed_candidate(repo: &TempRepo, different: bool) {
         ],
     );
     let published = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
-    let branch = delivery_head_branch(&RunId::new(RUN));
     git(
         &repo.workspace,
         &[
@@ -668,15 +685,54 @@ async fn resumed_candidate(repo: &TempRepo, different: bool) {
     );
     let server = HttpGit::start(&repo.remote);
     let authority = Arc::new(TransportAuthority::new(repo, &server, Update::None));
-    let execution = execute(repo, adopting_adapter(repo, authority.clone()), false).await;
-    assert_delivery_signal(
-        &execution.outcome,
-        if different {
-            DELIVERY_REPAIR_REQUIRED_LABEL
-        } else {
-            DELIVERY_MERGED_LABEL
-        },
-    );
+    let delivery = if local {
+        Arc::new(NativeV2DeliveryAdapter::new(
+            NativeV2DeliveryConfig {
+                local_branch: Some(branch.clone()),
+                delivery_run_id: RunId::new(RUN),
+                adopt_existing_delivery: true,
+                git_identity: None,
+                commit_identity: None,
+                commit_co_author: None,
+                workspace: repo.workspace.clone(),
+                git_program: "/usr/bin/git".into(),
+                target: target(repo),
+                poll: DeliveryPollPolicy::new(5, Duration::from_millis(1)).assert_value(),
+            },
+            authority.clone(),
+        ))
+    } else {
+        adopting_adapter(repo, authority.clone())
+    };
+    let execution = execute(repo, delivery, false).await;
+    if local {
+        assert_eq!(
+            git_output(&repo.workspace, &["symbolic-ref", "--short", "HEAD"]),
+            branch
+        );
+    }
+    if local && different {
+        assert_eq!(
+            execution.outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+        );
+        assert!(
+            execution
+                .output
+                .iter()
+                .any(|record| record.text.contains(&branch))
+        );
+        assert_eq!(git_output(&repo.workspace, &["rev-parse", "HEAD"]), base);
+    } else {
+        assert_delivery_signal(
+            &execution.outcome,
+            if different {
+                DELIVERY_REPAIR_REQUIRED_LABEL
+            } else {
+                DELIVERY_MERGED_LABEL
+            },
+        );
+    }
     assert_eq!(reference(&repo.remote, &branch), Some(published.clone()));
     assert_eq!(
         authority.pushes.load(Ordering::SeqCst),
@@ -736,6 +792,7 @@ async fn resumed_delivery_checkpoint_preserves_a_pending_merge() {
     let outcome = authority(&repo, &server)
         .reconcile_delivery_head(
             SourceHeadReconciliation {
+                require_fast_forward: false,
                 workspace: &repo.workspace,
                 published: &published,
                 observed: &published,
@@ -794,7 +851,7 @@ async fn resumed_delivery_checkpoint_preserves_nonstageable_submodule_contents()
     )
     .assert_value();
 
-    resumed_candidate(&repo, false).await;
+    resumed_candidate(&repo, false, false).await;
 
     assert_eq!(
         fs::read_to_string(dependency.join("README.md")).assert_value(),

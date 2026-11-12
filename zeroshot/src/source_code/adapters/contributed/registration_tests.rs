@@ -248,6 +248,7 @@ async fn ordinary_runtime_factory_binds_the_contributed_context_transport() {
     let observed = authority
         .observe_delivery(
             SourceDeliveryRead {
+                include_terminal_reviews: true,
                 target: &target,
                 head_branch: "main",
                 known_review: None,
