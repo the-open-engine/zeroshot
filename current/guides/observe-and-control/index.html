@@ -2468,8 +2468,9 @@ cleanup failure during finalization can instead prevent completion or end the ru
 <code>runtime_failed</code> or <code>runtime_lost</code>. Read <code>terminalResult</code> once the run is finished.</p>
 <h2 id="token-usage">Token usage<a class="headerlink" href="#token-usage" title="Permanent link">&para;</a></h2>
 <p><code>metadata.tokenUsage</code> contains run totals summed across agent invocations, including retries,
-correction turns and auxiliary agents such as postmortem specialists. Counters are summed as each
-harness reports them; input-token accounting can differ between harnesses.</p>
+correction turns and auxiliary agents such as postmortem specialists. <code>inputTokens</code> means uncached
+input only for every harness. Cache reads and cache writes appear only in their respective cache
+counters, so the four token counters do not overlap and can be added.</p>
 <table>
 <thead>
 <tr>
@@ -2480,7 +2481,7 @@ harness reports them; input-token accounting can differ between harnesses.</p>
 <tbody>
 <tr>
 <td><code>inputTokens</code></td>
-<td>Input tokens reported by the harness.</td>
+<td>Uncached input tokens, excluding cache reads/writes.</td>
 </tr>
 <tr>
 <td><code>outputTokens</code></td>
@@ -2503,7 +2504,8 @@ harness reports them; input-token accounting can differ between harnesses.</p>
 <p>When <code>complete</code> is <code>false</code>, the totals retain known usage but at least one invocation's usage is
 missing or unusable. An omitted cache counter means at least one invocation did not report that
 counter; its run total is unknown, not zero. Cache counters can be omitted even when <code>complete</code> is
-<code>true</code>. Script steps record zero for all four counters and preserve known cache totals.</p>
+<code>true</code>. Script steps record zero for all four counters and preserve known cache totals.
+Previously recorded runs retain their original numbers.</p>
 <h2 id="failure-evidence-and-mapped-executions">Failure evidence and mapped executions<a class="headerlink" href="#failure-evidence-and-mapped-executions" title="Permanent link">&para;</a></h2>
 <p>Failed <code>terminalResult.context</code> separates the known runtime cause (<code>primary</code>) from recent recorded
 execution errors (<code>recorded</code>) and verifier results (<code>verifiers</code>). Each verifier result is the latest
