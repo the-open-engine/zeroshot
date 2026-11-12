@@ -2270,10 +2270,28 @@ and issue or review comments.</p>
 </tr>
 </tbody>
 </table>
-<p>Instances must be publicly reachable over HTTPS with trusted TLS. Older or unidentifiable servers
-fail version checks. Use a web base without a trailing slash, including any GitLab installation
+<p>Instances must be reachable over HTTPS with certificate verification enabled. Local delivery honors
+the invoking shell's <code>HTTPS_PROXY</code>, <code>HTTP_PROXY</code>, <code>ALL_PROXY</code>, <code>NO_PROXY</code>, their lower-case forms,
+<code>SSL_CERT_FILE</code> and <code>SSL_CERT_DIR</code>. Git transport, the early forge check and delivery use the same
+captured settings, including after <code>resume</code>; no stored network configuration is needed. GitLab
+accepts private CA certificates from the named PEM file or certificate directories. On Linux the
+GitHub CLI also honors those CA paths. On macOS and Windows that depends on the installed GitHub
+CLI: a release built with Go 1.27 or newer honors them, and an older release uses only the system
+certificate store. If the early check reports an untrusted certificate there, update the GitHub
+CLI or install your forge's CA in the system store. An unreadable certificate file is reported by
+name. Proxy credentials are kept private.
+Relative CA paths are anchored to the invoking directory before a delivery worktree is created.
+GitLab also supports <code>socks5://</code> and <code>socks5h://</code> proxy URLs through these same variables.</p>
+<p>Older or unidentifiable servers fail version checks. Use a web base without a trailing slash, including any GitLab installation
 prefix (such as <code>https://gitlab.example/install</code>). GitHub uses a root web URL.</p>
 <h2 id="local-setup">Local setup<a class="headerlink" href="#local-setup" title="Permanent link">&para;</a></h2>
+<p>Before agents start, local <code>--pr</code> and <code>--ship</code> runs make one authenticated, read-only forge request
+to check connectivity, token acceptance, project readability and the supported server version.
+A refusal names the forge, failed step and reason. Resume repeats this check with the resuming
+shell's captured settings. Token scopes and merge permissions are checked by the actual operations.
+Checkpoint resumes check after restoring the selected files, so delivery programs in the checkpoint
+are available before the check and before any agent starts.
+Runs without forge delivery and <code>--validate-only</code> keep their existing behavior.</p>
 <p>Local <code>--push</code>, <code>--pr</code> and <code>--ship</code> runs require a clean checkout before agents start. Commit, stash
 or remove staged, unstaged and unignored untracked changes named in the refusal. Finish or abort a
 pending merge first. Changed submodule commit pointers count; files inside submodules do not.
