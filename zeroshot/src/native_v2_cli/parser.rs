@@ -101,6 +101,8 @@ enum CliCommand {
     /// workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
     ///
     /// A foreground run follows NDJSON events until completion. --detach returns after submission.
+    /// It prints graphResult when the graph ends and keeps waiting through the Active Memory
+    /// postmortem and finalization; its exit code follows the final terminalResult.
     /// Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the
     /// receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
     Run(Box<RunArgs>),
@@ -157,10 +159,10 @@ enum UtilityCommand {
     /// List runs as JSON.
     List(TargetRouteArgs),
 
-    /// Read a run's current status as JSON, including separate native delivery evidence when available.
+    /// Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence.
     Status(RunSelectorArgs),
 
-    /// Follow durable status as NDJSON, including native delivery evidence independently of graph output.
+    /// Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization.
     Watch(RunWatchArgs),
 
     /// Follow a run's log stream as NDJSON.

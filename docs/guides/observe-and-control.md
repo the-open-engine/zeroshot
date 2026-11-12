@@ -47,6 +47,30 @@ A run ID belongs to the controller or target that created it. Pass `--target NAM
 from a named target. Finished status separates graph-authored `terminalResult.output` from optional
 runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the receipt.
 
+When the graph ends, `status` and `list` expose its recorded outcome as `status.graphResult`,
+using the same shape as `terminalResult`, while `phase` remains `running` during the Active Memory
+postmortem and finalization. For example:
+
+```json
+{
+  "phase": "running",
+  "activeExecutions": [],
+  "graphResult": { "status": "failed", "reason": "worker_failed" }
+}
+```
+
+`graphResult` is absent before the graph ends and after the run finishes, when `terminalResult`
+is the only result. It remains visible if finalization enters `stopping`. `watch` emits the result
+as soon as it is recorded, and foreground `run` prints that event and keeps waiting for finalization.
+The log records the graph result once and says when the postmortem is running. Exit codes still
+follow the final run result.
+
+The recorded graph result does not guarantee the final run result. A force stop during the
+postmortem cancels and drains that work and preserves the recorded graph result; ordinary
+postmortem failures and controller restart after confirmed cleanup preserve it too. A runtime or
+cleanup failure during finalization can instead prevent completion or end the run with
+`runtime_failed` or `runtime_lost`. Read `terminalResult` once the run is finished.
+
 ## Token usage
 
 `metadata.tokenUsage` contains run totals summed across agent invocations, including retries,

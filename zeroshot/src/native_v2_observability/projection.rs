@@ -33,9 +33,17 @@ pub(super) fn status_from_snapshot(
         RunPhase::Admitted => Ok(RunStatus::Admitted {}),
         RunPhase::Running => Ok(RunStatus::Running {
             active_executions: active_executions()?,
+            graph_result: snapshot
+                .primary_graph
+                .as_ref()
+                .map(|primary| primary.result.clone()),
         }),
         RunPhase::Stopping => Ok(RunStatus::Stopping {
             active_executions: active_executions()?,
+            graph_result: snapshot
+                .primary_graph
+                .as_ref()
+                .map(|primary| primary.result.clone()),
         }),
         RunPhase::Finished => Ok(RunStatus::Finished {
             terminal_result: snapshot
@@ -61,7 +69,6 @@ pub(super) fn changes_public_status(event: &RunEvent) -> bool {
             | RunEvent::SafeLog { .. }
             | RunEvent::TokenUsageObserved { .. }
             | RunEvent::RunTokenUsageObserved { .. }
-            | RunEvent::PrimaryGraphCompleted { .. }
     )
 }
 

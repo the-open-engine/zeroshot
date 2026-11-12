@@ -260,9 +260,9 @@ pub(super) async fn append_interrupted(
             diagnostic: None,
         });
     }
-    events.extend(crate::native_v2_supervisor::logging::terminal_events(
-        primary.result.clone(),
-    )?);
+    events.push(RunEvent::Terminal {
+        result: primary.result.clone(),
+    });
     ledger.append(&stored.snapshot.run_id, events).await?;
     Ok(())
 }

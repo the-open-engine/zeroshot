@@ -9,8 +9,8 @@ use openengine_cluster_protocol::{
 
 use crate::native_v2_contract::{ExecutionRef, NodeCompletion};
 use crate::v2_run_ledger::{
-    RunEvent, RunLedger, RunLedgerError, RunSnapshot, SafeLogLine, SafeLogStream, StoredRun,
-    cursor_sequence,
+    PrimaryGraphCompletion, RunEvent, RunLedger, RunLedgerError, RunSnapshot, SafeLogLine,
+    SafeLogStream, StoredRun, cursor_sequence,
 };
 
 /// Record the executing build before preparation or dispatch can produce other logs.
@@ -94,16 +94,31 @@ pub(super) fn runtime_failure_log(cause: &str) -> Result<RunEvent, RunLedgerErro
     )
 }
 
-pub(crate) fn terminal_events(result: TerminalResult) -> Result<Vec<RunEvent>, RunLedgerError> {
-    let mut events = Vec::new();
-    if let TerminalResult::Failed { reason, .. } = &result {
-        events.push(error_log(
-            None,
+pub(super) fn primary_graph_events(
+    primary: PrimaryGraphCompletion,
+) -> Result<Vec<RunEvent>, RunLedgerError> {
+    let (stream, mut message) = match &primary.result {
+        TerminalResult::Failed { reason, .. } => (
+            SafeLogStream::Error,
             format!("Run failed: {}", reason.as_str()),
-            None,
-        )?);
+        ),
+        TerminalResult::Succeeded { .. } => (SafeLogStream::System, "Run succeeded".to_owned()),
+    };
+    if primary.auxiliary_pending {
+        message.push_str("; Active Memory postmortem is running");
     }
-    events.push(RunEvent::Terminal { result });
+    let mut events = vec![RunEvent::SafeLog {
+        execution: None,
+        diagnostic: None,
+        timestamp: crate::native_v2_runner::current_timestamp(),
+        stream,
+        line: SafeLogLine::new(message)?,
+    }];
+    events.push(RunEvent::PrimaryGraphCompleted {
+        result: primary.result,
+        auxiliary_pending: primary.auxiliary_pending,
+        delivery_execution: primary.delivery_execution,
+    });
     Ok(events)
 }
 
@@ -129,7 +144,16 @@ pub(crate) fn terminal_failure_events(
         )?);
     }
     clear_diagnostics(&mut events);
-    events.extend(terminal_events(terminal)?);
+    if snapshot.primary_graph.is_none()
+        && let TerminalResult::Failed { reason, .. } = &terminal
+    {
+        events.push(error_log(
+            None,
+            format!("Run failed: {}", reason.as_str()),
+            None,
+        )?);
+    }
+    events.push(RunEvent::Terminal { result: terminal });
     Ok(events)
 }
 
