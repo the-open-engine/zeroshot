@@ -643,6 +643,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retry policy, event parsing, and final-answer semantics. Shared provider text publication batches deltas, redacts credentials
   across event/stream boundaries, and emits bounded UTF-8 records. `HarnessProcessEnvironment`
   owns the minimal nonsecret environment for Claude and Pi in local and hosted composition.
+  `inputTokens` means uncached input; input, output, cache reads and cache writes are disjoint.
+  Adapters normalize native counters before publication: Codex subtracts cache reads and writes
+  after its resumed-session delta while retaining native baselines; Copilot subtracts both per call.
+  Recorded usage remains unchanged and omitted cache counters remain unknown.
   `TokenUsageDelta::checked_add` owns bounded provider-neutral usage arithmetic. Overflow or
   malformed claimed Pi usage makes the turn total incomplete permanently rather than publishing
   an earlier partial total. Native

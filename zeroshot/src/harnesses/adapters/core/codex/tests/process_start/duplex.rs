@@ -107,7 +107,7 @@ async fn input_failure_wins_while_the_unfinished_output_is_drained() {
     assert_resumed(&run);
     assert_eq!(run.usages.len(), 2);
     let usage = run.usages.first().copied().flatten().assert_value();
-    assert_eq!(usage.input_tokens.get(), 23);
+    assert_eq!(usage.input_tokens.get(), 1);
     assert_eq!(usage.output_tokens.get(), 9);
     assert_eq!(usage.cache_read_input_tokens.assert_value().get(), 17);
     assert_eq!(usage.cache_creation_input_tokens.assert_value().get(), 5);

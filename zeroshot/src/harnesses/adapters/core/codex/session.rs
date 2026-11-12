@@ -33,10 +33,7 @@ impl CodexSession {
     ) -> Option<TokenUsageDelta> {
         let observed = observed?;
         let previous = *self.usage.lock().await;
-        if !resumed {
-            return Some(observed);
-        }
-        Some(previous.map_or(observed, |previous| {
+        let mut delta = previous.filter(|_| resumed).map_or(observed, |previous| {
             if usage_reset(previous, observed) {
                 observed
             } else {
@@ -53,7 +50,24 @@ impl CodexSession {
                     ),
                 }
             }
-        }))
+        });
+        // Normalize only after the native cumulative delta; commit_usage retains native counters.
+        // The API's ordinary-input calculation excludes both cache reads and writes:
+        // https://developers.openai.com/api/docs/guides/prompt-caching (Monitor cache performance).
+        // Codex maps those counters unchanged. See openai/codex at
+        // c0cc9fc820f62e4dbdde68214dd6d792d6c8a7ee:
+        // codex-rs/protocol/src/protocol.rs (TokenUsage::non_cached_input) and
+        // codex-rs/codex-api/src/sse/responses.rs (From<ResponseCompletedUsage>,
+        // parses_cache_write_token_usage: input=100 includes read=40 and write=60).
+        delta.input_tokens = token_delta(
+            delta.cache_read_input_tokens.unwrap_or_default(),
+            delta.input_tokens,
+        );
+        delta.input_tokens = token_delta(
+            delta.cache_creation_input_tokens.unwrap_or_default(),
+            delta.input_tokens,
+        );
+        Some(delta)
     }
 
     pub(super) async fn commit_usage(&self, observed: Option<TokenUsageDelta>, resumed: bool) {

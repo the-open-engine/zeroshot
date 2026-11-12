@@ -313,7 +313,10 @@ impl PiTranscript {
     }
 }
 
-/// Pi usage records are complete cumulative snapshots in provider-native field names.
+/// Pi already separates uncached input, cache reads and cache writes. See badlogic/pi-mono at
+/// 749d88d70047ef9053b0ab35efb192bca7d5a301, packages/ai/src/api/:
+/// openai-responses-shared.ts (processResponsesStream), openai-completions.ts (parseChunkUsage),
+/// and anthropic-messages.ts (message_start/message_delta usage).
 fn parse_usage(value: &Value) -> Option<TokenUsageDelta> {
     let usage = value.as_object()?;
     let count = |name: &str| {

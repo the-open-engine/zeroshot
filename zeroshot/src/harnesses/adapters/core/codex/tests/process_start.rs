@@ -169,7 +169,7 @@ printf '%s%s\n' \
     assert!(logs.contains("Codex output contained conflicting thread IDs"));
     assert_eq!(usages.len(), 2);
     let first = usages.first().copied().flatten().assert_value();
-    assert_eq!(first.input_tokens.get(), 43);
+    assert_eq!(first.input_tokens.get(), 25);
     assert_eq!(first.output_tokens.get(), 19);
     assert_eq!(first.cache_read_input_tokens.assert_value().get(), 13);
     assert_eq!(first.cache_creation_input_tokens.assert_value().get(), 5);
