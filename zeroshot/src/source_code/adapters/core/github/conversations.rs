@@ -261,12 +261,11 @@ pub(super) async fn read(
     snapshot(authority, (review, comments, None), credential).await
 }
 
-fn thread_page(
+fn thread_page_nodes<'a>(
     review: &SourceReviewReceipt,
-    page: &serde_json::Value,
+    page: &'a serde_json::Value,
     pagination: (usize, usize, &mut Option<u64>),
-    credential: SourceDeliveryCredential<'_>,
-) -> Result<Vec<Thread>, SourceDeliveryError> {
+) -> Result<&'a serde_json::Value, SourceDeliveryError> {
     let (index, pages, total) = pagination;
     let repository = &page["data"]["repository"];
     let pr = &repository["pullRequest"];
@@ -297,7 +296,7 @@ fn thread_page(
     {
         return Err(invalid());
     }
-    super::api::decode_response(connection["nodes"].clone(), credential)
+    Ok(&connection["nodes"])
 }
 
 fn thread_comments<'a>(
@@ -349,7 +348,8 @@ async fn snapshot(
     let mut permissions = BTreeMap::new();
     let mut total = None;
     for (index, page) in pages.iter().enumerate() {
-        let threads = thread_page(review, page, (index, pages.len(), &mut total), credential)?;
+        let nodes = thread_page_nodes(review, page, (index, pages.len(), &mut total))?;
+        let threads: Vec<Thread> = authority.decode_response(nodes.clone(), credential)?;
         for thread in threads {
             if thread.id.is_empty() || !seen.insert(thread.id.clone()) {
                 return Err(invalid());

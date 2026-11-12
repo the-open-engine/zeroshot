@@ -11,6 +11,16 @@ struct Fixture {
 }
 
 impl Fixture {
+    async fn start_controller(
+        &self,
+        request: PreparedRunRequest,
+    ) -> Result<RunId, NativeV2CliError> {
+        let worktree = request.worktree;
+        let mut prepared = self.backend.prepare_run(request).await?;
+        install_forge_fixture(&mut prepared, &self.root.child("forge-bin"));
+        self.backend.submit_prepared(prepared, worktree).await
+    }
+
     fn new(remote_reply: &str) -> Self {
         let root = TestDirectory::new("pb");
         let workspace = root.child("w");
@@ -99,6 +109,110 @@ impl Fixture {
 
 const MAIN_REF: &str = "if [ \"$reference\" = refs/heads/main ]; then printf '0123456789abcdef0123456789abcdef01234567\\t%s\\n' \"$reference\"; fi\nexit 0";
 
+pub(super) fn install_forge_fixture(prepared: &mut PreparedLocalRun, directory: &Path) {
+    std::fs::create_dir_all(directory).assert_value();
+    openengine_cluster_testkit::fixture::write_executable(
+        &directory.join("gh"),
+        "#!/bin/sh\nprintf 'HTTP/2 200 OK\\r\\n\\r\\n{\"full_name\":\"open-engine/zeroshot\"}'\n",
+        0o700,
+    )
+    .assert_value();
+    let existing = prepared
+        .native_environment
+        .get("PATH")
+        .cloned()
+        .unwrap_or_default();
+    prepared
+        .native_environment
+        .insert("PATH".into(), format!("{}:{existing}", directory.display()));
+}
+
+#[tokio::test]
+async fn forge_refusals_stop_pr_and_ship_before_controller_or_agent_effects() {
+    for mode in [DeliveryMode::PullRequest, DeliveryMode::Merge] {
+        for reason in [
+            "gh: Bad credentials (HTTP 401)",
+            "gh: Not Found (HTTP 404)",
+            "dial tcp: connection refused",
+        ] {
+            let fixture = Fixture::new(MAIN_REF);
+            let mut prepared = fixture
+                .backend
+                .prepare_run(with_declared_github_token(fixture.request(mode)))
+                .await
+                .assert_value();
+            let tools = fixture.root.child("forge-bin");
+            install_forge_fixture(&mut prepared, &tools);
+            openengine_cluster_testkit::fixture::write_executable(&tools.join("gh"), format!(
+                "#!/bin/sh\nprintf '%s\\n' call >> \"$HOME/access-calls\"\nprintf '%s\\n' '{reason}' >&2\nprintf '%s\\n' \"$HTTPS_PROXY\" >&2\nexit 1\n"
+            ), 0o700).assert_value();
+            prepared.native_environment.insert(
+                "HTTPS_PROXY".into(),
+                "http://proxy-user:proxy-password@127.0.0.1:1".into(),
+            );
+            let error = fixture
+                .backend
+                .submit_prepared(prepared, None)
+                .await
+                .expect_err("forge access must refuse")
+                .to_string();
+            assert!(
+                error.contains("GitHub") || error.contains("source.github"),
+                "{error}"
+            );
+            assert!(
+                error.contains("authenticated project/version read"),
+                "{error}"
+            );
+            assert!(error.contains(reason), "{error}");
+            assert!(!error.contains("proxy-user"), "{error}");
+            assert!(!error.contains("proxy-password"), "{error}");
+            assert!(!fixture.backend.state_root.join("runs").exists());
+            assert!(fixture.observations().is_empty());
+            assert_eq!(
+                std::fs::read_to_string(
+                    fixture
+                        .backend
+                        .state_root
+                        .join("forge-preflight/access-calls")
+                )
+                .assert_value()
+                .lines()
+                .count(),
+                1
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn github_preflight_uses_delivery_repository_when_source_identity_differs() {
+    for mode in [DeliveryMode::PullRequest, DeliveryMode::Merge] {
+        let fixture = Fixture::new(MAIN_REF);
+        let mut prepared = fixture
+            .backend
+            .prepare_run(with_declared_github_token(fixture.request(mode)))
+            .await
+            .assert_value();
+        let source = prepared.submission.source.as_mut().assert_value();
+        source.repository =
+            openengine_cluster_protocol::SourceRepositoryId::new("caller/opaque/source-label")
+                .assert_value();
+        assert_eq!(
+            crate::native_v2_delivery::source_target(source, mode)
+                .assert_value()
+                .repository,
+            "open-engine/zeroshot"
+        );
+        install_forge_fixture(&mut prepared, &fixture.root.child("forge-bin"));
+        crate::native_v2_local::check_forge_access(&prepared, &fixture.backend.state_root)
+            .await
+            .assert_value();
+        assert!(fixture.observations().is_empty());
+        assert!(!fixture.backend.state_root.join("runs").exists());
+    }
+}
+
 fn authenticated_ref(basic: &str) -> String {
     format!(
         "if [ \"${{GIT_CONFIG_VALUE_2-}}\" != 'AUTHORIZATION: basic {basic}' ]; then exit 128; fi\n{MAIN_REF}",
@@ -145,7 +259,6 @@ async fn fresh_branch_uses_the_remote_default_without_an_upstream() {
         );
         assert_controller_start(
             fixture
-                .backend
                 .start_controller(with_declared_github_token(fixture.request(mode)))
                 .await,
         );
@@ -159,7 +272,6 @@ async fn target_branch_refuses_review_delivery_before_controller_start() {
         let fixture = Fixture::new("printf 'ref: refs/heads/main\\tHEAD\\n'; exit 0");
         git(&fixture.backend.current_directory, &["checkout", "main"]);
         let result = fixture
-            .backend
             .start_controller(with_declared_github_token(fixture.request(mode)))
             .await;
         assert!(
@@ -194,7 +306,7 @@ async fn delivery_connection_token_reaches_preflight_and_outranks_trusted_token(
         } else {
             request.connections.insert(key, values);
         }
-        assert_controller_start(fixture.backend.start_controller(request).await);
+        assert_controller_start(fixture.start_controller(request).await);
         assert_eq!(fixture.observations(), ["refs/heads/main"]);
     }
 }
@@ -256,7 +368,6 @@ async fn preflight_reuses_snapshot_and_preserves_trusted_token_file_precedence()
 async fn remote_access_failure_is_distinct_from_a_missing_branch() {
     let fixture = Fixture::new("exit 128");
     let result = fixture
-        .backend
         .start_controller(with_declared_github_token(
             fixture.request(DeliveryMode::Merge),
         ))
@@ -296,7 +407,7 @@ async fn preflight_honors_source_transport_credentials_before_delivery_fields() 
                 .assert_value(),
             );
         }
-        assert_controller_start(fixture.backend.start_controller(request).await);
+        assert_controller_start(fixture.start_controller(request).await);
         assert_eq!(fixture.observations(), ["refs/heads/main"]);
     }
 }
@@ -390,7 +501,6 @@ async fn detached_linked_worktree_uses_verified_retained_branch_after_checkout_h
     );
 
     let error = fixture
-        .backend
         .start_controller(with_declared_github_token(
             fixture.request(DeliveryMode::PullRequest),
         ))
@@ -406,7 +516,6 @@ async fn detached_linked_worktree_uses_verified_retained_branch_after_checkout_h
     // Stale recovery metadata must not recommend a branch that no longer exists.
     git(&linked, &["branch", "-D", "feature/retained"]);
     let error = fixture
-        .backend
         .start_controller(with_declared_github_token(
             fixture.request(DeliveryMode::PullRequest),
         ))
@@ -444,7 +553,6 @@ async fn accepted_pr_submission_returns_without_remote_access() {
         .assert_value();
     assert_eq!(
         fixture
-            .backend
             .start_controller(with_declared_github_token(
                 fixture.request(DeliveryMode::PullRequest),
             ))
@@ -460,7 +568,6 @@ async fn push_only_submission_does_not_check_for_a_remote_base() {
     let fixture = Fixture::new("exit 128");
     assert_controller_start(
         fixture
-            .backend
             .start_controller(fixture.request(DeliveryMode::Push))
             .await,
     );

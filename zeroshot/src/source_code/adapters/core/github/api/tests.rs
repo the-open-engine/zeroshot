@@ -170,6 +170,7 @@ fn explicit_rate_limit_403s_are_temporary_but_permission_403_is_terminal() {
         let error = ApiOutput {
             stdout: Vec::new(),
             stderr: format!("gh: {message} (HTTP 403)\n").into_bytes(),
+            ..Default::default()
         }
         .failure(
             Some(std::process::ExitStatus::from_raw(1 << 8)),
@@ -460,7 +461,8 @@ fn schema_failures_preserve_bounded_redacted_response_details() {
     let value = serde_json::json!({
         "unexpected": format!("{token} {} {}", encode_basic_credential(token), "λ🦀".repeat(20_000))
     });
-    let error = decode_response::<GitReferenceWire>(value, SourceDeliveryCredential::token(token))
+    let error = authority(PathBuf::from("unused"), Duration::from_secs(1))
+        .decode_response::<GitReferenceWire>(value, SourceDeliveryCredential::token(token))
         .err()
         .expect("wrong schema must fail");
     let diagnostic = error.to_string();
@@ -514,5 +516,73 @@ fn native_cli_http_errors_preserve_status_and_retry_classification() {
         assert_eq!(error.api_status(), status, "{text}");
         assert_eq!(error.retryable_operation(), retryable, "{text}");
         assert_eq!(error.authentication_failed(), status == Some(401), "{text}");
+    }
+}
+
+fn proxy_cutoff_fixture() -> (super::super::super::network::ForgeNetwork, [String; 3]) {
+    let password = format!("proxy-password-boundary-{}", "p".repeat(96));
+    let url = format!("proxy-user:{password}@proxy.invalid:8080");
+    let basic = crate::native_v2_delivery::git_auth::encode_user_password("proxy-user", &password);
+    let network = super::super::super::network::ForgeNetwork::from_snapshot(&BTreeMap::from([(
+        "HTTPS_PROXY".into(),
+        url.clone(),
+    )]));
+    (network, [password, url, basic])
+}
+
+fn assert_proxy_cutoff_redacted(error: SourceDeliveryError, echoed: &str) {
+    let diagnostic = format!("{error:?}\n{error}");
+    assert!(diagnostic.contains("truncated=true"), "{diagnostic}");
+    assert!(diagnostic.contains("[REDACTED]"), "{diagnostic}");
+    assert!(
+        !diagnostic.contains(&echoed[..24]),
+        "partial proxy credential leaked"
+    );
+}
+
+#[test]
+fn schema_failures_redact_proxy_credentials_before_diagnostic_cutoff() {
+    let (network, echoes) = proxy_cutoff_fixture();
+    let authority =
+        authority(PathBuf::from("unused"), Duration::from_secs(1)).with_network(network);
+    for echoed in echoes {
+        let value = serde_json::json!({"unexpected": format!("{}{echoed}{}",
+            "x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 48), "z".repeat(1024))});
+        let error = authority
+            .decode_response::<GitReferenceWire>(
+                value,
+                SourceDeliveryCredential::token("test-token"),
+            )
+            .err()
+            .expect("schema must be rejected");
+        assert_proxy_cutoff_redacted(error, &echoed);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn malformed_success_redacts_proxy_credentials_before_diagnostic_cutoff() {
+    let root = TemporaryDirectory::for_test("github-proxy-cutoff");
+    let program = script(root.as_path(), "cat \"$HOME/payload\"\n");
+    let (network, echoes) = proxy_cutoff_fixture();
+    let authority = authority(program, Duration::from_secs(10)).with_network(network);
+    for echoed in echoes {
+        std::fs::write(
+            root.as_path().join("payload"),
+            format!(
+                "{}{echoed}{}",
+                "x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 48),
+                "z".repeat(1024)
+            ),
+        )
+        .assert_value();
+        let error = authority
+            .api(
+                &["repos/acme/project".into()],
+                SourceDeliveryCredential::token("test-token"),
+            )
+            .await
+            .expect_err("malformed JSON must be rejected");
+        assert_proxy_cutoff_redacted(error, &echoed);
     }
 }

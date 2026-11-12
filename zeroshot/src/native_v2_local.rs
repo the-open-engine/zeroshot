@@ -34,7 +34,9 @@ use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
 const DEFAULT_SEARCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const MAX_GIT_OUTPUT_BYTES: usize = 16 * 1024;
 
+mod forge;
 mod source;
+pub(crate) use forge::{check_forge_access, check_restored_forge_access};
 use source::resolved_git_source;
 pub(crate) use source::validate_remote_base_branch;
 pub(crate) use source::verified_detached_branch;
@@ -86,6 +88,8 @@ pub enum LocalCompositionError {
     RemoteBaseCheck { branch: String },
     #[error("Git delivery credentials are invalid")]
     DeliveryCredentials,
+    #[error("{0}")]
+    ForgeAccess(String),
     #[error("current Git resolved source is invalid")]
     ResolvedSource,
     #[error("local run identity could not be assigned")]
@@ -286,6 +290,11 @@ pub(crate) fn capture_local_native_environment(
         crate::native_v2_capsule::provider_process::current_process_environment(),
     );
     resolve_relative_home_overrides(&mut environment, invoking_directory)?;
+    crate::source_code_provider::adapters::core::network::ForgeNetwork::normalize_snapshot(
+        &mut environment,
+        invoking_directory,
+    )
+    .map_err(|_| LocalCompositionError::NativeEnvironment)?;
     Ok(environment.into_values())
 }
 

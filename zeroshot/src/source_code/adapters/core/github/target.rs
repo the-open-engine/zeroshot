@@ -87,7 +87,7 @@ async fn queue_owns_integration(
             "GitHub returned incomplete target queue policy",
         ));
     }
-    let response: TargetQueueResponse = super::api::decode_response(value, credential)?;
+    let response: TargetQueueResponse = authority.decode_response(value, credential)?;
     if response.data.repository.name_with_owner != target.repository {
         return Err(SourceDeliveryError::Rejected);
     }
@@ -95,7 +95,7 @@ async fn queue_owns_integration(
     if queue.is_null() {
         return Ok(false);
     }
-    let queue: TargetQueue = super::api::decode_response(queue, credential)?;
+    let queue: TargetQueue = authority.decode_response(queue, credential)?;
     if queue.id.trim().is_empty() {
         return Err(SourceDeliveryError::Rejected);
     }
@@ -116,7 +116,7 @@ async fn observe_target(
             credential,
         )
         .await?;
-    let reference: GitReferenceWire = super::api::decode_response(value, credential)?;
+    let reference: GitReferenceWire = authority.decode_response(value, credential)?;
     reference_revision(reference, &target.target_branch)
 }
 

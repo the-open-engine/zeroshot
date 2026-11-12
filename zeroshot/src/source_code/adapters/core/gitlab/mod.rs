@@ -6,6 +6,7 @@ use openengine_cluster_protocol::SourceForgeBaseUrl;
 use crate::native_v2_delivery::transport::{self, GitTransport};
 use crate::source_code_provider::*;
 
+mod access;
 mod api;
 mod ci;
 mod comment;
@@ -71,6 +72,14 @@ impl GitLabDeliveryAuthority {
         self.transport.as_ref().ok_or_else(|| {
             SourceDeliveryError::identity("GitLab Git delivery requires the admitted Git transport")
         })
+    }
+
+    pub(crate) fn with_network(
+        mut self,
+        network: super::network::ForgeNetwork,
+    ) -> Result<Self, SourceDeliveryError> {
+        self.api = self.api.with_network(network)?;
+        Ok(self)
     }
 
     async fn project(
@@ -150,6 +159,14 @@ impl GitLabDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
+    async fn check_access(
+        &self,
+        repository: &str,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
+        access::check(self, repository, credential).await
+    }
+
     async fn review_conversation_state(
         &self,
     ) -> Result<Option<serde_json::Value>, SourceDeliveryError> {

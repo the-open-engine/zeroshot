@@ -20,16 +20,6 @@ const NATIVE_CONTEXT_FIELDS: &[&str] = &[
     "LOCALAPPDATA",
     "USERPROFILE",
     "SystemRoot",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "ALL_PROXY",
-    "NO_PROXY",
-    "https_proxy",
-    "http_proxy",
-    "all_proxy",
-    "no_proxy",
     "LANG",
     "LC_ALL",
 ];
@@ -156,7 +146,10 @@ fn native_command(executable: &str, context: NativeContext<'_>) -> Option<Comman
         .env_clear()
         .current_dir(context.directory)
         .stdin(Stdio::null());
-    for field in NATIVE_CONTEXT_FIELDS {
+    for field in NATIVE_CONTEXT_FIELDS
+        .iter()
+        .chain(crate::source_code_provider::adapters::core::network::NETWORK_FIELDS)
+    {
         if let Some(value) = context.environment.get(*field) {
             command.env(field, value);
         }

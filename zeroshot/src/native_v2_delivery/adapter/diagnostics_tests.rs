@@ -42,14 +42,17 @@ async fn unconfirmed_delivery_cleanup_keeps_its_classification_and_never_waits_f
             token_from_environment: false,
         };
         let encoded = git_auth::encode_basic_credential("native-cleanup-token");
-        let adapter = adapter().with_local_git_environment(Some(BTreeMap::from([(
-            "GIT_PASSWORD".to_owned(),
-            "native-cleanup-token".to_owned(),
-        )])));
+        let adapter = adapter().with_local_git_environment(Some(BTreeMap::from([
+            ("GIT_PASSWORD".to_owned(), "native-cleanup-token".to_owned()),
+            (
+                "HTTPS_PROXY".to_owned(),
+                "http://proxy-user:proxy-password@proxy.invalid".to_owned(),
+            ),
+        ])));
         let stop = DeliveryStop::Explained {
             result: Box::new(Err(NodeRunnerError::CleanupUnconfirmed)),
             diagnostic: format!(
-                "original cleanup cause private-cleanup-token native-cleanup-token {encoded}"
+                "original cleanup cause private-cleanup-token native-cleanup-token {encoded} http://proxy-user:proxy-password@proxy.invalid proxy-password proxy-user"
             ),
         };
         tokio::time::timeout(
@@ -75,6 +78,8 @@ async fn unconfirmed_delivery_cleanup_keeps_its_classification_and_never_waits_f
             assert!(!output.text.contains("private-cleanup-token"));
             assert!(!output.text.contains("native-cleanup-token"));
             assert!(!output.text.contains(&encoded));
+            assert!(!output.text.contains("proxy-user"));
+            assert!(!output.text.contains("proxy-password"));
             outputs.push(output);
         }
         let last = outputs.last().assert_value();

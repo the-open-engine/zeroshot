@@ -22,6 +22,9 @@ use tokio::time::timeout;
 const CLI_TIMEOUT: Duration = Duration::from_secs(90);
 const DELIVERY_FLAGS: [&str; 2] = ["--pr", "--ship"];
 
+#[path = "native_v2_local_delivery_gh_search_path/checkpoint_tests.rs"]
+mod checkpoint_tests;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn local_delivery_starts_the_gh_that_the_users_path_finds() {
     for flag in DELIVERY_FLAGS {
@@ -194,7 +197,7 @@ impl DeliveryFixture {
 
     async fn run_arguments(&self, flags: &[&str], search_path: &OsString) -> Output {
         let path = |name: &str| self.root.path(name);
-        let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
+        let mut command = self.command(search_path);
         command
             .args(["run", "--title", "Local delivery gh lookup", "--template"])
             .arg("software-change")
@@ -202,7 +205,17 @@ impl DeliveryFixture {
             .arg("--input")
             .arg(path("input.json"))
             .arg("--uniform-runtime-config")
-            .arg(path("runtime.json"))
+            .arg(path("runtime.json"));
+        timeout(CLI_TIMEOUT, command.output())
+            .await
+            .assert_value_with("local run deadline")
+            .assert_value_with("start local run")
+    }
+
+    fn command(&self, search_path: &OsString) -> Command {
+        let path = |name: &str| self.root.path(name);
+        let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
+        command
             .current_dir(&self.repository)
             .env_clear()
             .env("PATH", search_path)
@@ -212,10 +225,7 @@ impl DeliveryFixture {
             .env("OPENAI_API_KEY", "fixture-openai-key")
             .env("GH_TOKEN", "fixture-github-token")
             .kill_on_drop(true);
-        timeout(CLI_TIMEOUT, command.output())
-            .await
-            .assert_value_with("local run deadline")
-            .assert_value_with("start local run")
+        command
     }
 
     fn report(&self, flag: &str, run: &Output) -> String {
@@ -274,6 +284,10 @@ impl DeliveryFixture {
                 r#"#!/bin/sh
 for argument in "$@"; do printf 'arg=%s\n' "$argument"; done >> '{log}'
 printf '%s\n' '---' >> '{log}'
+if [ "$1" = api ] && [ "$2" = repos/acme/local-fixture ]; then
+    printf 'HTTP/2 200 OK\r\n\r\n{{"full_name":"acme/local-fixture"}}'
+    exit 0
+fi
 printf '%s\n' 'fixture gh returns no GitHub data'
 "#
             ),
@@ -345,6 +359,8 @@ printf '%s\n' '{{"type":"turn.completed"}}'
     fn initialize_repository(&self) {
         let repository = &self.repository;
         git(repository, &["init"]);
+        fs::write(repository.join(".git/info/exclude"), "*.profraw\n")
+            .assert_value_with("exclude coverage profiles from the delivery fixture");
         git(repository, &["config", "user.name", "Local Delivery Test"]);
         git(
             repository,

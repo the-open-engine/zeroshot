@@ -246,6 +246,45 @@ describe('Embedded UI distribution', () => {
 });
 
 describe('CI efficiency contract', () => {
+  it('executes forge access and native certificate trust regressions on macOS', () => {
+    const workflow = yaml.load(read('.github/workflows/ci.yml'));
+    const step = workflow.jobs['macos-check'].steps.find(
+      (step) => step.name === 'Run macOS forge network and access regressions'
+    );
+    assert.ok(step);
+    assert.match(step.run, /cargo test --locked --package zeroshot --lib --features ui --/);
+    assert.doesNotMatch(step.run, /--no-run/);
+    const filters = step.run.split(' -- ')[1].trim().split(/\s+/);
+    for (const name of [
+      'source_code_provider::adapters::core::network::tests::empty_uppercase_values_fall_back_to_lowercase_for_every_proxy_pair',
+      'source_code_provider::adapters::core::github::access::tests::github_child_receives_only_the_ten_snapshot_network_fields',
+      'source_code_provider::adapters::core::github::api::tests::schema_failures_redact_proxy_credentials_before_diagnostic_cutoff',
+      'source_code_provider::adapters::core::gitlab::tests::network_tests::native_github_cli_certificate_trust_matches_the_platform',
+      'native_v2_local::token_file::tests::caller_network_snapshot_anchors_ca_paths_for_worktrees_and_resume',
+    ]) {
+      assert.ok(
+        filters.some((filter) => name.includes(filter)),
+        `macOS must execute ${name}`
+      );
+    }
+    const checkpoint = workflow.jobs['macos-check'].steps.find(
+      (step) => step.name === 'Run macOS checkpoint forge access regression'
+    );
+    assert.ok(checkpoint);
+    assert.match(checkpoint.run, /--test native_v2_local_delivery_gh_search_path/);
+    assert.match(
+      checkpoint.run,
+      /checkpoint_resume_checks_the_restored_gh_once_before_agents_start/
+    );
+    assert.doesNotMatch(checkpoint.run, /--no-run/);
+    assert.ok(
+      workflow.jobs['macos-check'].steps.indexOf(checkpoint) >
+        workflow.jobs['macos-check'].steps.findIndex(
+          (step) => step.name === 'Prepare pinned Restic for native controller tests'
+        )
+    );
+  });
+
   it('executes macOS workspace export integration and private publication regressions', () => {
     const workflow = yaml.load(read('.github/workflows/ci.yml'));
     const step = workflow.jobs['macos-check'].steps.find(

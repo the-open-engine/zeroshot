@@ -283,6 +283,15 @@ pub(crate) use tests::{TestReviewCheckpoint, RefuseReviewCheckpoint, RecordingRe
 /// Target-owned, bounded source-provider effects. Implementations must bound every network operation.
 #[async_trait]
 pub trait SourceDeliveryAuthority: Send + Sync {
+    /// One read-only authenticated observation of project access and supported server version.
+    async fn check_access(
+        &self,
+        _repository: &str,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
+        Err(SourceDeliveryError::Unavailable)
+    }
+
     /// Export owned, credential-free conversation receipts for the existing execution checkpoint.
     async fn review_conversation_state(
         &self,

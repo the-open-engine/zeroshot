@@ -76,7 +76,9 @@ impl GitAuthentication {
                 environment
                     .iter()
                     .filter(|(name, _)| super::super::command::native_credential_name(name))
-                    .map(|(_, value)| value.clone()),
+                    .flat_map(|(_, value)| {
+                        crate::source_code_provider::adapters::core::network::proxy_secrets(value)
+                    }),
             );
         }
     }

@@ -27,6 +27,7 @@ impl GhCliDeliveryAuthority {
 
     pub(super) fn api_command(&self, credential: SourceDeliveryCredential<'_>) -> Command {
         let mut command = clean_command(&self.config, &self.config.gh_program, credential);
+        self.network.apply_command(&mut command);
         command
             .env("GH_HOST", self.hostname())
             .env_remove("GH_TOKEN")
@@ -86,7 +87,7 @@ impl GhCliDeliveryAuthority {
     }
 }
 
-fn server_version(value: &str) -> Option<(u64, u64, u64)> {
+pub(super) fn server_version(value: &str) -> Option<(u64, u64, u64)> {
     let parts = value
         .split('.')
         .map(str::parse::<u64>)

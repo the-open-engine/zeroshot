@@ -82,10 +82,10 @@ impl SystemGit {
             .flat_map(|environment| environment.iter())
             .filter(|(name, value)| command::native_credential_name(name) && !value.is_empty())
             .flat_map(|(_, value)| {
-                [
-                    value.clone(),
-                    super::git_auth::encode_basic_credential(value),
-                ]
+                let mut secrets =
+                    crate::source_code_provider::adapters::core::network::proxy_secrets(value);
+                secrets.push(super::git_auth::encode_basic_credential(value));
+                secrets
             })
             .collect()
     }

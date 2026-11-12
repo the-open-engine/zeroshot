@@ -200,6 +200,11 @@ impl LocalCliBackend {
             .checkpoint_selection(&params, &recovery, discard_workspace_changes)?
             .unzip();
         let prepared = self.prepare_successor(&params, &recovery).await?;
+        if checkpoint.is_none() {
+            crate::native_v2_local::check_forge_access(&prepared, &self.state_root)
+                .await
+                .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        }
         if let Some(interrupted) = &recovery.pending_restore {
             // Reconciliation confirmed that the interrupted attempt's controller released its
             // claim, so only its own stage is removed; other names beside the workspace stay.

@@ -70,7 +70,7 @@ async fn find_identity(
             credential,
         )
         .await?;
-    let reviews: Vec<PullRequestWire> = super::api::decode_response(value, credential)?;
+    let reviews: Vec<PullRequestWire> = authority.decode_response(value, credential)?;
     let mut identities = reviews
         .into_iter()
         .map(|wire| read_review_receipt(wire, request.target, request.head_branch))
@@ -102,7 +102,7 @@ async fn observe_review(
             credential,
         )
         .await?;
-    let wire: ObservedReview = super::api::decode_response(value, credential)?;
+    let wire: ObservedReview = authority.decode_response(value, credential)?;
     let receipt = read_review_receipt(wire.identity, request.target, request.head_branch)?;
     if receipt.review_id != identity.review_id {
         return Err(SourceDeliveryError::identity(format!(
@@ -144,7 +144,7 @@ async fn observe_ref(
         Err(error) if error.api_status() == Some(404) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let wire: GitReferenceWire = super::api::decode_response(value, credential)?;
+    let wire: GitReferenceWire = authority.decode_response(value, credential)?;
     reference_revision(wire, request.head_branch).map(Some)
 }
 

@@ -13,11 +13,29 @@ and issue or review comments.
 | GitHub Enterprise Server                    | 3.22.2          | `GH_TOKEN`     |
 | GitLab.com / self-managed GitLab            | 19.5.1          | `GITLAB_TOKEN` |
 
-Instances must be publicly reachable over HTTPS with trusted TLS. Older or unidentifiable servers
-fail version checks. Use a web base without a trailing slash, including any GitLab installation
+Instances must be reachable over HTTPS with certificate verification enabled. Local delivery honors
+the invoking shell's `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, their lower-case forms,
+`SSL_CERT_FILE` and `SSL_CERT_DIR`. Git transport, the early forge check and delivery use the same
+captured settings, including after `resume`; no stored network configuration is needed. GitLab
+accepts private CA certificates from the named PEM file or certificate directories. On Linux the
+GitHub CLI also honors those CA paths; on macOS and Windows it uses the system certificate store,
+so install your forge's CA there. An unreadable certificate file is reported by name. Proxy
+credentials are kept private.
+Relative CA paths are anchored to the invoking directory before a delivery worktree is created.
+GitLab also supports `socks5://` and `socks5h://` proxy URLs through these same variables.
+
+Older or unidentifiable servers fail version checks. Use a web base without a trailing slash, including any GitLab installation
 prefix (such as `https://gitlab.example/install`). GitHub uses a root web URL.
 
 ## Local setup
+
+Before agents start, local `--pr` and `--ship` runs make one authenticated, read-only forge request
+to check connectivity, token acceptance, project readability and the supported server version.
+A refusal names the forge, failed step and reason. Resume repeats this check with the resuming
+shell's captured settings. Token scopes and merge permissions are checked by the actual operations.
+Checkpoint resumes check after restoring the selected files, so delivery programs in the checkpoint
+are available before the check and before any agent starts.
+Runs without forge delivery and `--validate-only` keep their existing behavior.
 
 Local `--push`, `--pr` and `--ship` runs require a clean checkout before agents start. Commit, stash
 or remove staged, unstaged and unignored untracked changes named in the refusal. Finish or abort a

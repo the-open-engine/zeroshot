@@ -13,6 +13,7 @@ mod git;
 pub(crate) mod github;
 pub(crate) mod gitlab;
 pub(crate) mod instance;
+pub(crate) mod network;
 mod provider;
 mod review_responses;
 pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
@@ -313,7 +314,7 @@ pub(crate) fn delivery_uses_github_cli(
 /// Every selected adapter shares one transport whose workspace commits use `commit_identity` and
 /// whose prepared revisions credit `commit_co_author`.
 pub(crate) fn delivery_authority(
-    mut request: SourceDeliveryFactoryRequest<'_>,
+    request: SourceDeliveryFactoryRequest<'_>,
     commit_identity: Option<&openengine_cluster_protocol::CommitIdentity>,
     commit_co_author: Option<&openengine_cluster_protocol::CommitIdentity>,
 ) -> Result<Arc<dyn SourceDeliveryAuthority>, SourceDeliveryFactoryError> {
@@ -327,7 +328,7 @@ pub(crate) fn delivery_authority(
             home_directory: request.home_directory.to_owned(),
             private_directory: request.private_directory.to_owned(),
             identity: request.git_identity,
-            local_environment: request.local_environment.take(),
+            local_environment: request.local_environment.clone(),
             deadline: std::time::Duration::from_secs(10 * 60),
         },
         remote,
@@ -365,10 +366,15 @@ fn selected_delivery_authority(
                 .as_ref()
                 .and_then(|r| r.forge.as_ref())
                 .ok_or(SourceDeliveryFactoryError::ForgeRequired)?;
-            Ok(Some(Arc::new(gitlab::GitLabDeliveryAuthority::new(
+            let mut authority = gitlab::GitLabDeliveryAuthority::new(
                 forge_base_url(forge)?,
                 Some(transport.clone()),
-            )?)))
+            )?;
+            if let Some(environment) = &request.local_environment {
+                authority =
+                    authority.with_network(network::ForgeNetwork::from_snapshot(environment))?;
+            }
+            Ok(Some(Arc::new(authority)))
         }
         _ => Ok(None),
     }
@@ -385,6 +391,9 @@ fn github_authority(
         ..GhCliAuthorityConfig::hosted(request.home_directory.to_owned())
     })
     .with_git_transport(transport.clone());
+    if let Some(environment) = &request.local_environment {
+        github = github.with_network(network::ForgeNetwork::from_snapshot(environment));
+    }
     if let Some(forge) = request
         .source
         .remote

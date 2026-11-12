@@ -22,6 +22,7 @@ use crate::native_v2_delivery::{
     SourceTargetIntegration, SourceTargetReconciliation, valid_head_update, valid_revision,
 };
 
+mod access;
 mod api;
 mod comment;
 mod instance;
@@ -78,6 +79,7 @@ pub struct GhCliDeliveryAuthority {
     published_replies: super::review_responses::PublishedReplies,
     base_url: openengine_cluster_protocol::SourceForgeBaseUrl,
     instance_verified: Arc<tokio::sync::OnceCell<()>>,
+    network: super::network::ForgeNetwork,
 }
 
 #[derive(Clone, Debug)]
@@ -99,7 +101,13 @@ impl GhCliDeliveryAuthority {
             base_url: openengine_cluster_protocol::SourceForgeBaseUrl::new("https://github.com")
                 .expect("static base URL"),
             instance_verified: Arc::new(tokio::sync::OnceCell::new()),
+            network: Default::default(),
         }
+    }
+
+    pub(crate) fn with_network(mut self, network: super::network::ForgeNetwork) -> Self {
+        self.network = network;
+        self
     }
 
     #[must_use]
@@ -173,7 +181,7 @@ impl GhCliDeliveryAuthority {
                     credential,
                 )
                 .await?;
-            let wire: PullRequestWire = api::decode_response(value, credential)?;
+            let wire: PullRequestWire = self.decode_response(value, credential)?;
             let receipt = review_receipt(wire, request)?;
             if receipt.review_id != known.review_id {
                 return Err(SourceDeliveryError::identity(
@@ -428,6 +436,14 @@ impl GhCliDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
+    async fn check_access(
+        &self,
+        repository: &str,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
+        access::check(self, repository, credential).await
+    }
+
     async fn review_conversation_state(
         &self,
     ) -> Result<Option<serde_json::Value>, SourceDeliveryError> {
@@ -779,6 +795,8 @@ fn clean_command(
         .env("LANG", "C")
         .env("GH_HOST", "github.com")
         .env("GH_TOKEN", credential.expose())
+        .env("GH_NO_UPDATE_NOTIFIER", "1")
+        .env("GH_PROMPT_DISABLED", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
