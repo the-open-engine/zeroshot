@@ -83,7 +83,7 @@ pub enum DurableExecutionState {
 pub struct DurableExecution {
     /// Opaque, host-owned delivery receipts; never graph state or worker output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delivery_state: Option<crate::native_v2_contract::DeliveryCheckpoint>,
+    pub delivery_state: Option<identity_contract::DeliveryCheckpoint>,
     pub dispatch_position: HistoryPosition,
     pub node_instance: NodeInstanceId,
     pub execution: ExecutionId,

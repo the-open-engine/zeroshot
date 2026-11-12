@@ -1,4 +1,3 @@
-use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 #[test]
@@ -29,6 +28,7 @@ fn passed_ci_without_the_approval_exception_is_mergeable() {
 mod queued_handoff {
     use super::*;
     use crate::native_v2_delivery::tests::github_fixture::{FakeGitHub, Script};
+    use crate::source_code_provider::TestReviewCheckpoint;
     use std::sync::atomic::Ordering;
 
     struct Fixture {
