@@ -73,6 +73,7 @@ impl SourceDeliveryAuthority for GitDeliveryAuthority {
         &self,
         _review: &SourceReviewReceipt,
         _credential: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         Err(SourceDeliveryError::Rejected)
     }

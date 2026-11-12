@@ -106,6 +106,7 @@ async fn verified_graph() -> VerifiedGraph {
 #[tokio::test]
 async fn failed_step_does_not_promote_success_only_writes_before_error_routing() {
     let execution = DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(2).assert_value(),
         node_instance: NodeInstanceId::new(1).assert_value(),
         execution: ExecutionId::new(1).assert_value(),

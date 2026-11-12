@@ -412,6 +412,8 @@ mod runtime_failure;
 #[path = "tests/initialization.rs"]
 mod initialization;
 
+#[path = "tests/delivery_recovery.rs"]
+mod delivery_recovery;
 #[path = "tests/primary_restart.rs"]
 mod primary_restart;
 #[path = "tests/restart_logs.rs"]

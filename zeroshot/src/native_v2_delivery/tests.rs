@@ -36,6 +36,10 @@ use crate::native_v2_supervisor::{NativeV2Supervisor, RunEnvironment};
 use crate::v2_run_ledger::fake::FakeRunLedger;
 use crate::v2_run_ledger::{CreateRun, RunLedger};
 
+#[path = "tests/conversation_checkpoint.rs"]
+pub(crate) mod conversation_checkpoint;
+#[path = "tests/conversations.rs"]
+mod conversations;
 #[path = "tests/diagnostics.rs"]
 mod diagnostics;
 #[path = "tests/github_fixture.rs"]
@@ -343,7 +347,7 @@ async fn runtime_policy_can_ignore_pr_feedback_without_weakening_readiness() {
     .outcome;
 
     assert_delivery_signal(&outcome, DELIVERY_READY_LABEL);
-    assert_eq!(authority.feedback_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(authority.feedback_reads.load(Ordering::SeqCst), 1);
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
 }
 
@@ -1235,14 +1239,26 @@ async fn run_with_adapter_token(
 ) -> DeliveryExecution {
     let mut handle = start_with_adapter_token(request, adapter, pull_request_feedback, token).await;
     let mut durable = handle.take_initial_output().assert_value();
-    let outcome = handle.completion().await.assert_value().outcome;
-    let mut output = Vec::new();
-    while let Ok(event) = durable.recv().await {
-        if let crate::native_v2_runner::DurableNodeEvent::Output { output: event, .. } = event {
-            output.push(event);
+    let drain = async {
+        let mut output = Vec::new();
+        while let Ok(event) = durable.recv().await {
+            match event {
+                crate::native_v2_runner::DurableNodeEvent::Output { output: event, .. } => {
+                    output.push(event)
+                }
+                crate::native_v2_runner::DurableNodeEvent::DeliveryState(state) => durable
+                    .acknowledge_delivery_state(state.generation.get())
+                    .unwrap(),
+                crate::native_v2_runner::DurableNodeEvent::TokenUsage(_) => {}
+            }
         }
+        output
+    };
+    let (completion, output) = tokio::join!(handle.completion(), drain);
+    DeliveryExecution {
+        outcome: completion.assert_value().outcome,
+        output,
     }
-    DeliveryExecution { outcome, output }
 }
 
 async fn start_with_adapter_token(
@@ -1284,6 +1300,7 @@ async fn start_with_adapter_token(
     }
     runner
         .start(NodeRunRequest {
+            delivery_state: None,
             dispatch: Default::default(),
             invocation: NodeInvocation {
                 reference: ExecutionRef {

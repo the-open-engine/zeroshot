@@ -290,6 +290,7 @@ pub(super) async fn bridge_durable_events(
             break;
         }
         let mut events = Vec::with_capacity(queued.len());
+        let mut delivery_generation = None;
         for event in queued.drain(..) {
             events.push(match event {
                 DurableNodeEvent::Output { output, timestamp } => RunEvent::SafeLog {
@@ -299,12 +300,42 @@ pub(super) async fn bridge_durable_events(
                     line: SafeLogLine::new(output.text)?,
                     diagnostic: output.diagnostic,
                 },
+                DurableNodeEvent::DeliveryState(state) => {
+                    delivery_generation = Some(
+                        delivery_generation.map_or(state.generation.get(), |previous: u64| {
+                            previous.max(state.generation.get())
+                        }),
+                    );
+                    let stored = ledger
+                        .get(&run_id)
+                        .await?
+                        .ok_or(RunLedgerError::InvalidEvent("missing delivery run"))?;
+                    let node = stored
+                        .snapshot
+                        .executions
+                        .get(&execution)
+                        .ok_or(RunLedgerError::InvalidEvent("missing delivery execution"))?;
+                    if !matches!(
+                        stored.admitted.runtime.nodes().get(&node.reference.node),
+                        Some(crate::native_v2_contract::NodeRuntimeBinding::GitDelivery { .. })
+                    ) {
+                        return Err(RunLedgerError::InvalidEvent(
+                            "delivery state requires a Git delivery node",
+                        ));
+                    }
+                    RunEvent::DeliveryState { execution, state }
+                }
                 DurableNodeEvent::TokenUsage(usage) => {
                     RunEvent::TokenUsageObserved { execution, usage }
                 }
             });
         }
         ledger.append(&run_id, events).await?;
+        if let Some(generation) = delivery_generation {
+            output
+                .acknowledge_delivery_state(generation)
+                .map_err(|_| RunLedgerError::InvalidEvent("invalid delivery acknowledgement"))?;
+        }
     }
     Ok(())
 }
@@ -395,6 +426,7 @@ pub(super) fn durable_execution(
         },
     };
     Ok(DurableExecution {
+        delivery_state: node.delivery_state.clone(),
         dispatch_position: history_position(&node.started_at)?,
         node_instance: node.reference.node_instance,
         execution: node.reference.execution,

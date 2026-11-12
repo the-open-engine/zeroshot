@@ -12,6 +12,8 @@ struct ManifestInput {
     title: String,
     description: String,
     issue_number: Option<String>,
+    #[serde(default)]
+    review_responses: Vec<SourceReviewResponse>,
 }
 
 #[derive(Deserialize)]
@@ -24,6 +26,7 @@ pub(super) struct PreparedDeliveryInput {
     pub(super) title: String,
     pub(super) description: String,
     pub(super) source_issue: Option<SourceDeliveryIssue>,
+    pub(super) review_responses: Vec<SourceReviewResponse>,
 }
 
 pub(super) fn delivery_input(input: &Value) -> Result<PreparedDeliveryInput, DeliveryStop> {
@@ -31,10 +34,13 @@ pub(super) fn delivery_input(input: &Value) -> Result<PreparedDeliveryInput, Del
         return Ok(legacy_input(None));
     }
     if let Ok(input) = serde_json::from_value::<ManifestInput>(input.clone()) {
-        if !valid_delivery_description(&input.description) {
+        if !valid_delivery_description(&input.description)
+            || !valid_responses(&input.review_responses)
+        {
             return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
         }
         return Ok(PreparedDeliveryInput {
+            review_responses: input.review_responses,
             title: input.title,
             description: input.description,
             source_issue: optional_source_issue(input.issue_number.as_deref())?,
@@ -46,6 +52,7 @@ pub(super) fn delivery_input(input: &Value) -> Result<PreparedDeliveryInput, Del
 
 fn legacy_input(source_issue: Option<SourceDeliveryIssue>) -> PreparedDeliveryInput {
     PreparedDeliveryInput {
+        review_responses: Vec::new(),
         title: LEGACY_TITLE.to_owned(),
         description: LEGACY_DESCRIPTION.to_owned(),
         source_issue,
@@ -75,3 +82,23 @@ fn malformed<T>(result: Result<T, serde_json::Error>) -> Result<T, DeliveryStop>
 #[cfg(test)]
 #[path = "input/tests.rs"]
 mod tests;
+
+fn valid_responses(responses: &[SourceReviewResponse]) -> bool {
+    let mut ids = std::collections::BTreeSet::new();
+    responses.len() <= 1000
+        && serde_json::to_vec(responses).is_ok_and(|bytes| bytes.len() <= 1024 * 1024)
+        && responses.iter().all(|response| {
+            !response.thread_id.is_empty()
+                && response.thread_id.len() <= 2048
+                && !response.thread_id.chars().any(char::is_control)
+                && ids.insert(&response.thread_id)
+                && response.version.len() == 64
+                && response.version.bytes().all(|b| b.is_ascii_hexdigit())
+                && !response.response.trim().is_empty()
+                && response.response.len() <= 64 * 1024
+                && !response
+                    .response
+                    .chars()
+                    .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+        })
+}

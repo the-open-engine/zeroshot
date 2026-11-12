@@ -61,6 +61,7 @@ async fn complete_with_events(
     for event in events {
         match event {
             DurableNodeEvent::Output { output, .. } => logs.push(output.text),
+            DurableNodeEvent::DeliveryState(_) => panic!("unexpected delivery receipts"),
             DurableNodeEvent::TokenUsage(usage) => usages.push(usage),
         }
     }

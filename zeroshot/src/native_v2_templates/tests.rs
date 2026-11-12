@@ -241,7 +241,7 @@ async fn rejected_parallel_reviews_dispatch_repair_with_both_diagnostics() {
 }
 
 fn crashed_parallel_review_history() -> Vec<DurableExecution> {
-    let review_input = json!({"task":"repair checkout","deliveryFeedback":""});
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]});
     vec![
         settled_worker(),
         settled_review(
@@ -282,7 +282,7 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
         Decision::Dispatch { occurrence, attempt, input, .. }
             if occurrence.node.as_str() == "code"
                 && attempt.get() == MAX_AGENT_VERIFIER_ATTEMPTS
-                && input == &json!({"task":"repair checkout","deliveryFeedback":""})
+                && input == &json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]})
     )));
     assert!(reduction.terminal.is_none());
 
@@ -292,7 +292,7 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
             node_instance: 3,
             node: "code",
             settled_at: 5,
-            input: json!({"task":"repair checkout","deliveryFeedback":""}),
+            input: json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]}),
         },
         ACCEPTED_LABEL,
         "implementation sound",
@@ -329,7 +329,7 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
 #[tokio::test]
 async fn repeatedly_crashed_parallel_review_fails_after_the_retry_limit() {
     let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
-    let review_input = json!({"task":"repair checkout","deliveryFeedback":""});
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]});
     let mut history = crashed_parallel_review_history();
     history.push(settled_failure_attempt(
         SettledExecutionSpec {
@@ -355,7 +355,7 @@ async fn repeatedly_crashed_parallel_review_fails_after_the_retry_limit() {
 #[tokio::test]
 async fn accepted_second_review_round_ignores_stale_sibling_verdicts() {
     let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
-    let review_input = json!({"task":"repair checkout","deliveryFeedback":""});
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]});
     let mut history = vec![
         settled_worker(),
         settled_review(2, "acceptance", ACCEPTED_LABEL, "requirements met"),
@@ -556,7 +556,8 @@ fn assert_review_repair_preserves_delivery_feedback(
     history: &mut Vec<DurableExecution>,
     delivery_feedback: &str,
 ) {
-    let review_input = json!({"task":"repair checkout","deliveryFeedback":delivery_feedback});
+    let review_input =
+        json!({"task":"repair checkout","deliveryFeedback":delivery_feedback,"reviewResponses":[]});
     let reviews = reduce(verified, initial_input, history);
     assert_dispatch(&reviews, "acceptance", &review_input);
     assert_dispatch(&reviews, "code", &review_input);
@@ -616,7 +617,7 @@ fn assert_repaired_reviews_then_merge(
     assert_dispatched_together(&repaired, &["acceptance", "code"]);
     let review_input = json!({
         "task":"repair checkout",
-        "deliveryFeedback":delivery_feedback
+        "deliveryFeedback":delivery_feedback,"reviewResponses":[]
     });
     assert_dispatch(&repaired, "acceptance", &review_input);
     assert_dispatch(&repaired, "code", &review_input);

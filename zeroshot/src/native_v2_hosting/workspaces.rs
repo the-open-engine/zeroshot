@@ -36,6 +36,14 @@ pub struct HostedWorkspace {
 /// and leave no unowned background process writing into the workspace on cancellation.
 #[async_trait]
 pub trait HostedWorkspaceStorage: Send + Sync {
+    /// Retain acknowledged predecessor receipts before the runtime claims its successor.
+    /// Use the same lineage backend returned by `prepare`, with monotonic generation checks.
+    async fn retain_delivery_state(
+        &self,
+        run_id: &RunId,
+        state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), CheckpointError>;
+
     async fn prepare(
         &self,
         request: HostedWorkspaceRequest<'_>,

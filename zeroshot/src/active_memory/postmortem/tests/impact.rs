@@ -72,6 +72,7 @@ impl Case {
             .or_insert(next_instance);
         let name: NodeName = name.parse().assert_value();
         let node = NodeSnapshot {
+            delivery_state: None,
             reference: ExecutionRef {
                 run_id: self.snapshot.run_id.clone(),
                 node: name.clone(),
@@ -380,6 +381,7 @@ async fn retry_seed_and_incomplete_siblings_do_not_hide_a_real_completion() {
         .attempt = PositiveInteger::new(2).assert_value();
     let seed = &case.snapshot.executions[&worker];
     case.snapshot.execution_seed.push(DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(1).assert_value(),
         node_instance: seed.reference.node_instance,
         execution: seed.reference.execution,

@@ -217,6 +217,7 @@ async fn start_role(
         return Err(PostmortemError::Preparation);
     }
     let request = NodeRunRequest {
+        delivery_state: None,
         dispatch: Default::default(),
         invocation,
         environment,
@@ -345,6 +346,7 @@ async fn bridge(
 
 fn global_event(role: Role, event: DurableNodeEvent) -> Result<RunEvent, PostmortemError> {
     Ok(match event {
+        DurableNodeEvent::DeliveryState(_) => return Err(PostmortemError::Storage),
         DurableNodeEvent::TokenUsage(usage) => RunEvent::RunTokenUsageObserved { usage },
         DurableNodeEvent::Output { output, timestamp } => RunEvent::SafeLog {
             execution: None,

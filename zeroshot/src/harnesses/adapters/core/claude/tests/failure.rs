@@ -60,6 +60,7 @@ async fn collect_durable(durable: &mut DurableOutput) -> CapturedDurable {
     while let Ok(event) = durable.recv().await {
         match event {
             DurableNodeEvent::Output { output, .. } => logs.push(output.text),
+            DurableNodeEvent::DeliveryState(_) => panic!("unexpected delivery receipts"),
             DurableNodeEvent::TokenUsage(usage) => usages.push(usage),
         }
     }

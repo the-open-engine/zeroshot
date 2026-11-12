@@ -402,6 +402,7 @@ async fn native_candidate_runs_a_decision_without_starting_a_harness() {
     let run_id = invocation.node.reference.run_id.clone();
     let mut handle = runner
         .start(NodeRunRequest {
+            delivery_state: None,
             dispatch: Default::default(),
             invocation: invocation.node,
             environment: invocation.environment,

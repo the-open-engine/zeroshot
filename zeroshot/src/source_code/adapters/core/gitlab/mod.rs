@@ -9,6 +9,7 @@ use crate::source_code_provider::*;
 mod api;
 mod ci;
 mod comment;
+mod conversations;
 mod pipeline_errors;
 mod review;
 mod wire;
@@ -30,6 +31,8 @@ pub struct GitLabDeliveryAuthority {
     // Retain validated identity for links; every API operation reads fresh project policy.
     projects: Arc<Mutex<BTreeMap<String, Project>>>,
     effects: Arc<Mutex<Effects>>,
+    resolutions: conversations::PendingResolutions,
+    published_replies: super::review_responses::PublishedReplies,
 }
 
 #[derive(Default)]
@@ -59,6 +62,8 @@ impl GitLabDeliveryAuthority {
             transport,
             projects: Arc::new(Mutex::new(BTreeMap::new())),
             effects: Arc::new(Mutex::new(Effects::default())),
+            resolutions: conversations::PendingResolutions::default(),
+            published_replies: super::review_responses::PublishedReplies::default(),
         })
     }
 
@@ -145,6 +150,19 @@ impl GitLabDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
+    async fn review_conversation_state(
+        &self,
+    ) -> Result<Option<serde_json::Value>, SourceDeliveryError> {
+        conversations::checkpoint(self).await
+    }
+
+    async fn restore_review_conversation_state(
+        &self,
+        state: serde_json::Value,
+    ) -> Result<(), SourceDeliveryError> {
+        conversations::restore(self, state).await
+    }
+
     fn prepare_commit_message(&self, title: &str) -> String {
         review::normalized_title(title).0
     }
@@ -250,8 +268,22 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         &self,
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
-        review::feedback(self, receipt, credential)
+        review::feedback(self, receipt, credential, checkpoint)
+            .await
+            .map_err(|error| {
+                api::delivery_context(error, review::merge_request_identity(receipt), credential)
+            })
+    }
+
+    async fn resolve_review_conversation(
+        &self,
+        request: crate::source_code_provider::SourceReviewResolutionRequest<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<crate::source_code_provider::SourceReviewResolution, SourceDeliveryError> {
+        let receipt = request.review;
+        conversations::resolve(self, request, credential)
             .await
             .map_err(|error| {
                 api::delivery_context(error, review::merge_request_identity(receipt), credential)
@@ -262,12 +294,18 @@ impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
         &self,
         receipt: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
-        review::merge(self, receipt, credential)
-            .await
-            .map_err(|error| {
-                api::delivery_context(error, review::merge_request_identity(receipt), credential)
-            })
+        let result = async {
+            if conversations::reconcile_resolutions(self, receipt, credential, checkpoint).await? {
+                return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+            }
+            review::merge(self, receipt, credential, checkpoint).await
+        }
+        .await;
+        result.map_err(|error| {
+            api::delivery_context(error, review::merge_request_identity(receipt), credential)
+        })
     }
 
     async fn withdraw_merge_request(

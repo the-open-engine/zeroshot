@@ -225,6 +225,20 @@ pub trait CapsuleAllocator: Send + Sync {
         Default::default()
     }
 
+    /// Reconcile predecessor ledger facts into the existing lineage before any successor claim.
+    /// This must not capture workspace bytes or restore graph execution history.
+    async fn retain_delivery_state(
+        &self,
+        _run_id: &RunId,
+        _state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), crate::native_v2_supervisor::checkpoints::CheckpointError> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "delivery recovery storage is unavailable",
+        )
+        .into())
+    }
+
     async fn checkpoints(
         &self,
         _params: openengine_cluster_protocol::RunCheckpointsParams,

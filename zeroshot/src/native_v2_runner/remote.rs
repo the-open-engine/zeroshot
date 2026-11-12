@@ -75,6 +75,38 @@ impl RemoteNodeHandleBridge {
         Ok(())
     }
 
+    pub(crate) async fn record_delivery_state(
+        &self,
+        state: crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), NodeRunnerError> {
+        self.durable_output
+            .as_ref()
+            .ok_or(NodeRunnerError::DurableOutputClosed)?
+            .send_terminal(
+                DurableNodeEvent::DeliveryState(state),
+                self.cancellation.clone(),
+            )
+            .await
+    }
+
+    pub(crate) async fn checkpoint_delivery_state(
+        &self,
+        state: crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), NodeRunnerError> {
+        let generation = state.generation.get();
+        self.record_delivery_state(state).await?;
+        let mut cancellation = self.cancellation.clone();
+        let output = self
+            .durable_output
+            .as_ref()
+            .ok_or(NodeRunnerError::DurableOutputClosed)?;
+        tokio::select! {
+            biased;
+            _ = super::wait_for_cancellation(&mut cancellation) => Err(NodeRunnerError::Cancelled),
+            result = output.wait_delivery_ack(generation) => result,
+        }
+    }
+
     pub(crate) async fn record_token_usage(
         &self,
         usage: Option<TokenUsageDelta>,

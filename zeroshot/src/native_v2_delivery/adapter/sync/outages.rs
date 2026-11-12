@@ -104,6 +104,7 @@ impl SourceDeliveryAuthority for OutageAuthority {
         &self,
         _: &SourceReviewReceipt,
         _: SourceDeliveryCredential<'_>,
+        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         Err(SourceDeliveryError::Rejected)
     }

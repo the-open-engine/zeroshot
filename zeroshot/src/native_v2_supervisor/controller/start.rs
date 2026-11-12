@@ -49,7 +49,22 @@ impl NativeV2Supervisor {
         if let Some(stopped) = self.startup_interrupt(deadline, &mut cancel) {
             return Ok(stopped);
         }
+        let delivery_state = if matches!(
+            invocation.binding,
+            crate::native_v2_contract::NodeRuntimeBinding::GitDelivery { .. }
+        ) {
+            let history = self.snapshot().await?.delivery_checkpoint()?;
+            let retained = match &self.checkpoints {
+                Some(store) => store.delivery_state().await?,
+                None => None,
+            };
+            crate::native_v2_contract::DeliveryCheckpoint::latest(history, retained)
+                .map_err(|_| NativeV2SupervisorError::InvalidState)?
+        } else {
+            None
+        };
         let request = NodeRunRequest {
+            delivery_state,
             dispatch,
             invocation,
             environment,

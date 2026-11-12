@@ -57,7 +57,8 @@ pub(super) fn run_metadata(snapshot: &RunSnapshot) -> RunMetadata {
 pub(super) fn changes_public_status(event: &RunEvent) -> bool {
     !matches!(
         event,
-        RunEvent::SafeLog { .. }
+        RunEvent::DeliveryState { .. }
+            | RunEvent::SafeLog { .. }
             | RunEvent::TokenUsageObserved { .. }
             | RunEvent::RunTokenUsageObserved { .. }
             | RunEvent::PrimaryGraphCompleted { .. }

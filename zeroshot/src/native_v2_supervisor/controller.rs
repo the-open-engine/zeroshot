@@ -231,6 +231,12 @@ impl NativeV2Supervisor {
         if let Some(terminal) = snapshot.terminal {
             return Ok(terminal);
         }
+        if !snapshot.force_stop_requested
+            && !self.force_requested.load(Ordering::Acquire)
+            && let (Some(store), Some(state)) = (&self.checkpoints, snapshot.delivery_checkpoint()?)
+        {
+            store.retain_delivery_state(&state).await?;
+        }
         events.extend(super::logging::terminal_failure_events(
             &snapshot,
             reason,

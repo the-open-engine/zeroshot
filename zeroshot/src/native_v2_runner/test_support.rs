@@ -21,7 +21,7 @@ impl DurableOutput {
         loop {
             match self.recv().await? {
                 DurableNodeEvent::Output { output, .. } => return Ok(output),
-                DurableNodeEvent::TokenUsage(_) => {}
+                DurableNodeEvent::TokenUsage(_) | DurableNodeEvent::DeliveryState(_) => {}
             }
         }
     }
@@ -31,7 +31,7 @@ impl DurableOutput {
     ) -> Result<Option<TokenUsageDelta>, AttachReceiveError> {
         loop {
             match self.recv().await? {
-                DurableNodeEvent::Output { .. } => {}
+                DurableNodeEvent::Output { .. } | DurableNodeEvent::DeliveryState(_) => {}
                 DurableNodeEvent::TokenUsage(usage) => return Ok(usage),
             }
         }
@@ -159,6 +159,7 @@ pub(crate) fn request(run: &str, node: &str, identity: (u64, u64)) -> NodeRunReq
         .assert_value()
         .clone();
     NodeRunRequest {
+        delivery_state: None,
         dispatch: Default::default(),
         invocation: NodeInvocation {
             reference: ExecutionRef {
@@ -471,6 +472,8 @@ pub(crate) fn control_with_capacity(
     (
         cancel,
         DriverControl {
+            delivery_publication: Arc::new(tokio::sync::Mutex::new(DeliveryPublication::default())),
+            delivery_state: None,
             cancellation,
             live_output,
             durable_output,
@@ -478,3 +481,71 @@ pub(crate) fn control_with_capacity(
         durable,
     )
 }
+
+pub(crate) fn delivery_checkpoint(
+    state: Value,
+    generation: u64,
+) -> crate::native_v2_contract::DeliveryCheckpoint {
+    crate::native_v2_contract::DeliveryCheckpoint {
+        generation: PositiveInteger::new(generation).assert_value(),
+        state,
+    }
+}
+
+/// A later CI repair replaces worker output, while delivery facts belong to the host.
+pub(crate) fn delivery_history(state: Value) -> Vec<crate::full_v1_reducer::DurableExecution> {
+    use crate::full_v1_reducer::{
+        DurableExecution, DurableExecutionState, HistoryPosition, StructuralOccurrence,
+    };
+    ["deliver", "worker"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let sequence = index as u64 + 1;
+            DurableExecution {
+                delivery_state: (index == 0).then(|| delivery_checkpoint(state.clone(), 2)),
+                dispatch_position: HistoryPosition::new(sequence * 2).assert_value(),
+                node_instance: NodeInstanceId::new(sequence).assert_value(),
+                execution: ExecutionId::new(sequence).assert_value(),
+                occurrence: StructuralOccurrence {
+                    node: NodeName::new(name).assert_value(),
+                    map_indices: Vec::new(),
+                },
+                attempt: PositiveInteger::new(1).assert_value(),
+                input: Value::Null,
+                state: DurableExecutionState::Settled {
+                    position: HistoryPosition::new(sequence * 2 + 1).assert_value(),
+                    outcome: WorkerOutcome::Verified {
+                        output: json!({"reviewResponses":[]}),
+                        artifacts: Vec::new(),
+                    },
+                },
+            }
+        })
+        .collect()
+}
+
+pub(crate) async fn restart_delivery_state(repository: &std::path::Path, state: Value) -> Value {
+    use crate::native_v2_supervisor::checkpoints::{DeliveryCheckpointStore, RunCheckpointStore};
+    let store = DeliveryCheckpointStore::new(repository.to_owned());
+    store
+        .finish(&delivery_history(state.clone()))
+        .await
+        .assert_value();
+    drop(store);
+    // Restart has no execution seed and does not construct a workspace/Restic store.
+    let recovered = DeliveryCheckpointStore::new(repository.to_owned());
+    recovered.finish(&[]).await.assert_value();
+    let retained = recovered
+        .delivery_state()
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(retained.state, state);
+    assert_eq!(std::fs::read_dir(repository).assert_value().count(), 1);
+    retained.state
+}
+
+#[path = "test_support/delivery_recovery_tests.rs"]
+mod delivery_recovery_tests;
+pub(crate) use delivery_recovery_tests::interrupted_delivery_state;

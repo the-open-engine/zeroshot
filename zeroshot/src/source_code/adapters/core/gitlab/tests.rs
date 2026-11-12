@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use reqwest::{Method, StatusCode};
@@ -6,6 +7,8 @@ use super::*;
 
 #[path = "ci_tests.rs"]
 mod ci_tests;
+#[path = "conversation_tests.rs"]
+mod conversation_tests;
 #[path = "feedback_tests.rs"]
 mod feedback_tests;
 #[path = "http_fixture.rs"]
@@ -29,6 +32,12 @@ struct StateData {
     note_pages: BTreeMap<u32, Vec<Value>>,
     note_headers: BTreeMap<u32, Vec<String>>,
     discussion_note: Value,
+    conversation: Option<Value>,
+    conversation_race: Option<String>,
+    confirmation_failures: usize,
+    lose_resolve_response: bool,
+    lose_reopen_response: bool,
+    lose_reply_response: bool,
     calls: Vec<(String, String, Value)>,
     lose_create: bool,
     disconnect_create: bool,
@@ -70,6 +79,12 @@ impl Fixture {
             note_pages: BTreeMap::new(),
             note_headers: BTreeMap::new(),
             discussion_note: note(1, "Please test the edge case."),
+            conversation: None,
+            conversation_race: None,
+            confirmation_failures: 0,
+            lose_resolve_response: false,
+            lose_reopen_response: false,
+            lose_reply_response: false,
             calls: Vec::new(),
             lose_create: false,
             disconnect_create: false,
@@ -253,11 +268,13 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
         headers,
         body,
     } = request;
-    if headers
+    let authorization = headers
         .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        != Some("Bearer test-private-token")
-    {
+        .and_then(|value| value.to_str().ok());
+    if !matches!(
+        authorization,
+        Some("Bearer test-private-token" | "Bearer refreshed-private-token")
+    ) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let body = serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null);
@@ -266,6 +283,17 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
     state
         .calls
         .push((method.to_string(), path.to_owned(), body.clone()));
+    if method == Method::POST
+        && path.ends_with("/discussions/thread/notes")
+        && state.conversation_race.as_deref() == Some("require_fresh_reply")
+        && authorization != Some("Bearer refreshed-private-token")
+    {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"message":"Bad credentials"})),
+        )
+            .into_response();
+    }
     if state.disconnect_create && method == Method::POST && path.ends_with("/merge_requests") {
         return Response::disconnected();
     }
@@ -278,6 +306,9 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
         overridden_response(&state, &method, path).or_else(|| simple_response(&state, path))
     {
         return response;
+    }
+    if state.conversation.is_some() && path.contains("/discussions") {
+        return conversation_tests::conversation_response(&mut state, &method, path, body);
     }
     if path.ends_with("/api/graphql") {
         assert_eq!(method, Method::POST);
@@ -501,7 +532,7 @@ async fn merges_only_the_exact_reviewed_head_and_confirms_integrated_revision() 
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Accepted
@@ -528,7 +559,7 @@ async fn changed_head_refuses_merge_before_any_effect() {
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -543,7 +574,7 @@ async fn lost_merge_response_is_reconciled_during_safe_handoff() {
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -585,7 +616,7 @@ async fn unknown_policy_and_manual_pipeline_never_authorize_merge() {
         assert_eq!(
             fixture
                 .authority
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .unwrap(),
             SourceMergeRequestOutcome::Pending
@@ -600,7 +631,7 @@ async fn unknown_policy_and_manual_pipeline_never_authorize_merge() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -642,7 +673,7 @@ async fn feedback_is_fenced_against_mid_read_head_changes() {
     fixture.open_review();
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -650,7 +681,7 @@ async fn feedback_is_fenced_against_mid_read_head_changes() {
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -774,7 +805,7 @@ async fn required_merge_trains_never_use_a_synchronous_merge_bypass() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -790,7 +821,7 @@ async fn unknown_merge_settlement_refuses_a_worker_handoff() {
     assert!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -804,7 +835,7 @@ async fn unknown_merge_settlement_refuses_a_worker_handoff() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending,
@@ -1038,7 +1069,7 @@ async fn synthetic_pipeline_success_does_not_prove_ci_for_the_captured_head() {
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Pending
@@ -1100,7 +1131,7 @@ async fn null_discussion_iid_requires_the_fetched_global_merge_request_id() {
     fixture.state.lock().unwrap().discussion_note["noteable_iid"] = Value::Null;
     let feedback = fixture
         .authority
-        .inspect_review_feedback(&receipt(), credential())
+        .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
         .await
         .unwrap();
     assert_eq!(feedback.items.len(), 1);
@@ -1108,7 +1139,7 @@ async fn null_discussion_iid_requires_the_fetched_global_merge_request_id() {
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );
@@ -1120,7 +1151,7 @@ async fn null_discussion_iid_requires_the_fetched_global_merge_request_id() {
     assert!(
         fixture
             .authority
-            .inspect_review_feedback(&receipt(), credential())
+            .inspect_review_feedback(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .is_err()
     );

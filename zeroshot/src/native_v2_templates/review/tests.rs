@@ -204,6 +204,7 @@ pub(in crate::native_v2_cli::templates) fn settle(
         panic!("expected dispatch");
     };
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(position).assert_value(),
         node_instance: *node_instance,
         execution: *execution,

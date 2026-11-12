@@ -16,6 +16,14 @@ struct ExternalStorage {
 
 #[async_trait::async_trait]
 impl HostedWorkspaceStorage for ExternalStorage {
+    async fn retain_delivery_state(
+        &self,
+        _run_id: &RunId,
+        _state: &crate::native_v2_contract::DeliveryCheckpoint,
+    ) -> Result<(), CheckpointError> {
+        Err(std::io::Error::other("fixture has no retained recovery storage").into())
+    }
+
     async fn prepare(
         &self,
         request: HostedWorkspaceRequest<'_>,

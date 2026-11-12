@@ -87,8 +87,14 @@ async fn coverage_contract_receive_selects_the_only_open_lane() {
         let mut output = DurableOutput::new(
             receiver,
             cancelled_receiver,
-            Arc::new(TerminalOverflow::default()),
-            Arc::new(Notify::new()),
+            (
+                Arc::new(TerminalOverflow::default()),
+                Arc::new(Notify::new()),
+                DeliveryStateAcknowledgement {
+                    persisted: watch::channel(0).0,
+                    observed: Arc::new(AtomicU64::new(0)),
+                },
+            ),
         );
         if terminal {
             drop(events);
@@ -214,4 +220,79 @@ async fn cancelled_system_verifier_evidence_uses_the_bounded_terminal_lane() {
         panic!("missing result")
     };
     assert_eq!(retained, result);
+}
+
+#[tokio::test]
+async fn delivery_acknowledgement_requires_explicit_durable_confirmation() {
+    let (sender, mut output) = durable_event_channel_with_capacity(1);
+    let (cancel, cancellation) = watch::channel(false);
+    let checkpoint = super::super::test_support::delivery_checkpoint(
+        serde_json::json!({"github":[],"replies":[]}),
+        1,
+    );
+    sender
+        .send_terminal(DurableNodeEvent::DeliveryState(checkpoint), cancellation)
+        .await
+        .unwrap();
+    let mut waiting = Box::pin(sender.wait_delivery_ack(1));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(10), &mut waiting)
+            .await
+            .is_err()
+    );
+    assert!(
+        output.acknowledge_delivery_state(1).is_err(),
+        "unobserved future generations cannot be acknowledged"
+    );
+    assert!(matches!(
+        output.recv().await.unwrap(),
+        DurableNodeEvent::DeliveryState(_)
+    ));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(10), &mut waiting)
+            .await
+            .is_err(),
+        "enqueue and receive are not durable acknowledgement"
+    );
+    output.acknowledge_delivery_state(1).unwrap();
+    waiting.await.unwrap();
+    drop(cancel);
+    drop(output);
+    assert_eq!(
+        sender.wait_delivery_ack(2).await,
+        Err(NodeRunnerError::DurableOutputClosed)
+    );
+}
+
+#[tokio::test]
+async fn delivery_checkpoints_deduplicate_only_acknowledged_state_across_control_clones() {
+    let (_cancel, control, mut output) = super::super::test_support::control();
+    let state = serde_json::json!({"github":[],"replies":[]});
+    for generation in 1..=2 {
+        let mut changed = state.clone();
+        changed["revision"] = serde_json::json!(generation);
+        let producer = control.clone();
+        let input = changed.clone();
+        let task = tokio::spawn(async move { producer.checkpoint_delivery_state(input).await });
+        let DurableNodeEvent::DeliveryState(checkpoint) = output.recv().await.unwrap() else {
+            panic!("expected a checkpoint");
+        };
+        assert_eq!(checkpoint.generation.get(), generation);
+        assert_eq!(checkpoint.state, changed);
+        output.acknowledge_delivery_state(generation).unwrap();
+        task.await.unwrap().unwrap();
+        // Repeated CI polls must not accumulate identical receipt events or consume generations.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            control.clone().checkpoint_delivery_state(changed),
+        )
+        .await
+        .expect("acknowledged state must not wait for another event")
+        .unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), output.recv())
+                .await
+                .is_err()
+        );
+    }
 }

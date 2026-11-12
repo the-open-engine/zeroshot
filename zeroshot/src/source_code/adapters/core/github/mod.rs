@@ -28,6 +28,7 @@ mod instance;
 pub(crate) use comment::{comment_destination, comment_destination_at, validate_comment_review_scope};
 pub(super) use comment::valid_github_permalink as valid_comment_permalink;
 mod conflict;
+pub(crate) mod conversations;
 mod feedback;
 mod metadata;
 mod observation;
@@ -73,6 +74,8 @@ pub struct GhCliDeliveryAuthority {
     operator_diagnostics: Option<OperatorDiagnosticReporter>,
     transport: Option<crate::native_v2_delivery::transport::GitTransport>,
     queue_effects: queue::QueueEffects,
+    resolutions: conversations::PendingResolutions,
+    published_replies: super::review_responses::PublishedReplies,
     base_url: openengine_cluster_protocol::SourceForgeBaseUrl,
     instance_verified: Arc<tokio::sync::OnceCell<()>>,
 }
@@ -91,6 +94,8 @@ impl GhCliDeliveryAuthority {
             operator_diagnostics: None,
             transport: None,
             queue_effects: queue::QueueEffects::default(),
+            resolutions: conversations::PendingResolutions::default(),
+            published_replies: super::review_responses::PublishedReplies::default(),
             base_url: openengine_cluster_protocol::SourceForgeBaseUrl::new("https://github.com")
                 .expect("static base URL"),
             instance_verified: Arc::new(tokio::sync::OnceCell::new()),
@@ -325,12 +330,14 @@ impl GhCliDeliveryAuthority {
         review: &SourceReviewReceipt,
         selected: (merge_policy::MergeMethod, &str),
         credential: SourceDeliveryCredential<'_>,
-    ) -> Result<(), SourceDeliveryError> {
+    ) -> Result<(), api::CommandFailure> {
         let (merge_method, pull_request_id) = selected;
         if merge_method == merge_policy::MergeMethod::Queue {
             return queue::enqueue(self, review, pull_request_id, credential).await;
         }
-        self.ensure_instance(credential).await?;
+        self.ensure_instance(credential)
+            .await
+            .map_err(api::CommandFailure::unknown)?;
         let mut command = self.api_command(credential);
         command.args([
             "pr",
@@ -349,13 +356,25 @@ impl GhCliDeliveryAuthority {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
-        failure: &SourceDeliveryError,
+        failure: &api::CommandFailure,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
-        if failure.cleanup_unconfirmed() {
-            return Err(failure.clone());
+        let error = &failure.error;
+        if error.cleanup_unconfirmed() {
+            return Err(error.clone());
         }
         let snapshot = self.policy_snapshot(review, credential).await?;
-        let permanent_response = !failure.retryable_operation();
+        if !error.authentication_failed()
+            && matches!(error.api_status(), None | Some(405 | 409 | 422))
+            && failure.rejection == Some(api::MutationRejection::Conversation)
+            && !matches!(
+                snapshot.state,
+                SourceReviewState::Merged { .. } | SourceReviewState::Closed
+            )
+            && conversations::has_blocker(self, review, credential).await?
+        {
+            return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+        }
+        let permanent_response = !error.retryable_operation();
         match snapshot.state {
             SourceReviewState::Merged { .. } => Ok(SourceMergeRequestOutcome::Accepted),
             _ if permanent_response => Err(SourceDeliveryError::Rejected),
@@ -374,6 +393,19 @@ impl GhCliDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
+    async fn review_conversation_state(
+        &self,
+    ) -> Result<Option<serde_json::Value>, SourceDeliveryError> {
+        conversations::checkpoint(self).await
+    }
+
+    async fn restore_review_conversation_state(
+        &self,
+        state: serde_json::Value,
+    ) -> Result<(), SourceDeliveryError> {
+        conversations::restore(self, state).await
+    }
+
     fn review_links(
         &self,
         review: &SourceReviewReceipt,
@@ -454,15 +486,29 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
+        conversations::reconcile_resolutions(self, review, credential, checkpoint).await?;
         feedback::inspect(self, review, credential).await
+    }
+
+    async fn resolve_review_conversation(
+        &self,
+        request: crate::source_code_provider::SourceReviewResolutionRequest<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<crate::source_code_provider::SourceReviewResolution, SourceDeliveryError> {
+        conversations::resolve(self, request, credential).await
     }
 
     async fn request_merge(
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
+        if conversations::reconcile_resolutions(self, review, credential, checkpoint).await? {
+            return Ok(SourceMergeRequestOutcome::ReviewBlocked);
+        }
         let snapshot = self.policy_snapshot(review, credential).await?;
         let pull_request_id = snapshot.pull_request_id.clone();
         let queued = match merge_action(snapshot)? {
@@ -475,12 +521,12 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
             .await;
         match submitted {
             Ok(()) => Ok(SourceMergeRequestOutcome::Accepted),
-            Err(error) => match self
-                .classify_rejected_merge(review, credential, &error)
+            Err(failure) => match self
+                .classify_rejected_merge(review, credential, &failure)
                 .await
             {
                 Ok(outcome) => Ok(outcome),
-                Err(_) => Err(error.with_context(format!(
+                Err(_) => Err(failure.error.with_context(format!(
                     "Merge request for {}#{} into {} using {merge_method:?} failed. \
                      Check GitHub's rejection and base-branch policy before retrying delivery.",
                     review.repository, review.review_id, review.target_branch,

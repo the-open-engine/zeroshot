@@ -3,7 +3,7 @@ use super::*;
 use serde_json::Value;
 
 type QueueIdentity = (String, String, String, String, String);
-type Submission = Result<QueueAdmission, SourceDeliveryError>;
+type Submission = Result<QueueAdmission, api::CommandFailure>;
 
 #[derive(Clone, Debug)]
 struct QueueAdmission {
@@ -34,7 +34,7 @@ impl QueueEffect {
     async fn settle(&mut self) -> Submission {
         if let Some(task) = self.task.as_mut() {
             let submitted = task.await.unwrap_or_else(|_| QueueSubmission {
-                result: Err(submission_panicked()),
+                result: Err(api::CommandFailure::unknown(submission_panicked())),
                 uncertain: true,
             });
             self.uncertain |= submitted.uncertain;
@@ -43,7 +43,7 @@ impl QueueEffect {
         }
         self.settled
             .clone()
-            .unwrap_or_else(|| Err(invalid_receipt()))
+            .unwrap_or_else(|| Err(api::CommandFailure::unknown(invalid_receipt())))
     }
 }
 
@@ -73,15 +73,15 @@ pub(super) async fn enqueue(
     review: &SourceReviewReceipt,
     node_id: &str,
     credential: SourceDeliveryCredential<'_>,
-) -> Result<(), SourceDeliveryError> {
+) -> Result<(), api::CommandFailure> {
     let mut effects = authority.queue_effects.0.lock().await;
     let key = identity(review);
     if let Some(effect) = effects.get_mut(&key) {
         if effect.task.is_some()
             || effect.settled.as_ref().is_some_and(|result| {
                 result.is_ok()
-                    || matches!(result, Err(error) if error.cleanup_unconfirmed()
-                    || uncertain_submission(error) && !error.retryable_operation())
+                    || matches!(result, Err(failure) if failure.error.cleanup_unconfirmed()
+                    || uncertain_submission(&failure.error) && !failure.error.retryable_operation())
             })
         {
             return effect.settle().await.map(|_| ());
@@ -89,7 +89,8 @@ pub(super) async fn enqueue(
     }
     {
         let uncertain = effects.get(&key).is_some_and(|effect| effect.uncertain);
-        let mut command = mutation(authority, ENQUEUE, node_id, credential)?;
+        let mut command = mutation(authority, ENQUEUE, node_id, credential)
+            .map_err(api::CommandFailure::unknown)?;
         command.args(["-f", &format!("expectedHeadOid={}", review.head_revision)]);
         let token = credential.expose().to_owned();
         let deadline = authority.config.api_deadline;
@@ -106,13 +107,13 @@ pub(super) async fn enqueue(
             let rejected = response
                 .as_ref()
                 .err()
-                .is_some_and(|failure| failure.rejected);
-            let result = response
-                .map_err(|failure| failure.error)
-                .and_then(|value| confirm_receipt(value, &review, &node_id));
+                .is_some_and(|failure| failure.rejection.is_some());
+            let result = response.and_then(|value| {
+                confirm_receipt(value, &review, &node_id).map_err(api::CommandFailure::unknown)
+            });
             QueueSubmission {
                 uncertain: !rejected
-                    && matches!(&result, Err(error) if uncertain_submission(error)),
+                    && matches!(&result, Err(failure) if uncertain_submission(&failure.error)),
                 result,
             }
         });
@@ -128,13 +129,17 @@ pub(super) async fn enqueue(
     // Retain the task when this future is cancelled; withdrawal drains that same request first.
     effects
         .get_mut(&key)
-        .ok_or_else(invalid_receipt)?
+        .ok_or_else(|| api::CommandFailure::unknown(invalid_receipt()))?
         .settle()
         .await
         .map(|_| ())
 }
 
-fn confirm_receipt(value: Value, review: &SourceReviewReceipt, node_id: &str) -> Submission {
+fn confirm_receipt(
+    value: Value,
+    review: &SourceReviewReceipt,
+    node_id: &str,
+) -> Result<QueueAdmission, SourceDeliveryError> {
     let entry = value
         .pointer("/data/enqueuePullRequest/mergeQueueEntry")
         .ok_or_else(invalid_receipt)?;
@@ -182,7 +187,7 @@ pub(super) async fn withdraw(
     let mut effects = authority.queue_effects.0.lock().await;
     let uncertain = match effects.get_mut(&key) {
         Some(effect) => match effect.settle().await {
-            Err(error) if error.cleanup_unconfirmed() => return Err(error),
+            Err(failure) if failure.error.cleanup_unconfirmed() => return Err(failure.error),
             _ => effect.uncertain,
         },
         None => false,

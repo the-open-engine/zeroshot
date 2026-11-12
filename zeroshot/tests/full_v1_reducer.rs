@@ -138,6 +138,7 @@ impl<'a> SettledSpec<'a> {
 
 fn settled(spec: SettledSpec<'_>, outcome: WorkerOutcome) -> DurableExecution {
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(spec.position.saturating_sub(1)).assert_value(),
         node_instance: NodeInstanceId::new(spec.node_instance).assert_value(),
         execution: ExecutionId::new(spec.execution).assert_value(),
@@ -156,6 +157,7 @@ fn settled(spec: SettledSpec<'_>, outcome: WorkerOutcome) -> DurableExecution {
 
 fn active(execution: u64, node_instance: u64, node: &str, position: u64) -> DurableExecution {
     DurableExecution {
+        delivery_state: None,
         dispatch_position: HistoryPosition::new(position).assert_value(),
         node_instance: NodeInstanceId::new(node_instance).assert_value(),
         execution: ExecutionId::new(execution).assert_value(),

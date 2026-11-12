@@ -92,8 +92,37 @@ impl LocalCliBackend {
         let recovery = self
             .claimable_recovery_document(&params.run_id, status.workspace_recovery.recoverable)?;
         let _claim = self.claim_recovery_workspace(&params.run_id)?;
+        self.retain_predecessor_delivery(&params.run_id, &recovery)
+            .await?;
         self.start_local_successor(params, recovery, discard_workspace_changes)
             .await
+    }
+
+    async fn retain_predecessor_delivery(
+        &self,
+        run_id: &RunId,
+        recovery: &LocalRecoveryDocument,
+    ) -> Result<(), NativeV2CliError> {
+        use crate::native_v2_supervisor::checkpoints::{DeliveryCheckpointStore, RunCheckpointStore};
+        let ledger = SqliteRunLedger::open(self.paths(run_id)?.ledger()).map_err(local_error)?;
+        let predecessor = ledger
+            .get(run_id)
+            .await
+            .map_err(local_error)?
+            .ok_or_else(|| local_message("predecessor ledger is unavailable"))?;
+        if let Some(state) = predecessor
+            .snapshot
+            .delivery_checkpoint()
+            .map_err(local_error)?
+        {
+            let repository =
+                self.checkpoint_repository(&self.delivery_run_id(run_id, recovery)?)?;
+            DeliveryCheckpointStore::new(repository)
+                .retain_delivery_state(&state)
+                .await
+                .map_err(local_error)?;
+        }
+        Ok(())
     }
 
     fn claimable_recovery_document(

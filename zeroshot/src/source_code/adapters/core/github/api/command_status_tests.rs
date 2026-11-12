@@ -25,7 +25,7 @@ async fn exact_graphql_rejection_is_recognized_before_credential_redaction() {
         )
         .await
         .expect_err("request rejected");
-        assert!(failure.rejected);
+        assert_eq!(failure.rejection, Some(MutationRejection::Policy));
         assert_eq!(failure.error.api_status(), None);
         assert!(!failure.error.to_string().contains(token));
         assert!(!failure.error.retryable_operation());
@@ -35,7 +35,7 @@ async fn exact_graphql_rejection_is_recognized_before_credential_redaction() {
 #[tokio::test]
 async fn timed_out_graphql_response_never_claims_known_rejection() {
     let body = serde_json::json!({"data":{"enqueuePullRequest":null},"errors":[{
-        "type":"UNPROCESSABLE","path":["enqueuePullRequest"],"message":"Policy refused"}]})
+        "type":"UNPROCESSABLE","path":["enqueuePullRequest"],"message":"A conversation must be resolved."}]})
     .to_string();
     let mut command = shell("printf '%s' \"$1\"; exec /bin/sleep 30");
     command.args(["fixture", &body]);
@@ -47,9 +47,146 @@ async fn timed_out_graphql_response_never_claims_known_rejection() {
     )
     .await
     .expect_err("request incomplete");
-    assert!(!failure.rejected);
+    assert_eq!(failure.rejection, None);
     assert_eq!(failure.error.api_status(), None);
     assert!(failure.error.retryable_operation());
+}
+
+#[tokio::test]
+async fn conversation_reasons_use_complete_raw_graphql_responses() {
+    let rejected = serde_json::json!({"data":{"enqueuePullRequest":null},"errors":[{
+        "type":"UNPROCESSABLE","path":["enqueuePullRequest"],
+        "message":"A conversation must be resolved before this pull request can be merged."}]});
+    for token in ["conversation", "UNPROCESSABLE", "enqueuePullRequest"] {
+        let mut command = shell("printf '%s' \"$1\"; exit 1");
+        command
+            .env("GH_TOKEN", token)
+            .args(["fixture", &rejected.to_string()]);
+        let failure = command_json(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token(token),
+            Some("enqueuePullRequest"),
+        )
+        .await
+        .expect_err("conversation rejected");
+        assert_eq!(failure.rejection, Some(MutationRejection::Conversation));
+        assert!(!failure.error.to_string().contains(token));
+    }
+    let mut schema = rejected.clone();
+    schema["errors"][0]["type"] = serde_json::json!("GRAPHQL_VALIDATION_FAILED");
+    let mut wrong_path = rejected.clone();
+    wrong_path["errors"][0]["path"] = serde_json::json!(["enqueuePullRequest", "mergeQueueEntry"]);
+    let mut missing_data = rejected.clone();
+    missing_data.as_object_mut().unwrap().remove("data");
+    let mut partial = rejected.clone();
+    partial["data"]["enqueuePullRequest"] = serde_json::json!({"mergeQueueEntry": null});
+    let mut mixed = rejected.clone();
+    mixed["errors"]
+        .as_array_mut()
+        .unwrap()
+        .push(schema["errors"][0].clone());
+    let mut invalid_utf8 = rejected.to_string().into_bytes();
+    invalid_utf8.insert(
+        invalid_utf8
+            .windows(6)
+            .position(|b| b == b"before")
+            .unwrap()
+            + 1,
+        0xff,
+    );
+    let mut truncated = rejected.to_string().into_bytes();
+    truncated.extend(vec![b' '; 128 * 1024]);
+    for body in [
+        schema.to_string().into_bytes(),
+        wrong_path.to_string().into_bytes(),
+        missing_data.to_string().into_bytes(),
+        partial.to_string().into_bytes(),
+        mixed.to_string().into_bytes(),
+        invalid_utf8,
+        truncated,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("response");
+        std::fs::write(&path, body).unwrap();
+        let mut command = shell("/bin/cat \"$1\"; exit 1");
+        command.arg("A conversation must be resolved").arg(path);
+        let failure = command_json(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token("test-token"),
+            Some("enqueuePullRequest"),
+        )
+        .await
+        .expect_err("unrecognized or incomplete rejection");
+        assert_eq!(failure.rejection, None);
+    }
+}
+
+#[tokio::test]
+async fn native_conversation_reasons_require_complete_raw_merge_errors() {
+    const MESSAGE: &str = "GraphQL: A conversation must be resolved. (mergePullRequest)";
+    for token in ["conversation", "GraphQL", "mergePullRequest"] {
+        let mut command = shell("printf '%s' \"$1\" >&2; exit 1");
+        command.env("GH_TOKEN", token).args(["fixture", MESSAGE]);
+        let failure = command_status(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token(token),
+        )
+        .await
+        .expect_err("conversation rejected");
+        assert_eq!(failure.rejection, Some(MutationRejection::Conversation));
+        assert!(!failure.error.to_string().contains(token));
+    }
+    for message in [
+        "GraphQL: Unknown schema field mergePullRequest (mergePullRequest)",
+        "A conversation must be resolved.",
+        "GraphQL: A conversation must be resolved. (unknownMutation)",
+        "GraphQL: A conversation must be resolved.\nUnknown schema field (mergePullRequest)",
+    ] {
+        let mut command = shell("printf '%s' \"$1\" >&2; exit 1");
+        command.args(["A conversation must be resolved", message]);
+        let failure = command_status(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token("test-token"),
+        )
+        .await
+        .expect_err("unknown rejection");
+        assert_eq!(failure.rejection, None);
+    }
+    for timed_out in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("response");
+        std::fs::write(
+            &path,
+            format!(
+                "{MESSAGE}{}",
+                if timed_out {
+                    String::new()
+                } else {
+                    " ".repeat(128 * 1024)
+                }
+            ),
+        )
+        .unwrap();
+        let mut command = shell(if timed_out {
+            "/bin/cat \"$1\" >&2; exec /bin/sleep 30"
+        } else {
+            "/bin/cat \"$1\" >&2; exit 1"
+        });
+        command.arg("fixture").arg(path);
+        let failure = command_status(
+            command,
+            Duration::from_millis(100),
+            SourceDeliveryCredential::token("test-token"),
+        )
+        .await
+        .expect_err("incomplete rejection");
+        assert_eq!(failure.rejection, None);
+        assert_eq!(failure.error.retryable_operation(), timed_out);
+    }
 }
 
 #[tokio::test]
@@ -111,7 +248,8 @@ async fn failed_status_commands_keep_native_http_and_transport_semantics() {
             SourceDeliveryCredential::token("test-token"),
         )
         .await
-        .expect_err("command failed");
+        .expect_err("command failed")
+        .error;
         assert!(matches!(error, SourceDeliveryError::Api(_)));
         assert_eq!(error.api_status(), status, "{message}");
         assert_eq!(error.retryable_operation(), retryable, "{message}");
@@ -135,7 +273,8 @@ async fn timed_out_status_does_not_claim_an_incomplete_authentication_response()
         SourceDeliveryCredential::token("test-token"),
     )
     .await
-    .expect_err("command timed out");
+    .expect_err("command timed out")
+    .error;
     assert!(matches!(error, SourceDeliveryError::Api(_)));
     assert_eq!(error.api_status(), None);
     assert!(error.retryable_operation());
@@ -152,7 +291,8 @@ async fn status_spawn_failure_stays_in_the_api_boundary() {
         SourceDeliveryCredential::token("test-token"),
     )
     .await
-    .expect_err("missing executable");
+    .expect_err("missing executable")
+    .error;
     assert!(matches!(error, SourceDeliveryError::Api(_)));
     assert!(
         error
@@ -209,7 +349,7 @@ async fn status_completion_failure_and_timeout_stop_owned_helpers() {
         .await;
         assert_eq!(result.is_ok(), ending == "exit 0");
         if ending == "wait" {
-            assert!(result.expect_err("timed out").retryable_operation());
+            assert!(result.expect_err("timed out").error.retryable_operation());
         }
         assert_helper_stopped(&marker).await;
     }
@@ -260,7 +400,8 @@ async fn truncated_status_diagnostics_are_bounded_and_do_not_claim_http_authorit
         SourceDeliveryCredential::token(token),
     )
     .await
-    .expect_err("truncated failure");
+    .expect_err("truncated failure")
+    .error;
     let diagnostic = error.to_string();
     assert_eq!(error.api_status(), None);
     assert!(!error.authentication_failed());

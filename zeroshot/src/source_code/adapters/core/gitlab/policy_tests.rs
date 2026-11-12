@@ -1,3 +1,4 @@
+use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
 #[tokio::test]
@@ -257,7 +258,7 @@ async fn malformed_pipeline_identity_cannot_authorize_a_merge() {
         assert!(
             fixture
                 .authority
-                .request_merge(&receipt(), credential())
+                .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                 .await
                 .is_err()
         );
@@ -297,7 +298,7 @@ async fn closed_locked_and_conflicting_reviews_never_become_mergeable() {
             assert_eq!(
                 fixture
                     .authority
-                    .request_merge(&receipt(), credential())
+                    .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                     .await
                     .unwrap(),
                 SourceMergeRequestOutcome::Conflict
@@ -306,7 +307,7 @@ async fn closed_locked_and_conflicting_reviews_never_become_mergeable() {
             assert_eq!(
                 fixture
                     .authority
-                    .request_merge(&receipt(), credential())
+                    .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
                     .await
                     .unwrap(),
                 SourceMergeRequestOutcome::Pending
@@ -334,7 +335,7 @@ async fn already_integrated_squash_revision_is_confirmed_without_another_merge_e
     assert_eq!(
         fixture
             .authority
-            .request_merge(&receipt(), credential())
+            .request_merge(&receipt(), credential(), &TestReviewCheckpoint)
             .await
             .unwrap(),
         SourceMergeRequestOutcome::Accepted

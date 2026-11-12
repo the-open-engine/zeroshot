@@ -93,6 +93,7 @@ impl ResearchProbe {
                     };
                 let position = (self.history.len() as u64 + 1) * 2;
                 self.history.push(DurableExecution {
+                    delivery_state: None,
                     dispatch_position: HistoryPosition::new(position - 1).assert_value(),
                     node_instance,
                     execution,
