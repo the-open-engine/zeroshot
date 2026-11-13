@@ -33,39 +33,48 @@ impl NativeV2Supervisor {
             },
             RunEvent::Suspended { suspension },
         ];
-        // The host's store acknowledges both the complete graph state and this suspension's
-        // vector before cleanup. The final ledger event remains the durable end of the attempt.
-        let mut vectors = Vec::new();
-        let mut after = None;
+        // Keep admission live during host I/O. The first suspend request is the only concurrent
+        // vector append here; republish if it arrived after this snapshot was taken.
         loop {
-            let page = crate::v2_run_ledger::vectors::list(
-                self.ledger.as_ref(),
-                openengine_cluster_protocol::RunVectorsParams {
-                    run_id: self.run_id.clone(),
-                    after,
-                    limit: Some(100),
-                },
-            )
-            .await?;
-            vectors.extend(page.vectors);
-            after = page.next_after;
-            if after.is_none() {
-                break;
+            let snapshot = self.snapshot().await?;
+            let mut vectors = Vec::new();
+            let mut after = None;
+            loop {
+                let page = crate::v2_run_ledger::vectors::list(
+                    self.ledger.as_ref(),
+                    openengine_cluster_protocol::RunVectorsParams {
+                        run_id: self.run_id.clone(),
+                        after,
+                        limit: Some(100),
+                    },
+                )
+                .await?;
+                vectors.extend(page.vectors);
+                after = page.next_after;
+                if after.is_none() {
+                    break;
+                }
             }
-        }
-        if let RunEvent::Vector { vector } = &events[0] {
-            vectors.push(vector.clone());
-        }
-        self.checkpoints
-            .as_ref()
-            .ok_or(NativeV2SupervisorError::InvalidState)?
-            .suspend(&continuation_history(&self.snapshot().await?)?, &vectors)
-            .await?;
-        self.cleanup_runtime(RunRuntimeExit::Suspended).await?;
-        match self.ledger.append(&self.run_id, events).await {
-            Ok(_) => Err(NativeV2SupervisorError::Suspended),
-            Err(_) if self.force_requested.load(Ordering::Acquire) => Ok(()),
-            Err(error) => Err(error.into()),
+            if let RunEvent::Vector { vector } = &events[0] {
+                vectors.push(vector.clone());
+            }
+            self.checkpoints
+                .as_ref()
+                .ok_or(NativeV2SupervisorError::InvalidState)?
+                .suspend(&continuation_history(&snapshot)?, &vectors)
+                .await?;
+            // Fence new requests through disposal and the durable end of the attempt, so the
+            // acknowledged host record remains complete. Force-stop stays independent.
+            let _turn = self.suspend_turn.lock().await;
+            if self.snapshot().await?.suspend_requested != snapshot.suspend_requested {
+                continue;
+            }
+            self.cleanup_runtime(RunRuntimeExit::Suspended).await?;
+            return match self.ledger.append(&self.run_id, events).await {
+                Ok(_) => Err(NativeV2SupervisorError::Suspended),
+                Err(_) if self.force_requested.load(Ordering::Acquire) => Ok(()),
+                Err(error) => Err(error.into()),
+            };
         }
     }
 

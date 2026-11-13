@@ -952,7 +952,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
   imports old provider sessions, secrets, or token usage. Suspended runs accept only default resume,
   continuing at the held-back node, or after a due wait. Every successor inherits the ordered vector
-  record. Continuation restores no file locally or on a direct target and accepts no discard flag. Checkpoint IDs never become filesystem paths.
+  record. Suspension keeps request admission open during host storage writes and republishes the
+  complete record if a request arrives meanwhile. Final disposal and durable suspension share the
+  request admission turn; force-stop remains independent. Storage replaces the full snapshot on
+  republication. Continuation restores no file locally or on a direct target and accepts no discard flag. Checkpoint IDs never become filesystem paths.
   The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
   and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
   read-only boundaries reuse bytes. Local/direct storage normalizes Git into a temporary private

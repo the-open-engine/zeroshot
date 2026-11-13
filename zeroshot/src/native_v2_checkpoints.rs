@@ -57,6 +57,7 @@ impl CheckpointError {
 #[async_trait]
 pub trait RunCheckpointStore: Send + Sync {
     /// Publish complete suspension history and the vector record before disposing allocation.
+    /// A concurrent suspend request can require republishing; replace the previous full snapshot.
     async fn suspend(
         &self,
         _history: &[DurableExecution],

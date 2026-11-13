@@ -134,6 +134,7 @@ pub struct NativeV2Supervisor {
     resolution_stop: watch::Sender<bool>,
     version_initialized: Arc<Mutex<bool>>,
     drive_turn: Arc<Mutex<()>>,
+    suspend_turn: Arc<Mutex<()>>,
     suspend_signal: watch::Sender<bool>,
     wall_clock: crate::native_v2_wait::WallClock,
     wait_threshold: Option<Duration>,
@@ -162,6 +163,7 @@ impl NativeV2Supervisor {
             resolution_stop: watch::channel(false).0,
             version_initialized: Arc::new(Mutex::new(false)),
             drive_turn: Arc::new(Mutex::new(())),
+            suspend_turn: Arc::new(Mutex::new(())),
             suspend_signal: watch::channel(false).0,
             wall_clock: Arc::new(crate::native_v2_runner::current_timestamp),
             wait_threshold: None,
@@ -218,6 +220,7 @@ impl NativeV2Supervisor {
     }
 
     pub async fn suspend(&self) -> Result<(), NativeV2SupervisorError> {
+        let _turn = self.suspend_turn.lock().await;
         self.ledger.request_suspend(&self.run_id).await?;
         self.suspend_signal.send_replace(true);
         Ok(())

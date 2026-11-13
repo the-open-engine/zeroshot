@@ -2,6 +2,9 @@ use super::*;
 use openengine_cluster_protocol::{RunSuspension, UnixTimestampMillis};
 use std::sync::atomic::AtomicU64;
 
+#[path = "suspension/publication.rs"]
+mod publication;
+
 fn wait_node() -> Value {
     json!({"kind":"verifier","name":"wait","worker":crate::native_v2_wait::WAIT_WORKER_REF,
         "input":crate::native_v2_wait::input_schema().assert_value(),"output":{"kind":"null"},
