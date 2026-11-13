@@ -257,6 +257,31 @@ async fn failed_api_reserves_diagnostic_space_for_both_streams_and_retains_http_
 
 #[cfg(unix)]
 #[tokio::test]
+async fn bare_gh_api_http_status_keeps_transient_and_refusal_classification() {
+    // gh api prints a non-JSON error body to stdout and only the status to stderr.
+    for (status, retryable) in [(503, true), (429, true), (401, false), (403, false)] {
+        let root = TemporaryDirectory::for_test("github-api");
+        let program = script(
+            root.as_path(),
+            &format!("printf 'Service Unavailable'\nprintf 'gh: HTTP {status}\\n' >&2\nexit 1\n"),
+        );
+        let error = authority(program, Duration::from_secs(10))
+            .api_output(
+                &["repos/acme/project/pulls/1538".to_owned()],
+                SourceDeliveryCredential::token("test-token"),
+            )
+            .await
+            .err()
+            .assert_value();
+        assert_eq!(error.api_status(), Some(status));
+        assert_eq!(error.retryable_operation(), retryable, "HTTP {status}");
+        assert_eq!(error.authentication_failed(), status == 401);
+        assert!(error.to_string().contains(&format!("gh: HTTP {status}")));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn successful_api_retains_large_raw_response_without_redacting_or_truncating_it() {
     let root = TemporaryDirectory::for_test("github-api");
     let mut expected = b"raw response: test-token\0\xff".to_vec();
@@ -490,6 +515,32 @@ fn native_cli_http_errors_preserve_status_and_retry_classification() {
             true,
         ),
         ("HTTP 503 (https://api.github.com/graphql)", Some(503), true),
+        ("gh: HTTP 503", Some(503), true),
+        ("gh: HTTP 502", Some(502), true),
+        ("gh: HTTP 429", Some(429), true),
+        ("gh: HTTP 401", Some(401), false),
+        ("gh: HTTP 403", Some(403), false),
+        ("gh: HTTP 404", Some(404), false),
+        (
+            r#"non-200 OK status code: 503 Service Unavailable body: "Service Unavailable""#,
+            Some(503),
+            true,
+        ),
+        (
+            r#"non-200 OK status code: 502 Bad Gateway body: "<html>Bad Gateway</html>""#,
+            Some(502),
+            true,
+        ),
+        (
+            r#"non-200 OK status code: 401 Unauthorized body: "{\"message\": \"Bad credentials\"}""#,
+            Some(401),
+            false,
+        ),
+        (
+            r#"non-200 OK status code: 403 Forbidden body: "{\"message\": \"Forbidden\"}""#,
+            Some(403),
+            false,
+        ),
         (
             "HTTP 403: API rate limit exceeded for user ID 123. (https://api.github.com/graphql)",
             Some(403),

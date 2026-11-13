@@ -218,6 +218,18 @@ async fn failed_status_commands_keep_native_http_and_transport_semantics() {
             Some(503),
             true,
         ),
+        ("gh: HTTP 503", Some(503), true),
+        ("gh: HTTP 401", Some(401), false),
+        (
+            r#"non-200 OK status code: 503 Service Unavailable body: "{\"message\": \"Service Unavailable\"}""#,
+            Some(503),
+            true,
+        ),
+        (
+            r#"non-200 OK status code: 401 Unauthorized body: "{\"message\": \"Bad credentials\"}""#,
+            Some(401),
+            false,
+        ),
         (
             "HTTP 403: You have exceeded a secondary rate limit. (https://api.github.com/graphql)",
             Some(403),
