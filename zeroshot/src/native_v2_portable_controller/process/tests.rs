@@ -474,7 +474,7 @@ async fn bootstrap_round_trip_preserves_depth_64_and_admission_rejects_depth_65(
     let workspace = root.path().join("workspace");
     let storage = root.path().join("state");
     fs::create_dir(&workspace).assert_value();
-    fs::create_dir(&storage).assert_value();
+    crate::execution::platform::create_private_directory(&storage).assert_value();
     for depth in [64, 65] {
         let mut submitted = submission("deep-bootstrap");
         let mut node = serde_json::json!({"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]});
@@ -488,7 +488,7 @@ async fn bootstrap_round_trip_preserves_depth_64_and_admission_rejects_depth_65(
             workspace.clone(),
             storage.clone(),
         );
-        let path = root.path().join(format!("depth-{depth}.json"));
+        let path = storage.join(format!("depth-{depth}.json"));
         write_bootstrap_file(&path, &document).assert_value();
         let decoded = load_bootstrap_file(&path).assert_value();
         let admitted = crate::native_v2_admission::NativeV2Admission
