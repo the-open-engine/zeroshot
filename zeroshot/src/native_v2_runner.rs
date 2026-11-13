@@ -743,7 +743,8 @@ async fn wait_for_cancellation(receiver: &mut watch::Receiver<bool>) {
 fn session_scope(binding: &NodeRuntimeBinding) -> Result<SessionScope, NodeRunnerError> {
     match binding {
         NodeRuntimeBinding::Agent { session_scope, .. } => Ok(*session_scope),
-        NodeRuntimeBinding::Script { .. }
+        NodeRuntimeBinding::Request {}
+        | NodeRuntimeBinding::Script { .. }
         | NodeRuntimeBinding::Decision { .. }
         | NodeRuntimeBinding::GitDelivery { .. }
         | NodeRuntimeBinding::CommentDelivery { .. } => Ok(SessionScope::Execution),

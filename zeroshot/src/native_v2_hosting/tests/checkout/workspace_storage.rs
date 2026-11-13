@@ -9,7 +9,10 @@ use crate::native_v2_supervisor::checkpoints::{
     CheckpointError, ResticCheckpointStore, ResticCheckpointStoreTestConfig,
 };
 
+#[derive(Default)]
 struct ExternalStorage {
+    vectors: Vec<openengine_cluster_protocol::RunVector>,
+    resumed_from: Option<RunId>,
     reject: bool,
     comment_publications: Option<Arc<dyn CommentPublicationStore>>,
 }
@@ -40,6 +43,8 @@ impl HostedWorkspaceStorage for ExternalStorage {
             b"durable platform bytes",
         )?;
         Ok(HostedWorkspace {
+            resumed_from: self.resumed_from.clone(),
+            vector_seed: self.vectors.clone(),
             comment_publications: self.comment_publications.clone(),
             checkpoints: Arc::new(ResticCheckpointStore::with_program(
                 ResticCheckpointStoreTestConfig {
@@ -69,6 +74,7 @@ async fn external_workspace_restore_precedes_dispatch_and_preserves_delivery_lin
         Some(Arc::new(ExternalStorage {
             reject: false,
             comment_publications: None,
+            ..Default::default()
         })),
     )
     .await;
@@ -100,6 +106,7 @@ async fn external_restore_failure_never_releases_an_allocated_capsule() {
         Some(Arc::new(ExternalStorage {
             reject: true,
             comment_publications: None,
+            ..Default::default()
         })),
     )
     .await;
@@ -213,6 +220,7 @@ async fn comment_fixture(
         reject: false,
         comment_publications: host_supplied_store
             .then(|| Arc::new(store.clone()) as Arc<dyn CommentPublicationStore>),
+        ..Default::default()
     }));
     fixture.allocator =
         ProductionCapsuleAllocator::new(Arc::new(config), fixture.diagnostics.clone())
@@ -352,4 +360,56 @@ async fn hosted_comment_candidate_uses_authorized_store_scope_and_restored_deliv
             .await
             .assert_value();
     }
+}
+
+#[tokio::test]
+async fn owned_storage_is_opt_in_and_returns_the_successors_exact_vector_record() {
+    use crate::native_v2_target_authority::TargetControllerFactory;
+    use openengine_cluster_protocol::{RunVectorContent, VectorId};
+    let predecessor = RunId::new("host-predecessor");
+    let vector = openengine_cluster_protocol::RunVector {
+        id: VectorId::new("original-entry").assert_value(),
+        run_id: predecessor.clone(),
+        created_at: crate::native_v2_runner::current_timestamp(),
+        content: RunVectorContent::SuspendRequest {},
+    };
+    let mut fixture = CheckoutFixture::with_workspace_storage(
+        "",
+        Some(Arc::new(ExternalStorage {
+            vectors: vec![vector.clone()],
+            resumed_from: Some(predecessor.clone()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert!(fixture.allocator.suspension_policy().is_none());
+    assert!(
+        !ProductionTargetControllerFactory::new(fixture.config.as_ref().clone())
+            .supports_run_suspension()
+    );
+    let mut config = fixture.config.as_ref().clone();
+    config.suspension = Some(crate::native_v2_wait::WaitPolicy::default());
+    assert!(ProductionTargetControllerFactory::new(config.clone()).supports_run_suspension());
+    fixture.allocator =
+        ProductionCapsuleAllocator::new(Arc::new(config), fixture.diagnostics.clone())
+            .assert_value()
+            .with_test_filesystem_and_source(
+                fixture._repository.remote.clone(),
+                portable_filesystem,
+            );
+    assert!(fixture.allocator.suspension_policy().is_some());
+    let capsule = fixture.allocate().await.assert_value();
+    assert_eq!(capsule.vector_seed[0], vector);
+    assert!(
+        matches!(&capsule.vector_seed[1].content, RunVectorContent::Continuation {resumed_from} if resumed_from == &predecessor)
+    );
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Suspended)
+        .await
+        .assert_value();
+    assert!(
+        !fixture.allocator.run_path(&fixture.run_id).exists(),
+        "owned storage disposes the allocation after publication"
+    );
 }

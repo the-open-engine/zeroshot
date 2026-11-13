@@ -205,6 +205,7 @@ pub(super) fn materialize_local_access(
                     }
                     NodeRuntimeBinding::Agent { .. }
                     | NodeRuntimeBinding::Decision { .. }
+                    | NodeRuntimeBinding::Request {}
                     | NodeRuntimeBinding::Script { .. } => None,
                 }?;
                 (forge.provider.as_str() == GITHUB
@@ -301,6 +302,7 @@ fn binding_forge(
         NodeRuntimeBinding::CommentDelivery { .. } => comment_forge(submission),
         NodeRuntimeBinding::Agent { .. }
         | NodeRuntimeBinding::Decision { .. }
+        | NodeRuntimeBinding::Request {}
         | NodeRuntimeBinding::Script { .. } => Ok(None),
     }
 }

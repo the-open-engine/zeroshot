@@ -327,6 +327,7 @@ fn hosted_discovery(origin: &str) -> String {
             "cachePolicy": "no-store"
         },
         "extensions": {
+            "run_vectors": {"kind":"openengine.run-vectors/v1"},
             "api_key": {
                 "kind": "zeroshot.api-key-authentication/v1",
                 "header": "Authorization", "scheme": "Bearer",
@@ -391,6 +392,8 @@ fn hosted_discovery(origin: &str) -> String {
 
 fn hosted_run_routes() -> serde_json::Value {
     json!({
+        "vectors": "/native-v2/runs/{run_id}/vectors",
+        "vector": "/native-v2/runs/{run_id}/vector",
         "force": "/native-v2/runs/{run_id}/force",
         "list": "/native-v2/runs",
         "logs": "/native-v2/runs/{run_id}/logs{?from_cursor,execution}",

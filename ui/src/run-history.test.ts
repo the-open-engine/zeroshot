@@ -466,3 +466,12 @@ test('node names do not mutate observation object prototypes', () => {
   assert.equal(Object.hasOwn(projection.nodes, '__proto__'), true);
   assert.equal(projection.nodes.__proto__.state, 'running');
 });
+
+test('a deferred wait ends its invocation without inventing a successful outcome', () => {
+  const history = events(start(), { kind: 'wait_deferred', reference: ref() });
+  const projection = projectHistory(document(), history, history.length - 1);
+  assert.equal(projection.invocations[0].state, 'suspended');
+  assert.equal(projection.invocations[0].outcome, undefined);
+  assert.equal(projection.invocations[0].end, 1);
+  assert.equal(projection.nodes.worker.state, 'suspended');
+});

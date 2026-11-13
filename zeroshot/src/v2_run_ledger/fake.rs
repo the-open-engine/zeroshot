@@ -137,6 +137,21 @@ impl RunLedger for FakeRunLedger {
         append_locked(run, vec![RunEvent::ForceStopRequested])
     }
 
+    async fn request_suspend(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
+        let mut state = self.state();
+        let run = state
+            .runs
+            .get_mut(run_id)
+            .ok_or(RunLedgerError::RunNotFound)?;
+        match super::suspension_request_events(&run.stored)? {
+            Some(events) => append_locked(run, events),
+            None => Ok(AppendResult {
+                snapshot: run.stored.snapshot.clone(),
+                events: Vec::new(),
+            }),
+        }
+    }
+
     async fn snapshot_and_tail(
         &self,
         run_id: &RunId,

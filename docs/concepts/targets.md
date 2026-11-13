@@ -204,3 +204,5 @@ resolution. Model nodes receive credentials only through their declared connecti
 Transport secrets stay out of source records, history and checkpoints. Direct-target resume keeps
 the original source authorization and resolves fresh values. The submission receipt reports the
 selected repository, branch and revision; uncommitted files stay on the client.
+
+Direct targets (`zeroshot target serve`) support suspension, wait verifiers and vector reads. Suspended attempts retain the same exclusively claimable workspace and checkpoints as failed attempts, including across target restart. Continuation preserves files changed after the checkpoint and resolves fresh credentials against the original admitted requirements.

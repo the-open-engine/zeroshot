@@ -21,6 +21,9 @@ pub const RUN_STATUS_METHOD: &str = "run/status";
 pub const RUN_WATCH_METHOD: &str = "run/watch";
 pub const RUN_LOGS_METHOD: &str = "run/logs";
 pub const RUN_ATTACH_METHOD: &str = "run/attach";
+pub const RUN_SUSPEND_METHOD: &str = "run/suspend";
+pub const RUN_VECTORS_METHOD: &str = "run/vectors";
+pub const RUN_VECTOR_METHOD: &str = "run/vector";
 pub const RUN_FORCE_METHOD: &str = "run/force";
 pub const RUN_CHECKPOINTS_METHOD: &str = "run/checkpoints";
 pub const RUN_RESUME_METHOD: &str = "run/resume";
@@ -694,3 +697,6 @@ pub use wire::{
 #[cfg(test)]
 #[path = "native_v2_run/tests.rs"]
 mod tests;
+
+mod vectors;
+pub use vectors::*;

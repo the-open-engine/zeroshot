@@ -164,6 +164,8 @@ export function RuntimeEditor(p: {
             <small>
               {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
             </small>
+          ) : kind(n.name) === 'request' ? (
+            <small>Wait</small>
           ) : kind(n.name) === 'script' ? (
             <small>Script: {scriptCommandLabel(bindingFor(doc.runtime, n.name)?.command)}</small>
           ) : kind(n.name) === 'decision' ? (

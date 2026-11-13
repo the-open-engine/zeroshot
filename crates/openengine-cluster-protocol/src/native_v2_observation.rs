@@ -157,11 +157,17 @@ pub struct ActiveExecution {
 /// admitted runs have no execution, stopping means force was requested, and finished runs have
 /// exactly one terminal result and no active execution. Running/stopping report every active
 /// execution rather than a single "current worker" slot.
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "phase", rename_all = "snake_case")]
 pub enum RunStatus {
     Admitted {},
     Running {
+        #[serde(
+            default,
+            rename = "suspendRequested",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        suspend_requested: bool,
         #[serde(rename = "activeExecutions")]
         active_executions: Vec<ActiveExecution>,
         /// Recorded graph outcome while postmortem and finalization are still pending.
@@ -183,6 +189,12 @@ pub enum RunStatus {
             skip_serializing_if = "Option::is_none"
         )]
         graph_result: Option<TerminalResult>,
+    },
+    Suspended {
+        #[serde(flatten)]
+        suspension: RunSuspension,
+        #[serde(default)]
+        metadata: RunMetadata,
     },
     Finished {
         #[serde(rename = "terminalResult")]
@@ -409,3 +421,142 @@ define_run_status_projection!(
         status: #[doc = "Public phase projected after the force request was recorded."],
     }
 );
+
+/// Durable end of an attempt whose graph can continue in a successor.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, tag = "reason", rename_all = "snake_case")]
+pub enum RunSuspension {
+    Command {
+        node: NodeName,
+        #[serde(rename = "createdAt")]
+        created_at: UnixTimestampMillis,
+    },
+    Wait {
+        node: NodeName,
+        #[serde(rename = "createdAt")]
+        created_at: UnixTimestampMillis,
+        wait: RunWait,
+    },
+}
+
+impl RunSuspension {
+    #[must_use]
+    pub const fn node(&self) -> &NodeName {
+        match self {
+            Self::Command { node, .. } | Self::Wait { node, .. } => node,
+        }
+    }
+    #[must_use]
+    pub const fn due_at(&self) -> Option<UnixTimestampMillis> {
+        match self {
+            Self::Command { .. } => None,
+            Self::Wait { wait, .. } => Some(wait.due_at),
+        }
+    }
+}
+
+/// Absolute wall-clock deadline of a wait.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RunWait {
+    pub due_at: UnixTimestampMillis,
+}
+
+/// Requests a soft stop at the next checkpoint without interrupting executing workers.
+pub type RunSuspendParams = RunStatusParams;
+pub type RunSuspendResult = RunStatusResult;
+
+// Deserialize the flat suspended shape explicitly: serde's flattened internally tagged enums
+// cannot be combined with deny_unknown_fields. Keep strict admission for every phase.
+impl<'de> Deserialize<'de> for RunStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, tag = "phase", rename_all = "snake_case")]
+        enum Wire {
+            Admitted {},
+            Running {
+                #[serde(default, rename = "suspendRequested")]
+                suspend_requested: bool,
+                #[serde(rename = "activeExecutions")]
+                active_executions: Vec<ActiveExecution>,
+                #[serde(default, rename = "graphResult")]
+                graph_result: Option<TerminalResult>,
+            },
+            Stopping {
+                #[serde(rename = "activeExecutions")]
+                active_executions: Vec<ActiveExecution>,
+                #[serde(default, rename = "graphResult")]
+                graph_result: Option<TerminalResult>,
+            },
+            Suspended {
+                reason: crate::VectorSuspensionReason,
+                node: NodeName,
+                #[serde(rename = "createdAt")]
+                created_at: UnixTimestampMillis,
+                #[serde(default)]
+                wait: Option<RunWait>,
+                #[serde(default)]
+                metadata: RunMetadata,
+            },
+            Finished {
+                #[serde(rename = "terminalResult")]
+                terminal_result: TerminalResult,
+                #[serde(default)]
+                metadata: RunMetadata,
+            },
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Admitted {} => Self::Admitted {},
+            Wire::Running {
+                suspend_requested,
+                active_executions,
+                graph_result,
+            } => Self::Running {
+                suspend_requested,
+                active_executions,
+                graph_result,
+            },
+            Wire::Stopping {
+                active_executions,
+                graph_result,
+            } => Self::Stopping {
+                active_executions,
+                graph_result,
+            },
+            Wire::Finished {
+                terminal_result,
+                metadata,
+            } => Self::Finished {
+                terminal_result,
+                metadata,
+            },
+            Wire::Suspended {
+                reason,
+                node,
+                created_at,
+                wait,
+                metadata,
+            } => {
+                let suspension = match (reason, wait) {
+                    (crate::VectorSuspensionReason::Command, None) => {
+                        RunSuspension::Command { node, created_at }
+                    }
+                    (crate::VectorSuspensionReason::Wait, Some(wait)) => RunSuspension::Wait {
+                        node,
+                        created_at,
+                        wait,
+                    },
+                    _ => {
+                        return Err(serde::de::Error::custom(
+                            "suspended wait requires wait.dueAt; command forbids wait",
+                        ));
+                    }
+                };
+                Self::Suspended {
+                    suspension,
+                    metadata,
+                }
+            }
+        })
+    }
+}

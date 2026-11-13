@@ -480,3 +480,196 @@ async fn terminated_controller_stops_agent_work_before_resume() {
         .check_owned_tool_stops(Some(libc::SIGTERM))
         .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suspended_attempt_exits_continues_once_and_preserves_vector_record_and_files() {
+    let fixture = LocalFixture::new().with_second_worker();
+    let run_id = fixture.submit_detached("hold").await;
+    fixture.wait_running(&run_id).await;
+    let pid = fixture.ready_pid(&run_id);
+    let requested = fixture.json(&["suspend", &run_id], "hold").await;
+    assert_eq!(requested["status"]["suspendRequested"], true);
+    assert_eq!(requested["status"]["activeExecutions"][0]["node"], "worker");
+    let repeated = fixture.json(&["suspend", &run_id], "hold").await;
+    assert_eq!(repeated, requested);
+    fs::write(fixture.repository.join("release-turn"), b"release").assert_value();
+    let suspended = fixture.wait_suspended(&run_id).await;
+    assert_eq!(suspended["status"]["reason"], "command");
+    assert_eq!(suspended["status"]["node"], "second");
+    wait_for_exit(pid).await;
+    for _ in 0..2 {
+        assert_eq!(fixture.json(&["status", &run_id], "hold").await, suspended);
+        assert_eq!(
+            fixture.listed_run(&run_id).await["status"],
+            suspended["status"]
+        );
+    }
+    let calls = || {
+        fs::read_to_string(fixture.repository.join("local-session.args"))
+            .assert_value()
+            .matches("mode=")
+            .count()
+    };
+    assert_eq!(calls(), 1);
+    assert_success(
+        &fixture.output(&["watch", &run_id], "hold").await,
+        "suspended watch",
+    );
+    assert_success(
+        &fixture.output(&["logs", &run_id], "hold").await,
+        "suspended logs",
+    );
+    let checkpoints = fixture.json(&["checkpoints", &run_id], "hold").await;
+    assert!(
+        checkpoints["checkpoints"]
+            .as_array()
+            .assert_value()
+            .iter()
+            .any(|item| item["node"] == "second")
+    );
+    fs::write(
+        fixture.repository.join("README.md"),
+        b"changed after suspension",
+    )
+    .assert_value();
+    fs::write(
+        fixture.repository.join("new-file"),
+        b"untracked after suspension",
+    )
+    .assert_value();
+    let selected = checkpoints["checkpoints"][0]["checkpointId"]
+        .as_str()
+        .assert_value();
+    assert!(
+        !fixture
+            .output(
+                &["resume", &run_id, "--from-checkpoint", selected],
+                "finish"
+            )
+            .await
+            .status
+            .success()
+    );
+    let resumed = fixture.json(&["resume", &run_id], "finish").await;
+    let successor = resumed["runId"].as_str().assert_value();
+    assert_eq!(resumed["resumedFrom"], run_id);
+    fixture.wait_succeeded(successor, "finish").await;
+    assert_eq!(calls(), 2);
+    assert_eq!(
+        fs::read(fixture.repository.join("README.md")).assert_value(),
+        b"changed after suspension"
+    );
+    assert_eq!(
+        fs::read(fixture.repository.join("new-file")).assert_value(),
+        b"untracked after suspension"
+    );
+    let source = fixture.json(&["status", &run_id], "finish").await;
+    assert_eq!(source["status"]["phase"], "suspended");
+    assert_eq!(source["workspaceRecovery"]["successorRunId"], successor);
+    fixture.json(&["force-stop", &run_id], "finish").await;
+    assert_eq!(fixture.json(&["status", &run_id], "finish").await, source);
+    assert!(
+        !fixture
+            .output(&["resume", &run_id], "finish")
+            .await
+            .status
+            .success()
+    );
+    let page = fixture
+        .json(&["vectors", successor, "--limit", "2"], "finish")
+        .await;
+    assert_eq!(page["vectors"][0]["kind"], "suspend_request");
+    assert_eq!(page["vectors"][1]["kind"], "suspension");
+    assert_eq!(page["vectors"][0]["runId"], run_id);
+    let cursor = page["nextAfter"].as_str().assert_value();
+    let rest = fixture
+        .json(&["vectors", successor, "--after", cursor], "finish")
+        .await;
+    assert_eq!(rest["vectors"][0]["kind"], "continuation");
+    let id = page["vectors"][0]["id"].as_str().assert_value();
+    assert_eq!(
+        fixture
+            .json(&["vectors", "show", successor, id], "finish")
+            .await,
+        page["vectors"][0]
+    );
+    assert!(
+        !fixture
+            .output(&["vectors", "show", successor, "unknown"], "finish")
+            .await
+            .status
+            .success()
+    );
+    for limit in ["0", "101"] {
+        assert!(
+            !fixture
+                .output(&["vectors", successor, "--limit", limit], "finish")
+                .await
+                .status
+                .success()
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn past_wait_is_host_owned_and_records_due_time_between_workers() {
+    let fixture = LocalFixture::new().with_past_wait();
+    let run = fixture.submit_detached("finish").await;
+    fixture.wait_succeeded(&run, "finish").await;
+    let calls = fs::read_to_string(fixture.repository.join("local-session.args")).assert_value();
+    assert_eq!(calls.matches("mode=").count(), 2);
+    let page = fixture.json(&["vectors", &run], "finish").await;
+    assert_eq!(page["vectors"][0]["kind"], "wait");
+    assert_eq!(page["vectors"][0]["node"], "wait");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suspend_refusals_do_not_change_ended_or_checkpointless_runs_and_force_still_wins() {
+    let fixture = LocalFixture::new();
+    let run = fixture.submit_detached("hold").await;
+    fixture.wait_running(&run).await;
+    fixture.json(&["suspend", &run], "hold").await;
+    fs::write(fixture.repository.join("release-turn"), b"release").assert_value();
+    let finished = fixture.wait_succeeded(&run, "hold").await;
+    assert!(
+        !fixture
+            .output(&["suspend", &run], "hold")
+            .await
+            .status
+            .success()
+    );
+    assert_eq!(fixture.json(&["status", &run], "hold").await, finished);
+
+    let fixture = LocalFixture::new().without_checkpoints();
+    let run = fixture.submit_detached("hold").await;
+    fixture.wait_running(&run).await;
+    let before = fixture.json(&["status", &run], "hold").await;
+    assert!(
+        !fixture
+            .output(&["suspend", &run], "hold")
+            .await
+            .status
+            .success()
+    );
+    let after = fixture.json(&["status", &run], "hold").await;
+    // Provider bookkeeping can advance the cursor while this held turn is running.
+    assert_eq!(after["status"]["phase"], "running");
+    assert_eq!(
+        after["status"]["activeExecutions"],
+        before["status"]["activeExecutions"]
+    );
+    assert_ne!(after["status"]["suspendRequested"], true);
+    assert_eq!(
+        fixture.json(&["vectors", &run], "hold").await["vectors"],
+        json!([])
+    );
+    fixture.json(&["force-stop", &run], "hold").await;
+    fixture.wait_terminal(&run, "hold", "force_stopped").await;
+
+    let fixture = LocalFixture::new().with_second_worker();
+    let run = fixture.submit_detached("hold").await;
+    fixture.wait_running(&run).await;
+    fixture.json(&["suspend", &run], "hold").await;
+    fixture.json(&["force-stop", &run], "hold").await;
+    fixture.wait_terminal(&run, "hold", "force_stopped").await;
+}

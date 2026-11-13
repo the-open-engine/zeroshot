@@ -28,6 +28,7 @@ struct CheckoutFixture {
     _repository: RepositoryFixture,
     root: TestDirectory,
     allocator: ProductionCapsuleAllocator,
+    config: Arc<ProductionHostingConfig>,
     admitted: native_v2_contract::AdmittedRun,
     diagnostics: Arc<OperatorDiagnosticStore>,
     diagnostic_receiver:
@@ -74,7 +75,8 @@ exec /usr/bin/git "$@"
         config.workspace_storage = storage;
         let (output, diagnostic_receiver) = OperatorDiagnosticOutput::channel();
         let diagnostics = Arc::new(OperatorDiagnosticStore::new(Some(output)));
-        let allocator = ProductionCapsuleAllocator::new(Arc::new(config), diagnostics.clone())
+        let config = Arc::new(config);
+        let allocator = ProductionCapsuleAllocator::new(config.clone(), diagnostics.clone())
             .assert_value()
             .with_test_filesystem_and_source(repository.remote.clone(), portable_filesystem);
         let admitted = admit(submission(
@@ -87,6 +89,7 @@ exec /usr/bin/git "$@"
             _repository: repository,
             root,
             allocator,
+            config,
             admitted,
             diagnostics,
             diagnostic_receiver,
@@ -1122,4 +1125,226 @@ fn block_retained_cleanup(
     fs::write(runtime_home, "cleanup blocker")
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
     Err(CapsuleAllocationUnavailable::Runtime)
+}
+
+#[tokio::test]
+async fn force_stop_after_suspension_discards_retained_storage_without_allocator_restart() {
+    // Exercise both a later controller request and a live engine whose cleanup already ran.
+    for through_allocator in [true, false] {
+        let fixture = CheckoutFixture::new("").await;
+        let capsule = fixture.allocate().await.assert_value();
+        finish_checkpoints(&capsule).await;
+        let directory = checkpoint_directory(fixture.root.path(), &fixture.run_id);
+        let repository = checkpoint_repository(fixture.root.path(), &fixture.run_id);
+        let ancestor = checkpoint_directory(fixture.root.path(), &RunId::new("earlier-attempt"));
+        fs::create_dir_all(&ancestor).assert_value();
+        fs::copy(
+            directory.join("storage.json"),
+            ancestor.join("storage.json"),
+        )
+        .assert_value();
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Suspended)
+            .await
+            .assert_value();
+        assert!(
+            fixture
+                .allocator
+                .workspace_recovery(&fixture.run_id)
+                .await
+                .recoverable
+        );
+        assert!(directory.exists());
+        assert!(repository.exists());
+        if through_allocator {
+            fixture
+                .allocator
+                .destroy_or_confirm_absent(&fixture.run_id, RunRuntimeExit::ForceStopped)
+                .await
+                .assert_value();
+        } else {
+            capsule
+                .cleanup
+                .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
+                .await
+                .assert_value();
+        }
+        assert!(!fixture.allocator.run_path(&fixture.run_id).exists());
+        assert!(!directory.exists());
+        assert!(!ancestor.exists());
+        assert!(!repository.exists());
+        assert!(
+            !fixture
+                .allocator
+                .workspace_recovery(&fixture.run_id)
+                .await
+                .recoverable
+        );
+        assert!(
+            fixture
+                .allocate_retained(&RunId::new("late-successor"))
+                .await
+                .is_err()
+        );
+        // Cleanup remains idempotent after disposal.
+        fixture
+            .allocator
+            .destroy_or_confirm_absent(&fixture.run_id, RunRuntimeExit::ForceStopped)
+            .await
+            .assert_value();
+    }
+}
+
+#[tokio::test]
+async fn reserved_continuation_survives_restart_before_preparation_and_keeps_workspace_edits() {
+    let mut fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    finish_checkpoints(&capsule).await;
+    let workspace = fixture
+        .allocator
+        .run_path(&fixture.run_id)
+        .join("workspace");
+    fs::write(workspace.join("after-checkpoint.txt"), "preserve me").assert_value();
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Suspended)
+        .await
+        .assert_value();
+    let successor = RunId::new("reserved-continuation");
+    fixture
+        .allocator
+        .reserve_retained_workspace(
+            &fixture.run_id,
+            &successor,
+            &CheckpointRestoreSelection::Continue,
+        )
+        .await
+        .assert_value();
+    fixture.assert_claimed_by(&successor).await;
+    assert!(!workspace.exists());
+    assert!(
+        fixture
+            .allocator
+            .reserve_retained_workspace(
+                &fixture.run_id,
+                &RunId::new("competing-continuation"),
+                &CheckpointRestoreSelection::Continue,
+            )
+            .await
+            .is_err()
+    );
+    fixture.allocator =
+        ProductionCapsuleAllocator::new(fixture.config.clone(), fixture.diagnostics.clone())
+            .assert_value()
+            .with_test_filesystem_and_source(
+                fixture._repository.remote.clone(),
+                portable_filesystem,
+            );
+    fixture.assert_claimed_by(&successor).await;
+    let resumed = fixture
+        .allocator
+        .allocate_from_retained(fixture.retained_request(
+            &fixture.run_id,
+            &successor,
+            CheckpointRestoreSelection::Continue,
+        ))
+        .await
+        .assert_value();
+    assert_eq!(
+        fs::read_to_string(
+            fixture
+                .allocator
+                .run_path(&successor)
+                .join("workspace/after-checkpoint.txt")
+        )
+        .assert_value(),
+        "preserve me"
+    );
+    assert!(
+        fixture
+            .allocator
+            .allocate_from_retained(fixture.retained_request(
+                &fixture.run_id,
+                &successor,
+                CheckpointRestoreSelection::Continue,
+            ))
+            .await
+            .is_err(),
+        "the reservation must not allocate the same runtime twice"
+    );
+    resumed
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
+        .await
+        .assert_value();
+    assert!(!checkpoint_repository(fixture.root.path(), &fixture.run_id).exists());
+}
+
+#[tokio::test]
+async fn suspended_workspace_survives_allocator_restart_and_continuation_restores_no_files() {
+    let mut fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    let workspace = fixture
+        .allocator
+        .run_path(&fixture.run_id)
+        .join("workspace");
+    fs::write(workspace.join("before.txt"), "before checkpoint").assert_value();
+    finish_checkpoints(&capsule).await;
+    fs::write(workspace.join("after.txt"), "after checkpoint").assert_value();
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Suspended)
+        .await
+        .assert_value();
+    assert!(
+        fixture
+            .allocator
+            .workspace_recovery(&fixture.run_id)
+            .await
+            .recoverable
+    );
+    fixture.allocator =
+        ProductionCapsuleAllocator::new(fixture.config.clone(), fixture.diagnostics.clone())
+            .assert_value()
+            .with_test_filesystem_and_source(
+                fixture._repository.remote.clone(),
+                portable_filesystem,
+            );
+    assert!(
+        fixture
+            .allocator
+            .workspace_recovery(&fixture.run_id)
+            .await
+            .recoverable
+    );
+    let successor = RunId::new("suspended-successor");
+    let resumed = fixture
+        .allocator
+        .allocate_from_retained(fixture.retained_request(
+            &fixture.run_id,
+            &successor,
+            CheckpointRestoreSelection::Continue,
+        ))
+        .await
+        .assert_value();
+    fixture.assert_claimed_by(&successor).await;
+    let workspace = fixture.allocator.run_path(&successor).join("workspace");
+    assert_eq!(
+        fs::read_to_string(workspace.join("after.txt")).assert_value(),
+        "after checkpoint"
+    );
+    assert!(
+        fixture
+            .allocate_retained(&RunId::new("second-successor"))
+            .await
+            .is_err()
+    );
+    resumed
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
+        .await
+        .assert_value();
+    assert!(!workspace.exists());
+    assert!(!checkpoint_repository(fixture.root.path(), &fixture.run_id).exists());
 }

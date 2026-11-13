@@ -2,7 +2,7 @@ use super::*;
 use crate::native_v2_contract::{DeliveryCheckpoint, ExecutionId, ExecutionRef, NodeInstanceId};
 use crate::native_v2_runner::test_support::{delivery_checkpoint, node_started};
 use crate::native_v2_supervisor::checkpoints::{
-    CheckpointError, DeliveryCheckpointStore, RunCheckpointStore,
+    CheckpointError, CheckpointRestoreSelection, DeliveryCheckpointStore, RunCheckpointStore,
 };
 use crate::v2_run_ledger::RunEvent;
 
@@ -17,6 +17,16 @@ struct RecoveryAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for RecoveryAllocator {
+    async fn reserve_retained_workspace(
+        &self,
+        _source: &RunId,
+        successor: &RunId,
+        _selection: &CheckpointRestoreSelection,
+    ) -> Result<(), RetainedAllocationUnavailable> {
+        assert_eq!(successor, &self.successor);
+        assert_eq!(self.retained.load(Ordering::SeqCst), 1);
+        Ok(())
+    }
     async fn claim_controller(
         &self,
         run_id: &RunId,

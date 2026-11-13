@@ -158,11 +158,16 @@ class RunStatus:
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
-        phase: admitted, running, stopping, or finished.
+        phase: admitted, running, stopping, suspended, or finished.
         active_executions: Every currently active graph execution.
         result: Terminal result only when phase is finished.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
-        controller: Availability observation, omitted for responding controllers and finished runs.
+        controller: Availability observation, omitted for responding controllers and ended runs.
+        suspend_requested: Whether a running run has a durable suspension request.
+        reason: Why an ended attempt suspended.
+        node: Node held back by suspension.
+        created_at: Suspension time in Unix epoch milliseconds.
+        due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
     """
 
     run_id: str
@@ -170,11 +175,16 @@ class RunStatus:
     source: ResolvedSource | None
     size: str
     cursor: str
-    phase: Literal["admitted", "running", "stopping", "finished"]
+    phase: Literal["admitted", "running", "stopping", "suspended", "finished"]
     active_executions: tuple[ActiveExecution, ...] = ()
     result: RunResult | None = None
     graph_result: RunResult | None = None
     controller: ControllerObservation | None = None
+    suspend_requested: bool = False
+    reason: Literal["command", "wait"] | None = None
+    node: str | None = None
+    created_at: int | None = None
+    due_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -187,10 +197,15 @@ class RunSummary:
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
-        phase: admitted, running, stopping, or finished.
+        phase: admitted, running, stopping, suspended, or finished.
         force_stop_requested: Whether the current projection reflects a force-stop request.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
-        controller: Availability observation, omitted for responding controllers and finished runs.
+        controller: Availability observation, omitted for responding controllers and ended runs.
+        suspend_requested: Whether a running run has a durable suspension request.
+        reason: Why an ended attempt suspended.
+        node: Node held back by suspension.
+        created_at: Suspension time in Unix epoch milliseconds.
+        due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
     """
 
     run_id: str
@@ -198,10 +213,15 @@ class RunSummary:
     source: ResolvedSource | None
     size: str
     cursor: str
-    phase: Literal["admitted", "running", "stopping", "finished"]
+    phase: Literal["admitted", "running", "stopping", "suspended", "finished"]
     force_stop_requested: bool
     graph_result: RunResult | None = None
     controller: ControllerObservation | None = None
+    suspend_requested: bool = False
+    reason: Literal["command", "wait"] | None = None
+    node: str | None = None
+    created_at: int | None = None
+    due_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -227,3 +247,37 @@ class LogEvent:
     target: str
     message: str
     map_indices: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunVector:
+    """One immutable entry in the run's ordered vector record.
+
+    Args:
+        id: Opaque ordered entry identity, preserved by continuation.
+        run_id: Attempt that wrote the entry.
+        created_at: Entry time in Unix epoch milliseconds.
+        kind: Entry kind.
+        content: Complete kind-specific JSON fields.
+    """
+
+    id: str
+    run_id: str
+    created_at: int
+    kind: str
+    content: JsonValue
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunVectorsPage:
+    """A bounded page of the vector record.
+
+    Args:
+        run_id: Run whose record was read.
+        vectors: Ordered entries with their complete content.
+        next_after: Cursor for the next page, or None at the end.
+    """
+
+    run_id: str
+    vectors: tuple[RunVector, ...]
+    next_after: str | None

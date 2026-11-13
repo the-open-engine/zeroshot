@@ -142,6 +142,16 @@ pub(super) fn workers() -> Result<Vec<Value>, ApiError> {
         "workerRefs":[crate::native_v2_comment_delivery::COMMENT_DELIVERY_WORKER_REF],
         "node":named_node(&graph,name.as_str())?, "runtimeBinding":binding,
     }));
+    result.push(json!({
+        "id":"request_wait", "label":"Wait", "runtimeKind":"request",
+        "workerRefs":[crate::native_v2_wait::WAIT_WORKER_REF],
+        "runtimeBinding":{"kind":"request"},
+        "node":{"kind":"verifier", "name":"wait", "worker":crate::native_v2_wait::WAIT_WORKER_REF,
+            "input":crate::native_v2_wait::input_schema().map_err(internal)?,
+            "output":{"kind":"null"}, "signals":crate::native_v2_wait::signal_labels().map_err(internal)?,
+            "diagnostic":crate::native_v2_wait::diagnostic_schema().map_err(internal)?,
+            "inputBindings":[],"writeBindings":[],"attempts":1}
+    }));
     result.push(decision_worker()?);
     Ok(result)
 }

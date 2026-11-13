@@ -389,6 +389,63 @@ This method has no parameters.
 | --- | --- |
 | <code>runForceResult</code> | <a href="../schema.json#/$defs/RunForceResult"><code>schema.json#/$defs/RunForceResult</code></a> |
 
+### <code>run/suspend</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runSuspendResult</code> | <a href="../schema.json#/$defs/RunStatusResult"><code>schema.json#/$defs/RunStatusResult</code></a> |
+
+### <code>run/vectors</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>after</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/VectorId&quot;},{&quot;type&quot;:&quot;null&quot;}]}</code> |
+| <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runVectorsResult</code> | <a href="../schema.json#/$defs/RunVectorsResult"><code>schema.json#/$defs/RunVectorsResult</code></a> |
+
+### <code>run/vector</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>id</code> | Yes | <a href="#/$defs/VectorId"><code>#/$defs/VectorId</code></a> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runVectorResult</code> | <a href="../schema.json#/$defs/RunVector"><code>schema.json#/$defs/RunVector</code></a> |
+
 ### <code>run/checkpoints</code>
 
 Lists checkpoints in increasing sequence order. The after cursor is exclusive. Omitted limit means 50; accepted limits are 1 through 100. Concurrent groups, including every map wave and nested child, expose one entry point. Storage and execution seeds remain private to the target.

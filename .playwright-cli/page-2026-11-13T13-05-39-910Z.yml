@@ -1,0 +1,75 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic: zeroshot
+        - generic: LOCAL
+        - navigation:
+          - button: Profiles
+          - button: Runs
+        - generic:
+          - button
+      - generic:
+        - navigation:
+          - generic:
+            - generic: PROFILES
+            - button
+          - generic:
+            - button:
+              - generic: wait-browser-review
+            - generic: Untitled profile
+          - button: Import JSON
+        - main:
+          - generic:
+            - generic:
+              - heading [level=1]: Untitled profile
+              - generic: Unsaved
+            - generic:
+              - generic:
+                - button [disabled]
+                - button [disabled]
+              - button
+              - button: Save as
+              - button: Save profile
+          - generic:
+            - region:
+              - generic:
+                - generic:
+                  - button: Run settings
+                - generic:
+                  - button
+                  - button
+                  - button
+                  - button
+                  - button
+                  - button: Add activity
+              - generic:
+                - application:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - group:
+                            - generic:
+                              - generic: Worker
+                              - generic: gpt-6.1-sol
+                              - generic: "In task: string"
+                          - group:
+                            - generic: Complete
+                  - generic:
+                    - button
+                    - button
+                    - button
+          - generic:
+            - button:
+              - generic: Profile valid
+            - status: Draft restored
+            - generic: 1 activities
+      - dialog "Discard unsaved changes?" [ref=f1e132]:
+        - generic [ref=f1e133]:
+          - heading "Discard unsaved changes?" [level=2] [ref=f1e134]
+          - button "Close dialog" [ref=f1e135] [cursor=pointer]
+        - paragraph [ref=f1e139]: Your saved profile will stay unchanged.
+        - generic [ref=f1e140]:
+          - button "Keep editing" [active] [ref=f1e141] [cursor=pointer]
+          - button "Discard" [ref=f1e142] [cursor=pointer]

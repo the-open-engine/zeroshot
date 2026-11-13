@@ -257,6 +257,7 @@ impl ProductionCapsuleAllocator {
             delivery_run_id: request.delivery_run_id.clone(),
             restored_delivery_run_id: OnceLock::new(),
             inherited_retained_workspace: request.transfer_retained_workspace,
+            host_owned_workspace: self.config.workspace_storage.is_some(),
             process_pool: Mutex::new(Some(process_pool)),
             #[cfg(test)]
             portable_processes: self.portable_test_processes(),
@@ -438,12 +439,25 @@ impl ProductionCapsuleAllocator {
             state,
             active: Arc::downgrade(&self.active),
         });
+        let mut vector_seed = hosted_workspace.vector_seed;
+        if let Some(resumed_from) = hosted_workspace.resumed_from {
+            if let crate::v2_run_ledger::RunEvent::Vector { vector } =
+                crate::v2_run_ledger::vector_event(
+                    run_id,
+                    openengine_cluster_protocol::RunVectorContent::Continuation { resumed_from },
+                )
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+            {
+                vector_seed.push(vector);
+            }
+        }
         Ok(AllocatedCapsule {
             runner,
             cleanup,
             loss,
             checkpoints: Some(hosted_workspace.checkpoints),
             execution_seed: hosted_workspace.execution_seed,
+            vector_seed,
         })
     }
 
@@ -474,6 +488,7 @@ impl ProductionCapsuleAllocator {
             return Ok(prepared);
         }
         Ok(HostedWorkspace {
+            resumed_from: None,
             comment_publications: None,
             checkpoints: Arc::new(
                 ResticCheckpointStore::new(
@@ -485,6 +500,7 @@ impl ProductionCapsuleAllocator {
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             ),
             execution_seed: Vec::new(),
+            vector_seed: Vec::new(),
             delivery_run_id: None,
         })
     }
@@ -571,7 +587,10 @@ impl ProductionCapsuleAllocator {
         source_run_id: &RunId,
         selection: &CheckpointRestoreSelection,
     ) -> Result<(), CapsuleAllocationUnavailable> {
-        if matches!(selection, CheckpointRestoreSelection::Latest) {
+        if matches!(
+            selection,
+            CheckpointRestoreSelection::Latest | CheckpointRestoreSelection::Continue
+        ) {
             return Ok(());
         }
         self.validate_retained_checkpoint(source_run_id, selection.clone())
@@ -583,6 +602,9 @@ impl ProductionCapsuleAllocator {
         selection: CheckpointRestoreSelection,
         workspace: &Path,
     ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, CapsuleAllocationUnavailable> {
+        if selection == CheckpointRestoreSelection::Continue {
+            return Ok(Vec::new());
+        }
         let directory = checkpoint_directory(&self.config.storage_root, source_run_id);
         if matches!(&selection, CheckpointRestoreSelection::Latest)
             && !checkpoints::latest_available(&directory)
@@ -694,6 +716,15 @@ impl ProductionCapsuleAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for ProductionCapsuleAllocator {
+    fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
+        self.config.suspension.clone().or_else(|| {
+            self.config
+                .workspace_storage
+                .is_none()
+                .then(crate::native_v2_wait::WaitPolicy::default)
+        })
+    }
+
     async fn claim_controller(
         &self,
         run_id: &RunId,
@@ -736,7 +767,8 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             let path = run_directory(&self.config.storage_root, run_id);
             // A failed attempt that never registered ownership cannot delete a directory that
             // predates it. Reconstructed runs still use the allocator's restart cleanup path.
-            if self.allocated.lock().await.contains(run_id) {
+            let allocated = self.allocated.lock().await.contains(run_id);
+            if allocated {
                 let absent = matches!(
                     std::fs::symlink_metadata(&path),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound
@@ -750,7 +782,8 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 {
                     return Err(CapsuleCleanupUnavailable);
                 }
-            } else {
+            }
+            if !allocated || exit == RunRuntimeExit::ForceStopped {
                 let recovery = recovery_path(&self.config.storage_root, run_id);
                 let document = read_recovery(&recovery);
                 let delivery_run_id = document
@@ -776,6 +809,19 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         Ok(CapsuleDestroyed::confirmed())
     }
 
+    async fn reserve_retained_workspace(
+        &self,
+        source_run_id: &RunId,
+        run_id: &RunId,
+        selection: &CheckpointRestoreSelection,
+    ) -> Result<(), RetainedAllocationUnavailable> {
+        self.validate_retained_selection(source_run_id, selection)?;
+        let paths = RetainedAllocationPaths::new(&self.config.storage_root, source_run_id, run_id);
+        self.begin_retained_allocation(source_run_id, run_id, &paths)
+            .await?;
+        Ok(())
+    }
+
     async fn allocate_from_retained(
         &self,
         request: RetainedAllocationRequest<'_>,
@@ -793,13 +839,13 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         } = request;
         self.validate_retained_selection(source_run_id, &selection)?;
         let paths = RetainedAllocationPaths::new(&self.config.storage_root, source_run_id, run_id);
-        let (claim, _turn) = self
+        let (delivery_run_id, _turn) = self
             .begin_retained_allocation(source_run_id, run_id, &paths)
             .await?;
         let allocation = self
             .build_capsule(CapsuleBuildRequest {
                 run_id,
-                delivery_run_id: &claim.delivery_run_id,
+                delivery_run_id: &delivery_run_id,
                 adopt_existing_delivery: true,
                 admitted,
                 github_token,
@@ -832,11 +878,11 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                         ),
                         checkpoint_repository: &checkpoint_repository(
                             &self.config.storage_root,
-                            &claim.delivery_run_id,
+                            &delivery_run_id,
                         ),
                         recovery_path: &paths.run_recovery,
                         run_id,
-                        delivery_run_id: &claim.delivery_run_id,
+                        delivery_run_id: &delivery_run_id,
                         recovery_eligible: true,
                         defer_completed_checkpoint_gc: false,
                         exit: RunRuntimeExit::RuntimeLost,
@@ -953,6 +999,7 @@ struct ProductionCapsuleState {
     delivery_run_id: RunId,
     restored_delivery_run_id: OnceLock<RunId>,
     inherited_retained_workspace: bool,
+    host_owned_workspace: bool,
     // Retains the run's disjoint Linux identities until endpoint and workspace cleanup complete.
     process_pool: Mutex<Option<ActiveRunProcessPool>>,
     #[cfg(test)]
@@ -1010,7 +1057,8 @@ impl ProductionCapsuleState {
                 .restored_delivery_run_id
                 .get()
                 .unwrap_or(&self.delivery_run_id),
-            recovery_eligible: self.endpoint.get().is_some() || self.inherited_retained_workspace,
+            recovery_eligible: (self.endpoint.get().is_some() || self.inherited_retained_workspace)
+                && !(exit == RunRuntimeExit::Suspended && self.host_owned_workspace),
             defer_completed_checkpoint_gc: true,
             exit,
         })
@@ -1061,6 +1109,10 @@ async fn cleanup_state(
 ) -> Result<(), CapsuleCleanupUnavailable> {
     let mut cleaned = state.cleanup_turn.lock().await;
     if *cleaned {
+        // Suspension already released the runtime; a later force-stop disposes retained storage.
+        if exit == RunRuntimeExit::ForceStopped {
+            state.cleanup_owned_directory(run_id, exit)?;
+        }
         return Ok(());
     }
     if let Some(endpoint) = state.endpoint.get() {
@@ -1118,7 +1170,7 @@ fn cleanup_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCl
     if !request.recovery_eligible
         || !matches!(
             request.exit,
-            RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost
+            RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost | RunRuntimeExit::Suspended
         )
     {
         return dispose_run_directory(request);
@@ -1137,11 +1189,20 @@ fn dispose_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCl
         .is_some_and(|recovery| recovery.successor_run_id.is_some());
     // Successful checkpoint GC runs only after the terminal event is durable.
     if !ancestor
+        && request.exit != RunRuntimeExit::Suspended
         && !(request.defer_completed_checkpoint_gc
             && matches!(request.exit, RunRuntimeExit::Completed))
     {
-        remove_run_directory(request.checkpoint_directory)?;
-        remove_run_directory(request.checkpoint_repository)?;
+        if request.exit == RunRuntimeExit::ForceStopped {
+            checkpoints::discard_lineage(
+                request.checkpoint_directory,
+                request.checkpoint_repository,
+            )
+            .map_err(|_| CapsuleCleanupUnavailable)?;
+        } else {
+            remove_run_directory(request.checkpoint_directory)?;
+            remove_run_directory(request.checkpoint_repository)?;
+        }
     }
     Ok(())
 }

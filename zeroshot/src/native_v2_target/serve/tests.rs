@@ -44,8 +44,30 @@ async fn relative_storage_has_an_initialized_ledger_before_accepting_connections
     use zeroshot_engine::v2_run_ledger::RunLedger;
     assert!(ledger.list().await.assert_value().is_empty());
     drop(ledger);
-    drop(listener);
-    drop(server);
+    let address = listener.local_addr().assert_value();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let serving = tokio::spawn(serve_prepared(server, listener, async {
+        let _ = stopped.await;
+    }));
+    let discovery: serde_json::Value =
+        reqwest::get(format!("http://{address}/.well-known/zeroshot-native-v2"))
+            .await
+            .assert_value()
+            .json()
+            .await
+            .assert_value();
+    for (key, kind) in [
+        ("request_wait", "openengine.request-wait/v1"),
+        ("run_suspension", "openengine.run-suspension/v1"),
+        ("run_vectors", "openengine.run-vectors/v1"),
+    ] {
+        assert_eq!(
+            discovery["extensions"][key],
+            serde_json::json!({"kind":kind})
+        );
+    }
+    stop.send(()).assert_value();
+    serving.await.assert_value().assert_value();
 }
 
 #[test]

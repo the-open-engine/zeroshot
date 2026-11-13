@@ -352,6 +352,9 @@ async fn harness_with_options(
             } else {
                 json!({})
             };
+            if name == "wait" {
+                return (name, json!({"kind":"request"}));
+            }
             (
                 name,
                 json!({
@@ -474,3 +477,6 @@ mod checkpoint_tests;
 
 #[path = "tests/postmortem.rs"]
 mod postmortem_tests;
+
+#[path = "tests/suspension.rs"]
+mod suspension_tests;

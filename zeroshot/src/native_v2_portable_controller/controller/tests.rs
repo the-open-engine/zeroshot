@@ -12,6 +12,79 @@ use super::*;
 
 struct ForceCleanup(std::sync::atomic::AtomicUsize);
 
+#[tokio::test]
+async fn forcing_a_suspended_observer_discards_its_recorded_checkpoint_lineage() {
+    use crate::native_v2_supervisor::checkpoints::RunCheckpointStore;
+    use crate::v2_run_ledger::RunEvent;
+    use openengine_cluster_protocol::{NodeName, RunSuspension, UnixTimestampMillis};
+
+    let root = tempfile::tempdir().assert_value();
+    let storage = private_directory(root.path(), "run");
+    let workspace = private_directory(root.path(), "workspace");
+    let paths = PortableControllerPaths::new(storage);
+    let run_id = RunId::new("suspended-observer-force");
+    let directory = paths.storage().join("checkpoints");
+    let store = crate::native_v2_supervisor::checkpoints::fake_checkpoint_store(
+        root.path(),
+        directory.clone(),
+        workspace,
+        Default::default(),
+    );
+    let node = NodeName::new("held").assert_value();
+    store
+        .enter(
+            &crate::full_v1_reducer::ExecutionBoundary {
+                node: node.clone(),
+                map_indices: Vec::new(),
+                loop_iterations: Vec::new(),
+                attempt: 1,
+            },
+            &[],
+        )
+        .await
+        .assert_value();
+    let ledger = SqliteRunLedger::open(paths.ledger()).assert_value();
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: IdempotencyKey::new("suspended-observer-force").assert_value(),
+            submission_digest: Sha256Digest::new("a".repeat(64)).assert_value(),
+            admitted: crate::native_v2_runner::test_support::admitted(),
+        })
+        .await
+        .assert_value();
+    ledger
+        .append(
+            &run_id,
+            vec![
+                RunEvent::RunStarted,
+                RunEvent::Suspended {
+                    suspension: RunSuspension::Command {
+                        node,
+                        created_at: UnixTimestampMillis::new(1).assert_value(),
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    drop(ledger);
+
+    let controller = PortableRunController::open_observer(paths, run_id.clone())
+        .await
+        .assert_value();
+    let forced = controller
+        .inner
+        .force(RunForceParams { run_id })
+        .await
+        .assert_value();
+    assert!(matches!(forced.status, RunStatus::Finished {
+        terminal_result: openengine_cluster_protocol::TerminalResult::Failed { reason, .. }, ..
+    } if reason.as_str() == "force_stopped"));
+    assert!(!directory.exists());
+    assert!(!root.path().join("repository").exists());
+}
+
 #[async_trait]
 impl CapsuleCleanup for ForceCleanup {
     async fn destroy_or_confirm_absent(
@@ -37,6 +110,7 @@ async fn local_force_confirms_cleanup_despite_an_unpersisted_runtime_failure() {
     let ledger = Arc::new(SqliteRunLedger::open(paths.ledger()).assert_value());
     let cleanup = Arc::new(ForceCleanup(std::sync::atomic::AtomicUsize::new(0)));
     let runtime = PortableRuntime {
+        vector_seed: Vec::new(),
         cleanup: cleanup.clone(),
         ..PortableRuntime::new(Arc::new(super::super::tests::NeverDispatched))
     };
@@ -757,6 +831,7 @@ async fn workspace_checkpoint_store_follows_runtime_policy() {
             &bootstrap,
             async |_| {
                 Ok::<_, std::io::Error>(PortableRuntime {
+                    vector_seed: Vec::new(),
                     checkpoints: None,
                     execution_seed: Vec::new(),
                     runner: Arc::new(NeverDispatched),

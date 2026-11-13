@@ -296,6 +296,56 @@ test('an embedded run leaves its title and status to the host page', async (t) =
   }
 });
 
+test('a suspended run shows its deadline and host-owned successor link without following', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const dueAt = Date.parse('2026-12-01T08:00:00Z');
+  const detail: RunDetail = {
+    ...runDetailFixture('sleeping-run'),
+    phase: 'suspended',
+    terminal: undefined,
+    suspension: { reason: 'wait', node: 'cooldown', createdAt: dueAt - 3600000, wait: { dueAt } },
+    workspaceRecovery: { successorRunId: 'continued-run' },
+    observation: { state: 'active' },
+  };
+  let watched = false;
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => ({ ...completePage(), finished: true }),
+    watch: () => {
+      watched = true;
+      return () => {};
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          runId: detail.runId,
+          source,
+          workers: [],
+          runHref: (id: string) => `/host/runs/${id}`,
+        })
+      )
+    );
+    await flushEffects();
+    assert.match(
+      renderedText(container),
+      /Suspended \(wait\) at cooldown until 2026-12-01T08:00:00.000Z/
+    );
+    assert.equal(container.querySelector('a')?.getAttribute('href'), '/host/runs/continued-run');
+    assert.equal(watched, false);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test('preparation logs are visible before the first node and remain readable after setup failure', async (t) => {
   stubWorker(t);
   installBrowser(t);

@@ -20,6 +20,10 @@ pub struct HostedWorkspaceRequest<'a> {
 
 /// Restored execution authority and the store that owns subsequent engine barriers.
 pub struct HostedWorkspace {
+    /// Authenticated immediate predecessor, when the host restores a successor.
+    /// The runtime appends its continuation after taking over the supplied vector record.
+    pub resumed_from: Option<RunId>,
+    pub vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     /// Durable comment effects, independent of restored workspace bytes.
     pub comment_publications:
         Option<Arc<dyn crate::native_v2_comment_delivery::CommentPublicationStore>>,

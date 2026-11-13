@@ -461,7 +461,7 @@ impl LocalCliBackend {
                 submission: prepared.submission.clone(),
                 workspace: prepared.workspace.clone(),
                 delivery_run_id: Some(prepared.delivery_run_id.clone()),
-                resumed_from,
+                resumed_from: resumed_from.clone(),
                 successor_run_id: None,
                 pending_restore: None,
             },
@@ -470,6 +470,7 @@ impl LocalCliBackend {
         let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
         let bootstrap_path = storage.join(BOOTSTRAP_FILE);
         let bootstrap = PortableControllerBootstrap {
+            predecessor: resumed_from,
             delivery_receipt,
             local_branch: prepared.local_branch.clone(),
             memory_storage: Some(
@@ -1020,7 +1021,31 @@ impl LocalCliBackend {
         let loss_observed = status.controller.as_ref().is_some_and(|observation| {
             observation.state == openengine_cluster_protocol::ControllerState::Lost
         });
-        let unclaimed = (failed || loss_observed)
+        let suspended = match &status.status {
+            openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } => suspension
+                .due_at()
+                .is_none_or(|due| crate::native_v2_runner::current_timestamp() >= due),
+            _ => false,
+        };
+        let stopped_suspension = if matches!(
+            &status.status,
+            openengine_cluster_protocol::RunStatus::Finished {
+                terminal_result: TerminalResult::Failed { reason, .. }, ..
+            } if reason.as_str() == "force_stopped"
+        ) {
+            let ledger =
+                SqliteRunLedger::open_read_only(self.existing_run_paths(&status.run_id)?.ledger())
+                    .map_err(local_error)?;
+            ledger
+                .get(&status.run_id)
+                .await
+                .map_err(local_error)?
+                .is_some_and(|run| run.snapshot.suspension.is_some())
+        } else {
+            false
+        };
+        let unclaimed = !stopped_suspension
+            && (failed || suspended || loss_observed)
             && document.workspace.is_dir()
             && self.recovery_workspace_is_unclaimed(&status.run_id)?;
         // With the recovery claim released, a successor that neither runs nor was admitted is
@@ -1104,11 +1129,27 @@ impl LocalCliBackend {
                 run_id: params.run_id.clone(),
             })
             .await;
+        let suspended = recorded.as_ref().is_ok_and(|recorded| {
+            matches!(
+                recorded.status,
+                openengine_cluster_protocol::RunStatus::Suspended { .. }
+            )
+        });
+        let submission_lock = if suspended {
+            Some(self.acquire_submission_lock().await?)
+        } else {
+            None
+        };
         if let Ok(recorded) = recorded
-            && matches!(
+            && (matches!(
                 recorded.status,
                 openengine_cluster_protocol::RunStatus::Finished { .. }
-            )
+            ) || (matches!(
+                recorded.status,
+                openengine_cluster_protocol::RunStatus::Suspended { .. }
+            ) && self
+                .read_recovery_document(&params.run_id)
+                .is_ok_and(|recovery| recovery.successor_run_id.is_some())))
         {
             return Ok(RunForceResult {
                 run_id: recorded.run_id,
@@ -1121,6 +1162,13 @@ impl LocalCliBackend {
                 workspace_recovery: recorded.workspace_recovery,
             });
         }
+        // Use the same claim as resume before deleting the suspended lineage's checkpoints.
+        let _claim = if suspended {
+            Some(self.claim_recovery_workspace(&params.run_id)?)
+        } else {
+            None
+        };
+        drop(submission_lock);
         let transport = self.connect_run(&params.run_id).await?;
         ClusterClient::new(transport.as_ref())
             .run_force(params)

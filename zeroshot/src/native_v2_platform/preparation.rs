@@ -114,9 +114,11 @@ impl NativeV2PlatformController {
             .lock()
             .await
             .insert(run_id.clone(), RuntimeSlot::Preparing(task.clone()));
+        let wait_for_reservation = start.resume.is_some();
+        let (reserved, reservation) = tokio::sync::oneshot::channel();
         let controller = self.clone();
         tokio::spawn(async move {
-            let result = AssertUnwindSafe(controller.prepare_run(start, &task))
+            let result = AssertUnwindSafe(controller.prepare_run(start, &task, reserved))
                 .catch_unwind()
                 .await
                 .unwrap_or_else(|_| Err(PreparationFailure::unavailable("runtime_unavailable")));
@@ -132,6 +134,11 @@ impl NativeV2PlatformController {
             }
             task.finished.send_replace(true);
         });
+        if wait_for_reservation {
+            reservation
+                .await
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        }
         Ok(())
     }
 
@@ -139,13 +146,28 @@ impl NativeV2PlatformController {
         &self,
         start: PreparationStart,
         task: &PreparationTask,
+        reserved: tokio::sync::oneshot::Sender<()>,
     ) -> Result<(), PreparationFailure> {
         let mut cancellation = task.cancellation.subscribe();
         let progress: Arc<dyn PreparationProgress> = Arc::new(LedgerPreparationProgress {
             ledger: self.ledger.clone(),
             run_id: start.stored.snapshot.run_id.clone(),
         });
-        let allocation = AssertUnwindSafe(self.prepare_capsule(&start, progress)).catch_unwind();
+        let allocation = AssertUnwindSafe(async {
+            if let Some(resume) = &start.resume {
+                self.allocator
+                    .reserve_retained_workspace(
+                        &resume.source_run_id,
+                        &start.stored.snapshot.run_id,
+                        &resume.selection,
+                    )
+                    .await
+                    .map_err(retained_failure)?;
+            }
+            let _ = reserved.send(());
+            self.prepare_capsule(&start, progress).await
+        })
+        .catch_unwind();
         let capsule = tokio::select! {
             biased;
             _ = cancellation.wait_for(|value| *value) => return Err(PreparationFailure::cancelled()),
@@ -203,14 +225,7 @@ impl NativeV2PlatformController {
                     source_run_id: &resume.source_run_id,
                 })
                 .await
-                .map_err(|error| match error {
-                    RetainedAllocationUnavailable::Settled(error) => {
-                        PreparationFailure::unavailable(error.failure_code())
-                    }
-                    RetainedAllocationUnavailable::CleanupUnconfirmed(_) => {
-                        PreparationFailure::unavailable("runtime_unavailable")
-                    }
-                })
+                .map_err(retained_failure)
         } else {
             self.allocator
                 .allocate(CapsuleAllocationRequest {
@@ -291,6 +306,17 @@ impl NativeV2PlatformController {
                 self.retry_preparation_cleanup(run_id, task, true).await
             }
             None => Ok(()),
+        }
+    }
+}
+
+fn retained_failure(error: RetainedAllocationUnavailable) -> PreparationFailure {
+    match error {
+        RetainedAllocationUnavailable::Settled(error) => {
+            PreparationFailure::unavailable(error.failure_code())
+        }
+        RetainedAllocationUnavailable::CleanupUnconfirmed(_) => {
+            PreparationFailure::unavailable("runtime_unavailable")
         }
     }
 }

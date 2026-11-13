@@ -23,6 +23,9 @@ pub(in super::super) struct HostedRunsDescriptor {
     status: HostedRunRoute,
     watch: HostedRunRoute,
     logs: HostedRunRoute,
+    suspend: Option<HostedRunRoute>,
+    vectors: Option<HostedRunRoute>,
+    vector: Option<HostedRunRoute>,
     force: HostedRunRoute,
     resume: Option<HostedRunRoute>,
     checkpoints: Option<HostedRunRoute>,
@@ -50,6 +53,60 @@ struct RouteValues<'a> {
 }
 
 impl HostedRunsDescriptor {
+    pub(in super::super) fn vector_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Url>, TargetAuthorityError> {
+        self.vector
+            .as_ref()
+            .map(|route| {
+                route.expand(
+                    &self.base_url,
+                    RouteValues {
+                        run_id: Some(run_id),
+                        ..RouteValues::default()
+                    },
+                )
+            })
+            .transpose()
+    }
+
+    pub(in super::super) fn vectors_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Url>, TargetAuthorityError> {
+        self.vectors
+            .as_ref()
+            .map(|route| {
+                route.expand(
+                    &self.base_url,
+                    RouteValues {
+                        run_id: Some(run_id),
+                        ..RouteValues::default()
+                    },
+                )
+            })
+            .transpose()
+    }
+
+    pub(in super::super) fn suspend_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Url>, TargetAuthorityError> {
+        self.suspend
+            .as_ref()
+            .map(|route| {
+                route.expand(
+                    &self.base_url,
+                    RouteValues {
+                        run_id: Some(run_id),
+                        ..RouteValues::default()
+                    },
+                )
+            })
+            .transpose()
+    }
+
     pub(in super::super) fn export_workspace_url(
         &self,
         run_id: &RunId,
@@ -251,6 +308,21 @@ fn compile_hosted_run_routes(
             true,
             &[HostedRunQuery::FromCursor, HostedRunQuery::Execution],
         )?,
+        suspend: routes
+            .suspend
+            .as_deref()
+            .map(|route| compile_hosted_run_route(route, true, &[]))
+            .transpose()?,
+        vectors: routes
+            .vectors
+            .as_deref()
+            .map(|route| compile_hosted_run_route(route, true, &[]))
+            .transpose()?,
+        vector: routes
+            .vector
+            .as_deref()
+            .map(|route| compile_hosted_run_route(route, true, &[]))
+            .transpose()?,
         force: compile_hosted_run_route(&routes.force, true, &[])?,
         resume: None,
         checkpoints: None,

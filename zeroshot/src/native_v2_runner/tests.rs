@@ -491,7 +491,8 @@ fn resolved_environment_requires_exact_names_and_redacts_values() {
     let mut binding = binding(SessionScope::Execution);
     let connections = match &mut binding {
         NodeRuntimeBinding::Agent { connections, .. } => Some(connections),
-        NodeRuntimeBinding::Script { .. }
+        NodeRuntimeBinding::Request {}
+        | NodeRuntimeBinding::Script { .. }
         | NodeRuntimeBinding::Decision { .. }
         | NodeRuntimeBinding::GitDelivery { .. }
         | NodeRuntimeBinding::CommentDelivery { .. } => None,

@@ -44,3 +44,5 @@ pub mod profile_ui;
 /// Shared native workspace catalog, authoring and validation without browser assets.
 #[cfg(feature = "workspace")]
 pub mod workspace;
+
+pub mod native_v2_wait;

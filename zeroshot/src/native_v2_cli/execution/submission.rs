@@ -796,6 +796,10 @@ impl UniformRuntimePlan {
         let mut nodes = BTreeMap::new();
         let mode = crate::native_v2_admission::delivery_mode(&graph.root);
         for (name, delivery) in executable_runtime_roles(&graph.root) {
+            if is_wait_node(&graph.root, &name) {
+                nodes.insert(name, NodeRuntimeBinding::Request {});
+                continue;
+            }
             if is_comment_node(&graph.root, &name) {
                 nodes.insert(
                     name,
@@ -858,6 +862,17 @@ impl UniformRuntimePlan {
             nodes,
         })
     }
+}
+
+fn is_wait_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeName) -> bool {
+    if root.name() == name
+        && let openengine_cluster_protocol::GraphNode::Verifier(node) = root
+    {
+        return node.worker.as_str() == crate::native_v2_wait::WAIT_WORKER_REF;
+    }
+    openengine_cluster_server::graph_verifier::graph_node_children(root)
+        .into_iter()
+        .any(|child| is_wait_node(child, name))
 }
 
 fn is_comment_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeName) -> bool {

@@ -54,7 +54,10 @@ impl LocalCliBackend {
                 };
             }
         };
-        if !matches!(status.status, RunStatus::Finished { .. }) {
+        if !matches!(
+            status.status,
+            RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+        ) {
             match check_controller(&paths, id).await {
                 ControllerAvailability::Responding(connection, current) => {
                     return Ok(Inspection::Controller(connection, *current));
@@ -69,7 +72,10 @@ impl LocalCliBackend {
                     {
                         status = current;
                     }
-                    if !matches!(status.status, RunStatus::Finished { .. }) {
+                    if !matches!(
+                        status.status,
+                        RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+                    ) {
                         status.controller = Some(controller);
                     }
                 }
@@ -161,7 +167,10 @@ impl LocalCliBackend {
             Inspection::Controller(transport, _) => return Ok(spawn_attach(transport, params)),
             Inspection::Recorded(observation, status) => (observation, status),
         };
-        if matches!(status.status, RunStatus::Finished { .. }) {
+        if matches!(
+            status.status,
+            RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+        ) {
             return Err(local_message("execution is not active"));
         }
         let (_, mut replay) = observation
@@ -212,7 +221,12 @@ impl LocalCliBackend {
         let status = self
             .read_recorded_status(RunStatusParams { run_id: id.clone() })
             .await;
-        if status.is_ok_and(|status| matches!(status.status, RunStatus::Finished { .. })) {
+        if status.is_ok_and(|status| {
+            matches!(
+                status.status,
+                RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+            )
+        }) {
             return Ok(());
         }
         let paths = self.existing_run_paths(id)?;
@@ -252,7 +266,10 @@ async fn finish_recorded<E>(
     sender: &tokio::sync::mpsc::Sender<Result<CliSubscriptionItem<E>, NativeV2CliError>>,
     status: &RunStatusResult,
 ) -> Result<(), NativeV2CliError> {
-    if !matches!(status.status, RunStatus::Finished { .. }) {
+    if !matches!(
+        status.status,
+        RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+    ) {
         return Err(controller_unavailable(status));
     }
     let _ = sender

@@ -576,3 +576,29 @@ A native launch or session-initialization rejection fails the node with the nati
 normal bounded, redacted diagnostics and authored error routing. It does not trigger response
 correction, configuration fallback, or adapter retries of rejected initialization. Settings accepted
 or ignored by the native harness have no effective-configuration acknowledgement or added preflight.
+
+## Host-run wait verifier
+
+The worker `builtin.request.wait@1` uses the fieldless binding `{"kind":"request"}`. It is a
+verifier with no instructions or `timeoutMs`, exactly one attempt, no output beyond JSON null,
+signal `wait: ["elapsed"]` and diagnostic record `{message: string}`. Its fixed input schema is a
+record with optional string `dueAt` and integer `durationMs` fields. Supply exactly one, for example
+`{"dueAt":"2026-12-01T09:00:00+01:00"}` or `{"durationMs":3600000}`. Bind these inputs from graph
+state using ordinary input bindings. `--uniform-runtime-config` supplies the request binding.
+
+Past times and nonpositive durations succeed immediately. Missing/both fields, malformed times
+(including times without an offset), and deadlines over 30 days ahead produce `refusal` with a
+log explanation. Waits use wall time and recheck within one minute after machine sleep.
+Only seq, choice and loop placement is supported; par or map ancestry is refused.
+
+A host may configure an in-place threshold. A remaining duration at least that threshold suspends
+the attempt at its checkpoint with reason `wait` and `wait.dueAt`. A suspension request during an
+in-place wait does the same. Continuation is refused before due and skips the settled wait once
+due. Local and direct targets have no threshold and wait in place by default.
+
+Targets advertise strict marker objects under discovery extensions: `request_wait` is
+`{"kind":"openengine.request-wait/v1"}`, `run_suspension` is
+`{"kind":"openengine.run-suspension/v1"}`, and `run_vectors` is
+`{"kind":"openengine.run-vectors/v1"}`. Unknown extension keys are ignored; extra fields inside
+these markers are invalid. Clients require the relevant marker before requesting credentials,
+sending a plan or control body, or opening a session.

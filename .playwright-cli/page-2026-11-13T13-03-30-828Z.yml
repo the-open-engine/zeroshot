@@ -1,0 +1,22 @@
+- generic [ref=e129]:
+  - banner [ref=e130]:
+    - generic [ref=e131]:
+      - img "The Open Engine Company" [ref=e132]
+      - generic [ref=e134]: zeroshot
+    - generic [ref=e135]: LOCAL
+    - navigation "Workspace" [ref=e136]:
+      - button "Profiles" [ref=e137] [cursor=pointer]
+      - button "Runs" [ref=e138] [cursor=pointer]
+    - 'button "Color theme: system" [ref=e140] [cursor=pointer]'
+  - generic [ref=e143]:
+    - navigation "Runs" [ref=e144]:
+      - generic [ref=e145]:
+        - generic [ref=e146]: RUNS
+        - button "Refresh runs" [disabled] [ref=e147]
+      - textbox "Search runs" [ref=e157]:
+        - /placeholder: Find a run
+      - button "Examples 10" [ref=e159] [cursor=pointer]:
+        - text: Examples
+        - generic [ref=e162]: "10"
+    - main [ref=e163]:
+      - heading "Loading run" [level=1] [ref=e167]

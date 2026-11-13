@@ -31,7 +31,9 @@ Commands:
   logs               Follow a run's log stream as NDJSON
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
-  resume             Start a new attempt from a failed run's retained workspace or a saved checkpoint
+  suspend            Request suspension at the next checkpoint and print status immediately
+  vectors            Read one page of the run vector record, or show an entry in full
+  resume             Start a successor from a failed or suspended run's retained workspace
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
   export-workspace   Download a retained workspace or selected checkpoint as a tar archive
   discard-workspace  Permanently delete an abandoned retained target workspace
@@ -1101,7 +1103,7 @@ Submit a graph run locally or to a named target.
 
 Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named targets require a committed Git source. Local workspaces must not overlap Zeroshot state. Local delivery commits on the checked-out branch and pushes that same branch, including existing unpushed commits. PR/merge targets a different upstream branch, or the remote's default branch; starting on that target is refused. Start from a feature branch or use --worktree. Explicit --push can publish any branch, including main, without force-pushing. --worktree creates a retained worktree and managed run branch from local HEAD by default. --worktree-base remote fetches the invoking branch's upstream and requires one to be set. Worktree PR/merge targets the invoking branch's upstream, or its name without an upstream. Preparation verifies the target before agents start. Worktrees contain committed files only; dependencies and untracked resources are not copied or installed. Resume reuses the same workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
 
-A foreground run follows NDJSON events until completion. --detach returns after submission. It prints graphResult when the graph ends and keeps waiting through the Active Memory postmortem and finalization; its exit code follows the final terminalResult. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
+A foreground run follows NDJSON events until completion or suspension. Suspension exits 0. --detach returns after submission. It prints graphResult when the graph ends and keeps waiting through the Active Memory postmortem and finalization; its exit code follows the final terminalResult. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
 
 Usage: zeroshot run [OPTIONS] --title <TITLE>
 
@@ -1385,7 +1387,7 @@ Options:
           Print help (see a summary with '-h')
 
 EXIT STATUS
-  0  The run succeeded, or Ctrl-C detached before it finished.
+  0  The run succeeded or suspended, or Ctrl-C detached before it finished.
   1  The run finished failed, or observation failed. A failed run prints the same failure summary
      on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event.
      An unavailable local controller replays recorded events, then names `zeroshot resume RUN_ID`
@@ -1467,12 +1469,95 @@ Options:
           Print help
 ```
 
+### `zeroshot suspend`
+
+```text
+Request suspension at the next checkpoint and print status immediately
+
+Usage: zeroshot suspend [OPTIONS] <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+          Public run ID
+
+Options:
+      --target <NAME>
+          Use this named target. If omitted, use the local controller
+
+  -h, --help
+          Print help
+```
+
+### `zeroshot vectors`
+
+```text
+Read one page of the run vector record, or show an entry in full
+
+Usage: zeroshot vectors [OPTIONS] [RUN_ID]
+       zeroshot vectors <COMMAND>
+
+Commands:
+  show  Read one vector entry in full
+  help  Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [RUN_ID]
+          Public run ID
+
+Options:
+      --target <NAME>
+          Use this named target. If omitted, use the local controller
+
+      --after <ID>
+          List entries strictly after this vector ID
+
+      --limit <COUNT>
+          Maximum entries to return, from 1 to 100. Defaults to 50
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot vectors show`
+
+```text
+Read one vector entry in full
+
+Usage: zeroshot vectors show [OPTIONS] <RUN_ID> <ID>
+
+Arguments:
+  <RUN_ID>
+          Public run ID
+
+  <ID>
+          Opaque vector ID returned by vectors
+
+Options:
+      --target <NAME>
+          Use this named target. If omitted, use the local controller
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot vectors help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: zeroshot vectors help [COMMAND]
+
+Commands:
+  show  Read one vector entry in full
+  help  Print this message or the help of the given subcommand(s)
+```
+
 ### `zeroshot resume`
 
 ```text
-Start a new attempt from a failed run's retained workspace or a saved checkpoint.
+Start a successor from a failed or suspended run's retained workspace.
 
-By default, restart the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
+A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
 
 Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 
@@ -1613,7 +1698,9 @@ Commands:
   logs               Follow a run's log stream as NDJSON
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
-  resume             Start a new attempt from a failed run's retained workspace or a saved checkpoint
+  suspend            Request suspension at the next checkpoint and print status immediately
+  vectors            Read one page of the run vector record, or show an entry in full
+  resume             Start a successor from a failed or suspended run's retained workspace
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
   export-workspace   Download a retained workspace or selected checkpoint as a tar archive
   discard-workspace  Permanently delete an abandoned retained target workspace

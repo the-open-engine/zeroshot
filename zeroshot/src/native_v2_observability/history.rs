@@ -75,16 +75,24 @@ impl RunHistoryService {
             "version":1, "projectionVersion":1,
             "runId":id, "title":stored.admitted.title, "createdAt":created_at(id),
             "phase":stored.snapshot.phase,"cursor":stored.snapshot.cursor,
+            "suspension":stored.snapshot.suspension,"suspendRequested":stored.snapshot.suspend_requested,
             "terminal":stored.snapshot.terminal,"metadata":super::run_metadata(&stored.snapshot),"historyAvailable":true,
             "graph":graph, "runtime":stored.admitted.runtime,
             "initialInput":stored.admitted.initial_input,"source":stored.admitted.source,
             "observation":observation,
             "history":{
                 "initialCursor":initial_cursor(),"cursor":stored.snapshot.cursor,
-                "complete":stored.snapshot.terminal.is_some(),
+                "complete":stored.snapshot.terminal.is_some() || stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended,
                 "limitations":["control_flow_projected_by_reducer","retained_provider_output_only"]
             }
         });
+        if let Some(reader) = &self.status
+            && let Some(status) = reader.status(id).await
+            && (status.workspace_recovery.successor_run_id.is_some()
+                || status.workspace_recovery.resumed_from.is_some())
+        {
+            value["workspaceRecovery"] = json!(status.workspace_recovery);
+        }
         if let Some(failure) = runtime_failure {
             failure.apply(&mut value);
         }
@@ -109,7 +117,7 @@ impl RunHistoryService {
 }
 
 fn history_observation(snapshot: &RunSnapshot, runtime_available: bool) -> Observation {
-    if snapshot.terminal.is_some() {
+    if snapshot.terminal.is_some() || snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended {
         Observation {
             state: ObservationState::Complete,
             code: None,
@@ -152,7 +160,9 @@ async fn read_page(
     let runtime = status::runtime_observation(source.status.as_ref(), &observation.snapshot).await;
     let runtime_available = runtime.is_ok();
     let runtime_failure = runtime.ok().flatten();
-    let finished = observation.snapshot.terminal.is_some() || runtime_failure.is_some();
+    let finished = observation.snapshot.terminal.is_some()
+        || observation.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+        || runtime_failure.is_some();
     let availability = history_observation(&observation.snapshot, runtime_available);
     Ok(HistoryPage {
         events,
@@ -218,7 +228,7 @@ fn stringify_identifiers(value: &mut Value, keys: &[&str]) {
 
 fn project_event(event: &mut Value) {
     match event["kind"].as_str() {
-        Some("node_started" | "execution_voided") => {
+        Some("node_started" | "execution_voided" | "wait_deferred") => {
             stringify_identifiers(&mut event["reference"], &["execution", "nodeInstance"]);
         }
         Some("node_completed") => {

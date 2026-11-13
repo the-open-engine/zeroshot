@@ -154,6 +154,49 @@ where
 {
     let backend = context.backend;
     let command = match command {
+        NativeV2CliCommand::Suspend(run) => {
+            write_json(
+                output,
+                &backend
+                    .run_suspend(
+                        run.target.as_deref(),
+                        openengine_cluster_protocol::RunSuspendParams { run_id: run.run_id },
+                    )
+                    .await?,
+            )?;
+            return Ok(CliOutcome::Completed);
+        }
+        NativeV2CliCommand::Vectors(command) => {
+            write_json(
+                output,
+                &backend
+                    .run_vectors(
+                        command.run.target.as_deref(),
+                        openengine_cluster_protocol::RunVectorsParams {
+                            run_id: command.run.run_id,
+                            after: command.after,
+                            limit: command.limit,
+                        },
+                    )
+                    .await?,
+            )?;
+            return Ok(CliOutcome::Completed);
+        }
+        NativeV2CliCommand::Vector { run, id } => {
+            write_json(
+                output,
+                &backend
+                    .run_vector(
+                        run.target.as_deref(),
+                        openengine_cluster_protocol::RunVectorParams {
+                            run_id: run.run_id,
+                            id,
+                        },
+                    )
+                    .await?,
+            )?;
+            return Ok(CliOutcome::Completed);
+        }
         NativeV2CliCommand::ForceStop(run) => {
             return execute_force_stop(run, backend, output).await;
         }
@@ -199,6 +242,27 @@ where
             },
         )
         .await?;
+    if let CliRunStatus::Target(RunStatus::Suspended { suspension, .. }) = &status.status {
+        if command.from.is_some() || command.discard_workspace_changes {
+            return Err(NativeV2CliError::Usage(
+                "suspended runs accept only default resume".to_owned(),
+            ));
+        }
+        if let Some(due) = suspension.due_at()
+            && crate::native_v2_runner::current_timestamp() < due
+        {
+            return Err(NativeV2CliError::Usage(format!(
+                "wait is due at {}",
+                due.get()
+            )));
+        }
+    }
+    if let Some(successor) = &status.workspace_recovery.successor_run_id {
+        return Err(NativeV2CliError::Usage(format!(
+            "run already has successor {}",
+            successor.as_str()
+        )));
+    }
     if !status.workspace_recovery.recoverable {
         return Err(NativeV2CliError::Usage(
             "run does not have a recoverable workspace".to_owned(),
@@ -758,6 +822,7 @@ fn write_durable_event(
 
 fn watched_outcome(status: &CliRunStatus) -> Option<CliOutcome> {
     match status {
+        CliRunStatus::Target(RunStatus::Suspended { .. }) => Some(CliOutcome::Finished),
         CliRunStatus::Target(RunStatus::Finished {
             terminal_result: TerminalResult::Succeeded { .. },
             ..

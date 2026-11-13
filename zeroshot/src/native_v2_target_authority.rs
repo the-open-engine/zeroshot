@@ -125,6 +125,10 @@ pub trait TargetControllerFactory: Send + Sync {
     }
 
     /// Reports whether controllers from this factory can recover retained workspaces.
+    fn supports_run_suspension(&self) -> bool {
+        false
+    }
+
     fn supports_workspace_recovery(&self) -> bool {
         false
     }
@@ -230,6 +234,10 @@ impl NativeV2TargetAuthority {
         run_id: &openengine_cluster_protocol::RunId,
     ) -> TargetOperatorDiagnostics {
         self.operator_diagnostics.snapshot(run_id)
+    }
+
+    fn supports_run_suspension(&self) -> bool {
+        self.factory.supports_run_suspension()
     }
 
     fn supports_workspace_recovery(&self) -> bool {

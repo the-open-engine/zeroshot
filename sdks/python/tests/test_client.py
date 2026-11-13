@@ -846,3 +846,52 @@ def test_uniform_runtime_passes_native_configuration_without_shared_mutable_valu
     config["args"] = ["changed"]
     assert encoded["harnessConfig"] == {"args": ["--tools", "Read,Grep,Glob"]}
     assert "harnessConfig" not in runtime().to_dict()
+
+
+def test_suspension_continuation_and_vector_target_arguments(fake_native: Path) -> None:
+    async def scenario() -> None:
+        async with Client(target=HostedTarget("prod")) as client:
+            run = client.get_run("original")
+            assert (await run.suspend()).suspend_requested
+            assert (await run.resume()).id == "successor"
+            page = await run.vectors(after="cursor", limit=2)
+            assert page.next_after == "vector-1"
+            assert (await run.vector(page.vectors[0].id)).run_id == "original"
+        args = [entry["args"] for entry in read_invocations(fake_native)]
+        assert ["suspend", "original", "--target", "prod"] in args
+        assert ["resume", "original", "--target", "prod"] in args
+        assert [
+            "vectors",
+            "original",
+            "--limit",
+            "2",
+            "--after",
+            "cursor",
+            "--target",
+            "prod",
+        ] in args
+        assert ["vectors", "show", "original", "vector-1", "--target", "prod"] in args
+
+    asyncio.run(scenario())
+
+
+def test_wait_raises_suspended_with_handle_and_status(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        from zeroshot import RunSuspendedError
+
+        monkeypatch.setenv("FAKE_SUSPEND", "1")
+        async with Client(target=LocalTarget()) as client:
+            run = client.get_run("original")
+            with pytest.raises(RunSuspendedError) as error:
+                await run.wait()
+            assert error.value.run is run
+            assert error.value.status.reason == "wait"
+            assert error.value.status.due_at == 1762992000000
+            with pytest.raises(RunSuspendedError) as submitted:
+                await client.run("change it", preset=Preset("single-worker"), runtime=runtime())
+            assert submitted.value.run.id == "01900000-0000-7000-8000-000000000001"
+            assert submitted.value.status.reason == "wait"
+
+    asyncio.run(scenario())

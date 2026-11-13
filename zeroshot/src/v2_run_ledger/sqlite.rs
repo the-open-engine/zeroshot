@@ -214,6 +214,21 @@ impl RunLedger for SqliteRunLedger {
         .await
     }
 
+    async fn request_suspend(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
+        let run_id = run_id.clone();
+        self.with_transaction(move |transaction| {
+            let stored = load_by_id(transaction, &run_id)?.ok_or(RunLedgerError::RunNotFound)?;
+            match super::suspension_request_events(&stored)? {
+                Some(events) => append_transaction(transaction, &run_id, events),
+                None => Ok(AppendResult {
+                    snapshot: stored.snapshot,
+                    events: Vec::new(),
+                }),
+            }
+        })
+        .await
+    }
+
     async fn snapshot_and_tail(
         &self,
         run_id: &RunId,

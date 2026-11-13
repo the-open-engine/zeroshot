@@ -40,6 +40,9 @@ impl RunLedger for Replay {
     async fn request_force_stop(&self, _: &RunId) -> Result<AppendResult, RunLedgerError> {
         Err(RunLedgerError::Storage)
     }
+    async fn request_suspend(&self, _: &RunId) -> Result<AppendResult, RunLedgerError> {
+        Err(RunLedgerError::Storage)
+    }
     async fn snapshot_and_tail(
         &self,
         _: &RunId,

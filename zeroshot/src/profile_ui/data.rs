@@ -909,10 +909,7 @@ fn set_input(graph: &mut Value, index: &Index, edit: InputEdit<'_>) -> Result<()
     if node[schema]["kind"] == "null" {
         node[schema] = json!({"kind":"record","fields":{}});
     }
-    node[schema]["fields"]
-        .as_object_mut()
-        .ok_or_else(|| invalid("This input uses a scalar schema."))?
-        .insert(input.into(), json!({"type":value_type,"required":true}));
+    update_bound_field(node, schema, input, Some(&value_type))?;
     let bindings = array_mut(node, bindings)?;
     bindings.retain(|binding| {
         binding["target"]
@@ -927,10 +924,7 @@ fn set_input(graph: &mut Value, index: &Index, edit: InputEdit<'_>) -> Result<()
 fn remove_input(graph: &mut Value, index: &Index, node: &str, input: &str) -> Result<(), ApiError> {
     let node = get_mut(graph, index, node)?;
     let (schema, bindings) = input_keys(node)?;
-    node[schema]["fields"]
-        .as_object_mut()
-        .ok_or_else(|| invalid("This input uses a scalar schema."))?
-        .remove(input);
+    update_bound_field(node, schema, input, None)?;
     array_mut(node, bindings)?.retain(|binding| {
         binding["target"]
             .as_array()
@@ -938,6 +932,33 @@ fn remove_input(graph: &mut Value, index: &Index, node: &str, input: &str) -> Re
             .and_then(Value::as_str)
             != Some(input)
     });
+    Ok(())
+}
+fn update_bound_field(
+    node: &mut Value,
+    schema: &str,
+    input: &str,
+    value_type: Option<&Value>,
+) -> Result<(), ApiError> {
+    let fixed_wait = schema == "input" && node["worker"] == crate::native_v2_wait::WAIT_WORKER_REF;
+    let fields = node[schema]["fields"]
+        .as_object_mut()
+        .ok_or_else(|| invalid("This input uses a scalar schema."))?;
+    if fixed_wait {
+        if value_type.is_some_and(|value_type| {
+            fields
+                .get(input)
+                .is_none_or(|field| field["type"] != *value_type)
+        }) {
+            return Err(invalid(
+                "Choose a source matching the wait input's fixed type.",
+            ));
+        }
+    } else if let Some(value_type) = value_type {
+        fields.insert(input.into(), json!({"type":value_type,"required":true}));
+    } else {
+        fields.remove(input);
+    }
     Ok(())
 }
 fn array_mut<'a>(node: &'a mut Value, key: &str) -> Result<&'a mut Vec<Value>, ApiError> {
@@ -1160,27 +1181,22 @@ fn rewrite_connected_fields(
             .as_array()
             .filter(|path| path.len() == 1)
             .and_then(|path| path[0].as_str())
+            && value[schema]["fields"].is_object()
         {
-            if let Some(fields) = value
-                .get_mut(schema)
-                .and_then(|schema| schema.get_mut("fields"))
-                .and_then(Value::as_object_mut)
-            {
-                if let Some(field) = field {
-                    let mut selected = &field["type"];
-                    for part in source_path.as_array().into_iter().flatten().skip(1) {
-                        let part = part
-                            .as_str()
-                            .ok_or_else(|| invalid("Invalid connected input."))?;
-                        selected = selected["fields"]
-                            .get(part)
-                            .map(|field| &field["type"])
-                            .ok_or_else(|| invalid("A connected field no longer exists."))?;
-                    }
-                    fields.insert(input.into(), json!({"type":selected,"required":true}));
-                } else {
-                    fields.remove(input);
+            if let Some(field) = field {
+                let mut selected = &field["type"];
+                for part in source_path.as_array().into_iter().flatten().skip(1) {
+                    let part = part
+                        .as_str()
+                        .ok_or_else(|| invalid("Invalid connected input."))?;
+                    selected = selected["fields"]
+                        .get(part)
+                        .map(|field| &field["type"])
+                        .ok_or_else(|| invalid("A connected field no longer exists."))?;
                 }
+                update_bound_field(value, schema, input, Some(selected))?;
+            } else {
+                update_bound_field(value, schema, input, None)?;
             }
         }
     }

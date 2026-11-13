@@ -70,6 +70,8 @@ type RunHistoryViewProps = {
   workers: WorkerOption[];
   emptyAction?: ReactNode;
   viewKey?: string;
+  /** The host owns navigation between runs. */
+  runHref?: (runId: string) => string;
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
 };
@@ -79,6 +81,7 @@ export function RunHistoryView({
   workers,
   emptyAction,
   viewKey,
+  runHref,
   embedded = false,
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
@@ -274,6 +277,7 @@ export function RunHistoryView({
             openLog={() => inspect(document.graph.root.name)}
             retry={() => void loadHistory(run.runId, source, false)}
             embedded={embedded}
+            runHref={runHref}
           />
           <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
             <ReactFlowProvider>
@@ -439,6 +443,9 @@ function currentHistoryState(
   preparing: boolean,
   atStart: boolean
 ) {
+  if (run.phase === 'suspended')
+    return `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}`;
+  if (run.phase === 'running' && run.suspendRequested) return 'Suspension requested';
   if (terminal) return terminal.status;
   if (run.runtimeFailure) return 'failed';
   if (preparing) return 'Preparing environment';
@@ -483,6 +490,7 @@ function RunHistoryHeader({
   openLog,
   retry,
   embedded,
+  runHref,
 }: {
   run: RunDetail;
   terminal: RunTerminal | undefined;
@@ -492,6 +500,7 @@ function RunHistoryHeader({
   openLog: () => void;
   retry: () => void;
   embedded: boolean;
+  runHref?: (runId: string) => string;
 }) {
   const preparing = isPreparingEnvironment(run, history.events);
   const shownStatus =
@@ -504,10 +513,17 @@ function RunHistoryHeader({
         <div className="workspace-header history-header">
           <div className="profile-title">
             <h1 title={run.title}>{run.title}</h1>
+            {run.workspaceRecovery?.successorRunId && runHref && (
+              <a href={runHref(run.workspaceRecovery.successorRunId)}>Continue to successor</a>
+            )}
             <span
               className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
             >
-              {run.example ? 'Simulated' : humanize(shownStatus)}
+              {run.example
+                ? 'Simulated'
+                : run.phase === 'suspended' || (run.phase === 'running' && run.suspendRequested)
+                  ? shownStatus
+                  : humanize(shownStatus)}
             </span>
           </div>
         </div>
@@ -840,6 +856,8 @@ function useHistoryFeed(
   function retainEvents(next: HistoryEvent[]) {
     retained.current = next;
     setEvents(next);
+    if (next.some(({ event }) => event.kind === 'suspend_requested'))
+      setRun((previous) => (previous ? { ...previous, suspendRequested: true } : previous));
   }
   function retainControl(next: ControlRecord[]) {
     retainedControl.current = next;

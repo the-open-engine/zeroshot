@@ -100,6 +100,30 @@ impl ClusterBackend for NativeV2PlatformController {
         self.force(params).await.map_err(platform_backend_error)
     }
 
+    async fn run_suspend(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
+        self.suspend(params).await.map_err(platform_backend_error)
+    }
+
+    async fn run_vectors(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
+        self.vectors(params).await.map_err(platform_backend_error)
+    }
+
+    async fn run_vector(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
+        self.vector(params).await.map_err(platform_backend_error)
+    }
+
     async fn run_checkpoints(
         &self,
         _context: &ConnectionContext,
@@ -203,6 +227,15 @@ fn platform_backend_error(error: NativeV2PlatformError) -> BackendError {
                 "submission key identifies another run",
                 Some(serde_json::json!({ "runId": existing_run_id })),
             )
+        }
+        NativeV2PlatformError::InvalidRequest(message) => {
+            BackendError::application("invalid_request", message, None)
+        }
+        NativeV2PlatformError::Supervisor(NativeV2SupervisorError::Ledger(
+            RunLedgerError::InvalidEvent(message),
+        )) => BackendError::application("invalid_request", message, None),
+        NativeV2PlatformError::Ledger(RunLedgerError::VectorNotFound) => {
+            BackendError::application(NOT_FOUND, "vector was not found", None)
         }
         NativeV2PlatformError::Ledger(RunLedgerError::RunNotFound)
         | NativeV2PlatformError::Observation(NativeV2ObservationError::RunNotFound) => {

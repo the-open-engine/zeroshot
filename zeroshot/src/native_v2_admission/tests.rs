@@ -191,7 +191,8 @@ async fn admits_authored_loop_and_parallel_verifiers_without_defaulting_effort()
     for binding in admitted.runtime.nodes().values() {
         let effort = match binding {
             NodeRuntimeBinding::Agent { effort, .. } => Some(effort),
-            NodeRuntimeBinding::Script { .. }
+            NodeRuntimeBinding::Request {}
+            | NodeRuntimeBinding::Script { .. }
             | NodeRuntimeBinding::Decision { .. }
             | NodeRuntimeBinding::GitDelivery { .. }
             | NodeRuntimeBinding::CommentDelivery { .. } => None,
@@ -706,3 +707,6 @@ async fn scripts_require_a_step_without_instructions() {
         ));
     }
 }
+
+#[path = "tests/wait.rs"]
+mod wait_tests;

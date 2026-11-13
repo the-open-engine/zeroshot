@@ -311,7 +311,8 @@ impl SessionFactory for DeliveryLane {
         environment: &ResolvedEnvironment,
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
         match invocation.binding {
-            NodeRuntimeBinding::Script { .. }
+            NodeRuntimeBinding::Request {}
+            | NodeRuntimeBinding::Script { .. }
             | NodeRuntimeBinding::Decision { .. }
             | NodeRuntimeBinding::CommentDelivery { .. } => Err(NodeRunnerError::InvalidRole),
             NodeRuntimeBinding::GitDelivery { .. } => {
@@ -407,6 +408,7 @@ impl CapsuleAllocator for DeliveryAllocator {
         let (sender, loss) = watch::channel(false);
         self.lifecycle.losses.lock().assert_value().push(sender);
         Ok(AllocatedCapsule {
+            vector_seed: Vec::new(),
             checkpoints: None,
             execution_seed: Vec::new(),
             runner: Arc::new(runner),

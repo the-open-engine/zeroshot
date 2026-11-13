@@ -206,6 +206,7 @@ impl NativeV2Admission {
         }
         let declarations = executable_declarations(&graph.root);
         validate_executable_bindings(&declarations, runtime, context)?;
+        wait::validate_position(&graph.root, false)?;
         validate_delivery_concurrency(&graph.root)?;
         comment::validate_comment_profile(graph)?;
         let registry = GraphBoundWorkerRegistry::from_declarations(graph, &declarations, runtime)?;
@@ -223,6 +224,15 @@ impl NativeV2Admission {
         runtime: &RuntimePlan,
         delivery: StackDelivery,
     ) -> Result<(), NativeV2AdmissionError> {
+        if let Some(node) = executable_declarations(&graph.root)
+            .iter()
+            .find(|node| node.worker.as_str() == crate::native_v2_wait::WAIT_WORKER_REF)
+        {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node.name.clone(),
+                detail: "stack profiles cannot contain wait nodes".to_owned(),
+            });
+        }
         self.validate_profile(graph, runtime, DeliveryPolicy::Required)
             .await?;
         let workers: &[&str] = match delivery {
@@ -453,6 +463,7 @@ fn prepare_submission(
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
     validate_executable_bindings(&declarations, &runtime, context)?;
+    wait::validate_position(&graph.root, false)?;
     validate_delivery_concurrency(&graph.root)?;
     comment::validate_comment_profile(&graph)?;
     comment::validate_comment_input_shape(&graph.root, &initial_input)?;
@@ -513,6 +524,7 @@ pub(crate) fn executable_runtime_roles(root: &GraphNode) -> Vec<(NodeName, bool)
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeRole {
+    Request,
     Script,
     Agent,
     Decision,
@@ -625,6 +637,7 @@ mod tests;
 
 fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
     match binding {
+        NodeRuntimeBinding::Request {} => RuntimeRole::Request,
         NodeRuntimeBinding::Script { .. } => RuntimeRole::Script,
         NodeRuntimeBinding::Agent { .. } => RuntimeRole::Agent,
         NodeRuntimeBinding::Decision { .. } => RuntimeRole::Decision,
@@ -632,3 +645,5 @@ fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
         NodeRuntimeBinding::CommentDelivery { .. } => RuntimeRole::CommentDelivery,
     }
 }
+
+mod wait;

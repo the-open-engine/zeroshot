@@ -17,6 +17,8 @@ description: "Python API reference for run results, summaries, statuses, stack s
         - RunResult
         - RunStatus
         - RunSummary
+        - RunVector
+        - RunVectorsPage
         - SourceForgeIdentity
         - StackRunStatus
         - StackStatus

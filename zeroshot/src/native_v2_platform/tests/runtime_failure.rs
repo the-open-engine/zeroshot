@@ -183,6 +183,10 @@ impl RunLedger for FaultLedger {
         self.inner.request_force_stop(run_id).await
     }
 
+    async fn request_suspend(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
+        self.inner.request_suspend(run_id).await
+    }
+
     async fn snapshot_and_tail(
         &self,
         run_id: &RunId,

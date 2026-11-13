@@ -38,6 +38,8 @@ const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    predecessor: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     delivery_receipt: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
@@ -98,6 +100,7 @@ impl PortableBootstrapDocument {
             return Err(PortableControllerError::Bootstrap);
         }
         Ok(PortableControllerBootstrap {
+            predecessor: self.predecessor,
             delivery_receipt: self.delivery_receipt,
             local_branch: self.local_branch,
             checkpoint: self.checkpoint,
@@ -286,6 +289,7 @@ fn encode_bootstrap(
         .filter(|milliseconds| *milliseconds > 0)
         .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
+        predecessor: bootstrap.predecessor.clone(),
         delivery_receipt: bootstrap.delivery_receipt.clone(),
         checkpoint: bootstrap.checkpoint.clone(),
         preparation_timeout_ms,

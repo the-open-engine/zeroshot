@@ -692,3 +692,22 @@ fn workspace_export_is_an_optional_strict_http_contract() {
     assert!(serde_json::from_value::<super::TargetDiscoveryExtensions>(serde_json::json!({"workspace_export": {"kind":super::WORKSPACE_EXPORT_KIND,"route_template":"/runs/{run_id}/export", "extra":true}})).is_err());
     assert!(serde_json::from_value::<super::TargetHostedRunRoutes>(serde_json::json!({"list":"/runs", "status":"/runs/{run_id}", "watch":"/watch", "logs":"/logs", "force":"/force", "export_workspace":"/export"})).is_err());
 }
+
+#[test]
+fn suspension_wait_and_vector_markers_have_strict_independent_shapes() {
+    let base = TargetDiscoveryDocument::direct(TargetAuthentication::None).with_run_suspension();
+    let value = serde_json::to_value(&base).assert_value();
+    for (key, kind) in [
+        ("request_wait", "openengine.request-wait/v1"),
+        ("run_suspension", "openengine.run-suspension/v1"),
+        ("run_vectors", "openengine.run-vectors/v1"),
+    ] {
+        assert_eq!(value["extensions"][key], serde_json::json!({"kind":kind}));
+        let mut invalid = value.clone();
+        invalid["extensions"][key]["extra"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<TargetDiscoveryDocument>(invalid).is_err());
+    }
+    let mut unknown = value;
+    unknown["extensions"]["future_capability"] = serde_json::json!({"anything":true});
+    serde_json::from_value::<TargetDiscoveryDocument>(unknown).assert_value();
+}

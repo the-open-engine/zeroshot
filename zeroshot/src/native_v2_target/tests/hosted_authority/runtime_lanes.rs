@@ -872,3 +872,84 @@ async fn size_listing_rejects_public_and_authenticated_discovery_above_one_mebib
         );
     }
 }
+
+#[tokio::test]
+async fn wait_suspend_and_vector_capabilities_refuse_before_tokens_or_request_bodies() {
+    use openengine_cluster_protocol::{RunVectorParams, RunVectorsParams, VectorId};
+    for operation in 0..4 {
+        let root = temp_root();
+        let target = RecordingTarget::spawn(|request, origin, _| {
+            if (request.method.as_str(), request.path.as_str()) == DISCOVERY {
+                let mut document = hosted_document(origin);
+                document["extensions"]
+                    .as_object_mut()
+                    .assert_value()
+                    .remove("run_vectors");
+                ("200 OK", document.to_string())
+            } else if (request.method.as_str(), request.path.as_str()) == OAUTH_METADATA {
+                ("200 OK", oauth_metadata(origin))
+            } else {
+                unexpected()
+            }
+        })
+        .await;
+        let (record, authority) = authenticated_authority(&root, &target.origin).await;
+        let authority: &dyn TargetControlAuthority = &authority;
+        let run_id = openengine_cluster_protocol::RunId::new("run-wait");
+        let error = match operation {
+            0 => {
+                let mut request = run_request(json!({"kind":"request"}));
+                request.submission.graph.root = serde_json::from_value(json!({
+                    "kind":"verifier", "name":"worker", "worker":zeroshot_engine::native_v2_wait::WAIT_WORKER_REF,
+                    "input":zeroshot_engine::native_v2_wait::input_schema().assert_value(), "output":{"kind":"null"},
+                    "signals":zeroshot_engine::native_v2_wait::signal_labels().assert_value(),
+                    "diagnostic":zeroshot_engine::native_v2_wait::diagnostic_schema().assert_value(),
+                    "inputBindings":[], "writeBindings":[], "attempts":1
+                })).assert_value();
+                authority.submit(&record, &request).await.assert_error()
+            }
+            1 => authority
+                .validate_run_suspension(&record)
+                .await
+                .assert_error(),
+            2 => authority
+                .hosted_run_vectors(
+                    &record,
+                    RunVectorsParams {
+                        run_id,
+                        after: None,
+                        limit: None,
+                    },
+                )
+                .await
+                .assert_error(),
+            _ => authority
+                .hosted_run_vector(
+                    &record,
+                    RunVectorParams {
+                        run_id,
+                        id: VectorId::new("entry").assert_value(),
+                    },
+                )
+                .await
+                .assert_error(),
+        };
+        let marker = match operation {
+            0 => "openengine.request-wait/v1",
+            1 => "openengine.run-suspension/v1",
+            _ => "openengine.run-vectors/v1",
+        };
+        assert!(
+            error.to_string().contains(marker),
+            "operation {operation}: {error}"
+        );
+        assert_eq!(
+            routes(&target.stop()),
+            if operation == 0 {
+                vec![DISCOVERY, OAUTH_METADATA]
+            } else {
+                vec![DISCOVERY]
+            }
+        );
+    }
+}
