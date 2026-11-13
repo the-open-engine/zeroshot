@@ -23,6 +23,7 @@ async fn completed_map_replay_retains_linear_scoped_results() {
     let count = 2048_u64;
     let history = (1..=count + 1)
         .map(|id| DurableExecution {
+            delivery_state: None,
             dispatch_position: HistoryPosition::new(id * 2).assert_value(),
             node_instance: NodeInstanceId::new(id).assert_value(),
             execution: ExecutionId::new(id).assert_value(),

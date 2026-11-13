@@ -63,6 +63,7 @@ async fn complete_input_runs_in_item_batches_including_1025_items() {
                 {
                     observed.push(occurrence.map_indices[0]);
                     history.push(DurableExecution {
+                        delivery_state: None,
                         node_instance,
                         execution,
                         occurrence,
@@ -454,6 +455,7 @@ async fn partially_settled_batches_fill_all_available_execution_capacity() {
             } = decision
             {
                 history.push(DurableExecution {
+                    delivery_state: None,
                     node_instance,
                     execution,
                     occurrence,

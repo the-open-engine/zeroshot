@@ -15,6 +15,7 @@ fn node() -> GraphNode {
 fn visits(count: u64) -> Vec<DurableExecution> {
     (1..=count)
         .map(|id| DurableExecution {
+            delivery_state: None,
             dispatch_position: HistoryPosition::new(id * 2).expect("position"),
             node_instance: NodeInstanceId::new(1).expect("instance"),
             execution: ExecutionId::new(id).expect("execution"),
