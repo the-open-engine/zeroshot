@@ -1124,22 +1124,22 @@ impl LocalCliBackend {
     }
 
     async fn force_once(&self, params: RunForceParams) -> Result<RunForceResult, NativeV2CliError> {
+        let paths = self.existing_run_paths(&params.run_id)?;
+        let _directory =
+            crate::execution::platform::open_directory(paths.storage()).map_err(local_io)?;
+        // A running run may suspend before we connect. Hold resume's per-run claim before
+        // reading its phase or successor and through the force reply. Runs without recovery
+        // metadata cannot be resumed and need no workspace claim.
+        let _claim = if self.recovery_path(&params.run_id)?.is_file() {
+            Some(self.claim_recovery_workspace(&params.run_id)?)
+        } else {
+            None
+        };
         let recorded = self
             .read_recorded_status(RunStatusParams {
                 run_id: params.run_id.clone(),
             })
             .await;
-        let suspended = recorded.as_ref().is_ok_and(|recorded| {
-            matches!(
-                recorded.status,
-                openengine_cluster_protocol::RunStatus::Suspended { .. }
-            )
-        });
-        let submission_lock = if suspended {
-            Some(self.acquire_submission_lock().await?)
-        } else {
-            None
-        };
         if let Ok(recorded) = recorded
             && (matches!(
                 recorded.status,
@@ -1162,13 +1162,6 @@ impl LocalCliBackend {
                 workspace_recovery: recorded.workspace_recovery,
             });
         }
-        // Use the same claim as resume before deleting the suspended lineage's checkpoints.
-        let _claim = if suspended {
-            Some(self.claim_recovery_workspace(&params.run_id)?)
-        } else {
-            None
-        };
-        drop(submission_lock);
         let transport = self.connect_run(&params.run_id).await?;
         ClusterClient::new(transport.as_ref())
             .run_force(params)

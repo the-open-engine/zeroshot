@@ -444,6 +444,13 @@ struct LiveController {
     status: Option<RunStatusResult>,
     stopped: RunStatusResult,
     forced: AtomicBool,
+    force_gate: Option<Arc<ForceGate>>,
+}
+
+#[derive(Default)]
+struct ForceGate {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
 }
 
 impl LiveController {
@@ -452,6 +459,7 @@ impl LiveController {
             status,
             stopped: failed(recorded, "force_stopped"),
             forced: AtomicBool::new(false),
+            force_gate: None,
         })
     }
 }
@@ -494,6 +502,10 @@ impl ClusterBackend for LiveController {
         _params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
         self.forced.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.force_gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+        }
         let stopped = self.stopped.clone();
         Ok(RunForceResult {
             run_id: stopped.run_id,
@@ -507,6 +519,9 @@ impl ClusterBackend for LiveController {
         })
     }
 }
+
+#[path = "force_tests.rs"]
+mod force_tests;
 
 fn failed(recorded: &RunStatusResult, reason: &str) -> RunStatusResult {
     let mut status = recorded.clone();
