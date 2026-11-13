@@ -17,6 +17,9 @@ fn recovery_routes_are_optional_and_escape_the_run_identity() {
     assert!(missing.resume_url(&run_id).is_err());
     assert!(missing.checkpoints_url(&run_id).is_err());
     assert!(missing.discard_workspace_url(&run_id).is_err());
+    assert!(missing.suspend_url(&run_id).assert_value().is_none());
+    assert!(missing.vectors_url(&run_id).assert_value().is_none());
+    assert!(missing.vector_url(&run_id).assert_value().is_none());
 
     let present = descriptor_with_recovery(
         &origin,
@@ -202,6 +205,53 @@ fn recovery_routes() -> Value {
         "checkpoints": "/runs/{run_id}/checkpoints",
         "discard_workspace": "/runs/{run_id}/discard-workspace"
     })
+}
+
+#[test]
+fn control_routes_use_a_separate_extension_and_the_hosted_base_path() {
+    let origin = Url::parse("https://target.example").assert_value();
+    let make = |controls: Value| {
+        let extensions: TargetDiscoveryExtensions = serde_json::from_value(json!({
+            "hosted_runs": {"kind": HOSTED_RUNS_KIND, "base_url": "https://target.example/api/", "route_templates": routes()},
+            "hosted_run_controls": controls,
+        })).assert_value();
+        build_hosted_runs_descriptor(&origin, &extensions)
+    };
+    let controls = json!({
+        "kind": openengine_cluster_protocol::HOSTED_RUN_CONTROLS_KIND,
+        "route_templates":{
+            "suspend":"/runs/{run_id}/suspend", "vectors":"/runs/{run_id}/vectors",
+            "vector":"/runs/{run_id}/vector"
+        }
+    });
+    let descriptor = make(controls.clone()).assert_value();
+    let run_id = RunId::new("run/1");
+    for (url, suffix) in [
+        (descriptor.suspend_url(&run_id), "suspend"),
+        (descriptor.vectors_url(&run_id), "vectors"),
+        (descriptor.vector_url(&run_id), "vector"),
+    ] {
+        assert_eq!(
+            url.assert_value().assert_value().as_str(),
+            format!("https://target.example/api/runs/run%2F1/{suffix}")
+        );
+    }
+    let mut incompatible = controls.clone();
+    incompatible["kind"] = json!("future");
+    assert!(make(incompatible).is_err());
+    for name in ["suspend", "vectors", "vector"] {
+        for invalid in [
+            "https://attacker.example/{run_id}",
+            "/runs/{run_id}/../control",
+            "/runs/{run_id}/{other}",
+            "/runs/control",
+            "/runs/{run_id}/control{?from_cursor}",
+        ] {
+            let mut invalid_controls = controls.clone();
+            invalid_controls["route_templates"][name] = json!(invalid);
+            assert!(make(invalid_controls).is_err());
+        }
+    }
 }
 
 #[test]

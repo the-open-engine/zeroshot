@@ -418,7 +418,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
-| <code>after</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/VectorId&quot;},{&quot;type&quot;:&quot;null&quot;}]}</code> |
+| <code>after</code> | No | <a href="../schema.json#/$defs/RunVectorsParams/properties/after"><code>schema.json#/$defs/RunVectorsParams/properties/after</code></a> |
 | <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
 
 #### Result
@@ -438,7 +438,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
-| <code>id</code> | Yes | <a href="#/$defs/VectorId"><code>#/$defs/VectorId</code></a> |
+| <code>id</code> | Yes | <a href="../schema.json#/$defs/VectorId"><code>schema.json#/$defs/VectorId</code></a> |
 
 #### Result
 

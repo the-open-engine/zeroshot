@@ -26,6 +26,7 @@ struct State {
 struct FakeRun {
     stored: StoredRun,
     events: Vec<StoredRunEvent>,
+    vector_cursors: BTreeMap<openengine_cluster_protocol::VectorId, Cursor>,
 }
 
 impl FakeRunLedger {
@@ -79,6 +80,7 @@ impl RunLedger for FakeRunLedger {
             FakeRun {
                 stored: stored.clone(),
                 events: Vec::new(),
+                vector_cursors: BTreeMap::new(),
             },
         );
         Ok(CreateRunOutcome::Created(stored))
@@ -152,6 +154,19 @@ impl RunLedger for FakeRunLedger {
         }
     }
 
+    async fn vector_cursor(
+        &self,
+        run_id: &RunId,
+        id: &openengine_cluster_protocol::VectorId,
+    ) -> Result<Cursor, RunLedgerError> {
+        let state = self.state();
+        let run = state.runs.get(run_id).ok_or(RunLedgerError::RunNotFound)?;
+        run.vector_cursors
+            .get(id)
+            .cloned()
+            .ok_or(RunLedgerError::VectorNotFound)
+    }
+
     async fn snapshot_and_tail(
         &self,
         run_id: &RunId,
@@ -208,6 +223,13 @@ fn append_locked(run: &mut FakeRun, events: Vec<RunEvent>) -> Result<AppendResul
         });
     }
     // The fake commits only after the whole batch validates, matching the durable adapter.
+    for stored in &stored_events {
+        if let RunEvent::Vector { vector } = &stored.event {
+            run.vector_cursors
+                .entry(vector.id.clone())
+                .or_insert_with(|| stored.cursor.clone());
+        }
+    }
     run.events.extend(stored_events.iter().cloned());
     run.stored.snapshot = snapshot.clone();
     Ok(AppendResult {

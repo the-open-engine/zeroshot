@@ -517,6 +517,13 @@ pub trait RunLedger: Send + Sync {
     /// Records soft-stop intent and its vector atomically; repeating a live request is a no-op.
     async fn request_suspend(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError>;
 
+    /// Resolves an entry ID to its cursor in this run, including inherited entries.
+    async fn vector_cursor(
+        &self,
+        run_id: &RunId,
+        id: &openengine_cluster_protocol::VectorId,
+    ) -> Result<Cursor, RunLedgerError>;
+
     /// Reads the current projection and a bounded reconnect page under the same store snapshot.
     /// Pages contain at most `MAX_REPLAY_EVENTS` events and `MAX_REPLAY_BYTES` encoded event bytes.
     async fn snapshot_and_tail(

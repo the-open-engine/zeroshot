@@ -352,6 +352,14 @@ fn hosted_discovery(origin: &str) -> String {
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
             },
+            "hosted_run_controls": {
+                "kind": "openengine.hosted-run-controls/v1",
+                "route_templates": {
+                    "suspend": "/native-v2/runs/{run_id}/suspend",
+                    "vectors": "/native-v2/runs/{run_id}/vectors",
+                    "vector": "/native-v2/runs/{run_id}/vector"
+                }
+            },
             "hosted_workspace_recovery": {
                 "kind": "openengine.hosted-workspace-recovery/v1",
                 "route_templates": hosted_workspace_recovery_routes()
@@ -392,8 +400,6 @@ fn hosted_discovery(origin: &str) -> String {
 
 fn hosted_run_routes() -> serde_json::Value {
     json!({
-        "vectors": "/native-v2/runs/{run_id}/vectors",
-        "vector": "/native-v2/runs/{run_id}/vector",
         "force": "/native-v2/runs/{run_id}/force",
         "list": "/native-v2/runs",
         "logs": "/native-v2/runs/{run_id}/logs{?from_cursor,execution}",

@@ -848,9 +848,19 @@ def test_uniform_runtime_passes_native_configuration_without_shared_mutable_valu
     assert "harnessConfig" not in runtime().to_dict()
 
 
-def test_suspension_continuation_and_vector_target_arguments(fake_native: Path) -> None:
+@pytest.mark.parametrize("forward", [False, True])
+@pytest.mark.parametrize("target_kind", ["hosted", "direct"])
+def test_suspension_continuation_and_vector_target_arguments(
+    fake_native: Path, forward: bool, target_kind: str
+) -> None:
     async def scenario() -> None:
-        async with Client(target=HostedTarget("prod")) as client:
+        target = (
+            HostedTarget("prod")
+            if target_kind == "hosted"
+            else DirectTarget("https://target.example")
+        )
+        route = ["--target", "prod" if target_kind == "hosted" else "python-sdk"]
+        async with Client(target=target, forward_github_token=forward) as client:
             run = client.get_run("original")
             assert (await run.suspend()).suspend_requested
             assert (await run.resume()).id == "successor"
@@ -858,8 +868,8 @@ def test_suspension_continuation_and_vector_target_arguments(fake_native: Path) 
             assert page.next_after == "vector-1"
             assert (await run.vector(page.vectors[0].id)).run_id == "original"
         args = [entry["args"] for entry in read_invocations(fake_native)]
-        assert ["suspend", "original", "--target", "prod"] in args
-        assert ["resume", "original", "--target", "prod"] in args
+        assert ["suspend", "original", *route] in args
+        assert ["resume", "original", *route, *(["--forward-gh-token"] if forward else [])] in args
         assert [
             "vectors",
             "original",
@@ -867,10 +877,9 @@ def test_suspension_continuation_and_vector_target_arguments(fake_native: Path) 
             "2",
             "--after",
             "cursor",
-            "--target",
-            "prod",
+            *route,
         ] in args
-        assert ["vectors", "show", "original", "vector-1", "--target", "prod"] in args
+        assert ["vectors", "show", "original", "vector-1", *route] in args
 
     asyncio.run(scenario())
 

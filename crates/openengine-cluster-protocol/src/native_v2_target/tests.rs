@@ -711,3 +711,56 @@ fn suspension_wait_and_vector_markers_have_strict_independent_shapes() {
     unknown["extensions"]["future_capability"] = serde_json::json!({"anything":true});
     serde_json::from_value::<TargetDiscoveryDocument>(unknown).assert_value();
 }
+
+#[test]
+fn hosted_run_controls_leave_the_strict_v1_routes_unchanged() {
+    let routes = serde_json::json!({
+        "list":"/runs", "status":"/runs/{run_id}", "watch":"/runs/{run_id}/watch",
+        "logs":"/runs/{run_id}/logs", "force":"/runs/{run_id}/force"
+    });
+    let controls = serde_json::json!({
+        "kind":super::HOSTED_RUN_CONTROLS_KIND,
+        "route_templates":{
+            "suspend":"/runs/{run_id}/suspend", "vectors":"/runs/{run_id}/vectors",
+            "vector":"/runs/{run_id}/vector"
+        }
+    });
+    let value = serde_json::json!({
+        "hosted_runs":{
+            "kind":"zeroshot.hosted-runs/v1", "base_url":"https://target.example",
+            "route_templates":routes
+        },
+        "hosted_run_controls":controls
+    });
+    let extensions: super::TargetDiscoveryExtensions =
+        serde_json::from_value(value.clone()).assert_value();
+    assert_eq!(serde_json::to_value(extensions).assert_value(), value);
+    #[derive(serde::Deserialize)]
+    struct LegacyExtensions {
+        hosted_runs: super::TargetHostedRunsDiscovery,
+    }
+    let legacy: LegacyExtensions = serde_json::from_value(value).assert_value();
+    assert_eq!(
+        serde_json::to_value(legacy.hosted_runs.route_templates).assert_value(),
+        routes
+    );
+    for name in ["suspend", "vectors", "vector"] {
+        let mut invalid = routes.clone();
+        invalid[name] = serde_json::json!("/runs/{run_id}/new");
+        assert!(serde_json::from_value::<super::TargetHostedRunRoutes>(invalid).is_err());
+    }
+    let extensions: super::TargetDiscoveryExtensions =
+        serde_json::from_value(serde_json::json!({"hosted_run_controls":controls})).assert_value();
+    assert!(!extensions.is_empty());
+    for pointer in ["/extra", "/route_templates/extra"] {
+        let mut invalid = controls.clone();
+        if pointer == "/extra" {
+            invalid["extra"] = serde_json::json!(true);
+        } else {
+            invalid["route_templates"]["extra"] = serde_json::json!(true);
+        }
+        assert!(
+            serde_json::from_value::<super::TargetHostedRunControlsDiscovery>(invalid).is_err()
+        );
+    }
+}

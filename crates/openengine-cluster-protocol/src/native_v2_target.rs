@@ -471,12 +471,6 @@ pub struct TargetLoginSessionDiscovery {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetHostedRunRoutes {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vector: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vectors: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub suspend: Option<String>,
     pub list: String,
     pub status: String,
     pub watch: String,
@@ -490,6 +484,24 @@ pub struct TargetHostedRunsDiscovery {
     pub kind: String,
     pub base_url: String,
     pub route_templates: TargetHostedRunRoutes,
+}
+
+pub const HOSTED_RUN_CONTROLS_KIND: &str = "openengine.hosted-run-controls/v1";
+
+/// Optional POST routes relative to `hosted_runs.base_url`; the v1 run routes stay frozen.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedRunControlsDiscovery {
+    pub kind: String,
+    pub route_templates: TargetHostedRunControlRoutes,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedRunControlRoutes {
+    pub suspend: String,
+    pub vectors: String,
+    pub vector: String,
 }
 
 /// Authenticated tar streaming, independent of resume/checkpoint RPCs.
@@ -694,6 +706,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_runs: Option<TargetHostedRunsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub hosted_run_controls: Option<TargetHostedRunControlsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub run_history: Option<TargetRunHistoryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stacks: Option<crate::TargetStacksDiscovery>,
@@ -763,6 +777,7 @@ impl TargetDiscoveryExtensions {
 
     const fn controller_extensions_empty(&self) -> bool {
         self.run_suspension.is_none()
+            && self.hosted_run_controls.is_none()
             && self.run_vectors.is_none()
             && self.request_wait.is_none()
             && self.workspace_recovery.is_none()

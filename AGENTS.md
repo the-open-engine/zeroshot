@@ -961,6 +961,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   it after source checkout and before provider dispatch, imports settled prerequisites, and
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
+  Vector pagination resolves entry IDs through a per-run ledger index, including inherited IDs,
+  then replays after that cursor instead of reading earlier pages again.
   Local CLI inspection opens finished runs directly from read-only ledgers. Vector list and show
   use the same retained-storage checks and keep the validated run directory open for the read.
   Unfinished local CLI and UI history readers share the bounded portable-controller availability
@@ -1455,6 +1457,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
+- Hosted suspend and vector POST routes use the separate `hosted_run_controls` discovery extension
+  (`openengine.hosted-run-controls/v1`), relative to `hosted_runs.base_url`. Its strict
+  `route_templates` contains `suspend`, `vectors` and `vector`; the existing hosted run/recovery
+  route objects and the three capability markers stay unchanged.
 - `export-workspace` downloads only from named hosted targets advertising the separate
   `openengine.workspace-export/v1` extension. Its one strict `route_template` is relative to
   `hosted_runs.base_url`; existing hosted run/recovery route objects stay unchanged. The HTTP-only

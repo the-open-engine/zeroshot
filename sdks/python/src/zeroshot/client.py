@@ -808,7 +808,12 @@ class Run:
         """
         await self._client._ready()
         value = await self._client._native().json(
-            ["resume", self.id, *self._client._route_arguments()]
+            [
+                "resume",
+                self.id,
+                *self._client._route_arguments(),
+                *self._client._forwarding_arguments(),
+            ]
         )
         if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
             raise ProtocolError("Zeroshot emitted malformed resume result")

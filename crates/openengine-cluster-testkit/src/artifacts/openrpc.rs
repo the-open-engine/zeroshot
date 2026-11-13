@@ -538,7 +538,7 @@ fn run_vectors_method() -> Value {
     json!({"summary":"Read an ordered page of the durable vector record", "paramStructure":"by-name",
         "params":[
             {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
-            {"name":"after","required":false,"schema":property_schema(&schema,"after")},
+            {"name":"after","required":false,"schema":{"$ref":"schema.json#/$defs/RunVectorsParams/properties/after"}},
             {"name":"limit","required":false,"schema":property_schema(&schema,"limit")}],
         "result":{"name":"runVectorsResult","schema":{"$ref":"schema.json#/$defs/RunVectorsResult"}}})
 }
@@ -549,6 +549,6 @@ fn run_vector_method() -> Value {
     json!({"summary":"Read one vector entry in full", "paramStructure":"by-name",
         "params":[
             {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
-            {"name":"id","required":true,"schema":property_schema(&schema,"id")}],
+            {"name":"id","required":true,"schema":{"$ref":"schema.json#/$defs/VectorId"}}],
         "result":{"name":"runVectorResult","schema":{"$ref":"schema.json#/$defs/RunVector"}}})
 }

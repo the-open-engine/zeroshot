@@ -797,14 +797,7 @@
           "name": "after",
           "required": false,
           "schema": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/VectorId"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "schema.json#/$defs/RunVectorsParams/properties/after"
           }
         },
         {
@@ -849,7 +842,7 @@
           "name": "id",
           "required": true,
           "schema": {
-            "$ref": "#/$defs/VectorId"
+            "$ref": "schema.json#/$defs/VectorId"
           }
         }
       ],

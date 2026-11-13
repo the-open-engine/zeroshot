@@ -121,3 +121,146 @@ async fn sqlite_record_retains_order_and_identity_across_successors() {
     let ledger = SqliteRunLedger::open(root.path().join("ledger.sqlite3")).assert_value();
     exercise(&ledger).await;
 }
+
+async fn exercise_long_record(ledger: &dyn RunLedger) {
+    let source = RunId::new("long-source");
+    let successor = RunId::new("long-successor");
+    for (run, digest) in [(&source, 'c'), (&successor, 'd')] {
+        ledger
+            .create_or_get(create(run.as_str(), run.as_str(), digest))
+            .await
+            .assert_value();
+    }
+    let mut expected = Vec::new();
+    let mut events = Vec::new();
+    for index in 0..305 {
+        let RunEvent::Vector { mut vector } =
+            super::super::vector_event(&source, RunVectorContent::SuspendRequest {}).assert_value()
+        else {
+            unreachable!()
+        };
+        // IDs are opaque and need not sort in event order, particularly after inheritance.
+        vector.id = openengine_cluster_protocol::VectorId::new(format!("entry-{}", 305 - index))
+            .assert_value();
+        expected.push(vector.clone());
+        events.push(RunEvent::Vector { vector });
+        events.push(RunEvent::SafeLog {
+            execution: None,
+            timestamp: UnixTimestampMillis::new(1).assert_value(),
+            stream: SafeLogStream::Output,
+            line: SafeLogLine::new("between entries").assert_value(),
+            diagnostic: None,
+        });
+    }
+    ledger.append(&source, events).await.assert_value();
+    super::super::vectors::inherit(ledger, ledger, &source, &successor)
+        .await
+        .assert_value();
+    let mut inherited = Vec::new();
+    let mut after = None;
+    loop {
+        let page = super::super::vectors::list(
+            ledger,
+            RunVectorsParams {
+                run_id: successor.clone(),
+                after,
+                limit: Some(100),
+            },
+        )
+        .await
+        .assert_value();
+        inherited.extend(page.vectors);
+        after = page.next_after;
+        if after.is_none() {
+            break;
+        }
+    }
+    assert_eq!(&inherited[..305], expected);
+    assert_eq!(inherited.len(), 306);
+    assert!(
+        matches!(&inherited[305].content, RunVectorContent::Continuation { resumed_from } if resumed_from == &source)
+    );
+    for (run_id, error) in [
+        (source, RunLedgerError::VectorNotFound),
+        (RunId::new("missing"), RunLedgerError::RunNotFound),
+    ] {
+        assert_eq!(
+            super::super::vectors::list(
+                ledger,
+                RunVectorsParams {
+                    run_id,
+                    after: Some(inherited[305].id.clone()),
+                    limit: None,
+                }
+            )
+            .await,
+            Err(error)
+        );
+    }
+}
+
+#[tokio::test]
+async fn fake_pages_and_inherits_long_interleaved_records() {
+    exercise_long_record(&FakeRunLedger::new()).await;
+}
+
+#[tokio::test]
+async fn sqlite_pages_and_inherits_long_interleaved_records() {
+    let ledger = SqliteRunLedger::open_in_memory().assert_value();
+    exercise_long_record(&ledger).await;
+}
+
+#[tokio::test]
+async fn sqlite_read_only_pagination_seeks_past_earlier_events() {
+    let root = tempfile::tempdir().assert_value();
+    let path = root.path().join("ledger.sqlite3");
+    let ledger = SqliteRunLedger::open(&path).assert_value();
+    let run = RunId::new("source");
+    ledger
+        .create_or_get(create(run.as_str(), run.as_str(), 'e'))
+        .await
+        .assert_value();
+    let first =
+        super::super::vector_event(&run, RunVectorContent::SuspendRequest {}).assert_value();
+    let second =
+        super::super::vector_event(&run, RunVectorContent::SuspendRequest {}).assert_value();
+    let RunEvent::Vector {
+        vector: first_vector,
+    } = &first
+    else {
+        unreachable!()
+    };
+    let RunEvent::Vector {
+        vector: second_vector,
+    } = &second
+    else {
+        unreachable!()
+    };
+    let first_id = first_vector.id.clone();
+    let expected = second_vector.clone();
+    ledger
+        .append(&run, vec![RunEvent::RunStarted, first, second])
+        .await
+        .assert_value();
+    drop(ledger);
+    let connection = rusqlite::Connection::open(&path).assert_value();
+    // A page after the first vector must never decode earlier non-vector events.
+    connection.execute(
+        "UPDATE v2_run_events SET event_json = '{\"kind\":\"unreadable_old_event\"}' WHERE sequence = 1",
+        [],
+    ).assert_value();
+    drop(connection);
+    let ledger = SqliteRunLedger::open_read_only(&path).assert_value();
+    let page = super::super::vectors::list(
+        &ledger,
+        RunVectorsParams {
+            run_id: run,
+            after: Some(first_id),
+            limit: None,
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(page.vectors, vec![expected]);
+    assert!(page.next_after.is_none());
+}

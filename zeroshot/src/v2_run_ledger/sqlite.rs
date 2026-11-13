@@ -31,7 +31,15 @@ CREATE TABLE IF NOT EXISTS v2_run_events (
     PRIMARY KEY (run_id, sequence),
     FOREIGN KEY (run_id) REFERENCES v2_runs(run_id) ON DELETE CASCADE
 ) STRICT;
+CREATE INDEX IF NOT EXISTS v2_run_vector_ids
+    ON v2_run_events (run_id, json_extract(event_json, '$.vector.id'), sequence)
+    WHERE json_extract(event_json, '$.kind') = 'vector';
 ";
+
+const VECTOR_CURSOR_QUERY: &str = "SELECT sequence FROM v2_run_events
+    WHERE run_id = ?1 AND json_extract(event_json, '$.kind') = 'vector'
+        AND json_extract(event_json, '$.vector.id') = ?2
+    ORDER BY sequence LIMIT 1";
 
 #[path = "sqlite/readonly.rs"]
 mod readonly;
@@ -224,6 +232,35 @@ impl RunLedger for SqliteRunLedger {
                     snapshot: stored.snapshot,
                     events: Vec::new(),
                 }),
+            }
+        })
+        .await
+    }
+
+    async fn vector_cursor(
+        &self,
+        run_id: &RunId,
+        id: &openengine_cluster_protocol::VectorId,
+    ) -> Result<Cursor, RunLedgerError> {
+        let run_id = run_id.clone();
+        let id = id.clone();
+        self.with_connection(move |connection| {
+            let sequence = connection
+                .query_row(
+                    VECTOR_CURSOR_QUERY,
+                    params![run_id.as_str(), id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            match sequence {
+                Some(sequence) => Ok(cursor_for(
+                    u64::try_from(sequence).map_err(|_| RunLedgerError::Corrupt)?,
+                )),
+                None if load_by_id(connection, &run_id)?.is_none() => {
+                    Err(RunLedgerError::RunNotFound)
+                }
+                None => Err(RunLedgerError::VectorNotFound),
             }
         })
         .await
@@ -539,6 +576,10 @@ mod storage_failure_tests;
 #[cfg(test)]
 #[path = "sqlite/scheduling_tests.rs"]
 mod scheduling_tests;
+
+#[cfg(test)]
+#[path = "sqlite/vector_tests.rs"]
+mod vector_tests;
 
 #[cfg(all(test, feature = "ui"))]
 #[path = "sqlite/listing_tests.rs"]

@@ -277,6 +277,17 @@ pub(super) fn build_hosted_runs_descriptor(
     }
     let base_url = capability_base_url(origin, &wire.base_url)?;
     let mut descriptor = compile_hosted_run_routes(base_url, &wire.route_templates)?;
+    if let Some(controls) = extensions.hosted_run_controls.as_ref() {
+        if controls.kind != openengine_cluster_protocol::HOSTED_RUN_CONTROLS_KIND {
+            return Err(authority_error(
+                "hosted run controls discovery is incompatible",
+            ));
+        }
+        let routes = &controls.route_templates;
+        descriptor.suspend = Some(compile_hosted_run_route(&routes.suspend, true, &[])?);
+        descriptor.vectors = Some(compile_hosted_run_route(&routes.vectors, true, &[])?);
+        descriptor.vector = Some(compile_hosted_run_route(&routes.vector, true, &[])?);
+    }
     if let Some(recovery) = extensions.hosted_workspace_recovery.as_ref() {
         if recovery.kind != HOSTED_WORKSPACE_RECOVERY_KIND {
             return Err(authority_error(
@@ -308,21 +319,9 @@ fn compile_hosted_run_routes(
             true,
             &[HostedRunQuery::FromCursor, HostedRunQuery::Execution],
         )?,
-        suspend: routes
-            .suspend
-            .as_deref()
-            .map(|route| compile_hosted_run_route(route, true, &[]))
-            .transpose()?,
-        vectors: routes
-            .vectors
-            .as_deref()
-            .map(|route| compile_hosted_run_route(route, true, &[]))
-            .transpose()?,
-        vector: routes
-            .vector
-            .as_deref()
-            .map(|route| compile_hosted_run_route(route, true, &[]))
-            .transpose()?,
+        suspend: None,
+        vectors: None,
+        vector: None,
         force: compile_hosted_run_route(&routes.force, true, &[])?,
         resume: None,
         checkpoints: None,

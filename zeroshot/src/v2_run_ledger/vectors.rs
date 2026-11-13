@@ -9,8 +9,10 @@ pub async fn list(
     params
         .validate()
         .map_err(|_| RunLedgerError::InvalidEvent("vector limit must be 1 through 100"))?;
-    let mut after = None;
-    let mut found = params.after.is_none();
+    let mut after = match params.after.as_ref() {
+        Some(id) => Some(ledger.vector_cursor(&params.run_id, id).await?),
+        None => None,
+    };
     let mut vectors = Vec::new();
     let limit = params.limit.unwrap_or(50) as usize;
     loop {
@@ -20,10 +22,6 @@ pub async fn list(
         for stored in tail.events {
             after = Some(stored.cursor);
             if let RunEvent::Vector { vector } = stored.event {
-                if !found {
-                    found = params.after.as_ref() == Some(&vector.id);
-                    continue;
-                }
                 if vectors.len() == limit {
                     let next_after = vectors.last().map(|v: &RunVector| v.id.clone());
                     return Ok(RunVectorsResult {
@@ -40,9 +38,6 @@ pub async fn list(
         {
             break;
         }
-    }
-    if !found {
-        return Err(RunLedgerError::VectorNotFound);
     }
     Ok(RunVectorsResult {
         run_id: params.run_id,

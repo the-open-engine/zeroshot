@@ -187,6 +187,16 @@ impl RunLedger for FaultLedger {
         self.inner.request_suspend(run_id).await
     }
 
+    async fn vector_cursor(
+        &self,
+        run_id: &RunId,
+        id: &openengine_cluster_protocol::VectorId,
+    ) -> Result<Cursor, RunLedgerError> {
+        self.reads.wait().await;
+        self.read_available()?;
+        self.inner.vector_cursor(run_id, id).await
+    }
+
     async fn snapshot_and_tail(
         &self,
         run_id: &RunId,
