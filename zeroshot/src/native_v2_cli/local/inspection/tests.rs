@@ -17,6 +17,7 @@ struct Fixture {
     backend: LocalCliBackend,
     id: RunId,
     execution: openengine_cluster_protocol::ExecutionRef,
+    vector: openengine_cluster_protocol::RunVector,
 }
 
 impl Fixture {
@@ -43,9 +44,18 @@ impl Fixture {
         let reference = test_support::request(id.as_str(), "worker", (1, 1))
             .invocation
             .reference;
+        let vector = openengine_cluster_protocol::RunVector {
+            id: openengine_cluster_protocol::VectorId::new("recorded-vector").unwrap(),
+            run_id: id.clone(),
+            created_at: UnixTimestampMillis::MIN,
+            content: openengine_cluster_protocol::RunVectorContent::SuspendRequest {},
+        };
         let mut events = vec![
             RunEvent::RunStarted,
             test_support::node_started(&reference, serde_json::Value::Null),
+            RunEvent::Vector {
+                vector: vector.clone(),
+            },
         ];
         // Cross bounded ledger pages, including pages with no watch status changes.
         events.extend((0..300).map(|index| RunEvent::SafeLog {
@@ -123,6 +133,7 @@ impl Fixture {
             backend,
             id,
             execution,
+            vector,
         }
     }
 }
@@ -242,6 +253,7 @@ async fn inspection_leaves_read_only_running_lost_and_finished_directories_uncha
                 .await
                 .unwrap();
             assert_eq!(checkpoints.controller.is_none(), finished);
+            vector_tests::assert_vectors(&fixture).await;
             let mut watch = fixture
                 .backend
                 .inspect_watch(RunWatchParams {
@@ -522,6 +534,9 @@ impl ClusterBackend for LiveController {
 
 #[path = "force_tests.rs"]
 mod force_tests;
+
+#[path = "vector_tests.rs"]
+mod vector_tests;
 
 fn failed(recorded: &RunStatusResult, reason: &str) -> RunStatusResult {
     let mut status = recorded.clone();

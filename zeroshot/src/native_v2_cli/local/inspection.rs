@@ -15,7 +15,7 @@ enum Inspection {
 impl LocalCliBackend {
     /// Applies the retained-history reader's directory boundary, including native reparse
     /// checks. The returned handle keeps that directory open while its ledger is read.
-    fn recorded_storage(
+    pub(super) fn recorded_storage(
         &self,
         id: &RunId,
     ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {

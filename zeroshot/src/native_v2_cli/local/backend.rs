@@ -581,9 +581,8 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<openengine_cluster_protocol::RunVectorsResult, NativeV2CliError> {
         require_local(target)?;
-        let ledger =
-            SqliteRunLedger::open_read_only(self.existing_run_paths(&params.run_id)?.ledger())
-                .map_err(local_error)?;
+        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
         crate::v2_run_ledger::vectors::list(&ledger, params)
             .await
             .map_err(local_error)
@@ -595,9 +594,8 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: openengine_cluster_protocol::RunVectorParams,
     ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2CliError> {
         require_local(target)?;
-        let ledger =
-            SqliteRunLedger::open_read_only(self.existing_run_paths(&params.run_id)?.ledger())
-                .map_err(local_error)?;
+        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
         crate::v2_run_ledger::vectors::show(&ledger, params)
             .await
             .map_err(local_error)

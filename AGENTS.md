@@ -961,9 +961,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   it after source checkout and before provider dispatch, imports settled prerequisites, and
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
-  Local CLI inspection opens finished runs directly from read-only ledgers. Unfinished local CLI
-  and UI history readers share the bounded portable-controller availability probe: original lease
-  identity bound in readiness, read-only shared-lock probes, endpoint response and process evidence.
+  Local CLI inspection opens finished runs directly from read-only ledgers. Vector list and show
+  use the same retained-storage checks and keep the validated run directory open for the read.
+  Unfinished local CLI and UI history readers share the bounded portable-controller availability
+  probe: original lease identity bound in readiness, read-only shared-lock probes, endpoint response
+  and process evidence.
   Missing/inaccessible/replaced evidence and live or reused PIDs remain unknown; only an absent
   process with its original released lease establishes lost. Availability is optional controller
   metadata with observedAt, never a durable status, terminal outcome or inferred death time.
