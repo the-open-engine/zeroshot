@@ -624,50 +624,6 @@ impl ProductionCapsuleAllocator {
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)
     }
 
-    fn claim_retained_allocation(
-        &self,
-        source_run_id: &RunId,
-        run_id: &RunId,
-        paths: &RetainedAllocationPaths,
-    ) -> Result<RetainedAllocationClaim, RetainedAllocationUnavailable> {
-        let mut source =
-            read_recovery(&paths.source_recovery).ok_or(CapsuleAllocationUnavailable::Runtime)?;
-        if !source.recoverable || source.successor_run_id.is_some() || paths.run_root.exists() {
-            return Err(CapsuleAllocationUnavailable::Runtime.into());
-        }
-        let delivery_run_id =
-            retained_delivery_run_id(&self.config.storage_root, source_run_id, &source)
-                .ok_or(CapsuleAllocationUnavailable::Runtime)?;
-        let original_source = HostedRecoveryDocument {
-            recoverable: true,
-            run_id: Some(source_run_id.clone()),
-            delivery_run_id: Some(delivery_run_id.clone()),
-            resumed_from: source.resumed_from.clone(),
-            successor_run_id: None,
-        };
-        source.recoverable = false;
-        source.run_id = Some(source_run_id.clone());
-        source.delivery_run_id = Some(delivery_run_id.clone());
-        source.successor_run_id = Some(run_id.clone());
-        let successor = HostedRecoveryDocument {
-            recoverable: false,
-            run_id: Some(run_id.clone()),
-            delivery_run_id: Some(delivery_run_id.clone()),
-            resumed_from: Some(source_run_id.clone()),
-            successor_run_id: None,
-        };
-        if write_recovery(&paths.source_recovery, &source)
-            .and_then(|()| write_recovery(&paths.run_recovery, &successor))
-            .is_err()
-        {
-            return Err(retained_claim_failure(paths, &original_source));
-        }
-        Ok(RetainedAllocationClaim {
-            delivery_run_id,
-            original_source,
-        })
-    }
-
     fn prepare_git_identity(
         &self,
         process_pool: HostedProcessPool,
