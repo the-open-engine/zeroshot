@@ -182,7 +182,13 @@ async fn capture_native(
         )
         .await
     };
-    output.map_err(|_| local_message("native forge credential lookup failed"))
+    // The context is the capture's own text for the failed step and holds no command output.
+    output.map_err(|failure| {
+        local_message(format!(
+            "native forge credential lookup failed: {}",
+            failure.context
+        ))
+    })
 }
 
 fn checked_token(value: &str) -> Result<&str, NativeV2CliError> {

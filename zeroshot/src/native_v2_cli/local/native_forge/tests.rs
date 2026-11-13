@@ -179,6 +179,31 @@ async fn two_native_logins_are_ambiguous_instead_of_guessing_a_provider() {
     assert!(error.to_string().contains("both gh and glab"), "{error}");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_native_lookup_names_the_step_that_failed() {
+    let root = tempfile::tempdir().assert_value();
+    openengine_cluster_testkit::fixture::write_executable(
+        &root.path().join("gh"),
+        "#!/missing-interpreter\n",
+        0o700,
+    )
+    .assert_value();
+    let environment = fixture_environment(root.path());
+    let remote = GitRemoteUrl::new("git@git.example.test:team/repo.git").assert_value();
+    let error = identify_remote(
+        &remote,
+        NativeContext {
+            environment: &environment,
+            directory: root.path(),
+        },
+    )
+    .await
+    .assert_error();
+    let expected = "native forge credential lookup failed: could not start contained command";
+    assert!(error.to_string().contains(expected), "{error}");
+}
+
 fn comment_submission(host: &str, fields: &[&str]) -> RunSubmission {
     let graph = crate::native_v2_cli::BuiltinGraphTemplate::IssueReview
         .materialize(crate::native_v2_cli::TemplateDelivery::Comment)

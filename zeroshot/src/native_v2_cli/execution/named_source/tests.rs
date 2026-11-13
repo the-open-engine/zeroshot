@@ -496,7 +496,8 @@ async fn unsupported_forge_capability_is_rejected_before_source_credential_reads
         assert!(
             error
                 .to_string()
-                .contains("cannot identify the selected Git server; sign in to forge.example")
+                .contains("cannot identify the selected Git server; sign in to forge.example"),
+            "{error}"
         );
         assert_eq!(reads.get(), 0, "unsupported forge read source credentials");
         assert!(
