@@ -5,7 +5,7 @@
 //! liveness signal, and one result-bearing cleanup authority for the run's capsule/workspace.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
@@ -97,6 +97,7 @@ pub struct NativeV2PlatformController {
     observability: NativeV2Observability,
     runtimes: Arc<Mutex<BTreeMap<RunId, RuntimeSlot>>>,
     submission_turn: Arc<Mutex<()>>,
+    control_turns: Arc<Mutex<BTreeMap<RunId, Weak<Mutex<()>>>>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
@@ -162,6 +163,7 @@ impl NativeV2PlatformController {
             allocator,
             runtimes: Arc::new(Mutex::new(BTreeMap::new())),
             submission_turn: Arc::new(Mutex::new(())),
+            control_turns: Arc::default(),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
@@ -539,6 +541,10 @@ impl NativeV2PlatformController {
             commit_identity,
             commit_co_author,
         } = params;
+        // Refuse a live source before taking its control turn: cancellation must not wait for
+        // a resume's ledger reads. Recheck eligibility once ownership is serialized with force.
+        self.recoverable_resume_source(&run_id).await?;
+        let _control = self.lock_run_control(&run_id).await;
         let source = self.recoverable_resume_source(&run_id).await?;
         if let Some(suspension) = &source.snapshot.suspension {
             // A settled attempt must release its owner before the successor can claim storage.
@@ -928,7 +934,8 @@ impl NativeV2PlatformController {
     }
 
     async fn prepare_force(&self, run_id: &RunId) -> Result<ForceTarget, NativeV2PlatformError> {
-        // An existing runtime owns cancellation independently of submission and storage.
+        // Capture live ownership before reconstruction; a running engine rechecks successor
+        // ownership under its control turn before it can be signalled.
         if let Some(target) = self.live_force_target(run_id).await {
             return Ok(target);
         }
@@ -957,11 +964,38 @@ impl NativeV2PlatformController {
         Ok(ForceTarget::Reconstructed)
     }
 
+    async fn lock_run_control(&self, run_id: &RunId) -> tokio::sync::OwnedMutexGuard<()> {
+        let turn = {
+            let mut turns = self.control_turns.lock().await;
+            turns.retain(|_, turn| turn.strong_count() > 0);
+            if let Some(turn) = turns.get(run_id).and_then(Weak::upgrade) {
+                turn
+            } else {
+                let turn = Arc::new(Mutex::new(()));
+                turns.insert(run_id.clone(), Arc::downgrade(&turn));
+                turn
+            }
+        };
+        turn.lock_owned().await
+    }
+
     async fn force_running(
         &self,
         run_id: &RunId,
         engine: &PortableRunEngine,
     ) -> Result<(), NativeV2PlatformError> {
+        // A captured engine may already have published suspension. Serialize its force request
+        // with continuation ownership, including persistence, so it cannot stop a claimed source.
+        let _control = self.lock_run_control(run_id).await;
+        if self
+            .allocator
+            .workspace_recovery(run_id)
+            .await
+            .successor_run_id
+            .is_some()
+        {
+            return Ok(());
+        }
         // `drive` is internally serialized. Usually this waits behind the live driving turn; if
         // that turn stopped on cleanup error, this is the one retry that can finish cleanup.
         engine.force_stop().await?;

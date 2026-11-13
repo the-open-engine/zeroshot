@@ -9,6 +9,9 @@ use openengine_cluster_protocol::{
 };
 use std::sync::atomic::AtomicU64;
 
+#[path = "suspension/races.rs"]
+mod races;
+
 #[derive(Default)]
 struct SuspensionStore {
     published: StdMutex<Vec<RunVector>>,

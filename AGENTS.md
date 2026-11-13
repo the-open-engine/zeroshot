@@ -889,6 +889,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the workspace. Direct-target retained-workspace handoff records both sides before moving the tree
   and reconciles incomplete handoffs at startup. Resume reserves this durable handoff before
   acknowledging the successor; asynchronous credential resolution and preparation reuse that claim.
+  Live-engine force-stop shares a per-run control turn with resume and checks successor ownership
+  before signalling the engine, so a stale suspended engine cannot stop an accepted continuation.
+  Unrelated submissions and resume reads for an ineligible live source cannot block cancellation.
   Direct-target status for failed and suspended runs exposes the immutable admitted connection requirements so the CLI resolves
   fresh resume values without consulting changed profiles. Recovery lineage also retains the root
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
