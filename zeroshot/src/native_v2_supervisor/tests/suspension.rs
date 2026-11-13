@@ -175,17 +175,24 @@ async fn suspension_waits_for_entire_parallel_group() {
 
 #[tokio::test(start_paused = true)]
 async fn suspension_waits_for_all_map_waves() {
-    let mut harness = harness(
+    let mut harness = harness_with_options(
         super::checkpoint_tests::mapped_waves_graph(),
-        json!({"items":["a","b","c"]}),
+        json!({"items":["a","b","c","d","e"]}),
         FakeDriver::scripted([(
             "first",
             vec![
                 super::checkpoint_tests::completed_after(100),
                 super::checkpoint_tests::completed_after(200),
                 super::checkpoint_tests::completed_after(300),
+                super::checkpoint_tests::completed_after(400),
+                super::checkpoint_tests::completed_after(500),
             ],
         )]),
+        HarnessOptions {
+            max_concurrency: Some(1),
+            session_scope: SessionScope::Execution,
+            resolver: None,
+        },
     )
     .await;
     let (supervisor, _) = super::checkpoint_tests::RecordingCheckpointStore::attach(&harness);
@@ -199,8 +206,9 @@ async fn suspension_waits_for_all_map_waves() {
         task.await.assert_value(),
         Err(NativeV2SupervisorError::Suspended)
     ));
-    assert_eq!(harness.driver.starts("first"), 3);
-    assert_eq!(harness.driver.starts("second"), 3);
+    assert_eq!(harness.driver.starts("first"), 5);
+    assert_eq!(harness.driver.starts("second"), 5);
+    assert_eq!(harness.driver.max_active(), 1);
     assert_eq!(harness.driver.starts("after"), 0);
 }
 

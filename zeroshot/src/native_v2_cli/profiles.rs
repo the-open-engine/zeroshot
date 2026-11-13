@@ -273,8 +273,8 @@ impl LocalRunProfileStore {
         let mut encoded = serde_json::to_vec(stored)
             .map_err(|_| local_message("local profile store could not be encoded"))?;
         encoded.push(b'\n');
-        // Accepted writes must remain readable through the store's JSON parser.
-        serde_json::from_slice::<StoredProfiles>(&encoded).map_err(|_| {
+        // Keep unchanged entries opaque, as in read; encode_profile checks new entries.
+        serde_json::from_reader::<_, StoredProfiles>(encoded.as_slice()).map_err(|_| {
             local_message("local profile store could not be read back before saving")
         })?;
         let result = (|| {
@@ -352,7 +352,7 @@ fn stored_profile<'a>(
     value: &'a RawValue,
     name: &RunProfileName,
 ) -> Result<StoredProfile<&'a RawValue, &'a RawValue>, NativeV2CliError> {
-    serde_json::from_str(value.get())
+    openengine_cluster_protocol::bounded_json_from_str(value.get())
         .map_err(|_| local_message(format!("profile {name} has malformed metadata")))
 }
 
@@ -376,9 +376,9 @@ fn decode_profile(
         id: value.id,
         name: name.clone(),
         scope: RunProfileScope::User,
-        graph: serde_json::from_str(value.graph.get())
+        graph: openengine_cluster_protocol::bounded_json_from_str(value.graph.get())
             .map_err(|_| local_message(format!("profile {name} has a malformed graph")))?,
-        runtime: serde_json::from_str(value.runtime.get())
+        runtime: openengine_cluster_protocol::bounded_json_from_str(value.runtime.get())
             .map_err(|_| local_message(format!("profile {name} has a malformed runtime")))?,
         is_default,
     })

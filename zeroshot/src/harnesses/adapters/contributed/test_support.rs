@@ -57,5 +57,7 @@ pub(super) fn invocation(
         environment: request.environment,
         session,
         provider_session_slot: NodeInstanceId::new(1).assert_value(),
+        provider_home_slot: NodeInstanceId::new(1).assert_value(),
+        auxiliary: false,
     }
 }

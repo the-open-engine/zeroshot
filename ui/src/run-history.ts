@@ -1,12 +1,21 @@
 import type { EnvironmentDefinition } from './environment-store';
 import type { FailureContext } from './failure-context';
 import type { HistoryObservation } from './history-contract';
-import { allNodes, children, isGroup, pathTo, type Document, type GraphNode } from './domain';
+import {
+  allNodes,
+  children,
+  executable,
+  isGroup,
+  pathTo,
+  type Document,
+  type GraphNode,
+} from './domain';
 import {
   controlState,
   projectControlHistory,
   settleControlVisits,
   type ControlRecord,
+  type ControlVisit,
 } from './control-history';
 import type { WorkflowNodeObservation } from './workflow-observation';
 
@@ -319,49 +328,6 @@ export function projectHistory(
     if (event.kind === 'terminal') terminal = event.result;
     else readHistoryEvent(event, index, projection);
   }
-  const nodes: Record<string, WorkflowNodeObservation> = Object.create(null);
-  for (const node of allNodes(document.graph.root)) {
-    const descendants = new Set(allNodes(node).map((child) => child.name));
-    const executions = invocations.filter((invocation) => descendants.has(invocation.node));
-    const latestByOccurrence = new Map<string, Invocation>();
-    for (const invocation of executions)
-      latestByOccurrence.set(JSON.stringify([invocation.node, invocation.mapIndices]), invocation);
-    const latest = [...latestByOccurrence.values()];
-    // A settled descendant does not prove a group finished: more branches, map items or
-    // loop visits may follow. Only active descendants provide a current group observation.
-    // Structural terminal nodes have no dispatch record, so do not label them unreached.
-    if (isGroup(node)) {
-      if (executions.some((invocation) => invocation.state === 'running')) {
-        nodes[node.name] = { state: 'running', count: executions.length };
-      } else if (executions.length) {
-        nodes[node.name] = { state: 'recorded', count: executions.length };
-      }
-      continue;
-    }
-    if (!['step', 'verifier'].includes(node.kind)) continue;
-    const state: NodeState = latest.some((i) => i.state === 'running')
-      ? 'running'
-      : latest.some((i) => i.state === 'suspended')
-        ? 'suspended'
-        : latest.some((i) => i.state === 'failed')
-          ? 'failed'
-          : latest.some((i) => i.state === 'skipped')
-            ? 'skipped'
-            : latest.length
-              ? 'succeeded'
-              : 'idle';
-    const own = invocations.filter((i) => i.node === node.name);
-    const signals = own.at(-1)?.outcome?.signals;
-    nodes[node.name] = {
-      state,
-      count: executions.length,
-      detail:
-        signals &&
-        Object.entries(signals)
-          .map(([key, value]) => `${humanize(key)}: ${value}`)
-          .join(' · '),
-    };
-  }
   const controls = settleControlVisits(
     document.graph.root,
     projectControlHistory(control, events, through)
@@ -372,21 +338,25 @@ export function projectHistory(
     visits.push(visit);
     byControlNode.set(visit.node, visits);
   }
-  for (const [name, visits] of byControlNode) {
-    const latest = new Map<string, (typeof controls)[number]>();
-    for (const visit of visits) latest.set(JSON.stringify(visit.mapIndices), visit);
-    const current = [...latest.values()];
-    const states = new Set(current.map((visit) => controlState(visit.state)));
-    const state =
-      (['running', 'failed', 'skipped', 'recorded'] as const).find((next) => states.has(next)) ??
-      'succeeded';
-    const visit = current.reduce((a, b) => (a.updated > b.updated ? a : b));
-    nodes[name] = {
-      state,
-      count: visits.length,
-      countUnit: 'visit',
-      detail: visit.branch ? `Selected: ${humanize(visit.branch)}` : visit.detail,
-    };
+  const nodes: Record<string, WorkflowNodeObservation> = Object.create(null);
+  for (const node of allNodes(document.graph.root)) {
+    const visits = byControlNode.get(node.name) ?? [];
+    if (executable(node)) {
+      nodes[node.name] = leafObservation(
+        invocations.filter((invocation) => invocation.node === node.name),
+        visits
+      );
+    } else if (visits.length) {
+      nodes[node.name] = controlObservation(visits);
+    } else if (isGroup(node)) {
+      // Without a structural record, only active descendants establish a current group state.
+      const descendants = new Set(allNodes(node).map((child) => child.name));
+      const executions = invocations.filter((invocation) => descendants.has(invocation.node));
+      if (executions.some((invocation) => invocation.state === 'running'))
+        nodes[node.name] = { state: 'running', count: executions.length };
+      else if (executions.length)
+        nodes[node.name] = { state: 'recorded', count: executions.length };
+    }
   }
   if (terminal)
     nodes[document.graph.root.name] = {
@@ -552,4 +522,66 @@ export function observedRoutes(node: GraphNode, invocations: readonly Invocation
 
 export function descendantNames(node: GraphNode): Set<string> {
   return new Set([node.name, ...children(node).flatMap((child) => [...descendantNames(child)])]);
+}
+
+function controlObservation(visits: readonly ControlVisit[]): WorkflowNodeObservation {
+  const latest = new Map(visits.map((visit) => [JSON.stringify(visit.mapIndices), visit]));
+  const current = [...latest.values()];
+  const states = new Set(current.map((visit) => controlState(visit.state)));
+  const state =
+    (['running', 'failed', 'skipped', 'recorded'] as const).find((next) => states.has(next)) ??
+    'succeeded';
+  const visit = current.reduce((a, b) => (a.updated > b.updated ? a : b));
+  return {
+    state,
+    count: visits.length,
+    countUnit: 'visit',
+    detail: visit.branch ? `Selected: ${humanize(visit.branch)}` : visit.detail,
+  };
+}
+
+function leafObservation(
+  executions: readonly Invocation[],
+  controls: readonly ControlVisit[]
+): WorkflowNodeObservation {
+  const latest = new Map<string, { state: WorkflowNodeObservation['state']; start: number }>();
+  for (const invocation of executions)
+    latest.set(JSON.stringify(invocation.mapIndices), invocation);
+  const queued = applyPendingVisits(latest, controls);
+  const states = new Set([...latest.values()].map((visit) => visit.state));
+  const state =
+    (['running', 'suspended', 'failed', 'queued', 'skipped'] as const).find((next) =>
+      states.has(next)
+    ) ?? (latest.size ? 'succeeded' : 'idle');
+  const signals = executions.at(-1)?.outcome?.signals;
+  return {
+    state,
+    count: executions.length,
+    detail:
+      [
+        signals &&
+          Object.entries(signals)
+            .map(([key, value]) => `${humanize(key)}: ${value}`)
+            .join(' · '),
+        queued ? `${queued} queued` : undefined,
+      ]
+        .filter(Boolean)
+        .join(' · ') || undefined,
+  };
+}
+
+function applyPendingVisits(
+  latest: Map<string, { state: WorkflowNodeObservation['state']; start: number }>,
+  controls: readonly ControlVisit[]
+) {
+  const current = new Map(controls.map((visit) => [JSON.stringify(visit.mapIndices), visit]));
+  let queued = 0;
+  for (const [key, visit] of current) {
+    if (visit.state !== 'queued' && visit.state !== 'stopped') continue;
+    const start = visit.queuedAt ?? visit.start;
+    if ((latest.get(key)?.start ?? -1) >= start) continue;
+    latest.set(key, { start, state: controlState(visit.state) });
+    if (visit.state === 'queued') queued++;
+  }
+  return queued;
 }

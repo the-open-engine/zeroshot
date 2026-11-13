@@ -105,6 +105,7 @@ pub struct HostedProcessPool {
     writer_uid: u32,
     writer_gid: u32,
     session_identity_base: u32,
+    maximum_identity: Option<u64>,
 }
 
 /// Stable containment and runtime-home scope for one provider session.
@@ -216,7 +217,16 @@ impl HostedProcessIdentity {
     /// The root must already exist and be traversable by the configured provider identity. It must
     /// not be writable by provider processes; only the generated leaf is handed to the child.
     pub fn prepare_private_home(self, root: &Path) -> Result<PathBuf, ProcessRunnerError> {
-        let home = self.scope.private_home(root);
+        self.prepare_private_home_for(root, self.scope)
+    }
+
+    pub(crate) fn prepare_private_home_for(
+        self,
+        root: &Path,
+        home_scope: HostedProcessScope,
+    ) -> Result<PathBuf, ProcessRunnerError> {
+        home_scope.validate()?;
+        let home = home_scope.private_home(root);
         prepare_private_directory(&home, Some((self.uid, self.gid)))?;
         Ok(home)
     }
@@ -228,6 +238,7 @@ impl HostedProcessPool {
             writer_uid: HOSTED_WORKER_UID,
             writer_gid: HOSTED_WORKER_GID,
             session_identity_base: 20_000,
+            maximum_identity: None,
         }
     }
 
@@ -250,6 +261,7 @@ impl HostedProcessPool {
             writer_uid,
             writer_gid,
             session_identity_base,
+            maximum_identity: None,
         })
     }
 
@@ -267,7 +279,7 @@ impl HostedProcessPool {
     ///
     /// The host pool's writer identity remains reserved for serialized source resolution. Active
     /// runs reserve one workspace owner, environment and delivery markers, and distinct
-    /// session markers for every admitted execution identity.
+    /// compact, recyclable cleanup markers for live provider sessions.
     pub(crate) fn active_run_slot(
         self,
         slot: u32,
@@ -298,7 +310,9 @@ impl HostedProcessPool {
         if highest_uid == u32::MAX {
             return Err(identity_range_exhausted());
         }
-        Self::new(writer_uid, self.writer_gid, session_identity_base)
+        let mut pool = Self::new(writer_uid, self.writer_gid, session_identity_base)?;
+        pool.maximum_identity = Some(maximum_identity);
+        Ok(pool)
     }
 
     pub fn identity(
@@ -306,6 +320,12 @@ impl HostedProcessPool {
         scope: HostedProcessScope,
     ) -> Result<HostedProcessIdentity, ProcessRunnerError> {
         scope.validate()?;
+        if scope.session_identity().is_some_and(|(identity, _)| {
+            self.maximum_identity
+                .is_some_and(|maximum| identity > maximum)
+        }) {
+            return Err(identity_range_exhausted());
+        }
         let (uid, gid) = (self.writer_uid, self.writer_gid);
         let group = self.cleanup_marker(scope)?;
         let runner = LocalProcessRunner::hosted_identity(uid, gid, group)?;

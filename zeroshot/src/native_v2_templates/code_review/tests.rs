@@ -419,15 +419,6 @@ async fn a_failure_before_the_report_publishes_nothing() {
         assert_failed(&run.reduce(), &reason);
     }
 
-    let mut run = Run::new(&graph, input());
-    let reviews = run.review(9);
-    assert!(
-        reviews
-            .iter()
-            .all(|(node, _)| HUNTERS.iter().any(|(hunter, _)| *hunter == node))
-    );
-    assert_failed(&run.reduce(), "units_broad_a_failed");
-
     for (failing, reason) in [
         (FINALIZE_UNIT, "finalize_units_failed"),
         (FINALIZE_REST, "finalize_rest_failed"),
@@ -548,4 +539,35 @@ fn every_agent_has_complete_instructions_for_the_pr_review_input() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn review_maps_process_more_units_than_their_item_concurrency() {
+    let graph = graph(TemplateDelivery::Comment).await;
+    let mut run = Run::new(&graph, input());
+    let reviews = run.review(9);
+    for (reviewer, _) in UNIT_REVIEWERS {
+        assert_eq!(
+            reviews.iter().filter(|(node, _)| node == reviewer).count(),
+            9
+        );
+    }
+    let finalized = run.settle_stage(&[FINALIZE_UNIT, FINALIZE_REST], |_, input| {
+        reviewed("final", input)
+    });
+    assert_eq!(
+        finalized
+            .iter()
+            .filter(|(node, _)| node == FINALIZE_UNIT)
+            .count(),
+        9
+    );
+    assert_eq!(
+        finalized
+            .iter()
+            .filter(|(node, _)| node == FINALIZE_REST)
+            .count(),
+        1
+    );
+    assert_eq!(dispatched(&run.reduce()), [REPORT]);
 }

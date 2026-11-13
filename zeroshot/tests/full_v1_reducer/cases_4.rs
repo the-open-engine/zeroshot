@@ -50,11 +50,15 @@ fn assert_deterministic_seed(graph: &VerifiedGraph, seed: i64) {
                 continue;
             }
             let left = settled(
-                SettledSpec::new(1, 1, "property_left").position(left_position),
+                SettledSpec::new(1, 1, "property_left")
+                    .position(left_position)
+                    .dispatched(0),
                 success(left_value),
             );
             let right = settled(
-                SettledSpec::new(2, 2, "property_right").position(right_position),
+                SettledSpec::new(2, 2, "property_right")
+                    .position(right_position)
+                    .dispatched(1),
                 success(right_value),
             );
             let expected = if left_position < right_position {

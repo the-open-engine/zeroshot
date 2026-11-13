@@ -50,14 +50,13 @@ function isPositiveCount(value: unknown): value is number {
 export function controlSources(node?: GraphNode): string[] {
   if (node?.kind === 'verifier') return ['error', 'signal'];
   if (node?.kind === 'step') return ['error'];
-  if (node && ['loop', 'map', 'par'].includes(node.kind)) return ['group'];
+  if (node && ['loop', 'par'].includes(node.kind)) return ['group'];
   return [];
 }
 
 export function controlFields(node?: GraphNode): Signals {
   if (node?.kind === 'verifier') return isObject(node.signals) ? node.signals : {};
   if (node?.kind === 'loop') return { terminated: ['converged', 'exhausted'] };
-  if (node?.kind === 'map') return { overflow: ['ok', 'overflow'] };
   if (node?.kind === 'par')
     return node.join?.kind === 'first'
       ? { raced: ['satisfied', 'no_satisfier'] }

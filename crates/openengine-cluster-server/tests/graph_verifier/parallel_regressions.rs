@@ -375,5 +375,5 @@ async fn nested_parallel_merges_preserve_inner_conditional_ownership() {
         .verify(&nested_parallel_graph(true))
         .await
         .assert_error();
-    assert!(rejection_codes(error).contains(&GraphDiagnosticCode::ChoiceExhaustiveness));
+    assert!(rejection_codes(error).contains(&GraphDiagnosticCode::UndefinedRead));
 }

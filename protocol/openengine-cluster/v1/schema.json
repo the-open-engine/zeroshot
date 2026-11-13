@@ -1642,6 +1642,7 @@
               "type": "string"
             },
             "maxItems": {
+              "description": "Maximum active complete item bodies. Larger inputs queue; every item runs unless authored control flow stops it.",
               "maximum": 9007199254740991,
               "minimum": 1,
               "type": "integer"
@@ -5852,6 +5853,15 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
+        "maxConcurrency": {
+          "description": "Maximum owned leaf and auxiliary executions. Omission uses 64 on every placement.",
+          "maximum": 65536,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "nodes": {
           "additionalProperties": false,
           "patternProperties": {
@@ -6073,11 +6083,13 @@
           "type": "object"
         },
         "maxNodeExecutions": {
+          "description": "Upper limit on logical executable visits, derived statically or enforced at runtime.",
           "maximum": 9007199254740991,
           "minimum": 1,
           "type": "integer"
         },
         "peakConcurrency": {
+          "description": "Structural concurrency upper limit, capped by the runtime execution ceiling.",
           "maximum": 9007199254740991,
           "minimum": 1,
           "type": "integer"

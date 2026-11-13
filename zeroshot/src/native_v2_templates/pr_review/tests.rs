@@ -192,16 +192,47 @@ async fn skip_and_required_reproduction_reach_checker_with_exact_context_and_evi
 }
 
 #[tokio::test]
-async fn classifier_failure_or_multiple_tasks_cannot_publish() {
+async fn classifier_failure_cannot_publish() {
     let graph = graph(TemplateDelivery::Comment).await;
-    for outcome in [
+    let mut history = Vec::new();
+    advance(
+        &graph,
+        &mut history,
+        CLASSIFIER,
         WorkerOutcome::declared_failure(WorkerErrorCode::Malformed),
+    );
+    assert_failed(reduce_with_input(&graph, &history, &input()));
+}
+
+#[tokio::test]
+async fn multiple_reproduction_tasks_run_in_order_before_the_checker() {
+    let graph = graph(TemplateDelivery::Comment).await;
+    let mut history = Vec::new();
+    advance(
+        &graph,
+        &mut history,
+        CLASSIFIER,
         classified(json!([{"plan":"first"},{"plan":"second"}])),
-    ] {
-        let mut history = Vec::new();
-        advance(&graph, &mut history, CLASSIFIER, outcome);
-        assert_failed(reduce_with_input(&graph, &history, &input()));
+    );
+    for plan in ["first", "second"] {
+        let dispatched = advance(
+            &graph,
+            &mut history,
+            REPRODUCER,
+            WorkerOutcome::Verified {
+                output: json!({EVIDENCE:plan}),
+                artifacts: Vec::new(),
+            },
+        );
+        assert_eq!(dispatched["plan"], plan);
     }
+    let checker = advance(
+        &graph,
+        &mut history,
+        CHECKER,
+        verified(json!({"body":"Both tasks checked."})),
+    );
+    assert_eq!(checker[EVIDENCE], json!(["first", "second"]));
 }
 
 #[tokio::test]

@@ -18,8 +18,6 @@ async fn optional_map_collection(prefilled: bool) -> VerifiedGraph {
     let route = json!({
         "kind":"choice","name":"outcome","state":state.clone(),
         "branches":[
-            {"when":{"kind":"in","value":{"name":"collect","source":"group","field":"overflow"},"labels":["overflow"]},
-             "node":{"kind":"fail","name":"too_many","reason":"too_many_items"}},
             {"when":{"kind":"k_of_map","count":1,"value":{"name":"inspect","source":"error","field":null},
                      "labels":["timeout","crash","malformed","refusal"]},
              "node":{"kind":"fail","name":"inspection_failed","reason":"inspection_failed"}}
@@ -149,13 +147,13 @@ async fn failed_map_collection_never_reuses_a_prior_collection_as_an_item_result
         settled(
             SettledSpec::new(3, 3, "inspect")
                 .map_indices(vec![0])
-                .position(3),
+                .position(5),
             success(10),
         ),
         settled(
             SettledSpec::new(4, 4, "inspect")
                 .map_indices(vec![1])
-                .position(4),
+                .position(6),
             WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
         ),
     ];
@@ -203,4 +201,110 @@ async fn map_collection_does_not_hide_a_malformed_successful_durable_output() {
         next_execution: 2,
     });
     assert_eq!(result.assert_error(), ReducerError::MissingSelectedValue);
+}
+
+fn terminal_map(name: &str, body: Value, state: &Value, capacity: u64) -> Value {
+    json!({"kind":"map","name":name,"state":state,
+        "over":{"source":"state","path":["items"]},"maxItems":capacity,
+        "promotedStatePaths":[],"body":body})
+}
+
+fn terminal_item(state: &Value, worker: &str) -> Value {
+    json!({"kind":"seq","name":format!("{worker}_item"),"state":state,"promotedStatePaths":[],
+        "children":[step(worker,1),{"kind":"fail","name":format!("{worker}_end"),"reason":"ended"}]})
+}
+
+#[tokio::test]
+async fn nested_terminal_maps_keep_one_selected_trace() {
+    let depth = 4;
+    let state = required_array_record(&[("items", "null")]);
+    let mut body = terminal_item(&state, "work");
+    for level in 0..depth {
+        body = terminal_map(&format!("map{level}"), body, &state, 1);
+    }
+    let root = json!({"kind":"seq","name":"run","state":state,"promotedStatePaths":[],
+        "children":[body,succeed("empty_done")]});
+    let graph = reducer_test_support::verified_graph(root, state, true).await;
+    let history = [settled(
+        SettledSpec::new(1, 1, "work")
+            .position(2)
+            .map_indices(vec![0; depth]),
+        success(1),
+    )];
+    let initial = json!({"items":[null]});
+    let input = ReductionInput {
+        initial_input: &initial,
+        executions: &history,
+        next_node_instance: 2,
+        next_execution: 2,
+    };
+    let reducer = FullV1Reducer::native_v2(&graph);
+    let plain = reducer.reduce(input.clone()).assert_value();
+    let traced = reducer.reduce_with_trace(input).assert_value();
+    assert_eq!(plain, traced.reduction);
+    assert_eq!(
+        plain.terminal,
+        Some(TerminalProjection::Failed {
+            context: None,
+            reason: "ended".parse().assert_value(),
+        })
+    );
+    assert_eq!(traced.trace.len(), depth + 3);
+    for level in 0..depth {
+        assert_eq!(
+            traced
+                .trace
+                .iter()
+                .filter(|record| record.node.as_str() == format!("map{level}"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn terminal_map_releases_queued_siblings_before_other_parallel_work() {
+    let state = required_array_record(&[("items", "null")]);
+    let mapped = terminal_map("mapped", terminal_item(&state, "map_worker"), &state, 2);
+    let live = json!({"kind":"seq","name":"live","state":state,"promotedStatePaths":[],
+        "children":[step("prior_worker",1),step("next_worker",1)]});
+    let root = json!({"kind":"seq","name":"run","state":state,"promotedStatePaths":[],
+        "children":[{"kind":"par","name":"parallel","state":state,"promotedStatePaths":[],
+            "branches":[mapped,live],"join":{"kind":"any"}},succeed("done")]});
+    let graph = reducer_test_support::verified_graph(root, state, true).await;
+    let history = [
+        settled(
+            SettledSpec::new(1, 1, "map_worker")
+                .map_indices(vec![0])
+                .dispatched(1)
+                .position(2),
+            success(1),
+        ),
+        settled(
+            SettledSpec::new(2, 2, "prior_worker")
+                .dispatched(3)
+                .position(4),
+            success(1),
+        ),
+    ];
+    let reduced = FullV1Reducer::native_v2(&graph)
+        .with_dispatch_limit(1)
+        .reduce(ReductionInput {
+            initial_input: &json!({"items":[null,null]}),
+            executions: &history,
+            next_node_instance: 3,
+            next_execution: 3,
+        })
+        .assert_value();
+    assert!(reduced.terminal.is_none());
+    assert!(reduced.decisions.iter().any(|decision| matches!(decision,
+        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "next_worker")));
+    assert_eq!(
+        reduced
+            .decisions
+            .iter()
+            .filter(|decision| matches!(decision, Decision::Dispatch { .. }))
+            .count(),
+        1
+    );
 }

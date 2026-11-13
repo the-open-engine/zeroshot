@@ -187,7 +187,7 @@ pub(super) fn identity(invocation: &DriverInvocation) -> Result<String, NodeRunn
         return Err(NodeRunnerError::Driver);
     };
     let execution = invocation.node.reference.execution.get();
-    let instance = invocation.provider_session_slot.get();
+    let instance = invocation.provider_home_slot.get();
     Ok(match session_scope {
         SessionScope::NodeInstance => format!("node-instance/{instance}"),
         SessionScope::Execution => format!("execution/{execution}"),

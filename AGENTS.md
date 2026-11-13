@@ -169,12 +169,55 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Initial input remains caller-owned and is validated unchanged. A root group may add required
   state fields only when their payload types have deterministic implicit empty values; verification
   proves this and reduction materializes missing null, string, array, and recursively empty record values.
+- `maxItems` limits active complete map bodies, never total input cardinality. The reducer derives
+  a bounded pending frontier from dispatch-ordered history within the current visit window; prior
+  loop rounds do not exempt fresh items. Read-only probes discover settlement, strict closed-window
+  replay validates owned executions, and only current decisions admit new work. Execution progress
+  and confirmed loop work survive independently of discarded values and controls; do not encode
+  visit counters as control facts or infer executed prefixes from later-round descendants. Admission records effective `maxConcurrency` (default 64, maximum 65,536).
+  The supervisor admits leaf executions before allocating identities, attempts or timeouts and keeps
+  capacity through cleanup and durable settlement. Native auxiliary runners share the candidate's
+  execution capacity. Provider sessions lease compact cleanup slots independently of durable retry
+  IDs; monotonically fresh home identities prevent cleanup-slot reuse from reusing native session
+  directories and recall budgets. Auxiliary ownership is explicit; large primary retry IDs never
+  imply auxiliary work. Auxiliary metadata IDs start beyond the genuine primary visit/attempt ceiling,
+  independently of contained cleanup reservations. Uncertain cleanup quarantines those slots and capacity. Logical visits and loop entries each
+  have a separate run ceiling of 65,536, reconstructed from ledger/checkpoint history.
+  Admission retains the established structural-bounds wire shape; dynamic work uses runtime ceilings.
+  One scoped assignment traversal owns flat and nested map proofs, preserving shared item populations
+  and applying enclosing retention after candidate qualification. Incoming controls and lifted writes
+  retain their conditions. Choice routes and candidate availability are shared immutable proofs.
+  Correlated aggregate verification uses saturated joint counts and one deterministic 8 Mi count-cell
+  proof-work bound; an exhausted proof budget stays exhausted through admission.
+  Joins settle at the earliest actual history prefix proving success or impossibility, and use
+  actual settled outcomes and completed candidate facts. Pending candidates remain
+  potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
+  Shared short-circuiting three-valued guard evaluation preserves candidate-local first-join eligibility.
+  Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
+  branches on join settlement, consuming only executions owned by that visit window and preserving
+  earlier cancellation causes. Later-round executions never belong to an earlier join's losers.
+  Read-only probes reuse discovered results. Settled parallel groups and terminal maps validate
+  each owned branch/item once through the actual cutoff; winners supply the same traversal's values.
+  Closed-window replay never contributes pending work; terminal maps discard their queued siblings.
+  Static aggregate proofs check private qualification before exporting retained controls, preserve
+  presence and success/failure refinement in every compressed label class, saturate higher counts at
+  authored thresholds, and charge shared-guard expansion before allocation.
+  Aggregate guards can use nested map facts when an enclosing map dominates their scope.
+  The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
+  actual traversal to find ready work; static write/retention witnesses remain private to admission.
+  Cancel or void losers after an actual join or terminal decision through confirmed cleanup.
+  Do not predict future writes, map cardinalities, choice routes, convergence or loop exits.
+  Extra execution while an outcome remains unknown is permitted. Enforce work ceilings at
+  the next actual visit or loop entry, without forecasting or precharging unstarted work.
+  Map replay retains compact item-scoped facts and promoted values, discarding caller state
+  and temporary probe results. Graph-bearing JSON boundaries scan a 512-container envelope
+  before decoding depth-64 graphs and their payload/transport wrappers.
 - Map reduction collects a promoted field only when every item wrote it in that item scope. A worker
   error leaves an incomplete collection unchanged while its controls remain available to authored
   guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
 - Each full-v1 loop round starts with fresh error, signal, group, and output-channel facts for its
-  body at that map scope. Caller state persists across rounds; internal visit markers persist for
-  durable replay. Final-round facts replace older facts when the loop returns to its parent.
+  body at that map scope. Caller state persists across rounds; dispatch-ordered history identifies
+  visits during replay. Final-round facts replace older facts when the loop returns to its parent.
 - Harness integration lives in `harnesses/`: one registry supplies pure descriptors, provider
   requirements, executable lookup and factories for every adapter. Maintained implementations live
   in `harnesses/adapters/core`; contributions live in `harnesses/adapters/contributed` and register
@@ -596,7 +639,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the checker preserves them in the comment. PR headers omit a source revision already named
   by their captured head. Classifier/checker are inspection-only verifiers; the reproducer is a step
   that can prepare the full local stack and browser tests without repairing tracked source.
-  Mapped runtime failures and overflow stop before publication; failed checks and environment
+  Mapped runtime failures stop before publication; failed checks and environment
   blockers return evidence for the report. All model choices remain caller-authored; the supplied
   PR runtime binds the three independent agents to `gpt-6.1-sol` with `xhigh`. Negative findings
   are successful reviews. Selecting a review template defaults to comment
@@ -631,13 +674,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   extra marker fields fail discovery while unknown extension keys remain ignored.
 - `code-review` reuses the `pr-review` input type and review continuation, so `--task-from`,
   comparison preparation and comment publication are unchanged. Triage returns a summary and at most
-  six units (maps allow eight; overflow fails). Per-unit maps run two broad, a depth and a design
+  six units (maps allow eight concurrent items). Per-unit maps run two broad, a depth and a design
   reviewer beside five whole-change hunters (logic, state, contracts, errors, claims); the claims
   hunter checks linked issue acceptance criteria. Per-unit and remaining-file finalizers merge, try to
   disprove and rewrite `{file,startLine,endLine,severity,title,body}` findings, and a report agent
   renders one Markdown comment. Every agent is a read-only verifier with two attempts and no deadline.
   One choice per agent or map keeps each guard's control space under the verifier ceiling; any
-  agent error or map overflow fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
+  agent error fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
   prompt parser. Inspectors do not install dependencies or start applications, services or browsers.
   The report stays under 12,000 characters and 48,000 UTF-8 bytes to leave room for the publisher header. The supplied runtime splits agents across Claude Code and Codex;
   model choices remain caller-authored. Its supplied local runtime sets `workspaceCheckpoints: false`
@@ -1659,8 +1702,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   publication so accepted writes remain readable; unchanged entries stay opaque. Shared store envelope
   corruption still fails closed. Checked saves decode the selected profile for its revision.
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
-  generation; imports carry no foreign revision. Pending numeric text belongs to the document,
-  survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
+  generation; imports carry no foreign revision. Pending numeric text, including run-wide concurrency, belongs to the document,
+  survives inspector navigation, and commits only when valid. Runtime dialogs use a separate instance
+  of the same numeric draft store; Apply and Cancel own only those dialog drafts. Navigation must
+  preserve unsaved work. Queued/retried and stopped unstarted leaves use the latest queue transition,
+  while actual starts and outcomes remain authoritative for executions.
   Hosted workspaces use the `platform` kind with their existing opaque workspace IDs. The tag
   rename starts a new browser storage namespace; earlier drafts and preferences are not imported.
   Hosted environment saves use the same correlated snapshot/acknowledgement lifecycle: the iframe

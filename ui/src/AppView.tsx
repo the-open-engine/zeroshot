@@ -568,6 +568,7 @@ function RuntimeContent({ model }: { model: AppModel }) {
     validation,
     runtimeView,
     runtimeDraft,
+    runtimeNumericDrafts,
     setRuntimeDraft,
     json,
     setJson,
@@ -578,7 +579,7 @@ function RuntimeContent({ model }: { model: AppModel }) {
   } = model;
   if (modal !== 'runtime' || !doc || !runtimeDraft) return null;
   return (
-    <>
+    <NumericDraftProvider value={runtimeNumericDrafts}>
       {runtimeView === 'form' ? (
         <RuntimeEditor
           document={{ ...doc, runtime: runtimeDraft }}
@@ -613,7 +614,7 @@ function RuntimeContent({ model }: { model: AppModel }) {
           Apply changes
         </button>
       </div>
-    </>
+    </NumericDraftProvider>
   );
 }
 

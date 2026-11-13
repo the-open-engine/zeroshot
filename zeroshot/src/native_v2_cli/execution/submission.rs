@@ -736,6 +736,11 @@ struct UniformRuntimePlan {
     provider: openengine_cluster_protocol::ProviderId,
     #[serde(default)]
     size: Option<RunSize>,
+    #[serde(
+        default,
+        deserialize_with = "openengine_cluster_protocol::RuntimePlan::deserialize_max_concurrency"
+    )]
+    max_concurrency: Option<openengine_cluster_protocol::PositiveInteger>,
     #[serde(default = "default_workspace_checkpoints")]
     workspace_checkpoints: bool,
     model: ModelId,
@@ -853,6 +858,7 @@ impl UniformRuntimePlan {
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
         Ok(RuntimePlan {
+            max_concurrency: self.max_concurrency,
             harness,
             provider: self.provider,
             size: self.size,
@@ -959,10 +965,12 @@ where
         path: path.to_owned(),
         source,
     })?;
-    serde_json::from_slice(&bytes).map_err(|source| NativeV2CliError::Json {
-        kind,
-        path: path.to_owned(),
-        source,
+    openengine_cluster_protocol::bounded_json_from_slice(&bytes).map_err(|source| {
+        NativeV2CliError::Json {
+            kind,
+            path: path.to_owned(),
+            source,
+        }
     })
 }
 

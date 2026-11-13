@@ -433,7 +433,7 @@ pub(super) async fn read_json_with_limit<T: DeserializeOwned>(
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes)
+    openengine_cluster_protocol::bounded_json_from_slice(&bytes)
         .map_err(|_| authority_error(format!("{operation} response is malformed")))
 }
 

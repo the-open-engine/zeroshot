@@ -137,23 +137,32 @@ async fn race_probes_do_not_leak_a_losing_terminal_path_or_duplicate_winners() {
         json!({"kind":"par","name":"race","state":{"kind":"record","fields":{}},"branches":[sequence("left_branch",vec![step("left",1),succeed("left_end")]),sequence("right_branch",vec![step("right",1)])],"promotedStatePaths":[],"join":{"kind":"any"}}),
         succeed("done"),
     ]), json!({})).await;
-    let history = [
-        active(1, 1, "left", 1),
-        settled(SettledSpec::new(2, 2, "right").position(4), success(1)),
-    ];
-    let observed = trace(&graph, &json!({}), &history);
-    assert!(
-        !observed
-            .iter()
-            .any(|record| ["left_branch", "left_end"].contains(&record.node.as_str()))
-    );
-    assert_eq!(
-        observed
-            .iter()
-            .filter(|record| record.node.as_str() == "right_branch")
-            .count(),
-        1
-    );
+    for loser_started in [false, true] {
+        let mut history = vec![settled(
+            SettledSpec::new(2, 2, "right").position(4),
+            success(1),
+        )];
+        if loser_started {
+            history.insert(0, active(1, 1, "left", 1));
+        }
+        let observed = trace(&graph, &json!({}), &history);
+        assert!(
+            !observed.iter().any(|record| record.node.as_str() == "left"
+                && record.state == StructuralTraceState::Queued)
+        );
+        assert!(
+            !observed
+                .iter()
+                .any(|record| ["left_branch", "left_end"].contains(&record.node.as_str()))
+        );
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|record| record.node.as_str() == "right_branch")
+                .count(),
+            1
+        );
+    }
 }
 
 #[tokio::test]
@@ -218,4 +227,72 @@ async fn map_terminal_selection_traces_only_the_winning_item_scope() {
         .assert_value();
     assert_eq!(terminal.map_indices, vec![0]);
     assert!(!observed.iter().any(|record| record.map_indices == vec![1]));
+}
+
+#[tokio::test]
+async fn queue_observation_is_bounded_independently_of_dispatch_and_keeps_item_loop_identity() {
+    let state = required_array_record(&[("items", "null")]);
+    let graph = reducer_test_support::verified_graph(json!({"kind":"seq","name":"run","state":state,"promotedStatePaths":[],"children":[
+        {"kind":"map","name":"mapped","state":state,"over":{"source":"state","path":["items"]},"maxItems":3,"promotedStatePaths":[],
+            "body":{"kind":"loop","name":"rounds","state":state,"maxIterations":2,"body":step("work",1),"promotedStatePaths":[]}},succeed("done")
+    ]}), state,true).await;
+    let observed = FullV1Reducer::native_v2(&graph)
+        .with_dispatch_limit(0)
+        .reduce_with_trace(ReductionInput {
+            initial_input: &json!({"items":[null,null,null]}),
+            executions: &[],
+            next_execution: 1,
+            next_node_instance: 1,
+        })
+        .unwrap();
+    let queued = observed
+        .trace
+        .iter()
+        .filter(|record| record.state == StructuralTraceState::Queued)
+        .collect::<Vec<_>>();
+    assert_eq!(queued.len(), 3);
+    for (index, record) in queued.iter().enumerate() {
+        assert_eq!(record.map_indices, vec![index as u64]);
+        assert_eq!(record.loop_iterations, vec![1]);
+    }
+    assert!(
+        !observed
+            .reduction
+            .decisions
+            .iter()
+            .any(|decision| matches!(decision, Decision::Dispatch { .. }))
+    );
+}
+
+#[tokio::test]
+async fn nested_completed_joins_reuse_discovery_and_replay_each_branch_once() {
+    for join in [
+        json!({"kind":"all"}),
+        json!({"kind":"any"}),
+        json!({"kind":"quorum","count":2}),
+    ] {
+        let depth = 24_u64;
+        let mut nested = step("leaf_0", 1);
+        for level in 1..=depth {
+            nested = json!({"kind":"par","name":format!("nested_{level}"),
+                "state":{"kind":"record","fields":{}},
+                "branches":[nested,step(&format!("leaf_{level}"),1)],
+                "join":join,"promotedStatePaths":[]});
+        }
+        let graph = observed_graph(sequence("root", vec![nested, succeed("done")])).await;
+        let history = (0..=depth)
+            .map(|index| {
+                settled(
+                    SettledSpec::new(index + 1, index + 1, &format!("leaf_{index}"))
+                        .dispatched(index + 1)
+                        .position(depth + index + 2),
+                    success(1),
+                )
+            })
+            .collect::<Vec<_>>();
+        let observed = trace(&graph, &json!({}), &history);
+        assert_eq!(observed.len(), depth as usize + 2);
+        assert!(observed.iter().any(|record| record.node.as_str() == "done"
+            && record.state == StructuralTraceState::Succeeded));
+    }
 }

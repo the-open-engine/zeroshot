@@ -440,7 +440,7 @@ async fn repeated_map_items_do_not_restore_stale_sibling_controls() {
                 .position(3),
             verdict("accepted"),
         ),
-        settled(SettledSpec::new(3, 3, "repair").position(4), success(0)),
+        settled(SettledSpec::new(3, 3, "repair").position(5), success(0)),
         settled(
             SettledSpec::new(4, 1, "check")
                 .map_indices(vec![0])

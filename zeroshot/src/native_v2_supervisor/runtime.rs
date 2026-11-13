@@ -358,12 +358,18 @@ pub(super) fn reduce(
         compiled_ir: admitted.graph.clone(),
         diagnostics: Vec::new(),
     };
-    Ok(FullV1Reducer::native_v2(&verified).reduce(ReductionInput {
-        initial_input: &admitted.initial_input,
-        executions: &executions,
-        next_node_instance: next_node_instance(&executions)?,
-        next_execution: next_execution(&executions)?,
-    })?)
+    let available = admitted
+        .runtime
+        .effective_max_concurrency()
+        .saturating_sub(snapshot.active_executions().count() as u64);
+    Ok(FullV1Reducer::native_v2(&verified)
+        .with_dispatch_limit(available as usize)
+        .reduce(ReductionInput {
+            initial_input: &admitted.initial_input,
+            executions: &executions,
+            next_node_instance: next_node_instance(&executions)?,
+            next_execution: next_execution(&executions)?,
+        })?)
 }
 
 pub(crate) fn durable_history(

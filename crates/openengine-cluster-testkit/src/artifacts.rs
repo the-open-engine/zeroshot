@@ -506,6 +506,7 @@ fn compiled_fixture(par_order: &[&str], sequence_order: &[&str]) -> Value {
             "promotedStatePaths": []
         },
         "bounds": {
+
             "termination": { "kind": "bounded", "ranking": [["count"]], "maxIterations": 4 },
             "maxNodeExecutions": 12, "peakConcurrency": 2,
             "attemptsPerNode": { "parallel": 1, "ordered": 1 }

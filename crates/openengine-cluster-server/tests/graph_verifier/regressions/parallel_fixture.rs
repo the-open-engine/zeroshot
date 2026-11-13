@@ -353,3 +353,43 @@ async fn every_parallel_failure_control_hides_success_only_branch_outputs() {
     }
 }
 use super::*;
+
+#[tokio::test]
+async fn producer_success_does_not_export_writes_without_successful_join_retention() {
+    for join in ["all", "first"] {
+        let mut graph =
+            serde_json::to_value(parallel_promotion_graph(join, Some("success"))).assert_value();
+        fn replace(value: &mut Value, producer: &str) {
+            if value.get("name").and_then(Value::as_str) == Some("afterParallel") {
+                value["branches"][0]["when"] = json!({"kind":"not","guard":{"kind":"in","value":{"name":producer,"source":"error","field":null},"labels":["timeout","crash","malformed","refusal"]}});
+                return;
+            }
+            match value {
+                Value::Object(fields) => {
+                    for child in fields.values_mut() {
+                        replace(child, producer);
+                    }
+                }
+                Value::Array(values) => {
+                    for child in values {
+                        replace(child, producer);
+                    }
+                }
+                _ => {}
+            }
+        }
+        replace(
+            &mut graph,
+            if join == "first" { "firstWork" } else { "left" },
+        );
+        let graph = serde_json::from_value(graph).assert_value();
+        let error = ProductionGraphVerifier::new(registry())
+            .verify(&graph)
+            .await
+            .assert_error();
+        assert!(
+            rejection_codes(error).contains(&GraphDiagnosticCode::UndefinedRead),
+            "{join} exported a write after producer-only success"
+        );
+    }
+}

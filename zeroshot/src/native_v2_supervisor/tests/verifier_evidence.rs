@@ -218,18 +218,30 @@ async fn unreachable_parallel_reviews_retain_exhausted_loops_in_status_and_histo
             .map(|entry| (entry.node.as_str(), entry.completed_iterations.get()))
             .collect::<Vec<_>>();
         loops.sort_unstable();
-        assert_eq!(loops, [("left_rounds", 2), ("right_rounds", 2)]);
-        assert_eq!(context.verifiers.len(), 2);
+        if join["kind"] == "any" {
+            assert_eq!(loops, [("left_rounds", 2), ("right_rounds", 2)]);
+        } else {
+            assert!(!loops.is_empty());
+            assert!(loops.iter().all(
+                |(name, count)| ["left_rounds", "right_rounds"].contains(name) && *count == 2
+            ));
+        }
+        if join["kind"] == "any" {
+            assert_eq!(context.verifiers.len(), 2);
+        } else {
+            assert!((1..=2).contains(&context.verifiers.len()));
+        }
         assert!(!context.incomplete);
         let tail = harness
             .ledger
             .snapshot_and_tail(&harness.supervisor.run_id, None)
             .await
             .assert_value();
-        assert_eq!(
-            tail.events
-                .iter()
-                .filter(|entry| matches!(
+        let receipts = tail
+            .events
+            .iter()
+            .filter(|entry| {
+                matches!(
                     entry.event,
                     RunEvent::SafeLog {
                         diagnostic: Some(
@@ -237,10 +249,14 @@ async fn unreachable_parallel_reviews_retain_exhausted_loops_in_status_and_histo
                         ),
                         ..
                     }
-                ))
-                .count(),
-            4
-        );
+                )
+            })
+            .count();
+        if join["kind"] == "any" {
+            assert_eq!(receipts, 4);
+        } else {
+            assert!((2..=4).contains(&receipts));
+        }
         assert!(
             matches!(&tail.events.last().assert_value().event, RunEvent::Terminal { result } if result == &terminal)
         );

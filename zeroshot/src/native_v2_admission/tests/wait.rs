@@ -80,5 +80,27 @@ async fn wait_under_parallel_or_map_is_rejected_even_below_a_sequence() {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("wait"), "{error}");
+        let error = NativeV2Admission
+            .admit(submission(graph, bindings.clone()))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("wait"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn wait_admission_preserves_effective_execution_concurrency() {
+    for limit in [None, Some(1)] {
+        let mut request = submission(
+            graph(vec![wait(), succeed("done")]),
+            BTreeMap::from([(named("wait"), NodeRuntimeBinding::Request {})]),
+        );
+        request.runtime.max_concurrency = limit
+            .map(|value| openengine_cluster_protocol::PositiveInteger::new(value).assert_value());
+        let admitted = NativeV2Admission.admit(request).await.assert_value();
+        assert_eq!(
+            admitted.runtime.max_concurrency.assert_value().get(),
+            limit.unwrap_or(64)
+        );
     }
 }
