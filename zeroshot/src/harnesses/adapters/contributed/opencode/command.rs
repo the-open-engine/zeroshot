@@ -309,23 +309,30 @@ fn arguments(
     let NodeRuntimeBinding::Agent { model, effort, .. } = &invocation.node.binding else {
         return Err(NodeRunnerError::InvalidRole);
     };
-    let mut argv = adapter.config.prefix_arguments.clone();
-    argv.extend([
-        "run".to_owned(),
-        "--format".to_owned(),
-        "json".to_owned(),
-        "--model".to_owned(),
-        format!(
+    let model_spec = match effort {
+        Some(effort) => format!(
+            "{}/{}#{}",
+            native_provider(&adapter.config.provider),
+            model.as_str(),
+            effort_token(*effort)
+        ),
+        None => format!(
             "{}/{}",
             native_provider(&adapter.config.provider),
             model.as_str()
         ),
+    };
+    let mut argv = adapter.config.prefix_arguments.clone();
+    argv.extend([
+        "run".to_owned(),
+        "--standalone".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+        "--model".to_owned(),
+        model_spec,
     ]);
     if let Some(id) = session_id {
         argv.extend(["--session".to_owned(), id.to_owned()]);
-    }
-    if let Some(effort) = effort {
-        argv.extend(["--variant".to_owned(), effort_token(*effort).to_owned()]);
     }
     let native = crate::harnesses::native_config::invocation_args(
         invocation,

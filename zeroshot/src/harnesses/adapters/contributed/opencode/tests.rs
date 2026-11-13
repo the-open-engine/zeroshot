@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::sync::Arc;
 
-use openengine_cluster_protocol::NodeName;
+use openengine_cluster_protocol::{HarnessConfiguration, NodeName};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
@@ -241,7 +241,7 @@ fn unfinished_steps_without_the_exact_two_x_shape_still_fail() {
     let mut native_error = unfinished_tool_turn();
     push(
         &mut native_error,
-        &json!({"type":"error","sessionID":"ses_fixture","error":{"name":"APIError"}}),
+        &json!({"type":"error","sessionID":"ses_fixture","error":{"type":"provider.unknown","message":"connection reset"}}),
     );
     cases.push(("native error", native_error, None));
 
@@ -377,28 +377,38 @@ mod github;
 
 #[test]
 fn native_authentication_and_model_errors_preserve_machine_classification() {
-    for error in [
-        json!({"name":"ProviderAuthError","data":{"providerID":"openai","message":"denied"}}),
-        json!({"name":"APIError","data":{"statusCode":401,"message":"denied"}}),
-        json!({"name":"APIError","data":{"statusCode":404,"message":"missing-model rejected",
-            "responseBody":"{\"error\":{\"code\":\"model_not_found\"}}"}}),
-        json!({"name":"ProviderModelNotFoundError","data":{"modelID":"missing-model"}}),
+    for (error, model_text) in [
+        (
+            json!({"type":"provider.auth","message":"bad key","status":401,
+                "response":{"body":"{\"error\": {\"message\": \"bad key\", \"type\": \"invalid_request_error\", \"code\": \"invalid_api_key\"}}"}}),
+            None,
+        ),
+        (json!({"type":"provider.auth","message":"denied"}), None),
+        (
+            json!({"type":"provider.invalid-request","message":"The model does not exist","status":404,
+                "response":{"body":"{\"error\": {\"message\": \"The model does not exist\", \"type\": \"invalid_request_error\", \"code\": \"model_not_found\"}}"}}),
+            Some("The model does not exist"),
+        ),
+        (
+            json!({"type":"provider.no-route","message":"Model unavailable: probe/nomodel"}),
+            Some("probe/nomodel"),
+        ),
     ] {
-        let auth = error["name"] == "ProviderAuthError" || error["data"]["statusCode"] == 401;
         let mut transcript = transcript::OpenCodeTranscript::new(None, vec![]);
         push(
             &mut transcript,
             &json!({"type":"error","sessionID":"ses_fixture","error":error}),
         );
         let result = transcript.finish(None);
-        if auth {
-            assert!(matches!(
-                result,
-                Err(NodeRunnerError::AuthenticationRequired(_))
-            ));
+        if let Some(model_text) = model_text {
+            assert!(
+                matches!(result, Err(NodeRunnerError::ModelUnavailable(detail)) if detail.contains(model_text)),
+                "{error}"
+            );
         } else {
             assert!(
-                matches!(result, Err(NodeRunnerError::ModelUnavailable(detail)) if detail.contains("missing-model"))
+                matches!(result, Err(NodeRunnerError::AuthenticationRequired(_))),
+                "{error}"
             );
         }
     }
@@ -407,9 +417,9 @@ fn native_authentication_and_model_errors_preserve_machine_classification() {
 #[test]
 fn unclassified_native_errors_and_cut_streams_remain_crashes() {
     for error in [
-        json!({"name":"APIError","data":{"statusCode":404,"message":"model not found"}}),
-        json!({"name":"UnknownError","data":{"message":"invalid API key"}}),
-        json!({"name":"APIError","data":{"message":"connection reset","isRetryable":true}}),
+        json!({"type":"provider.invalid-request","message":"model not found","status":404}),
+        json!({"type":"provider.no-route","message":"Variant unavailable for example/model: nonsense"}),
+        json!({"type":"provider.unknown","message":"connection reset"}),
     ] {
         let mut transcript = transcript::OpenCodeTranscript::new(None, vec![]);
         push(
@@ -420,5 +430,17 @@ fn unclassified_native_errors_and_cut_streams_remain_crashes() {
             transcript.finish(None),
             Ok(ProviderAttempt::Failed(_))
         ));
+    }
+}
+
+#[test]
+fn user_arguments_cannot_choose_the_server() {
+    for args in [
+        ["--standalone"].as_slice(),
+        ["--server", "http://x"].as_slice(),
+        ["--worktree"].as_slice(),
+    ] {
+        let config = HarnessConfiguration::new(json!({"args": args})).assert_value();
+        assert!(native_config::validate(&config).is_err(), "{args:?}");
     }
 }

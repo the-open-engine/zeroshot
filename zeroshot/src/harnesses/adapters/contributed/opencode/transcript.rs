@@ -99,9 +99,9 @@ impl OpenCodeTranscript {
             self.rejection = rejection::classify(&value["error"]);
             self.failure = Some(
                 value
-                    .pointer("/error/data/message")
+                    .pointer("/error/message")
                     .and_then(Value::as_str)
-                    .or_else(|| value.pointer("/error/name").and_then(Value::as_str))
+                    .or_else(|| value.pointer("/error/type").and_then(Value::as_str))
                     .unwrap_or("OpenCode reported a native session error")
                     .to_owned(),
             );

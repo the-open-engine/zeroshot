@@ -27,7 +27,7 @@ version is refused with the lane, executable, reported version, supported range 
 | `copilot`  | 1.0.70  | Open                      | Oldest CLI explicitly handled by the adapter                              |
 | `pi`       | 1.4.0   | Open                      | Tested hosted release                                                     |
 | `hermes`   | 0.22.5  | 0.22.6                    | Live memory/session/verifier contract; 0.22.6 breaks native agent cleanup |
-| `opencode` | None    | None                      | Version 2 compatibility and its minimum belong to the version 2 port      |
+| `opencode` | 2.2.3   | Open                      | First release with the native contract; OpenCode 1.x is not supported     |
 
 An open upper bound accepts newer releases; an exclusive upper bound marks a known incompatibility.
 Copilot also checks its RPC protocol at session connection. Claude retains its first-turn check using

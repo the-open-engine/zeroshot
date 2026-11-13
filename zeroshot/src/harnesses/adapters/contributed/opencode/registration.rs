@@ -11,9 +11,19 @@ use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 
 use super::{OpenCodeAdapter, OpenCodeConfig};
 
+// 2.2.3 is the first release with the native contract this adapter targets.
+const CLI_VERSION: crate::harnesses::HarnessCliVersion = crate::harnesses::HarnessCliVersion {
+    minimum: [2, 2, 3],
+    first_unsupported: None,
+    arguments: &["--version"],
+    parse: |reported| crate::harnesses::cli_version::release(reported.strip_prefix("opencode v")?),
+    upgrade: "Install OpenCode 2.2.3 or newer from https://opencode.ai; OpenCode 1.x is not supported.",
+    local_environment: |native| native.selected(super::command::LOCAL_ENVIRONMENT),
+};
+
 pub(crate) fn registration() -> HarnessRegistration {
     HarnessRegistration {
-        cli_version: None,
+        cli_version: Some(CLI_VERSION),
         descriptor: HarnessDescriptor {
             id: "opencode",
             label: "OpenCode",

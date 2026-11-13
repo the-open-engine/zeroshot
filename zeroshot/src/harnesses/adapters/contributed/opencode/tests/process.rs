@@ -2,7 +2,9 @@ use super::*;
 use crate::active_memory::hooks::{ActiveMemoryHooks, ActiveMemorySource, HookQuery};
 use crate::execution::process::HostedProcessScope;
 use crate::native_v2_candidate::test_support::TestDirectory;
+use crate::native_v2_contract::NodeRuntimeBinding;
 use crate::native_v2_runner::test_support::control;
+use crate::worker_catalog::ReasoningEffort;
 
 pub(super) fn adapter(directory: &TestDirectory, body: &str) -> OpenCodeAdapter {
     let executable = directory.write_executable("opencode", body);
@@ -217,6 +219,90 @@ fn native_pure_mode_is_kept_without_declared_authentication() {
 }
 
 #[test]
+fn launch_arguments_carry_effort_in_the_model_and_use_a_private_server() {
+    let directory = TestDirectory::new("opencode-launch-arguments");
+    let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
+    let files =
+        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
+            .assert_value();
+
+    // Effort travels in the model; the run starts a private server for the invocation.
+    let mut effort_invocation = invocation(&[]);
+    let model = {
+        let NodeRuntimeBinding::Agent { model, effort, .. } = &mut effort_invocation.node.binding
+        else {
+            panic!("expected an agent binding");
+        };
+        let model = model.as_str().to_owned();
+        *effort = Some(ReasoningEffort::High);
+        model
+    };
+    let command = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &effort_invocation,
+        files: &files,
+        session_id: Some("ses_test"),
+    })
+    .assert_value();
+    let mut expected = vec![
+        "run".to_owned(),
+        "--standalone".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+        "--model".to_owned(),
+    ];
+    expected.push(format!("anthropic/{model}#high"));
+    expected.push("--session".to_owned());
+    expected.push("ses_test".to_owned());
+    assert!(command.argv.starts_with(&expected), "{:?}", command.argv);
+    assert!(
+        !command.argv.iter().any(|arg| arg == "--variant"),
+        "{:?}",
+        command.argv
+    );
+
+    // Without effort the model carries no suffix.
+    let no_effort = invocation(&[]);
+    let model = {
+        let NodeRuntimeBinding::Agent { model, .. } = &no_effort.node.binding else {
+            panic!("expected an agent binding");
+        };
+        model.as_str().to_owned()
+    };
+    let command = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &no_effort,
+        files: &files,
+        session_id: None,
+    })
+    .assert_value();
+    let mut expected = vec![
+        "run".to_owned(),
+        "--standalone".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+        "--model".to_owned(),
+    ];
+    expected.push(format!("anthropic/{model}"));
+    assert!(command.argv.starts_with(&expected), "{:?}", command.argv);
+    assert!(
+        !command.argv.iter().any(|arg| arg == "--variant"),
+        "{:?}",
+        command.argv
+    );
+    let model_index = command
+        .argv
+        .iter()
+        .position(|arg| arg == "--model")
+        .unwrap();
+    assert!(
+        !command.argv[model_index + 1].contains('#'),
+        "{:?}",
+        command.argv
+    );
+}
+
+#[test]
 fn native_inline_jsonc_preserves_comments_trailing_commas_plugins_and_authored_policy() {
     let directory = TestDirectory::new("opencode-native-inline-jsonc");
     let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
@@ -346,7 +432,7 @@ fn a_declared_key_suppresses_stored_auth_and_uses_environment_interpolation() {
         "{env:ANTHROPIC_API_KEY}"
     );
     assert!(!config.to_string().contains("declared-secret"));
-    assert_eq!(command.argv[4], "anthropic/opaque/model");
+    assert_eq!(command.argv[5], "anthropic/opaque/model");
 }
 
 #[test]
