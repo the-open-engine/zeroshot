@@ -87,27 +87,19 @@ fn active_run_slots_are_disjoint_from_source_and_each_other() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn contained_auxiliary_cleanup_markers_do_not_overlap_primary_or_adjacent_runs() {
-    let maximum = openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
-    let offset = crate::native_v2_runner::AUXILIARY_PROVIDER_SLOT_OFFSET;
+fn contained_cleanup_markers_do_not_overlap_adjacent_runs() {
+    let slots = crate::native_v2_runner::MAX_PROCESS_SLOTS;
     let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
-    let first = host.active_run_slot(0, maximum * 2).assert_value();
-    let second = host.active_run_slot(1, maximum * 2).assert_value();
-    let primary_last = first
-        .cleanup_marker(HostedProcessScope::WriterExecution(maximum))
-        .assert_value()
-        .assert_value();
-    let auxiliary_first = first
-        .cleanup_marker(HostedProcessScope::VerifierNodeInstance(offset + 1))
-        .assert_value()
-        .assert_value();
-    let auxiliary_last = first
-        .cleanup_marker(HostedProcessScope::WriterExecution(offset + maximum))
-        .assert_value()
-        .assert_value();
-    assert!(primary_last < auxiliary_first);
-    assert!(auxiliary_first <= auxiliary_last);
-    assert!(auxiliary_last < writer_identity(second).0);
+    let first = host.active_run_slot(0, slots).assert_value();
+    let second = host.active_run_slot(1, slots).assert_value();
+    for scope in [
+        HostedProcessScope::WriterExecution(slots),
+        HostedProcessScope::VerifierExecution(slots),
+        HostedProcessScope::VerifierNodeInstance(slots),
+    ] {
+        let last = first.cleanup_marker(scope).assert_value().assert_value();
+        assert!(last < writer_identity(second).0);
+    }
 }
 
 #[test]
@@ -684,4 +676,27 @@ fn coverage_contract_command_domain_preflight_checks_supervisor_authority_before
         super::set_private_directory_owner(&invalid, Some((10_002, 10_002))),
         Err(ProcessRunnerError::InvalidCommand(_))
     ));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn active_run_reservations_reject_retry_ids_outside_their_owned_range() {
+    let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
+    let first = host.active_run_slot(0, 131_072).assert_value();
+    let second = host.active_run_slot(1, 131_072).assert_value();
+    assert!(
+        first
+            .identity(HostedProcessScope::WriterExecution(131_074))
+            .is_err()
+    );
+    assert!(
+        first
+            .identity(HostedProcessScope::VerifierExecution(1_065_537))
+            .is_err()
+    );
+    assert!(
+        second
+            .identity(HostedProcessScope::WriterNodeInstance(1))
+            .is_ok()
+    );
 }

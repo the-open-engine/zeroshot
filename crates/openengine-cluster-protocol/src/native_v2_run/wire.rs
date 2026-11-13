@@ -23,6 +23,11 @@ pub struct RuntimePlan {
     /// Omission asks the selected target to choose its advertised default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<RunSize>,
+    /// Maximum owned leaf and auxiliary executions. Omission uses 64 on every placement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "RuntimePlan::deserialize_max_concurrency")]
+    #[schemars(range(max = 65_536_u64))]
+    pub max_concurrency: Option<crate::PositiveInteger>,
     /// Local workspace snapshots. Run history remains durable when disabled.
     #[serde(
         default = "default_workspace_checkpoints",
@@ -37,6 +42,29 @@ pub struct RuntimePlan {
 }
 
 impl RuntimePlan {
+    pub const DEFAULT_MAX_CONCURRENCY: u64 = 64;
+    pub const MAX_CONCURRENCY: u64 = 65_536;
+
+    /// Decode the same bounded concurrency value in full and uniform runtime plans.
+    pub fn deserialize_max_concurrency<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<crate::PositiveInteger>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Option::<crate::PositiveInteger>::deserialize(deserializer)?;
+        if value.is_some_and(|limit| limit.get() > Self::MAX_CONCURRENCY) {
+            return Err(serde::de::Error::custom("maxConcurrency exceeds 65536"));
+        }
+        Ok(value)
+    }
+
+    #[must_use]
+    pub fn effective_max_concurrency(&self) -> u64 {
+        self.max_concurrency
+            .map_or(Self::DEFAULT_MAX_CONCURRENCY, |value| value.get())
+    }
+
     #[must_use]
     pub fn new(
         lane: RuntimeLane,
@@ -47,6 +75,7 @@ impl RuntimePlan {
             harness: lane.harness,
             provider: lane.provider,
             size: size.into(),
+            max_concurrency: None,
             workspace_checkpoints: true,
             active_memory: ActiveMemoryConfig::default(),
             global_agents: GlobalAgentsConfig::default(),

@@ -145,7 +145,7 @@ function terminalEndpoint(node: GraphNode): string | undefined {
   if (node.kind === 'choice' && nested.length && nested.every(terminalEndpoint)) return node.name;
   // Parallel consumes branch terminals and returns its group result even when the
   // join cannot be reached. Following checkpoints must remain authorable.
-  // An empty map or an exceeded item limit bypasses even a terminal-only body.
+  // An empty map bypasses even a terminal-only body.
   return undefined;
 }
 
@@ -331,7 +331,6 @@ export function parallelSiblingCandidates(document: Document, name: string): Gra
 }
 
 type ProtectionTerm = { conditions: unknown[]; errors: Set<string> };
-const errorAtom = (name: string, channel = 'error') => JSON.stringify([name, channel]);
 const canonical = (value: unknown): string =>
   JSON.stringify(value, (_, entry) =>
     entry && typeof entry === 'object' && !Array.isArray(entry)
@@ -384,15 +383,7 @@ function standardErrorAtoms(guard: any): Set<string> | undefined {
     canonical([...new Set(labels)].sort()) ===
       canonical(['crash', 'malformed', 'refusal', 'timeout'])
   )
-    return new Set([errorAtom(value.name)]);
-  if (
-    guard.kind === 'in' &&
-    value.source === 'group' &&
-    value.field === 'overflow' &&
-    labels.length === 1 &&
-    labels[0] === 'overflow'
-  )
-    return new Set([errorAtom(value.name, 'overflow')]);
+    return new Set([value.name]);
   return undefined;
 }
 
@@ -424,22 +415,21 @@ function continuationAllowsProtection(node: GraphNode, suffix: GraphNode[]): boo
       if (continues(branch.node))
         expected.push({
           conditions: [...prior, branch.when],
-          errors: new Set(workerNames(branch.node).map((name) => errorAtom(name))),
+          errors: new Set(workerNames(branch.node)),
         });
       prior.push({ kind: 'not', guard: branch.when });
     }
     if (node.otherwise && continues(node.otherwise))
       expected.push({
         conditions: prior,
-        errors: new Set(workerNames(node.otherwise).map((name) => errorAtom(name))),
+        errors: new Set(workerNames(node.otherwise)),
       });
   } else {
-    const errors = new Set(workerNames(node).map((name) => errorAtom(name)));
-    if (node.kind === 'map') errors.add(errorAtom(node.name, 'overflow'));
+    const errors = new Set(workerNames(node));
     expected.push({ conditions: [], errors });
   }
   expected.forEach((term) => {
-    term.errors.forEach((atom) => watched.add(JSON.parse(atom)[0]));
+    term.errors.forEach((name) => watched.add(name));
     term.conditions.flatMap(guardSources).forEach((name) => watched.add(name));
   });
   const first = suffix[0];

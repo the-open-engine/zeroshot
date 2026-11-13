@@ -634,3 +634,107 @@ fn response_contract_rejects_every_artifact_reference() {
 }
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};
+
+#[tokio::test]
+async fn primary_and_auxiliary_executions_share_one_limit_and_auxiliary_waits_cancel() {
+    let admitted = single_capacity_admitted();
+    let driver = Arc::new(FakeDriver::default());
+    let runner = NativeNodeRunner::new(&admitted, driver.clone(), Arc::new(FakeFactory::default()))
+        .assert_value();
+    let mut primary = runner
+        .start(request("shared", "left", (1, 131074)))
+        .await
+        .assert_value();
+    let factory = runner.auxiliary_factory();
+    let auxiliary = factory.fork(&admitted).assert_value();
+    let queued = tokio::spawn({
+        let auxiliary = auxiliary.clone();
+        async move {
+            auxiliary
+                .start(request("shared", "right", (1065537, 1065537)))
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    assert!(!queued.is_finished());
+    primary.completion().await.assert_value();
+    let mut started = queued.await.assert_value().assert_value();
+    started.completion().await.assert_value();
+    assert_eq!(driver.concurrency.max_readers.load(Ordering::SeqCst), 1);
+    assert!(
+        driver
+            .slots
+            .lock()
+            .assert_value()
+            .iter()
+            .all(|(_, slot)| *slot <= MAX_PROCESS_SLOTS)
+    );
+}
+
+struct UnconfirmedCleanupDriver;
+#[async_trait]
+impl NodeDriver for UnconfirmedCleanupDriver {
+    async fn run(
+        &self,
+        _invocation: DriverInvocation,
+        _control: DriverControl,
+    ) -> Result<WorkerOutcome, NodeRunnerError> {
+        Err(NodeRunnerError::CleanupUnconfirmed)
+    }
+}
+
+#[tokio::test]
+async fn uncertain_cleanup_refuses_later_turns_with_the_original_cleanup_failure() {
+    let runner = NativeNodeRunner::new(
+        &admitted(),
+        Arc::new(UnconfirmedCleanupDriver),
+        Arc::new(FakeFactory::default()),
+    )
+    .assert_value();
+    let mut first = runner
+        .start(request("first", "left", (1, 1)))
+        .await
+        .assert_value();
+    assert_eq!(
+        first.completion().await,
+        Err(NodeRunnerError::CleanupUnconfirmed)
+    );
+    assert!(matches!(
+        runner.start(request("next", "right", (2, 2))).await,
+        Err(NodeRunnerError::CleanupUnconfirmed)
+    ));
+}
+
+#[tokio::test]
+async fn auxiliary_waiting_for_capacity_closes_without_opening_a_session() {
+    let admitted = single_capacity_admitted();
+    let driver = Arc::new(FakeDriver::default());
+    let sessions = Arc::new(FakeFactory::default());
+    let runner = NativeNodeRunner::new(&admitted, driver.clone(), sessions.clone()).assert_value();
+    let permit = runner.capacity.clone().acquire_owned().await.assert_value();
+    let factory = runner.auxiliary_factory();
+    let auxiliary = factory.fork(&admitted).assert_value();
+    let queued = tokio::spawn(async move {
+        auxiliary
+            .start(request("waiting", "right", (1065537, 1065537)))
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(!queued.is_finished());
+    factory.close_run(&RunId::new("waiting")).await;
+    let result = tokio::time::timeout(Duration::from_secs(1), queued)
+        .await
+        .assert_value()
+        .assert_value();
+    assert!(matches!(result, Err(NodeRunnerError::RunClosed)));
+    assert_eq!(sessions.opened.load(Ordering::SeqCst), 0);
+    assert!(driver.slots.lock().assert_value().is_empty());
+    drop(permit);
+}
+
+fn single_capacity_admitted() -> crate::native_v2_contract::AdmittedRun {
+    let mut admitted = admitted();
+    admitted.runtime.max_concurrency =
+        Some(openengine_cluster_protocol::PositiveInteger::new(1).assert_value());
+    admitted
+}

@@ -2,7 +2,7 @@ import { allNodes, isGroup, pathTo, type GraphNode } from './domain';
 
 /** Cursor-specific presentation supplied by the observer, not inferred by the canvas. */
 export type WorkflowNodeObservation = {
-  state: 'idle' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'recorded';
+  state: 'queued' | 'idle' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'recorded';
   count?: number;
   countUnit?: 'execution' | 'visit';
   detail?: string;

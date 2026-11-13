@@ -129,6 +129,8 @@ async fn invocation(endpoint: &str, key: &str) -> DriverInvocation {
         environment,
         session,
         provider_session_slot: NodeInstanceId::new(1).unwrap(),
+        provider_home_slot: NodeInstanceId::new(1).unwrap(),
+        auxiliary: false,
     }
 }
 

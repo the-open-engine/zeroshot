@@ -495,7 +495,7 @@ impl RemoteRunHistory {
         if !status.is_success() {
             return Err(remote_problem(status, &body));
         }
-        serde_json::from_slice(&body).map_err(|_| incompatible())
+        openengine_cluster_protocol::bounded_json_from_slice(&body).map_err(|_| incompatible())
     }
 }
 
@@ -568,9 +568,9 @@ fn invalid_remote_runtime_failure(run: &RunHistorySummary) -> bool {
 }
 
 fn remote_problem(status: StatusCode, body: &[u8]) -> ApiError {
-    let Ok(problem) =
-        serde_json::from_slice::<openengine_cluster_protocol::TargetHttpProblem>(body)
-    else {
+    let Ok(problem) = openengine_cluster_protocol::bounded_json_from_slice::<
+        openengine_cluster_protocol::TargetHttpProblem,
+    >(body) else {
         return unavailable();
     };
     let Some(code) = HistoryProblemCode::parse(problem.code()) else {

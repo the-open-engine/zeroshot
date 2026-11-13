@@ -231,7 +231,7 @@ multiplex::impl_multiplexed_transport!(
 
 /// Extracts the `id` from an outgoing request this crate serialized itself.
 fn extract_request_id(request: &str) -> Result<RequestId, TransportError> {
-    serde_json::from_str::<JsonRpcRequest<Value>>(request)
+    openengine_cluster_protocol::bounded_json_from_str::<JsonRpcRequest<Value>>(request)
         .map(|request| request.id)
         .map_err(|error| TransportError::Protocol(error.to_string()))
 }
@@ -391,7 +391,7 @@ where
             params,
         })?;
         let response = self.transport.request(request).await?;
-        let value: Value = serde_json::from_str(&response)
+        let value: Value = openengine_cluster_protocol::bounded_json_from_str(&response)
             .map_err(|error| ClientError::InvalidResponse(error.to_string()))?;
 
         if value.get("error").is_some() {

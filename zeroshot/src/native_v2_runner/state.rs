@@ -138,12 +138,14 @@ impl ActivityToken {
 pub(super) struct ManagedSession {
     inner: Arc<dyn NodeSession>,
     closed: Arc<AtomicBool>,
+    pub(super) process_slot: Arc<ProcessSlot>,
 }
 
 impl ManagedSession {
-    fn new(inner: Arc<dyn NodeSession>) -> Self {
+    fn new(inner: Arc<dyn NodeSession>, process_slot: Arc<ProcessSlot>) -> Self {
         Self {
             inner,
+            process_slot,
             closed: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -159,6 +161,7 @@ impl ManagedSession {
     async fn close(&self) {
         if !self.closed.swap(true, Ordering::SeqCst) {
             self.inner.close().await;
+            self.process_slot.release();
         }
     }
 
@@ -172,6 +175,7 @@ pub(super) struct SessionPool {
     factory: Arc<dyn SessionFactory>,
     entries: Arc<Mutex<BTreeMap<SessionKey, SessionEntry>>>,
     boundary: ReusableSessionBoundary,
+    process_slots: ProcessSlots,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,14 +192,20 @@ pub(super) struct SessionCheckout<'a> {
 }
 
 impl SessionPool {
-    pub(super) fn factory(&self) -> Arc<dyn SessionFactory> {
-        self.factory.clone()
+    pub(super) fn isolated(&self) -> Self {
+        Self {
+            factory: self.factory.clone(),
+            entries: Arc::new(Mutex::new(BTreeMap::new())),
+            boundary: ReusableSessionBoundary::Run,
+            process_slots: self.process_slots.clone(),
+        }
     }
     pub(super) fn new(factory: Arc<dyn SessionFactory>) -> Self {
         Self {
             factory,
             entries: Arc::new(Mutex::new(BTreeMap::new())),
             boundary: ReusableSessionBoundary::Run,
+            process_slots: ProcessSlots::default(),
         }
     }
 
@@ -204,19 +214,7 @@ impl SessionPool {
             factory,
             entries: Arc::new(Mutex::new(BTreeMap::new())),
             boundary: ReusableSessionBoundary::Owner,
-        }
-    }
-
-    pub(super) fn provider_session_slot(
-        &self,
-        invocation: &NodeInvocation,
-        owner_slot: u64,
-    ) -> Result<NodeInstanceId, NodeRunnerError> {
-        match self.boundary {
-            ReusableSessionBoundary::Run => Ok(invocation.reference.node_instance),
-            ReusableSessionBoundary::Owner => {
-                NodeInstanceId::new(owner_slot).map_err(|_| NodeRunnerError::InvalidRole)
-            }
+            process_slots: ProcessSlots::default(),
         }
     }
 
@@ -230,11 +228,7 @@ impl SessionPool {
             let session = self
                 .open_session(request.invocation, request.environment, cancellation)
                 .await?;
-            return Ok(SessionLease {
-                session,
-                pool: self.clone(),
-                kind: SessionLeaseKind::Execution,
-            });
+            return SessionLease::checked(session, self.clone(), SessionLeaseKind::Execution);
         }
 
         let key = self.reusable_key(request.invocation, request.owner_slot)?;
@@ -253,7 +247,8 @@ impl SessionPool {
             },
             ReusableSessionBoundary::Owner => SessionKey::Owner {
                 node: invocation.reference.node.clone(),
-                provider_session_slot: self.provider_session_slot(invocation, owner_slot)?,
+                provider_session_slot: NodeInstanceId::new(owner_slot)
+                    .map_err(|_| NodeRunnerError::InvalidRole)?,
             },
         })
     }
@@ -312,11 +307,7 @@ impl SessionPool {
             self.invalidate(key, session, SessionEntry::Lost).await;
             return Err(NodeRunnerError::SessionLost);
         }
-        Ok(SessionLease {
-            session,
-            pool: self.clone(),
-            kind: SessionLeaseKind::Reusable(key),
-        })
+        SessionLease::checked(session, self.clone(), SessionLeaseKind::Reusable(key))
     }
 
     async fn open_session(
@@ -330,7 +321,14 @@ impl SessionPool {
             _ = wait_for_cancellation(cancellation) => return Err(NodeRunnerError::Cancelled),
             session = self.factory.open(invocation, environment) => session?,
         };
-        let session = ManagedSession::new(session);
+        let slot = match self.process_slots.acquire() {
+            Ok(slot) => slot,
+            Err(error) => {
+                session.close().await;
+                return Err(error);
+            }
+        };
+        let session = ManagedSession::new(session, slot);
         let live = tokio::select! {
             biased;
             _ = wait_for_cancellation(cancellation) => {
@@ -373,11 +371,11 @@ impl SessionPool {
                 match opened {
                     Ok(session) => {
                         entries.insert(key.clone(), SessionEntry::Live(session.clone()));
-                        Ok(SessionLease {
+                        SessionLease::checked(
                             session,
-                            pool: self.clone(),
-                            kind: SessionLeaseKind::Reusable(key),
-                        })
+                            self.clone(),
+                            SessionLeaseKind::Reusable(key),
+                        )
                     }
                     Err(error) => {
                         if error == NodeRunnerError::Cancelled {
@@ -536,6 +534,19 @@ pub(super) struct SessionLease {
 }
 
 impl SessionLease {
+    fn checked(
+        session: ManagedSession,
+        pool: SessionPool,
+        kind: SessionLeaseKind,
+    ) -> Result<Self, NodeRunnerError> {
+        session.process_slot.begin()?;
+        Ok(Self {
+            session,
+            pool,
+            kind,
+        })
+    }
+
     pub(super) fn binding(&self) -> SessionBinding {
         SessionBinding {
             session: self.session.clone(),
@@ -544,6 +555,7 @@ impl SessionLease {
     }
 
     pub(super) async fn finish(self, clean: bool) {
+        let slot = self.session.process_slot.clone();
         match self.kind {
             SessionLeaseKind::Execution => self.session.close().await,
             SessionLeaseKind::Reusable(_) if clean => {}
@@ -553,6 +565,7 @@ impl SessionLease {
                     .await;
             }
         }
+        slot.end();
     }
 }
 

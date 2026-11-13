@@ -217,8 +217,12 @@ pub struct DriverInvocation {
     pub response: NodeResponseContract,
     pub environment: ResolvedEnvironment,
     pub session: Arc<dyn NodeSession>,
-    /// Stable private-home slot for the provider session that owns this invocation.
+    /// Compact cleanup slot held until this provider session is confirmed closed.
     pub provider_session_slot: NodeInstanceId,
+    /// Fresh private-home identity; cleanup slot reuse never reuses a native session directory.
+    pub provider_home_slot: NodeInstanceId,
+    /// Runtime-owned auxiliary work; numeric IDs and authored node names never establish ownership.
+    pub auxiliary: bool,
 }
 
 impl DriverInvocation {
@@ -439,7 +443,8 @@ pub trait AuxiliaryRunnerFactory: Send + Sync {
 struct NativeAuxiliaryRunnerFactory {
     agent_context: Option<Arc<dyn AgentContextProvider>>,
     driver: Arc<dyn NodeDriver>,
-    sessions: Arc<dyn SessionFactory>,
+    sessions: SessionPool,
+    capacity: Arc<tokio::sync::Semaphore>,
     state: std::sync::Mutex<AuxiliaryRunners>,
 }
 
@@ -449,8 +454,11 @@ struct AuxiliaryRunners {
     runners: Vec<Arc<dyn NodeRunner>>,
 }
 
-pub(crate) const AUXILIARY_PROVIDER_SLOT_OFFSET: u64 =
-    openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
+// Primary execution numbers are minted only on admission, with at most this many attempts.
+// This metadata namespace is independent of the compact contained-process cleanup reservation.
+pub(crate) const AUXILIARY_EXECUTION_OFFSET: u64 =
+    openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS
+        * openengine_cluster_server::graph_verifier::FULL_V1_MAX_ATTEMPTS_PER_NODE;
 
 #[async_trait]
 impl AuxiliaryRunnerFactory for NativeAuxiliaryRunnerFactory {
@@ -458,9 +466,11 @@ impl AuxiliaryRunnerFactory for NativeAuxiliaryRunnerFactory {
         let runner: Arc<dyn NodeRunner> = Arc::new(NativeNodeRunner {
             agent_context: self.agent_context.clone(),
             driver: self.driver.clone(),
-            sessions: SessionPool::new(self.sessions.clone()),
-            roles: NodeRolePlan::from_admitted(admitted)?
-                .offset_provider_slots(AUXILIARY_PROVIDER_SLOT_OFFSET)?,
+            sessions: self.sessions.isolated(),
+            capacity: self.capacity.clone(),
+            auxiliary: true,
+            auxiliary_stop: watch::channel(false).0,
+            roles: NodeRolePlan::from_admitted(admitted)?,
             activity: ActivityRegistry::default(),
         });
         let mut state = self
@@ -495,6 +505,9 @@ pub struct NativeNodeRunner {
     driver: Arc<dyn NodeDriver>,
     sessions: SessionPool,
     roles: NodeRolePlan,
+    capacity: Arc<tokio::sync::Semaphore>,
+    auxiliary: bool,
+    auxiliary_stop: watch::Sender<bool>,
     activity: ActivityRegistry,
 }
 
@@ -511,7 +524,8 @@ impl NativeNodeRunner {
         Arc::new(NativeAuxiliaryRunnerFactory {
             agent_context: self.agent_context.clone(),
             driver: self.driver.clone(),
-            sessions: self.sessions.factory(),
+            sessions: self.sessions.clone(),
+            capacity: self.capacity.clone(),
             state: std::sync::Mutex::default(),
         })
     }
@@ -520,29 +534,33 @@ impl NativeNodeRunner {
         driver: Arc<dyn NodeDriver>,
         sessions: Arc<dyn SessionFactory>,
     ) -> Result<Self, NodeRunnerError> {
-        Ok(Self {
-            agent_context: None,
-            driver,
-            sessions: SessionPool::new(sessions),
-            roles: NodeRolePlan::from_admitted(admitted)?,
-            activity: ActivityRegistry::default(),
-        })
+        Self::from_sessions(admitted, driver, SessionPool::new(sessions))
     }
 
-    /// Builds a runner whose node-instance sessions survive individual runs.
-    ///
-    /// The owner must serialize runs and call [`Self::close_session`] before releasing the
-    /// workspace or provider runtime.
+    /// Builds an owner-scoped runner whose sessions survive serialized runs.
     pub(crate) fn new_owner_scoped(
         admitted: &AdmittedRun,
         driver: Arc<dyn NodeDriver>,
         sessions: Arc<dyn SessionFactory>,
     ) -> Result<Self, NodeRunnerError> {
+        Self::from_sessions(admitted, driver, SessionPool::new_owner_scoped(sessions))
+    }
+
+    fn from_sessions(
+        admitted: &AdmittedRun,
+        driver: Arc<dyn NodeDriver>,
+        sessions: SessionPool,
+    ) -> Result<Self, NodeRunnerError> {
         Ok(Self {
             agent_context: None,
             driver,
-            sessions: SessionPool::new_owner_scoped(sessions),
+            sessions,
             roles: NodeRolePlan::from_admitted(admitted)?,
+            capacity: Arc::new(tokio::sync::Semaphore::new(
+                admitted.runtime.effective_max_concurrency() as usize,
+            )),
+            auxiliary: false,
+            auxiliary_stop: watch::channel(false).0,
             activity: ActivityRegistry::default(),
         })
     }
@@ -564,6 +582,22 @@ impl NativeNodeRunner {
 impl NodeRunner for NativeNodeRunner {
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {
         let plan = self.roles.resolve(&request.invocation)?;
+        let permit = if self.auxiliary {
+            let mut stop = self.auxiliary_stop.subscribe();
+            tokio::select! {
+                biased;
+                _ = wait_for_cancellation(&mut stop) => return Err(NodeRunnerError::RunClosed),
+                permit = self.capacity.clone().acquire_owned() => permit.map_err(|_| NodeRunnerError::CleanupUnconfirmed)?,
+            }
+        } else {
+            self.capacity
+                .clone()
+                .try_acquire_owned()
+                .map_err(|error| match error {
+                    tokio::sync::TryAcquireError::Closed => NodeRunnerError::CleanupUnconfirmed,
+                    tokio::sync::TryAcquireError::NoPermits => NodeRunnerError::ExecutionActive,
+                })?
+        };
         let reference = request.invocation.reference.clone();
         let (cancel_sender, cancel_receiver) = watch::channel(false);
         let (output_sender, _) = broadcast::channel(LIVE_OUTPUT_CAPACITY);
@@ -579,19 +613,28 @@ impl NodeRunner for NativeNodeRunner {
             sessions: self.sessions.clone(),
         };
         let task_output = output_sender.clone();
+        let auxiliary = self.auxiliary;
 
+        let capacity = self.capacity.clone();
         tokio::spawn(async move {
             let task = RunnerTask {
                 request,
                 role: plan.role,
                 response: plan.response,
-                provider_session_slot: plan.provider_session_slot,
+                owner_slot: plan.provider_session_slot,
+                auxiliary,
                 cancellation: cancel_receiver,
                 output: task_output,
                 durable_output: durable_output_sender,
                 activity: &activity,
             };
             let result = execute(runtime, task).await;
+            if matches!(result, Err(NodeRunnerError::CleanupUnconfirmed)) {
+                capacity.close();
+                permit.forget();
+            } else {
+                drop(permit);
+            }
             activity.finish().await;
             let _ = completion_sender.send(result);
         });
@@ -607,6 +650,9 @@ impl NodeRunner for NativeNodeRunner {
     }
 
     async fn close_run(&self, run_id: &RunId) {
+        if self.auxiliary {
+            self.auxiliary_stop.send_replace(true);
+        }
         let targets = self.activity.begin_close(run_id).await;
         for target in &targets {
             if let Some(binding) = &target.binding {
@@ -629,7 +675,8 @@ struct RunnerTask<'a> {
     request: NodeRunRequest,
     role: NodeRole,
     response: NodeResponseContract,
-    provider_session_slot: u64,
+    owner_slot: u64,
+    auxiliary: bool,
     cancellation: watch::Receiver<bool>,
     output: broadcast::Sender<LiveOutput>,
     durable_output: DurableEventSender,
@@ -646,7 +693,7 @@ async fn execute(
             SessionCheckout {
                 invocation: &task.request.invocation,
                 environment: &task.request.environment,
-                owner_slot: task.provider_session_slot,
+                owner_slot: task.owner_slot,
             },
             &mut task.cancellation,
         )
@@ -679,9 +726,9 @@ async fn execute(
         response: response.clone(),
         environment: task.request.environment,
         session: lease.session.inner(),
-        provider_session_slot: runtime
-            .sessions
-            .provider_session_slot(&task.request.invocation, task.provider_session_slot)?,
+        provider_session_slot: lease.session.process_slot.slot,
+        provider_home_slot: lease.session.process_slot.home,
+        auxiliary: task.auxiliary,
     };
     let control = DriverControl {
         delivery_publication: Arc::new(Mutex::new(DeliveryPublication {
@@ -715,6 +762,9 @@ async fn execute(
             })
         }
         Err(error) => {
+            if error == NodeRunnerError::CleanupUnconfirmed {
+                lease.session.process_slot.quarantine();
+            }
             lease.finish(false).await;
             Err(error)
         }
@@ -750,6 +800,9 @@ fn session_scope(binding: &NodeRuntimeBinding) -> Result<SessionScope, NodeRunne
     }
 }
 
+mod process_slots;
+use process_slots::{ProcessSlot, ProcessSlots};
+pub(crate) use process_slots::MAX_PROCESS_SLOTS;
 mod state;
 use state::*;
 #[cfg(test)]

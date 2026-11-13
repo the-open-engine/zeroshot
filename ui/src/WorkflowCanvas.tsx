@@ -94,6 +94,7 @@ type ActivityData = {
 };
 
 const observationLabels = {
+  queued: 'Queued',
   idle: 'Not started',
   running: 'Running',
   succeeded: 'Succeeded',
@@ -104,6 +105,7 @@ const observationLabels = {
 
 function ObservationBadge({ observation }: { observation: WorkflowNodeObservation }) {
   const Icon = {
+    queued: Clock3,
     idle: Circle,
     running: LoaderCircle,
     succeeded: Check,

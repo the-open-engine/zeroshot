@@ -178,7 +178,7 @@ async fn every_parallel_join_observes_completion_order_and_cancels_losers() {
         ),
         (
             "first",
-            json!({"kind": "first", "when": signal_guard("fast", "accepted")}),
+            json!({"kind": "first", "when": {"kind":"any","guards":[signal_guard("fast", "accepted"),signal_guard("slow", "accepted")]}}),
             vec![verifier("fast", 1_000), verifier("slow", 1_000)],
         ),
     ] {

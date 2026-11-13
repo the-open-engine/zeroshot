@@ -24,7 +24,13 @@ fn boundary_contract_runner_selection_and_agent_workspace_access_follow_the_exec
 
     let root = tempfile::tempdir().assert_value();
     let (_, home) = local
-        .turn_process(root.path(), HostedProcessScope::WriterExecution(7))
+        .turn_process(
+            root.path(),
+            (
+                HostedProcessScope::WriterExecution(7),
+                HostedProcessScope::WriterExecution(7),
+            ),
+        )
         .assert_value();
     assert!(home.is_dir());
 }

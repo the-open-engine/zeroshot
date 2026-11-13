@@ -26,11 +26,7 @@ fn mapped_parallel_with_incoming_control_graph(first: bool) -> GraphSpec {
         (
             json!({
                 "kind":"first",
-                "when":{
-                    "kind":"in",
-                    "value":{"name":"gate","source":"signal","field":"verdict"},
-                    "labels":["accepted"]
-                }
+                "when":with_racer_reference(json!({"kind":"in","value":{"name":"gate","source":"signal","field":"verdict"},"labels":["accepted"]}))
             }),
             "raced",
             "no_satisfier",
@@ -110,7 +106,7 @@ fn mapped_parallel_with_shared_and_item_controls_graph(first: bool) -> GraphSpec
     });
     let (join, field, success_label, failure_label, branches) = if first {
         (
-            json!({"kind":"first","when":completion_guard}),
+            json!({"kind":"first","when":with_racer_reference(completion_guard)}),
             "raced",
             "satisfied",
             "no_satisfier",
@@ -194,5 +190,35 @@ async fn mapped_parallel_controls_keep_item_variation_with_incoming_controls() {
             .verify(&mapped_parallel_with_shared_and_item_controls_graph(first))
             .await
             .assert_value();
+    }
+}
+
+fn with_racer_reference(guard: Value) -> Value {
+    let error = json!({"kind":"in","value":{"name":"mappedWork","source":"error","field":null},"labels":["crash"]});
+    json!({"kind":"all","guards":[guard,{"kind":"any","guards":[error.clone(),{"kind":"not","guard":error}]}]})
+}
+
+#[tokio::test]
+async fn first_join_requires_a_racer_reference_in_addition_to_incoming_facts() {
+    for racer_reference in [false, true] {
+        let state = mapped_items_state();
+        let incoming = json!({"kind":"in","value":{"name":"gate","source":"signal","field":"verdict"},"labels":["accepted"]});
+        let guard = if racer_reference {
+            with_racer_reference(incoming)
+        } else {
+            incoming
+        };
+        let graph = graph_with_state_children(
+            state.clone(),
+            json!([map_verifier("gate"),
+                {"kind":"par","name":"race","state":state,"branches":[mapped_step("mappedWork")],"join":{"kind":"first","when":guard},"promotedStatePaths":[]},
+                {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+            ]),
+        );
+        if racer_reference {
+            assert_graph_accepted(&graph).await;
+        } else {
+            assert_graph_rejected_with(&graph, GraphDiagnosticCode::InvalidGraphShape).await;
+        }
     }
 }

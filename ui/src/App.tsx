@@ -72,6 +72,8 @@ export function App(props: AppProps) {
 function useAppState({ services, bootstrap, host }: AppProps) {
   const storage = workspaceStorageKeys(services.mount, bootstrap.workspace);
   const [numericDrafts] = useState(createNumericDrafts);
+  const [runtimeNumericDrafts] = useState(createNumericDrafts);
+  useEffect(() => () => runtimeNumericDrafts.clear(), [runtimeNumericDrafts]);
   useEffect(() => () => numericDrafts.clear(), [numericDrafts]);
   const [historyPage, setHistoryPage] = useState(
     () => !host && window.location.hash.startsWith('#runs')
@@ -204,6 +206,7 @@ function useAppState({ services, bootstrap, host }: AppProps) {
   }, []);
   function adopt(next: Document, saved?: Document, rev?: string, layout?: Positions) {
     numericDrafts.clear();
+    runtimeNumericDrafts.clear();
     documentGeneration.current++;
     current.current = content(next);
     currentRevision.current = rev;
@@ -235,6 +238,7 @@ function useAppState({ services, bootstrap, host }: AppProps) {
   return {
     storage,
     numericDrafts,
+    runtimeNumericDrafts,
     historyPage,
     defaultsPage,
     profiles,
@@ -467,6 +471,27 @@ function useProfileEffects(
   }, [doc, selected, numericDrafts]);
 }
 
+function closeEditorModal(state: ReturnType<typeof useAppState>) {
+  const { busy, modal, modalDirty, runtimeNumericDrafts, setModal, setConfirm } = state;
+  if (busy) return;
+  const close = () => {
+    if (modal === 'runtime') {
+      runtimeNumericDrafts.clear();
+    }
+    setModal(null);
+  };
+  if (modalDirty || (modal === 'runtime' && runtimeNumericDrafts.pending()))
+    setConfirm({
+      title: modal === 'runtime' ? 'Discard runtime changes?' : 'Discard JSON changes?',
+      body:
+        modal === 'runtime'
+          ? 'Changes in Runtime settings have not been applied.'
+          : 'Changes in this JSON editor have not been applied.',
+      action: close,
+    });
+  else close();
+}
+
 function createWorkflowEditor(
   { services, bootstrap }: AppProps,
   state: ReturnType<typeof useAppState>
@@ -479,18 +504,16 @@ function createWorkflowEditor(
     setJsonTarget,
     setModalError,
     setModal,
-    modal,
     busy,
-    modalDirty,
     runtimeView,
     setRuntimeView,
     runtimeDraft,
     setRuntimeDraft,
     setRuntimeInitial,
-    setConfirm,
     jsonTarget,
     json,
     numericDrafts,
+    runtimeNumericDrafts,
     selected,
     setSelected,
     apply,
@@ -513,6 +536,7 @@ function createWorkflowEditor(
   } = state;
   function openRuntime(view: 'form' | 'json' = 'form') {
     if (!doc || loading) return;
+    runtimeNumericDrafts.clear();
     setRuntimeInitial(doc.runtime);
     setRuntimeDraft(clone(doc.runtime));
     setRuntimeView(view);
@@ -542,9 +566,15 @@ function createWorkflowEditor(
     if (!doc || !runtimeDraft) return;
     try {
       const runtime = runtimeView === 'json' ? parseRuntime(json) : runtimeDraft;
+      runtimeNumericDrafts.prune(doc.graph.root, runtime);
+      if (runtimeNumericDrafts.pending())
+        throw new Error(
+          'Finish or cancel the pending field edits before applying Runtime settings.'
+        );
       const next = { ...clone(doc), runtime: clone(runtime) };
       assertDocument(next);
       apply(next);
+      runtimeNumericDrafts.clear();
       setModal(null);
     } catch (e) {
       setModalError(message(e));
@@ -561,19 +591,7 @@ function createWorkflowEditor(
     setModalError('');
     setModal('json');
   }
-  function closeModal() {
-    if (busy) return;
-    if (modalDirty)
-      setConfirm({
-        title: modal === 'runtime' ? 'Discard runtime changes?' : 'Discard JSON changes?',
-        body:
-          modal === 'runtime'
-            ? 'Changes in Runtime settings have not been applied.'
-            : 'Changes in this JSON editor have not been applied.',
-        action: () => setModal(null),
-      });
-    else setModal(null);
-  }
+  const closeModal = () => closeEditorModal(state);
   function applyJson() {
     if (!doc) return;
     try {
@@ -769,6 +787,7 @@ function useProfileActions(
   const {
     storage,
     numericDrafts,
+    runtimeNumericDrafts,
     historyPage,
     defaultsPage,
     doc,
@@ -834,6 +853,7 @@ function useProfileActions(
       if (base) adopt(base, base, revision);
       else {
         numericDrafts.clear();
+        runtimeNumericDrafts.clear();
         documentGeneration.current++;
         current.current = undefined;
         setDoc(undefined);

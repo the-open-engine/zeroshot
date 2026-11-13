@@ -143,7 +143,8 @@ pub fn read_ready(
 ) -> Result<PortableControllerReady, PortableControllerError> {
     let bytes = read_bounded_regular_file(&paths.ready(), READY_MAX_BYTES)?;
     let ready: PortableControllerReady =
-        serde_json::from_slice(&bytes).map_err(|_| PortableControllerError::Readiness)?;
+        openengine_cluster_protocol::bounded_json_from_slice(&bytes)
+            .map_err(|_| PortableControllerError::Readiness)?;
     if ready.kind != READY_KIND || ready.socket != paths.socket() {
         return Err(PortableControllerError::Readiness);
     }
@@ -252,9 +253,10 @@ pub fn load_bootstrap_file(
 ) -> Result<PortableControllerBootstrap, PortableControllerError> {
     let file = validate_private_bootstrap(path)?;
     let bytes = read_bounded_file(file, BOOTSTRAP_MAX_BYTES)?;
-    let parsed = serde_json::from_slice::<PortableBootstrapDocument>(&bytes)
-        .map_err(|_| PortableControllerError::Bootstrap)
-        .and_then(PortableBootstrapDocument::validate);
+    let parsed =
+        openengine_cluster_protocol::bounded_json_from_slice::<PortableBootstrapDocument>(&bytes)
+            .map_err(|_| PortableControllerError::Bootstrap)
+            .and_then(PortableBootstrapDocument::validate);
     std::fs::remove_file(path).map_err(|_| PortableControllerError::BootstrapCleanup)?;
     parsed
 }

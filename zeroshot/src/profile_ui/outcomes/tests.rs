@@ -286,7 +286,7 @@ fn parallel_failure_is_after_join_and_refresh_includes_added_writer() {
 }
 
 #[test]
-fn map_failure_uses_aggregate_errors_and_overflow_after_collection() {
+fn map_failure_uses_aggregate_errors_after_collection() {
     let mapped = mapped(worker("draft"));
     let result = transform(
         graph(vec![mapped.clone(), done()]),
@@ -295,13 +295,10 @@ fn map_failure_uses_aggregate_errors_and_overflow_after_collection() {
     .assert_value();
     let root = &result["graph"]["root"];
     assert_eq!(root["children"][0], mapped);
-    let guards = root["children"][1]["branches"][0]["when"]["guards"]
-        .as_array()
-        .assert_value();
-    assert_eq!(guards[0]["value"]["field"], "overflow");
-    assert_eq!(guards[1]["kind"], "k_of_map");
-    assert_eq!(guards[1]["count"], 1);
-    assert_eq!(guards[1]["value"]["name"], "draft");
+    let guard = &root["children"][1]["branches"][0]["when"];
+    assert_eq!(guard["kind"], "k_of_map");
+    assert_eq!(guard["count"], 1);
+    assert_eq!(guard["value"]["name"], "draft");
 }
 
 #[test]
@@ -338,7 +335,7 @@ fn protection_rejects_branch_terminals_other_joins_and_partial_custom_guards() {
 }
 
 #[test]
-fn map_policy_refresh_preserves_overflow_and_adds_new_mapped_workers() {
+fn map_policy_refresh_adds_new_mapped_workers() {
     let mut protected = protected_graph(graph(vec![mapped(worker("draft")), done()]), "items");
     protected["root"]["children"][0]["body"] =
         sequence("map_steps", vec![worker("draft"), worker("review")]);
@@ -347,10 +344,9 @@ fn map_policy_refresh_preserves_overflow_and_adds_new_mapped_workers() {
     let guards = refreshed["graph"]["root"]["children"][1]["branches"][0]["when"]["guards"]
         .as_array()
         .assert_value();
-    assert_eq!(guards.len(), 3);
-    assert_eq!(guards[0]["value"]["field"], "overflow");
-    assert_eq!(guards[1]["value"]["name"], "draft");
-    assert_eq!(guards[2]["value"]["name"], "review");
+    assert_eq!(guards.len(), 2);
+    assert_eq!(guards[0]["value"]["name"], "draft");
+    assert_eq!(guards[1]["value"]["name"], "review");
 }
 
 #[test]

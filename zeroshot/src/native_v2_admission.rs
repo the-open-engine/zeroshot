@@ -123,7 +123,9 @@ pub enum NativeV2AdmissionError {
         delivery: NodeName,
         writer: NodeName,
     },
-    #[error("map {map} may execute Git delivery node {delivery} concurrently across items")]
+    #[error(
+        "map {map} may repeat publication node {delivery} across items, including at concurrency one"
+    )]
     ConcurrentMapDelivery { map: NodeName, delivery: NodeName },
     #[error("graph-local worker descriptor could not be constructed: {0}")]
     WorkerDescriptor(String),
@@ -443,7 +445,7 @@ fn prepare_submission(
         title,
         mut graph,
         initial_input,
-        runtime,
+        mut runtime,
         environment,
         branch: _,
         submission_key: _,
@@ -453,6 +455,10 @@ fn prepare_submission(
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
     validate_executable_bindings(&declarations, &runtime, context)?;
+    runtime.max_concurrency = Some(
+        openengine_cluster_protocol::PositiveInteger::new(runtime.effective_max_concurrency())
+            .map_err(|error| NativeV2AdmissionError::InvalidRuntime(error.to_string()))?,
+    );
     validate_delivery_concurrency(&graph.root)?;
     comment::validate_comment_profile(&graph)?;
     comment::validate_comment_input_shape(&graph.root, &initial_input)?;

@@ -83,7 +83,7 @@ pub async fn verified_graph(
     ProductionGraphVerifier::new(TestWorkers { rich_outputs })
         .verify(&graph)
         .await
-        .assert_value()
+        .unwrap_or_else(|error| panic!("graph verification failed: {error:?}"))
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};

@@ -77,7 +77,9 @@ pub enum TerminationWitness {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct StructuralBounds {
     pub termination: TerminationWitness,
+    /// Upper limit on logical executable visits, derived statically or enforced at runtime.
     pub max_node_executions: PositiveInteger,
+    /// Structural concurrency upper limit, capped by the runtime execution ceiling.
     pub peak_concurrency: PositiveInteger,
     #[schemars(
         schema_with = "crate::value::identifier_keyed_map_schema::<NodeName, PositiveInteger>"

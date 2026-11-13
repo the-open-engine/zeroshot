@@ -954,7 +954,7 @@ impl LocalCliBackend {
 impl LocalRecoveryDocument {
     fn read(path: &Path) -> Result<Self, NativeV2CliError> {
         let bytes = std::fs::read(path).map_err(local_io)?;
-        serde_json::from_slice(&bytes)
+        openengine_cluster_protocol::bounded_json_from_slice(&bytes)
             .map_err(|_| local_message("workspace recovery metadata is invalid"))
     }
 

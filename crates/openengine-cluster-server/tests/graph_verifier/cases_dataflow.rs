@@ -436,7 +436,7 @@ async fn k_guards_reject_labels_outside_every_closed_selector_domain() {
 }
 
 #[tokio::test]
-async fn single_map_item_cannot_have_success_and_error_outcomes() {
+async fn serial_map_can_have_success_and_error_on_different_items() {
     let guard = json!({"kind":"all","guards":[
         {"kind":"k_of_map","count":1,
             "value":{"name":"mapVerify","source":"signal","field":"verdict"},"labels":["accepted"]},
@@ -444,8 +444,7 @@ async fn single_map_item_cannot_have_success_and_error_outcomes() {
             "value":{"name":"mapVerify","source":"error","field":null},"labels":["timeout"]}
     ]});
     let graph = map_choice_graph(1, guard);
-    let error = assert_graph_rejected(&graph).await;
-    assert!(rejection_codes(error).contains(&GraphDiagnosticCode::ChoiceExhaustiveness));
+    assert_graph_accepted(&graph).await;
 }
 
 fn map_choice_graph(max_items: u64, guard: Value) -> GraphSpec {

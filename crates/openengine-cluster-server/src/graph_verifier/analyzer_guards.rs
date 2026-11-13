@@ -171,10 +171,13 @@ impl<'a> Analyzer<'a> {
     ) -> bool {
         let mut valid = true;
         for (selector, map_aggregate, condition) in guarded_selector_uses(guard) {
-            let map_available = map_aggregate
-                && self
-                    .map_owner(&selector.name)
-                    .is_some_and(|owner| available.contains(owner));
+            let map_available = map_aggregate && self.nodes.get(&selector.name).is_some_and(|info| {
+                info.path.iter().any(|part| matches!(part,
+                    DiagnosticPathSegment::Node { name } if name != &selector.name
+                        && available.contains(name)
+                        && self.nodes.get(name).is_some_and(|info| matches!(info.node, GraphNode::Map(_)))
+                ))
+            });
             if !available.contains(&selector.name)
                 && !map_available
                 && !self.choice_error_is_available(selector, available, (&condition, context.path))
@@ -240,16 +243,13 @@ impl<'a> Analyzer<'a> {
                 labels: labels.values(),
                 guard: context,
             }),
-            Guard::KOfMap {
-                count,
-                value,
-                labels,
-            } => self.validate_k_of_map_labels(KOfMapLabelsValidationContext {
-                count: count.get(),
-                selector: value,
-                labels: labels.values(),
-                guard: context,
-            }),
+            Guard::KOfMap { value, labels, .. } => {
+                self.validate_k_of_map_labels(KOfMapLabelsValidationContext {
+                    selector: value,
+                    labels: labels.values(),
+                    guard: context,
+                })
+            }
         }
     }
 
@@ -358,28 +358,15 @@ impl<'a> Analyzer<'a> {
         context: KOfMapLabelsValidationContext<'_>,
     ) -> bool {
         let mut valid = true;
-        match self.map_control_cardinality(context.selector) {
-            Some(cardinality) if context.count > cardinality => {
-                emit_diagnostic!(
-                    self,
-                    context.guard.code,
-                    "k_of_map count exceeds the selected map bound",
-                    with_field(context.guard.path, "count"),
-                    vec![context.selector.name.clone()],
-                );
-                valid = false;
-            }
-            None => {
-                emit_diagnostic!(
-                    self,
-                    context.guard.code,
-                    "k_of_map selector has no bounded enclosing map scope",
-                    with_field(context.guard.path, "value"),
-                    vec![context.selector.name.clone()],
-                );
-                valid = false;
-            }
-            Some(_) => {}
+        if self.map_control_scope(context.selector).is_none() {
+            emit_diagnostic!(
+                self,
+                context.guard.code,
+                "k_of_map selector has no enclosing map scope",
+                with_field(context.guard.path, "value"),
+                vec![context.selector.name.clone()]
+            );
+            valid = false;
         }
         let labels_valid = self.validate_selector_labels(
             context.selector,
@@ -417,24 +404,40 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    pub(super) fn map_control_cardinality(&self, selector: &ControlSelector) -> Option<u64> {
-        self.map_control_scope(selector)
-            .map(|aggregate| aggregate.maximum)
-    }
-
     pub(super) fn map_control_scope(&self, selector: &ControlSelector) -> Option<MapAggregate> {
         self.nodes.get(&selector.name)?;
         let owner = self.map_owner(&selector.name)?.clone();
         self.nodes.get(&owner).and_then(|info| match info.node {
-            GraphNode::Map(map) => Some(MapAggregate {
-                owner,
-                maximum: map.max_items.get(),
-            }),
+            GraphNode::Map(_) => Some(MapAggregate { owner }),
             _ => None,
         })
     }
 
     pub(super) fn map_owner(&self, target: &NodeName) -> Option<&NodeName> {
-        find_map_owner(&self.graph.root, target, None)
+        self.nodes
+            .get(target)?
+            .path
+            .iter()
+            .rev()
+            .find_map(|segment| match segment {
+                DiagnosticPathSegment::Node { name }
+                    if name != target
+                        && self
+                            .nodes
+                            .get(name)
+                            .is_some_and(|info| matches!(info.node, GraphNode::Map(_))) =>
+                {
+                    Some(name)
+                }
+                _ => None,
+            })
+    }
+    pub(super) fn map_depth(&self, name: &NodeName) -> usize {
+        self.nodes.get(name).map_or(0, |info| {
+            info.path.iter().filter(|part| matches!(part,
+            DiagnosticPathSegment::Node { name: parent } if parent != name
+                && self.nodes.get(parent).is_some_and(|info| matches!(info.node, GraphNode::Map(_)))
+        )).count()
+        })
     }
 }

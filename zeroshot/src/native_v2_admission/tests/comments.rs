@@ -375,11 +375,24 @@ async fn publisher_cannot_execute_inside_a_loop_or_even_a_single_item_map() {
         graph["root"]["children"][0] = group;
         submission.graph = serde_json::from_value(graph).assert_value();
         submission.initial_input["items"] = json!([null]);
-        reject_comment_profile(
-            submission,
-            "comment delivery cannot execute inside a loop or map",
-        )
-        .await;
+        if kind == "map" {
+            assert!(matches!(
+                NativeV2Admission
+                    .validate_profile(
+                        &submission.graph,
+                        &submission.runtime,
+                        DeliveryPolicy::Required
+                    )
+                    .await,
+                Err(NativeV2AdmissionError::ConcurrentMapDelivery { .. })
+            ));
+        } else {
+            reject_comment_profile(
+                submission,
+                "comment delivery cannot execute inside a loop or map",
+            )
+            .await;
+        }
     }
 }
 

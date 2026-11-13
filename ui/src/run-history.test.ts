@@ -466,3 +466,99 @@ test('node names do not mutate observation object prototypes', () => {
   assert.equal(Object.hasOwn(projection.nodes, '__proto__'), true);
   assert.equal(projection.nodes.__proto__.state, 'running');
 });
+
+test('durable starts and completions supersede stale queue observations at each cursor', () => {
+  const history = events({ kind: 'run_started' }, start(), complete());
+  const controls = [
+    {
+      cursor: 'v2:1',
+      node: 'worker',
+      mapIndices: [],
+      visitId: 'queued-worker',
+      state: 'queued' as const,
+    },
+  ];
+  assert.equal(projectHistory(document(), history, 0, controls).nodes.worker.state, 'queued');
+  assert.equal(projectHistory(document(), history, 1, controls).nodes.worker.state, 'running');
+  assert.equal(projectHistory(document(), history, 2, controls).nodes.worker.state, 'succeeded');
+});
+
+test('queued map items preserve failed executions and verifier details', () => {
+  const doc = document({
+    kind: 'map',
+    name: 'items',
+    body: { kind: 'verifier', name: 'worker', signals: { verdict: ['rejected'] } },
+  });
+  const history = events(
+    { kind: 'run_started' },
+    start(ref(), 1, [0]),
+    complete(ref(), { status: 'error', code: 'crash' }),
+    start(ref('worker', '2', '2'), 1, [1]),
+    complete(ref('worker', '2', '2'), { status: 'verifier', signals: { verdict: 'rejected' } })
+  );
+  const projection = projectHistory(doc, history, 4, [
+    { cursor: 'v2:1', node: 'worker', mapIndices: [2], visitId: 'queued-item', state: 'queued' },
+  ]);
+  assert.equal(projection.nodes.worker.state, 'failed');
+  assert.match(projection.nodes.worker.detail ?? '', /Verdict: rejected/);
+  assert.match(projection.nodes.worker.detail ?? '', /1 queued/);
+});
+
+test('a queued retry and a stopped unstarted visit supersede prior attempts', () => {
+  const log = {
+    kind: 'safe_log',
+    execution: null,
+    stream: 'output',
+    line: 'transition',
+    timestamp: 1,
+  };
+  const history = events(
+    { kind: 'run_started' },
+    start(),
+    complete(ref(), { status: 'error', code: 'crash' }),
+    log,
+    log
+  );
+  const controls = [
+    { cursor: 'v2:1', node: 'worker', mapIndices: [], visitId: 'retry', state: 'queued' as const },
+    {
+      cursor: 'v2:2',
+      node: 'worker',
+      mapIndices: [],
+      visitId: 'retry',
+      state: 'completed' as const,
+    },
+    { cursor: 'v2:4', node: 'worker', mapIndices: [], visitId: 'retry', state: 'queued' as const },
+    { cursor: 'v2:5', node: 'worker', mapIndices: [], visitId: 'retry', state: 'stopped' as const },
+  ];
+  const pending = projectHistory(document(), history, 3, controls).nodes.worker;
+  assert.equal(pending.state, 'queued');
+  assert.match(pending.detail ?? '', /1 queued/);
+  assert.equal(projectHistory(document(), history, 4, controls).nodes.worker.state, 'skipped');
+  assert.equal(
+    projectHistory(document(), events(log, log), 1, [
+      { ...controls[0], cursor: 'v2:1' },
+      { ...controls[3], cursor: 'v2:2' },
+    ]).nodes.worker.state,
+    'skipped'
+  );
+});
+
+test('one node projection preserves structural details and authoritative leaf outcomes', () => {
+  const doc = document(sequence('run', {
+    kind: 'par', name: 'reviews', join: { kind: 'any' }, branches: [step('worker'), step('peer')],
+  }, { kind: 'succeed', name: 'done' }));
+  const history = events({ kind: 'run_started' }, start(), complete());
+  const projection = projectHistory(doc, history, 2, [
+    { cursor: 'v2:1', node: 'worker', mapIndices: [], visitId: 'worker', state: 'queued' },
+    { cursor: 'v2:2', node: 'reviews', mapIndices: [], visitId: 'reviews', state: 'entered' },
+    { cursor: 'v2:3', node: 'reviews', mapIndices: [], visitId: 'reviews', state: 'completed', detail: 'reached' },
+    { cursor: 'v2:3', node: 'done', mapIndices: [], visitId: 'done', state: 'succeeded', detail: 'Delivered' },
+  ]);
+  assert.equal(projection.nodes.worker.state, 'succeeded');
+  assert.equal(projection.nodes.worker.count, 1);
+  assert.equal(projection.nodes.worker.countUnit, undefined);
+  assert.deepEqual(projection.nodes.reviews, { state: 'recorded', count: 1, countUnit: 'visit', detail: 'reached' });
+  assert.deepEqual(projection.nodes.done, { state: 'succeeded', count: 1, countUnit: 'visit', detail: 'Delivered' });
+  assert.equal(projection.nodes.peer.state, 'idle');
+});

@@ -63,6 +63,7 @@ impl ControlRecord {
             map_indices: trace.map_indices,
             visit_id,
             state: match trace.state {
+                StructuralTraceState::Queued => "queued",
                 StructuralTraceState::Entered => "entered",
                 StructuralTraceState::Completed => "completed",
                 StructuralTraceState::Succeeded => "succeeded",
@@ -241,7 +242,32 @@ impl ControlReplay {
             return Err(PROJECTION_LIMIT);
         }
         apply_event(&mut self.snapshot, &stored.event, sequence).map_err(|_| PROJECTION_FAILED)?;
+        if let RunEvent::NodeStarted { occurrence, .. } = &stored.event {
+            self.complete_queued(occurrence)?;
+        }
         self.project_event(stored.event)
+    }
+
+    fn complete_queued(
+        &mut self,
+        occurrence: &crate::full_v1_reducer::StructuralOccurrence,
+    ) -> Result<(), &'static str> {
+        let queued = self
+            .current
+            .values()
+            .filter(|record| {
+                record.state == "queued"
+                    && record.node == occurrence.node.as_str()
+                    && record.map_indices == occurrence.map_indices
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for mut record in queued {
+            record.cursor = self.snapshot.cursor.clone();
+            record.state = "completed".into();
+            self.record(record)?;
+        }
+        Ok(())
     }
 
     fn project_event(&mut self, event: RunEvent) -> Result<(), &'static str> {
@@ -269,6 +295,7 @@ impl ControlReplay {
             diagnostics: Vec::new(),
         };
         let traced = FullV1Reducer::native_v2(&verified)
+            .with_dispatch_limit(0)
             .reduce_with_trace(ReductionInput {
                 initial_input: &self.admitted.initial_input,
                 executions: &executions,
@@ -322,7 +349,7 @@ impl ControlReplay {
             .current
             .values()
             .filter(|record| {
-                record.state == "entered"
+                matches!(record.state.as_str(), "entered" | "queued")
                     && present.is_none_or(|ids| !ids.contains(&record.visit_id))
             })
             .cloned()
@@ -350,3 +377,7 @@ impl ControlReplay {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "control/queue_tests.rs"]
+mod queue_tests;

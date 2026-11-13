@@ -424,17 +424,18 @@ the fields of several providers.
 
 `--uniform-runtime-config` accepts a single agent configuration and expands it into a full plan:
 
-| Field           | Required | Value                                 |
-| --------------- | -------- | ------------------------------------- |
-| `harness`       | Yes      | As in `RuntimePlan`                   |
-| `provider`      | Yes      | As in `RuntimePlan`                   |
-| `size`          | No       | As in `RuntimePlan`; default `medium` |
-| `model`         | Yes      | As in an `agent` binding              |
-| `effort`        | No       | As in an `agent` binding              |
-| `contextWindow` | No       | As in an `agent` binding              |
-| `maxTokens`     | No       | As in an `agent` binding              |
-| `sessionScope`  | No       | As in an `agent` binding              |
-| `connections`   | No       | Applied to every agent node           |
+| Field            | Required | Value                                                                                                   |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `harness`        | Yes      | As in `RuntimePlan`                                                                                     |
+| `provider`       | Yes      | As in `RuntimePlan`                                                                                     |
+| `size`           | No       | As in `RuntimePlan`; default `medium`                                                                   |
+| `model`          | Yes      | As in an `agent` binding                                                                                |
+| `effort`         | No       | As in an `agent` binding                                                                                |
+| `contextWindow`  | No       | As in an `agent` binding                                                                                |
+| `maxTokens`      | No       | As in an `agent` binding                                                                                |
+| `maxConcurrency` | No       | Run-wide execution limit, default 64, range 1–65,536; also supported in exact plans and saved profiles. |
+| `sessionScope`   | No       | As in an `agent` binding                                                                                |
+| `connections`    | No       | Applied to every agent node                                                                             |
 
 `contextWindow` and `maxTokens` are available in both an exact `agent` binding and a uniform
 runtime configuration. They are caller declarations and are never inferred from the model
@@ -576,3 +577,11 @@ A native launch or session-initialization rejection fails the node with the nati
 normal bounded, redacted diagnostics and authored error routing. It does not trigger response
 correction, configuration fallback, or adapter retries of rejected initialization. Settings accepted
 or ignored by the native harness have no effective-configuration acknowledgement or added preflight.
+
+## Execution concurrency
+
+Optional `maxConcurrency` limits executing leaf nodes and Zeroshot-owned auxiliary agents across
+the run. Its effective default is 64 on every placement; explicit values range from 1 through
+65,536. Admission records the effective value in run metadata. Queued work has no execution
+identity, attempt, or timeout until admission. Map `maxItems` independently limits active complete
+item bodies. Neither limit changes the separate 65,536 logical-visit and loop-entry ceilings.

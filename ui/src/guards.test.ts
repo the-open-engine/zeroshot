@@ -94,7 +94,7 @@ test('control choices follow native worker, verifier and group result domains', 
   assert.deepEqual(controlFields({ kind: 'loop', name: 'loop' }), {
     terminated: ['converged', 'exhausted'],
   });
-  assert.deepEqual(controlFields({ kind: 'map', name: 'map' }), { overflow: ['ok', 'overflow'] });
+  assert.deepEqual(controlFields({ kind: 'map', name: 'map' }), {});
   assert.deepEqual(
     controlFields({ kind: 'par', name: 'reviews', join: { kind: 'quorum', count: 1 } }),
     { joined: ['reached', 'quorum_unreachable'] }

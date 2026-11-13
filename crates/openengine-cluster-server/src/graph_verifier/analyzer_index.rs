@@ -4,6 +4,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn new(graph: &'a GraphSpec) -> Self {
         Self {
             graph,
+            proof_work: ProofWork::default(),
             nodes: BTreeMap::new(),
             authored: Vec::new(),
             dependencies: BTreeMap::new(),
@@ -15,6 +16,7 @@ impl<'a> Analyzer<'a> {
             choice_reachability: BTreeMap::new(),
             choice_execution_correlations: BTreeMap::new(),
             choice_write_conditions: BTreeMap::new(),
+            choice_routes: std::cell::RefCell::default(),
             parallel_join_correlations: BTreeMap::new(),
             map_execution_correlations: BTreeMap::new(),
             node_completion: BTreeMap::new(),
@@ -25,8 +27,11 @@ impl<'a> Analyzer<'a> {
     pub(super) fn analyze(&mut self) -> Option<StructuralBounds> {
         self.validate_profile();
         let root_path = vec![field_segment("root"), node_segment(self.graph.root.name())];
-        self.index_node(&self.graph.root, root_path, 1);
+        self.index_node(&self.graph.root, root_path.clone(), 1);
         self.validate_global_limits();
+        if !self.diagnostics.is_empty() {
+            return None;
+        }
 
         let materialized_state = self
             .graph
@@ -49,6 +54,9 @@ impl<'a> Analyzer<'a> {
                 map_index_targets: None,
             },
         );
+        if self.proof_work.charge(0).is_none() {
+            self.assignment_ceiling(&root_path);
+        }
         self.validate_terminal_coverage();
         let order = self.reference_topological_order();
         let fold = self.fold_node(&self.graph.root);
@@ -132,7 +140,9 @@ impl<'a> Analyzer<'a> {
     ) {
         self.index_identity(node, &path);
         self.validate_node_depth(node.name(), &path, depth);
-        self.index_children(node, &path, depth);
+        if depth <= FULL_V1_MAX_GRAPH_DEPTH {
+            self.index_children(node, &path, depth);
+        }
     }
 
     pub(super) fn index_identity(&mut self, node: &'a GraphNode, path: &[DiagnosticPathSegment]) {
