@@ -578,6 +578,7 @@ pub(crate) fn null_worker_invocation(
 }
 
 /// Exercise direct adapter rejection and retain its session for explicit cleanup assertions.
+#[cfg(unix)]
 pub(crate) async fn run_null_worker<T: NodeDriver + SessionFactory>(
     adapter: &T,
     request: NodeRunRequest,
