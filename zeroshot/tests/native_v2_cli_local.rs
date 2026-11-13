@@ -594,13 +594,13 @@ async fn suspended_attempt_exits_continues_once_and_preserves_vector_record_and_
             .await,
         page["vectors"][0]
     );
-    assert!(
-        !fixture
-            .output(&["vectors", "show", successor, "unknown"], "finish")
-            .await
-            .status
-            .success()
-    );
+    let diagnostic = fixture
+        .json_error(&["vectors", "show", successor, "unknown"], "finish")
+        .await;
+    assert_eq!(diagnostic["schema"], "zeroshot.error/v1");
+    assert_eq!(diagnostic["kind"], "run_not_found");
+    assert_eq!(diagnostic["code"], "run.not_found");
+    assert_eq!(diagnostic["message"], "vector was not found");
     for limit in ["0", "101"] {
         assert!(
             !fixture

@@ -1,5 +1,5 @@
 use super::*;
-use openengine_cluster_protocol::{RunVectorParams, RunVectorsParams};
+use openengine_cluster_protocol::{RunVectorParams, RunVectorsParams, VectorId};
 
 pub(super) async fn assert_vectors(fixture: &Fixture) {
     let page = fixture
@@ -31,6 +31,38 @@ pub(super) async fn assert_vectors(fixture: &Fixture) {
         .await
         .unwrap();
     assert_eq!(vector, fixture.vector);
+    let missing = VectorId::new("unknown").unwrap();
+    let errors = [
+        fixture
+            .backend
+            .run_vector(
+                None,
+                RunVectorParams {
+                    run_id: fixture.id.clone(),
+                    id: missing.clone(),
+                },
+            )
+            .await
+            .unwrap_err(),
+        fixture
+            .backend
+            .run_vectors(
+                None,
+                RunVectorsParams {
+                    run_id: fixture.id.clone(),
+                    after: Some(missing),
+                    limit: None,
+                },
+            )
+            .await
+            .unwrap_err(),
+    ];
+    for error in errors {
+        let diagnostic = serde_json::to_value(error.diagnostic()).unwrap();
+        assert_eq!(diagnostic["kind"], "run_not_found");
+        assert_eq!(diagnostic["code"], "run.not_found");
+        assert_eq!(diagnostic["message"], "vector was not found");
+    }
 }
 
 async fn assert_boundary_refused(fixture: &Fixture) {

@@ -263,6 +263,21 @@ impl LocalFixture {
         serde_json::from_slice(&output.stdout).assert_value_with("local CLI JSON output")
     }
 
+    pub(super) async fn json_error(&self, args: &[&str], mode: &str) -> Value {
+        let output = timeout(
+            CLI_TIMEOUT,
+            self.command(args, mode)
+                .env("ZEROSHOT_ERROR_FORMAT", "json")
+                .output(),
+        )
+        .await
+        .assert_value_with("local CLI JSON error deadline")
+        .assert_value_with("start local CLI");
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        serde_json::from_slice(&output.stderr).assert_value_with("local CLI JSON error")
+    }
+
     pub(super) async fn interrupted(&self, args: &[&str], mode: &str, expected: &str) -> Output {
         let mut command = self.command(args, mode);
         command.stdout(std::process::Stdio::piped());

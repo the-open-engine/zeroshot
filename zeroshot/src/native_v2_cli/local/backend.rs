@@ -2,7 +2,8 @@ use super::*;
 use crate::native_v2_supervisor::checkpoints::{
     CheckpointRestore, CheckpointRestoreSelection, remove_restore_stage,
 };
-use openengine_cluster_protocol::RunResumeFrom;
+use crate::v2_run_ledger::RunLedgerError;
+use openengine_cluster_protocol::{NOT_FOUND, RunResumeFrom};
 
 /// Chooses the snapshot a local successor restores, if any. Plain resume keeps the user-owned
 /// checkout as it is. Replacing it needs `--discard-workspace-changes`: to roll back to a selected
@@ -585,7 +586,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
         crate::v2_run_ledger::vectors::list(&ledger, params)
             .await
-            .map_err(local_error)
+            .map_err(vector_error)
     }
 
     async fn run_vector(
@@ -598,7 +599,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
         crate::v2_run_ledger::vectors::show(&ledger, params)
             .await
-            .map_err(local_error)
+            .map_err(vector_error)
     }
 
     async fn run_checkpoints(
@@ -640,6 +641,17 @@ impl NativeV2CliBackend for LocalCliBackend {
         Err(local_message(
             "local workspaces are user-owned and cannot be discarded by Zeroshot",
         ))
+    }
+}
+
+fn vector_error(error: RunLedgerError) -> NativeV2CliError {
+    match error {
+        RunLedgerError::VectorNotFound => NativeV2CliError::Remote {
+            code: NOT_FOUND.to_owned(),
+            message: error.to_string(),
+            details: None,
+        },
+        error => local_error(error),
     }
 }
 
