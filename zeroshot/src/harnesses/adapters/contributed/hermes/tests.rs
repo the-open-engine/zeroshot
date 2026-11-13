@@ -272,11 +272,112 @@ async fn foreign_declared_credential_refuses_before_native_startup() {
 #[cfg(unix)]
 #[tokio::test]
 async fn ignored_bootstrap_exits_without_receiving_a_prompt() {
-    let directory = TestDirectory::new("hermes-ignored-bootstrap");
-    let adapter = adapter(&directory, "#!/bin/sh\nprintf '%s\\n' 'Hermes help'\n");
-    let result = run(&adapter, invocation(&[])).await;
-    assert!(
-        matches!(result, Err(NodeRunnerError::DriverDetail(detail)) if detail.contains("bootstrap"))
+    for output in [
+        "Hermes help\nUsage: hermes [options]\nMore help\n",
+        "Hermes help\n",
+        "",
+        "{invalid JSON}\nmore help\n",
+        "{\"type\":\"ready\",\"protocol\":2}\nmore help\n",
+        "{\"type\":\"ready\"}\n",
+        "{\"type\":\"initialized\"}\n",
+        "null\n",
+        "Hermes help\n{\"type\":\"ready\",\"protocol\":1}\n",
+    ] {
+        for exit_code in [0, 17] {
+            let directory = TestDirectory::new("hermes-ignored-bootstrap");
+            let source = format!(
+                r#"#!/usr/bin/env python3
+import os, pathlib, subprocess, sys
+assert sys.argv[1:] == ['--version', '--help']
+assert not os.environ.get('OPENAI_API_KEY')
+pathlib.Path('provider.pid').write_text(str(os.getpid()))
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+pathlib.Path('child.pid').write_text(str(child.pid))
+sys.stdout.write({output}); sys.stdout.flush(); os.close(1)
+pathlib.Path('received-stdin').write_bytes(sys.stdin.buffer.read())
+os._exit({exit_code})
+"#,
+                output = json!(output),
+            );
+            let adapter = adapter(&directory, &source);
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                run(
+                    &adapter,
+                    invocation(&[("OPENAI_API_KEY", "withheld-secret")]),
+                ),
+            )
+            .await
+            .assert_value();
+            let Err(NodeRunnerError::DriverDetail(detail)) = result else {
+                panic!("startup cause was lost for {output:?}, exit {exit_code}: {result:?}");
+            };
+            assert!(detail.contains("Hermes bridge startup"), "{detail}");
+            assert!(detail.contains("node `agent`"), "{detail}");
+            assert!(!detail.contains("withheld-secret"));
+            assert_eq!(
+                std::fs::read(adapter.config.workspace.join("received-stdin")).assert_value(),
+                b"",
+                "initialization and prompts must wait for a compatible ready frame"
+            );
+            for marker in ["provider.pid", "child.pid"] {
+                assert_process_gone(&adapter.config.workspace.join(marker));
+            }
+        }
+    }
+}
+
+fn assert_process_gone(marker: &std::path::Path) {
+    let pid = std::fs::read_to_string(marker)
+        .assert_value()
+        .parse::<i32>()
+        .assert_value();
+    // SAFETY: signal zero only inspects the captured fixture process's existence.
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        -1,
+        "fixture process survived cleanup"
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+}
+
+#[tokio::test]
+async fn cancellation_before_handshake_confirms_process_cleanup() {
+    let directory = TestDirectory::new("hermes-cancel-startup");
+    let adapter = adapter(
+        &directory,
+        r#"#!/usr/bin/env python3
+import os, pathlib, sys
+pathlib.Path('provider.pid').write_text(str(os.getpid()))
+pathlib.Path('received-stdin').write_bytes(sys.stdin.buffer.read())
+"#,
+    );
+    let marker = adapter.config.workspace.join("provider.pid");
+    let (cancel, control, mut durable) = control();
+    let drain = tokio::spawn(async move { while durable.recv_output().await.is_ok() {} });
+    let running = adapter.run(invocation(&[]), control);
+    let cancellation = async {
+        while !marker.exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        cancel.send_replace(true);
+    };
+    let (outcome, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(running, cancellation)
+    })
+    .await
+    .assert_value();
+    assert_eq!(outcome, Err(NodeRunnerError::Cancelled));
+    drain.await.assert_value();
+    assert_process_gone(&marker);
+    assert_eq!(
+        std::fs::read(adapter.config.workspace.join("received-stdin")).assert_value(),
+        b""
     );
 }
 
@@ -332,6 +433,47 @@ async fn native_cleanup_failure_keeps_redacted_stage_evidence() {
         outputs
             .iter()
             .all(|output| !output.text.contains("declared-sensitive-fixture"))
+    );
+}
+
+#[tokio::test]
+async fn startup_cause_survives_unconfirmed_native_cleanup() {
+    let directory = TestDirectory::new("hermes-startup-cleanup-evidence");
+    let source = fixture("unused", false)
+        .replace(
+            "emit({'type':'initialized','sessionId':init['sessionId']})",
+            "emit({'type':'initialized','sessionId':'wrong-session'})",
+        )
+        .replace(
+            "if False: emit({'type':'closed','clean':True})",
+            "emit({'type':'error','message':init['authority']['apiKey']+' pending LSP'})",
+        );
+    let adapter = adapter(&directory, &source);
+    let (_cancel, control, mut durable) = control();
+    let drain = tokio::spawn(async move {
+        let mut outputs = Vec::new();
+        while let Ok(output) = durable.recv_output().await {
+            outputs.push(output);
+        }
+        outputs
+    });
+    let outcome = adapter
+        .run(invocation(&[("OPENAI_API_KEY", "startup-secret")]), control)
+        .await;
+    assert_eq!(outcome, Err(NodeRunnerError::CleanupUnconfirmed));
+    let outputs = drain.await.assert_value();
+    assert!(outputs.iter().any(|output| {
+        output.diagnostic.is_some()
+            && output.text.contains("cleanup could not be confirmed")
+            && output.text.contains("Hermes bridge startup")
+            && output.text.contains("node `agent`")
+            && output.text.contains("session initialization failed")
+            && output.text.contains("pending LSP")
+    }));
+    assert!(
+        outputs
+            .iter()
+            .all(|output| !output.text.contains("startup-secret"))
     );
 }
 

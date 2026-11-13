@@ -80,7 +80,12 @@ impl<'a> HermesConnection<'a> {
         invocation: &DriverInvocation,
         init: Value,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
-        self.start(process, init).await?;
+        self.start(process, init).await.map_err(|error| {
+            failure(&format!(
+                "Hermes bridge startup failed for node `{}`: {error}",
+                invocation.node.reference.node
+            ))
+        })?;
         let dialect = ProviderSchemaDialect::Standard;
         let mut response = response_state(invocation)?;
         let feedback = ProviderFailureRetry::new(
@@ -300,22 +305,42 @@ impl<'a> HermesConnection<'a> {
         kill: tokio::sync::watch::Sender<bool>,
         outcome: Result<WorkerOutcome, NodeRunnerError>,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
-        let shutdown = tokio::time::timeout(CLEANUP_BUDGET, self.shutdown(process)).await;
-        let native_clean = matches!(shutdown, Ok(Ok(())));
+        let native_clean = !self.activated
+            || matches!(
+                tokio::time::timeout(CLEANUP_BUDGET, self.shutdown(process)).await,
+                Ok(Ok(()))
+            );
         if !native_clean {
             process.retain_execution_files();
             kill.send_replace(true);
         }
-        let completion = if native_clean {
+        let completion = if !self.activated {
+            // No native resources were initialized. Release the process and drain remaining
+            // help or malformed output without interpreting it as a cleanup protocol.
+            let completion = process.release();
+            tokio::pin!(completion);
+            tokio::select! {
+                completion = &mut completion => completion,
+                () = async {
+                    while self.stdout.recv().await.is_some() {}
+                } => completion.await,
+            }
+        } else if native_clean {
             process.wait().await
         } else {
             process.release().await
         };
         let published = self.final_output(native_clean, outcome.is_ok()).await;
         if require_process_cleanup(&completion).is_err() || !native_clean {
+            let primary_failure = outcome.as_ref().err().map(ToString::to_string);
             let diagnostic = self
                 .output
-                .failure_diagnostic("Hermes", self.native_failure.as_deref())
+                .failure_diagnostic(
+                    "Hermes",
+                    std::iter::once("native or process cleanup could not be confirmed")
+                        .chain(primary_failure.as_deref())
+                        .chain(self.native_failure.as_deref()),
+                )
                 .unwrap_or_else(|| {
                     "Hermes native or process cleanup could not be confirmed".to_owned()
                 });
