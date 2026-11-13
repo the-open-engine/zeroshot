@@ -491,7 +491,8 @@ async fn suspended_attempt_exits_continues_once_and_preserves_vector_record_and_
     assert_eq!(requested["status"]["suspendRequested"], true);
     assert_eq!(requested["status"]["activeExecutions"][0]["node"], "worker");
     let repeated = fixture.json(&["suspend", &run_id], "hold").await;
-    assert_eq!(repeated, requested);
+    // Unrelated live logs may advance the cursor while suspension remains unchanged.
+    assert_eq!(repeated["status"], requested["status"]);
     fs::write(fixture.repository.join("release-turn"), b"release").assert_value();
     let suspended = fixture.wait_suspended(&run_id).await;
     assert_eq!(suspended["status"]["reason"], "command");
