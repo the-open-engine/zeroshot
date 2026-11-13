@@ -170,7 +170,7 @@ async fn native_aws_errors_redact_ambient_bearer_and_iam_secrets() {
     let adapter = ambient_adapter(
         &directory,
         "bedrock",
-        "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' \"$AWS_BEARER_TOKEN_BEDROCK $AWS_SECRET_ACCESS_KEY\" >&2\nexit 1\n",
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\ncat >/dev/null\nprintf '%s\\n' \"$AWS_BEARER_TOKEN_BEDROCK $AWS_SECRET_ACCESS_KEY\" >&2\nexit 1\n",
     );
     let error = super::process::run(&adapter, super::process::invocation(&[]))
         .await

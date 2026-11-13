@@ -375,6 +375,10 @@ mod providers;
 #[path = "tests/github.rs"]
 mod github;
 
+#[cfg(unix)]
+#[path = "tests/store.rs"]
+mod store;
+
 #[test]
 fn native_authentication_and_model_errors_preserve_machine_classification() {
     for (error, model_text) in [

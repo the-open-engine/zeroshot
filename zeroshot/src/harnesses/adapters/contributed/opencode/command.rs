@@ -264,6 +264,9 @@ fn process_environment(
             .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
     );
     environment.insert("OPENCODE_DISABLE_AUTOUPDATE".to_owned(), "1".to_owned());
+    for (name, value) in super::store::private_environment(files.home())? {
+        environment.insert(name.to_owned(), value);
+    }
     if adapter.runners.is_hosted() {
         environment.insert("OPENCODE_DISABLE_PROJECT_CONFIG".to_owned(), "1".to_owned());
     }

@@ -14,6 +14,7 @@ mod native_config;
 mod permissions;
 mod plugin;
 mod registration;
+mod store;
 mod transcript;
 
 pub(crate) use registration::registration;
@@ -182,6 +183,21 @@ impl OpenCodeAdapter {
             .core
             .ensure_live(ClosedSessionFailure::SessionLost)?;
         let expected = turn.session.id.lock().await.clone();
+        let login = {
+            let mut login = turn.session.login.lock().await;
+            if login.is_none() {
+                *login = Some(
+                    store::transfer_login(store::TransferRequest {
+                        adapter: self,
+                        invocation: turn.invocation,
+                        files: &turn.files,
+                        control: turn.control,
+                    })
+                    .await?,
+                );
+            }
+            login.clone()
+        };
         let mut command = command::command(command::CommandRequest {
             adapter: self,
             invocation: turn.invocation,
@@ -189,6 +205,9 @@ impl OpenCodeAdapter {
             session_id: expected.as_deref(),
         })?;
         let mut redactions = self.redactions(&turn.invocation.environment);
+        if let Some(secrets) = &login {
+            redactions.extend(secrets.iter().cloned());
+        }
         self.apply_permission_default(&mut command);
         redactions.extend(command::configuration_secrets(&command.environment));
         let transcript = transcript::OpenCodeTranscript::new(expected.clone(), redactions.clone());
@@ -257,6 +276,7 @@ struct OpenCodeTurn<'a> {
 struct OpenCodeSession {
     core: ProviderSessionCore,
     id: Mutex<Option<String>>,
+    login: Mutex<Option<Vec<String>>>,
 }
 
 impl_provider_node_session!(OpenCodeSession);
@@ -265,7 +285,8 @@ crate::native_v2_capsule::provider_process::impl_provider_session_factory!(
     OpenCodeAdapter,
     OpenCodeSession {
         core: ProviderSessionCore::new(),
-        id: Mutex::new(None)
+        id: Mutex::new(None),
+        login: Mutex::new(None)
     }
 );
 

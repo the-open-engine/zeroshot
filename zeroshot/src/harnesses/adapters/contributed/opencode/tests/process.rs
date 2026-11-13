@@ -37,6 +37,7 @@ pub(super) fn invocation(fields: &[(&str, &str)]) -> DriverInvocation {
         Arc::new(OpenCodeSession {
             core: ProviderSessionCore::new(),
             id: Mutex::new(None),
+            login: Mutex::new(None),
         }),
     )
 }
@@ -45,7 +46,7 @@ fn script(answer: &str) -> String {
     let text = text_event("t1", "m1", answer).to_string();
     let finish = finish_event("f1", "m1", "stop").to_string();
     format!(
-        "#!/bin/sh\nif [ \"$1\" = debug ]; then printf '%s\\n' '{{}}'; exit 0; fi\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nif [ \"$1\" = debug ]; then printf '%s\\n' '{{}}'; exit 0; fi\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
     )
 }
 
@@ -175,7 +176,6 @@ fn declared_provider_keeps_native_homes_resources_and_mcp_configuration() {
     );
     for name in [
         "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
         "OPENCODE_CONFIG",
         "OPENCODE_CONFIG_DIR",
         "OPENCODE_MODELS_PATH",
@@ -740,7 +740,7 @@ async fn native_configuration_rejection_is_terminal_with_native_stderr() {
     let directory = TestDirectory::new("opencode-native-rejection");
     let adapter = adapter(
         &directory,
-        "#!/bin/sh\nprintf 'launch\\n' >> launches\nprintf '%s\\n' 'invalid --title native-value' >&2\nexit 2\n",
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nprintf 'launch\\n' >> launches\nprintf '%s\\n' 'invalid --title native-value' >&2\nexit 2\n",
     );
     let mut invocation = invocation(&[]);
     crate::harnesses::native_config::tests::set(
@@ -768,7 +768,7 @@ async fn per_node_pure_mode_is_rejected_before_launch_with_or_without_owned_plug
         for fields in [&[][..], &[("ANTHROPIC_API_KEY", "declared-key")][..]] {
             let mut adapter = adapter(
                 &directory,
-                "#!/bin/sh\nprintf 'launch\\n' >> launches\nexit 0\n",
+                "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nprintf 'launch\\n' >> launches\nexit 0\n",
             );
             if memory {
                 let source = Arc::new(RecallMemory);
