@@ -284,9 +284,8 @@ async fn api_rejections_keep_gitlab_reason_and_requested_resource() {
 
 #[tokio::test]
 async fn refused_connection_names_the_transport_failure() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let closed = listener.local_addr().unwrap();
-    drop(listener);
+    // Port 1 is closed and outside the range a parallel test's `127.0.0.1:0` bind can receive.
+    let closed = "127.0.0.1:1";
     let mut authority =
         GitLabDeliveryAuthority::new(SourceForgeBaseUrl::new(ORIGIN).unwrap(), None).unwrap();
     authority.api = Api::loopback(&format!("http://{closed}/api/v4/")).unwrap();
