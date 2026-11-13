@@ -679,6 +679,7 @@ fn coverage_contract_command_domain_preflight_checks_supervisor_authority_before
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn active_run_reservations_reject_retry_ids_outside_their_owned_range() {
     let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
     let first = host.active_run_slot(0, 131_072).assert_value();

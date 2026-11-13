@@ -403,7 +403,7 @@ async fn item_local_aggregate_counts_cannot_combine_a_signal_with_its_own_error(
 }
 
 #[tokio::test]
-async fn aggregate_counts_discard_unobservable_label_classes_after_correlation() {
+async fn aggregate_counts_saturate_at_their_observable_thresholds() {
     let state = mapped_items_state();
     let graph = mapped_control_graph(
         state,

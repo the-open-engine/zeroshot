@@ -336,13 +336,18 @@ impl<'a> Analyzer<'a> {
             self.proof_work.charge(
                 domain
                     .len()
-                    .checked_mul(1 + tests.iter().map(Vec::len).sum::<usize>())?,
+                    .checked_mul(2 + tests.iter().map(Vec::len).sum::<usize>())?,
             )?;
             let mut representatives = BTreeMap::<Vec<bool>, EnumLabel>::new();
             let classes = domain
                 .into_iter()
                 .map(|label| {
-                    let signature = tests.iter().map(|labels| labels.contains(&label)).collect();
+                    let mut signature = tests
+                        .iter()
+                        .map(|labels| labels.contains(&label))
+                        .collect::<Vec<_>>();
+                    // Refinement and joined/raced correlations also observe failure.
+                    signature.push(control_label_is_failure(&key, &label));
                     let representative = representatives
                         .entry(signature)
                         .or_insert_with(|| label.clone())

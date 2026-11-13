@@ -199,8 +199,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Read-only probes reuse discovered results. Settled parallel groups and terminal maps validate
   each owned branch/item once through the actual cutoff; winners supply the same traversal's values.
   Closed-window replay never contributes pending work; terminal maps discard their queued siblings.
-  Static aggregate proofs check private qualification before exporting retained controls, clip only
-  queried label classes at their own thresholds, and charge shared-guard expansion before allocation.
+  Static aggregate proofs check private qualification before exporting retained controls, preserve
+  presence and success/failure refinement in every compressed label class, saturate higher counts at
+  authored thresholds, and charge shared-guard expansion before allocation.
   Aggregate guards can use nested map facts when an enclosing map dominates their scope.
   The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
   actual traversal to find ready work; static write/retention witnesses remain private to admission.

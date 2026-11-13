@@ -30,28 +30,26 @@ pub(super) fn assignment_has_failure(assignment: &Assignment, name: &NodeName) -
     let mut has_signal = false;
     let mut signal_occurrences = 0_u64;
     for (key, value) in assignment.iter().filter(|(key, _)| key.name == *name) {
-        match key.source {
-            ControlSourceKey::Error if value.counts.values().any(|count| *count > 0) => {
-                return true;
-            }
-            ControlSourceKey::Group
-                if is_parallel_group_control(key)
-                    && value.counts.iter().any(|(label, count)| {
-                        *count > 0
-                            && matches!(label.as_str(), "quorum_unreachable" | "no_satisfier")
-                    }) =>
-            {
-                return true;
-            }
-            ControlSourceKey::Signal => {
-                has_signal = true;
-                signal_occurrences =
-                    signal_occurrences.saturating_add(value.counts.values().copied().sum::<u64>());
-            }
-            ControlSourceKey::Error | ControlSourceKey::Group | ControlSourceKey::Execution => {}
+        if value
+            .counts
+            .iter()
+            .any(|(label, count)| *count > 0 && control_label_is_failure(key, label))
+        {
+            return true;
+        }
+        if key.source == ControlSourceKey::Signal {
+            has_signal = true;
+            signal_occurrences =
+                signal_occurrences.saturating_add(value.counts.values().copied().sum::<u64>());
         }
     }
     has_signal && signal_occurrences == 0
+}
+
+pub(super) fn control_label_is_failure(key: &SelectorKey, label: &EnumLabel) -> bool {
+    key.source == ControlSourceKey::Error
+        || (is_parallel_group_control(key)
+            && matches!(label.as_str(), "quorum_unreachable" | "no_satisfier"))
 }
 
 fn is_parallel_group_control(key: &SelectorKey) -> bool {
@@ -132,5 +130,5 @@ pub(super) use proof_work::ProofWork;
 
 use aggregate::project_retained_controls;
 
-/// Each observable label class retains only the largest count a guard can distinguish.
+/// Classes preserve presence and outcome refinement; higher counts saturate at guard thresholds.
 pub(super) type CountLimits = BTreeMap<SelectorKey, BTreeMap<EnumLabel, u64>>;

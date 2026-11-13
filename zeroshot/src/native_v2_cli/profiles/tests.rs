@@ -335,7 +335,10 @@ fn replace_profile_payload(store: &LocalRunProfileStore, field: &str) -> serde_j
 }
 
 fn assert_profile_payload_unchanged(store: &LocalRunProfileStore, expected: &serde_json::Value) {
-    assert_eq!(&read_profile_json(store)["profiles"]["broken"], expected);
+    assert_eq!(
+        store.read().assert_value().profiles[&selector("broken").name].get(),
+        serde_json::to_string(expected).assert_value()
+    );
 }
 
 fn assert_profile_error<T>(result: Result<T, NativeV2CliError>, expected: &str) {
@@ -480,7 +483,7 @@ fn exercise_checked_metadata_isolation(store: &LocalRunProfileStore) {
 
 #[test]
 fn malformed_profile_metadata_is_isolated_preserved_and_removable() {
-    for corruption in ["entry", "id", "graph", "runtime", "extra"] {
+    for corruption in ["entry", "id", "graph", "runtime", "extra", "depth"] {
         let (_root, store) = temporary_store();
         let healthy = store
             .set(profile_request("healthy", "worker", true))
@@ -493,6 +496,9 @@ fn malformed_profile_metadata_is_isolated_preserved_and_removable() {
             "entry" => *entry = json!(null),
             "id" => entry["id"] = json!(17),
             "extra" => entry["futureMetadata"] = json!({"preserve": true}),
+            "depth" => {
+                entry["graph"] = (0..513).fold(serde_json::Value::Null, |value, _| json!([value]));
+            }
             missing => {
                 entry.as_object_mut().assert_value().remove(missing);
             }
@@ -722,25 +728,27 @@ fn interrupted_saves_do_not_keep_a_replaced_profile() {
 }
 
 #[test]
-fn an_unreadable_store_write_preserves_existing_bytes_and_never_creates_an_initial_store() {
+fn unreadable_new_or_replacement_profiles_preserve_existing_bytes() {
+    use openengine_cluster_protocol::PayloadType;
+
     for existing in [false, true] {
         let (_root, store) = temporary_store();
         if existing {
             store
-                .set(profile_request("valid", "worker", true))
+                .set(profile_request("bounded", "worker", true))
                 .assert_value();
         }
         let path = store.root.join(PROFILES_FILE);
         let before = std::fs::read(&path).ok();
-        let mut stored = store.read().assert_value();
-        let bad = RunProfileName::new("unreadable").assert_value();
-        let payload = (0..513).fold(serde_json::Value::Null, |value, _| json!([value]));
-        stored.profiles.insert(
-            bad.clone(),
-            serde_json::value::to_raw_value(&payload).assert_value(),
+        let mut request = profile_request("bounded", "worker", true);
+        request.graph.initial_input =
+            (0..513).fold(PayloadType::Null, |items, _| PayloadType::Array {
+                items: Box::new(items),
+            });
+        assert_profile_error(
+            store.set(request),
+            "local profile store could not be read back before saving",
         );
-        stored.default = Some(bad);
-        assert!(store.write(&stored).is_err());
         assert_eq!(std::fs::read(&path).ok(), before);
         assert_eq!(
             store
@@ -748,7 +756,7 @@ fn an_unreadable_store_write_preserves_existing_bytes_and_never_creates_an_initi
                 .assert_value()
                 .default
                 .map(|name| name.to_string()),
-            existing.then(|| "valid".to_owned())
+            existing.then(|| "bounded".to_owned())
         );
     }
 }

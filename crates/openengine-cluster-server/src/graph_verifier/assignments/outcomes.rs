@@ -68,14 +68,12 @@ fn add_aggregate_outcome(
     for (key, control) in outcome {
         let target = next.get_mut(key)?;
         for (label, count) in &control.counts {
+            // Refinement and correlations observe presence even when no authored guard does.
             let limit = count_limits
                 .get(key)
                 .and_then(|limits| limits.get(label))
                 .copied()
-                .unwrap_or(0);
-            if limit == 0 {
-                continue;
-            }
+                .unwrap_or(1);
             let previous = target.counts.entry(label.clone()).or_default();
             *previous = previous.saturating_add(*count).min(limit);
         }

@@ -273,10 +273,10 @@ impl LocalRunProfileStore {
         let mut encoded = serde_json::to_vec(stored)
             .map_err(|_| local_message("local profile store could not be encoded"))?;
         encoded.push(b'\n');
-        // Accepted writes must remain readable through the store's JSON parser.
-        openengine_cluster_protocol::bounded_json_from_slice::<StoredProfiles>(&encoded).map_err(
-            |_| local_message("local profile store could not be read back before saving"),
-        )?;
+        // Keep unchanged entries opaque, as in read; encode_profile checks new entries.
+        serde_json::from_reader::<_, StoredProfiles>(encoded.as_slice()).map_err(|_| {
+            local_message("local profile store could not be read back before saving")
+        })?;
         let result = (|| {
             let file = owner_only_options()
                 .write(true)
