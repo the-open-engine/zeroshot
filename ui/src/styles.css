@@ -507,6 +507,8 @@ h2 {
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  /* Embedded runs sit in a column; without this the inspector stretches the page instead of scrolling. */
+  min-height: 0;
   position: relative;
 }
 .workspace-header {
