@@ -594,36 +594,14 @@ impl NativeV2PlatformController {
             commit_co_author,
         })?;
         let controller_claim = self.allocator.claim_controller(&successor_run_id).await?;
-        self.create_resume_successor(CreateRun {
-            run_id: successor_run_id.clone(),
-            submission_key,
-            submission_digest,
-            admitted: admitted.clone(),
-        })
-        .await?;
-        crate::v2_run_ledger::vectors::inherit(
-            self.ledger.as_ref(),
-            self.ledger.as_ref(),
-            &run_id,
-            &successor_run_id,
-        )
-        .await?;
-        if source.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended {
-            let history = crate::native_v2_supervisor::continuation_history(&source.snapshot)?;
-            for execution in history {
-                self.ledger
-                    .append(
-                        &successor_run_id,
-                        vec![RunEvent::PriorExecution { execution }],
-                    )
-                    .await?;
-            }
-        }
         let stored = self
-            .ledger
-            .get(&successor_run_id)
-            .await?
-            .ok_or(RunLedgerError::RunNotFound)?;
+            .create_resume_successor(CreateRun {
+                run_id: successor_run_id.clone(),
+                submission_key,
+                submission_digest,
+                admitted: admitted.clone(),
+            })
+            .await?;
         self.start_preparation(PreparationStart {
             stored,
             secrets,

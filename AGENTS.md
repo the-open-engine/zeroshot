@@ -934,6 +934,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Direct-target retained-workspace handoff records both sides before moving the tree
   and reconciles incomplete handoffs at startup. Resume reserves this durable handoff before
   acknowledging the successor; asynchronous credential resolution and preparation reuse that claim.
+  Supervised preparation owns successor version logging, vector inheritance, continuation seeds
+  and snapshot loading before reserving the workspace. Initialization failure settles the successor
+  as `runtime_unavailable` after confirmed cleanup, leaving the unclaimed source resumable.
   Live-engine force-stop shares a per-run control turn with resume and checks successor ownership
   before signalling the engine, so a stale suspended engine cannot stop an accepted continuation.
   Unrelated submissions and resume reads for an ineligible live source cannot block cancellation.

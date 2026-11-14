@@ -12,6 +12,9 @@ use std::sync::atomic::AtomicU64;
 #[path = "suspension/races.rs"]
 mod races;
 
+#[path = "suspension/initialization.rs"]
+mod initialization;
+
 #[derive(Default)]
 struct SuspensionStore {
     published: StdMutex<Vec<RunVector>>,

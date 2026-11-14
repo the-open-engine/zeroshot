@@ -94,14 +94,8 @@ impl PreparationProgress for LedgerPreparationProgress {
 impl NativeV2PlatformController {
     pub(super) async fn start_preparation(
         &self,
-        mut start: PreparationStart,
+        start: PreparationStart,
     ) -> Result<(), NativeV2PlatformError> {
-        crate::native_v2_supervisor::logging::record_run_version(
-            self.ledger.as_ref(),
-            &mut start.stored,
-        )
-        .await?;
-        self.observability.track_runtime(&start.stored.snapshot)?;
         let run_id = start.stored.snapshot.run_id.clone();
         let task = Arc::new(PreparationTask {
             cancellation: watch::channel(false).0,
@@ -144,7 +138,7 @@ impl NativeV2PlatformController {
 
     async fn prepare_run(
         &self,
-        start: PreparationStart,
+        mut start: PreparationStart,
         task: &PreparationTask,
         reserved: tokio::sync::oneshot::Sender<()>,
     ) -> Result<(), PreparationFailure> {
@@ -154,6 +148,9 @@ impl NativeV2PlatformController {
             run_id: start.stored.snapshot.run_id.clone(),
         });
         let allocation = AssertUnwindSafe(async {
+            self.initialize_preparation(&mut start)
+                .await
+                .map_err(|_| PreparationFailure::unavailable("runtime_unavailable"))?;
             if let Some(resume) = &start.resume {
                 self.allocator
                     .reserve_retained_workspace(
@@ -191,6 +188,49 @@ impl NativeV2PlatformController {
         })
         .await
         .map_err(|_| PreparationFailure::unavailable("runtime_unavailable"))?;
+        Ok(())
+    }
+
+    async fn initialize_preparation(
+        &self,
+        start: &mut PreparationStart,
+    ) -> Result<(), NativeV2PlatformError> {
+        self.observability.track_runtime(&start.stored.snapshot)?;
+        crate::native_v2_supervisor::logging::record_run_version(
+            self.ledger.as_ref(),
+            &mut start.stored,
+        )
+        .await?;
+        if let Some(resume) = &start.resume {
+            // Seed before reserving the workspace: a failed copy leaves the source resumable.
+            let run_id = &start.stored.snapshot.run_id;
+            crate::v2_run_ledger::vectors::inherit(
+                self.ledger.as_ref(),
+                self.ledger.as_ref(),
+                &resume.source_run_id,
+                run_id,
+            )
+            .await?;
+            if matches!(resume.selection, CheckpointRestoreSelection::Continue) {
+                let source = self
+                    .ledger
+                    .get(&resume.source_run_id)
+                    .await?
+                    .ok_or(RunLedgerError::RunNotFound)?;
+                for execution in
+                    crate::native_v2_supervisor::continuation_history(&source.snapshot)?
+                {
+                    self.ledger
+                        .append(run_id, vec![RunEvent::PriorExecution { execution }])
+                        .await?;
+                }
+            }
+            start.stored = self
+                .ledger
+                .get(run_id)
+                .await?
+                .ok_or(RunLedgerError::RunNotFound)?;
+        }
         Ok(())
     }
 
