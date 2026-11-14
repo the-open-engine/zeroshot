@@ -18,6 +18,7 @@ pub(super) struct LocalFixture {
     harness_environment: std::collections::BTreeMap<String, String>,
     pub(super) repository: PathBuf,
     working_directory: PathBuf,
+    cwd: Option<PathBuf>,
     state: PathBuf,
     pub(super) config_blocker: PathBuf,
     graph: PathBuf,
@@ -54,6 +55,7 @@ impl LocalFixture {
             root,
             harness_environment: std::collections::BTreeMap::new(),
             working_directory: repository.clone(),
+            cwd: None,
             repository,
             state,
             config_blocker,
@@ -181,6 +183,9 @@ impl LocalFixture {
             "--runtime-config",
             self.runtime.to_str().assert_value_with("runtime path"),
         ];
+        if let Some(cwd) = &self.cwd {
+            arguments.extend(["--cwd", cwd.to_str().assert_value_with("workspace path")]);
+        }
         if let Some(key) = submission_key {
             arguments.extend(["--submission-key", key]);
         }

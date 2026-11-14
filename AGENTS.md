@@ -1962,6 +1962,8 @@ python -m mkdocs build --strict
   so the intentional write failure cannot corrupt collected profiles.
   Local CLI fixture repositories exclude `*.profraw` through their shared Git exclude file,
   keeping profiles from environment-cleared instrumented processes out of delivery and status.
+  Conversation fixtures launch outside their explicit `--cwd` workspace so those profiles also
+  stay out of checkpoint contents and storage-growth measurements.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.
