@@ -40,6 +40,7 @@ fn invocation(fields: &[(&str, &str)]) -> DriverInvocation {
         Arc::new(HermesSession {
             core: ProviderSessionCore::new(),
             id: "owned-session".to_owned(),
+            restored_id: Mutex::new(None),
         }),
     )
 }

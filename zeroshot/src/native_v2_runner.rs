@@ -28,6 +28,7 @@ const LIVE_OUTPUT_CAPACITY: usize = 256;
 pub(crate) const MAX_LIVE_OUTPUT_BYTES: usize = 16 * 1024;
 pub(crate) const DURABLE_OUTPUT_CAPACITY: usize = 1024;
 
+pub mod conversations;
 mod handle;
 mod output;
 mod remote;
@@ -184,6 +185,16 @@ pub trait NodeSession: Any + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     async fn is_live(&self) -> bool;
     async fn close(&self);
+
+    /// Called only at a quiescent checkpoint. Unsupported or missing files never fail a run.
+    async fn conversation(&self) -> Result<conversations::ConversationSource, &'static str> {
+        Err("provider conversation layout cannot be captured")
+    }
+
+    /// Install private checkpoint material before this session's first turn.
+    async fn restore_conversation(&self, _source: conversations::ConversationSource) -> bool {
+        false
+    }
 }
 
 /// Optional run-global work is a runner lifecycle contract, independent of graph execution.
@@ -271,6 +282,7 @@ struct DeliveryPublication {
 
 #[derive(Clone)]
 pub struct DriverControl {
+    restored_conversation: Arc<AtomicBool>,
     delivery_publication: Arc<Mutex<DeliveryPublication>>,
     delivery_state: Option<crate::native_v2_contract::DeliveryCheckpoint>,
     cancellation: watch::Receiver<bool>,
@@ -279,6 +291,14 @@ pub struct DriverControl {
 }
 
 impl DriverControl {
+    pub(crate) fn mark_conversation_restored(&self) {
+        self.restored_conversation.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_restored_conversation(&self) -> bool {
+        self.restored_conversation.load(Ordering::Acquire)
+    }
+
     pub(crate) fn delivery_state(&self) -> Option<&serde_json::Value> {
         self.delivery_state
             .as_ref()
@@ -420,6 +440,28 @@ pub trait NodeDriver: Send + Sync {
 
 #[async_trait]
 pub trait NodeRunner: Send + Sync {
+    async fn capture_conversations(&self, _run_id: &RunId) -> conversations::ConversationCapture {
+        conversations::ConversationCapture::default()
+    }
+
+    /// Capture observes a controller stop and drains blocking copies before releasing sessions.
+    /// Existing embedders retain their previous optional capture implementation.
+    async fn capture_conversations_until_stopped(
+        &self,
+        run_id: &RunId,
+        _cancellation: crate::execution::driver::DriverCancellation,
+    ) -> conversations::ConversationCapture {
+        self.capture_conversations(run_id).await
+    }
+
+    /// Restored history identifies eligible node instances; ordinary restarts supply no history.
+    async fn restore_conversations(
+        &self,
+        _history: &[crate::full_v1_reducer::DurableExecution],
+        _files: Option<conversations::ConversationFiles>,
+    ) {
+    }
+
     /// Optional host-owned global work, separate from reducer executions and checkpoints.
     fn postmortem(&self) -> Option<Arc<dyn RunPostmortem>> {
         None
@@ -580,6 +622,34 @@ impl NativeNodeRunner {
 
 #[async_trait]
 impl NodeRunner for NativeNodeRunner {
+    async fn capture_conversations(&self, run_id: &RunId) -> conversations::ConversationCapture {
+        self.capture_conversations_until_stopped(
+            run_id,
+            DriverCancellation::new(watch::channel(false).1),
+        )
+        .await
+    }
+
+    async fn capture_conversations_until_stopped(
+        &self,
+        run_id: &RunId,
+        cancellation: DriverCancellation,
+    ) -> conversations::ConversationCapture {
+        let operation = conversations::ConversationIo::default().with_request(cancellation);
+        if !self.activity.capture(run_id, &operation).await {
+            return conversations::ConversationCapture::default();
+        }
+        self.sessions.capture_conversations(run_id, operation).await
+    }
+
+    async fn restore_conversations(
+        &self,
+        history: &[crate::full_v1_reducer::DurableExecution],
+        files: Option<conversations::ConversationFiles>,
+    ) {
+        self.sessions.restore_conversations(history, files).await;
+    }
+
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {
         let plan = self.roles.resolve(&request.invocation)?;
         let permit = if self.auxiliary {
@@ -731,6 +801,7 @@ async fn execute(
         auxiliary: task.auxiliary,
     };
     let control = DriverControl {
+        restored_conversation: Arc::default(),
         delivery_publication: Arc::new(Mutex::new(DeliveryPublication {
             generation: task
                 .request
@@ -748,6 +819,25 @@ async fn execute(
         live_output: task.output,
         durable_output: task.durable_output,
     };
+    if let Some(reason) = runtime
+        .sessions
+        .restore_session(&driver_invocation.node, &lease.session)
+        .await
+    {
+        if let Err(error) = control
+            .emit(LiveOutput::new(
+                LiveOutputStream::System,
+                format!(
+                    "node {} starts a new conversation: {reason}",
+                    driver_invocation.node.reference.node.as_str()
+                ),
+            )?)
+            .await
+        {
+            lease.finish(false).await;
+            return Err(error);
+        }
+    }
     let driver_result = runtime.driver.run(driver_invocation, control).await;
     match driver_result {
         Ok(outcome) => {

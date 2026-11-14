@@ -51,6 +51,7 @@ impl CleanupFixture {
         let state = Arc::new(ProductionCapsuleState {
             environment: EnvironmentProcesses::default(),
             restored_delivery_run_id: OnceLock::new(),
+            conversation_restore: OnceLock::new(),
             endpoint: OnceLock::from(Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
                 IdleRunner,
             )))),

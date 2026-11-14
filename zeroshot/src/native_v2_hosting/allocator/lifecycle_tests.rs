@@ -679,6 +679,7 @@ async fn environment_hooks_prepare_private_homes_without_starting_scripts() {
         recovery_path: root.child("recovery.json"),
         delivery_run_id: run_id.clone(),
         restored_delivery_run_id: OnceLock::new(),
+        conversation_restore: OnceLock::new(),
         inherited_retained_workspace: false,
         host_owned_workspace: false,
         process_pool: Mutex::new(None),

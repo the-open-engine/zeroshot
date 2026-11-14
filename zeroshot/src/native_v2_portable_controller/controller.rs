@@ -20,6 +20,7 @@ use crate::native_v2_platform::{
     ExclusiveControllerClaim, NativeV2PlatformController,
 };
 use crate::native_v2_contract::AdmittedRun;
+use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, CheckpointRestoreSelection};
 use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
 use crate::v2_run_ledger::RunLedger;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
@@ -266,6 +267,10 @@ impl PortableRunController {
                         self.inner.wait_runtime_settled(&self.run_id),
                     )
                     .await;
+                } else {
+                    // Success is durable before checkpoint GC. Keep the process alive until its
+                    // runtime finishes deleting the lineage's private conversation files.
+                    self.inner.wait_runtime_settled(&self.run_id).await;
                 }
                 return Ok(());
             }
@@ -431,8 +436,21 @@ where
         .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     require_not_stopping(prepared)?;
     runtime.execution_seed = execution_seed;
-    seed_predecessor_history(bootstrap, &mut runtime).await?;
+    let conversation_restore = seed_predecessor_history(bootstrap, &mut runtime)
+        .await?
+        .or_else(|| bootstrap.checkpoint.clone());
     let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
+    if let Some(selection) = conversation_restore {
+        let restored = crate::native_v2_supervisor::checkpoints::restore_checkpoint_conversations(
+            &selection,
+            prepared.stopping.clone(),
+        )
+        .await;
+        runtime
+            .runner
+            .restore_conversations(&runtime.execution_seed, restored)
+            .await;
+    }
     Ok(PreparedRuntime {
         runtime: Some(runtime),
         workspace_identity: Some(workspace_identity),
@@ -443,9 +461,9 @@ where
 async fn seed_predecessor_history(
     bootstrap: &PortableControllerBootstrap,
     runtime: &mut PortableRuntime,
-) -> Result<(), PortableControllerError> {
+) -> Result<Option<CheckpointRestore>, PortableControllerError> {
     let Some(predecessor) = &bootstrap.predecessor else {
-        return Ok(());
+        return Ok(None);
     };
     let root = bootstrap
         .storage
@@ -457,7 +475,8 @@ async fn seed_predecessor_history(
         .get(predecessor)
         .await?
         .ok_or(PortableControllerError::DurableIdentity)?;
-    if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended {
+    let conversation_restore = if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+    {
         if bootstrap.checkpoint.is_some() {
             return Err(PortableControllerError::Bootstrap);
         }
@@ -475,7 +494,13 @@ async fn seed_predecessor_history(
             None => crate::native_v2_supervisor::continuation_history(&stored.snapshot),
         }
         .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
-    }
+        Some(CheckpointRestore {
+            directory: root.join(predecessor.as_str()).join("checkpoints"),
+            selection: CheckpointRestoreSelection::Continue,
+        })
+    } else {
+        None
+    };
     let mut after = None;
     loop {
         let page = crate::v2_run_ledger::vectors::list_full(
@@ -515,7 +540,7 @@ async fn seed_predecessor_history(
     )? {
         runtime.vector_seed.push(vector);
     }
-    Ok(())
+    Ok(conversation_restore)
 }
 
 fn require_not_stopping(prepared: &PreparedControllerStart) -> Result<(), PortableControllerError> {

@@ -268,9 +268,19 @@ for the whole outer group, including nested groups and all mapped batches; indiv
 writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.
 
 Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
-resolve credentials again. The successor does not inherit provider sessions, secrets, or previous
-token usage. A sudden target loss can precede the next snapshot boundary, so the last writer may run
-again. Local workspaces must be idle while they are restored.
+resolve credentials again. A selected checkpoint or the continuation of a suspended run restores each supported
+`node_instance` agent's provider conversation as it was at the checkpoint, even on another machine
+or without restoring workspace files. A failed-run restart and every `execution`-scoped agent start
+new conversations. Successor token usage starts at zero.
+
+Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
+They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
+in workspace exports. Restoring replaces only that conversation's provider files, including later
+turns still present locally. If files are missing, oversized, unsupported or cannot be restored,
+the node starts a new conversation and the run log explains why. A failed continued turn follows
+the node's attempt policy; its retry starts a new conversation. A sudden target loss can precede
+the next snapshot boundary, so the last writer may run again. Local workspaces must be idle while
+they are restored.
 
 A local checkpoint resume restores the snapshot before any agent starts. That preparation may take
 up to 10 minutes. For larger workspaces or slower disks, set `ZEROSHOT_PREPARATION_TIMEOUT` to a
@@ -324,7 +334,8 @@ the workspace lock. A graph that finishes first keeps its ordinary result. Runni
 `suspendRequested` after the request. Suspension requires workspace checkpoints.
 
 `zeroshot resume RUN_ID` creates a successor (`runId`, `resumedFrom`) beginning at the held-back
-node. It preserves workspace changes made after suspension and starts fresh provider sessions.
+node. It preserves workspace changes made after suspension and restores captured node-instance provider
+conversations from the checkpoint. Unsupported or missing conversations start new with a system log.
 A suspended wait can continue only from its reported `wait.dueAt`, and continues after the wait.
 No timer starts successors locally or on a direct target. Selected checkpoint resume and
 `--discard-workspace-changes` are refused for suspended runs. The predecessor stays suspended and

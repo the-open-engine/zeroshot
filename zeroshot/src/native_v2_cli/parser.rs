@@ -186,6 +186,8 @@ enum UtilityCommand {
     ForceStop(RunSelectorArgs),
 
     /// Request suspension at the next checkpoint and print status immediately.
+    ///
+    /// Its successor continues captured node-instance conversations from that checkpoint.
     Suspend(RunSelectorArgs),
 
     /// Answer a suspended request from a JSON file and start its successor.
@@ -220,7 +222,10 @@ enum UtilityCommand {
     ///
     /// Target runs reuse the saved environment definition: setup runs before workspace restore,
     /// then startup runs before the graph. Startup must tolerate existing workspace files.
-    /// Services, Docker state, and agent conversations are not restored.
+    /// Checkpoint continuations and suspended successors restore captured node-instance agent
+    /// conversations. Missing or unsupported conversations start new with a system log explanation.
+    /// Restarts and execution-scoped agents start new conversations. Token usage starts at zero.
+    /// Services and Docker state are not restored.
     Resume(RunResumeArgs),
 
     /// List one page of a run's saved workspace checkpoints as JSON.

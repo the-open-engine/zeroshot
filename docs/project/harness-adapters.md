@@ -161,3 +161,39 @@ replaced through overrides. Existing permission inspection only decides whether 
 local bypass. Native initialization failure must preserve its bounded redacted cause and node/harness
 identity, settle cleanup, and skip automatic correction/fallback/retry. Focused process/session tests
 must cover forwarding, isolation, reuse and rejection for every registered adapter.
+
+## Conversations in checkpoints
+
+Adapters select only the files belonging to a conversation identifier and name their destination
+under the successor's provider session storage. They never parse, split, redact or pack transcripts.
+Capture includes the identifier and Codex's cumulative usage baseline as one complete unit, bounded
+at 1 GiB. Shared checkpoint code copies raw files beside `workspace` into the lineage's deduplicating
+repository and rejects absolute, escaping or symlink names. Checkpoint deletion removes this data.
+Credentials and configuration are excluded. Missing or unsupported material starts a new conversation
+with a node-naming system log; a failed continued turn follows the existing attempt policy and its
+retry starts new. Capture never fails a checkpoint.
+Codex requires a cumulative usage report covering the latest turn; absent usage, including an older
+baseline retained for in-run accounting, makes that checkpoint's conversation unavailable. Contained
+restores assign provider ownership to restored files and their ancestors through the private session
+home, so nested storage stays accessible without changing any directory outside that home.
+
+Codex captures its named rollout under `sessions`; Claude captures the named transcript and its
+session directory under the cwd-specific project, relocating them for the successor workspace. Pi
+captures the named session JSONL. Copilot captures the named `session-state` directory. Hermes
+captures the private node's SQLite database and sidecars. Contained OpenCode captures its exclusively
+owned database; **local OpenCode's shared database is not captured** because it contains other
+conversations. Local OpenCode and older OpenCode layouts without the private SQLite database
+therefore take the logged fallback.
+
+Hosts implementing workspace storage receive `ConversationFiles` through the optional
+`RunCheckpointStore::retain_conversations` method. Store the files outside the exported workspace
+and return the selected files through `restored_conversations`, including continuations with a
+retained workspace. Existing hosts compile without these methods and use the logged fallback.
+
+The ignored `checkpoint_conversation_live_contract` in `harnesses/live_tests.rs` verifies recall
+after capture and restoration with a new workspace and empty provider storage. OpenCode uses its
+private home layout; its shared local storage is covered by the fallback regression. It uses the
+same `ZEROSHOT_LIVE_*` settings as the shared live contract. The local CLI's ignored
+`live_suspended_conversation` checks recall through the built binary. Before release, run the adapter
+contract with each supported CLI/provider lane; the owner also checks suspended hosted runs after
+installing conversation storage support on that host.

@@ -7,6 +7,7 @@
 
 #[path = "command.rs"]
 mod command;
+mod conversation;
 pub(crate) mod memory;
 mod native_config;
 #[path = "permissions.rs"]
@@ -288,13 +289,8 @@ impl ClaudeAdapter {
         turn.session
             .core
             .ensure_live(ClosedSessionFailure::SessionLost)?;
-        let attempt = self
-            .execute_turn(
-                turn,
-                state.resume_id.as_deref(),
-                state.response.prompt().to_owned(),
-            )
-            .await?;
+        let prompt = state.response.prompt().to_owned();
+        let attempt = self.execute_turn(turn, state, prompt).await?;
         if let Err(diagnostic) = observe_session(&mut state.resume_id, attempt_session_id(&attempt))
         {
             return Ok(ClaudeTurnAdvance::ProviderFailure {
@@ -308,10 +304,40 @@ impl ClaudeAdapter {
     async fn execute_turn(
         &self,
         turn: &ClaudeTurn<'_>,
-        resume_id: Option<&str>,
+        state: &mut ClaudeRunState,
         prompt: String,
     ) -> Result<ClaudeAttempt, NodeRunnerError> {
-        let mut process = match self.open_turn_process(turn, resume_id).await? {
+        let files = match turn.execution.prepare(turn.control).await {
+            Ok(files) => files,
+            Err(error) => match turn_process::failed_before_start(error, turn.control)? {
+                ClaudeProcessStart::Failed(attempt) => return Ok(attempt),
+                ClaudeProcessStart::Ready(_) => {
+                    unreachable!("a preparation failure cannot be ready")
+                }
+            },
+        };
+        let environment = self.process_environment(&turn.invocation.environment, files.home())?;
+        let home = environment
+            .get("CLAUDE_CONFIG_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(&environment["HOME"]).join(".claude"));
+        if let Some(metadata) = turn
+            .session
+            .core
+            .prepare_conversation(
+                Some(conversation::layout(home, &self.workspace)),
+                turn.invocation,
+                turn.control,
+            )
+            .await?
+        {
+            state.resume_id = Some(metadata.id.clone());
+            *turn.session.resume_id.lock().await = Some(metadata.id);
+        }
+        let mut process = match self
+            .open_turn_process(turn, state.resume_id.as_deref(), files)
+            .await?
+        {
             ClaudeProcessStart::Ready(process) => process,
             ClaudeProcessStart::Failed(attempt) => return Ok(attempt),
         };
@@ -327,11 +353,8 @@ impl ClaudeAdapter {
         &self,
         turn: &ClaudeTurn<'_>,
         resume_id: Option<&str>,
+        files: std::sync::Arc<ProviderExecutionFiles>,
     ) -> Result<ClaudeProcessStart, NodeRunnerError> {
-        let files = match turn.execution.prepare(turn.control).await {
-            Ok(process) => process,
-            Err(error) => return turn_process::failed_before_start(error, turn.control),
-        };
         let mut command = self.command(
             turn,
             ClaudeCommandInput {

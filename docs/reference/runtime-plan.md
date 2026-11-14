@@ -153,11 +153,15 @@ declarations, never inferences: they are validated at admission, emitted only in
 retains the provider's own limit; a present value must be a positive integer in the stated range.
 
 `sessionScope` controls provider conversation state. It does not change graph state or bindings.
+Checkpoint continuations and suspended successors restore supported `node_instance` conversations
+from the checkpoint, including their provider files. Restarts and `execution` scopes start fresh.
+Missing, oversized or unrestorable conversations start new with a system log explanation. Successor
+usage begins at zero; Active Memory delivery sets begin fresh even for a continued conversation.
 
-| `sessionScope`  | Behavior                                                                                      |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| `execution`     | Opens a fresh provider session for each execution of the node, then closes it                 |
-| `node_instance` | Reuses one session when the same node instance runs again, for example across loop iterations |
+| `sessionScope`  | Behavior                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| `execution`     | Opens a fresh provider session for each execution of the node, then closes it                           |
+| `node_instance` | Reuses one conversation across node-instance visits and supported checkpoint or suspended continuations |
 
 If a reused session is lost, zeroshot fails that execution with `session_lost`. It does not open a
 replacement session silently.
