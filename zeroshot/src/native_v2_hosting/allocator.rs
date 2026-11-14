@@ -5,7 +5,7 @@ use environment_hooks::HookContext;
 mod identity_leases;
 mod lanes;
 mod lifecycle;
-use lifecycle::AllocationTurns;
+use lifecycle::{AllocationTurns, transfer_workspace_ownership};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
@@ -1284,34 +1284,6 @@ fn retained_claim_failure(
         Ok(()) => RetainedAllocationUnavailable::Settled(CapsuleAllocationUnavailable::Runtime),
         Err(error) => RetainedAllocationUnavailable::CleanupUnconfirmed(error),
     }
-}
-
-fn transfer_workspace_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        if unsafe { libc::geteuid() } != 0 {
-            return Ok(());
-        }
-        transfer_entry_ownership(path, uid, gid)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (path, uid, gid);
-        Err(std::io::Error::other(
-            "hosted workspace ownership transfer requires Linux",
-        ))
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn transfer_entry_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        for entry in std::fs::read_dir(path)? {
-            transfer_entry_ownership(&entry?.path(), uid, gid)?;
-        }
-    }
-    std::os::unix::fs::lchown(path, Some(uid), Some(gid))
 }
 
 pub(super) fn recovery_path(root: &Path, run_id: &RunId) -> PathBuf {

@@ -461,7 +461,42 @@ async fn request_workspace_fixture(enabled: bool, expired: bool) -> CheckoutFixt
             );
     let runtime:RuntimePlan=serde_json::from_value(json!({"harness":"codex","provider":"openai","size":"small","activeMemory":{"repository":false,"graph":false},"nodes":{"approval":{"kind":"request"}}})).assert_value();
     let mut request = submission(runtime, &fixture._repository.main_revision, "host-request");
-    request.graph=serde_json::from_value(json!({"profile":"openengine.graph.full/v1","initialInput":{"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}},"policy":{"policy":"policy.native-v2@1","default":"deny"},"root":{"kind":"seq","name":"root","state":{"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}},"children":[{"kind":"verifier","name":"approval","worker":crate::native_v2_request::ASK_WORKER_REF,"input":crate::native_v2_request::input_schema().assert_value(),"output":{"kind":"record","fields":{}},"signals":{"decision":["approved","rejected"]},"diagnostic":crate::native_v2_wait::diagnostic_schema().assert_value(),"inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],"writeBindings":[],"attempts":1},{"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}],"promotedStatePaths":[]}})).assert_value();
+    request.graph = serde_json::from_value(json!({
+        "profile": "openengine.graph.full/v1",
+        "initialInput": {
+            "kind": "record",
+            "fields": {"text": {"required": true, "type": {"kind": "string"}}}
+        },
+        "policy": {"policy": "policy.native-v2@1", "default": "deny"},
+        "root": {
+            "kind": "seq",
+            "name": "root",
+            "state": {
+                "kind": "record",
+                "fields": {"text": {"required": true, "type": {"kind": "string"}}}
+            },
+            "children": [
+                {
+                    "kind": "verifier",
+                    "name": "approval",
+                    "worker": crate::native_v2_request::ASK_WORKER_REF,
+                    "input": crate::native_v2_request::input_schema().assert_value(),
+                    "output": {"kind": "record", "fields": {}},
+                    "signals": {"decision": ["approved", "rejected"]},
+                    "diagnostic": crate::native_v2_wait::diagnostic_schema().assert_value(),
+                    "inputBindings": [{
+                        "target": ["text"],
+                        "value": {"source": "state", "path": ["text"]}
+                    }],
+                    "writeBindings": [],
+                    "attempts": 1
+                },
+                {"kind": "succeed", "name": "done", "output": {"kind": "null"}, "bindings": []}
+            ],
+            "promotedStatePaths": []
+        }
+    }))
+    .assert_value();
     request.initial_input = json!({"text":"Approve?"});
     fixture.admitted = admit(request).await;
     fixture

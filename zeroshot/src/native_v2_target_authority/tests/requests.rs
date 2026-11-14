@@ -98,7 +98,42 @@ impl TargetControllerFactory for RequestFactory {
 async fn seed(ledger: &FakeRunLedger, index: u8, expired: bool) -> RunId {
     let id = RunId::new(format!("018f5e78-7f95-7c22-8d98-3f15af20c9{index:02}"));
     let mut submission = request().submission;
-    submission.graph=serde_json::from_value(json!({"profile":"openengine.graph.full/v1","initialInput":{"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}},"policy":{"policy":"policy.native-v2@1","default":"deny"},"root":{"kind":"seq","name":"root","state":{"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}},"children":[{"kind":"verifier","name":"approval","worker":crate::native_v2_request::ASK_WORKER_REF,"input":crate::native_v2_request::input_schema().assert_value(),"output":{"kind":"record","fields":{}},"signals":{"decision":["approved","rejected"]},"diagnostic":crate::native_v2_wait::diagnostic_schema().assert_value(),"inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],"writeBindings":[],"attempts":1},{"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}],"promotedStatePaths":[]}})).assert_value();
+    submission.graph = serde_json::from_value(json!({
+        "profile": "openengine.graph.full/v1",
+        "initialInput": {
+            "kind": "record",
+            "fields": {"text": {"required": true, "type": {"kind": "string"}}}
+        },
+        "policy": {"policy": "policy.native-v2@1", "default": "deny"},
+        "root": {
+            "kind": "seq",
+            "name": "root",
+            "state": {
+                "kind": "record",
+                "fields": {"text": {"required": true, "type": {"kind": "string"}}}
+            },
+            "children": [
+                {
+                    "kind": "verifier",
+                    "name": "approval",
+                    "worker": crate::native_v2_request::ASK_WORKER_REF,
+                    "input": crate::native_v2_request::input_schema().assert_value(),
+                    "output": {"kind": "record", "fields": {}},
+                    "signals": {"decision": ["approved", "rejected"]},
+                    "diagnostic": crate::native_v2_wait::diagnostic_schema().assert_value(),
+                    "inputBindings": [{
+                        "target": ["text"],
+                        "value": {"source": "state", "path": ["text"]}
+                    }],
+                    "writeBindings": [],
+                    "attempts": 1
+                },
+                {"kind": "succeed", "name": "done", "output": {"kind": "null"}, "bindings": []}
+            ],
+            "promotedStatePaths": []
+        }
+    }))
+    .assert_value();
     submission.initial_input = json!({"text":"Approve?"});
     submission.runtime=serde_json::from_value(json!({"harness":"codex","provider":"openai","size":"small","nodes":{"approval":{"kind":"request"}}})).assert_value();
     let admitted = NativeV2Admission
