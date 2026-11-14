@@ -1,6 +1,7 @@
 //! Typed transport-neutral Cluster Protocol client.
 
 mod multiplex;
+mod ndjson_frame;
 mod ndjson_pump;
 mod ndjson_subscription;
 
@@ -43,10 +44,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot, Mutex};
-use tokio_stream::StreamExt;
-use tokio_util::codec::{FramedRead, LinesCodec};
 
 #[derive(Debug, Error)]
 pub enum TransportError {
@@ -132,6 +131,7 @@ where
 }
 
 /// Full request responses include node input, its authored contract and JSON-RPC framing.
+/// Unpaged run inventories apply this bound per status; other replies use it per frame.
 /// The server's incoming request-frame bound remains independent.
 const MAX_FRAME_BYTES: usize = openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES + 1024;
 
@@ -251,8 +251,8 @@ async fn run_pump<R, W>(
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin + Send,
 {
-    let mut lines = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
-    while let Some(Ok(line)) = lines.next().await {
+    let mut reader = BufReader::new(reader);
+    while let Ok(Some(line)) = ndjson_frame::next_line(&mut reader).await {
         multiplex::route_and_maybe_cancel(line, &pending, &subscriptions, &sink).await;
     }
     multiplex::finish_pump(&pending, &subscriptions);

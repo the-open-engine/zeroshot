@@ -419,10 +419,30 @@ async fn owned_storage_is_opt_in_and_returns_the_successors_exact_vector_record(
 
 fn request_continuation(expired: bool) -> crate::native_v2_hosting::HostedRequestContinuation {
     use openengine_cluster_protocol::{RunResumeFrom, UnixTimestampMillis};
-    crate::native_v2_hosting::HostedRequestContinuation {
-        suspension:serde_json::from_value(json!({"reason":"request","node":"approval","createdAt":1000,"request":{"id":"question","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":if expired {1001} else {UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION).assert_value().get()}}})).assert_value(),
-        from:if expired {RunResumeFrom::Expiry{}} else {serde_json::from_value(json!({"kind":"answer","signals":{"decision":"approved"},"output":{}})).assert_value()},
-    }
+    let suspension = serde_json::from_value(json!({
+        "reason": "request", "node": "approval", "createdAt": 1000,
+        "request": {
+            "id": "question", "text": "Approve?",
+            "signals": {"decision": ["approved", "rejected"]},
+            "output": {"kind": "record", "fields": {}},
+            "expiresAt": if expired {1001} else {openengine_cluster_protocol::MAX_SAFE_GENERATION}
+        }
+    }))
+    .assert_value();
+    let from = if expired {
+        RunResumeFrom::Expiry {}
+    } else {
+        serde_json::from_value(
+            json!({"kind":"answer","signals":{"decision":"approved"},"output":{}}),
+        )
+        .assert_value()
+    };
+    crate::native_v2_hosting::HostedRequestContinuation::validate(
+        suspension,
+        from,
+        UnixTimestampMillis::new(if expired { 1001 } else { 1000 }).assert_value(),
+    )
+    .assert_value()
 }
 fn pending_request() -> crate::full_v1_reducer::DurableExecution {
     use crate::full_v1_reducer::*;
@@ -441,9 +461,15 @@ fn pending_request() -> crate::full_v1_reducer::DurableExecution {
     }
 }
 async fn request_workspace_fixture(enabled: bool, expired: bool) -> CheckoutFixture {
+    request_workspace_with_continuation(enabled, request_continuation(expired)).await
+}
+async fn request_workspace_with_continuation(
+    enabled: bool,
+    continuation: crate::native_v2_hosting::HostedRequestContinuation,
+) -> CheckoutFixture {
     let storage = ExternalStorage {
         resumed_from: Some(RunId::new("request-source")),
-        request: Some(request_continuation(expired)),
+        request: Some(continuation),
         history: vec![pending_request()],
         ..Default::default()
     };
@@ -550,42 +576,97 @@ async fn external_request_history_settles_before_any_worker_and_requires_indepen
 #[test]
 fn host_can_validate_shape_and_deadline_before_starting_anything() {
     use openengine_cluster_protocol::{RunResumeFrom, UnixTimestampMillis};
-    let mut continuation = request_continuation(false);
-    if let openengine_cluster_protocol::RunSuspension::Request { request, .. } =
-        &mut continuation.suspension
-    {
+    use crate::native_v2_hosting::HostedRequestContinuation;
+    let mut suspension = request_continuation(false).suspension;
+    if let openengine_cluster_protocol::RunSuspension::Request { request, .. } = &mut suspension {
         request.expires_at = UnixTimestampMillis::new(2000).assert_value();
     }
-    assert!(
-        continuation
-            .validate(UnixTimestampMillis::new(1999).assert_value())
-            .is_ok()
-    );
-    assert!(
-        continuation
-            .validate(UnixTimestampMillis::new(2000).assert_value())
-            .unwrap_err()
-            .contains("expired")
-    );
-    continuation.from = RunResumeFrom::Expiry {};
-    assert!(
-        continuation
-            .validate(UnixTimestampMillis::new(1999).assert_value())
-            .is_err()
-    );
-    assert!(
-        continuation
-            .validate(UnixTimestampMillis::new(2000).assert_value())
-            .is_ok()
-    );
-    continuation.from = RunResumeFrom::Answer {
-        signals: Default::default(),
-        output: json!({}),
+    let answer: RunResumeFrom = serde_json::from_value(json!({
+        "kind":"answer", "signals":{"decision":"approved"}, "output":{}
+    }))
+    .assert_value();
+    let validate = |from, now| {
+        HostedRequestContinuation::validate(
+            suspension.clone(),
+            from,
+            UnixTimestampMillis::new(now).assert_value(),
+        )
     };
+    assert!(validate(answer.clone(), 1999).is_ok());
+    assert!(validate(answer, 2000).unwrap_err().contains("expired"));
+    assert!(validate(RunResumeFrom::Expiry {}, 1999).is_err());
+    assert!(validate(RunResumeFrom::Expiry {}, 2000).is_ok());
     assert!(
-        continuation
-            .validate(UnixTimestampMillis::new(1999).assert_value())
-            .unwrap_err()
-            .contains("signals.decision")
+        validate(
+            RunResumeFrom::Answer {
+                signals: Default::default(),
+                output: json!({}),
+            },
+            1999
+        )
+        .unwrap_err()
+        .contains("signals.decision")
     );
+}
+
+#[tokio::test]
+async fn accepted_host_resolution_survives_restoration_after_deadline_or_on_a_behind_clock() {
+    use crate::full_v1_reducer::DurableExecutionState;
+    use crate::native_v2_hosting::HostedRequestContinuation;
+    use openengine_cluster_protocol::{
+        RunResumeFrom, RunSuspension, UnixTimestampMillis, WorkerOutcome, WorkerErrorCode,
+    };
+    for expired in [false, true] {
+        let mut suspension = request_continuation(false).suspension;
+        let deadline = if expired {
+            openengine_cluster_protocol::MAX_SAFE_GENERATION
+        } else {
+            1001
+        };
+        if let RunSuspension::Request { request, .. } = &mut suspension {
+            request.expires_at = UnixTimestampMillis::new(deadline).assert_value();
+        }
+        let now = crate::native_v2_runner::current_timestamp().get();
+        assert_eq!(
+            now < deadline,
+            expired,
+            "fixture must straddle the allocator's clock"
+        );
+        let from = if expired {
+            RunResumeFrom::Expiry {}
+        } else {
+            serde_json::from_value(
+                json!({"kind":"answer","signals":{"decision":"approved"},"output":{}}),
+            )
+            .assert_value()
+        };
+        let accepted = HostedRequestContinuation::validate(
+            suspension,
+            from,
+            UnixTimestampMillis::new(if expired { deadline } else { 1000 }).assert_value(),
+        )
+        .assert_value();
+        let fixture = request_workspace_with_continuation(true, accepted).await;
+        let capsule = fixture.allocate().await.assert_value();
+        let DurableExecutionState::Settled { outcome, .. } = &capsule.execution_seed[0].state
+        else {
+            panic!("host's accepted resolution was not settled");
+        };
+        assert!(matches!(
+            (outcome, expired),
+            (WorkerOutcome::Verifier { .. }, false)
+                | (
+                    WorkerOutcome::Error {
+                        code: WorkerErrorCode::Timeout,
+                        ..
+                    },
+                    true
+                )
+        ));
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+            .await
+            .assert_value();
+    }
 }

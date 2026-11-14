@@ -145,3 +145,65 @@ async fn ndjson_inbox_show_reads_a_full_request_larger_than_one_mebibyte() {
     assert_eq!(result.request.text.len(), 1024 * 1024 - 1024);
     peer.await.assert_value();
 }
+
+#[tokio::test]
+async fn ndjson_run_inventory_above_one_frame_preserves_other_pending_calls() {
+    use openengine_cluster_client::NdjsonTransport;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (client_stream, server_stream) = tokio::io::duplex(4096);
+    let (read, write) = tokio::io::split(client_stream);
+    let client = ClusterClient::new(NdjsonTransport::new(read, write));
+    let peer = tokio::spawn(async move {
+        let mut server = BufReader::new(server_stream);
+        let mut requests = Vec::new();
+        for _ in 0..2 {
+            let mut line = String::new();
+            server.read_line(&mut line).await.assert_value();
+            requests.push(serde_json::from_str::<Value>(&line).assert_value());
+        }
+        let mut status = response("run/status");
+        status["status"] = json!({"phase":"suspended","reason":"request","node":"approval",
+            "createdAt":1000,"metadata":{},"request":{"id":"question","text":"x".repeat(750_000),
+            "signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000}});
+        requests.sort_by_key(|request| request["method"].as_str().assert_value().to_owned());
+        for request in requests {
+            let result = if request["method"] == "run/list" {
+                let runs: Vec<_> = (0..5)
+                    .map(|index| {
+                        let mut row = status.clone();
+                        row["runId"] = json!(format!("run-{index}"));
+                        row
+                    })
+                    .collect();
+                json!({"runs":runs})
+            } else {
+                response("run/status")
+            };
+            let frame =
+                json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string() + "\n";
+            if request["method"] == "run/list" {
+                assert!(
+                    frame.len() > openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES + 1024
+                );
+            }
+            server
+                .get_mut()
+                .write_all(frame.as_bytes())
+                .await
+                .assert_value();
+        }
+    });
+    let (listed, status) = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        tokio::join!(
+            client.run_list(RunListParams::default()),
+            client.run_status(RunStatusParams {
+                run_id: RunId::new("run-1")
+            })
+        )
+    })
+    .await
+    .assert_value();
+    assert_eq!(listed.assert_value().runs.len(), 5);
+    assert_eq!(status.assert_value().run_id, RunId::new("run-1"));
+    peer.await.assert_value();
+}

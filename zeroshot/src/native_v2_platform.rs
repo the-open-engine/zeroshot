@@ -512,6 +512,27 @@ impl NativeV2PlatformController {
         execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
         vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     ) -> Result<(), NativeV2PlatformError> {
+        let run_id = &stored.snapshot.run_id;
+        let expiry = vector_seed.iter().find_map(|vector| match &vector.content {
+            openengine_cluster_protocol::RunVectorContent::Expiry { request_id }
+                if &vector.run_id == run_id =>
+            {
+                Some(request_id)
+            }
+            _ => None,
+        });
+        let node = expiry.and_then(|id| {
+            vector_seed.iter().find_map(|vector| match &vector.content {
+                openengine_cluster_protocol::RunVectorContent::Request { node, .. }
+                    if &vector.id == id =>
+                {
+                    Some(node)
+                }
+                _ => None,
+            })
+        });
+        let mut log =
+            crate::native_v2_supervisor::logging::request_expiry_log(&execution_seed, node)?;
         for vector in vector_seed {
             stored.snapshot = self
                 .ledger
@@ -520,10 +541,13 @@ impl NativeV2PlatformController {
                 .snapshot;
         }
         if !execution_seed.is_empty() {
-            let events = execution_seed
-                .into_iter()
-                .map(|execution| RunEvent::PriorExecution { execution })
-                .collect();
+            let mut events = Vec::new();
+            for execution in execution_seed {
+                if matches!(&log, Some((id, _)) if *id == execution.execution) {
+                    events.extend(log.take().map(|(_, event)| event));
+                }
+                events.push(RunEvent::PriorExecution { execution });
+            }
             stored.snapshot = self
                 .ledger
                 .append(&stored.snapshot.run_id, events)
@@ -1244,7 +1268,21 @@ impl NativeV2PlatformController {
             .validate()
             .map_err(|error| NativeV2PlatformError::InvalidRequest(error.to_string()))?;
         let mut requests = Vec::new();
-        for summary in self.list().await? {
+        let mut runs = self.list().await?;
+        runs.sort_by(|a, b| a.run_id.as_str().cmp(b.run_id.as_str()));
+        let now = (self
+            .allocator
+            .suspension_policy()
+            .unwrap_or_default()
+            .wall_clock)();
+        for summary in runs {
+            if params
+                .after
+                .as_ref()
+                .is_some_and(|after| summary.run_id.as_str() <= after.as_str())
+            {
+                continue;
+            }
             let stored = self
                 .ledger
                 .get(&summary.run_id)
@@ -1264,13 +1302,14 @@ impl NativeV2PlatformController {
             {
                 continue;
             }
-            requests.push(
-                self.inbox_show(openengine_cluster_protocol::InboxShowParams {
-                    run_id: summary.run_id,
-                })
-                .await?
-                .into(),
-            );
+            if let Some(entry) = stored.snapshot.suspension.as_ref().and_then(|suspension| {
+                crate::v2_run_ledger::inbox::entry(summary.run_id, suspension, now)
+            }) {
+                requests.push(entry);
+            }
+            if requests.len() > params.limit.unwrap_or(50) as usize {
+                break;
+            }
         }
         Ok(crate::v2_run_ledger::inbox::page(requests, params)?)
     }

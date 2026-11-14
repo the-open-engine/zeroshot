@@ -56,23 +56,24 @@ pub trait HostedWorkspaceStorage: Send + Sync {
     ) -> Result<HostedWorkspace, CheckpointError>;
 }
 
-/// Host-authenticated selection paired with the request checkpoint's pending history.
-/// Hosts can call `validate` before allocating a workspace; late answers are rejected.
+/// Host-accepted resolution paired with the request checkpoint's pending history.
+/// Validate on the owning host's clock before allocation; restoration never rechecks expiry.
 #[derive(Clone, Debug)]
 pub struct HostedRequestContinuation {
-    pub suspension: openengine_cluster_protocol::RunSuspension,
-    pub from: openengine_cluster_protocol::RunResumeFrom,
+    pub(super) suspension: openengine_cluster_protocol::RunSuspension,
+    resolution: openengine_cluster_protocol::RequestResolution,
 }
 
 impl HostedRequestContinuation {
+    /// Validate the shape and deadline once, at the owning host's acceptance boundary.
     pub fn validate(
-        &self,
+        suspension: openengine_cluster_protocol::RunSuspension,
+        from: openengine_cluster_protocol::RunResumeFrom,
         now: openengine_cluster_protocol::UnixTimestampMillis,
-    ) -> Result<openengine_cluster_protocol::RequestResolution, String> {
-        let resolution =
-            crate::native_v2_request::resolve(&self.suspension, Some(&self.from), now)?;
+    ) -> Result<Self, String> {
+        let resolution = crate::native_v2_request::resolve(&suspension, Some(&from), now)?;
         if matches!(
-            self.from,
+            from,
             openengine_cluster_protocol::RunResumeFrom::Answer { .. }
         ) && matches!(
             resolution,
@@ -80,16 +81,15 @@ impl HostedRequestContinuation {
         ) {
             return Err("request expired; select expiry explicitly".to_owned());
         }
-        Ok(resolution)
+        Ok(Self {
+            suspension,
+            resolution,
+        })
     }
 }
 
 impl HostedWorkspace {
-    pub(crate) fn settle_request(
-        &mut self,
-        run_id: &RunId,
-        now: openengine_cluster_protocol::UnixTimestampMillis,
-    ) -> Result<(), String> {
+    pub(crate) fn settle_request(&mut self, run_id: &RunId) -> Result<(), String> {
         use crate::full_v1_reducer::{DurableExecutionState, HistoryPosition};
         use crate::native_v2_request::RequestOutcome;
         let Some(continuation) = self.request_continuation.take() else {
@@ -98,7 +98,7 @@ impl HostedWorkspace {
         if self.resumed_from.is_none() {
             return Err("request continuation requires its predecessor".to_owned());
         }
-        let resolution = continuation.validate(now)?;
+        let resolution = continuation.resolution;
         let openengine_cluster_protocol::RunSuspension::Request { node, request, .. } =
             continuation.suspension
         else {

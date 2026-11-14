@@ -261,6 +261,9 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
     let next = old["successorRunId"].as_str().assert_value();
     fixture.wait_succeeded(next, "finish").await;
     assert_eq!(fixture.invocation_count(), 1);
+    let logs = fixture.output(&["logs", next], "finish").await;
+    assert_success(&logs, "expiry logs");
+    assert_eq!(String::from_utf8_lossy(&logs.stdout).matches("Node approval failed: timeout").count(), 1);
     let vectors = fixture.json(&["vectors", next], "finish").await;
     assert_eq!(vectors["vectors"][0]["kind"], "request");
     assert!(

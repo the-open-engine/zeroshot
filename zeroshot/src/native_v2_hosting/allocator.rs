@@ -498,18 +498,8 @@ impl ProductionCapsuleAllocator {
                     return Err(CapsuleAllocationUnavailable::Runtime);
                 }
             }
-            let now = openengine_cluster_protocol::UnixTimestampMillis::new(
-                u64::try_from(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
-                        .as_millis(),
-                )
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
-            )
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
             prepared
-                .settle_request(request.run_id, now)
+                .settle_request(request.run_id)
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
             transfer_retained_workspace_to_writer(request.workspace, request.process_pool)?;
             if let Some(id) = &prepared.delivery_run_id {

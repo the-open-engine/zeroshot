@@ -5,6 +5,33 @@ use openengine_cluster_protocol::{
     RunVectorContent, RunVectorsParams, UnixTimestampMillis,
 };
 
+/// A suspended snapshot retains its own request vector's bounded inbox fields.
+pub fn entry(
+    run_id: RunId,
+    suspension: &openengine_cluster_protocol::RunSuspension,
+    now: UnixTimestampMillis,
+) -> Option<InboxEntry> {
+    let openengine_cluster_protocol::RunSuspension::Request {
+        node,
+        created_at,
+        request,
+    } = suspension
+    else {
+        return None;
+    };
+    Some(InboxEntry {
+        run_id,
+        node: node.clone(),
+        created_at: *created_at,
+        expires_at: request.expires_at,
+        state: if now >= request.expires_at {
+            RequestState::Expired
+        } else {
+            RequestState::Pending
+        },
+    })
+}
+
 pub async fn show(
     ledger: &dyn RunLedger,
     run_id: &RunId,

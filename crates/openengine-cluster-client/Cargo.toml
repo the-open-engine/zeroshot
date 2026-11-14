@@ -22,9 +22,7 @@ thiserror.workspace = true
 rustls.workspace = true
 rustls-native-certs.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
-tokio-util.workspace = true
 webpki-roots = { workspace = true, optional = true }
 
 [dev-dependencies]

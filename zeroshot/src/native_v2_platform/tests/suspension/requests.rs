@@ -2,7 +2,7 @@ use super::*;
 use openengine_cluster_protocol::{
     InboxListParams, RequestState, RunResumeFrom, RunVectorSummaryContent,
 };
-fn ask_request() -> RunSubmitParams {
+pub(super) fn ask_request() -> RunSubmitParams {
     let mut request = wait_request();
     let mut graph = serde_json::to_value(&request.submission.graph).assert_value();
     let schema =
@@ -22,7 +22,10 @@ fn ask_request() -> RunSubmitParams {
     request.submission.initial_input = json!({"text":"Approve?"});
     request
 }
-async fn suspended(controller: &NativeV2PlatformController, run: &RunId) -> RunStatusResult {
+pub(super) async fn suspended(
+    controller: &NativeV2PlatformController,
+    run: &RunId,
+) -> RunStatusResult {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let status = controller
@@ -134,6 +137,18 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
         assert_eq!(
             driver.starts.load(Ordering::SeqCst),
             if expired { 0 } else { 1 }
+        );
+        let tail = ledger
+            .snapshot_and_tail(&params.successor_run_id, None)
+            .await
+            .assert_value();
+        assert_eq!(
+            tail.events
+                .iter()
+                .filter(|record| matches!(&record.event,
+            RunEvent::SafeLog { line, .. } if line.as_str() == "Node wait failed: timeout"))
+                .count(),
+            usize::from(expired)
         );
         let old = controller
             .inbox_show(RunStatusParams {

@@ -53,6 +53,45 @@ pub(super) fn completion_events(
     Ok(events)
 }
 
+/// Log only the request newly expired by this successor, before importing its settlement.
+/// Older failures in checkpoint history already belong to their original run's logs.
+pub(crate) fn request_expiry_log(
+    history: &[crate::full_v1_reducer::DurableExecution],
+    node: Option<&openengine_cluster_protocol::NodeName>,
+) -> Result<Option<(crate::native_v2_contract::ExecutionId, RunEvent)>, RunLedgerError> {
+    use crate::full_v1_reducer::DurableExecutionState;
+    let Some(node) = node else {
+        return Ok(None);
+    };
+    let execution = history
+        .iter()
+        .filter(|execution| &execution.occurrence.node == node)
+        .max_by_key(|execution| execution.dispatch_position)
+        .ok_or(RunLedgerError::InvalidEvent(
+            "expired request execution is missing",
+        ))?;
+    let DurableExecutionState::Settled { outcome, .. } = &execution.state else {
+        return Err(RunLedgerError::InvalidEvent(
+            "expired request is not settled",
+        ));
+    };
+    if *outcome
+        != WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Timeout)
+    {
+        return Err(RunLedgerError::InvalidEvent(
+            "expired request is not timeout",
+        ));
+    }
+    // Imported executions belong to checkpoint history, not this run's live execution map.
+    // Keep the node identity in the error line without claiming a new dispatch.
+    let log = error_log(
+        None,
+        format!("Node {} failed: timeout", node.as_str()),
+        Some(FailureDiagnosticKind::Failure),
+    )?;
+    Ok(Some((execution.execution, log)))
+}
+
 pub(super) fn node_failure_log(
     reference: &ExecutionRef,
     outcome: &WorkerOutcome,

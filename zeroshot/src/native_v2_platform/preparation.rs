@@ -224,10 +224,22 @@ impl NativeV2PlatformController {
                     }
                     None => crate::native_v2_supervisor::continuation_history(&source.snapshot)?,
                 };
+                let expiry = match (&resume.request_resolution, &source.snapshot.suspension) {
+                    (
+                        Some(openengine_cluster_protocol::RequestResolution::Expiry {}),
+                        Some(openengine_cluster_protocol::RunSuspension::Request { node, .. }),
+                    ) => Some(node),
+                    _ => None,
+                };
+                let mut log =
+                    crate::native_v2_supervisor::logging::request_expiry_log(&history, expiry)?;
                 for execution in history {
-                    self.ledger
-                        .append(run_id, vec![RunEvent::PriorExecution { execution }])
-                        .await?;
+                    let mut events = Vec::new();
+                    if matches!(&log, Some((id, _)) if *id == execution.execution) {
+                        events.extend(log.take().map(|(_, event)| event));
+                    }
+                    events.push(RunEvent::PriorExecution { execution });
+                    self.ledger.append(run_id, events).await?;
                 }
             }
             if let Some(resolution) = &resume.request_resolution {

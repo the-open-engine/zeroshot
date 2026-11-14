@@ -643,7 +643,17 @@ impl NativeV2CliBackend for LocalCliBackend {
             .validate()
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         let mut requests = Vec::new();
-        for status in self.list_local().await?.runs {
+        let mut runs = self.list_local().await?.runs;
+        runs.sort_by(|a, b| a.run_id.as_str().cmp(b.run_id.as_str()));
+        let now = crate::native_v2_runner::current_timestamp();
+        for status in runs {
+            if params
+                .after
+                .as_ref()
+                .is_some_and(|after| status.run_id.as_str() <= after.as_str())
+            {
+                continue;
+            }
             if !matches!(
                 status.status,
                 openengine_cluster_protocol::RunStatus::Suspended {
@@ -654,16 +664,16 @@ impl NativeV2CliBackend for LocalCliBackend {
             {
                 continue;
             }
-            requests.push(
-                self.inbox_show(
-                    None,
-                    openengine_cluster_protocol::InboxShowParams {
-                        run_id: status.run_id,
-                    },
-                )
-                .await?
-                .into(),
-            );
+            if let openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } =
+                &status.status
+                && let Some(entry) =
+                    crate::v2_run_ledger::inbox::entry(status.run_id, suspension, now)
+            {
+                requests.push(entry);
+            }
+            if requests.len() > params.limit.unwrap_or(50) as usize {
+                break;
+            }
         }
         crate::v2_run_ledger::inbox::page(requests, params).map_err(vector_error)
     }

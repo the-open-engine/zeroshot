@@ -684,6 +684,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   successor. Request, answer and expiry vectors retain full content through show and inheritance;
   bounded list summaries omit text, schemas and answers. Inbox reads project only each run's own
   request vectors, never apply expiry, and exclude continued or stopped runs from pending pages.
+  Pending inbox pages use the durable suspension's request projection, apply cursors before reads,
+  and stop after one lookahead row without scanning vector histories.
   Discovery adds `request_ask` (`openengine.request-ask/v1`); hosted inbox routes live in the separate
   `hosted_inbox` (`openengine.hosted-inbox/v1`) extension. Host-owned storage has an independent,
   default-off request opt-in beside suspension. Direct and local controllers enable requests.
@@ -1039,8 +1041,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `ProductionHostingConfig` can accept host-owned `HostedWorkspaceStorage`; the allocator invokes
   it after source checkout and before provider dispatch, imports settled prerequisites, and
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
+  Host-owned request continuations validate once against the owning host's clock before allocation;
+  their opaque accepted resolution survives restoration without another deadline decision.
 - Durable observation replay reads bounded ledger pages that fit every accepted event, including
   combined request text and contracts, and retains its scan cursor across pages.
+  NDJSON run inventories bound each typed status separately from the response envelope, so several
+  full requests fit one unpaged reply without removing bounds from other frames.
   Vector pagination resolves entry IDs through a per-run ledger index, including inherited IDs,
   then replays after that cursor instead of reading earlier pages again.
   Local CLI inspection opens finished runs directly from read-only ledgers. Vector list and show
@@ -1091,7 +1097,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   On a request node it is the deadline from creation, defaults to 7 days, and permits at most 30 days.
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
   The supervisor records every node error in durable logs before settlement, including handled
-  failures and retries. Summaries preserve error code, typed refusal/malformed reason, elapsed time,
+  failures and retries. A newly applied request expiry logs its timeout in the successor before
+  importing that execution's settlement; inherited historical failures are not logged again.
+  Summaries preserve error code, typed refusal/malformed reason, elapsed time,
   and returned error context; provider adapters redact credentials before returning details. Runtime failure,
   runtime loss/restart reconciliation, and force-stop use the same completion/log transaction for
   every active node. Failed runs also retain a run-wide error log, including before graph dispatch.
