@@ -639,6 +639,8 @@
       
         
       
+        
+      
     
     
     
@@ -811,6 +813,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/ask-a-person/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask a person
   
 
     
@@ -1810,6 +1840,67 @@
       
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-answer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot answer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="zeroshot inbox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox help
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -3574,6 +3665,67 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#zeroshot-answer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot answer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="zeroshot inbox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot-inbox-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeroshot inbox help
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot-vectors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3733,20 +3885,22 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>  attach             Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>  force-stop         Force a run to stop and write the result as JSON
 <a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>  suspend            Request suspension at the next checkpoint and print status immediately
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>  vectors            Read one page of the run vector record, or show an entry in full
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>  resume             Start a successor from a failed or suspended run's retained workspace
-<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>  checkpoints        List one page of a run's saved workspace checkpoints as JSON
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
-<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>  discard-workspace  Permanently delete an abandoned retained target workspace
-<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>  version            Print the Zeroshot version
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>  help               Print this message or the help of the given subcommand(s)
-<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>
-<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>Options:
-<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>  -V, --version
-<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>          Print the Zeroshot version
-<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>
-<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>  -h, --help
-<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>  answer             Answer a suspended request from a JSON file and start its successor
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>  inbox              Read pending requests or show the request made by one run. Reads never apply expiry
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>  vectors            Read one page of the run vector record, or show an entry in full
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>  resume             Start a successor from a failed or suspended run's retained workspace
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>  checkpoints        List one page of a run's saved workspace checkpoints as JSON
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>  discard-workspace  Permanently delete an abandoned retained target workspace
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>  version            Print the Zeroshot version
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>  help               Print this message or the help of the given subcommand(s)
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>Options:
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>  -V, --version
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>          Print the Zeroshot version
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>  -h, --help
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-memory"><code>zeroshot memory</code><a class="headerlink" href="#zeroshot-memory" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Initialize local Active Memory through the canonical skill
@@ -5028,198 +5182,282 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-54-15" name="__codelineno-54-15" href="#__codelineno-54-15"></a>  -h, --help
 <a id="__codelineno-54-16" name="__codelineno-54-16" href="#__codelineno-54-16"></a>          Print help (see a summary with '-h')
 </code></pre></div>
-<h3 id="zeroshot-vectors"><code>zeroshot vectors</code><a class="headerlink" href="#zeroshot-vectors" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>Read one page of the run vector record, or show an entry in full
+<h3 id="zeroshot-answer"><code>zeroshot answer</code><a class="headerlink" href="#zeroshot-answer" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>Answer a suspended request from a JSON file and start its successor.
 <a id="__codelineno-55-2" name="__codelineno-55-2" href="#__codelineno-55-2"></a>
-<a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a>Usage: zeroshot vectors [OPTIONS] [RUN_ID]
-<a id="__codelineno-55-4" name="__codelineno-55-4" href="#__codelineno-55-4"></a>       zeroshot vectors &lt;COMMAND&gt;
-<a id="__codelineno-55-5" name="__codelineno-55-5" href="#__codelineno-55-5"></a>
-<a id="__codelineno-55-6" name="__codelineno-55-6" href="#__codelineno-55-6"></a>Commands:
-<a id="__codelineno-55-7" name="__codelineno-55-7" href="#__codelineno-55-7"></a>  show  Read one vector entry in full
-<a id="__codelineno-55-8" name="__codelineno-55-8" href="#__codelineno-55-8"></a>  help  Print this message or the help of the given subcommand(s)
-<a id="__codelineno-55-9" name="__codelineno-55-9" href="#__codelineno-55-9"></a>
-<a id="__codelineno-55-10" name="__codelineno-55-10" href="#__codelineno-55-10"></a>Arguments:
-<a id="__codelineno-55-11" name="__codelineno-55-11" href="#__codelineno-55-11"></a>  [RUN_ID]
-<a id="__codelineno-55-12" name="__codelineno-55-12" href="#__codelineno-55-12"></a>          Public run ID
-<a id="__codelineno-55-13" name="__codelineno-55-13" href="#__codelineno-55-13"></a>
-<a id="__codelineno-55-14" name="__codelineno-55-14" href="#__codelineno-55-14"></a>Options:
-<a id="__codelineno-55-15" name="__codelineno-55-15" href="#__codelineno-55-15"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-55-16" name="__codelineno-55-16" href="#__codelineno-55-16"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a>The file contains signals and output matching the request's declared shape. At or after the deadline, the command starts the timeout successor and exits 1 naming it. The retained workspace is used as it is; earlier nodes and agent sessions do not restart.
+<a id="__codelineno-55-4" name="__codelineno-55-4" href="#__codelineno-55-4"></a>
+<a id="__codelineno-55-5" name="__codelineno-55-5" href="#__codelineno-55-5"></a>Usage: zeroshot answer [OPTIONS] --input &lt;FILE&gt; &lt;RUN_ID&gt;
+<a id="__codelineno-55-6" name="__codelineno-55-6" href="#__codelineno-55-6"></a>
+<a id="__codelineno-55-7" name="__codelineno-55-7" href="#__codelineno-55-7"></a>Arguments:
+<a id="__codelineno-55-8" name="__codelineno-55-8" href="#__codelineno-55-8"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-55-9" name="__codelineno-55-9" href="#__codelineno-55-9"></a>          Public run ID
+<a id="__codelineno-55-10" name="__codelineno-55-10" href="#__codelineno-55-10"></a>
+<a id="__codelineno-55-11" name="__codelineno-55-11" href="#__codelineno-55-11"></a>Options:
+<a id="__codelineno-55-12" name="__codelineno-55-12" href="#__codelineno-55-12"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-55-13" name="__codelineno-55-13" href="#__codelineno-55-13"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-55-14" name="__codelineno-55-14" href="#__codelineno-55-14"></a>
+<a id="__codelineno-55-15" name="__codelineno-55-15" href="#__codelineno-55-15"></a>      --input &lt;FILE&gt;
+<a id="__codelineno-55-16" name="__codelineno-55-16" href="#__codelineno-55-16"></a>          JSON answer file, containing signals and output. No standard-input form
 <a id="__codelineno-55-17" name="__codelineno-55-17" href="#__codelineno-55-17"></a>
-<a id="__codelineno-55-18" name="__codelineno-55-18" href="#__codelineno-55-18"></a>      --after &lt;ID&gt;
-<a id="__codelineno-55-19" name="__codelineno-55-19" href="#__codelineno-55-19"></a>          List entries strictly after this vector ID
+<a id="__codelineno-55-18" name="__codelineno-55-18" href="#__codelineno-55-18"></a>      --forward-gh-token
+<a id="__codelineno-55-19" name="__codelineno-55-19" href="#__codelineno-55-19"></a>          Forward GH_TOKEN with a named-target continuation
 <a id="__codelineno-55-20" name="__codelineno-55-20" href="#__codelineno-55-20"></a>
-<a id="__codelineno-55-21" name="__codelineno-55-21" href="#__codelineno-55-21"></a>      --limit &lt;COUNT&gt;
-<a id="__codelineno-55-22" name="__codelineno-55-22" href="#__codelineno-55-22"></a>          Maximum entries to return, from 1 to 100. Defaults to 50
-<a id="__codelineno-55-23" name="__codelineno-55-23" href="#__codelineno-55-23"></a>
-<a id="__codelineno-55-24" name="__codelineno-55-24" href="#__codelineno-55-24"></a>  -h, --help
-<a id="__codelineno-55-25" name="__codelineno-55-25" href="#__codelineno-55-25"></a>          Print help
+<a id="__codelineno-55-21" name="__codelineno-55-21" href="#__codelineno-55-21"></a>  -h, --help
+<a id="__codelineno-55-22" name="__codelineno-55-22" href="#__codelineno-55-22"></a>          Print help (see a summary with '-h')
+</code></pre></div>
+<h3 id="zeroshot-inbox"><code>zeroshot inbox</code><a class="headerlink" href="#zeroshot-inbox" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-56-1" name="__codelineno-56-1" href="#__codelineno-56-1"></a>Read pending requests or show the request made by one run. Reads never apply expiry
+<a id="__codelineno-56-2" name="__codelineno-56-2" href="#__codelineno-56-2"></a>
+<a id="__codelineno-56-3" name="__codelineno-56-3" href="#__codelineno-56-3"></a>Usage: zeroshot inbox &lt;COMMAND&gt;
+<a id="__codelineno-56-4" name="__codelineno-56-4" href="#__codelineno-56-4"></a>
+<a id="__codelineno-56-5" name="__codelineno-56-5" href="#__codelineno-56-5"></a>Commands:
+<a id="__codelineno-56-6" name="__codelineno-56-6" href="#__codelineno-56-6"></a>  list  List one JSON page in run ID order. Expired requests remain until continued or stopped
+<a id="__codelineno-56-7" name="__codelineno-56-7" href="#__codelineno-56-7"></a>  show  Show this run's own request, shape, deadline, state and successor
+<a id="__codelineno-56-8" name="__codelineno-56-8" href="#__codelineno-56-8"></a>  help  Print this message or the help of the given subcommand(s)
+<a id="__codelineno-56-9" name="__codelineno-56-9" href="#__codelineno-56-9"></a>
+<a id="__codelineno-56-10" name="__codelineno-56-10" href="#__codelineno-56-10"></a>Options:
+<a id="__codelineno-56-11" name="__codelineno-56-11" href="#__codelineno-56-11"></a>  -h, --help
+<a id="__codelineno-56-12" name="__codelineno-56-12" href="#__codelineno-56-12"></a>          Print help
+</code></pre></div>
+<h4 id="zeroshot-inbox-list"><code>zeroshot inbox list</code><a class="headerlink" href="#zeroshot-inbox-list" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-57-1" name="__codelineno-57-1" href="#__codelineno-57-1"></a>List one JSON page in run ID order. Expired requests remain until continued or stopped
+<a id="__codelineno-57-2" name="__codelineno-57-2" href="#__codelineno-57-2"></a>
+<a id="__codelineno-57-3" name="__codelineno-57-3" href="#__codelineno-57-3"></a>Usage: zeroshot inbox list [OPTIONS]
+<a id="__codelineno-57-4" name="__codelineno-57-4" href="#__codelineno-57-4"></a>
+<a id="__codelineno-57-5" name="__codelineno-57-5" href="#__codelineno-57-5"></a>Options:
+<a id="__codelineno-57-6" name="__codelineno-57-6" href="#__codelineno-57-6"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-57-7" name="__codelineno-57-7" href="#__codelineno-57-7"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-57-8" name="__codelineno-57-8" href="#__codelineno-57-8"></a>
+<a id="__codelineno-57-9" name="__codelineno-57-9" href="#__codelineno-57-9"></a>      --after &lt;RUN_ID&gt;
+<a id="__codelineno-57-10" name="__codelineno-57-10" href="#__codelineno-57-10"></a>
+<a id="__codelineno-57-11" name="__codelineno-57-11" href="#__codelineno-57-11"></a>
+<a id="__codelineno-57-12" name="__codelineno-57-12" href="#__codelineno-57-12"></a>      --limit &lt;COUNT&gt;
+<a id="__codelineno-57-13" name="__codelineno-57-13" href="#__codelineno-57-13"></a>
+<a id="__codelineno-57-14" name="__codelineno-57-14" href="#__codelineno-57-14"></a>
+<a id="__codelineno-57-15" name="__codelineno-57-15" href="#__codelineno-57-15"></a>  -h, --help
+<a id="__codelineno-57-16" name="__codelineno-57-16" href="#__codelineno-57-16"></a>          Print help
+</code></pre></div>
+<h4 id="zeroshot-inbox-show"><code>zeroshot inbox show</code><a class="headerlink" href="#zeroshot-inbox-show" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-58-1" name="__codelineno-58-1" href="#__codelineno-58-1"></a>Show this run's own request, shape, deadline, state and successor
+<a id="__codelineno-58-2" name="__codelineno-58-2" href="#__codelineno-58-2"></a>
+<a id="__codelineno-58-3" name="__codelineno-58-3" href="#__codelineno-58-3"></a>Usage: zeroshot inbox show [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-58-4" name="__codelineno-58-4" href="#__codelineno-58-4"></a>
+<a id="__codelineno-58-5" name="__codelineno-58-5" href="#__codelineno-58-5"></a>Arguments:
+<a id="__codelineno-58-6" name="__codelineno-58-6" href="#__codelineno-58-6"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-58-7" name="__codelineno-58-7" href="#__codelineno-58-7"></a>          Public run ID
+<a id="__codelineno-58-8" name="__codelineno-58-8" href="#__codelineno-58-8"></a>
+<a id="__codelineno-58-9" name="__codelineno-58-9" href="#__codelineno-58-9"></a>Options:
+<a id="__codelineno-58-10" name="__codelineno-58-10" href="#__codelineno-58-10"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-58-11" name="__codelineno-58-11" href="#__codelineno-58-11"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-58-12" name="__codelineno-58-12" href="#__codelineno-58-12"></a>
+<a id="__codelineno-58-13" name="__codelineno-58-13" href="#__codelineno-58-13"></a>  -h, --help
+<a id="__codelineno-58-14" name="__codelineno-58-14" href="#__codelineno-58-14"></a>          Print help
+</code></pre></div>
+<h4 id="zeroshot-inbox-help"><code>zeroshot inbox help</code><a class="headerlink" href="#zeroshot-inbox-help" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-59-1" name="__codelineno-59-1" href="#__codelineno-59-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-59-2" name="__codelineno-59-2" href="#__codelineno-59-2"></a>
+<a id="__codelineno-59-3" name="__codelineno-59-3" href="#__codelineno-59-3"></a>Usage: zeroshot inbox help [COMMAND]
+<a id="__codelineno-59-4" name="__codelineno-59-4" href="#__codelineno-59-4"></a>
+<a id="__codelineno-59-5" name="__codelineno-59-5" href="#__codelineno-59-5"></a>Commands:
+<a id="__codelineno-59-6" name="__codelineno-59-6" href="#__codelineno-59-6"></a>  list  List one JSON page in run ID order. Expired requests remain until continued or stopped
+<a id="__codelineno-59-7" name="__codelineno-59-7" href="#__codelineno-59-7"></a>  show  Show this run's own request, shape, deadline, state and successor
+<a id="__codelineno-59-8" name="__codelineno-59-8" href="#__codelineno-59-8"></a>  help  Print this message or the help of the given subcommand(s)
+</code></pre></div>
+<h3 id="zeroshot-vectors"><code>zeroshot vectors</code><a class="headerlink" href="#zeroshot-vectors" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-60-1" name="__codelineno-60-1" href="#__codelineno-60-1"></a>Read one page of the run vector record, or show an entry in full
+<a id="__codelineno-60-2" name="__codelineno-60-2" href="#__codelineno-60-2"></a>
+<a id="__codelineno-60-3" name="__codelineno-60-3" href="#__codelineno-60-3"></a>Usage: zeroshot vectors [OPTIONS] [RUN_ID]
+<a id="__codelineno-60-4" name="__codelineno-60-4" href="#__codelineno-60-4"></a>       zeroshot vectors &lt;COMMAND&gt;
+<a id="__codelineno-60-5" name="__codelineno-60-5" href="#__codelineno-60-5"></a>
+<a id="__codelineno-60-6" name="__codelineno-60-6" href="#__codelineno-60-6"></a>Commands:
+<a id="__codelineno-60-7" name="__codelineno-60-7" href="#__codelineno-60-7"></a>  show  Read one vector entry in full
+<a id="__codelineno-60-8" name="__codelineno-60-8" href="#__codelineno-60-8"></a>  help  Print this message or the help of the given subcommand(s)
+<a id="__codelineno-60-9" name="__codelineno-60-9" href="#__codelineno-60-9"></a>
+<a id="__codelineno-60-10" name="__codelineno-60-10" href="#__codelineno-60-10"></a>Arguments:
+<a id="__codelineno-60-11" name="__codelineno-60-11" href="#__codelineno-60-11"></a>  [RUN_ID]
+<a id="__codelineno-60-12" name="__codelineno-60-12" href="#__codelineno-60-12"></a>          Public run ID
+<a id="__codelineno-60-13" name="__codelineno-60-13" href="#__codelineno-60-13"></a>
+<a id="__codelineno-60-14" name="__codelineno-60-14" href="#__codelineno-60-14"></a>Options:
+<a id="__codelineno-60-15" name="__codelineno-60-15" href="#__codelineno-60-15"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-60-16" name="__codelineno-60-16" href="#__codelineno-60-16"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-60-17" name="__codelineno-60-17" href="#__codelineno-60-17"></a>
+<a id="__codelineno-60-18" name="__codelineno-60-18" href="#__codelineno-60-18"></a>      --after &lt;ID&gt;
+<a id="__codelineno-60-19" name="__codelineno-60-19" href="#__codelineno-60-19"></a>          List entries strictly after this vector ID
+<a id="__codelineno-60-20" name="__codelineno-60-20" href="#__codelineno-60-20"></a>
+<a id="__codelineno-60-21" name="__codelineno-60-21" href="#__codelineno-60-21"></a>      --limit &lt;COUNT&gt;
+<a id="__codelineno-60-22" name="__codelineno-60-22" href="#__codelineno-60-22"></a>          Maximum entries to return, from 1 to 100. Defaults to 50
+<a id="__codelineno-60-23" name="__codelineno-60-23" href="#__codelineno-60-23"></a>
+<a id="__codelineno-60-24" name="__codelineno-60-24" href="#__codelineno-60-24"></a>  -h, --help
+<a id="__codelineno-60-25" name="__codelineno-60-25" href="#__codelineno-60-25"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-vectors-show"><code>zeroshot vectors show</code><a class="headerlink" href="#zeroshot-vectors-show" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-56-1" name="__codelineno-56-1" href="#__codelineno-56-1"></a>Read one vector entry in full
-<a id="__codelineno-56-2" name="__codelineno-56-2" href="#__codelineno-56-2"></a>
-<a id="__codelineno-56-3" name="__codelineno-56-3" href="#__codelineno-56-3"></a>Usage: zeroshot vectors show [OPTIONS] &lt;RUN_ID&gt; &lt;ID&gt;
-<a id="__codelineno-56-4" name="__codelineno-56-4" href="#__codelineno-56-4"></a>
-<a id="__codelineno-56-5" name="__codelineno-56-5" href="#__codelineno-56-5"></a>Arguments:
-<a id="__codelineno-56-6" name="__codelineno-56-6" href="#__codelineno-56-6"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-56-7" name="__codelineno-56-7" href="#__codelineno-56-7"></a>          Public run ID
-<a id="__codelineno-56-8" name="__codelineno-56-8" href="#__codelineno-56-8"></a>
-<a id="__codelineno-56-9" name="__codelineno-56-9" href="#__codelineno-56-9"></a>  &lt;ID&gt;
-<a id="__codelineno-56-10" name="__codelineno-56-10" href="#__codelineno-56-10"></a>          Opaque vector ID returned by vectors
-<a id="__codelineno-56-11" name="__codelineno-56-11" href="#__codelineno-56-11"></a>
-<a id="__codelineno-56-12" name="__codelineno-56-12" href="#__codelineno-56-12"></a>Options:
-<a id="__codelineno-56-13" name="__codelineno-56-13" href="#__codelineno-56-13"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-56-14" name="__codelineno-56-14" href="#__codelineno-56-14"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-56-15" name="__codelineno-56-15" href="#__codelineno-56-15"></a>
-<a id="__codelineno-56-16" name="__codelineno-56-16" href="#__codelineno-56-16"></a>  -h, --help
-<a id="__codelineno-56-17" name="__codelineno-56-17" href="#__codelineno-56-17"></a>          Print help
-</code></pre></div>
-<h4 id="zeroshot-vectors-help"><code>zeroshot vectors help</code><a class="headerlink" href="#zeroshot-vectors-help" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-57-1" name="__codelineno-57-1" href="#__codelineno-57-1"></a>Print this message or the help of the given subcommand(s)
-<a id="__codelineno-57-2" name="__codelineno-57-2" href="#__codelineno-57-2"></a>
-<a id="__codelineno-57-3" name="__codelineno-57-3" href="#__codelineno-57-3"></a>Usage: zeroshot vectors help [COMMAND]
-<a id="__codelineno-57-4" name="__codelineno-57-4" href="#__codelineno-57-4"></a>
-<a id="__codelineno-57-5" name="__codelineno-57-5" href="#__codelineno-57-5"></a>Commands:
-<a id="__codelineno-57-6" name="__codelineno-57-6" href="#__codelineno-57-6"></a>  show  Read one vector entry in full
-<a id="__codelineno-57-7" name="__codelineno-57-7" href="#__codelineno-57-7"></a>  help  Print this message or the help of the given subcommand(s)
-</code></pre></div>
-<h3 id="zeroshot-resume"><code>zeroshot resume</code><a class="headerlink" href="#zeroshot-resume" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-58-1" name="__codelineno-58-1" href="#__codelineno-58-1"></a>Start a successor from a failed or suspended run's retained workspace.
-<a id="__codelineno-58-2" name="__codelineno-58-2" href="#__codelineno-58-2"></a>
-<a id="__codelineno-58-3" name="__codelineno-58-3" href="#__codelineno-58-3"></a>A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
-<a id="__codelineno-58-4" name="__codelineno-58-4" href="#__codelineno-58-4"></a>
-<a id="__codelineno-58-5" name="__codelineno-58-5" href="#__codelineno-58-5"></a>Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarts and execution-scoped agents start new conversations. Token usage starts at zero. Services and Docker state are not restored.
-<a id="__codelineno-58-6" name="__codelineno-58-6" href="#__codelineno-58-6"></a>
-<a id="__codelineno-58-7" name="__codelineno-58-7" href="#__codelineno-58-7"></a>Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
-<a id="__codelineno-58-8" name="__codelineno-58-8" href="#__codelineno-58-8"></a>
-<a id="__codelineno-58-9" name="__codelineno-58-9" href="#__codelineno-58-9"></a>Arguments:
-<a id="__codelineno-58-10" name="__codelineno-58-10" href="#__codelineno-58-10"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-58-11" name="__codelineno-58-11" href="#__codelineno-58-11"></a>          Public run ID
-<a id="__codelineno-58-12" name="__codelineno-58-12" href="#__codelineno-58-12"></a>
-<a id="__codelineno-58-13" name="__codelineno-58-13" href="#__codelineno-58-13"></a>Options:
-<a id="__codelineno-58-14" name="__codelineno-58-14" href="#__codelineno-58-14"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-58-15" name="__codelineno-58-15" href="#__codelineno-58-15"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-58-16" name="__codelineno-58-16" href="#__codelineno-58-16"></a>
-<a id="__codelineno-58-17" name="__codelineno-58-17" href="#__codelineno-58-17"></a>      --from-checkpoint &lt;ID&gt;
-<a id="__codelineno-58-18" name="__codelineno-58-18" href="#__codelineno-58-18"></a>          Restore this checkpoint and continue from its saved graph boundary
-<a id="__codelineno-58-19" name="__codelineno-58-19" href="#__codelineno-58-19"></a>
-<a id="__codelineno-58-20" name="__codelineno-58-20" href="#__codelineno-58-20"></a>      --discard-workspace-changes
-<a id="__codelineno-58-21" name="__codelineno-58-21" href="#__codelineno-58-21"></a>          Allow a local checkpoint restore to replace the current checkout.
-<a id="__codelineno-58-22" name="__codelineno-58-22" href="#__codelineno-58-22"></a>
-<a id="__codelineno-58-23" name="__codelineno-58-23" href="#__codelineno-58-23"></a>          The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Attached HEAD, branch tips, commits, and Git configuration are kept. Restoring files does not recover published ancestry after a history rewrite. Named targets restore their own retained copy and do not accept this flag.
-<a id="__codelineno-58-24" name="__codelineno-58-24" href="#__codelineno-58-24"></a>
-<a id="__codelineno-58-25" name="__codelineno-58-25" href="#__codelineno-58-25"></a>      --forward-gh-token
-<a id="__codelineno-58-26" name="__codelineno-58-26" href="#__codelineno-58-26"></a>          Send the GH_TOKEN from this shell with the resume.
-<a id="__codelineno-58-27" name="__codelineno-58-27" href="#__codelineno-58-27"></a>
-<a id="__codelineno-58-28" name="__codelineno-58-28" href="#__codelineno-58-28"></a>          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
-<a id="__codelineno-58-29" name="__codelineno-58-29" href="#__codelineno-58-29"></a>
-<a id="__codelineno-58-30" name="__codelineno-58-30" href="#__codelineno-58-30"></a>  -h, --help
-<a id="__codelineno-58-31" name="__codelineno-58-31" href="#__codelineno-58-31"></a>          Print help (see a summary with '-h')
-</code></pre></div>
-<h3 id="zeroshot-checkpoints"><code>zeroshot checkpoints</code><a class="headerlink" href="#zeroshot-checkpoints" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-59-1" name="__codelineno-59-1" href="#__codelineno-59-1"></a>List one page of a run's saved workspace checkpoints as JSON.
-<a id="__codelineno-59-2" name="__codelineno-59-2" href="#__codelineno-59-2"></a>
-<a id="__codelineno-59-3" name="__codelineno-59-3" href="#__codelineno-59-3"></a>Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. Local restores also require --discard-workspace-changes and keep attached HEAD and branch tips. When nextAfter is present, pass it as --after to fetch the next page. Local reads exit 0 and include controller.state and controller.observedAt when an unfinished run's controller is unavailable, without changing recorded state.
-<a id="__codelineno-59-4" name="__codelineno-59-4" href="#__codelineno-59-4"></a>
-<a id="__codelineno-59-5" name="__codelineno-59-5" href="#__codelineno-59-5"></a>Usage: zeroshot checkpoints [OPTIONS] &lt;RUN_ID&gt;
-<a id="__codelineno-59-6" name="__codelineno-59-6" href="#__codelineno-59-6"></a>
-<a id="__codelineno-59-7" name="__codelineno-59-7" href="#__codelineno-59-7"></a>Arguments:
-<a id="__codelineno-59-8" name="__codelineno-59-8" href="#__codelineno-59-8"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-59-9" name="__codelineno-59-9" href="#__codelineno-59-9"></a>          Public run ID
-<a id="__codelineno-59-10" name="__codelineno-59-10" href="#__codelineno-59-10"></a>
-<a id="__codelineno-59-11" name="__codelineno-59-11" href="#__codelineno-59-11"></a>Options:
-<a id="__codelineno-59-12" name="__codelineno-59-12" href="#__codelineno-59-12"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-59-13" name="__codelineno-59-13" href="#__codelineno-59-13"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-59-14" name="__codelineno-59-14" href="#__codelineno-59-14"></a>
-<a id="__codelineno-59-15" name="__codelineno-59-15" href="#__codelineno-59-15"></a>      --after &lt;ID&gt;
-<a id="__codelineno-59-16" name="__codelineno-59-16" href="#__codelineno-59-16"></a>          List checkpoints strictly after this checkpoint ID
-<a id="__codelineno-59-17" name="__codelineno-59-17" href="#__codelineno-59-17"></a>
-<a id="__codelineno-59-18" name="__codelineno-59-18" href="#__codelineno-59-18"></a>      --limit &lt;COUNT&gt;
-<a id="__codelineno-59-19" name="__codelineno-59-19" href="#__codelineno-59-19"></a>          Maximum checkpoints to return, from 1 to 100. Defaults to 50
-<a id="__codelineno-59-20" name="__codelineno-59-20" href="#__codelineno-59-20"></a>
-<a id="__codelineno-59-21" name="__codelineno-59-21" href="#__codelineno-59-21"></a>  -h, --help
-<a id="__codelineno-59-22" name="__codelineno-59-22" href="#__codelineno-59-22"></a>          Print help (see a summary with '-h')
-</code></pre></div>
-<h3 id="zeroshot-export-workspace"><code>zeroshot export-workspace</code><a class="headerlink" href="#zeroshot-export-workspace" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-60-1" name="__codelineno-60-1" href="#__codelineno-60-1"></a>Download a retained workspace or selected checkpoint as a tar archive.
-<a id="__codelineno-60-2" name="__codelineno-60-2" href="#__codelineno-60-2"></a>
-<a id="__codelineno-60-3" name="__codelineno-60-3" href="#__codelineno-60-3"></a>Requires an advertised export capability on a named hosted target. The output must not exist, including symlinks. It is published privately only after the entire transfer succeeds. Ctrl-C cancels the download and removes its temporary file. Does not restart the run or extract files.
-<a id="__codelineno-60-4" name="__codelineno-60-4" href="#__codelineno-60-4"></a>
-<a id="__codelineno-60-5" name="__codelineno-60-5" href="#__codelineno-60-5"></a>Usage: zeroshot export-workspace [OPTIONS] --target &lt;NAME&gt; --output &lt;PATH&gt; &lt;RUN_ID&gt;
-<a id="__codelineno-60-6" name="__codelineno-60-6" href="#__codelineno-60-6"></a>
-<a id="__codelineno-60-7" name="__codelineno-60-7" href="#__codelineno-60-7"></a>Arguments:
-<a id="__codelineno-60-8" name="__codelineno-60-8" href="#__codelineno-60-8"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-60-9" name="__codelineno-60-9" href="#__codelineno-60-9"></a>          Public run ID
-<a id="__codelineno-60-10" name="__codelineno-60-10" href="#__codelineno-60-10"></a>
-<a id="__codelineno-60-11" name="__codelineno-60-11" href="#__codelineno-60-11"></a>Options:
-<a id="__codelineno-60-12" name="__codelineno-60-12" href="#__codelineno-60-12"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-60-13" name="__codelineno-60-13" href="#__codelineno-60-13"></a>          Named hosted target, using its existing login or ZEROSHOT_API_KEY authentication
-<a id="__codelineno-60-14" name="__codelineno-60-14" href="#__codelineno-60-14"></a>
-<a id="__codelineno-60-15" name="__codelineno-60-15" href="#__codelineno-60-15"></a>      --from-checkpoint &lt;CHECKPOINT_ID&gt;
-<a id="__codelineno-60-16" name="__codelineno-60-16" href="#__codelineno-60-16"></a>          Export this entry checkpoint instead of the latest retained workspace
-<a id="__codelineno-60-17" name="__codelineno-60-17" href="#__codelineno-60-17"></a>
-<a id="__codelineno-60-18" name="__codelineno-60-18" href="#__codelineno-60-18"></a>      --output &lt;PATH&gt;
-<a id="__codelineno-60-19" name="__codelineno-60-19" href="#__codelineno-60-19"></a>          Explicit destination path for the raw tar archive; must not exist
-<a id="__codelineno-60-20" name="__codelineno-60-20" href="#__codelineno-60-20"></a>
-<a id="__codelineno-60-21" name="__codelineno-60-21" href="#__codelineno-60-21"></a>  -h, --help
-<a id="__codelineno-60-22" name="__codelineno-60-22" href="#__codelineno-60-22"></a>          Print help (see a summary with '-h')
-</code></pre></div>
-<h3 id="zeroshot-discard-workspace"><code>zeroshot discard-workspace</code><a class="headerlink" href="#zeroshot-discard-workspace" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-61-1" name="__codelineno-61-1" href="#__codelineno-61-1"></a>Permanently delete an abandoned retained target workspace
+<div class="highlight"><pre><span></span><code><a id="__codelineno-61-1" name="__codelineno-61-1" href="#__codelineno-61-1"></a>Read one vector entry in full
 <a id="__codelineno-61-2" name="__codelineno-61-2" href="#__codelineno-61-2"></a>
-<a id="__codelineno-61-3" name="__codelineno-61-3" href="#__codelineno-61-3"></a>Usage: zeroshot discard-workspace [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-61-3" name="__codelineno-61-3" href="#__codelineno-61-3"></a>Usage: zeroshot vectors show [OPTIONS] &lt;RUN_ID&gt; &lt;ID&gt;
 <a id="__codelineno-61-4" name="__codelineno-61-4" href="#__codelineno-61-4"></a>
 <a id="__codelineno-61-5" name="__codelineno-61-5" href="#__codelineno-61-5"></a>Arguments:
 <a id="__codelineno-61-6" name="__codelineno-61-6" href="#__codelineno-61-6"></a>  &lt;RUN_ID&gt;
 <a id="__codelineno-61-7" name="__codelineno-61-7" href="#__codelineno-61-7"></a>          Public run ID
 <a id="__codelineno-61-8" name="__codelineno-61-8" href="#__codelineno-61-8"></a>
-<a id="__codelineno-61-9" name="__codelineno-61-9" href="#__codelineno-61-9"></a>Options:
-<a id="__codelineno-61-10" name="__codelineno-61-10" href="#__codelineno-61-10"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-61-11" name="__codelineno-61-11" href="#__codelineno-61-11"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-61-12" name="__codelineno-61-12" href="#__codelineno-61-12"></a>
-<a id="__codelineno-61-13" name="__codelineno-61-13" href="#__codelineno-61-13"></a>  -h, --help
-<a id="__codelineno-61-14" name="__codelineno-61-14" href="#__codelineno-61-14"></a>          Print help
+<a id="__codelineno-61-9" name="__codelineno-61-9" href="#__codelineno-61-9"></a>  &lt;ID&gt;
+<a id="__codelineno-61-10" name="__codelineno-61-10" href="#__codelineno-61-10"></a>          Opaque vector ID returned by vectors
+<a id="__codelineno-61-11" name="__codelineno-61-11" href="#__codelineno-61-11"></a>
+<a id="__codelineno-61-12" name="__codelineno-61-12" href="#__codelineno-61-12"></a>Options:
+<a id="__codelineno-61-13" name="__codelineno-61-13" href="#__codelineno-61-13"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-61-14" name="__codelineno-61-14" href="#__codelineno-61-14"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-61-15" name="__codelineno-61-15" href="#__codelineno-61-15"></a>
+<a id="__codelineno-61-16" name="__codelineno-61-16" href="#__codelineno-61-16"></a>  -h, --help
+<a id="__codelineno-61-17" name="__codelineno-61-17" href="#__codelineno-61-17"></a>          Print help
+</code></pre></div>
+<h4 id="zeroshot-vectors-help"><code>zeroshot vectors help</code><a class="headerlink" href="#zeroshot-vectors-help" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-62-1" name="__codelineno-62-1" href="#__codelineno-62-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-62-2" name="__codelineno-62-2" href="#__codelineno-62-2"></a>
+<a id="__codelineno-62-3" name="__codelineno-62-3" href="#__codelineno-62-3"></a>Usage: zeroshot vectors help [COMMAND]
+<a id="__codelineno-62-4" name="__codelineno-62-4" href="#__codelineno-62-4"></a>
+<a id="__codelineno-62-5" name="__codelineno-62-5" href="#__codelineno-62-5"></a>Commands:
+<a id="__codelineno-62-6" name="__codelineno-62-6" href="#__codelineno-62-6"></a>  show  Read one vector entry in full
+<a id="__codelineno-62-7" name="__codelineno-62-7" href="#__codelineno-62-7"></a>  help  Print this message or the help of the given subcommand(s)
+</code></pre></div>
+<h3 id="zeroshot-resume"><code>zeroshot resume</code><a class="headerlink" href="#zeroshot-resume" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-63-1" name="__codelineno-63-1" href="#__codelineno-63-1"></a>Start a successor from a failed or suspended run's retained workspace.
+<a id="__codelineno-63-2" name="__codelineno-63-2" href="#__codelineno-63-2"></a>
+<a id="__codelineno-63-3" name="__codelineno-63-3" href="#__codelineno-63-3"></a>A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
+<a id="__codelineno-63-4" name="__codelineno-63-4" href="#__codelineno-63-4"></a>
+<a id="__codelineno-63-5" name="__codelineno-63-5" href="#__codelineno-63-5"></a>Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarts and execution-scoped agents start new conversations. Token usage starts at zero. Services and Docker state are not restored.
+<a id="__codelineno-63-6" name="__codelineno-63-6" href="#__codelineno-63-6"></a>
+<a id="__codelineno-63-7" name="__codelineno-63-7" href="#__codelineno-63-7"></a>Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-63-8" name="__codelineno-63-8" href="#__codelineno-63-8"></a>
+<a id="__codelineno-63-9" name="__codelineno-63-9" href="#__codelineno-63-9"></a>Arguments:
+<a id="__codelineno-63-10" name="__codelineno-63-10" href="#__codelineno-63-10"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-63-11" name="__codelineno-63-11" href="#__codelineno-63-11"></a>          Public run ID
+<a id="__codelineno-63-12" name="__codelineno-63-12" href="#__codelineno-63-12"></a>
+<a id="__codelineno-63-13" name="__codelineno-63-13" href="#__codelineno-63-13"></a>Options:
+<a id="__codelineno-63-14" name="__codelineno-63-14" href="#__codelineno-63-14"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-63-15" name="__codelineno-63-15" href="#__codelineno-63-15"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-63-16" name="__codelineno-63-16" href="#__codelineno-63-16"></a>
+<a id="__codelineno-63-17" name="__codelineno-63-17" href="#__codelineno-63-17"></a>      --from-checkpoint &lt;ID&gt;
+<a id="__codelineno-63-18" name="__codelineno-63-18" href="#__codelineno-63-18"></a>          Restore this checkpoint and continue from its saved graph boundary
+<a id="__codelineno-63-19" name="__codelineno-63-19" href="#__codelineno-63-19"></a>
+<a id="__codelineno-63-20" name="__codelineno-63-20" href="#__codelineno-63-20"></a>      --discard-workspace-changes
+<a id="__codelineno-63-21" name="__codelineno-63-21" href="#__codelineno-63-21"></a>          Allow a local checkpoint restore to replace the current checkout.
+<a id="__codelineno-63-22" name="__codelineno-63-22" href="#__codelineno-63-22"></a>
+<a id="__codelineno-63-23" name="__codelineno-63-23" href="#__codelineno-63-23"></a>          The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Attached HEAD, branch tips, commits, and Git configuration are kept. Restoring files does not recover published ancestry after a history rewrite. Named targets restore their own retained copy and do not accept this flag.
+<a id="__codelineno-63-24" name="__codelineno-63-24" href="#__codelineno-63-24"></a>
+<a id="__codelineno-63-25" name="__codelineno-63-25" href="#__codelineno-63-25"></a>      --forward-gh-token
+<a id="__codelineno-63-26" name="__codelineno-63-26" href="#__codelineno-63-26"></a>          Send the GH_TOKEN from this shell with the resume.
+<a id="__codelineno-63-27" name="__codelineno-63-27" href="#__codelineno-63-27"></a>
+<a id="__codelineno-63-28" name="__codelineno-63-28" href="#__codelineno-63-28"></a>          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
+<a id="__codelineno-63-29" name="__codelineno-63-29" href="#__codelineno-63-29"></a>
+<a id="__codelineno-63-30" name="__codelineno-63-30" href="#__codelineno-63-30"></a>  -h, --help
+<a id="__codelineno-63-31" name="__codelineno-63-31" href="#__codelineno-63-31"></a>          Print help (see a summary with '-h')
+</code></pre></div>
+<h3 id="zeroshot-checkpoints"><code>zeroshot checkpoints</code><a class="headerlink" href="#zeroshot-checkpoints" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-64-1" name="__codelineno-64-1" href="#__codelineno-64-1"></a>List one page of a run's saved workspace checkpoints as JSON.
+<a id="__codelineno-64-2" name="__codelineno-64-2" href="#__codelineno-64-2"></a>
+<a id="__codelineno-64-3" name="__codelineno-64-3" href="#__codelineno-64-3"></a>Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. Local restores also require --discard-workspace-changes and keep attached HEAD and branch tips. When nextAfter is present, pass it as --after to fetch the next page. Local reads exit 0 and include controller.state and controller.observedAt when an unfinished run's controller is unavailable, without changing recorded state.
+<a id="__codelineno-64-4" name="__codelineno-64-4" href="#__codelineno-64-4"></a>
+<a id="__codelineno-64-5" name="__codelineno-64-5" href="#__codelineno-64-5"></a>Usage: zeroshot checkpoints [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-64-6" name="__codelineno-64-6" href="#__codelineno-64-6"></a>
+<a id="__codelineno-64-7" name="__codelineno-64-7" href="#__codelineno-64-7"></a>Arguments:
+<a id="__codelineno-64-8" name="__codelineno-64-8" href="#__codelineno-64-8"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-64-9" name="__codelineno-64-9" href="#__codelineno-64-9"></a>          Public run ID
+<a id="__codelineno-64-10" name="__codelineno-64-10" href="#__codelineno-64-10"></a>
+<a id="__codelineno-64-11" name="__codelineno-64-11" href="#__codelineno-64-11"></a>Options:
+<a id="__codelineno-64-12" name="__codelineno-64-12" href="#__codelineno-64-12"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-64-13" name="__codelineno-64-13" href="#__codelineno-64-13"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-64-14" name="__codelineno-64-14" href="#__codelineno-64-14"></a>
+<a id="__codelineno-64-15" name="__codelineno-64-15" href="#__codelineno-64-15"></a>      --after &lt;ID&gt;
+<a id="__codelineno-64-16" name="__codelineno-64-16" href="#__codelineno-64-16"></a>          List checkpoints strictly after this checkpoint ID
+<a id="__codelineno-64-17" name="__codelineno-64-17" href="#__codelineno-64-17"></a>
+<a id="__codelineno-64-18" name="__codelineno-64-18" href="#__codelineno-64-18"></a>      --limit &lt;COUNT&gt;
+<a id="__codelineno-64-19" name="__codelineno-64-19" href="#__codelineno-64-19"></a>          Maximum checkpoints to return, from 1 to 100. Defaults to 50
+<a id="__codelineno-64-20" name="__codelineno-64-20" href="#__codelineno-64-20"></a>
+<a id="__codelineno-64-21" name="__codelineno-64-21" href="#__codelineno-64-21"></a>  -h, --help
+<a id="__codelineno-64-22" name="__codelineno-64-22" href="#__codelineno-64-22"></a>          Print help (see a summary with '-h')
+</code></pre></div>
+<h3 id="zeroshot-export-workspace"><code>zeroshot export-workspace</code><a class="headerlink" href="#zeroshot-export-workspace" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-65-1" name="__codelineno-65-1" href="#__codelineno-65-1"></a>Download a retained workspace or selected checkpoint as a tar archive.
+<a id="__codelineno-65-2" name="__codelineno-65-2" href="#__codelineno-65-2"></a>
+<a id="__codelineno-65-3" name="__codelineno-65-3" href="#__codelineno-65-3"></a>Requires an advertised export capability on a named hosted target. The output must not exist, including symlinks. It is published privately only after the entire transfer succeeds. Ctrl-C cancels the download and removes its temporary file. Does not restart the run or extract files.
+<a id="__codelineno-65-4" name="__codelineno-65-4" href="#__codelineno-65-4"></a>
+<a id="__codelineno-65-5" name="__codelineno-65-5" href="#__codelineno-65-5"></a>Usage: zeroshot export-workspace [OPTIONS] --target &lt;NAME&gt; --output &lt;PATH&gt; &lt;RUN_ID&gt;
+<a id="__codelineno-65-6" name="__codelineno-65-6" href="#__codelineno-65-6"></a>
+<a id="__codelineno-65-7" name="__codelineno-65-7" href="#__codelineno-65-7"></a>Arguments:
+<a id="__codelineno-65-8" name="__codelineno-65-8" href="#__codelineno-65-8"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-65-9" name="__codelineno-65-9" href="#__codelineno-65-9"></a>          Public run ID
+<a id="__codelineno-65-10" name="__codelineno-65-10" href="#__codelineno-65-10"></a>
+<a id="__codelineno-65-11" name="__codelineno-65-11" href="#__codelineno-65-11"></a>Options:
+<a id="__codelineno-65-12" name="__codelineno-65-12" href="#__codelineno-65-12"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-65-13" name="__codelineno-65-13" href="#__codelineno-65-13"></a>          Named hosted target, using its existing login or ZEROSHOT_API_KEY authentication
+<a id="__codelineno-65-14" name="__codelineno-65-14" href="#__codelineno-65-14"></a>
+<a id="__codelineno-65-15" name="__codelineno-65-15" href="#__codelineno-65-15"></a>      --from-checkpoint &lt;CHECKPOINT_ID&gt;
+<a id="__codelineno-65-16" name="__codelineno-65-16" href="#__codelineno-65-16"></a>          Export this entry checkpoint instead of the latest retained workspace
+<a id="__codelineno-65-17" name="__codelineno-65-17" href="#__codelineno-65-17"></a>
+<a id="__codelineno-65-18" name="__codelineno-65-18" href="#__codelineno-65-18"></a>      --output &lt;PATH&gt;
+<a id="__codelineno-65-19" name="__codelineno-65-19" href="#__codelineno-65-19"></a>          Explicit destination path for the raw tar archive; must not exist
+<a id="__codelineno-65-20" name="__codelineno-65-20" href="#__codelineno-65-20"></a>
+<a id="__codelineno-65-21" name="__codelineno-65-21" href="#__codelineno-65-21"></a>  -h, --help
+<a id="__codelineno-65-22" name="__codelineno-65-22" href="#__codelineno-65-22"></a>          Print help (see a summary with '-h')
+</code></pre></div>
+<h3 id="zeroshot-discard-workspace"><code>zeroshot discard-workspace</code><a class="headerlink" href="#zeroshot-discard-workspace" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-66-1" name="__codelineno-66-1" href="#__codelineno-66-1"></a>Permanently delete an abandoned retained target workspace
+<a id="__codelineno-66-2" name="__codelineno-66-2" href="#__codelineno-66-2"></a>
+<a id="__codelineno-66-3" name="__codelineno-66-3" href="#__codelineno-66-3"></a>Usage: zeroshot discard-workspace [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-66-4" name="__codelineno-66-4" href="#__codelineno-66-4"></a>
+<a id="__codelineno-66-5" name="__codelineno-66-5" href="#__codelineno-66-5"></a>Arguments:
+<a id="__codelineno-66-6" name="__codelineno-66-6" href="#__codelineno-66-6"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-66-7" name="__codelineno-66-7" href="#__codelineno-66-7"></a>          Public run ID
+<a id="__codelineno-66-8" name="__codelineno-66-8" href="#__codelineno-66-8"></a>
+<a id="__codelineno-66-9" name="__codelineno-66-9" href="#__codelineno-66-9"></a>Options:
+<a id="__codelineno-66-10" name="__codelineno-66-10" href="#__codelineno-66-10"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-66-11" name="__codelineno-66-11" href="#__codelineno-66-11"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-66-12" name="__codelineno-66-12" href="#__codelineno-66-12"></a>
+<a id="__codelineno-66-13" name="__codelineno-66-13" href="#__codelineno-66-13"></a>  -h, --help
+<a id="__codelineno-66-14" name="__codelineno-66-14" href="#__codelineno-66-14"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-version"><code>zeroshot version</code><a class="headerlink" href="#zeroshot-version" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-62-1" name="__codelineno-62-1" href="#__codelineno-62-1"></a>Print the Zeroshot version
-<a id="__codelineno-62-2" name="__codelineno-62-2" href="#__codelineno-62-2"></a>
-<a id="__codelineno-62-3" name="__codelineno-62-3" href="#__codelineno-62-3"></a>Usage: zeroshot version
-<a id="__codelineno-62-4" name="__codelineno-62-4" href="#__codelineno-62-4"></a>
-<a id="__codelineno-62-5" name="__codelineno-62-5" href="#__codelineno-62-5"></a>Options:
-<a id="__codelineno-62-6" name="__codelineno-62-6" href="#__codelineno-62-6"></a>  -h, --help
-<a id="__codelineno-62-7" name="__codelineno-62-7" href="#__codelineno-62-7"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-67-1" name="__codelineno-67-1" href="#__codelineno-67-1"></a>Print the Zeroshot version
+<a id="__codelineno-67-2" name="__codelineno-67-2" href="#__codelineno-67-2"></a>
+<a id="__codelineno-67-3" name="__codelineno-67-3" href="#__codelineno-67-3"></a>Usage: zeroshot version
+<a id="__codelineno-67-4" name="__codelineno-67-4" href="#__codelineno-67-4"></a>
+<a id="__codelineno-67-5" name="__codelineno-67-5" href="#__codelineno-67-5"></a>Options:
+<a id="__codelineno-67-6" name="__codelineno-67-6" href="#__codelineno-67-6"></a>  -h, --help
+<a id="__codelineno-67-7" name="__codelineno-67-7" href="#__codelineno-67-7"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-help"><code>zeroshot help</code><a class="headerlink" href="#zeroshot-help" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-63-1" name="__codelineno-63-1" href="#__codelineno-63-1"></a>Print this message or the help of the given subcommand(s)
-<a id="__codelineno-63-2" name="__codelineno-63-2" href="#__codelineno-63-2"></a>
-<a id="__codelineno-63-3" name="__codelineno-63-3" href="#__codelineno-63-3"></a>Usage: zeroshot help [COMMAND]
-<a id="__codelineno-63-4" name="__codelineno-63-4" href="#__codelineno-63-4"></a>
-<a id="__codelineno-63-5" name="__codelineno-63-5" href="#__codelineno-63-5"></a>Commands:
-<a id="__codelineno-63-6" name="__codelineno-63-6" href="#__codelineno-63-6"></a>  memory             Initialize local Active Memory through the canonical skill
-<a id="__codelineno-63-7" name="__codelineno-63-7" href="#__codelineno-63-7"></a>  acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
-<a id="__codelineno-63-8" name="__codelineno-63-8" href="#__codelineno-63-8"></a>  ui                 Serve the local profile editor and live or recorded run history
-<a id="__codelineno-63-9" name="__codelineno-63-9" href="#__codelineno-63-9"></a>  target             Manage named targets or serve a direct target
-<a id="__codelineno-63-10" name="__codelineno-63-10" href="#__codelineno-63-10"></a>  delegation         Manage user or organization machine delegations and API keys
-<a id="__codelineno-63-11" name="__codelineno-63-11" href="#__codelineno-63-11"></a>  connection         Inspect and manage named runtime connections
-<a id="__codelineno-63-12" name="__codelineno-63-12" href="#__codelineno-63-12"></a>  profile            Manage reusable graph/runtime profiles
-<a id="__codelineno-63-13" name="__codelineno-63-13" href="#__codelineno-63-13"></a>  template           Inspect built-in graph templates
-<a id="__codelineno-63-14" name="__codelineno-63-14" href="#__codelineno-63-14"></a>  stack              Validate, submit, and observe hosted stacks of dependent runs
-<a id="__codelineno-63-15" name="__codelineno-63-15" href="#__codelineno-63-15"></a>  run                Submit a graph run locally or to a named target
-<a id="__codelineno-63-16" name="__codelineno-63-16" href="#__codelineno-63-16"></a>  update             Update this executable and managed agent skills to the newest canonical release
-<a id="__codelineno-63-17" name="__codelineno-63-17" href="#__codelineno-63-17"></a>  list               List runs as JSON. Local reads never change run state
-<a id="__codelineno-63-18" name="__codelineno-63-18" href="#__codelineno-63-18"></a>  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
-<a id="__codelineno-63-19" name="__codelineno-63-19" href="#__codelineno-63-19"></a>  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
-<a id="__codelineno-63-20" name="__codelineno-63-20" href="#__codelineno-63-20"></a>  logs               Follow a run's log stream as NDJSON
-<a id="__codelineno-63-21" name="__codelineno-63-21" href="#__codelineno-63-21"></a>  attach             Attach to an execution's interactive event stream as NDJSON
-<a id="__codelineno-63-22" name="__codelineno-63-22" href="#__codelineno-63-22"></a>  force-stop         Force a run to stop and write the result as JSON
-<a id="__codelineno-63-23" name="__codelineno-63-23" href="#__codelineno-63-23"></a>  suspend            Request suspension at the next checkpoint and print status immediately
-<a id="__codelineno-63-24" name="__codelineno-63-24" href="#__codelineno-63-24"></a>  vectors            Read one page of the run vector record, or show an entry in full
-<a id="__codelineno-63-25" name="__codelineno-63-25" href="#__codelineno-63-25"></a>  resume             Start a successor from a failed or suspended run's retained workspace
-<a id="__codelineno-63-26" name="__codelineno-63-26" href="#__codelineno-63-26"></a>  checkpoints        List one page of a run's saved workspace checkpoints as JSON
-<a id="__codelineno-63-27" name="__codelineno-63-27" href="#__codelineno-63-27"></a>  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
-<a id="__codelineno-63-28" name="__codelineno-63-28" href="#__codelineno-63-28"></a>  discard-workspace  Permanently delete an abandoned retained target workspace
-<a id="__codelineno-63-29" name="__codelineno-63-29" href="#__codelineno-63-29"></a>  version            Print the Zeroshot version
-<a id="__codelineno-63-30" name="__codelineno-63-30" href="#__codelineno-63-30"></a>  help               Print this message or the help of the given subcommand(s)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-68-1" name="__codelineno-68-1" href="#__codelineno-68-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-68-2" name="__codelineno-68-2" href="#__codelineno-68-2"></a>
+<a id="__codelineno-68-3" name="__codelineno-68-3" href="#__codelineno-68-3"></a>Usage: zeroshot help [COMMAND]
+<a id="__codelineno-68-4" name="__codelineno-68-4" href="#__codelineno-68-4"></a>
+<a id="__codelineno-68-5" name="__codelineno-68-5" href="#__codelineno-68-5"></a>Commands:
+<a id="__codelineno-68-6" name="__codelineno-68-6" href="#__codelineno-68-6"></a>  memory             Initialize local Active Memory through the canonical skill
+<a id="__codelineno-68-7" name="__codelineno-68-7" href="#__codelineno-68-7"></a>  acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
+<a id="__codelineno-68-8" name="__codelineno-68-8" href="#__codelineno-68-8"></a>  ui                 Serve the local profile editor and live or recorded run history
+<a id="__codelineno-68-9" name="__codelineno-68-9" href="#__codelineno-68-9"></a>  target             Manage named targets or serve a direct target
+<a id="__codelineno-68-10" name="__codelineno-68-10" href="#__codelineno-68-10"></a>  delegation         Manage user or organization machine delegations and API keys
+<a id="__codelineno-68-11" name="__codelineno-68-11" href="#__codelineno-68-11"></a>  connection         Inspect and manage named runtime connections
+<a id="__codelineno-68-12" name="__codelineno-68-12" href="#__codelineno-68-12"></a>  profile            Manage reusable graph/runtime profiles
+<a id="__codelineno-68-13" name="__codelineno-68-13" href="#__codelineno-68-13"></a>  template           Inspect built-in graph templates
+<a id="__codelineno-68-14" name="__codelineno-68-14" href="#__codelineno-68-14"></a>  stack              Validate, submit, and observe hosted stacks of dependent runs
+<a id="__codelineno-68-15" name="__codelineno-68-15" href="#__codelineno-68-15"></a>  run                Submit a graph run locally or to a named target
+<a id="__codelineno-68-16" name="__codelineno-68-16" href="#__codelineno-68-16"></a>  update             Update this executable and managed agent skills to the newest canonical release
+<a id="__codelineno-68-17" name="__codelineno-68-17" href="#__codelineno-68-17"></a>  list               List runs as JSON. Local reads never change run state
+<a id="__codelineno-68-18" name="__codelineno-68-18" href="#__codelineno-68-18"></a>  status             Read a run's current status as JSON. While finalizing, graphResult carries the recorded graph outcome; finished runs use terminalResult and separate native delivery evidence
+<a id="__codelineno-68-19" name="__codelineno-68-19" href="#__codelineno-68-19"></a>  watch              Follow durable status as NDJSON. graphResult appears when the graph ends; following continues until the run finishes, including its postmortem and finalization
+<a id="__codelineno-68-20" name="__codelineno-68-20" href="#__codelineno-68-20"></a>  logs               Follow a run's log stream as NDJSON
+<a id="__codelineno-68-21" name="__codelineno-68-21" href="#__codelineno-68-21"></a>  attach             Attach to an execution's interactive event stream as NDJSON
+<a id="__codelineno-68-22" name="__codelineno-68-22" href="#__codelineno-68-22"></a>  force-stop         Force a run to stop and write the result as JSON
+<a id="__codelineno-68-23" name="__codelineno-68-23" href="#__codelineno-68-23"></a>  suspend            Request suspension at the next checkpoint and print status immediately
+<a id="__codelineno-68-24" name="__codelineno-68-24" href="#__codelineno-68-24"></a>  answer             Answer a suspended request from a JSON file and start its successor
+<a id="__codelineno-68-25" name="__codelineno-68-25" href="#__codelineno-68-25"></a>  inbox              Read pending requests or show the request made by one run. Reads never apply expiry
+<a id="__codelineno-68-26" name="__codelineno-68-26" href="#__codelineno-68-26"></a>  vectors            Read one page of the run vector record, or show an entry in full
+<a id="__codelineno-68-27" name="__codelineno-68-27" href="#__codelineno-68-27"></a>  resume             Start a successor from a failed or suspended run's retained workspace
+<a id="__codelineno-68-28" name="__codelineno-68-28" href="#__codelineno-68-28"></a>  checkpoints        List one page of a run's saved workspace checkpoints as JSON
+<a id="__codelineno-68-29" name="__codelineno-68-29" href="#__codelineno-68-29"></a>  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
+<a id="__codelineno-68-30" name="__codelineno-68-30" href="#__codelineno-68-30"></a>  discard-workspace  Permanently delete an abandoned retained target workspace
+<a id="__codelineno-68-31" name="__codelineno-68-31" href="#__codelineno-68-31"></a>  version            Print the Zeroshot version
+<a id="__codelineno-68-32" name="__codelineno-68-32" href="#__codelineno-68-32"></a>  help               Print this message or the help of the given subcommand(s)
 </code></pre></div>
 
 

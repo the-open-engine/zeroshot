@@ -639,6 +639,8 @@
       
         
       
+        
+      
     
     
     
@@ -811,6 +813,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/ask-a-person/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask a person
   
 
     
@@ -1645,6 +1675,50 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;RunSummary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.HumanRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HumanRequest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.InboxEntry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;InboxEntry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.InboxPage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;InboxPage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.InboxRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;InboxRequest
       
     </span>
   </a>
@@ -2527,6 +2601,50 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;RunSummary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.HumanRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HumanRequest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.InboxEntry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;InboxEntry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.InboxPage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;InboxPage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.InboxRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;InboxRequest
       
     </span>
   </a>
@@ -3495,7 +3613,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunStatus" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3629,7 +3747,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>reason</code></b>
-              (<code><span title="typing.Literal">Literal</span>[&#39;command&#39;, &#39;wait&#39;] | None</code>, default:
+              (<code><span title="typing.Literal">Literal</span>[&#39;command&#39;, &#39;wait&#39;, &#39;request&#39;] | None</code>, default:
                   <code>None</code>
 )
           –
@@ -3665,6 +3783,20 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
           –
           <div class="doc-md-description">
             <p>Earliest continuation time for a suspended wait, in epoch milliseconds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>request</code></b>
+              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int)
+
+  
+      dataclass
+   (zeroshot.runs.HumanRequest)" href="#zeroshot.HumanRequest">HumanRequest</a> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Human request contract when suspended for a request.</p>
           </div>
         </li>
     </ul>
@@ -3703,7 +3835,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunSummary" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSummary</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">force_stop_requested</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSummary</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">force_stop_requested</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3817,7 +3949,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>reason</code></b>
-              (<code><span title="typing.Literal">Literal</span>[&#39;command&#39;, &#39;wait&#39;] | None</code>, default:
+              (<code><span title="typing.Literal">Literal</span>[&#39;command&#39;, &#39;wait&#39;, &#39;request&#39;] | None</code>, default:
                   <code>None</code>
 )
           –
@@ -3853,6 +3985,396 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
           –
           <div class="doc-md-description">
             <p>Earliest continuation time for a suspended wait, in epoch milliseconds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>request</code></b>
+              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int)
+
+  
+      dataclass
+   (zeroshot.runs.HumanRequest)" href="#zeroshot.HumanRequest">HumanRequest</a> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Human request contract when suspended for a request.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.HumanRequest" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">HumanRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">signals</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">output</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">expires_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.HumanRequest" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A host-run question and its declared answer contract.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>id</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Opaque request vector identity.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>text</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Question supplied by the graph.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>signals</code></b>
+              (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Declared signals and their allowed labels.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>output</code></b>
+              (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Closed record payload schema.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>expires_at</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Exclusive answer deadline in Unix epoch milliseconds.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.InboxEntry" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">InboxEntry</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">expires_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'pending'</span><span class="p">,</span> <span class="s1">'expired'</span><span class="p">])</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.InboxEntry" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One bounded request summary.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>run_id</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Run held suspended by this request.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>node</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Request verifier name.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>created_at</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Creation time in Unix epoch milliseconds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>expires_at</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Exclusive answer deadline in Unix epoch milliseconds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>state</code></b>
+              (<code><span title="typing.Literal">Literal</span>[&#39;pending&#39;, &#39;expired&#39;]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Pending or expired; reading never applies expiry.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.InboxPage" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">InboxPage</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">requests</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">InboxEntry</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">next_after</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.InboxPage" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One request page in run ID order.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>requests</code></b>
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              InboxEntry(*, run_id: str, node: str, created_at: int, expires_at: int, state: Literal['pending', 'expired'])
+
+  
+      dataclass
+   (zeroshot.runs.InboxEntry)" href="#zeroshot.InboxEntry">InboxEntry</a>, ...]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Bounded summaries for runs still held suspended.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>next_after</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>Run ID cursor for the next page, or None at the end.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.InboxRequest" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">InboxRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'pending'</span><span class="p">,</span> <span class="s1">'answered'</span><span class="p">,</span> <span class="s1">'expired'</span><span class="p">,</span> <span class="s1">'stopped'</span><span class="p">],</span> <span class="n">successor_run_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.InboxRequest" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>The request made by a run, including its disposition.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>run_id</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Run that asked the question.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>node</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Request verifier name.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>created_at</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Creation time in Unix epoch milliseconds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>request</code></b>
+              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int)
+
+  
+      dataclass
+   (zeroshot.runs.HumanRequest)" href="#zeroshot.HumanRequest">HumanRequest</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Complete question and answer contract.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>state</code></b>
+              (<code><span title="typing.Literal">Literal</span>[&#39;pending&#39;, &#39;answered&#39;, &#39;expired&#39;, &#39;stopped&#39;]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Pending, answered, expired, or stopped.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>successor_run_id</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>Accepted continuation, if any.</p>
           </div>
         </li>
     </ul>
@@ -4024,7 +4546,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
    (zeroshot.runs.RunVector)" href="#zeroshot.RunVector">RunVector</a>, ...]</code>)
           –
           <div class="doc-md-description">
-            <p>Ordered entries with their complete content.</p>
+            <p>Ordered bounded summaries; use Run.vector() for complete content.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">

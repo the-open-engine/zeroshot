@@ -641,6 +641,8 @@
       
         
       
+        
+      
     
     
     
@@ -813,6 +815,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ask-a-person/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask a person
   
 
     
@@ -1111,6 +1141,17 @@
     <span class="md-ellipsis">
       
         Pass exact protocol documents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#answer-a-human-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Answer a human request
       
     </span>
   </a>
@@ -2265,6 +2306,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#answer-a-human-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Answer a human request
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2455,6 +2507,16 @@ successor's <code>Run</code> handle. <code>run.watch()</code> ends at suspension
 expose <code>suspend_requested</code>, <code>reason</code>, <code>node</code>, <code>created_at</code> and <code>due_at</code>. Read the ordered record
 with <code>await run.vectors(after=None, limit=50)</code> (<code>RunVectorsPage.vectors</code>, <code>next_after</code>) and read a
 complete entry with <code>await run.vector(id)</code>. These methods use the client's selected target.</p>
+<h2 id="answer-a-human-request">Answer a human request<a class="headerlink" href="#answer-a-human-request" title="Permanent link">&para;</a></h2>
+<p><code>await client.inbox(after=None, limit=50)</code> returns an <code>InboxPage</code> with requests and <code>next_after</code>.
+<code>await run.request()</code> returns the run's own <code>InboxRequest</code>, including text, declared signals/output,
+deadline, state and successor. <code>await run.answer({"signals": {"decision": "approved"}, "output":
+{"feedback": ""}})</code> returns the successor <code>Run</code>. <code>RunStatus.request</code> carries the human request.
+All methods use the client's local or named target arguments; named targets need
+<code>openengine.request-ask/v1</code>. Answers follow resume's credential and forwarding rules.
+Invalid, repeated and late answers raise the existing CLI command error with its message. A late
+answer still starts the <code>timeout</code> successor. Deadlines default to 7 days and have a 30-day maximum;
+inbox reads never apply them. See <a href="../ask-a-person/">Ask a person</a>.</p>
 
 
 

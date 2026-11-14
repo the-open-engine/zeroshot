@@ -641,6 +641,8 @@
       
         
       
+        
+      
     
     
     
@@ -813,6 +815,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ask-a-person/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask a person
   
 
     
@@ -2473,6 +2503,11 @@ must finish first. When plans depend on each other, the skill offers to write a 
 <code>.zeroshot/plans/&lt;id&gt;.stack.json</code> with one run per plan, and leaves <code>delivery</code> for you to choose. See
 <a href="../planning/">Plan work before running it</a>.</p>
 <p>Stack profiles cannot contain <code>builtin.request.wait@1</code> wait nodes; submission refuses them before sending the stack.</p>
+<p>Stack profiles cannot contain human request nodes (<code>builtin.request.ask@1</code>), including profiles
+used for merge or stacked pull-request delivery. These nodes need a retained interactive checkpoint
+and an answer successor, while stacks keep static inputs. Use a standalone graph and <code>answer</code>/<code>inbox</code>
+when a person must decide. Request deadlines default to 7 days and are bounded to 30 days; named
+targets must advertise <code>openengine.request-ask/v1</code>. See <a href="../ask-a-person/">Ask a person</a>.</p>
 
 
 

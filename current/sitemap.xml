@@ -45,6 +45,10 @@
          <lastmod>2026-11-12</lastmod>
     </url>
     <url>
+         <loc>https://zeroshot.sh/docs/current/guides/ask-a-person/</loc>
+         <lastmod>2026-11-14</lastmod>
+    </url>
+    <url>
          <loc>https://zeroshot.sh/docs/current/guides/code-review/</loc>
          <lastmod>2026-11-13</lastmod>
     </url>
@@ -134,11 +138,11 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/data-plane/</loc>
-         <lastmod>2026-10-24</lastmod>
+         <lastmod>2026-11-14</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/graph/</loc>
-         <lastmod>2026-11-13</lastmod>
+         <lastmod>2026-11-14</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/lifecycle/</loc>

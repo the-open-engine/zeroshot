@@ -641,6 +641,8 @@
       
         
       
+        
+      
     
     
     
@@ -813,6 +815,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ask-a-person/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask a person
   
 
     
@@ -1143,6 +1173,17 @@
     <span class="md-ellipsis">
       
         Vector record
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#human-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human requests
       
     </span>
   </a>
@@ -2441,6 +2482,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#human-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human requests
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2802,6 +2854,14 @@ entries unchanged. Suspension writes <code>suspend_request</code>, <code>suspens
 <p>A page contains <code>runId</code>, <code>vectors</code> and an optional <code>nextAfter</code> cursor. Limits are 1 through 100.
 <code>show</code> reads the complete entry; unknown IDs fail as not found. Both commands are read-only and
 accept <code>--target NAME</code> where <code>openengine.run-vectors/v1</code> is advertised.</p>
+<h2 id="human-requests">Human requests<a class="headerlink" href="#human-requests" title="Permanent link">&para;</a></h2>
+<p>A request suspends with reason <code>request</code> and carries its text, answer shape and <code>expiresAt</code> in
+status. Read <code>zeroshot inbox list</code> (paged with <code>--after</code> and <code>--limit</code>) or <code>zeroshot inbox show RUN_ID</code>,
+then use <code>zeroshot answer RUN_ID --input answer.json</code>. The file contains <code>signals</code> and <code>output</code>.
+The answer starts one successor on the retained workspace. Ordinary <code>resume</code> refuses requests.
+Deadlines default to 7 days and accept at most 30 days. A late answer starts the author's <code>timeout</code>
+route and exits 1 naming its successor. Reads never apply expiry. Add <code>--target NAME</code> for a target
+that advertises <code>openengine.request-ask/v1</code>. See <a href="../ask-a-person/">Ask a person</a>.</p>
 
 
 

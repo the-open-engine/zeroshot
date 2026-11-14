@@ -639,6 +639,8 @@
       
         
       
+        
+      
     
     
     
@@ -811,6 +813,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/ask-a-person/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask a person
   
 
     
@@ -1921,6 +1951,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#human-request-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human request binding
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2593,6 +2634,17 @@
     <span class="md-ellipsis">
       
         Execution concurrency
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#human-request-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human request binding
       
     </span>
   </a>
@@ -3373,6 +3425,16 @@ the run. Its effective default is 64 on every placement; explicit values range f
 65,536. Admission records the effective value in run metadata. Queued work has no execution
 identity, attempt, or timeout until admission. Map <code>maxItems</code> independently limits active complete
 item bodies. Neither limit changes the separate 65,536 logical-visit and loop-entry ceilings.</p>
+<h2 id="human-request-binding">Human request binding<a class="headerlink" href="#human-request-binding" title="Permanent link">&para;</a></h2>
+<p><code>{"kind":"request"}</code> also binds the host-run verifier <code>builtin.request.ask@1</code>. It has exactly one
+required string input <code>text</code>, a flat scalar-record output (boolean, integer, number, string or enum),
+authored signals, the fixed <code>{message: string}</code> diagnostic, one attempt and no instructions.
+It has no model, lane, credentials or provider session. <code>--uniform-runtime-config</code> recognizes it.
+It requires workspace checkpoints and seq/choice/loop placement; par/map ancestry and stack
+profiles refuse it. The deadline is <code>timeoutMs</code> from request creation, 7 days by default and at
+most 30 days. <code>answer</code> validates signals and output and starts a successor; late answers settle
+with the existing <code>timeout</code> error. <code>inbox</code> reads pending or historical questions from vectors.
+Named targets require <code>openengine.request-ask/v1</code>. See <a href="../../guides/ask-a-person/">Ask a person</a>.</p>
 
 
 

@@ -639,6 +639,8 @@
       
         
       
+        
+      
     
     
     
@@ -811,6 +813,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/ask-a-person/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask a person
   
 
     
@@ -1601,6 +1631,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#zeroshot.Client.inbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;inbox
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1689,6 +1730,28 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;request
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.answer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;answer
       
     </span>
   </a>
@@ -2649,6 +2712,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#zeroshot.Client.inbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;inbox
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2737,6 +2811,28 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;request
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.answer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;answer
       
     </span>
   </a>
@@ -3640,6 +3736,81 @@ completes before local controller startup or direct-target contact.</p>
 
 </div>
 
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Client.inbox" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">inbox</span><span class="p">(</span><span class="n">after</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">50</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">InboxPage</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Client.inbox" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read requests still holding their runs suspended without applying expiry.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>after</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Exclusive run ID cursor, or None for the first page.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>limit</code></b>
+              (<code><span title="int">int</span></code>, default:
+                  <code>50</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Maximum entries, from 1 through 100.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              InboxPage(*, requests: tuple[InboxEntry, ...], next_after: str | None)
+
+  
+      dataclass
+   (zeroshot.runs.InboxPage)" href="../results/#zeroshot.InboxPage">InboxPage</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The request page and its next cursor.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If limit is outside 1 through 100.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
 
 
   </div>
@@ -3728,7 +3899,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None)
 
   
       dataclass
@@ -3803,7 +3974,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None)
+              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None)
 
   
       dataclass
@@ -4003,7 +4174,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None)
 
   
       dataclass
@@ -4045,6 +4216,95 @@ completes before local controller startup or direct-target contact.</p>
           –
           <div class="doc-md-description">
             <p>The successor run handle.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Run.request" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">request</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">InboxRequest</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Run.request" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read the request this run made, including its state and successor.</p>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              InboxRequest(*, run_id: str, node: str, created_at: int, request: HumanRequest, state: Literal['pending', 'answered', 'expired', 'stopped'], successor_run_id: str | None)
+
+  
+      dataclass
+   (zeroshot.runs.InboxRequest)" href="../results/#zeroshot.InboxRequest">InboxRequest</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The complete inbox request. Inherited requests are excluded.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Run.answer" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">answer</span><span class="p">(</span><span class="n">answer</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Run.answer" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Answer this run's request and start one successor on the retained workspace.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>answer</code></b>
+              (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Complete verifier result with signals and output matching the request.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The successor run handle. Invalid, repeated and late answers raise the CLI error.</p>
           </div>
         </li>
     </ul>
