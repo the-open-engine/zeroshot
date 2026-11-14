@@ -5011,20 +5011,22 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-53-14" name="__codelineno-53-14" href="#__codelineno-53-14"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-suspend"><code>zeroshot suspend</code><a class="headerlink" href="#zeroshot-suspend" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a>Request suspension at the next checkpoint and print status immediately
+<div class="highlight"><pre><span></span><code><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a>Request suspension at the next checkpoint and print status immediately.
 <a id="__codelineno-54-2" name="__codelineno-54-2" href="#__codelineno-54-2"></a>
-<a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a>Usage: zeroshot suspend [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a>Its successor continues captured node-instance conversations from that checkpoint.
 <a id="__codelineno-54-4" name="__codelineno-54-4" href="#__codelineno-54-4"></a>
-<a id="__codelineno-54-5" name="__codelineno-54-5" href="#__codelineno-54-5"></a>Arguments:
-<a id="__codelineno-54-6" name="__codelineno-54-6" href="#__codelineno-54-6"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-54-7" name="__codelineno-54-7" href="#__codelineno-54-7"></a>          Public run ID
-<a id="__codelineno-54-8" name="__codelineno-54-8" href="#__codelineno-54-8"></a>
-<a id="__codelineno-54-9" name="__codelineno-54-9" href="#__codelineno-54-9"></a>Options:
-<a id="__codelineno-54-10" name="__codelineno-54-10" href="#__codelineno-54-10"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-54-11" name="__codelineno-54-11" href="#__codelineno-54-11"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-54-12" name="__codelineno-54-12" href="#__codelineno-54-12"></a>
-<a id="__codelineno-54-13" name="__codelineno-54-13" href="#__codelineno-54-13"></a>  -h, --help
-<a id="__codelineno-54-14" name="__codelineno-54-14" href="#__codelineno-54-14"></a>          Print help
+<a id="__codelineno-54-5" name="__codelineno-54-5" href="#__codelineno-54-5"></a>Usage: zeroshot suspend [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-54-6" name="__codelineno-54-6" href="#__codelineno-54-6"></a>
+<a id="__codelineno-54-7" name="__codelineno-54-7" href="#__codelineno-54-7"></a>Arguments:
+<a id="__codelineno-54-8" name="__codelineno-54-8" href="#__codelineno-54-8"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-54-9" name="__codelineno-54-9" href="#__codelineno-54-9"></a>          Public run ID
+<a id="__codelineno-54-10" name="__codelineno-54-10" href="#__codelineno-54-10"></a>
+<a id="__codelineno-54-11" name="__codelineno-54-11" href="#__codelineno-54-11"></a>Options:
+<a id="__codelineno-54-12" name="__codelineno-54-12" href="#__codelineno-54-12"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-54-13" name="__codelineno-54-13" href="#__codelineno-54-13"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-54-14" name="__codelineno-54-14" href="#__codelineno-54-14"></a>
+<a id="__codelineno-54-15" name="__codelineno-54-15" href="#__codelineno-54-15"></a>  -h, --help
+<a id="__codelineno-54-16" name="__codelineno-54-16" href="#__codelineno-54-16"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-vectors"><code>zeroshot vectors</code><a class="headerlink" href="#zeroshot-vectors" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>Read one page of the run vector record, or show an entry in full
@@ -5086,7 +5088,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-58-2" name="__codelineno-58-2" href="#__codelineno-58-2"></a>
 <a id="__codelineno-58-3" name="__codelineno-58-3" href="#__codelineno-58-3"></a>A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
 <a id="__codelineno-58-4" name="__codelineno-58-4" href="#__codelineno-58-4"></a>
-<a id="__codelineno-58-5" name="__codelineno-58-5" href="#__codelineno-58-5"></a>Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
+<a id="__codelineno-58-5" name="__codelineno-58-5" href="#__codelineno-58-5"></a>Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarts and execution-scoped agents start new conversations. Token usage starts at zero. Services and Docker state are not restored.
 <a id="__codelineno-58-6" name="__codelineno-58-6" href="#__codelineno-58-6"></a>
 <a id="__codelineno-58-7" name="__codelineno-58-7" href="#__codelineno-58-7"></a>Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-58-8" name="__codelineno-58-8" href="#__codelineno-58-8"></a>

@@ -2797,7 +2797,11 @@ check whether a model supports the chosen effort. <code>contextWindow</code> and
 declarations, never inferences: they are validated at admission, emitted only into the
 <code>pi/gateway</code> model entry, and otherwise left unset for the provider to default. An absent value
 retains the provider's own limit; a present value must be a positive integer in the stated range.</p>
-<p><code>sessionScope</code> controls provider conversation state. It does not change graph state or bindings.</p>
+<p><code>sessionScope</code> controls provider conversation state. It does not change graph state or bindings.
+Checkpoint continuations and suspended successors restore supported <code>node_instance</code> conversations
+from the checkpoint, including their provider files. Restarts and <code>execution</code> scopes start fresh.
+Missing, oversized or unrestorable conversations start new with a system log explanation. Successor
+usage begins at zero; Active Memory delivery sets begin fresh even for a continued conversation.</p>
 <table>
 <thead>
 <tr>
@@ -2812,7 +2816,7 @@ retains the provider's own limit; a present value must be a positive integer in 
 </tr>
 <tr>
 <td><code>node_instance</code></td>
-<td>Reuses one session when the same node instance runs again, for example across loop iterations</td>
+<td>Reuses one conversation across node-instance visits and supported checkpoint or suspended continuations</td>
 </tr>
 </tbody>
 </table>
