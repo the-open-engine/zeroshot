@@ -83,20 +83,23 @@ async fn live_suspended_conversation() {
     let mut runtime = local_runtime();
     runtime["harness"] = json!(harness);
     runtime["provider"] = json!(provider);
-    runtime["nodes"] = json!({"worker":{"kind":"agent","model":model,"sessionScope":"node_instance","connections":{"live":fields}}});
+    runtime["nodes"] = json!({"worker":{"kind":"agent","model":model,"effort":"medium","sessionScope":"node_instance","connections":{"live":fields}}});
     runtime["nodes"]["check"] = runtime["nodes"]["worker"].clone();
     runtime["nodes"]["check"]["sessionScope"] = json!("execution");
     let instructions = concat!(
-        "Choose exactly one branch based on whether secret-word exists at the START of this turn. ",
-        "If it exists at the start, use native tools to run ",
-        "`cat secret-word && rm -- secret-word && test ! -e secret-word` ",
-        "and remember the printed word in this conversation. ",
-        "Unlink the file completely; truncating it is insufficient. ",
-        "Do not take the absent branch after deleting it. ",
+        "On EVERY invocation, including a continued conversation, your first action must be a NEW ",
+        "native shell call: `if test -e secret-word; then printf 'NEW_WORD\\n'; ",
+        "cat secret-word && rm -- secret-word && test ! -e secret-word; ",
+        "else printf 'RECALL_WORD\\n'; fi`. ",
+        "Choose the branch ONLY from the marker printed by THIS invocation's shell call. ",
+        "Never reuse a previous invocation's file check or branch decision. ",
+        "For NEW_WORD, remember the printed word in this conversation and return the literal ",
+        "string \"stored\" as output. Do not switch branches after deleting the file. ",
+        "For RECALL_WORD, return the exact word learned in the earlier invocation as output. ",
+        "The earlier reply \"stored\" is an acknowledgement, not the word to recall. ",
         "Do not save it in any other workspace file. ",
-        "Return the literal string \"stored\" as output. ",
-        "If secret-word was absent at the start, return the word remembered from the earlier turn as output. ",
-        "Never include the word in diagnostic. Do not use Git or network tools."
+        "Never include the word in diagnostic. Do not use Git or network tools. ",
+        "Obey the runtime response contract without encoding another JSON object inside the output string."
     );
     let mut graph = local_graph::graph();
     graph["root"]["children"] = json!([
@@ -200,6 +203,17 @@ async fn live_suspended_conversation() {
         1,
         "suspension must hold back the worker's second turn"
     );
+    let first_turn = predecessor
+        .snapshot
+        .executions
+        .values()
+        .find(|execution| execution.reference.node.as_str() == "worker")
+        .assert_value();
+    assert!(
+        matches!(first_turn.outcome(), Some(openengine_cluster_protocol::WorkerOutcome::Verified { output, .. }) if output == "stored"),
+        "first turn must acknowledge storing the fact: {:?}",
+        first_turn.outcome()
+    );
     // Use empty provider storage; the declared connection supplies authentication again.
     let transcripts = storage.join(if harness == "codex" {
         "sessions"
@@ -242,6 +256,7 @@ async fn live_suspended_conversation() {
         );
         sleep(Duration::from_millis(100)).await;
     }
+    wait_for_exit(fixture.ready_pid(&successor)).await;
     let ledger =
         SqliteRunLedger::open_read_only(fixture.run_storage(&successor).join("runs.sqlite3"))
             .assert_value();
@@ -262,9 +277,16 @@ async fn live_suspended_conversation() {
         "exactly one worker turn must happen in each run"
     );
     assert!(!turns[0].input.to_string().contains(&word));
+    let recalled = matches!(turns[0].outcome(),Some(openengine_cluster_protocol::WorkerOutcome::Verified {output,..}) if output.as_str().is_some_and(|output| output.contains(&word)));
+    let evidence = fixture.root.as_path().with_extension("failed");
+    if !recalled {
+        // Both controllers have exited. Keep their ledgers and native transcripts for diagnosis.
+        fs::rename(fixture.root.as_path(), &evidence).assert_value_with("retain recall evidence");
+    }
     assert!(
-        matches!(turns[0].outcome(),Some(openengine_cluster_protocol::WorkerOutcome::Verified {output,..}) if output.as_str().is_some_and(|output| output.contains(&word))),
-        "successor did not recall the first-turn-only fact: {:?}",
-        turns[0].outcome()
+        recalled,
+        "successor did not recall the first-turn-only fact: {:?}; evidence retained at {}",
+        turns[0].outcome(),
+        evidence.display()
     );
 }

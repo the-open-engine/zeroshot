@@ -578,7 +578,7 @@ pub(crate) fn select_files(
     Ok(selection.files)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) mod test_support;
 
 #[cfg(test)]

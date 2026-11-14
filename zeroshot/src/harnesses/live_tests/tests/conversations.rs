@@ -43,12 +43,24 @@ async fn turn(
     next: bool,
     restored: Option<crate::native_v2_runner::conversations::ConversationSource>,
 ) -> (Arc<dyn crate::native_v2_runner::NodeSession>, Value) {
-    let binding = settings.binding(&HarnessRegistry::local(), SessionScope::NodeInstance);
-    let instructions = if next {
-        "Return the exact secret word you learned in the preceding turn of this provider conversation. The source file is gone. Do not inspect any other files or use network tools. Obey the runtime response contract without encoding another JSON object inside the output string."
-    } else {
-        "Use native tools to run `cat secret-word && rm -- secret-word && test ! -e secret-word`. Remember the printed word in this provider conversation. Unlink the file completely; truncating it is insufficient. Never save the word in another workspace file. Return the literal string \"stored\" as output. Do not use Git or network tools. Obey the runtime response contract without encoding another JSON object inside the output string."
-    };
+    let mut binding = settings.binding(&HarnessRegistry::local(), SessionScope::NodeInstance);
+    if let crate::native_v2_contract::NodeRuntimeBinding::Agent { effort, .. } = &mut binding {
+        *effort = Some(crate::worker_catalog::ReasoningEffort::Medium);
+    }
+    let instructions = concat!(
+        "On EVERY invocation, including a continued conversation, your first action must be a NEW ",
+        "native shell call: `if test -e secret-word; then printf 'NEW_WORD\\n'; ",
+        "cat secret-word && rm -- secret-word && test ! -e secret-word; ",
+        "else printf 'RECALL_WORD\\n'; fi`. ",
+        "Choose the branch ONLY from the marker printed by THIS invocation's shell call. ",
+        "Never reuse a previous invocation's file check or branch decision. ",
+        "For NEW_WORD, remember the printed word in this conversation and return the literal ",
+        "string \"stored\" as output. Do not switch branches after deleting the file. ",
+        "For RECALL_WORD, return the exact word learned in the earlier invocation as output. ",
+        "The earlier reply \"stored\" is an acknowledgement, not the word to recall. ",
+        "Do not save it in any other workspace file. Do not use Git or network tools. ",
+        "Obey the runtime response contract without encoding another JSON object inside the output string."
+    );
     let request = NodeRequestFixture {
         run_id: if next {
             "live-checkpoint-after"
@@ -130,7 +142,8 @@ async fn checkpoint_conversation_live_contract() {
     let word = format!("fact-{}", uuid::Uuid::now_v7().simple());
     std::fs::write(workspace.join("secret-word"), &word).assert_value();
     let adapter = configured_adapter(&settings, first.join("runtime"));
-    let (session, _output) = turn(&adapter, &settings, false, None).await;
+    let (session, output) = turn(&adapter, &settings, false, None).await;
+    assert_eq!(output, "stored", "learning turn must acknowledge the fact");
     assert!(!workspace.join("secret-word").exists());
     let source = session.conversation().await.assert_value();
     let captured = capture(ConversationSources::from([(
@@ -173,9 +186,25 @@ async fn checkpoint_conversation_live_contract() {
         .assert_value();
     let adapter = configured_adapter(&settings, second.join("runtime"));
     let (session, output) = turn(&adapter, &settings, true, Some(restored)).await;
-    assert!(
-        output.as_str().is_some_and(|output| output.contains(&word)),
-        "the continued provider must recall the first-turn-only fact: {output}"
-    );
+    let recalled = output.as_str().is_some_and(|output| output.contains(&word));
+    let evidence = directory.path().with_extension("failed");
+    if !recalled {
+        // The native turn has stopped. Copy before close removes private session homes.
+        crate::native_v2_capsule::provider_process::copy_workspace_entry(
+            directory.path(),
+            &evidence,
+        )
+        .assert_value_with("retain native recall evidence");
+        crate::native_v2_capsule::provider_process::copy_workspace_entry(
+            files.directory(),
+            &evidence.join("checkpoint"),
+        )
+        .assert_value_with("retain the captured conversation");
+    }
     session.close().await;
+    assert!(
+        recalled,
+        "the continued provider must recall the first-turn-only fact: {output}; evidence retained at {}",
+        evidence.display()
+    );
 }
