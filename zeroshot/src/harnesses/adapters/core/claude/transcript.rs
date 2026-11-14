@@ -313,9 +313,15 @@ impl ClaudeTranscript {
             .get("error")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
-        self.pending.emit(
+        let error = match event.get("error_status") {
+            Some(Value::Number(status)) => format!("{error} (HTTP {status})"),
+            Some(Value::Null) if error == "unknown" => {
+                "no complete response from the API".to_owned()
+            }
+            _ => error.to_owned(),
+        };
+        self.pending.emit_progress(
             emissions,
-            LiveOutputStream::System,
             &format!("Claude API retry {attempt}/{maximum}: {error}"),
         );
     }

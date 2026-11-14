@@ -402,6 +402,12 @@ jobs:
           npm --prefix ui run build
       - name: Check macOS product and test compilation
         run: cargo check --locked --workspace --all-targets --features ui
+      - name: Run macOS provider transcript regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          native_v2_claude::transcript::tests
+          native_v2_codex::output::tests
+          native_v2_pi::transcript::tests
       - name: Run macOS forge network and access regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --

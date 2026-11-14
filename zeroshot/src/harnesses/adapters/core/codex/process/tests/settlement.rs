@@ -13,7 +13,7 @@ use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::HostedProcessScope;
 use crate::execution::WorkspaceAccessMode;
 use crate::native_v2_candidate::test_support::TestDirectory;
-use crate::native_v2_runner::{DurableNodeEvent, test_support};
+use crate::native_v2_runner::{DurableNodeEvent, LiveOutputStream, test_support};
 
 const FIXTURE_TEST: &str = "native_v2_codex::process::tests::settlement::codex_process_fixture";
 const MODE: &str = "ZEROSHOT_CODEX_SETTLEMENT_FIXTURE";

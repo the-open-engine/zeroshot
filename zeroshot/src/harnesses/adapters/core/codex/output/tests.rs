@@ -6,6 +6,69 @@ use super::*;
 #[path = "tests/unicode.rs"]
 mod unicode;
 
+#[test]
+fn retry_progress_includes_stream_error_message_and_preserves_failure() {
+    for (extra, expected) in [
+        (
+            json!({"message":"connection reset"}),
+            "Codex stream error: connection reset",
+        ),
+        (
+            json!({"error":{"message":"stream cut"}}),
+            "Codex stream error: stream cut",
+        ),
+        (json!({}), "Codex stream error"),
+        (json!({"message":null}), "Codex stream error"),
+        (json!({"message":42}), "Codex stream error"),
+        (json!({"message":"  "}), "Codex stream error"),
+    ] {
+        let mut event = extra;
+        event["type"] = json!("error");
+        let bytes = format!("{event}\n");
+        let mut decoder = CodexOutputDecoder::new();
+        let emissions = decoder.push(bytes.as_bytes());
+        assert_eq!(emissions.len(), 1);
+        assert_eq!(emissions[0].log(), (LiveOutputStream::System, expected));
+        let output = decoder.finish();
+        assert!(output.final_message().is_err());
+        assert!(
+            output.failure_message().assert_value().contains(
+                expected
+                    .strip_prefix("Codex stream error: ")
+                    .unwrap_or("Codex stream error without provider detail")
+            )
+        );
+    }
+}
+
+#[test]
+fn retry_progress_redacts_before_bounding_without_shortening_final_failure() {
+    let secret = "private-provider-token";
+    for message in [
+        format!("connection reset {secret}"),
+        format!("{} {secret} {} {secret}", "é".repeat(235), "界".repeat(600)),
+    ] {
+        let mut decoder = CodexOutputDecoder::new();
+        let event = json!({"type":"error", "message":message});
+        let emissions = decoder.push(format!("{event}\n").as_bytes());
+        assert_eq!(emissions.len(), 1);
+        let mut logs = Vec::new();
+        emissions[0].emit(&ProviderText::new(&[secret.to_owned()]), &mut logs);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].stream, LiveOutputStream::System);
+        let line = &logs[0].text;
+        assert!(
+            line.len() <= crate::native_v2_capsule::provider_process::text::LIVE_LINE_BYTES,
+            "{} bytes",
+            line.len()
+        );
+        assert!(line.starts_with("Codex stream error: "));
+        assert!(line.contains("[REDACTED]"));
+        assert!(!line.contains("private"));
+        assert_eq!(decoder.finish().failure_message(), Some(message.as_str()));
+    }
+}
+
 fn output_with_provisional_usage(event_type: &str, usage: Option<Value>) -> CodexOutput {
     let mut terminal = json!({"type":event_type});
     if event_type == "turn.failed" {

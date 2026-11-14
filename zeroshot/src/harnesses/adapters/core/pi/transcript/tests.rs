@@ -11,6 +11,63 @@ use serde_json::json;
 #[path = "tests/unicode.rs"]
 mod unicode;
 
+#[test]
+fn retry_progress_includes_error_message_when_supplied() {
+    for (message, expected) in [
+        (
+            Some(json!("529 overloaded")),
+            "Pi is retrying the model turn (attempt 2): 529 overloaded",
+        ),
+        (None, "Pi is retrying the model turn (attempt 2)"),
+        (
+            Some(json!(null)),
+            "Pi is retrying the model turn (attempt 2)",
+        ),
+        (Some(json!(42)), "Pi is retrying the model turn (attempt 2)"),
+    ] {
+        let mut event = json!({"type":"auto_retry_start", "attempt":2});
+        if let Some(message) = message {
+            event["errorMessage"] = message;
+        }
+        let mut transcript = PiTranscript::new(Vec::new());
+        let emissions = transcript.push(format!("{event}\n").as_bytes());
+        assert_eq!(emissions.len(), 1);
+        assert_eq!(emissions[0].stream, LiveOutputStream::System);
+        assert_eq!(emissions[0].text, expected);
+    }
+}
+
+#[test]
+fn retry_progress_redacts_before_bounding_without_shortening_final_failure() {
+    let secret = "private-provider-token";
+    for message in [
+        format!("overloaded {secret}"),
+        format!("{} {secret} {} {secret}", "é".repeat(222), "界".repeat(600)),
+    ] {
+        let mut transcript = PiTranscript::new(vec![secret.to_owned()]);
+        let retry = json!({"type":"auto_retry_start", "attempt":2, "errorMessage":message});
+        let failure = json!({"type":"message_end", "message":{
+            "role":"assistant", "stopReason":"error", "errorMessage":message}});
+        let emissions = transcript.push(format!("{retry}\n{failure}\n").as_bytes());
+        assert_eq!(emissions.len(), 1);
+        assert_eq!(emissions[0].stream, LiveOutputStream::System);
+        let line = &emissions[0].text;
+        assert!(
+            line.len() <= crate::native_v2_capsule::provider_process::text::LIVE_LINE_BYTES,
+            "{} bytes",
+            line.len()
+        );
+        assert!(line.starts_with("Pi is retrying the model turn (attempt 2): "));
+        assert!(line.contains("[REDACTED]"));
+        assert!(!line.contains("private"));
+        let super::PiAttempt::Failed(failure) = transcript.finish(None).unwrap() else {
+            panic!("expected a failed attempt");
+        };
+        assert!(failure.retryable);
+        assert_eq!(failure.diagnostic, message.replace(secret, "[REDACTED]"));
+    }
+}
+
 fn header(id: &str) -> String {
     json!({"type": "session", "version": 3, "id": id, "cwd": "/w"}).to_string()
 }
