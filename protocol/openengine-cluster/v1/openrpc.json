@@ -759,6 +759,107 @@
       }
     },
     {
+      "name": "run/suspend",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "runSuspendResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunStatusResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "run/vectors",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "after",
+          "required": false,
+          "schema": {
+            "$ref": "schema.json#/$defs/RunVectorsParams/properties/after"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "format": "uint32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "runVectorsResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunVectorsResult"
+        }
+      },
+      "summary": "Read an ordered page of the durable vector record",
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "run/vector",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "$ref": "schema.json#/$defs/VectorId"
+          }
+        }
+      ],
+      "result": {
+        "name": "runVectorResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunVector"
+        }
+      },
+      "summary": "Read one vector entry in full",
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
       "description": "Lists checkpoints in increasing sequence order. The after cursor is exclusive. Omitted limit means 50; accepted limits are 1 through 100. Concurrent groups, including every map wave and nested child, expose one entry point. Storage and execution seeds remain private to the target.",
       "name": "run/checkpoints",
       "paramStructure": "by-name",

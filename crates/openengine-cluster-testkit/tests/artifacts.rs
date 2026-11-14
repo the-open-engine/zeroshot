@@ -156,6 +156,51 @@ async fn openrpc_exposes_only_the_implemented_protocol_methods() {
 }
 
 #[tokio::test]
+async fn openrpc_vector_parameters_resolve_in_the_generated_schema() {
+    let artifacts = generate_artifacts().await;
+    let openrpc = generated_json(&artifacts, "/openrpc.json");
+    let schema = generated_json(&artifacts, "/schema.json");
+    for (method_name, parameter_name, pointer) in [
+        (
+            "run/vectors",
+            "after",
+            "/$defs/RunVectorsParams/properties/after",
+        ),
+        ("run/vector", "id", "/$defs/VectorId"),
+    ] {
+        let method = openrpc
+            .assert_key("methods")
+            .as_array()
+            .assert_value()
+            .iter()
+            .find(|method| method.assert_key("name") == method_name)
+            .assert_value();
+        let parameter = method
+            .assert_key("params")
+            .as_array()
+            .assert_value()
+            .iter()
+            .find(|parameter| parameter.assert_key("name") == parameter_name)
+            .assert_value();
+        let reference = parameter
+            .assert_key("schema")
+            .assert_key("$ref")
+            .as_str()
+            .assert_value();
+        assert_eq!(reference, format!("schema.json#{pointer}"));
+        assert!(schema.pointer(pointer).is_some());
+    }
+    let vector_id = schema.assert_key("$defs").assert_key("VectorId");
+    assert_eq!(vector_id.assert_key("type"), "string");
+    assert_eq!(
+        schema
+            .pointer("/$defs/RunVectorsParams/properties/after/anyOf/0/$ref")
+            .assert_value(),
+        "#/$defs/VectorId"
+    );
+}
+
+#[tokio::test]
 async fn openrpc_recovery_methods_match_the_authoritative_schema() {
     let artifacts = generate_artifacts().await;
     let openrpc = generated_json(&artifacts, "/openrpc.json");

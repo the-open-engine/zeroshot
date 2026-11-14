@@ -236,6 +236,49 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .await
     }
 
+    async fn validate_run_suspension(
+        &self,
+        target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        let (origin, wire) = self.discovery(target).await?;
+        let descriptor = super::contract::build_controller_descriptor(
+            &origin,
+            wire,
+            target.access.authentication(),
+        )?;
+        super::require_session_capability(&descriptor, super::TargetSessionPurpose::RunSuspension)
+    }
+
+    async fn run_suspension_session(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        let access = self
+            .controller_access_inner(
+                target,
+                super::TargetSessionPurpose::RunSuspension,
+                super::RequestCapabilities::default(),
+            )
+            .await?;
+        self.issue_oecp_session(target, request, access).await
+    }
+
+    async fn run_vectors_session(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        let access = self
+            .controller_access_inner(
+                target,
+                super::TargetSessionPurpose::RunVectors,
+                super::RequestCapabilities::default(),
+            )
+            .await?;
+        self.issue_oecp_session(target, request, access).await
+    }
+
     async fn workspace_checkpoints_session(
         &self,
         target: &TargetRecord,
@@ -356,6 +399,30 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         params: openengine_cluster_protocol::RunExportWorkspaceParams,
     ) -> Result<zeroshot_engine::native_v2_cli::WorkspaceExportStream, TargetAuthorityError> {
         TargetHttpControlAuthority::hosted_run_export_workspace(self, target, params).await
+    }
+
+    async fn hosted_run_suspend(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<Option<CliRunStatusResult>, TargetAuthorityError> {
+        TargetHttpControlAuthority::hosted_run_suspend(self, target, params).await
+    }
+
+    async fn hosted_run_vectors(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorsResult>, TargetAuthorityError> {
+        TargetHttpControlAuthority::hosted_run_vectors(self, target, params).await
+    }
+
+    async fn hosted_run_vector(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorResult>, TargetAuthorityError> {
+        TargetHttpControlAuthority::hosted_run_vector(self, target, params).await
     }
 
     async fn hosted_run_checkpoints(

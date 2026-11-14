@@ -88,7 +88,7 @@ pub(super) struct ExecutableDeclaration {
     pub(super) worker: WorkerRef,
     pub(super) instructions: Option<NodeInstructions>,
     pub(super) contract: WorkerContract,
-    attempts: u64,
+    pub(super) attempts: u64,
     kind: LeafKind,
 }
 
@@ -221,6 +221,7 @@ fn validate_binding_kinds(
         if let NodeRuntimeBinding::Decision { .. } = binding {
             validate_decision_declaration(declaration, binding)?;
         }
+        super::wait::validate_binding(declaration, binding)?;
         validate_binding_kind(declaration, binding)?;
         validate_instructions(declaration, binding)?;
     }
@@ -344,7 +345,7 @@ pub(crate) fn writer_nodes(admitted: &AdmittedRun) -> BTreeSet<NodeName> {
         .filter(|declaration| {
             !matches!(
                 admitted.runtime.nodes().get(&declaration.name),
-                Some(NodeRuntimeBinding::Decision { .. })
+                Some(NodeRuntimeBinding::Decision { .. } | NodeRuntimeBinding::Request {})
             )
         })
         .map(|declaration| declaration.name)

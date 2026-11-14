@@ -161,6 +161,8 @@ pub struct NativeV2TargetConnector<R, A, D> {
 enum TargetSessionPurpose {
     General,
     WorkspaceRecovery,
+    RunSuspension,
+    RunVectors,
     WorkspaceCheckpoints,
 }
 
@@ -493,6 +495,32 @@ where
             .await
     }
 
+    async fn validate_run_suspension(&self, name: &str) -> Result<(), NativeV2CliError> {
+        let target = self.registry.get(name).map_err(cli_target_error)?;
+        self.authority
+            .validate_run_suspension(&target)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn connect_run_suspension(
+        &self,
+        name: &str,
+        run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(name, Some(run_id), TargetSessionPurpose::RunSuspension)
+            .await
+    }
+
+    async fn connect_run_vectors(
+        &self,
+        name: &str,
+        run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(name, Some(run_id), TargetSessionPurpose::RunVectors)
+            .await
+    }
+
     async fn connect_workspace_checkpoints(
         &self,
         name: &str,
@@ -598,6 +626,51 @@ where
         let target = self.target(name)?;
         self.authority
             .hosted_run_export_workspace(&target, params)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn hosted_run_suspend(
+        &self,
+        name: &str,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
+        let target = self.target(name)?;
+        if matches!(target.access, TargetAccess::Direct) {
+            return Ok(None);
+        }
+        self.authority
+            .hosted_run_suspend(&target, params)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn hosted_run_vectors(
+        &self,
+        name: &str,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorsResult>, NativeV2CliError> {
+        let target = self.target(name)?;
+        if matches!(target.access, TargetAccess::Direct) {
+            return Ok(None);
+        }
+        self.authority
+            .hosted_run_vectors(&target, params)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn hosted_run_vector(
+        &self,
+        name: &str,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorResult>, NativeV2CliError> {
+        let target = self.target(name)?;
+        if matches!(target.access, TargetAccess::Direct) {
+            return Ok(None);
+        }
+        self.authority
+            .hosted_run_vector(&target, params)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
@@ -737,6 +810,14 @@ where
                 self.authority
                     .workspace_recovery_session(&target, &request)
                     .await
+            }
+            TargetSessionPurpose::RunSuspension => {
+                self.authority
+                    .run_suspension_session(&target, &request)
+                    .await
+            }
+            TargetSessionPurpose::RunVectors => {
+                self.authority.run_vectors_session(&target, &request).await
             }
             TargetSessionPurpose::WorkspaceCheckpoints => {
                 self.authority

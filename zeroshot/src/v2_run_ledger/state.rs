@@ -35,6 +35,11 @@ pub(crate) fn validate_create(request: &CreateRun) -> Result<(), RunLedgerError>
 }
 
 pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
+    if let RunEvent::Vector { vector } = event {
+        vector
+            .validate()
+            .map_err(|_| RunLedgerError::InvalidEvent("vector record identity is out of bounds"))?;
+    }
     let maximum = match event {
         RunEvent::PriorExecution { .. } => MAX_PRIOR_EXECUTION_BYTES,
         _ => MAX_EVENT_BYTES,
@@ -88,6 +93,9 @@ pub(crate) fn apply_event(
     if snapshot.terminal.is_some() {
         return Err(RunLedgerError::InvalidEvent("run is already terminal"));
     }
+    if snapshot.phase == RunPhase::Suspended && !matches!(event, RunEvent::ForceStopRequested) {
+        return Err(RunLedgerError::InvalidEvent("run is suspended"));
+    }
     validate_event(event)?;
     apply_event_kind(snapshot, event, sequence)?;
     snapshot.cursor = cursor_for(sequence);
@@ -129,6 +137,12 @@ fn apply_event_kind(
         RunEvent::NodeCompleted { completion } => {
             apply_node_completed(snapshot, completion, sequence)
         }
+        RunEvent::WaitDeferred { reference } => {
+            active_node_mut(snapshot, reference)?.state = NodeState::SuspendedWait {
+                at: cursor_for(sequence),
+            };
+            Ok(())
+        }
         RunEvent::ExecutionVoided { reference, reason } => {
             apply_execution_voided(snapshot, reference, *reason, sequence)
         }
@@ -144,6 +158,28 @@ fn apply_event_kind(
         } => {
             apply_primary_graph_completed(snapshot, result, *auxiliary_pending, delivery_execution)
         }
+        RunEvent::SuspendRequested => {
+            require_running(snapshot)?;
+            if snapshot.suspend_requested {
+                return Err(RunLedgerError::InvalidEvent(
+                    "suspension was already requested",
+                ));
+            }
+            snapshot.suspend_requested = true;
+            Ok(())
+        }
+        RunEvent::Suspended { suspension } => {
+            require_running(snapshot)?;
+            if snapshot.active_executions().next().is_some() {
+                return Err(RunLedgerError::InvalidEvent(
+                    "cannot suspend active executions",
+                ));
+            }
+            snapshot.suspension = Some(suspension.clone());
+            snapshot.phase = RunPhase::Suspended;
+            Ok(())
+        }
+        RunEvent::Vector { .. } => Ok(()),
         RunEvent::ForceStopRequested => apply_force_stop(snapshot),
         RunEvent::Terminal { result } => apply_terminal(snapshot, result),
     }

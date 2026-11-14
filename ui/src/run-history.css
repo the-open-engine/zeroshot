@@ -81,6 +81,11 @@
 .run-list-item small span {
   margin-left: auto;
 }
+.run-successor {
+  display: block;
+  margin: 0 10px 10px 25px;
+  font-size: 11px;
+}
 .run-dot {
   flex-shrink: 0;
   width: 6px;

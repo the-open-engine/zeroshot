@@ -11,7 +11,7 @@ struct Observation {
     history: Vec<DurableExecution>,
 }
 
-struct RecordingCheckpointStore {
+pub(super) struct RecordingCheckpointStore {
     driver: Arc<FakeDriver>,
     ledger: Arc<FakeRunLedger>,
     records: StdMutex<Vec<Observation>>,
@@ -19,7 +19,7 @@ struct RecordingCheckpointStore {
 }
 
 impl RecordingCheckpointStore {
-    fn attach(harness: &Harness) -> (NativeV2Supervisor, Arc<Self>) {
+    pub(super) fn attach(harness: &Harness) -> (NativeV2Supervisor, Arc<Self>) {
         let store = Arc::new(Self {
             driver: harness.driver.clone(),
             ledger: harness.ledger.clone(),
@@ -72,6 +72,25 @@ impl RecordingCheckpointStore {
 
 #[async_trait]
 impl RunCheckpointStore for RecordingCheckpointStore {
+    async fn suspend(
+        &self,
+        history: &[DurableExecution],
+        _vectors: &[openengine_cluster_protocol::RunVector],
+    ) -> Result<(), CheckpointError> {
+        let snapshot = stored_run(&self.ledger).await.snapshot;
+        assert_eq!(self.driver.state().active, 0);
+        assert!(snapshot.active_executions().next().is_none());
+        assert_eq!(continuation_history(&snapshot).assert_value(), history);
+        self.records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Observation {
+                boundary: None,
+                history: history.to_vec(),
+            });
+        Ok(())
+    }
+
     async fn retain_delivery_state(
         &self,
         _state: &crate::native_v2_contract::DeliveryCheckpoint,
@@ -106,7 +125,7 @@ impl RunCheckpointStore for RecordingCheckpointStore {
     }
 }
 
-fn completed_after(millis: u64) -> Behavior {
+pub(super) fn completed_after(millis: u64) -> Behavior {
     Behavior::Complete {
         delay: Duration::from_millis(millis),
         outcome: success_for(NodeRole::Worker),
@@ -160,7 +179,7 @@ async fn checkpoint_shutdown_stops_before_dispatch_and_preserves_a_latched_graph
     }
 }
 
-fn mapped_waves_graph() -> GraphSpec {
+pub(super) fn mapped_waves_graph() -> GraphSpec {
     let state = record_type();
     let item_work = json!({
         "kind":"seq", "name":"item_work", "state":state,

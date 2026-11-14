@@ -9,7 +9,7 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 import { JSDOM } from 'jsdom';
-import type { GraphNode } from './domain';
+import type { GraphNode, Runtime } from './domain';
 import type { CanvasView } from './run-view-state';
 import { createViteTestServer, installTestGlobals, runDetailFixture } from './test-support';
 
@@ -145,6 +145,7 @@ class ScaleMatrix {
 
 type CanvasOptions = {
   root?: GraphNode;
+  runtime?: Runtime;
   readOnly?: boolean;
   view?: CanvasView;
   size?: typeof canvas;
@@ -232,7 +233,7 @@ async function mountRunGraph(
   const document = {
     name: detail.runId,
     graph: { ...detail.graph, root: options.root ?? root },
-    runtime: detail.runtime,
+    runtime: options.runtime ?? detail.runtime,
   };
   await act(async () =>
     reactRoot.render(
@@ -346,6 +347,27 @@ async function expandInPlace(container: HTMLElement) {
   const after = viewport(container);
   assert.equal(after.zoom, before.zoom);
   assert.deepEqual(onScreen(box(nodeWith(container, 'Collapse rounds')), after), card);
+}
+
+for (const readOnly of [false, true]) {
+  test(`wait shows its own detail in the ${readOnly ? 'history' : 'editor'} canvas`, async (t) => {
+    const container = await mountRunGraph(t, layoutWorker(), undefined, {
+      readOnly,
+      root: { kind: 'verifier', name: 'cooldown', worker: 'builtin.request.wait@1' },
+      runtime: {
+        harness: 'codex',
+        provider: 'openai',
+        size: 'small',
+        nodes: { cooldown: { kind: 'request' } },
+      },
+      view: { collapsed: [] },
+    });
+    const card = container.querySelector('.workflow-card.role-activity');
+    assert.equal(card?.querySelector('small')?.textContent, 'Wait');
+    assert.equal(card?.querySelector('.needs-value'), null);
+    assert.doesNotMatch(card?.textContent ?? '', /Choose model|Agent/);
+    assert.ok(card?.querySelector('.lucide-clock'));
+  });
 }
 
 test('a host without its own header gets its controls beside the settings button', async (t) => {

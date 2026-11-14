@@ -9,6 +9,83 @@ use serde::{Serialize, de::DeserializeOwned};
 use super::{AccessToken, TargetAuthorityError, TargetHttpControlAuthority, TargetRecord};
 
 impl TargetHttpControlAuthority {
+    pub(in super::super) async fn hosted_run_vector(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorResult>, TargetAuthorityError> {
+        let (auth, controller) = self
+            .descriptors_inner(target, super::super::TargetSessionPurpose::RunVectors)
+            .await?;
+        let Some(url) = auth.hosted_runs.vector_url(&params.run_id)? else {
+            return Ok(None);
+        };
+        let access = self
+            .access_token(target, &auth, &controller.audience)
+            .await?;
+        let request = self
+            .authorized(self.client.post(url), &access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .json(&params);
+        self.hosted_json(
+            (request, &access),
+            "hosted run vector",
+            Some(openengine_cluster_protocol::MAX_VECTOR_RESPONSE_BYTES),
+        )
+        .await
+        .map(Some)
+    }
+
+    pub(in super::super) async fn hosted_run_vectors(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorsResult>, TargetAuthorityError> {
+        let (auth, controller) = self
+            .descriptors_inner(target, super::super::TargetSessionPurpose::RunVectors)
+            .await?;
+        let Some(url) = auth.hosted_runs.vectors_url(&params.run_id)? else {
+            return Ok(None);
+        };
+        let access = self
+            .access_token(target, &auth, &controller.audience)
+            .await?;
+        let request = self
+            .authorized(self.client.post(url), &access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .json(&params);
+        self.hosted_json((request, &access), "hosted run vectors", None)
+            .await
+            .map(Some)
+    }
+
+    pub(in super::super) async fn hosted_run_suspend(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<Option<zeroshot_engine::native_v2_cli::CliRunStatusResult>, TargetAuthorityError>
+    {
+        let (auth, controller) = self
+            .descriptors_inner(target, super::super::TargetSessionPurpose::RunSuspension)
+            .await?;
+        let Some(url) = auth.hosted_runs.suspend_url(&params.run_id)? else {
+            return Ok(None);
+        };
+        let access = self
+            .access_token(target, &auth, &controller.audience)
+            .await?;
+        let request = self
+            .authorized(self.client.post(url), &access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .json(&params);
+        self.hosted_json((request, &access), "hosted run suspend", None)
+            .await
+            .map(Some)
+    }
+
     pub(in super::super) async fn hosted_run_resume(
         &self,
         target: &TargetRecord,

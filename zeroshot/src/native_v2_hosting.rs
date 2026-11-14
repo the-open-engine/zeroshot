@@ -107,6 +107,9 @@ pub struct ProductionHostingConfig {
     /// Private diagnostics collection; the host owns the receiver and durable storage.
     pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
     pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
+    /// Enables wait, suspension and vectors together for host-owned storage. The store must
+    /// publish suspended history and vectors before returning its checkpoint acknowledgement.
+    pub suspension: Option<crate::native_v2_wait::WaitPolicy>,
     /// Optional private delivery authority installed by the host, never selected by run input.
     pub delivery_validation: Option<Arc<dyn HostedDeliveryValidationFactory>>,
     pub storage_root: PathBuf,
@@ -201,6 +204,10 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             )
             .expect("product registry supplies unique bounded runtime lanes"),
         )
+    }
+
+    fn supports_run_suspension(&self) -> bool {
+        self.config.workspace_storage.is_none() || self.config.suspension.is_some()
     }
 
     fn supports_comment_delivery(&self) -> bool {
@@ -460,6 +467,7 @@ impl Default for ProductionHostingConfig {
             memory_backend: None,
             operator_diagnostic_output: None,
             workspace_storage: None,
+            suspension: None,
             delivery_validation: None,
             storage_root: PathBuf::from("/var/lib/zeroshot/native-v2"),
             copilot_executable: PathBuf::from("/usr/local/bin/copilot"),

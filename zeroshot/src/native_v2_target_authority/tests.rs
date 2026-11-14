@@ -105,6 +105,7 @@ fn fixture_run_sizes() -> openengine_cluster_protocol::TargetRunSizesDiscovery {
 
 #[derive(Default)]
 struct FakeFactory {
+    suspension: bool,
     workspace_checkpoints: bool,
     controllers: AtomicUsize,
     submissions: AtomicUsize,
@@ -120,6 +121,9 @@ type CommitAttribution = (
 
 #[async_trait]
 impl TargetControllerFactory for FakeFactory {
+    fn supports_run_suspension(&self) -> bool {
+        self.suspension
+    }
     fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
         Some(fixture_run_sizes())
     }
@@ -156,6 +160,61 @@ impl TargetControllerFactory for FakeFactory {
             run_id: request.run_id,
         })
     }
+}
+
+#[tokio::test]
+async fn direct_target_advertises_suspension_and_routes_vector_reads() {
+    use openengine_cluster_protocol::{RunVectorParams, RunVectorsParams, VectorId};
+    let (address, endpoint, task) = direct_test_server(Arc::new(FakeFactory {
+        suspension: true,
+        ..FakeFactory::default()
+    }))
+    .await;
+    let document = target_discovery(address).await;
+    assert_eq!(
+        document.extensions.run_suspension.assert_value().kind,
+        "openengine.run-suspension/v1"
+    );
+    assert_eq!(
+        document.extensions.request_wait.assert_value().kind,
+        "openengine.request-wait/v1"
+    );
+    assert_eq!(
+        document.extensions.run_vectors.assert_value().kind,
+        "openengine.run-vectors/v1"
+    );
+    let client = connect_client(&endpoint, None).await;
+    for error in [
+        client
+            .run_vectors(RunVectorsParams {
+                run_id: run_id(),
+                after: None,
+                limit: Some(1),
+            })
+            .await
+            .unwrap_err(),
+        client
+            .run_vector(RunVectorParams {
+                run_id: run_id(),
+                id: VectorId::new("entry").assert_value(),
+            })
+            .await
+            .unwrap_err(),
+    ] {
+        let ClientError::Rpc(error) = error else {
+            panic!("controller response expected")
+        };
+        assert_eq!(error.data.assert_value().code, NOT_FOUND);
+    }
+    let error = client
+        .run_suspend(openengine_cluster_protocol::RunSuspendParams { run_id: run_id() })
+        .await
+        .unwrap_err();
+    let ClientError::Rpc(error) = error else {
+        panic!("controller response expected")
+    };
+    assert_eq!(error.data.assert_value().code, "invalid_request");
+    task.abort();
 }
 
 struct FakeSessions;

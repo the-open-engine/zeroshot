@@ -663,6 +663,58 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
 }
 
 #[tokio::test]
+async fn suspension_and_both_vector_reads_require_markers_before_dialing() {
+    use openengine_cluster_protocol::{RunVectorParams, RunVectorsParams, VectorId};
+    let registry = MemoryRegistry::default();
+    registry.insert(target()).assert_value();
+    let authority = FakeAuthority::new("wss://target.example/oecp");
+    let dialer = FakeDialer::default();
+    let backend = NamedTargetCliBackend::new(NativeV2TargetConnector::new(
+        registry,
+        authority.clone(),
+        dialer.clone(),
+    ));
+    let run_id = run_request().run_id;
+    let error = backend
+        .run_suspend(
+            Some("prod"),
+            RunStatusParams {
+                run_id: run_id.clone(),
+            },
+        )
+        .await
+        .assert_error();
+    assert!(error.to_string().contains("openengine.run-suspension/v1"));
+    for error in [
+        backend
+            .run_vectors(
+                Some("prod"),
+                RunVectorsParams {
+                    run_id: run_id.clone(),
+                    after: None,
+                    limit: None,
+                },
+            )
+            .await
+            .assert_error(),
+        backend
+            .run_vector(
+                Some("prod"),
+                RunVectorParams {
+                    run_id,
+                    id: VectorId::new("entry").assert_value(),
+                },
+            )
+            .await
+            .assert_error(),
+    ] {
+        assert!(error.to_string().contains("openengine.run-vectors/v1"));
+    }
+    assert!(authority.calls().is_empty());
+    assert!(dialer.sessions.lock().assert_value().is_empty());
+}
+
+#[tokio::test]
 async fn hosted_authority_uses_unified_discovery_and_run_scoped_oecp() {
     let root = temp_root();
     let (origin, server) = spawn_target_authority(15).await;
@@ -1128,4 +1180,80 @@ async fn direct_submission_carries_preparation_and_authorizes_its_resume_connect
             .assert_value(),
         expected.connection_requirements()
     );
+}
+
+#[tokio::test]
+async fn suspend_and_both_vector_reads_reach_the_direct_runs_oecp_session() {
+    use openengine_cluster_protocol::{RunSuspendParams, RunVectorParams, RunVectorsParams, VectorId};
+    let root = temp_root();
+    let (origin, server) = spawn_direct_target_authority(7).await;
+    let registry = MemoryRegistry::default();
+    registry.insert(direct_target(origin)).assert_value();
+    let dialer = FakeDialer::default();
+    let backend = NamedTargetCliBackend::new(NativeV2TargetConnector::new(
+        registry,
+        test_http_authority(root.path("refresh-locks")),
+        dialer.clone(),
+    ));
+    let run_id = RunId::new("run-suspended");
+    backend
+        .run_suspend(
+            Some("vm"),
+            RunSuspendParams {
+                run_id: run_id.clone(),
+            },
+        )
+        .await
+        .assert_error();
+    backend
+        .run_vectors(
+            Some("vm"),
+            RunVectorsParams {
+                run_id: run_id.clone(),
+                after: None,
+                limit: Some(2),
+            },
+        )
+        .await
+        .assert_error();
+    backend
+        .run_vector(
+            Some("vm"),
+            RunVectorParams {
+                run_id: run_id.clone(),
+                id: VectorId::new("entry").assert_value(),
+            },
+        )
+        .await
+        .assert_error();
+    let requests = dialer.requests.lock().assert_value().clone();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request["method"].as_str().assert_value())
+            .collect::<Vec<_>>(),
+        ["run/suspend", "run/vectors", "run/vector"]
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|request| request["params"]["runId"] == run_id.as_str())
+    );
+    assert_eq!(dialer.sessions.lock().assert_value().len(), 3);
+    let http = tokio::time::timeout(std::time::Duration::from_secs(5), server)
+        .await
+        .assert_value()
+        .assert_value();
+    let sessions = http
+        .iter()
+        .filter(|request| request.path == "/native-v2/oecp-session")
+        .collect::<Vec<_>>();
+    assert_eq!(sessions.len(), 3);
+    for session in sessions {
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&session.body).assert_value()["runId"],
+            run_id.as_str()
+        );
+        assert!(session.authorization.is_none());
+    }
 }

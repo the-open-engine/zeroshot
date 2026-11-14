@@ -17,17 +17,17 @@ struct Fixture {
     backend: LocalCliBackend,
     id: RunId,
     execution: openengine_cluster_protocol::ExecutionRef,
+    vector: openengine_cluster_protocol::RunVector,
 }
 
 impl Fixture {
     async fn new(finished: bool, lost: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let backend = LocalCliBackend::new(
-            root.path().to_owned(),
-            "unused".into(),
-            root.path().to_owned(),
-            "git".into(),
-        );
+        // Match the CLI's private state root, including explicit Windows ownership.
+        let state = root.path().join("state");
+        crate::execution::platform::create_private_directory(&state).unwrap();
+        let backend =
+            LocalCliBackend::new(state, "unused".into(), root.path().to_owned(), "git".into());
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
         let storage = backend.create_run_storage(&id).unwrap();
         let ledger = SqliteRunLedger::open(storage.join("runs.sqlite3")).unwrap();
@@ -43,9 +43,18 @@ impl Fixture {
         let reference = test_support::request(id.as_str(), "worker", (1, 1))
             .invocation
             .reference;
+        let vector = openengine_cluster_protocol::RunVector {
+            id: openengine_cluster_protocol::VectorId::new("recorded-vector").unwrap(),
+            run_id: id.clone(),
+            created_at: UnixTimestampMillis::MIN,
+            content: openengine_cluster_protocol::RunVectorContent::SuspendRequest {},
+        };
         let mut events = vec![
             RunEvent::RunStarted,
             test_support::node_started(&reference, serde_json::Value::Null),
+            RunEvent::Vector {
+                vector: vector.clone(),
+            },
         ];
         // Cross bounded ledger pages, including pages with no watch status changes.
         events.extend((0..300).map(|index| RunEvent::SafeLog {
@@ -123,6 +132,7 @@ impl Fixture {
             backend,
             id,
             execution,
+            vector,
         }
     }
 }
@@ -145,7 +155,15 @@ fn tree(path: &Path) -> BTreeMap<PathBuf, Entry> {
     entries.insert(
         path.to_owned(),
         Entry {
-            bytes: metadata.is_file().then(|| std::fs::read(path).unwrap()),
+            bytes: metadata.is_file().then(|| {
+                // Windows locks also cover reads past EOF. Metadata proves an empty lease's
+                // contents without reading its locked byte range through another handle.
+                if metadata.len() == 0 {
+                    Vec::new()
+                } else {
+                    std::fs::read(path).unwrap()
+                }
+            }),
             modified: metadata.modified().unwrap(),
             permissions: metadata.permissions(),
         },
@@ -242,6 +260,7 @@ async fn inspection_leaves_read_only_running_lost_and_finished_directories_uncha
                 .await
                 .unwrap();
             assert_eq!(checkpoints.controller.is_none(), finished);
+            vector_tests::assert_vectors(&fixture).await;
             let mut watch = fixture
                 .backend
                 .inspect_watch(RunWatchParams {
@@ -444,6 +463,13 @@ struct LiveController {
     status: Option<RunStatusResult>,
     stopped: RunStatusResult,
     forced: AtomicBool,
+    force_gate: Option<Arc<ForceGate>>,
+}
+
+#[derive(Default)]
+struct ForceGate {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
 }
 
 impl LiveController {
@@ -452,6 +478,7 @@ impl LiveController {
             status,
             stopped: failed(recorded, "force_stopped"),
             forced: AtomicBool::new(false),
+            force_gate: None,
         })
     }
 }
@@ -494,6 +521,10 @@ impl ClusterBackend for LiveController {
         _params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
         self.forced.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.force_gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+        }
         let stopped = self.stopped.clone();
         Ok(RunForceResult {
             run_id: stopped.run_id,
@@ -507,6 +538,12 @@ impl ClusterBackend for LiveController {
         })
     }
 }
+
+#[path = "force_tests.rs"]
+mod force_tests;
+
+#[path = "vector_tests.rs"]
+mod vector_tests;
 
 fn failed(recorded: &RunStatusResult, reason: &str) -> RunStatusResult {
     let mut status = recorded.clone();

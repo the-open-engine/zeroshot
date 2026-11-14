@@ -467,13 +467,18 @@ async fn initialization_reports_one_corrupt_history_without_losing_other_runs() 
         .join("runs")
         .join(corrupt.snapshot.run_id.as_str())
         .join("runs.sqlite3");
-    rusqlite::Connection::open(path)
-        .assert_value()
+    let connection = rusqlite::Connection::open(path).assert_value();
+    // Bypass the vector index's JSON expressions to simulate existing on-disk corruption.
+    connection
+        .execute("DROP INDEX v2_run_vector_ids", [])
+        .assert_value();
+    connection
         .execute(
             "INSERT INTO v2_run_events(run_id,sequence,event_json) VALUES(?1,1,'{invalid-json')",
             [corrupt.snapshot.run_id.as_str()],
         )
         .assert_value();
+    drop(connection);
     let inventory = case.prepare().await;
     assert_eq!(inventory["runs"].as_array().assert_value().len(), 1);
     assert_eq!(inventory["excluded"].as_array().assert_value().len(), 1);

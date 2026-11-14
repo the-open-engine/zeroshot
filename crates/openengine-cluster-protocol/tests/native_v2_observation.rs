@@ -43,6 +43,7 @@ fn active(execution_ref: &str, node: &str) -> ActiveExecution {
 
 fn running_status() -> RunStatus {
     RunStatus::Running {
+        suspend_requested: false,
         graph_result: None,
         active_executions: vec![
             active("opaque-verifier-a", "verify-a"),
@@ -382,5 +383,17 @@ fn controller_availability_is_optional_observation_metadata() {
         let mut invalid = value;
         invalid["controller"]["observedAt"] = json!(0);
         assert!(serde_json::from_value::<RunStatusResult>(invalid).is_err());
+    }
+}
+
+#[test]
+fn suspended_statuses_round_trip_without_terminal_result() {
+    for value in [
+        json!({"phase":"suspended","reason":"command","node":"review","createdAt":1762905600000_u64,"metadata":{}}),
+        json!({"phase":"suspended","reason":"wait","node":"cooldown","createdAt":1762905600000_u64,"wait":{"dueAt":1762992000000_u64},"metadata":{}}),
+        json!({"phase":"running","activeExecutions":[],"suspendRequested":true}),
+    ] {
+        let status: RunStatus = serde_json::from_value(value.clone()).assert_value();
+        assert_eq!(serde_json::to_value(status).assert_value(), value);
     }
 }

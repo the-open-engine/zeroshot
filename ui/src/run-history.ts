@@ -1,7 +1,15 @@
 import type { EnvironmentDefinition } from './environment-store';
 import type { FailureContext } from './failure-context';
 import type { HistoryObservation } from './history-contract';
-import { allNodes, children, executable, isGroup, pathTo, type Document, type GraphNode } from './domain';
+import {
+  allNodes,
+  children,
+  executable,
+  isGroup,
+  pathTo,
+  type Document,
+  type GraphNode,
+} from './domain';
 import {
   controlState,
   projectControlHistory,
@@ -25,6 +33,14 @@ export type RunSummary = {
   runId: string;
   title: string;
   phase: string;
+  suspendRequested?: boolean;
+  suspension?: {
+    reason: 'command' | 'wait';
+    node: string;
+    createdAt: number;
+    wait?: { dueAt: number };
+  };
+  workspaceRecovery?: { successorRunId?: string };
   cursor: string | null;
   terminal?: RunTerminalSynopsis | null;
   runtimeFailure?: RuntimeFailure;
@@ -75,6 +91,7 @@ export type HistoryEvent = {
     stream?: string;
     line?: string;
     reason?: string;
+    suspension?: RunSummary['suspension'];
     result?: RunTerminal;
     usage?: Record<string, number> | null;
   };
@@ -113,11 +130,16 @@ export function finishRunHistory(
       break;
     }
   }
+  const suspended =
+    [...events].reverse().find(({ event }) => event.kind === 'suspended')?.event.suspension ??
+    (run.phase === 'suspended' ? run.suspension : undefined);
   const runtimeFailure = recordedTerminal ? undefined : (page.runtimeFailure ?? run.runtimeFailure);
   return {
     ...run,
     observation: page.observation ?? run.observation,
-    phase: 'finished',
+    phase: suspended && !recordedTerminal ? 'suspended' : 'finished',
+    suspension: suspended ?? run.suspension,
+    suspendRequested: false,
     cursor: page.headCursor,
     terminal:
       recordedTerminal ?? (runtimeFailure ? runtimeFailureTerminal(runtimeFailure) : run.terminal),
@@ -125,11 +147,12 @@ export function finishRunHistory(
     history: {
       ...run.history,
       cursor: page.headCursor,
-      complete: recordedTerminal ? true : runtimeFailure ? false : run.history.complete,
+      complete:
+        recordedTerminal || suspended ? true : runtimeFailure ? false : run.history.complete,
     },
   };
 }
-export type NodeState = 'idle' | 'running' | 'succeeded' | 'failed' | 'skipped';
+export type NodeState = 'idle' | 'running' | 'suspended' | 'succeeded' | 'failed' | 'skipped';
 export type Invocation = {
   id: ExecutionId;
   node: string;
@@ -162,6 +185,7 @@ export const stateLabel = (state: NodeState) =>
   ({
     idle: 'Not reached',
     running: 'Running',
+    suspended: 'Suspended',
     succeeded: 'Completed',
     failed: 'Failed',
     skipped: 'Stopped',
@@ -183,6 +207,8 @@ export function eventLabel(event: HistoryEvent['event']): string {
       const signals = Object.values(outcome?.signals ?? {});
       return `${humanize(node ?? 'Node')} · ${signals.length ? signals.join(', ') : 'completed'}`;
     }
+    case 'wait_deferred':
+      return `${humanize(node ?? 'Wait')} suspended`;
     case 'execution_voided':
       return `${humanize(node ?? 'Node')} stopped`;
     case 'force_stop_requested':
@@ -393,7 +419,7 @@ function readHistoryEvent(
       invocation.outcome = event.completion.outcome;
       invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
     }
-  } else if (event.kind === 'execution_voided' && event.reference) {
+  } else if (['execution_voided', 'wait_deferred'].includes(event.kind) && event.reference) {
     const invocation = byId.get(identity(event.reference.execution));
     if (
       invocation &&
@@ -401,7 +427,7 @@ function readHistoryEvent(
       invocation.end === undefined
     ) {
       invocation.end = index;
-      invocation.state = 'skipped';
+      invocation.state = event.kind === 'wait_deferred' ? 'suspended' : 'skipped';
       invocation.reason = event.reason;
     }
   } else if (event.kind === 'safe_log') {
@@ -524,8 +550,9 @@ function leafObservation(
   const queued = applyPendingVisits(latest, controls);
   const states = new Set([...latest.values()].map((visit) => visit.state));
   const state =
-    (['running', 'failed', 'queued', 'skipped'] as const).find((next) => states.has(next)) ??
-    (latest.size ? 'succeeded' : 'idle');
+    (['running', 'suspended', 'failed', 'queued', 'skipped'] as const).find((next) =>
+      states.has(next)
+    ) ?? (latest.size ? 'succeeded' : 'idle');
   const signals = executions.at(-1)?.outcome?.signals;
   return {
     state,

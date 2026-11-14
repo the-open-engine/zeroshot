@@ -826,3 +826,23 @@ async fn oecp_forwarding_preserves_close_errors_eof_and_consumer_drop() {
         .is_empty()
     );
 }
+
+#[tokio::test]
+async fn queued_hosted_run_refuses_suspend_without_contacting_the_run() {
+    let connector = StubConnector::new(Some(status("queued")));
+    let requests = connector.transport.requests.clone();
+    let backend = NamedTargetCliBackend::new(connector);
+    let error = backend
+        .run_suspend(
+            Some("prod"),
+            RunStatusParams {
+                run_id: RunId::new("run-contract"),
+            },
+        )
+        .await
+        .assert_error();
+    assert!(
+        matches!(error, NativeV2CliError::Remote { ref code, .. } if code == "invalid_request")
+    );
+    assert!(requests.lock().assert_value().is_empty());
+}

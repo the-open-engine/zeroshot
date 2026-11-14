@@ -265,6 +265,7 @@ impl NativeV2TargetServer {
                 controller,
                 workspace_recovery: self.workspace_recovery(),
                 workspace_checkpoints: self.workspace_checkpoints(),
+                run_suspension: self.target.supports_run_suspension(),
             }),
             StaticConnectionIdentityResolver::new(identity),
             SystemConnectionTime,
@@ -504,6 +505,9 @@ impl NativeV2TargetServer {
         if self.workspace_recovery() {
             document = document.with_workspace_recovery();
         }
+        if self.target.supports_run_suspension() {
+            document = document.with_run_suspension();
+        }
         if self.workspace_checkpoints() {
             document = document.with_workspace_checkpoints();
         }
@@ -595,6 +599,7 @@ struct TargetOecpBackend {
     controller: Arc<NativeV2PlatformController>,
     workspace_recovery: bool,
     workspace_checkpoints: bool,
+    run_suspension: bool,
 }
 
 #[async_trait]
@@ -673,6 +678,51 @@ impl ClusterBackend for TargetOecpBackend {
         params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
         ClusterBackend::run_force(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_suspend(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
+        if !self.run_suspension {
+            return Err(BackendError::application(
+                "invalid_request",
+                "run suspension is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::run_suspend(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_vectors(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
+        if !self.run_suspension {
+            return Err(BackendError::application(
+                "invalid_request",
+                "run suspension is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::run_vectors(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_vector(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
+        if !self.run_suspension {
+            return Err(BackendError::application(
+                "invalid_request",
+                "run suspension is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::run_vector(self.controller.as_ref(), context, params).await
     }
 
     async fn run_checkpoints(

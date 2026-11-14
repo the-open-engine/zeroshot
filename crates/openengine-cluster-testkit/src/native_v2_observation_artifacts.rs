@@ -32,6 +32,12 @@ pub struct NativeV2ObservationSchema {
     pub attach_request: JsonRpcRequest<RunAttachParams>,
     pub attach_response: JsonRpcResponse<RunAttachResult>,
     pub attach_event_notification: JsonRpcNotification<RunAttachEventNotification>,
+    pub suspend_request: JsonRpcRequest<openengine_cluster_protocol::RunSuspendParams>,
+    pub suspend_response: JsonRpcResponse<openengine_cluster_protocol::RunSuspendResult>,
+    pub vectors_request: JsonRpcRequest<openengine_cluster_protocol::RunVectorsParams>,
+    pub vectors_response: JsonRpcResponse<openengine_cluster_protocol::RunVectorsResult>,
+    pub vector_request: JsonRpcRequest<openengine_cluster_protocol::RunVectorParams>,
+    pub vector_response: JsonRpcResponse<openengine_cluster_protocol::RunVectorResult>,
     pub force_request: JsonRpcRequest<RunForceParams>,
     pub force_response: JsonRpcResponse<RunForceResult>,
 }
@@ -40,6 +46,27 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
     let schema = serde_json::to_value(schema_for!(NativeV2ObservationSchema))
         .assert_value_with("native-v2 observation schema serialization must succeed");
     vec![
+        json_artifact(
+            format!("{ROOT}/fixtures/native_v2_observation/suspended-command.json"),
+            suspension_fixture(false),
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/native_v2_observation/suspended-wait.json"),
+            suspension_fixture(true),
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/native_v2_observation/suspend-requested.json"),
+            {
+                let mut status = status();
+                if let RunStatus::Running {
+                    suspend_requested, ..
+                } = &mut status.status
+                {
+                    *suspend_requested = true;
+                }
+                serde_json::to_value(status).assert_value()
+            },
+        ),
         json_artifact(format!("{ROOT}/native-v2-observation.schema.json"), schema),
         json_artifact(
             format!("{ROOT}/fixtures/native_v2_observation/status.json"),
@@ -112,6 +139,7 @@ fn status() -> RunStatusResult {
         size: RunSize::new("medium").assert_value(),
         at_cursor: cursor(7),
         status: RunStatus::Running {
+            suspend_requested: false,
             graph_result: None,
             active_executions: vec![
                 ActiveExecution {
@@ -176,6 +204,7 @@ fn graph_result_fixture() -> Value {
     let mut result = status();
     result.at_cursor = cursor(8);
     result.status = RunStatus::Running {
+        suspend_requested: false,
         active_executions: Vec::new(),
         graph_result: Some(TerminalResult::Succeeded {
             output: json!({"summary":"graph completed; postmortem is running"}),
@@ -260,4 +289,27 @@ fn force_fixture() -> Value {
             workspace_recovery: result.workspace_recovery,
         }
     })
+}
+
+fn suspension_fixture(wait: bool) -> Value {
+    use openengine_cluster_protocol::{RunSuspension, RunWait};
+    let mut status = status();
+    let node = NodeName::new("cooldown").assert_value();
+    let created_at = UnixTimestampMillis::new(1_762_905_600_000).assert_value();
+    let suspension = if wait {
+        RunSuspension::Wait {
+            node,
+            created_at,
+            wait: RunWait {
+                due_at: UnixTimestampMillis::new(1_762_992_000_000).assert_value(),
+            },
+        }
+    } else {
+        RunSuspension::Command { node, created_at }
+    };
+    status.status = RunStatus::Suspended {
+        suspension,
+        metadata: RunMetadata::default(),
+    };
+    serde_json::to_value(status).assert_value()
 }

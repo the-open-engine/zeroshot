@@ -50,6 +50,33 @@ impl ClusterBackend for PortableRunController {
         ClusterBackend::run_list(self.inner.as_ref(), context, params).await
     }
 
+    async fn run_suspend(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
+        self.require_run(&params.run_id)?;
+        ClusterBackend::run_suspend(self.inner.as_ref(), context, params).await
+    }
+
+    async fn run_vectors(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
+        self.require_run(&params.run_id)?;
+        ClusterBackend::run_vectors(self.inner.as_ref(), context, params).await
+    }
+
+    async fn run_vector(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
+        self.require_run(&params.run_id)?;
+        ClusterBackend::run_vector(self.inner.as_ref(), context, params).await
+    }
+
     async fn run_checkpoints(
         &self,
         context: &ConnectionContext,

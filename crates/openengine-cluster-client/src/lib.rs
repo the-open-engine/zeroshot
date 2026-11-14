@@ -357,6 +357,30 @@ where
         self.call(RUN_FORCE_METHOD, params).await
     }
 
+    pub async fn run_suspend(
+        &self,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, ClientError> {
+        self.call(openengine_cluster_protocol::RUN_SUSPEND_METHOD, params)
+            .await
+    }
+
+    pub async fn run_vectors(
+        &self,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, ClientError> {
+        self.call(openengine_cluster_protocol::RUN_VECTORS_METHOD, params)
+            .await
+    }
+
+    pub async fn run_vector(
+        &self,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, ClientError> {
+        self.call(openengine_cluster_protocol::RUN_VECTOR_METHOD, params)
+            .await
+    }
+
     pub async fn run_checkpoints(
         &self,
         params: RunCheckpointsParams,

@@ -77,6 +77,7 @@ pub trait CapsuleCleanup: Send + Sync {
 }
 
 pub struct AllocatedCapsule {
+    pub vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     pub checkpoints: Option<Arc<dyn crate::native_v2_supervisor::checkpoints::RunCheckpointStore>>,
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     pub runner: Arc<dyn NodeRunner>,
@@ -97,6 +98,7 @@ impl AllocatedCapsule {
             cleanup,
             checkpoints: None,
             execution_seed: Vec::new(),
+            vector_seed: Vec::new(),
         }
     }
 }
@@ -188,6 +190,11 @@ pub trait ExclusiveControllerClaim: Send + Sync {}
 
 #[async_trait]
 pub trait CapsuleAllocator: Send + Sync {
+    /// None refuses suspension and wait plans; hosts with remote storage explicitly opt in.
+    fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
+        None
+    }
+
     /// Acquires exclusive controller authority for the supplied public run identity.
     async fn claim_controller(
         &self,
@@ -211,6 +218,18 @@ pub trait CapsuleAllocator: Send + Sync {
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable>;
 
+    /// Durably reserves the retained workspace for one successor before resume is acknowledged.
+    /// This performs the existing ownership handoff without credentials or runtime preparation.
+    async fn reserve_retained_workspace(
+        &self,
+        _source_run_id: &RunId,
+        _run_id: &RunId,
+        _selection: &crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection,
+    ) -> Result<(), RetainedAllocationUnavailable> {
+        Err(CapsuleAllocationUnavailable::Runtime.into())
+    }
+
+    /// Prepares the successor using its reserved retained workspace.
     async fn allocate_from_retained(
         &self,
         _request: RetainedAllocationRequest<'_>,

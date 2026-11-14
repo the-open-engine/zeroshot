@@ -5,7 +5,7 @@
 //! liveness signal, and one result-bearing cleanup authority for the run's capsule/workspace.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
@@ -66,6 +66,8 @@ pub type PlatformRunSubmission = RunSubmission;
 
 #[derive(Debug, Error)]
 pub enum NativeV2PlatformError {
+    #[error("{0}")]
+    InvalidRequest(String),
     #[error(transparent)]
     ControllerClaim(#[from] ControllerClaimUnavailable),
     #[error(transparent)]
@@ -95,6 +97,7 @@ pub struct NativeV2PlatformController {
     observability: NativeV2Observability,
     runtimes: Arc<Mutex<BTreeMap<RunId, RuntimeSlot>>>,
     submission_turn: Arc<Mutex<()>>,
+    control_turns: Arc<Mutex<BTreeMap<RunId, Weak<Mutex<()>>>>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
@@ -154,11 +157,13 @@ impl NativeV2PlatformController {
         delivery_policy: DeliveryPolicy,
     ) -> Result<Self, NativeV2PlatformError> {
         let controller = Self {
-            observability: NativeV2Observability::new(ledger.clone()),
+            observability: NativeV2Observability::new(ledger.clone())
+                .with_workspace_recovery(allocator.clone()),
             ledger,
             allocator,
             runtimes: Arc::new(Mutex::new(BTreeMap::new())),
             submission_turn: Arc::new(Mutex::new(())),
+            control_turns: Arc::default(),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
@@ -169,10 +174,31 @@ impl NativeV2PlatformController {
         Ok(controller)
     }
 
+    fn require_wait_support(
+        &self,
+        runtime: &crate::native_v2_contract::RuntimePlan,
+    ) -> Result<(), NativeV2AdmissionError> {
+        if self.allocator.suspension_policy().is_none()
+            && let Some((node, _)) = runtime.nodes().iter().find(|(_, binding)| {
+                matches!(
+                    binding,
+                    openengine_cluster_protocol::NodeRuntimeBinding::Request {}
+                )
+            })
+        {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node.clone(),
+                detail: "host does not enable openengine.request-wait/v1".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     fn validate_harnesses(
         &self,
         runtime: &crate::native_v2_contract::RuntimePlan,
     ) -> Result<(), NativeV2AdmissionError> {
+        self.require_wait_support(runtime)?;
         self.harnesses
             .validate_runtime(runtime)
             .map_err(|error| NativeV2AdmissionError::InvalidRuntime(error.to_string()))
@@ -213,7 +239,9 @@ impl NativeV2PlatformController {
                 .get(&summary.run_id)
                 .await?
                 .ok_or(RunLedgerError::RunNotFound)?;
-            if stored.snapshot.terminal.is_some() {
+            if stored.snapshot.terminal.is_some()
+                || stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            {
                 continue;
             }
             let _claim = self.allocator.claim_controller(&summary.run_id).await?;
@@ -255,6 +283,7 @@ impl NativeV2PlatformController {
         &self,
         request: RunSubmitParams,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
+        self.require_wait_support(&request.submission.runtime)?;
         let environment =
             RunEnvironment::exact_for_submission(&request.submission, BTreeMap::new())?;
         self.submit_inner(request, environment, RunSourceCredentials::default())
@@ -423,13 +452,17 @@ impl NativeV2PlatformController {
         } = start;
         let run_id = stored.snapshot.run_id.clone();
         let AllocatedCapsule {
+            vector_seed,
             checkpoints,
             execution_seed,
             runner,
             loss,
             cleanup,
         } = capsule;
-        if let Err(error) = self.initialize_allocated(&mut stored, execution_seed).await {
+        if let Err(error) = self
+            .initialize_allocated(&mut stored, execution_seed, vector_seed)
+            .await
+        {
             // Runtime-loss cleanup preserves the restored workspace and its recovery lineage.
             cleanup
                 .destroy_or_confirm_absent(RunRuntimeExit::RuntimeLost)
@@ -442,6 +475,7 @@ impl NativeV2PlatformController {
         let mut runtime = PortableRuntime::with_cleanup(runner, cleanup);
         runtime.checkpoints = checkpoints;
         let engine = PortableRunEngine::start(PortableRunEngineBootstrap {
+            wait_policy: self.allocator.suspension_policy().unwrap_or_default(),
             run_id: run_id.clone(),
             ledger: self.ledger.clone(),
             environment: environment.as_ref().clone(),
@@ -467,7 +501,15 @@ impl NativeV2PlatformController {
         &self,
         stored: &mut StoredRun,
         execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
+        vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     ) -> Result<(), NativeV2PlatformError> {
+        for vector in vector_seed {
+            stored.snapshot = self
+                .ledger
+                .append(&stored.snapshot.run_id, vec![RunEvent::Vector { vector }])
+                .await?
+                .snapshot;
+        }
         if !execution_seed.is_empty() {
             let events = execution_seed
                 .into_iter()
@@ -499,7 +541,34 @@ impl NativeV2PlatformController {
             commit_identity,
             commit_co_author,
         } = params;
+        // Refuse a live source before taking its control turn: cancellation must not wait for
+        // a resume's ledger reads. Recheck eligibility once ownership is serialized with force.
+        self.recoverable_resume_source(&run_id).await?;
+        let _control = self.lock_run_control(&run_id).await;
         let source = self.recoverable_resume_source(&run_id).await?;
+        if let Some(suspension) = &source.snapshot.suspension {
+            // A settled attempt must release its owner before the successor can claim storage.
+            self.wait_runtime_settled(&run_id).await;
+            self.runtimes.lock().await.remove(&run_id);
+            if from.is_some() {
+                return Err(NativeV2PlatformError::InvalidRequest(
+                    "suspended runs accept only default resume".to_owned(),
+                ));
+            }
+            if let Some(due) = suspension.due_at()
+                && (self
+                    .allocator
+                    .suspension_policy()
+                    .unwrap_or_default()
+                    .wall_clock)()
+                    < due
+            {
+                return Err(NativeV2PlatformError::InvalidRequest(format!(
+                    "wait is due at {}",
+                    due.get()
+                )));
+            }
+        }
         // Reconcile before claiming/moving the workspace or creating a successor. A hard exit
         // may leave acknowledged ledger receipts newer than the last workspace boundary.
         if let Some(state) = source.snapshot.delivery_checkpoint()? {
@@ -539,9 +608,11 @@ impl NativeV2PlatformController {
             controller_claim,
             resume: Some(ResumePreparation {
                 source_run_id: run_id.clone(),
-                selection: crate::native_v2_supervisor::checkpoints::restore_selection(
-                    from.as_ref(),
-                ),
+                selection: if source.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended {
+                    crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Continue
+                } else {
+                    crate::native_v2_supervisor::checkpoints::restore_selection(from.as_ref())
+                },
             }),
         })
         .await?;
@@ -564,7 +635,17 @@ impl NativeV2PlatformController {
             source.snapshot.terminal,
             Some(TerminalResult::Failed { .. })
         );
-        if !failed || !self.allocator.workspace_recovery(run_id).await.recoverable {
+        let recovery = self.allocator.workspace_recovery(run_id).await;
+        if let Some(successor) = &recovery.successor_run_id {
+            return Err(NativeV2PlatformError::InvalidRequest(format!(
+                "retained workspace was already claimed by {}",
+                successor.as_str()
+            )));
+        }
+        if (failed && source.snapshot.suspension.is_some())
+            || !(failed || source.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended)
+            || !recovery.recoverable
+        {
             return Err(CapsuleAllocationUnavailable::Runtime.into());
         }
         Ok(source)
@@ -579,6 +660,40 @@ impl NativeV2PlatformController {
             CreateRunOutcome::Created(stored) => Ok(stored),
             CreateRunOutcome::Existing(_) => Err(RunLedgerError::RunIdConflict.into()),
         }
+    }
+
+    pub async fn suspend(
+        &self,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, NativeV2PlatformError> {
+        let engine = match self.runtimes.lock().await.get(&params.run_id) {
+            Some(RuntimeSlot::Running(engine)) => engine.clone(),
+            _ => {
+                return Err(NativeV2PlatformError::InvalidRequest(
+                    "suspend requires a running run".to_owned(),
+                ));
+            }
+        };
+        if self.allocator.suspension_policy().is_none() {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "host does not enable openengine.run-suspension/v1".to_owned(),
+            ));
+        }
+        engine.suspend().await?;
+        self.status(params).await
+    }
+
+    pub async fn vectors(
+        &self,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, NativeV2PlatformError> {
+        Ok(crate::v2_run_ledger::vectors::list(self.ledger.as_ref(), params).await?)
+    }
+    pub async fn vector(
+        &self,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2PlatformError> {
+        Ok(crate::v2_run_ledger::vectors::show(self.ledger.as_ref(), params).await?)
     }
 
     pub async fn checkpoints(
@@ -647,7 +762,9 @@ impl NativeV2PlatformController {
             .get(&stored.snapshot.run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        if stored.snapshot.terminal.is_some() {
+        if stored.snapshot.terminal.is_some()
+            || stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+        {
             return Ok(());
         }
         let runtime = self
@@ -706,10 +823,24 @@ impl NativeV2PlatformController {
                 ..
             }
         );
-        if failed {
-            result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
+        result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
+        let suspended = matches!(result.status, RunStatus::Suspended { .. });
+        if !(failed || suspended) {
+            result.workspace_recovery.recoverable = false;
         }
-        if failed && result.workspace_recovery.recoverable {
+        if let RunStatus::Suspended { suspension, .. } = &result.status
+            && suspension.due_at().is_some_and(|due| {
+                (self
+                    .allocator
+                    .suspension_policy()
+                    .unwrap_or_default()
+                    .wall_clock)()
+                    < due
+            })
+        {
+            result.workspace_recovery.recoverable = false;
+        }
+        if suspended || (failed && result.workspace_recovery.recoverable) {
             if let Some(stored) = self.ledger.get(&result.run_id).await? {
                 result.workspace_recovery.connection_requirements = stored
                     .admitted
@@ -781,7 +912,8 @@ impl NativeV2PlatformController {
     }
 
     async fn prepare_force(&self, run_id: &RunId) -> Result<ForceTarget, NativeV2PlatformError> {
-        // An existing runtime owns cancellation independently of submission and storage.
+        // Capture live ownership before reconstruction; a running engine rechecks successor
+        // ownership under its control turn before it can be signalled.
         if let Some(target) = self.live_force_target(run_id).await {
             return Ok(target);
         }
@@ -795,11 +927,34 @@ impl NativeV2PlatformController {
             .get(run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        if stored.snapshot.terminal.is_some() {
+        if stored.snapshot.terminal.is_some()
+            || (stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+                && self
+                    .allocator
+                    .workspace_recovery(run_id)
+                    .await
+                    .successor_run_id
+                    .is_some())
+        {
             return Ok(ForceTarget::Terminal);
         }
         self.ledger.request_force_stop(run_id).await?;
         Ok(ForceTarget::Reconstructed)
+    }
+
+    async fn lock_run_control(&self, run_id: &RunId) -> tokio::sync::OwnedMutexGuard<()> {
+        let turn = {
+            let mut turns = self.control_turns.lock().await;
+            turns.retain(|_, turn| turn.strong_count() > 0);
+            if let Some(turn) = turns.get(run_id).and_then(Weak::upgrade) {
+                turn
+            } else {
+                let turn = Arc::new(Mutex::new(()));
+                turns.insert(run_id.clone(), Arc::downgrade(&turn));
+                turn
+            }
+        };
+        turn.lock_owned().await
     }
 
     async fn force_running(
@@ -807,6 +962,18 @@ impl NativeV2PlatformController {
         run_id: &RunId,
         engine: &PortableRunEngine,
     ) -> Result<(), NativeV2PlatformError> {
+        // A captured engine may already have published suspension. Serialize its force request
+        // with continuation ownership, including persistence, so it cannot stop a claimed source.
+        let _control = self.lock_run_control(run_id).await;
+        if self
+            .allocator
+            .workspace_recovery(run_id)
+            .await
+            .successor_run_id
+            .is_some()
+        {
+            return Ok(());
+        }
         // `drive` is internally serialized. Usually this waits behind the live driving turn; if
         // that turn stopped on cleanup error, this is the one retry that can finish cleanup.
         engine.force_stop().await?;

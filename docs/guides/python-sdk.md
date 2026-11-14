@@ -197,3 +197,10 @@ Before starting a local controller or contacting a direct target, the bundled ex
 the same preflight as the CLI.
 
 The [Python API reference](../reference/python.md) documents the public client surface.
+
+`await run.suspend()` returns the current status immediately; `await run.resume()` returns the
+successor's `Run` handle. `run.watch()` ends at suspension. `Run.wait()` and `Client.run()` raise
+`RunSuspendedError`, carrying `run` and `status`, when an attempt suspends. Status and summaries
+expose `suspend_requested`, `reason`, `node`, `created_at` and `due_at`. Read the ordered record
+with `await run.vectors(after=None, limit=50)` (`RunVectorsPage.vectors`, `next_after`) and read a
+complete entry with `await run.vector(id)`. These methods use the client's selected target.

@@ -98,6 +98,7 @@ pub(super) struct RunProgram {
 
 #[derive(Default)]
 pub(super) struct ActiveDispatches {
+    pub(super) boundary: Option<crate::full_v1_reducer::ExecutionBoundary>,
     pub(super) tasks: JoinSet<FinishedDispatch>,
     pub(super) cancellations: BTreeMap<ExecutionId, oneshot::Sender<ExecutionInterrupt>>,
     pub(super) pending_voids: BTreeMap<ExecutionId, ExecutionVoidReason>,
@@ -406,6 +407,24 @@ pub(crate) fn durable_history(
     Ok(executions)
 }
 
+/// Build the conditional seed for a suspended attempt. The caller must enforce its due time
+/// before consuming this seed; the predecessor retains the wait as deferred, without an outcome.
+pub(crate) fn continuation_history(
+    snapshot: &RunSnapshot,
+) -> Result<Vec<DurableExecution>, NativeV2SupervisorError> {
+    let mut continuation = snapshot.clone();
+    for node in continuation.executions.values_mut() {
+        if let NodeState::SuspendedWait { at } = &node.state {
+            node.state = NodeState::Completed {
+                at: at.clone(),
+                outcome: crate::native_v2_wait::elapsed()
+                    .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+            };
+        }
+    }
+    durable_history(&continuation)
+}
+
 fn offset_position(
     position: HistoryPosition,
     offset: u64,
@@ -421,7 +440,7 @@ pub(super) fn durable_execution(
     node: &NodeSnapshot,
 ) -> Result<DurableExecution, NativeV2SupervisorError> {
     let state = match &node.state {
-        NodeState::Active => DurableExecutionState::Active,
+        NodeState::Active | NodeState::SuspendedWait { .. } => DurableExecutionState::Active,
         NodeState::Completed { at, outcome } => DurableExecutionState::Settled {
             position: history_position(at)?,
             outcome: outcome.clone(),

@@ -142,6 +142,30 @@ pub trait TargetConnector: Send + Sync {
         name: &str,
         run_id: Option<openengine_cluster_protocol::RunId>,
     ) -> Result<Arc<Self::Transport>, NativeV2CliError>;
+    async fn validate_run_suspension(&self, _name: &str) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
+
+    async fn connect_run_suspension(
+        &self,
+        _name: &str,
+        _run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise RUN_SUSPENSION".to_owned(),
+        ))
+    }
+
+    async fn connect_run_vectors(
+        &self,
+        _name: &str,
+        _run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise RUN_VECTORS".to_owned(),
+        ))
+    }
+
     async fn connect_workspace_checkpoints(
         &self,
         _name: &str,
@@ -204,6 +228,30 @@ pub trait TargetConnector: Send + Sync {
             "target does not advertise workspace export".to_owned(),
         ))
     }
+    async fn hosted_run_suspend(
+        &self,
+        _name: &str,
+        _params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
+        Ok(None)
+    }
+
+    async fn hosted_run_vectors(
+        &self,
+        _name: &str,
+        _params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorsResult>, NativeV2CliError> {
+        Ok(None)
+    }
+
+    async fn hosted_run_vector(
+        &self,
+        _name: &str,
+        _params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorResult>, NativeV2CliError> {
+        Ok(None)
+    }
+
     async fn hosted_run_checkpoints(
         &self,
         _name: &str,

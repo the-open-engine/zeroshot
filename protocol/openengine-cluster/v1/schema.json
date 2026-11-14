@@ -2621,7 +2621,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunCheckpointsParams"
+          "$ref": "#/$defs/RunVectorsParams"
         }
       },
       "required": [
@@ -2644,7 +2644,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunResumeParams"
+          "$ref": "#/$defs/RunVectorParams"
         }
       },
       "required": [
@@ -2656,6 +2656,52 @@
       "type": "object"
     },
     "JsonRpcRequest22": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunCheckpointsParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest23": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunResumeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest24": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -2989,6 +3035,26 @@
         }
       ]
     },
+    "JsonRpcResponse23": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess23"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse24": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess24"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
     "JsonRpcResponse3": {
       "anyOf": [
         {
@@ -3296,7 +3362,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunCheckpointsResult"
+          "$ref": "#/$defs/RunVectorsResult"
         }
       },
       "required": [
@@ -3315,7 +3381,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunResumeResult"
+          "$ref": "#/$defs/RunVector"
         }
       },
       "required": [
@@ -3326,6 +3392,44 @@
       "type": "object"
     },
     "JsonRpcSuccess22": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunCheckpointsResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess23": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunResumeResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess24": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -3782,6 +3886,19 @@
             "minProbability",
             "uncertainLabel",
             "connections"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
           ],
           "type": "object"
         },
@@ -4917,7 +5034,7 @@
       "type": "object"
     },
     "RunResumeFrom": {
-      "description": "A new successor either restarts the graph on the latest workspace or continues from an entry\ncheckpoint with its matching predecessor outputs. Provider sessions are never resumed.",
+      "description": "A successor restarts a failed graph or restores a selected checkpoint; a suspended attempt\ncontinues at its saved boundary without restoring workspace files. Provider sessions are never resumed.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -5094,6 +5211,9 @@
             "phase": {
               "const": "running",
               "type": "string"
+            },
+            "suspendRequested": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -5132,6 +5252,80 @@
             "activeExecutions"
           ],
           "type": "object"
+        },
+        {
+          "description": "Durable end of an attempt whose graph can continue in a successor.",
+          "oneOf": [
+            {
+              "properties": {
+                "createdAt": {
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "reason": {
+                  "const": "command",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason",
+                "node",
+                "createdAt"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "createdAt": {
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "reason": {
+                  "const": "wait",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/$defs/RunWait"
+                }
+              },
+              "required": [
+                "reason",
+                "node",
+                "createdAt",
+                "wait"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "metadata": {
+              "$ref": "#/$defs/RunMetadata",
+              "default": {}
+            },
+            "phase": {
+              "const": "suspended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         },
         {
           "additionalProperties": false,
@@ -5306,6 +5500,197 @@
       },
       "required": [
         "runId"
+      ],
+      "type": "object"
+    },
+    "RunVector": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "suspend_request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "suspension",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/$defs/VectorSuspensionReason"
+            }
+          },
+          "required": [
+            "kind",
+            "reason",
+            "node"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "continuation",
+              "type": "string"
+            },
+            "resumedFrom": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "resumedFrom"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "dueAt": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "wait",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "node",
+            "dueAt"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "runId": {
+          "$ref": "#/$defs/VectorId"
+        }
+      },
+      "required": [
+        "id",
+        "runId",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "RunVectorParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "id"
+      ],
+      "type": "object"
+    },
+    "RunVectorsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VectorId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "maximum": 100,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "type": "object"
+    },
+    "RunVectorsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "nextAfter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VectorId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "type": "string"
+        },
+        "vectors": {
+          "items": {
+            "$ref": "#/$defs/RunVector"
+          },
+          "maxItems": 100,
+          "type": "array"
+        }
+      },
+      "required": [
+        "runId",
+        "vectors"
+      ],
+      "type": "object"
+    },
+    "RunWait": {
+      "additionalProperties": false,
+      "description": "Absolute wall-clock deadline of a wait.",
+      "properties": {
+        "dueAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dueAt"
       ],
       "type": "object"
     },
@@ -6025,6 +6410,19 @@
       ],
       "type": "object"
     },
+    "VectorId": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.:-]+$",
+      "type": "string"
+    },
+    "VectorSuspensionReason": {
+      "enum": [
+        "command",
+        "wait"
+      ],
+      "type": "string"
+    },
     "WatchEvent": {
       "description": "The closed public event algebra. `Phase` folds the observable cluster status (admission\ncommit, update, suspend/resume, stop-request); `NodeBegin`/`NodeEnd` are a testkit-only\nsynthetic hook decoupled from the real dispatch/lease turn mechanism, since no native graph\nexecutor exists yet; `Bookmark` advances the cursor without changing folded public state;\n`Fault` carries a durable, backend-neutral projected `BackendFault`: it correlates to the\nenclosing `EventNotification.run_id` plus its own optional opaque `executionRef`, and its\nordering/emission never itself authorizes a retry or changes terminal semantics -- it folds to\nno public status change, exactly like `Bookmark`; `Finished` is always the last event for a\nrun.",
       "oneOf": [
@@ -6525,16 +6923,16 @@
       "$ref": "#/$defs/JsonRpcResponse18"
     },
     "run_checkpoints_request": {
-      "$ref": "#/$defs/JsonRpcRequest20"
-    },
-    "run_checkpoints_response": {
-      "$ref": "#/$defs/JsonRpcResponse20"
-    },
-    "run_discard_workspace_request": {
       "$ref": "#/$defs/JsonRpcRequest22"
     },
-    "run_discard_workspace_response": {
+    "run_checkpoints_response": {
       "$ref": "#/$defs/JsonRpcResponse22"
+    },
+    "run_discard_workspace_request": {
+      "$ref": "#/$defs/JsonRpcRequest24"
+    },
+    "run_discard_workspace_response": {
+      "$ref": "#/$defs/JsonRpcResponse24"
     },
     "run_export_workspace_request": {
       "$ref": "#/$defs/RunExportWorkspaceParams",
@@ -6562,10 +6960,10 @@
       "$ref": "#/$defs/JsonRpcResponse17"
     },
     "run_resume_request": {
-      "$ref": "#/$defs/JsonRpcRequest21"
+      "$ref": "#/$defs/JsonRpcRequest23"
     },
     "run_resume_response": {
-      "$ref": "#/$defs/JsonRpcResponse21"
+      "$ref": "#/$defs/JsonRpcResponse23"
     },
     "run_status_request": {
       "$ref": "#/$defs/JsonRpcRequest15"
@@ -6578,6 +6976,24 @@
     },
     "run_submit_response": {
       "$ref": "#/$defs/JsonRpcResponse13"
+    },
+    "run_suspend_request": {
+      "$ref": "#/$defs/JsonRpcRequest15"
+    },
+    "run_suspend_response": {
+      "$ref": "#/$defs/JsonRpcResponse15"
+    },
+    "run_vector_request": {
+      "$ref": "#/$defs/JsonRpcRequest21"
+    },
+    "run_vector_response": {
+      "$ref": "#/$defs/JsonRpcResponse21"
+    },
+    "run_vectors_request": {
+      "$ref": "#/$defs/JsonRpcRequest20"
+    },
+    "run_vectors_response": {
+      "$ref": "#/$defs/JsonRpcResponse20"
     },
     "run_watch_event_notification": {
       "$ref": "#/$defs/JsonRpcNotification9"
@@ -6664,6 +7080,12 @@
     "run_attach_event_notification",
     "run_force_request",
     "run_force_response",
+    "run_suspend_request",
+    "run_suspend_response",
+    "run_vectors_request",
+    "run_vectors_response",
+    "run_vector_request",
+    "run_vector_response",
     "run_checkpoints_request",
     "run_checkpoints_response",
     "run_resume_request",

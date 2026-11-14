@@ -330,6 +330,13 @@ pub type WorkspaceExportStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, NativeV2CliError>> + Send>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunVectorsCommand {
+    pub run: RunSelector,
+    pub after: Option<openengine_cluster_protocol::VectorId>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunCheckpointsCommand {
     pub run: RunSelector,
     pub after: Option<CheckpointId>,
@@ -415,6 +422,12 @@ pub enum NativeV2CliCommand {
     Attach {
         run: RunSelector,
         execution: ExecutionRef,
+    },
+    Suspend(RunSelector),
+    Vectors(RunVectorsCommand),
+    Vector {
+        run: RunSelector,
+        id: openengine_cluster_protocol::VectorId,
     },
     ForceStop(RunSelector),
     Resume(RunResumeCommand),
@@ -854,6 +867,36 @@ pub trait NativeV2CliBackend: Send + Sync {
             "target does not advertise workspace export".to_owned(),
         ))
     }
+    async fn run_suspend(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<CliRunStatusResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support suspend".to_owned(),
+        ))
+    }
+
+    async fn run_vectors(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support vectors".to_owned(),
+        ))
+    }
+
+    async fn run_vector(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support vector".to_owned(),
+        ))
+    }
+
     async fn run_checkpoints(
         &self,
         _target: Option<&str>,

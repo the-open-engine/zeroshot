@@ -23,6 +23,9 @@ pub(in super::super) struct HostedRunsDescriptor {
     status: HostedRunRoute,
     watch: HostedRunRoute,
     logs: HostedRunRoute,
+    suspend: Option<HostedRunRoute>,
+    vectors: Option<HostedRunRoute>,
+    vector: Option<HostedRunRoute>,
     force: HostedRunRoute,
     resume: Option<HostedRunRoute>,
     checkpoints: Option<HostedRunRoute>,
@@ -50,6 +53,60 @@ struct RouteValues<'a> {
 }
 
 impl HostedRunsDescriptor {
+    pub(in super::super) fn vector_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Url>, TargetAuthorityError> {
+        self.vector
+            .as_ref()
+            .map(|route| {
+                route.expand(
+                    &self.base_url,
+                    RouteValues {
+                        run_id: Some(run_id),
+                        ..RouteValues::default()
+                    },
+                )
+            })
+            .transpose()
+    }
+
+    pub(in super::super) fn vectors_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Url>, TargetAuthorityError> {
+        self.vectors
+            .as_ref()
+            .map(|route| {
+                route.expand(
+                    &self.base_url,
+                    RouteValues {
+                        run_id: Some(run_id),
+                        ..RouteValues::default()
+                    },
+                )
+            })
+            .transpose()
+    }
+
+    pub(in super::super) fn suspend_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Url>, TargetAuthorityError> {
+        self.suspend
+            .as_ref()
+            .map(|route| {
+                route.expand(
+                    &self.base_url,
+                    RouteValues {
+                        run_id: Some(run_id),
+                        ..RouteValues::default()
+                    },
+                )
+            })
+            .transpose()
+    }
+
     pub(in super::super) fn export_workspace_url(
         &self,
         run_id: &RunId,
@@ -220,6 +277,17 @@ pub(super) fn build_hosted_runs_descriptor(
     }
     let base_url = capability_base_url(origin, &wire.base_url)?;
     let mut descriptor = compile_hosted_run_routes(base_url, &wire.route_templates)?;
+    if let Some(controls) = extensions.hosted_run_controls.as_ref() {
+        if controls.kind != openengine_cluster_protocol::HOSTED_RUN_CONTROLS_KIND {
+            return Err(authority_error(
+                "hosted run controls discovery is incompatible",
+            ));
+        }
+        let routes = &controls.route_templates;
+        descriptor.suspend = Some(compile_hosted_run_route(&routes.suspend, true, &[])?);
+        descriptor.vectors = Some(compile_hosted_run_route(&routes.vectors, true, &[])?);
+        descriptor.vector = Some(compile_hosted_run_route(&routes.vector, true, &[])?);
+    }
     if let Some(recovery) = extensions.hosted_workspace_recovery.as_ref() {
         if recovery.kind != HOSTED_WORKSPACE_RECOVERY_KIND {
             return Err(authority_error(
@@ -251,6 +319,9 @@ fn compile_hosted_run_routes(
             true,
             &[HostedRunQuery::FromCursor, HostedRunQuery::Execution],
         )?,
+        suspend: None,
+        vectors: None,
+        vector: None,
         force: compile_hosted_run_route(&routes.force, true, &[])?,
         resume: None,
         checkpoints: None,

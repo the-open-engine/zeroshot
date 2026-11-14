@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { ControlRecord } from './control-history';
 import assert from 'node:assert/strict';
 import {
   currentInvocation,
@@ -467,6 +468,25 @@ test('node names do not mutate observation object prototypes', () => {
   assert.equal(projection.nodes.__proto__.state, 'running');
 });
 
+test('a deferred wait supersedes its queued visit without inventing a successful outcome', () => {
+  const history = events({ kind: 'run_started' }, start(), {
+    kind: 'wait_deferred',
+    reference: ref(),
+  });
+  const controls: ControlRecord[] = [
+    { cursor: 'v2:1', node: 'worker', mapIndices: [], visitId: 'wait', state: 'queued' },
+    { cursor: 'v2:2', node: 'worker', mapIndices: [], visitId: 'wait', state: 'entered' },
+    { cursor: 'v2:3', node: 'worker', mapIndices: [], visitId: 'wait', state: 'stopped' },
+  ];
+  assert.equal(projectHistory(document(), history, 0, controls).nodes.worker.state, 'queued');
+  assert.equal(projectHistory(document(), history, 1, controls).nodes.worker.state, 'running');
+  const projection = projectHistory(document(), history, history.length - 1, controls);
+  assert.equal(projection.invocations[0].state, 'suspended');
+  assert.equal(projection.invocations[0].outcome, undefined);
+  assert.equal(projection.invocations[0].end, 2);
+  assert.equal(projection.nodes.worker.state, 'suspended');
+});
+
 test('durable starts and completions supersede stale queue observations at each cursor', () => {
   const history = events({ kind: 'run_started' }, start(), complete());
   const controls = [
@@ -545,20 +565,53 @@ test('a queued retry and a stopped unstarted visit supersede prior attempts', ()
 });
 
 test('one node projection preserves structural details and authoritative leaf outcomes', () => {
-  const doc = document(sequence('run', {
-    kind: 'par', name: 'reviews', join: { kind: 'any' }, branches: [step('worker'), step('peer')],
-  }, { kind: 'succeed', name: 'done' }));
+  const doc = document(
+    sequence(
+      'run',
+      {
+        kind: 'par',
+        name: 'reviews',
+        join: { kind: 'any' },
+        branches: [step('worker'), step('peer')],
+      },
+      { kind: 'succeed', name: 'done' }
+    )
+  );
   const history = events({ kind: 'run_started' }, start(), complete());
   const projection = projectHistory(doc, history, 2, [
     { cursor: 'v2:1', node: 'worker', mapIndices: [], visitId: 'worker', state: 'queued' },
     { cursor: 'v2:2', node: 'reviews', mapIndices: [], visitId: 'reviews', state: 'entered' },
-    { cursor: 'v2:3', node: 'reviews', mapIndices: [], visitId: 'reviews', state: 'completed', detail: 'reached' },
-    { cursor: 'v2:3', node: 'done', mapIndices: [], visitId: 'done', state: 'succeeded', detail: 'Delivered' },
+    {
+      cursor: 'v2:3',
+      node: 'reviews',
+      mapIndices: [],
+      visitId: 'reviews',
+      state: 'completed',
+      detail: 'reached',
+    },
+    {
+      cursor: 'v2:3',
+      node: 'done',
+      mapIndices: [],
+      visitId: 'done',
+      state: 'succeeded',
+      detail: 'Delivered',
+    },
   ]);
   assert.equal(projection.nodes.worker.state, 'succeeded');
   assert.equal(projection.nodes.worker.count, 1);
   assert.equal(projection.nodes.worker.countUnit, undefined);
-  assert.deepEqual(projection.nodes.reviews, { state: 'recorded', count: 1, countUnit: 'visit', detail: 'reached' });
-  assert.deepEqual(projection.nodes.done, { state: 'succeeded', count: 1, countUnit: 'visit', detail: 'Delivered' });
+  assert.deepEqual(projection.nodes.reviews, {
+    state: 'recorded',
+    count: 1,
+    countUnit: 'visit',
+    detail: 'reached',
+  });
+  assert.deepEqual(projection.nodes.done, {
+    state: 'succeeded',
+    count: 1,
+    countUnit: 'visit',
+    detail: 'Delivered',
+  });
   assert.equal(projection.nodes.peer.state, 'idle');
 });

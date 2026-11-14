@@ -64,6 +64,65 @@ impl LocalFixture {
         }
     }
 
+    pub(super) fn with_second_worker(self) -> Self {
+        let mut graph = local_graph::graph();
+        let mut second = graph["root"]["children"][0].clone();
+        second["name"] = json!("second");
+        graph["root"]["children"]
+            .as_array_mut()
+            .assert_value()
+            .insert(1, second);
+        let mut runtime = local_runtime();
+        runtime["nodes"]["second"] = runtime["nodes"]["worker"].clone();
+        write_json(&self.graph, &graph);
+        write_json(&self.runtime, &runtime);
+        self
+    }
+
+    pub(super) async fn wait_suspended(&self, run_id: &str) -> Value {
+        let deadline = Instant::now() + CLI_TIMEOUT;
+        loop {
+            let status = self.json(&["status", run_id], "hold").await;
+            if status["status"]["phase"] == "suspended" {
+                return status;
+            }
+            assert!(Instant::now() < deadline, "run did not suspend: {status}");
+            sleep(Duration::from_millis(30)).await;
+        }
+    }
+
+    pub(super) fn with_past_wait(self) -> Self {
+        let fixture = self.with_second_worker();
+        let mut graph: Value =
+            serde_json::from_slice(&fs::read(&fixture.graph).assert_value()).assert_value();
+        let state =
+            json!({"kind":"record","fields":{"dueAt":{"required":true,"type":{"kind":"string"}}}});
+        graph["initialInput"] = state.clone();
+        graph["root"]["state"] = state;
+        graph["root"]["children"].as_array_mut().assert_value().insert(1, json!({
+            "kind":"verifier","name":"wait","worker":"builtin.request.wait@1",
+            "input":{"kind":"record","fields":{"dueAt":{"required":false,"type":{"kind":"string"}},"durationMs":{"required":false,"type":{"kind":"integer"}}}},
+            "output":{"kind":"null"},"signals":{"wait":["elapsed"]},
+            "diagnostic":{"kind":"record","fields":{"message":{"required":true,"type":{"kind":"string"}}}},
+            "inputBindings":[{"target":["dueAt"],"value":{"source":"state","path":["dueAt"]}}],"writeBindings":[],"attempts":1
+        }));
+        graph["root"]["children"][3]["state"] = graph["root"]["state"].clone();
+        let mut runtime: Value =
+            serde_json::from_slice(&fs::read(&fixture.runtime).assert_value()).assert_value();
+        runtime["nodes"]["wait"] = json!({"kind":"request"});
+        write_json(&fixture.graph, &graph);
+        write_json(&fixture.runtime, &runtime);
+        write_json(&fixture.input, &json!({"dueAt":"2020-01-01T00:00:00Z"}));
+        fixture
+    }
+
+    pub(super) fn without_checkpoints(self) -> Self {
+        let mut runtime = local_runtime();
+        runtime["workspaceCheckpoints"] = json!(false);
+        write_json(&self.runtime, &runtime);
+        self
+    }
+
     pub(super) fn with_long_state_root(mut self) -> Self {
         self.state = self.root.path("state").join("s".repeat(120));
         self
@@ -202,6 +261,21 @@ impl LocalFixture {
         let output = self.output(args, mode).await;
         assert_success(&output, "local CLI JSON command");
         serde_json::from_slice(&output.stdout).assert_value_with("local CLI JSON output")
+    }
+
+    pub(super) async fn json_error(&self, args: &[&str], mode: &str) -> Value {
+        let output = timeout(
+            CLI_TIMEOUT,
+            self.command(args, mode)
+                .env("ZEROSHOT_ERROR_FORMAT", "json")
+                .output(),
+        )
+        .await
+        .assert_value_with("local CLI JSON error deadline")
+        .assert_value_with("start local CLI");
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        serde_json::from_slice(&output.stderr).assert_value_with("local CLI JSON error")
     }
 
     pub(super) async fn interrupted(&self, args: &[&str], mode: &str, expected: &str) -> Output {
@@ -586,6 +660,9 @@ printf 'declared-only\n' > "$PWD/environment-proof.txt"
 cat >/dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"local-thread"}'
 printf '%s\n' '{"type":"turn.started"}'
+if test "${FAKE_CODEX_MODE-}" = hold; then
+  while ! test -f "$PWD/release-turn"; do sleep 0.05; done
+fi
 if test "${FAKE_CODEX_MODE-}" = fail; then
   printf '%s\n' '{"type":"turn.failed","error":{"message":"injected failure"}}'
   exit 1

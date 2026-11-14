@@ -327,6 +327,7 @@ fn hosted_discovery(origin: &str) -> String {
             "cachePolicy": "no-store"
         },
         "extensions": {
+            "run_vectors": {"kind":"openengine.run-vectors/v1"},
             "api_key": {
                 "kind": "zeroshot.api-key-authentication/v1",
                 "header": "Authorization", "scheme": "Bearer",
@@ -350,6 +351,14 @@ fn hosted_discovery(origin: &str) -> String {
                 "kind": "zeroshot.hosted-runs/v1",
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
+            },
+            "hosted_run_controls": {
+                "kind": "openengine.hosted-run-controls/v1",
+                "route_templates": {
+                    "suspend": "/native-v2/runs/{run_id}/suspend",
+                    "vectors": "/native-v2/runs/{run_id}/vectors",
+                    "vector": "/native-v2/runs/{run_id}/vector"
+                }
             },
             "hosted_workspace_recovery": {
                 "kind": "openengine.hosted-workspace-recovery/v1",

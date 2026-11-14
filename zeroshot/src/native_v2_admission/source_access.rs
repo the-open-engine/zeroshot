@@ -66,6 +66,7 @@ fn binding_destination(
     match binding {
         NodeRuntimeBinding::Agent { .. }
         | NodeRuntimeBinding::Decision { .. }
+        | NodeRuntimeBinding::Request {}
         | NodeRuntimeBinding::Script { .. } => Ok(None),
         NodeRuntimeBinding::CommentDelivery { .. } => comment_forge(submission).map(Some),
         NodeRuntimeBinding::GitDelivery { .. } => {

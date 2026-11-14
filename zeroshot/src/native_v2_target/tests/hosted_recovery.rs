@@ -12,7 +12,7 @@ use super::hosted_authority::{CapturedHttpRequest, hosted_backend};
 #[tokio::test]
 async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_transport() {
     let root = temp_root();
-    let (backend, dialer, server) = hosted_backend(&root, 14).await;
+    let (backend, dialer, server) = hosted_backend(&root, 20).await;
     let run_id = RunId::new("run-recoverable");
     let requirements: RunConnectionRequirements = serde_json::from_value(json!({
         "provider": ["ANTHROPIC_API_KEY"]
@@ -76,6 +76,30 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .assert_value();
     assert!(discarded.discarded);
     assert_eq!(discarded.run_id, run_id);
+    let vectors = backend
+        .run_vectors(
+            Some("prod"),
+            openengine_cluster_protocol::RunVectorsParams {
+                run_id: run_id.clone(),
+                after: Some(openengine_cluster_protocol::VectorId::new("before").assert_value()),
+                limit: Some(2),
+            },
+        )
+        .await
+        .assert_value();
+    assert_eq!(vectors.vectors.len(), 1);
+    assert_eq!(vectors.next_after.as_ref().assert_value().as_str(), "entry");
+    let vector = backend
+        .run_vector(
+            Some("prod"),
+            openengine_cluster_protocol::RunVectorParams {
+                run_id: run_id.clone(),
+                id: vectors.vectors[0].id.clone(),
+            },
+        )
+        .await
+        .assert_value();
+    assert_eq!(vector, vectors.vectors[0]);
     assert!(dialer.sessions.lock().assert_value().is_empty());
     let requests = tokio::time::timeout(std::time::Duration::from_secs(5), server)
         .await
@@ -89,7 +113,7 @@ fn assert_recovery_requests(requests: &[CapturedHttpRequest]) {
         .iter()
         .filter(|request| request.path.starts_with("/native-v2/runs/"))
         .collect::<Vec<_>>();
-    assert_eq!(recovery.len(), 4);
+    assert_eq!(recovery.len(), 6);
     for request in &recovery {
         assert_eq!(request.method, "POST");
         assert_eq!(request.authorization.as_deref(), Some("Bearer access-1"));
@@ -109,6 +133,9 @@ fn assert_recovery_requests(requests: &[CapturedHttpRequest]) {
     );
     assert_eq!(bodies[2]["after"], "page/after");
     assert_eq!(bodies[2]["limit"], 5);
+    assert_eq!(bodies[4]["after"], "before");
+    assert_eq!(bodies[4]["limit"], 2);
+    assert_eq!(bodies[5]["id"], "entry");
     assert!(
         requests
             .iter()
@@ -129,8 +156,14 @@ pub(super) fn response(request: &CapturedHttpRequest) -> Option<String> {
             "resume" => json!({"runId": body["successorRunId"], "resumedFrom": body["runId"]}),
             "checkpoints" => json!({"runId": body["runId"], "checkpoints": []}),
             "discard-workspace" => json!({"runId": body["runId"], "discarded": true}),
+            "vectors" => json!({"runId": body["runId"], "vectors":[vector()], "nextAfter":"entry"}),
+            "vector" => vector(),
             _ => return None,
         }
         .to_string(),
     )
+}
+
+fn vector() -> Value {
+    json!({"id":"entry", "kind":"suspend_request", "runId":"run-recoverable", "createdAt":1})
 }

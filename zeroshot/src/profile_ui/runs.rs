@@ -369,9 +369,18 @@ impl LocalRunHistory {
                                 .await
                                 .ok()
                                 .flatten();
-                        Ok(summary(&stored.snapshot, failure))
+                        let mut entry = summary(&stored.snapshot, failure);
+                        if let Some(reader) = &self.status
+                            && let Some(status) = reader.status(&id).await
+                        {
+                            entry.workspace_recovery = Some(status.workspace_recovery);
+                        }
+                        Ok(entry)
                     }
                     Err(_) => Ok(RunHistorySummary {
+                        suspension: None,
+                        suspend_requested: false,
+                        workspace_recovery: None,
                         title: RunTitle::new(id.as_str()).map_err(|_| unavailable())?,
                         created_at: created_at(&id),
                         run_id: id,
@@ -603,6 +612,9 @@ fn summary(snapshot: &RunSnapshot, runtime_failure: Option<RuntimeFailure>) -> R
                 .map(RunHistoryTerminalSynopsis::from)
         });
     RunHistorySummary {
+        suspension: snapshot.suspension.clone(),
+        suspend_requested: snapshot.suspend_requested,
+        workspace_recovery: None,
         run_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         phase: if runtime_failure.is_some() {

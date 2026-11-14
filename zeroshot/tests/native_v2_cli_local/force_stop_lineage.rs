@@ -95,3 +95,35 @@ impl LocalFixture {
             .count()
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn force_stopped_suspension_discards_checkpoints_and_cannot_continue() {
+    let fixture = LocalFixture::new().with_second_worker();
+    let run = fixture.submit_detached("hold").await;
+    fixture.wait_running(&run).await;
+    fixture.json(&["suspend", &run], "hold").await;
+    fs::write(fixture.repository.join("release-turn"), b"release").assert_value();
+    fixture.wait_suspended(&run).await;
+    wait_for_exit(fixture.ready_pid(&run)).await;
+    let before = fixture.json(&["status", &run], "finish").await;
+    assert!(
+        !fixture
+            .output(&["suspend", &run], "finish")
+            .await
+            .status
+            .success()
+    );
+    assert_eq!(fixture.json(&["status", &run], "finish").await, before);
+    assert!(!fixture.checkpoints(&run).await.is_empty());
+    fixture.json(&["force-stop", &run], "finish").await;
+    fixture.wait_terminal(&run, "finish", "force_stopped").await;
+    assert!(fixture.checkpoints(&run).await.is_empty());
+    assert_eq!(fixture.checkpoint_repositories(), 0);
+    assert!(
+        !fixture
+            .output(&["resume", &run], "finish")
+            .await
+            .status
+            .success()
+    );
+}

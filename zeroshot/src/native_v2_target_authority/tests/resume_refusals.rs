@@ -44,6 +44,15 @@ impl CapsuleAllocator for RetainedWorkspace {
             ..Default::default()
         }
     }
+
+    async fn reserve_retained_workspace(
+        &self,
+        _source_run_id: &RunId,
+        _run_id: &RunId,
+        _selection: &crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection,
+    ) -> Result<(), crate::native_v2_platform::RetainedAllocationUnavailable> {
+        Ok(())
+    }
 }
 
 struct FailedRunFactory {

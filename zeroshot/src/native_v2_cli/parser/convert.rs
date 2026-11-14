@@ -192,6 +192,32 @@ impl UtilityCommand {
             Self::Logs(args) => args.into_command(),
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
+            Self::Suspend(args) => args.into_selector().map(NativeV2CliCommand::Suspend),
+            Self::Vectors(args) => {
+                if let Some(super::RunVectorCommand::Show { run, id }) = args.command {
+                    return Ok(NativeV2CliCommand::Vector {
+                        run: run.into_selector()?,
+                        id: openengine_cluster_protocol::VectorId::new(id)
+                            .map_err(|error| usage(error.to_string()))?,
+                    });
+                }
+                let run = RunSelectorArgs {
+                    run_id: args.run_id.ok_or_else(|| usage("a run ID is required"))?,
+                    target: args.target,
+                }
+                .into_selector()?;
+                Ok(NativeV2CliCommand::Vectors(
+                    crate::native_v2_cli::RunVectorsCommand {
+                        run,
+                        after: args
+                            .after
+                            .map(openengine_cluster_protocol::VectorId::new)
+                            .transpose()
+                            .map_err(|error| usage(error.to_string()))?,
+                        limit: args.limit,
+                    },
+                ))
+            }
             recovery @ (Self::Resume(_) | Self::Checkpoints(_) | Self::DiscardWorkspace(_)) => {
                 recovery.into_recovery_command()
             }

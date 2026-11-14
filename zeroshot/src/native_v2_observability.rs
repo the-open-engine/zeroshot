@@ -52,6 +52,7 @@ mod tests;
 #[derive(Clone)]
 pub struct NativeV2Observability {
     ledger: Arc<dyn RunLedger>,
+    recovery: Option<Arc<dyn crate::native_v2_platform::CapsuleAllocator>>,
     history_control: history::control::ControlCache,
     live: LiveRegistry,
     runtime: RuntimeObservation,
@@ -63,11 +64,20 @@ impl NativeV2Observability {
     pub fn new(ledger: Arc<dyn RunLedger>) -> Self {
         Self {
             ledger,
+            recovery: None,
             history_control: history::control::ControlCache::default(),
             live: LiveRegistry::default(),
             runtime: RuntimeObservation::default(),
             next_subscription: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    pub(crate) fn with_workspace_recovery(
+        mut self,
+        allocator: Arc<dyn crate::native_v2_platform::CapsuleAllocator>,
+    ) -> Self {
+        self.recovery = Some(allocator);
+        self
     }
 
     /// Shares the existing ledger and projector; never initializes or recovers a controller.
@@ -92,7 +102,12 @@ impl NativeV2Observability {
             Ok(None) => Err(NativeV2ObservationError::RunNotFound),
             Err(error) => Err(error.into()),
         };
-        result.or_else(|error| self.runtime.failure(&params.run_id).ok_or(error))
+        let mut result =
+            result.or_else(|error| self.runtime.failure(&params.run_id).ok_or(error))?;
+        if let Some(allocator) = &self.recovery {
+            result.workspace_recovery = allocator.workspace_recovery(&params.run_id).await;
+        }
+        Ok(result)
     }
 
     pub async fn watch(

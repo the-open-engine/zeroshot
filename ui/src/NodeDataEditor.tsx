@@ -60,7 +60,9 @@ export function NodeDataEditor({
 }) {
   const authoring = useAuthoring();
   const root = node.name === document.graph.root.name;
-  const fixed = isDeliveryKind(document.runtime.nodes[node.name]?.kind);
+  const fixed =
+    isDeliveryKind(document.runtime.nodes[node.name]?.kind) ||
+    document.runtime.nodes[node.name]?.kind === 'request';
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   usePendingText(busy);

@@ -2,7 +2,8 @@ use super::*;
 use crate::native_v2_supervisor::checkpoints::{
     CheckpointRestore, CheckpointRestoreSelection, remove_restore_stage,
 };
-use openengine_cluster_protocol::RunResumeFrom;
+use crate::v2_run_ledger::RunLedgerError;
+use openengine_cluster_protocol::{NOT_FOUND, RunResumeFrom};
 
 /// Chooses the snapshot a local successor restores, if any. Plain resume keeps the user-owned
 /// checkout as it is. Replacing it needs `--discard-workspace-changes`: to roll back to a selected
@@ -59,7 +60,7 @@ fn local_restore_selection(
 
 fn restore_command(run_id: &RunId, selection: &CheckpointRestoreSelection) -> String {
     let selection = match selection {
-        CheckpointRestoreSelection::Latest => String::new(),
+        CheckpointRestoreSelection::Latest | CheckpointRestoreSelection::Continue => String::new(),
         CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
             format!(" --from-checkpoint {}", checkpoint_id.as_str())
         }
@@ -93,6 +94,11 @@ impl LocalCliBackend {
                     run_id: params.run_id.clone(),
                 })
                 .await?;
+            reject_suspended_selection(
+                &status.status,
+                params.from.as_ref(),
+                discard_workspace_changes,
+            )?;
             let recovery = self.claimable_recovery_document(
                 &params.run_id,
                 status.workspace_recovery.recoverable,
@@ -545,6 +551,57 @@ impl NativeV2CliBackend for LocalCliBackend {
         .map(|_| ())
     }
 
+    async fn run_suspend(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<CliRunStatusResult, NativeV2CliError> {
+        require_local(target)?;
+        let status = self.status_local(params.clone()).await?;
+        if !matches!(
+            status.status,
+            openengine_cluster_protocol::RunStatus::Running { .. }
+        ) {
+            return Err(NativeV2CliError::Remote {
+                code: "invalid_request".to_owned(),
+                message: "suspend requires a running run".to_owned(),
+                details: None,
+            });
+        }
+        let transport = self.connect_run(&params.run_id).await?;
+        ClusterClient::new(transport.as_ref())
+            .run_suspend(params)
+            .await
+            .map(Into::into)
+            .map_err(protocol_error)
+    }
+
+    async fn run_vectors(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, NativeV2CliError> {
+        require_local(target)?;
+        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
+        crate::v2_run_ledger::vectors::list(&ledger, params)
+            .await
+            .map_err(vector_error)
+    }
+
+    async fn run_vector(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2CliError> {
+        require_local(target)?;
+        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
+        crate::v2_run_ledger::vectors::show(&ledger, params)
+            .await
+            .map_err(vector_error)
+    }
+
     async fn run_checkpoints(
         &self,
         target: Option<&str>,
@@ -587,6 +644,17 @@ impl NativeV2CliBackend for LocalCliBackend {
     }
 }
 
+fn vector_error(error: RunLedgerError) -> NativeV2CliError {
+    match error {
+        RunLedgerError::VectorNotFound => NativeV2CliError::Remote {
+            code: NOT_FOUND.to_owned(),
+            message: error.to_string(),
+            details: None,
+        },
+        error => local_error(error),
+    }
+}
+
 #[cfg(test)]
 #[path = "backend/checkpoint_compatibility_tests.rs"]
 mod checkpoint_compatibility_tests;
@@ -594,3 +662,23 @@ mod checkpoint_compatibility_tests;
 #[cfg(test)]
 #[path = "backend/tests.rs"]
 mod tests;
+
+fn reject_suspended_selection(
+    status: &openengine_cluster_protocol::RunStatus,
+    from: Option<&RunResumeFrom>,
+    discard: bool,
+) -> Result<(), NativeV2CliError> {
+    if let openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } = status {
+        if from.is_some() || discard {
+            return Err(local_message(
+                "suspended runs accept only default resume without --discard-workspace-changes",
+            ));
+        }
+        if let Some(due) = suspension.due_at()
+            && crate::native_v2_runner::current_timestamp() < due
+        {
+            return Err(local_message(format!("wait is due at {}", due.get())));
+        }
+    }
+    Ok(())
+}

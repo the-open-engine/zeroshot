@@ -155,6 +155,17 @@ elif args and args[0] == "list":
             )
         )
     print(json.dumps({"runs": runs}))
+elif args and args[0] == "suspend":
+    status = {"phase":"running","activeExecutions":[],"suspendRequested":True}
+    print(json.dumps(projection(args[1], status, "v2:1")))
+elif args and args[0] == "resume":
+    print(json.dumps({"runId":"successor","resumedFrom":args[1]}))
+elif args and args[0] == "vectors":
+    vector={"id":"vector-1","kind":"suspend_request","runId":"original","createdAt":1762905600000}
+    if args[1] == "show":
+        print(json.dumps(vector))
+    else:
+        print(json.dumps({"runId":args[1],"vectors":[vector],"nextAfter":"vector-1"}))
 elif args and args[0] == "status":
     if os.environ.get("FAKE_WATCH_FAILURE") in ("early", "outage_failed_run"):
         print(json.dumps(projection(args[1], failed_status, "v2:2")))
@@ -188,6 +199,11 @@ elif args and args[0] == "watch":
         },
         "v2:2",
     )
+    if os.environ.get("FAKE_SUSPEND") == "1":
+        finished["status"] = {
+            "phase":"suspended", "reason":"wait", "node":"cooldown",
+            "createdAt":1762905600000, "wait":{"dueAt":1762992000000}, "metadata":{},
+        }
     finished["cursor"] = finished.pop("atCursor")
     print(json.dumps(finished), flush=True)
     if failure == "terminal":

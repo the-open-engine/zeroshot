@@ -94,14 +94,8 @@ impl PreparationProgress for LedgerPreparationProgress {
 impl NativeV2PlatformController {
     pub(super) async fn start_preparation(
         &self,
-        mut start: PreparationStart,
+        start: PreparationStart,
     ) -> Result<(), NativeV2PlatformError> {
-        crate::native_v2_supervisor::logging::record_run_version(
-            self.ledger.as_ref(),
-            &mut start.stored,
-        )
-        .await?;
-        self.observability.track_runtime(&start.stored.snapshot)?;
         let run_id = start.stored.snapshot.run_id.clone();
         let task = Arc::new(PreparationTask {
             cancellation: watch::channel(false).0,
@@ -114,9 +108,11 @@ impl NativeV2PlatformController {
             .lock()
             .await
             .insert(run_id.clone(), RuntimeSlot::Preparing(task.clone()));
+        let wait_for_reservation = start.resume.is_some();
+        let (reserved, reservation) = tokio::sync::oneshot::channel();
         let controller = self.clone();
         tokio::spawn(async move {
-            let result = AssertUnwindSafe(controller.prepare_run(start, &task))
+            let result = AssertUnwindSafe(controller.prepare_run(start, &task, reserved))
                 .catch_unwind()
                 .await
                 .unwrap_or_else(|_| Err(PreparationFailure::unavailable("runtime_unavailable")));
@@ -132,20 +128,43 @@ impl NativeV2PlatformController {
             }
             task.finished.send_replace(true);
         });
+        if wait_for_reservation {
+            reservation
+                .await
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        }
         Ok(())
     }
 
     async fn prepare_run(
         &self,
-        start: PreparationStart,
+        mut start: PreparationStart,
         task: &PreparationTask,
+        reserved: tokio::sync::oneshot::Sender<()>,
     ) -> Result<(), PreparationFailure> {
         let mut cancellation = task.cancellation.subscribe();
         let progress: Arc<dyn PreparationProgress> = Arc::new(LedgerPreparationProgress {
             ledger: self.ledger.clone(),
             run_id: start.stored.snapshot.run_id.clone(),
         });
-        let allocation = AssertUnwindSafe(self.prepare_capsule(&start, progress)).catch_unwind();
+        let allocation = AssertUnwindSafe(async {
+            self.initialize_preparation(&mut start)
+                .await
+                .map_err(|_| PreparationFailure::unavailable("runtime_unavailable"))?;
+            if let Some(resume) = &start.resume {
+                self.allocator
+                    .reserve_retained_workspace(
+                        &resume.source_run_id,
+                        &start.stored.snapshot.run_id,
+                        &resume.selection,
+                    )
+                    .await
+                    .map_err(retained_failure)?;
+            }
+            let _ = reserved.send(());
+            self.prepare_capsule(&start, progress).await
+        })
+        .catch_unwind();
         let capsule = tokio::select! {
             biased;
             _ = cancellation.wait_for(|value| *value) => return Err(PreparationFailure::cancelled()),
@@ -169,6 +188,49 @@ impl NativeV2PlatformController {
         })
         .await
         .map_err(|_| PreparationFailure::unavailable("runtime_unavailable"))?;
+        Ok(())
+    }
+
+    async fn initialize_preparation(
+        &self,
+        start: &mut PreparationStart,
+    ) -> Result<(), NativeV2PlatformError> {
+        self.observability.track_runtime(&start.stored.snapshot)?;
+        crate::native_v2_supervisor::logging::record_run_version(
+            self.ledger.as_ref(),
+            &mut start.stored,
+        )
+        .await?;
+        if let Some(resume) = &start.resume {
+            // Seed before reserving the workspace: a failed copy leaves the source resumable.
+            let run_id = &start.stored.snapshot.run_id;
+            crate::v2_run_ledger::vectors::inherit(
+                self.ledger.as_ref(),
+                self.ledger.as_ref(),
+                &resume.source_run_id,
+                run_id,
+            )
+            .await?;
+            if matches!(resume.selection, CheckpointRestoreSelection::Continue) {
+                let source = self
+                    .ledger
+                    .get(&resume.source_run_id)
+                    .await?
+                    .ok_or(RunLedgerError::RunNotFound)?;
+                for execution in
+                    crate::native_v2_supervisor::continuation_history(&source.snapshot)?
+                {
+                    self.ledger
+                        .append(run_id, vec![RunEvent::PriorExecution { execution }])
+                        .await?;
+                }
+            }
+            start.stored = self
+                .ledger
+                .get(run_id)
+                .await?
+                .ok_or(RunLedgerError::RunNotFound)?;
+        }
         Ok(())
     }
 
@@ -203,14 +265,7 @@ impl NativeV2PlatformController {
                     source_run_id: &resume.source_run_id,
                 })
                 .await
-                .map_err(|error| match error {
-                    RetainedAllocationUnavailable::Settled(error) => {
-                        PreparationFailure::unavailable(error.failure_code())
-                    }
-                    RetainedAllocationUnavailable::CleanupUnconfirmed(_) => {
-                        PreparationFailure::unavailable("runtime_unavailable")
-                    }
-                })
+                .map_err(retained_failure)
         } else {
             self.allocator
                 .allocate(CapsuleAllocationRequest {
@@ -291,6 +346,17 @@ impl NativeV2PlatformController {
                 self.retry_preparation_cleanup(run_id, task, true).await
             }
             None => Ok(()),
+        }
+    }
+}
+
+fn retained_failure(error: RetainedAllocationUnavailable) -> PreparationFailure {
+    match error {
+        RetainedAllocationUnavailable::Settled(error) => {
+            PreparationFailure::unavailable(error.failure_code())
+        }
+        RetainedAllocationUnavailable::CleanupUnconfirmed(_) => {
+            PreparationFailure::unavailable("runtime_unavailable")
         }
     }
 }

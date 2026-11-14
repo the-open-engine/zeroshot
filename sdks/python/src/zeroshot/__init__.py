@@ -25,6 +25,7 @@ from .run_errors import (
 from .run_errors import (
     RunNotFoundError as RunNotFoundError,
 )
+from .run_errors import RunSuspendedError as RunSuspendedError
 from .run_errors import (
     RunWaitTimeout as RunWaitTimeout,
 )
@@ -61,6 +62,8 @@ from .runs import (
 from .runs import (
     RunSummary as RunSummary,
 )
+from .runs import RunVector as RunVector
+from .runs import RunVectorsPage as RunVectorsPage
 from .runtime import (
     DirectTarget as DirectTarget,
 )

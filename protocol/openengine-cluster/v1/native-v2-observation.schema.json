@@ -439,6 +439,52 @@
           "type": "string"
         },
         "params": {
+          "$ref": "#/$defs/RunVectorsParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest6": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunVectorParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest7": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
           "$ref": "#/$defs/RunForceParams"
         }
       },
@@ -494,6 +540,26 @@
       "anyOf": [
         {
           "$ref": "#/$defs/JsonRpcSuccess5"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse6": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess6"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse7": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess7"
         },
         {
           "$ref": "#/$defs/JsonRpcErrorResponse"
@@ -577,6 +643,44 @@
       "type": "object"
     },
     "JsonRpcSuccess5": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunVectorsResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess6": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunVector"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess7": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -1063,6 +1167,9 @@
             "phase": {
               "const": "running",
               "type": "string"
+            },
+            "suspendRequested": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1101,6 +1208,80 @@
             "activeExecutions"
           ],
           "type": "object"
+        },
+        {
+          "description": "Durable end of an attempt whose graph can continue in a successor.",
+          "oneOf": [
+            {
+              "properties": {
+                "createdAt": {
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "reason": {
+                  "const": "command",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason",
+                "node",
+                "createdAt"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "createdAt": {
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "reason": {
+                  "const": "wait",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/$defs/RunWait"
+                }
+              },
+              "required": [
+                "reason",
+                "node",
+                "createdAt",
+                "wait"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "metadata": {
+              "$ref": "#/$defs/RunMetadata",
+              "default": {}
+            },
+            "phase": {
+              "const": "suspended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         },
         {
           "additionalProperties": false,
@@ -1192,6 +1373,197 @@
         "size",
         "atCursor",
         "status"
+      ],
+      "type": "object"
+    },
+    "RunVector": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "suspend_request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "suspension",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/$defs/VectorSuspensionReason"
+            }
+          },
+          "required": [
+            "kind",
+            "reason",
+            "node"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "continuation",
+              "type": "string"
+            },
+            "resumedFrom": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "resumedFrom"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "dueAt": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "wait",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "node",
+            "dueAt"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "runId": {
+          "$ref": "#/$defs/VectorId"
+        }
+      },
+      "required": [
+        "id",
+        "runId",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "RunVectorParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "id"
+      ],
+      "type": "object"
+    },
+    "RunVectorsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VectorId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "maximum": 100,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "type": "object"
+    },
+    "RunVectorsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "nextAfter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VectorId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "type": "string"
+        },
+        "vectors": {
+          "items": {
+            "$ref": "#/$defs/RunVector"
+          },
+          "maxItems": 100,
+          "type": "array"
+        }
+      },
+      "required": [
+        "runId",
+        "vectors"
+      ],
+      "type": "object"
+    },
+    "RunWait": {
+      "additionalProperties": false,
+      "description": "Absolute wall-clock deadline of a wait.",
+      "properties": {
+        "dueAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dueAt"
       ],
       "type": "object"
     },
@@ -1407,6 +1779,19 @@
       ],
       "type": "object"
     },
+    "VectorId": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.:-]+$",
+      "type": "string"
+    },
+    "VectorSuspensionReason": {
+      "enum": [
+        "command",
+        "wait"
+      ],
+      "type": "string"
+    },
     "WorkspaceRecovery": {
       "additionalProperties": false,
       "description": "Public recovery state. It never contains credentials, workspace paths, or checkpoint bytes.",
@@ -1464,10 +1849,10 @@
       "$ref": "#/$defs/JsonRpcResponse4"
     },
     "force_request": {
-      "$ref": "#/$defs/JsonRpcRequest5"
+      "$ref": "#/$defs/JsonRpcRequest7"
     },
     "force_response": {
-      "$ref": "#/$defs/JsonRpcResponse5"
+      "$ref": "#/$defs/JsonRpcResponse7"
     },
     "log_event_notification": {
       "$ref": "#/$defs/JsonRpcNotification2"
@@ -1483,6 +1868,24 @@
     },
     "status_response": {
       "$ref": "#/$defs/JsonRpcResponse"
+    },
+    "suspend_request": {
+      "$ref": "#/$defs/JsonRpcRequest"
+    },
+    "suspend_response": {
+      "$ref": "#/$defs/JsonRpcResponse"
+    },
+    "vector_request": {
+      "$ref": "#/$defs/JsonRpcRequest6"
+    },
+    "vector_response": {
+      "$ref": "#/$defs/JsonRpcResponse6"
+    },
+    "vectors_request": {
+      "$ref": "#/$defs/JsonRpcRequest5"
+    },
+    "vectors_response": {
+      "$ref": "#/$defs/JsonRpcResponse5"
     },
     "watch_event_notification": {
       "$ref": "#/$defs/JsonRpcNotification"
@@ -1506,6 +1909,12 @@
     "attach_request",
     "attach_response",
     "attach_event_notification",
+    "suspend_request",
+    "suspend_response",
+    "vectors_request",
+    "vectors_response",
+    "vector_request",
+    "vector_response",
     "force_request",
     "force_response"
   ],

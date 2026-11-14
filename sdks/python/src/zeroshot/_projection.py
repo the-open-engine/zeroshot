@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal, TypeAlias, cast
+from typing import Literal, TypeAlias, TypedDict, cast
 
 from .errors import ProtocolError
 from .runs import (
@@ -16,12 +16,14 @@ from .runs import (
     RunResult,
     RunStatus,
     RunSummary,
+    RunVector,
+    RunVectorsPage,
 )
 from .source import ResolvedGitRemote, ResolvedSource, SourceForgeIdentity
 from .stacks import StackRunStatus, StackStatus
 from .values import JsonValue
 
-_Phase: TypeAlias = Literal["admitted", "running", "stopping", "finished"]
+_Phase: TypeAlias = Literal["admitted", "running", "stopping", "suspended", "finished"]
 _Level: TypeAlias = Literal["debug", "info", "error"]
 _MAX_JAVASCRIPT_SAFE_INTEGER = 9_007_199_254_740_991
 
@@ -34,7 +36,7 @@ def _status(value: object) -> RunStatus:
         _enum_string(
             native_status,
             "phase",
-            {"admitted", "running", "stopping", "finished"},
+            {"admitted", "running", "stopping", "suspended", "finished"},
             "run status.status",
         ),
     )
@@ -74,6 +76,7 @@ def _status(value: object) -> RunStatus:
         result=result,
         graph_result=graph_result,
         controller=_controller(root.get("controller")),
+        **_suspension(native_status, phase),
     )
 
 
@@ -89,6 +92,11 @@ def _summary(status: RunStatus) -> RunSummary:
         force_stop_requested=status.phase == "stopping" or failure == "force_stopped",
         graph_result=status.graph_result,
         controller=status.controller,
+        suspend_requested=status.suspend_requested,
+        reason=status.reason,
+        node=status.node,
+        created_at=status.created_at,
+        due_at=status.due_at,
     )
 
 
@@ -397,3 +405,59 @@ def _nullable_string(value: Mapping[str, object], name: str, kind: str) -> str |
     if selected is not None and not isinstance(selected, str):
         raise ProtocolError(f"Zeroshot emitted malformed {kind}.{name}")
     return selected
+
+
+class _SuspensionFields(TypedDict, total=False):
+    suspend_requested: bool
+    reason: Literal["command", "wait"]
+    node: str
+    created_at: int
+    due_at: int | None
+
+
+def _suspension(value: Mapping[str, object], phase: str) -> _SuspensionFields:
+    requested = value.get("suspendRequested", False)
+    if not isinstance(requested, bool):
+        raise ProtocolError("Zeroshot emitted malformed suspendRequested")
+    if phase != "suspended":
+        return {"suspend_requested": requested}
+    wait = value.get("wait")
+    reason = cast(
+        Literal["command", "wait"],
+        _enum_string(value, "reason", {"command", "wait"}, "suspension"),
+    )
+    if (reason == "wait") != (wait is not None):
+        raise ProtocolError("Zeroshot emitted malformed suspension.wait")
+    return {
+        "suspend_requested": requested,
+        "reason": reason,
+        "node": _string(value, "node", "suspension"),
+        "created_at": _positive_javascript_safe_integer(value, "createdAt", "suspension"),
+        "due_at": None
+        if wait is None
+        else _positive_javascript_safe_integer(
+            _mapping(wait, "suspension.wait"), "dueAt", "suspension.wait"
+        ),
+    }
+
+
+def _vector(value: object) -> RunVector:
+    entry = _mapping(value, "vector")
+    return RunVector(
+        id=_string(entry, "id", "vector"),
+        run_id=_string(entry, "runId", "vector"),
+        created_at=_positive_javascript_safe_integer(entry, "createdAt", "vector"),
+        kind=_string(entry, "kind", "vector"),
+        content=cast(JsonValue, dict(entry)),
+    )
+
+
+def _vectors(value: object) -> RunVectorsPage:
+    page = _mapping(value, "vector page")
+    return RunVectorsPage(
+        run_id=_string(page, "runId", "vector page"),
+        vectors=tuple(_vector(item) for item in _mapping_list(page.get("vectors"), "vectors")),
+        next_after=_nullable_string(
+            {"nextAfter": page.get("nextAfter")}, "nextAfter", "vector page"
+        ),
+    )

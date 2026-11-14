@@ -153,3 +153,5 @@ The `zeroshot-plan` skill splits large work into plans whose `depends_on` lists 
 must finish first. When plans depend on each other, the skill offers to write a stack manifest to
 `.zeroshot/plans/<id>.stack.json` with one run per plan, and leaves `delivery` for you to choose. See
 [Plan work before running it](planning.md).
+
+Stack profiles cannot contain `builtin.request.wait@1` wait nodes; submission refuses them before sending the stack.

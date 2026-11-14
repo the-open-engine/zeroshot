@@ -350,6 +350,42 @@ pub trait ClusterBackend: Send + Sync + 'static {
         ))
     }
 
+    async fn run_suspend(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support suspend",
+            None,
+        ))
+    }
+
+    async fn run_vectors(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support vectors",
+            None,
+        ))
+    }
+
+    async fn run_vector(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support vector",
+            None,
+        ))
+    }
+
     async fn run_checkpoints(
         &self,
         _context: &ConnectionContext,

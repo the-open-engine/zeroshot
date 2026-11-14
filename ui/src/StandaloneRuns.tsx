@@ -20,12 +20,22 @@ const dateLabel = (time?: number | null) =>
       })
     : '';
 const runState = (run: RunSummary) =>
-  run.terminal?.status ?? (run.phase === 'finished' ? 'Finished' : humanize(run.phase));
+  run.phase === 'suspended'
+    ? `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}`
+    : run.phase === 'running' && run.suspendRequested
+      ? 'Suspension requested'
+      : humanize(run.terminal?.status ?? (run.phase === 'finished' ? 'Finished' : run.phase));
 function mergeRuns(previous: RunSummary[], incoming: RunSummary[]) {
   const byId = new Map(previous.map((run) => [run.runId, run]));
   for (const run of incoming) {
     const old = byId.get(run.runId);
     if (old?.phase === 'finished' && run.phase !== 'finished' && run.historyAvailable) continue;
+    if (
+      old?.phase === 'suspended' &&
+      ['admitted', 'running', 'stopping'].includes(run.phase) &&
+      run.historyAvailable
+    )
+      continue;
     byId.set(run.runId, run);
   }
   return [...byId.values()].sort((a, b) => b.runId.localeCompare(a.runId));
@@ -231,6 +241,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
           }
           source={selection?.example ? exampleSource : history}
           workers={bootstrap.workers ?? []}
+          runHref={(id) => `#runs/local/${encodeURIComponent(id)}`}
           emptyAction={
             latest && (
               <button className="button" onClick={() => choose(latest)}>
@@ -254,19 +265,29 @@ function RunListItem({
   choose: (run: RunSummary) => void;
 }) {
   return (
-    <button
-      className={`run-list-item ${active ? 'active' : ''}`}
-      aria-current={active ? 'true' : undefined}
-      onClick={() => choose(run)}
-    >
-      <span className={`run-dot state-${run.terminal?.status ?? run.phase}`} />
-      <span>
-        <strong>{run.title}</strong>
-        <small>
-          {run.example ? 'Example' : dateLabel(run.createdAt) || run.runId.slice(0, 8)}
-          <span>{run.historyAvailable ? humanize(runState(run)) : 'History unavailable'}</span>
-        </small>
-      </span>
-    </button>
+    <div>
+      <button
+        className={`run-list-item ${active ? 'active' : ''}`}
+        aria-current={active ? 'true' : undefined}
+        onClick={() => choose(run)}
+      >
+        <span className={`run-dot state-${run.terminal?.status ?? run.phase}`} />
+        <span>
+          <strong>{run.title}</strong>
+          <small>
+            {run.example ? 'Example' : dateLabel(run.createdAt) || run.runId.slice(0, 8)}
+            <span>{run.historyAvailable ? runState(run) : 'History unavailable'}</span>
+          </small>
+        </span>
+      </button>
+      {run.workspaceRecovery?.successorRunId && (
+        <a
+          className="run-successor"
+          href={`#runs/local/${encodeURIComponent(run.workspaceRecovery.successorRunId)}`}
+        >
+          Continue to successor
+        </a>
+      )}
+    </div>
   );
 }

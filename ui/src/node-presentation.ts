@@ -3,6 +3,7 @@ import {
   ShieldCheck,
   GitPullRequest,
   MessageSquare,
+  Clock,
   Layers,
   Columns3,
   Split,
@@ -33,6 +34,7 @@ export const nodeIcons: Record<string, typeof Bot> = {
   fail: X,
   git_delivery: GitPullRequest,
   comment_delivery: MessageSquare,
+  request: Clock,
 };
 
 export function nodePresentation(document: Document, node: GraphNode, workers: WorkerOption[]) {
@@ -44,7 +46,15 @@ export function nodePresentation(document: Document, node: GraphNode, workers: W
     worker?.runtimeKind === 'comment_delivery' || binding?.kind === 'comment_delivery';
   return {
     Icon:
-      nodeIcons[delivery ? (comment ? 'comment_delivery' : 'git_delivery') : node.kind] ?? Layers,
+      nodeIcons[
+        delivery
+          ? comment
+            ? 'comment_delivery'
+            : 'git_delivery'
+          : binding?.kind === 'request'
+            ? 'request'
+            : node.kind
+      ] ?? Layers,
     label: delivery
       ? comment
         ? 'Comment delivery'
@@ -63,10 +73,12 @@ function deliveryDetail(worker: WorkerOption | undefined, comment: boolean): str
 }
 
 function activityDetail(binding: Binding | undefined): string | undefined {
+  if (binding?.kind === 'request') return 'Wait';
   return binding?.kind === 'script' ? scriptCommandLabel(binding.command) : binding?.model;
 }
 
 export function activityLabel(nodeKind: string, bindingKind?: string): string {
   if (bindingKind === 'script') return 'Script';
+  if (bindingKind === 'request') return 'Wait';
   return bindingKind === 'decision' ? 'Decision' : labels[nodeKind];
 }

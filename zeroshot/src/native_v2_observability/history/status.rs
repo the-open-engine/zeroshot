@@ -56,7 +56,7 @@ impl RuntimeStatusReader {
         &self,
         snapshot: &RunSnapshot,
     ) -> Result<Option<RuntimeFailure>, ()> {
-        if snapshot.terminal.is_some() {
+        if snapshot.terminal.is_some() || snapshot.suspension.is_some() {
             return Ok(None);
         }
         #[cfg(feature = "ui")]
@@ -87,14 +87,39 @@ impl RuntimeStatusReader {
         Ok(confirmed_failure(snapshot, status))
     }
 
-    async fn status(&self, id: &RunId) -> Option<RunStatusResult> {
+    pub(crate) async fn status(&self, id: &RunId) -> Option<RunStatusResult> {
         match self {
             Self::Target(observability) => observability
                 .status(RunStatusParams { run_id: id.clone() })
                 .await
                 .ok(),
             #[cfg(feature = "ui")]
-            Self::Local(_) => None,
+            Self::Local(root) => {
+                use crate::native_v2_cli::NativeV2CliBackend;
+                let backend = crate::native_v2_cli::local::LocalCliBackend::new(
+                    root.clone(),
+                    PathBuf::new(),
+                    PathBuf::new(),
+                    PathBuf::new(),
+                );
+                let status = backend
+                    .run_status(None, RunStatusParams { run_id: id.clone() })
+                    .await
+                    .ok()?;
+                let crate::native_v2_cli::CliRunStatus::Target(status_body) = status.status else {
+                    return None;
+                };
+                Some(RunStatusResult {
+                    run_id: status.run_id,
+                    title: status.title,
+                    source: status.source,
+                    size: status.size,
+                    at_cursor: status.at_cursor,
+                    status: status_body,
+                    controller: status.controller,
+                    workspace_recovery: status.workspace_recovery,
+                })
+            }
         }
     }
 }

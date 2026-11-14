@@ -486,6 +486,24 @@ pub struct TargetHostedRunsDiscovery {
     pub route_templates: TargetHostedRunRoutes,
 }
 
+pub const HOSTED_RUN_CONTROLS_KIND: &str = "openengine.hosted-run-controls/v1";
+
+/// Optional POST routes relative to `hosted_runs.base_url`; the v1 run routes stay frozen.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedRunControlsDiscovery {
+    pub kind: String,
+    pub route_templates: TargetHostedRunControlRoutes,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedRunControlRoutes {
+    pub suspend: String,
+    pub vectors: String,
+    pub vector: String,
+}
+
 /// Authenticated tar streaming, independent of resume/checkpoint RPCs.
 pub const WORKSPACE_EXPORT_KIND: &str = "openengine.workspace-export/v1";
 
@@ -678,9 +696,17 @@ pub struct TargetTaskResolutionDiscovery {
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_wait: Option<TargetRequestWaitDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_suspension: Option<TargetRunSuspensionDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_vectors: Option<TargetRunVectorsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<crate::TargetApiKeyDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_runs: Option<TargetHostedRunsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hosted_run_controls: Option<TargetHostedRunControlsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_history: Option<TargetRunHistoryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -750,7 +776,11 @@ impl TargetDiscoveryExtensions {
     }
 
     const fn controller_extensions_empty(&self) -> bool {
-        self.workspace_recovery.is_none()
+        self.run_suspension.is_none()
+            && self.hosted_run_controls.is_none()
+            && self.run_vectors.is_none()
+            && self.request_wait.is_none()
+            && self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
             && self.workspace_export.is_none()
@@ -820,6 +850,19 @@ impl TargetDiscoveryDocument {
 
     /// Adds checkpoint listing and entry-point resume support for direct and private targets.
     #[must_use]
+    pub fn with_run_suspension(mut self) -> Self {
+        self.extensions.request_wait = Some(TargetRequestWaitDiscovery {
+            kind: REQUEST_WAIT_KIND.to_owned(),
+        });
+        self.extensions.run_suspension = Some(TargetRunSuspensionDiscovery {
+            kind: RUN_SUSPENSION_KIND.to_owned(),
+        });
+        self.extensions.run_vectors = Some(TargetRunVectorsDiscovery {
+            kind: RUN_VECTORS_KIND.to_owned(),
+        });
+        self
+    }
+
     pub fn with_workspace_checkpoints(mut self) -> Self {
         if !matches!(self.authentication, TargetAuthentication::HostedOauth) {
             self.extensions.workspace_checkpoints = Some(TargetWorkspaceCheckpointsDiscovery {
@@ -894,3 +937,22 @@ pub fn is_canonical_uuid_v7(run_id: &RunId) -> bool {
 #[cfg(test)]
 #[path = "native_v2_target/tests.rs"]
 mod tests;
+
+pub const REQUEST_WAIT_KIND: &str = "openengine.request-wait/v1";
+pub const RUN_SUSPENSION_KIND: &str = "openengine.run-suspension/v1";
+pub const RUN_VECTORS_KIND: &str = "openengine.run-vectors/v1";
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetRequestWaitDiscovery {
+    pub kind: String,
+}
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetRunSuspensionDiscovery {
+    pub kind: String,
+}
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetRunVectorsDiscovery {
+    pub kind: String,
+}

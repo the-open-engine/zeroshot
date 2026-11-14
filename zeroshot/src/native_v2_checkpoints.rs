@@ -56,6 +56,20 @@ impl CheckpointError {
 /// Delivery receipt retention is independent of workspace capture and graph history.
 #[async_trait]
 pub trait RunCheckpointStore: Send + Sync {
+    /// Publish complete suspension history and the vector record before disposing allocation.
+    /// A concurrent suspend request can require republishing; replace the previous full snapshot.
+    async fn suspend(
+        &self,
+        _history: &[DurableExecution],
+        _vectors: &[openengine_cluster_protocol::RunVector],
+    ) -> Result<(), CheckpointError> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "workspace storage does not support suspension",
+        )
+        .into())
+    }
+
     /// Reconcile acknowledged delivery facts before recovery, without capturing workspace bytes.
     /// Reject conflicting generations and never replace a newer retained generation.
     async fn retain_delivery_state(
@@ -185,6 +199,7 @@ pub struct CheckpointRestore {
 #[serde(deny_unknown_fields, rename_all = "camelCase", tag = "kind")]
 pub enum CheckpointRestoreSelection {
     Latest,
+    Continue,
     Checkpoint { checkpoint_id: CheckpointId },
 }
 
@@ -455,6 +470,14 @@ fn publish_storage_configuration(
 
 #[async_trait]
 impl RunCheckpointStore for ResticCheckpointStore {
+    async fn suspend(
+        &self,
+        _history: &[DurableExecution],
+        _vectors: &[openengine_cluster_protocol::RunVector],
+    ) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+
     async fn retain_delivery_state(
         &self,
         state: &crate::native_v2_contract::DeliveryCheckpoint,
@@ -512,6 +535,18 @@ pub fn discard_lineage(directory: &Path, repository: &Path) -> Result<(), Checkp
     remove_if_present(repository)
 }
 
+pub(crate) fn discard_recorded_lineage(directory: &Path) -> Result<(), CheckpointError> {
+    let configuration: StorageConfiguration = match catalog::read(&directory.join("storage.json")) {
+        Ok(configuration) => configuration,
+        Err(error) if error.0.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if configuration.format != STORAGE_FORMAT {
+        return Err(catalog::invalid("unsupported checkpoint storage format"));
+    }
+    discard_lineage(directory, &configuration.repository)
+}
+
 #[must_use]
 pub fn restore_selection(
     from: Option<&openengine_cluster_protocol::RunResumeFrom>,
@@ -541,7 +576,9 @@ pub fn pin(selection: &CheckpointRestore) -> Result<SnapshotId, CheckpointError>
 
 fn selected_snapshot(selection: &CheckpointRestore) -> Result<SnapshotId, CheckpointError> {
     match &selection.selection {
-        CheckpointRestoreSelection::Latest => catalog::latest(&selection.directory),
+        CheckpointRestoreSelection::Latest | CheckpointRestoreSelection::Continue => {
+            catalog::latest(&selection.directory)
+        }
         CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
             Ok(catalog::point(&selection.directory, checkpoint_id)?.snapshot)
         }
@@ -551,7 +588,7 @@ fn selected_snapshot(selection: &CheckpointRestore) -> Result<SnapshotId, Checkp
 /// Restart imports no seed; a selected checkpoint continues from its settled prerequisites.
 fn selected_seed(selection: &CheckpointRestore) -> Result<Vec<DurableExecution>, CheckpointError> {
     match &selection.selection {
-        CheckpointRestoreSelection::Latest => Ok(Vec::new()),
+        CheckpointRestoreSelection::Latest | CheckpointRestoreSelection::Continue => Ok(Vec::new()),
         CheckpointRestoreSelection::Checkpoint { checkpoint_id } => Ok(CheckpointSeed::read(
             &catalog::seed_path(&selection.directory, checkpoint_id),
         )?

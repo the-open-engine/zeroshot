@@ -579,6 +579,12 @@ fn require_session_capability(
         TargetSessionPurpose::WorkspaceRecovery if !controller.workspace_recovery => Err(
             authority_error("target does not advertise workspace recovery"),
         ),
+        TargetSessionPurpose::RunSuspension if !controller.run_suspension => Err(authority_error(
+            "target does not advertise openengine.run-suspension/v1",
+        )),
+        TargetSessionPurpose::RunVectors if !controller.run_vectors => Err(authority_error(
+            "target does not advertise openengine.run-vectors/v1",
+        )),
         TargetSessionPurpose::WorkspaceCheckpoints if !controller.workspace_checkpoints => Err(
             authority_error("target does not advertise workspace checkpoints"),
         ),
@@ -626,6 +632,17 @@ fn require_runtime_capabilities(
     }) {
         return Err(authority_error(
             "script bindings currently require local execution",
+        ));
+    }
+    if runtime.nodes().values().any(|binding| {
+        matches!(
+            binding,
+            openengine_cluster_protocol::NodeRuntimeBinding::Request {}
+        )
+    }) && !controller.request_wait
+    {
+        return Err(authority_error(
+            "target does not advertise openengine.request-wait/v1",
         ));
     }
     require_node_runtime_lanes(controller, runtime)?;

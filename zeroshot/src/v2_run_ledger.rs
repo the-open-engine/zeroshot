@@ -85,6 +85,7 @@ pub enum RunPhase {
     Admitted,
     Running,
     Stopping,
+    Suspended,
     Finished,
 }
 
@@ -94,7 +95,7 @@ impl RunPhase {
         match self {
             Self::Admitted => Phase::Admitting,
             Self::Running | Self::Stopping => Phase::Running,
-            Self::Finished => Phase::Finished,
+            Self::Suspended | Self::Finished => Phase::Finished,
         }
     }
 }
@@ -110,6 +111,10 @@ pub struct RunSnapshot {
     pub cursor: Cursor,
     pub phase: RunPhase,
     pub force_stop_requested: bool,
+    #[serde(default)]
+    pub suspend_requested: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspension: Option<openengine_cluster_protocol::RunSuspension>,
     pub executions: BTreeMap<ExecutionId, NodeSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
@@ -185,6 +190,8 @@ impl RunSnapshot {
             cursor: initial_cursor(),
             phase: RunPhase::Admitted,
             force_stop_requested: false,
+            suspend_requested: false,
+            suspension: None,
             executions: BTreeMap::new(),
             execution_seed: Vec::new(),
             primary_graph: None,
@@ -260,7 +267,7 @@ impl NodeSnapshot {
     pub const fn outcome(&self) -> Option<&WorkerOutcome> {
         match &self.state {
             NodeState::Completed { outcome, .. } => Some(outcome),
-            NodeState::Active | NodeState::Voided { .. } => None,
+            NodeState::Active | NodeState::SuspendedWait { .. } | NodeState::Voided { .. } => None,
         }
     }
 }
@@ -269,6 +276,10 @@ impl NodeSnapshot {
 #[serde(rename_all = "snake_case")]
 pub enum NodeState {
     Active,
+    /// No process remains; the continuation may settle this wait only once its due time is reached.
+    SuspendedWait {
+        at: Cursor,
+    },
     Completed {
         at: Cursor,
         outcome: WorkerOutcome,
@@ -300,6 +311,9 @@ pub enum RunEvent {
     NodeCompleted {
         completion: NodeCompletion,
     },
+    WaitDeferred {
+        reference: ExecutionRef,
+    },
     ExecutionVoided {
         reference: ExecutionRef,
         reason: ExecutionVoidReason,
@@ -326,6 +340,13 @@ pub enum RunEvent {
         auxiliary_pending: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delivery_execution: Option<ExecutionId>,
+    },
+    SuspendRequested,
+    Suspended {
+        suspension: openengine_cluster_protocol::RunSuspension,
+    },
+    Vector {
+        vector: openengine_cluster_protocol::RunVector,
     },
     ForceStopRequested,
     Terminal {
@@ -411,6 +432,10 @@ pub struct RunSummary {
     pub cursor: Cursor,
     pub phase: RunPhase,
     pub force_stop_requested: bool,
+    #[serde(default)]
+    pub suspend_requested: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspension: Option<openengine_cluster_protocol::RunSuspension>,
     pub active_executions: Vec<ExecutionId>,
 }
 
@@ -424,6 +449,8 @@ impl From<&RunSnapshot> for RunSummary {
             cursor: snapshot.cursor.clone(),
             phase: snapshot.phase.clone(),
             force_stop_requested: snapshot.force_stop_requested,
+            suspend_requested: snapshot.suspend_requested,
+            suspension: snapshot.suspension.clone(),
             active_executions: snapshot
                 .active_executions()
                 .map(|node| node.reference.execution)
@@ -436,6 +463,8 @@ impl From<&RunSnapshot> for RunSummary {
 pub enum RunLedgerError {
     #[error("run was not found")]
     RunNotFound,
+    #[error("vector was not found")]
+    VectorNotFound,
     #[error("submission key already identifies a different admitted run")]
     SubmissionConflict { existing_run_id: RunId },
     #[error("run ID already identifies a different submission")]
@@ -485,6 +514,16 @@ pub trait RunLedger: Send + Sync {
     /// Records force-stop intent once. Repeated requests and requests after terminal are no-ops.
     async fn request_force_stop(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError>;
 
+    /// Records soft-stop intent and its vector atomically; repeating a live request is a no-op.
+    async fn request_suspend(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError>;
+
+    /// Resolves an entry ID to its cursor in this run, including inherited entries.
+    async fn vector_cursor(
+        &self,
+        run_id: &RunId,
+        id: &openengine_cluster_protocol::VectorId,
+    ) -> Result<Cursor, RunLedgerError>;
+
     /// Reads the current projection and a bounded reconnect page under the same store snapshot.
     /// Pages contain at most `MAX_REPLAY_EVENTS` events and `MAX_REPLAY_BYTES` encoded event bytes.
     async fn snapshot_and_tail(
@@ -500,6 +539,7 @@ impl fmt::Display for RunPhase {
             Self::Admitted => "admitted",
             Self::Running => "running",
             Self::Stopping => "stopping",
+            Self::Suspended => "suspended",
             Self::Finished => "finished",
         };
         formatter.write_str(value)
@@ -513,3 +553,39 @@ mod tests;
 #[cfg(test)]
 #[path = "../tests/support/sqlite_crash.rs"]
 pub(crate) mod sqlite_crash;
+
+fn suspension_request_events(stored: &StoredRun) -> Result<Option<Vec<RunEvent>>, RunLedgerError> {
+    if stored.snapshot.phase != RunPhase::Running || !stored.admitted.runtime.workspace_checkpoints
+    {
+        return Err(RunLedgerError::InvalidEvent(
+            "suspend requires a running run with workspace checkpoints",
+        ));
+    }
+    if stored.snapshot.suspend_requested {
+        return Ok(None);
+    }
+    Ok(Some(vec![
+        RunEvent::SuspendRequested,
+        vector_event(
+            &stored.snapshot.run_id,
+            openengine_cluster_protocol::RunVectorContent::SuspendRequest {},
+        )?,
+    ]))
+}
+
+pub(crate) fn vector_event(
+    run_id: &RunId,
+    content: openengine_cluster_protocol::RunVectorContent,
+) -> Result<RunEvent, RunLedgerError> {
+    Ok(RunEvent::Vector {
+        vector: openengine_cluster_protocol::RunVector {
+            id: openengine_cluster_protocol::VectorId::new(uuid::Uuid::now_v7().to_string())
+                .map_err(|_| RunLedgerError::Corrupt)?,
+            run_id: run_id.clone(),
+            created_at: crate::native_v2_runner::current_timestamp(),
+            content,
+        },
+    })
+}
+
+pub mod vectors;

@@ -573,3 +573,52 @@ mod local {
         }
     }
 }
+
+#[tokio::test]
+async fn suspended_history_is_complete_and_ended_for_local_and_target_sources() {
+    use openengine_cluster_protocol::{RunSuspension, RunWait};
+    for suspension in [
+        RunSuspension::Command {
+            node: NodeName::new("worker").assert_value(),
+            created_at: UnixTimestampMillis::new(1762905600000).assert_value(),
+        },
+        RunSuspension::Wait {
+            node: NodeName::new("worker").assert_value(),
+            created_at: UnixTimestampMillis::new(1762905600000).assert_value(),
+            wait: RunWait {
+                due_at: UnixTimestampMillis::new(1762992000000).assert_value(),
+            },
+        },
+    ] {
+        let fixture = Fixture::new().await;
+        fixture
+            .ledger
+            .append(
+                &fixture.id,
+                vec![
+                    RunEvent::RunStarted,
+                    RunEvent::Suspended {
+                        suspension: suspension.clone(),
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        let target = NativeRunHistory::target(
+            fixture.root.join("runs").join(fixture.id.as_str()),
+            fixture.observations(),
+        );
+        for source in [&fixture.service, &target] {
+            let detail = source.detail(&fixture.id).await.assert_value();
+            assert_eq!(detail["phase"], "suspended");
+            assert_eq!(detail["suspension"], json!(suspension));
+            assert_eq!(detail["history"]["complete"], true);
+            assert!(detail.get("runtimeFailure").is_none());
+            let listed = source.list(None).await.assert_value();
+            assert_eq!(listed["runs"][0]["phase"], "suspended");
+            assert_eq!(listed["runs"][0]["suspension"], json!(suspension));
+            let page = source.page(&fixture.id, None).await.assert_value();
+            assert_eq!(page["finished"], true);
+        }
+    }
+}

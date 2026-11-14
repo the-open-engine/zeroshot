@@ -120,6 +120,11 @@ fn native_v2_method(name: &str) -> Option<Value> {
         RUN_LOGS_METHOD => run_logs_method(),
         RUN_ATTACH_METHOD => run_attach_method(),
         RUN_FORCE_METHOD => run_force_method(),
+        openengine_cluster_protocol::RUN_SUSPEND_METHOD => {
+            run_id_method::<RunStatusParams>("runSuspendResult", "RunStatusResult")
+        }
+        openengine_cluster_protocol::RUN_VECTORS_METHOD => run_vectors_method(),
+        openengine_cluster_protocol::RUN_VECTOR_METHOD => run_vector_method(),
         _ => return native_v2_recovery_method(name),
     };
     Some(method)
@@ -525,4 +530,25 @@ fn run_attach_method() -> Value {
             "schema": { "$ref": "schema.json#/$defs/RunAttachResult" }
         }
     })
+}
+
+fn run_vectors_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(openengine_cluster_protocol::RunVectorsParams))
+        .assert_value();
+    json!({"summary":"Read an ordered page of the durable vector record", "paramStructure":"by-name",
+        "params":[
+            {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
+            {"name":"after","required":false,"schema":{"$ref":"schema.json#/$defs/RunVectorsParams/properties/after"}},
+            {"name":"limit","required":false,"schema":property_schema(&schema,"limit")}],
+        "result":{"name":"runVectorsResult","schema":{"$ref":"schema.json#/$defs/RunVectorsResult"}}})
+}
+
+fn run_vector_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(openengine_cluster_protocol::RunVectorParams))
+        .assert_value();
+    json!({"summary":"Read one vector entry in full", "paramStructure":"by-name",
+        "params":[
+            {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
+            {"name":"id","required":true,"schema":{"$ref":"schema.json#/$defs/VectorId"}}],
+        "result":{"name":"runVectorResult","schema":{"$ref":"schema.json#/$defs/RunVector"}}})
 }
