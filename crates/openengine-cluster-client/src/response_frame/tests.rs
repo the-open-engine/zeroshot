@@ -34,6 +34,39 @@ async fn collection_bounds_follow_typed_statuses_across_chunks_and_escaped_strin
 }
 
 #[tokio::test]
+async fn unfinished_run_inventory_keeps_a_finite_total_receive_bound() {
+    use tokio::io::AsyncWriteExt;
+    use tokio::sync::oneshot;
+
+    let entry = serde_json::to_vec(&status("x".repeat(750_000))).assert_value();
+    let count = crate::websocket::MAX_WIRE_RESPONSE_BYTES / entry.len() + 1;
+    let (mut peer, stream) = tokio::io::duplex(64 * 1024);
+    let (release, held) = oneshot::channel::<()>();
+    let sender = tokio::spawn(async move {
+        peer.write_all(br#"{"jsonrpc":"2.0","id":1,"result":{"runs":["#)
+            .await
+            .assert_value();
+        // Stream only enough valid statuses to cross the bound, with no array end or newline.
+        // A missing bound must time out rather than grow an unbounded test payload.
+        for _ in 0..count {
+            if peer.write_all(&entry).await.is_err() || peer.write_all(b",").await.is_err() {
+                return;
+            }
+        }
+        let _ = held.await;
+    });
+    let mut reader = BufReader::new(stream);
+    let result =
+        tokio::time::timeout(std::time::Duration::from_secs(60), next_line(&mut reader)).await;
+    drop(reader);
+    let _ = release.send(());
+    sender.await.assert_value();
+    let error = result.assert_value().unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("too large"), "{error}");
+}
+
+#[tokio::test]
 async fn collection_entries_and_non_collection_frames_keep_explicit_bounds() {
     let oversized = status("x".repeat(MAX_REQUEST_RESPONSE_BYTES));
     for frame in [

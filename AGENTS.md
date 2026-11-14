@@ -1049,8 +1049,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   combined request text and contracts, and retains its scan cursor across pages.
   NDJSON and WebSocket run inventories bound each typed status separately from the response
   envelope, so several full requests fit one unpaged reply without removing bounds from other
-  responses. Both WebSocket dialers cap frames and reassembled messages at 128 MiB before wire
-  allocation; the shared transport applies tighter response bounds after WebSocket reassembly.
+  responses. NDJSON replies and both WebSocket dialers share a 128 MiB total receive ceiling;
+  NDJSON checks before buffer growth and WebSocket checks before frame allocation and reassembly.
+  The shared transport retains tighter bounds for individual responses and inventory entries.
   Vector pagination resolves entry IDs through a per-run ledger index, including inherited IDs,
   then replays after that cursor instead of reading earlier pages again.
   Local CLI inspection opens finished runs directly from read-only ledgers. Vector list and show

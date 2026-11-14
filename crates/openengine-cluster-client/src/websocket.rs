@@ -33,9 +33,7 @@ use crate::{PendingMap, SubscriptionMap, TransportError};
 // Preserve Tungstenite's previous message allowance outside the unpaged inventory.
 const MAX_ORDINARY_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
-/// Receive allocation ceiling for WebSocket frames and reassembled messages, including inventories.
-/// Individual inventory entries and ordinary responses retain their tighter application bounds.
-pub const MAX_WIRE_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
+pub use crate::response_frame::MAX_WIRE_RESPONSE_BYTES;
 
 /// Options applied to one outbound WebSocket connection.
 ///

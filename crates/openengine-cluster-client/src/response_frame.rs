@@ -6,7 +6,14 @@ use openengine_cluster_protocol::{
     MAX_REQUEST_RESPONSE_BYTES, RunStatusResult, bounded_json_from_slice,
 };
 
+/// Receive ceiling for complete responses, including unpaged run inventories.
+/// Individual inventory entries and ordinary responses retain tighter application bounds.
+pub const MAX_WIRE_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
+
 pub(super) fn validate(bytes: &[u8], ordinary_limit: usize) -> io::Result<()> {
+    if bytes.len() > MAX_WIRE_RESPONSE_BYTES {
+        return Err(too_large());
+    }
     let mut bounds = Bounds {
         ordinary_limit: Some(ordinary_limit),
         ..Bounds::default()
@@ -34,6 +41,9 @@ pub(super) async fn next_line<R: AsyncBufRead + Unpin>(
         let end = chunk.iter().position(|byte| *byte == b'\n');
         let count = end.unwrap_or(chunk.len());
         let start = line.len();
+        if count > MAX_WIRE_RESPONSE_BYTES.saturating_sub(start) {
+            return Err(too_large());
+        }
         line.extend_from_slice(&chunk[..count]);
         for index in start..line.len() {
             bounds.push(&line[..=index])?;
