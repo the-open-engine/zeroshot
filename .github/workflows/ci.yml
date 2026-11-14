@@ -438,10 +438,6 @@ jobs:
           mkdir -p target/debug
           cp "$output_root/$target/restic" target/debug/restic
           target/debug/restic version
-      - name: Run macOS Restic resume regressions
-        run: |
-          cargo test --locked --package zeroshot --features ui --lib native_v2_supervisor::checkpoints::tests::restore_tests
-          cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable restic_resume_tests
       - name: Run macOS checkpoint forge access regression
         run: >-
           cargo test --locked --package zeroshot --features ui

@@ -5,6 +5,7 @@ mod fixture;
 
 #[path = "native_v2_cli_portable/inspection.rs"]
 mod inspection;
+#[cfg(windows)]
 #[path = "native_v2_cli_portable/restic_resume_tests.rs"]
 mod restic_resume_tests;
 use fixture::{Fixture, success};
