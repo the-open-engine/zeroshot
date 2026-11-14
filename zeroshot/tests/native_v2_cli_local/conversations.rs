@@ -296,6 +296,8 @@ async fn failed_continued_turn_retries_with_a_new_conversation() {
     new_provider_home(&mut fixture);
     let resumed = fixture.json(&["resume", &run], "reject-resume").await;
     let successor = resumed["runId"].as_str().assert_value();
+    // Avoid repeatedly launching an instrumented status process during the retry.
+    wait_for_exit(fixture.ready_pid(successor)).await;
     fixture.wait_succeeded(successor, "reject-resume").await;
     let calls = worker_calls(&fixture);
     assert_eq!(calls.first().assert_value(), "fresh local-thread");
