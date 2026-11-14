@@ -10,11 +10,16 @@ static VERIFY_COUNTER: AtomicUsize = AtomicUsize::new(0);
 fn verify_script() -> String {
     format!(
         "{PLUGIN_SETUP}\n{}",
-        r#"const hook = hooks['session.http.request'];
+        r#"const http = hooks['session.http.request'];
+const websocket = hooks['session.experimental.ws.handshake'];
 const results = [];
 for (const r of JSON.parse(process.env.REQUESTS)) {
   try {
-    await hook({model:{providerID:r.provider}, kind:'primary', request:new Request(r.url, {method:'POST', headers:r.headers})});
+    if (r.transport === 'ws') {
+      await websocket({model:{providerID:r.provider}, kind:'primary', url:r.url, headers:r.headers});
+    } else {
+      await http({model:{providerID:r.provider}, kind:'primary', request:new Request(r.url, {method:'POST', headers:r.headers})});
+    }
     results.push({ok:true});
   } catch (error) { results.push({ok:false, message:String(error.message)}); }
 }
@@ -133,6 +138,73 @@ fn declared_key_installs_one_verifier_plugin_without_its_secret() {
             .join("zeroshot-provider-auth.loaded")
             .exists()
     );
+    assert!(
+        !std::path::Path::new(tmpdir)
+            .join("zeroshot-plugins")
+            .join("zeroshot-provider-auth.conflict")
+            .exists(),
+        "an accepted request must not leave a conflict behind"
+    );
+}
+
+#[test]
+fn a_conflict_leaves_only_the_message_for_the_node() {
+    let name = format!(
+        "opencode-verify-{}",
+        VERIFY_COUNTER.fetch_add(1, Ordering::SeqCst)
+    );
+    let directory = TestDirectory::new(&name);
+    let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
+    adapter.config.provider = "openai".to_owned();
+    let files =
+        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
+            .assert_value();
+    let invocation = invocation(&[
+        ("OPENAI_API_KEY", "declared-key"),
+        ("OPENAI_BASE_URL", "https://declared.invalid/v1"),
+    ]);
+    let command: ProcessSessionCommand = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &invocation,
+        files: &files,
+        session_id: None,
+    })
+    .assert_value();
+    let plugin_url = owned_plugin(&command, "zeroshot-provider-auth");
+    let requests = json!([{
+        "provider": "openai",
+        "url": "https://declared.invalid/v1/chat/completions",
+        "headers": {"authorization": "Bearer declared-key", "x-api-key": "file-header-secret"}
+    }]);
+    let output = node_command()
+        .args(["--input-type=module", "-e", &verify_script(), &plugin_url])
+        .arg(&adapter.config.workspace)
+        .envs(&command.environment)
+        .env("REQUESTS", requests.to_string())
+        .output()
+        .assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Vec<Value>>(&output.stdout).assert_value(),
+        vec![
+            json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: x-api-key"})
+        ]
+    );
+
+    let conflict = std::path::Path::new(&command.environment["TMPDIR"])
+        .join("zeroshot-plugins")
+        .join("zeroshot-provider-auth.conflict");
+    assert!(conflict.exists(), "{conflict:?}");
+    let text = std::fs::read_to_string(&conflict).assert_value();
+    assert_eq!(
+        text,
+        "Zeroshot OpenCode declared provider conflict: x-api-key"
+    );
+    assert!(!text.contains("file-header-secret"), "{text}");
 }
 
 #[test]
@@ -212,6 +284,59 @@ fn verifier_accepts_only_the_declared_authority() {
         "wrong-secret",
         "upstream-secret",
     ] {
+        for result in &results {
+            let text = result.to_string();
+            assert!(!text.contains(secret), "{text}");
+        }
+    }
+}
+
+#[test]
+fn verifier_checks_the_websocket_handshake() {
+    let requests = json!([
+        {
+            "transport": "ws",
+            "provider": "openai",
+            "url": "wss://declared.invalid/v1/responses",
+            "headers": {"Authorization": "Bearer declared-key", "openai-beta": "responses"}
+        },
+        {
+            "transport": "ws",
+            "provider": "openai",
+            "url": "wss://declared.invalid/v1/responses",
+            "headers": {"authorization": "Bearer declared-key", "x-api-key": "file-header-secret"}
+        },
+        {
+            "transport": "ws",
+            "provider": "openai",
+            "url": "wss://other.invalid/v1/responses",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "transport": "ws",
+            "provider": "anthropic",
+            "url": "wss://declared.invalid/v1/responses",
+            "headers": {}
+        }
+    ]);
+    let results = verify(
+        "openai",
+        &[
+            ("OPENAI_API_KEY", "declared-key"),
+            ("OPENAI_BASE_URL", "https://declared.invalid/v1"),
+        ],
+        requests,
+    );
+    assert_eq!(
+        results,
+        vec![
+            json!({"ok": true}),
+            json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: x-api-key"}),
+            json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: endpoint"}),
+            json!({"ok": true}),
+        ]
+    );
+    for secret in ["declared-key", "file-header-secret"] {
         for result in &results {
             let text = result.to_string();
             assert!(!text.contains(secret), "{text}");

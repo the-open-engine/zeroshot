@@ -65,7 +65,6 @@ function retrieve(event) {
 export default {
   id: 'zeroshot-active-memory',
   async setup(ctx) {
-    fs.mkdirSync(path.dirname(LOADED_MARKER), {recursive: true}); fs.writeFileSync(LOADED_MARKER, '');
     await ctx.tool.hook('execute.after', async (event) => {
       if (event.status !== 'completed' || event.result == null || typeof event.result !== 'object') return;
       const delivery = await retrieve({toolName: event.tool, input: event.input, cwd: ctx.location.directory, sessionId: event.sessionID});
@@ -76,6 +75,7 @@ export default {
       else return;
       delivery.returned();
     });
+    fs.mkdirSync(path.dirname(LOADED_MARKER), {recursive: true}); fs.writeFileSync(LOADED_MARKER, '');
   }
 };
 "#;

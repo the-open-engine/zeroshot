@@ -59,7 +59,8 @@ pub(super) fn install(installation: Installation<'_>) -> Result<(), NodeRunnerEr
 }
 
 // The plugin only verifies: the declared key and endpoint reach OpenCode through the inline
-// config, and a conflict error names headers, never values.
+// config, and a conflict error names headers, never values. Both the HTTP and the WebSocket
+// transport are checked.
 const HOOK: &str = r#"import fs from 'node:fs';
 import path from 'node:path';
 const selection = AUTH_SELECTION;
@@ -68,6 +69,7 @@ const within = (url, base) => {
   const root = base.replace(/\/+$/, '');
   return url === root || url.startsWith(root + '/') || url.startsWith(root + '?');
 };
+const conflictFile = LOADED_MARKER.replace(/\.loaded$/, '.conflict');
 export default {
   id: 'zeroshot-provider-auth',
   async setup(ctx) {
@@ -75,21 +77,31 @@ export default {
     const endpoint = selection.endpoint ? process.env[selection.endpoint] : undefined;
     const canonical = selection.header.toLowerCase();
     const expected = canonical === 'x-api-key' ? key : `Bearer ${key}`;
-    fs.mkdirSync(path.dirname(LOADED_MARKER), {recursive: true}); fs.writeFileSync(LOADED_MARKER, '');
-    await ctx.session.hook('http.request', async (event) => {
-      if (event.model?.providerID !== selection.provider) return;
+    function verify(entries, url) {
       const conflicts = [];
       let present = false;
-      event.request.headers.forEach((value, name) => {
-        if (selection.endpoint && name === 'x-provider-api-keys') { conflicts.push(name); return; }
-        if (!authHeader(name)) return;
-        if (name === canonical && key && value === expected) { present = true; return; }
+      for (const [name, value] of entries) {
+        if (selection.endpoint && name === 'x-provider-api-keys') { conflicts.push(name); continue; }
+        if (!authHeader(name)) continue;
+        if (name === canonical && key && value === expected) { present = true; continue; }
         conflicts.push(name);
-      });
+      }
       if (!present) conflicts.push(canonical);
-      if (selection.endpoint && !(endpoint && within(event.request.url, endpoint))) conflicts.push('endpoint');
-      if (conflicts.length) throw new Error(`Zeroshot OpenCode declared provider conflict: ${[...new Set(conflicts)].sort().join(', ')}`);
+      if (selection.endpoint && !(endpoint && within(url, endpoint))) conflicts.push('endpoint');
+      if (!conflicts.length) return;
+      const message = `Zeroshot OpenCode declared provider conflict: ${[...new Set(conflicts)].sort().join(', ')}`;
+      fs.mkdirSync(path.dirname(conflictFile), {recursive: true}); fs.writeFileSync(conflictFile, message);
+      throw new Error(message);
+    }
+    await ctx.session.hook('http.request', async (event) => {
+      if (event.model?.providerID !== selection.provider) return;
+      verify([...event.request.headers], event.request.url);
     });
+    await ctx.session.hook('experimental.ws.handshake', async (event) => {
+      if (event.model?.providerID !== selection.provider) return;
+      verify(Object.entries(event.headers ?? {}).map(([name, value]) => [name.toLowerCase(), String(value)]), String(event.url).replace(/^ws(s?):/i, 'http$1:'));
+    });
+    fs.mkdirSync(path.dirname(LOADED_MARKER), {recursive: true}); fs.writeFileSync(LOADED_MARKER, '');
   }
 }
 "#;

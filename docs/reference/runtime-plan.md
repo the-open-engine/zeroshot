@@ -558,8 +558,8 @@ and `--cloud`, and Pi `--fork`. Contained Pi also owns tool selection and projec
 their native aliases, including `-t`/`--tools` and `-a`/`--approve`. Local Pi tool modifiers such
 as `{"args":["--tools","-read"]}` are passed through: Pi's exact short tokens do not treat
 `-read` as the reserved `-r` option.
-OpenCode `--pure` (including joined forms) is reserved because it disables the runtime's
-authentication and Active Memory plugins.
+OpenCode `--pure` (including joined forms) is reserved; the runtime's authentication and Active
+Memory plugins must load for every turn.
 
 Codex `exec` subcommand tokens (`resume`, `fork`, `review`, `help`) are runtime-owned anywhere
 in `args`; if a native option needs one as a literal value, use its `--option=value` form.

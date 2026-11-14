@@ -223,12 +223,16 @@ impl OpenCodeAdapter {
                 let result =
                     turn::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
                         .await;
-                if let Some(id) = plugin::missing(turn.files.home(), &scratch) {
-                    let keep_process_result = matches!(
-                        &result,
+                if let Some(message) = plugin::conflict(&scratch) {
+                    if !matches!(
+                        result,
                         Err(NodeRunnerError::Cancelled) | Err(NodeRunnerError::CleanupUnconfirmed)
-                    );
-                    if !keep_process_result {
+                    ) {
+                        return Err(NodeRunnerError::DriverDetail(message));
+                    }
+                }
+                if let Some(id) = plugin::missing(turn.files.home(), &scratch) {
+                    if matches!(result, Ok(ProviderAttempt::Complete(_))) {
                         return Err(NodeRunnerError::DriverDetail(format!(
                             "OpenCode plugin {id} did not load"
                         )));

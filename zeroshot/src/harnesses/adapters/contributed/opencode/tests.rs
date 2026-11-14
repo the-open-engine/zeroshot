@@ -235,18 +235,17 @@ fn clean_stderr() -> Option<ProviderProcessFailure> {
 }
 
 #[test]
-fn answer_step_after_tools_settles_on_a_clean_exit_with_unknown_usage() {
+fn answer_step_after_tools_without_its_final_step_fails() {
     for process_failure in [None, clean_stderr()] {
         let transcript = unfinished_tool_turn();
         assert!(!transcript.is_success());
-        assert!(transcript.token_usage().is_none());
-        match transcript.finish(process_failure).assert_value() {
-            ProviderAttempt::Complete(result) => {
-                assert_eq!(result.message, "{\"response\":\"done\"}");
-                assert_eq!(result.session_id.as_deref(), Some("ses_fixture"));
-            }
-            ProviderAttempt::Failed(_) => panic!("2.x answer step must settle on a clean exit"),
-        }
+        assert!(
+            matches!(
+                transcript.finish(process_failure).assert_value(),
+                ProviderAttempt::Failed(_)
+            ),
+            "an answer step without its final step must fail"
+        );
     }
 }
 
@@ -262,7 +261,7 @@ fn reported_answer_step_after_tools_keeps_complete_usage() {
 }
 
 #[test]
-fn unfinished_steps_without_the_exact_two_x_shape_still_fail() {
+fn unfinished_steps_still_fail() {
     let failed_exit = Some(ProviderProcessFailure {
         kind: ProviderProcessFailureKind::Completion,
         detail: "exit status 1".to_owned(),

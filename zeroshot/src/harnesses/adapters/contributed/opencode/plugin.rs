@@ -60,6 +60,30 @@ pub(super) fn reset(home: &Path, scratch: &Path) -> io::Result<()> {
     remove_dir_all_if_exists(&scratch.join("zeroshot-plugins"))
 }
 
+pub(super) fn conflict(scratch: &Path) -> Option<String> {
+    const ACCEPTED_PREFIX: &str = "Zeroshot OpenCode declared provider conflict: ";
+    const SUMMARY: &str = "Zeroshot OpenCode declared provider conflict";
+    let path = scratch
+        .join("zeroshot-plugins")
+        .join("zeroshot-provider-auth.conflict");
+    let Ok(mut file) = std::fs::File::open(&path) else {
+        return None;
+    };
+    let mut taken = io::Read::take(&mut file, 512);
+    let mut bytes = Vec::new();
+    if io::Read::read_to_end(&mut taken, &mut bytes).is_err() {
+        return None;
+    }
+    let names_only = bytes.starts_with(ACCEPTED_PREFIX.as_bytes())
+        && bytes.iter().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b',' | b':' | b' ')
+        });
+    if names_only {
+        return Some(String::from_utf8_lossy(&bytes).to_string());
+    }
+    Some(SUMMARY.to_owned())
+}
+
 pub(super) fn missing(home: &Path, scratch: &Path) -> Option<String> {
     let expected = home.join("zeroshot-plugins").join("expected");
     let mut names = Vec::new();

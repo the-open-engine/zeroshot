@@ -724,6 +724,63 @@ async fn a_turn_whose_owned_plugin_did_not_load_fails_the_node() {
 }
 
 #[tokio::test]
+async fn a_declared_provider_conflict_is_reported_instead_of_the_native_error() {
+    let directory = TestDirectory::new("opencode-declared-provider-conflict");
+    let native_error = json!({
+        "type": "error",
+        "error": {"type": "provider.invalid-output", "message": "Failed to read stream"}
+    })
+    .to_string();
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!(
+            "{LOADS_PLUGINS}\nprintf '%s' 'Zeroshot OpenCode declared provider conflict: x-api-key' > \"$TMPDIR/zeroshot-plugins/zeroshot-provider-auth.conflict\"\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+        ),
+    );
+    let adapter = adapter(&directory, &body);
+    let detail = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value()
+    .to_string();
+    assert!(
+        detail.contains("Zeroshot OpenCode declared provider conflict: x-api-key"),
+        "{detail}"
+    );
+    assert!(!detail.contains("Failed to read stream"), "{detail}");
+}
+
+#[tokio::test]
+async fn an_unexpected_conflict_file_is_reported_without_its_content() {
+    let directory = TestDirectory::new("opencode-unexpected-conflict-content");
+    let native_error = json!({
+        "type": "error",
+        "error": {"type": "provider.invalid-output", "message": "Failed to read stream"}
+    })
+    .to_string();
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!(
+            "{LOADS_PLUGINS}\nprintf '%s' 'Zeroshot OpenCode declared provider conflict: x-api-key=leaked!' > \"$TMPDIR/zeroshot-plugins/zeroshot-provider-auth.conflict\"\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+        ),
+    );
+    let adapter = adapter(&directory, &body);
+    let detail = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value()
+    .to_string();
+    assert!(detail.contains("declared provider conflict"), "{detail}");
+    assert!(!detail.contains("leaked"), "{detail}");
+}
+
+#[tokio::test]
 async fn native_args_and_config_are_isolated_and_survive_reused_sessions() {
     let directory = TestDirectory::new("opencode-native-config");
     let source=script("{\"response\":null}").replace("cat >/dev/null","printf '%s\\n' \"$@\" >> native-args\nprintf '%s\\n' \"$OPENCODE_CONFIG_CONTENT\" >> native-options\ncat >/dev/null");
@@ -773,6 +830,27 @@ async fn native_configuration_rejection_is_terminal_with_native_stderr() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn a_failed_process_reports_its_own_failure_without_a_load_marker() {
+    let directory = TestDirectory::new("opencode-failed-process-without-load-marker");
+    let adapter = adapter(
+        &directory,
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' 'invalid --title native-value' >&2\nexit 2\n",
+    );
+    let mut invocation = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"args":["--title","native-value"]}),
+    );
+    let detail = run(&adapter, invocation).await.unwrap_err().to_string();
+    assert!(
+        detail.contains("--title") && detail.contains("opencode"),
+        "{detail}"
+    );
+    assert!(!detail.contains("did not load"), "{detail}");
+    assert!(!detail.contains("declared-key"), "{detail}");
 }
 
 #[tokio::test]

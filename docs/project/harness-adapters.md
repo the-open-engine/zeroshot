@@ -59,8 +59,9 @@ native authentication for every supported provider except gateway, including the
 credential chain for Bedrock. OpenCode's `opencode` (Zen) and `opencode-go` (Go) lanes reuse the
 native OpenCode account login; a declared `OPENCODE_API_KEY` serves both. Other lanes require
 declared connections. GitHub connections use
-`COPILOT_GITHUB_TOKEN`; each harness owns its native exchange and refresh behavior. Declared
-credentials use private runtime state and preserve saved logins.
+`COPILOT_GITHUB_TOKEN`; each harness owns its native exchange and refresh behavior. OpenCode 2
+has no way to accept a declared GitHub token, so OpenCode's `github` lane runs only with the native
+GitHub Copilot login. Declared credentials use private runtime state and preserve saved logins.
 
 Local OpenCode and Hermes runs preserve native configuration discovery with declared credentials.
 Their declared authentication takes precedence over ambient authentication for the selected lane,
@@ -68,11 +69,13 @@ while native settings and plugins continue to apply. OpenCode keeps `HOME`, its 
 directory and its native permission policy, while its data, state and cache (database, saved
 logins, sessions, logs) live in a private directory per node session that is removed when the
 session closes. A local run copies the saved login of the lane's provider into that private store
-unless the node declares its own credential; nothing is written back to the user's store. Its
-declared authentication uses a private plugin, so `OPENCODE_PURE=true` conflicts with that setup.
-Native plugins and custom transport code run with the native CLI's authority. Local OpenCode adds
-no `--auto` flag and skips configuration inspection because that inspection can start background
-dependency work.
+unless the node declares its own credential; nothing is written back to the user's store. A declared
+credential reaches OpenCode through its inline configuration. A private plugin checks every model
+request of the selected provider and stops it when another authentication header or a different
+endpoint would be sent. The runtime's own plugins must load; a turn in which one of them did not
+load fails. Native plugins and custom transport code run with the native CLI's authority. Local
+OpenCode adds no `--auto` flag and skips configuration inspection because that inspection can start
+background dependency work.
 
 Hermes uses the interpreter from its installed canonical executable and native configuration
 factories without attaching to its shared gateway. Local profiles, plugins, MCP and permissions
