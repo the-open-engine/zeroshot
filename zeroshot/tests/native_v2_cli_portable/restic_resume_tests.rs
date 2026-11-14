@@ -18,8 +18,17 @@ fn resume_rediscovers_restic_after_the_install_moves() {
         let replacement = fixture
             .root
             .path(&format!("new-restic{}", std::env::consts::EXE_SUFFIX));
-        fs::copy(&restic, &original).unwrap();
-        fs::copy(&restic, &replacement).unwrap();
+        for path in [&original, &replacement] {
+            #[cfg(unix)]
+            openengine_cluster_testkit::fixture::write_executable(
+                path,
+                fs::read(&restic).unwrap(),
+                0o700,
+            )
+            .unwrap();
+            #[cfg(windows)]
+            fs::copy(&restic, path).unwrap();
+        }
         let failed = fixture
             .run_command("fail", false)
             .env("ZEROSHOT_RESTIC", &original)

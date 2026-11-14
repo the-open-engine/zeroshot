@@ -38,6 +38,14 @@ fn restore_rediscovers_restic_after_the_install_moves() {
         fs::create_dir(&directory).assert_value();
         // Isolate current_exe's sibling search as well as the subprocess environment.
         let probe = directory.join(executable.file_name().assert_value());
+        #[cfg(unix)]
+        openengine_cluster_testkit::fixture::write_executable(
+            &probe,
+            fs::read(&executable).assert_value(),
+            0o700,
+        )
+        .assert_value();
+        #[cfg(windows)]
         fs::copy(&executable, &probe).assert_value();
         let search = directory.join("path");
         fs::create_dir(&search).assert_value();
@@ -74,7 +82,6 @@ async fn restore_after_restic_move_probe() {
     let root = executable.parent().assert_value();
     let original = root.join(format!("original-restic{}", std::env::consts::EXE_SUFFIX));
     let restic = std::env::var_os("ZEROSHOT_RESTIC_TEST").assert_value();
-    fs::copy(&restic, &original).assert_value();
     let name = if cfg!(windows) {
         "restic.exe"
     } else {
@@ -85,7 +92,17 @@ async fn restore_after_restic_move_probe() {
         "path" => root.join("path").join(name),
         _ => root.join(format!("selected{}", std::env::consts::EXE_SUFFIX)),
     };
-    fs::copy(&restic, &replacement).assert_value();
+    for path in [&original, &replacement] {
+        #[cfg(unix)]
+        openengine_cluster_testkit::fixture::write_executable(
+            path,
+            fs::read(&restic).assert_value(),
+            0o700,
+        )
+        .assert_value();
+        #[cfg(windows)]
+        fs::copy(&restic, path).assert_value();
+    }
     let directory = root.join("checkpoints");
     let workspace = root.join("workspace");
     fs::create_dir(&workspace).assert_value();
