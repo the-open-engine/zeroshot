@@ -625,6 +625,9 @@ async fn supported_hosted_target_transmits_private_credentials_only_in_the_envel
 #[path = "runtime_lanes/review.rs"]
 mod review;
 
+#[path = "runtime_lanes/recovery.rs"]
+mod recovery;
+
 fn core_catalog_response(
     request: &CapturedHttpRequest,
     origin: &str,

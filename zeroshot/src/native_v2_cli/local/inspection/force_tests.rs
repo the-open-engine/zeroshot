@@ -108,7 +108,15 @@ async fn running_force_fences_continuation_until_the_controller_replies() {
             .recoverable
     );
     // Cancellation of this run does not serialize unrelated submissions.
-    drop(ControllerLease::acquire(fixture.root.path().join(SUBMISSION_LOCK_FILE)).unwrap());
+    drop(
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            fixture.backend.acquire_submission_lock(),
+        )
+        .await
+        .unwrap()
+        .unwrap(),
+    );
     gate.release.notify_one();
     force.await.unwrap();
     drop(

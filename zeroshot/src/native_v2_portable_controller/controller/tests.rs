@@ -10,6 +10,9 @@ use openengine_cluster_server::{ClusterBackend, ConnectionContext};
 
 use super::*;
 
+#[path = "tests/continuation.rs"]
+mod continuation;
+
 struct ForceCleanup(std::sync::atomic::AtomicUsize);
 
 #[tokio::test]

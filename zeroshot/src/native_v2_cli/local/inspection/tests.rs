@@ -23,12 +23,11 @@ struct Fixture {
 impl Fixture {
     async fn new(finished: bool, lost: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let backend = LocalCliBackend::new(
-            root.path().to_owned(),
-            "unused".into(),
-            root.path().to_owned(),
-            "git".into(),
-        );
+        // Match the CLI's private state root, including explicit Windows ownership.
+        let state = root.path().join("state");
+        crate::execution::platform::create_private_directory(&state).unwrap();
+        let backend =
+            LocalCliBackend::new(state, "unused".into(), root.path().to_owned(), "git".into());
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
         let storage = backend.create_run_storage(&id).unwrap();
         let ledger = SqliteRunLedger::open(storage.join("runs.sqlite3")).unwrap();
@@ -156,7 +155,15 @@ fn tree(path: &Path) -> BTreeMap<PathBuf, Entry> {
     entries.insert(
         path.to_owned(),
         Entry {
-            bytes: metadata.is_file().then(|| std::fs::read(path).unwrap()),
+            bytes: metadata.is_file().then(|| {
+                // Windows locks also cover reads past EOF. Metadata proves an empty lease's
+                // contents without reading its locked byte range through another handle.
+                if metadata.len() == 0 {
+                    Vec::new()
+                } else {
+                    std::fs::read(path).unwrap()
+                }
+            }),
             modified: metadata.modified().unwrap(),
             permissions: metadata.permissions(),
         },
