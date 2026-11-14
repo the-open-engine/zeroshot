@@ -12,16 +12,16 @@
 npm install -g @the-open-engine-company/zeroshot
 ```
 
-Do you still look at the code? We don't. We built zeroshot so we wouldn't have to.
+As a coding agent's context fills up, it forgets requirements, stops questioning its own
+assumptions and calls the work done, even when you tell it to check its work.
 
-One agent gets sloppy and biases itself as its context fills up. It forgets requirements, stops
-questioning its own assumptions, and calls it done. The agent that wrote the code shouldn't be
-the one that says it works.
+The agent that wrote the code shouldn't be the one that says it works
+([see our benchmark](https://zeroshot.sh/blog/review-loop/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot)).
 
-So you draw your team's process as a graph (who writes, who reviews with fresh context, what must
-pass, where failures go back), pick the agent and model for each step, and the engine runs every
-task through it. Agents can't skip a step, and what happens after a review is up to the graph,
-not the agent.
+So zeroshot runs your team's process as a graph the engine enforces. You decide who writes, who
+reviews, what must pass and where failures loop back, and pick the agent and model for each step.
+Every task runs through that graph, no agent can skip a step, and the graph, not the agent,
+decides what happens after a review.
 
 ## How it works
 
@@ -59,13 +59,6 @@ Save your graph as a [reusable profile](docs/zeroshot-cli.md#zeroshot-profile-se
 and run the same process across tasks.
 
 See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
-
-Why not a skill? A skill asks for a review, and the agent can skip it, whereas a zeroshot graph
-enforces it in code.
-
-Do loops work? Yes, even a simple one. In our benchmark, a build-and-check loop lifted a small
-model to a big model's score, at 58% of the cost. Just asking the agent to check its own work
-didn't help. [Read the study](https://zeroshot.sh/blog/review-loop/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot).
 
 ## Get started
 
