@@ -3,6 +3,8 @@
 use std::io;
 use std::path::Path;
 
+use crate::execution::platform::installed_executable_path;
+
 pub(crate) const MAX_CONTEXT_BYTES: usize = crate::active_memory::MAX_INJECTION_BYTES;
 
 pub(super) fn bounded_context(context: String) -> String {
@@ -28,7 +30,7 @@ fn hook_executable() -> io::Result<std::path::PathBuf> {
     }
     #[cfg(not(test))]
     {
-        std::env::current_exe()
+        std::env::current_exe().map(|path| installed_executable_path(&path))
     }
 }
 
@@ -38,7 +40,7 @@ pub(super) fn test_hook_executable(
     executable: Option<std::ffi::OsString>,
 ) -> io::Result<std::path::PathBuf> {
     let Some(executable) = executable else {
-        return std::env::current_exe();
+        return std::env::current_exe().map(|path| installed_executable_path(&path));
     };
     let executable = std::path::PathBuf::from(executable);
     if !executable.is_absolute() {

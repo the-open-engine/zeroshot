@@ -554,6 +554,114 @@ fn live_test_hook_executable_is_explicit_absolute_and_does_not_change_production
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn hook_command_survives_replacement_of_the_running_executable() {
+    use openengine_cluster_testkit::fixture::write_executable;
+    use std::process::Stdio;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::process::Command;
+    use tokio::time::timeout;
+
+    const FIXTURE: &str = "ZEROSHOT_HOOK_UPGRADE_FIXTURE";
+    const TEST: &str =
+        "active_memory::hooks::tests::hook_command_survives_replacement_of_the_running_executable";
+    if let Some(capability) = std::env::var_os(FIXTURE) {
+        for _ in 0..2 {
+            println!(
+                "HOOK_SNAPSHOT:{}",
+                json!({
+                    "reported": std::env::current_exe().unwrap(),
+                    "command": native::hook_command(Path::new(&capability)).unwrap(),
+                })
+            );
+            std::io::stdout().flush().unwrap();
+            std::io::stdin().read_exact(&mut [0]).unwrap();
+        }
+        return;
+    }
+
+    let directory = tempfile::Builder::new()
+        .prefix("zeroshot hook ' upgrade ")
+        .tempdir()
+        .unwrap();
+    // current_exe resolves aliases in TMPDIR before reporting the executable's path.
+    let installed = directory.path().canonicalize().unwrap().join("zeroshot");
+    let capability = installed.with_file_name("capability.json");
+    write_executable(
+        &installed,
+        std::fs::read(std::env::current_exe().unwrap()).unwrap(),
+        0o700,
+    )
+    .unwrap();
+    let mut child = Command::new(&installed)
+        .args(["--exact", TEST, "--nocapture"])
+        .env(FIXTURE, &capability)
+        .env_remove("ZEROSHOT_LIVE_CLI_BINARY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut snapshots = Vec::new();
+    for round in 0..2 {
+        let snapshot = timeout(Duration::from_secs(10), async {
+            loop {
+                let line = lines.next_line().await.unwrap().expect("fixture exited");
+                if let Some((_, snapshot)) = line.split_once("HOOK_SNAPSHOT:") {
+                    break serde_json::from_str::<Value>(snapshot).unwrap();
+                }
+            }
+        })
+        .await
+        .expect("fixture did not report its hook command");
+        snapshots.push(snapshot);
+        if round == 0 {
+            assert_eq!(snapshots[0]["reported"], installed.to_str().unwrap());
+            let replacement = installed.with_file_name("replacement");
+            write_executable(&replacement, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", 0o700).unwrap();
+            std::fs::rename(replacement, &installed).unwrap();
+            child.stdin.as_mut().unwrap().write_all(&[1]).await.unwrap();
+        }
+    }
+    assert!(
+        snapshots[1]["reported"]
+            .as_str()
+            .unwrap()
+            .ends_with(" (deleted)")
+    );
+    let output = timeout(
+        Duration::from_secs(10),
+        Command::new("/bin/sh")
+            .args(["-c", snapshots[1]["command"].as_str().unwrap()])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("__active-memory-hook\n{}\n", capability.display())
+    );
+    assert_eq!(snapshots[1]["command"], snapshots[0]["command"]);
+    child.stdin.as_mut().unwrap().write_all(&[1]).await.unwrap();
+    assert!(
+        timeout(Duration::from_secs(10), child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+}
+
 #[test]
 fn primary_retries_keep_recall_and_fresh_homes_get_fresh_recall_budgets() {
     use crate::native_v2_contract::{ExecutionId, NodeInstanceId};

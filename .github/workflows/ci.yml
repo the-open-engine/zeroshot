@@ -402,6 +402,13 @@ jobs:
           npm --prefix ui run build
       - name: Check macOS product and test compilation
         run: cargo check --locked --workspace --all-targets --features ui
+      - name: Run macOS Active Memory hook regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          active_memory::hooks::tests
+          native_v2_claude::tests::command::native_settings_and_owned_memory_hook
+          native_v2_codex::memory::tests
+          execution::platform::tests::installed_executable_path
       - name: Run macOS forge network and access regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --

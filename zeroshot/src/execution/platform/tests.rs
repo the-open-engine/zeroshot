@@ -5,6 +5,40 @@ use openengine_cluster_testkit::TemporaryDirectory;
 use super::*;
 
 #[test]
+fn installed_executable_path_only_removes_the_linux_deleted_marker() {
+    let reported = Path::new("install (deleted)/zeroshot (deleted)");
+    let expected = if cfg!(target_os = "linux") {
+        Path::new("install (deleted)/zeroshot")
+    } else {
+        reported
+    };
+    assert_eq!(installed_executable_path(reported), expected);
+    for unchanged in [
+        "install/zeroshot",
+        "install (deleted)/zeroshot",
+        "install/zeroshot (deleted).exe",
+        "install/zeroshot (deleted) extra",
+    ] {
+        assert_eq!(
+            installed_executable_path(Path::new(unchanged)),
+            Path::new(unchanged)
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn installed_executable_path_preserves_non_utf8_bytes() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let installed = Path::new(OsStr::from_bytes(b"/install/zeroshot-\xff"));
+    let reported = Path::new(OsStr::from_bytes(b"/install/zeroshot-\xff (deleted)"));
+    assert_eq!(installed_executable_path(installed), installed);
+    assert_eq!(installed_executable_path(reported), installed);
+}
+
+#[test]
 fn private_state_round_trips_and_replaces_an_existing_file() {
     let root = TemporaryDirectory::for_test("private-state");
     let directory = root.path("private");

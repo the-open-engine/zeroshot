@@ -64,6 +64,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
   whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
   bounded, control-safe `message`, never request URLs.
+  Native Active Memory hook commands share the updater's installed-executable path correction in
+  `execution::platform`: Linux's trailing ` (deleted)` marker is removed so running controllers
+  invoke the installed helper after replacement; other platforms retain the reported path.
 - Release recovery may complete missing outputs only when existing immutable artifacts match the
   exact version and source commit.
 
