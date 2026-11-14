@@ -4,6 +4,8 @@
 
 mod command;
 mod connection;
+mod conversation;
+use tokio::sync::Mutex;
 mod native_config;
 mod registration;
 
@@ -96,7 +98,21 @@ impl HermesAdapter {
             .prepare(control)
             .await
             .map_err(connection::process_error)?;
-        let (command, init) = command::prepare(self, invocation, &files, &session.id)?;
+        let restored = session
+            .core
+            .prepare_conversation(
+                Some(conversation::layout(files.home())),
+                invocation,
+                control,
+            )
+            .await?;
+        if let Some(metadata) = restored {
+            *session.restored_id.lock().await = Some(metadata.id);
+        }
+        let restored_id = session.restored_id.lock().await;
+        let id = restored_id.as_deref().unwrap_or(&session.id).to_owned();
+        drop(restored_id);
+        let (command, init) = command::prepare(self, invocation, &files, &id)?;
         let redactions = self.redactions(&invocation.environment);
         let (kill, cancellation) = tokio::sync::watch::channel(false);
         // Native terminal jobs can detach from the provider's process group. Ask Hermes to stop
@@ -112,10 +128,14 @@ impl HermesAdapter {
         let mut connection =
             connection::HermesConnection::new(process.detach_stdout(), control, redactions.clone());
         let result = connection.execute(&process, invocation, init).await;
-        connection
+        let result = connection
             .finish(&mut process, kill, result)
             .await
-            .map_err(|error| redact_provider_error(error, &redactions))
+            .map_err(|error| redact_provider_error(error, &redactions));
+        if result.is_ok() {
+            session.core.record_conversation(Some(id), None).await;
+        }
+        result
     }
 
     fn redactions(
@@ -131,6 +151,7 @@ impl HermesAdapter {
 struct HermesSession {
     core: ProviderSessionCore,
     id: String,
+    restored_id: Mutex<Option<String>>,
 }
 
 impl_provider_node_session!(HermesSession);
@@ -139,7 +160,8 @@ crate::native_v2_capsule::provider_process::impl_provider_session_factory!(
     HermesAdapter,
     HermesSession {
         core: ProviderSessionCore::new(),
-        id: uuid::Uuid::now_v7().to_string()
+        id: uuid::Uuid::now_v7().to_string(),
+        restored_id: Mutex::new(None)
     }
 );
 

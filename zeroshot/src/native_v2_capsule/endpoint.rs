@@ -179,6 +179,20 @@ impl NativeCapsuleNodeEndpoint {
 
 #[async_trait]
 impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
+    async fn capture_conversations(
+        &self,
+        run_id: &RunId,
+    ) -> crate::native_v2_runner::conversations::ConversationCapture {
+        self.runner.capture_conversations(run_id).await
+    }
+    async fn restore_conversations(
+        &self,
+        history: &[crate::full_v1_reducer::DurableExecution],
+        files: Option<crate::native_v2_runner::conversations::ConversationFiles>,
+    ) {
+        self.runner.restore_conversations(history, files).await;
+    }
+
     async fn start(
         &self,
         request: NodeRunRequest,

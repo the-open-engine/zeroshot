@@ -137,14 +137,16 @@ impl ActivityToken {
 #[derive(Clone)]
 pub(super) struct ManagedSession {
     inner: Arc<dyn NodeSession>,
+    node: NodeName,
     closed: Arc<AtomicBool>,
     pub(super) process_slot: Arc<ProcessSlot>,
 }
 
 impl ManagedSession {
-    fn new(inner: Arc<dyn NodeSession>, process_slot: Arc<ProcessSlot>) -> Self {
+    fn new(inner: Arc<dyn NodeSession>, process_slot: Arc<ProcessSlot>, node: NodeName) -> Self {
         Self {
             inner,
+            node,
             process_slot,
             closed: Arc::new(AtomicBool::new(false)),
         }
@@ -174,6 +176,7 @@ impl ManagedSession {
 pub(super) struct SessionPool {
     factory: Arc<dyn SessionFactory>,
     entries: Arc<Mutex<BTreeMap<SessionKey, SessionEntry>>>,
+    restored: Arc<Mutex<conversations::ConversationSources>>,
     boundary: ReusableSessionBoundary,
     process_slots: ProcessSlots,
 }
@@ -192,10 +195,99 @@ pub(super) struct SessionCheckout<'a> {
 }
 
 impl SessionPool {
+    pub(super) async fn restore_conversations(
+        &self,
+        history: &[crate::full_v1_reducer::DurableExecution],
+        files: Option<conversations::ConversationFiles>,
+    ) {
+        if self.boundary != ReusableSessionBoundary::Run {
+            return;
+        }
+        let mut restored = self.restored.lock().await;
+        for execution in history {
+            restored.entry(execution.node_instance).or_insert_with(|| {
+                let node = execution.occurrence.node.clone();
+                let source = files
+                    .as_ref()
+                    .ok_or("checkpoint has no conversation")
+                    .and_then(|files| files.conversation(execution.node_instance, &node));
+                (node, source)
+            });
+        }
+    }
+
+    pub(super) async fn restore_session(
+        &self,
+        invocation: &NodeInvocation,
+        session: &ManagedSession,
+    ) -> Option<&'static str> {
+        if session_scope(&invocation.binding).ok() != Some(SessionScope::NodeInstance) {
+            return None;
+        }
+        let (_, source) = self
+            .restored
+            .lock()
+            .await
+            .remove(&invocation.reference.node_instance)?;
+        match source {
+            Ok(source) => {
+                if session.inner.restore_conversation(source).await {
+                    None
+                } else {
+                    Some("provider conversation restoration is unsupported")
+                }
+            }
+            Err(reason) => Some(reason),
+        }
+    }
+
+    pub(super) async fn capture_conversations(
+        &self,
+        run_id: &RunId,
+    ) -> conversations::ConversationCapture {
+        if self.boundary != ReusableSessionBoundary::Run {
+            return conversations::ConversationCapture::default();
+        }
+        let mut sources = self
+            .restored
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, (_, source))| source.is_ok())
+            .map(|(id, value)| (*id, value.clone()))
+            .collect::<conversations::ConversationSources>();
+        let sessions = self
+            .entries
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(key, entry)| match (key, entry) {
+                (
+                    SessionKey::Run {
+                        run_id: owner,
+                        node_instance,
+                    },
+                    SessionEntry::Live(session),
+                ) if owner == run_id => Some((*node_instance, session.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for (instance, session) in sessions {
+            sources.insert(
+                instance,
+                (session.node.clone(), session.inner.conversation().await),
+            );
+        }
+        tokio::task::spawn_blocking(move || conversations::capture(sources))
+            .await
+            .unwrap_or_default()
+    }
+
     pub(super) fn isolated(&self) -> Self {
         Self {
             factory: self.factory.clone(),
             entries: Arc::new(Mutex::new(BTreeMap::new())),
+            restored: Arc::default(),
             boundary: ReusableSessionBoundary::Run,
             process_slots: self.process_slots.clone(),
         }
@@ -204,6 +296,7 @@ impl SessionPool {
         Self {
             factory,
             entries: Arc::new(Mutex::new(BTreeMap::new())),
+            restored: Arc::default(),
             boundary: ReusableSessionBoundary::Run,
             process_slots: ProcessSlots::default(),
         }
@@ -213,6 +306,7 @@ impl SessionPool {
         Self {
             factory,
             entries: Arc::new(Mutex::new(BTreeMap::new())),
+            restored: Arc::default(),
             boundary: ReusableSessionBoundary::Owner,
             process_slots: ProcessSlots::default(),
         }
@@ -328,7 +422,7 @@ impl SessionPool {
                 return Err(error);
             }
         };
-        let session = ManagedSession::new(session, slot);
+        let session = ManagedSession::new(session, slot, invocation.reference.node.clone());
         let live = tokio::select! {
             biased;
             _ = wait_for_cancellation(cancellation) => {
@@ -415,6 +509,7 @@ impl SessionPool {
         if self.boundary == ReusableSessionBoundary::Owner {
             return;
         }
+        self.restored.lock().await.clear();
         let mut entries = self.entries.lock().await;
         let keys = entries
             .keys()

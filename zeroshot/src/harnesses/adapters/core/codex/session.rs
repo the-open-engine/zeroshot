@@ -14,7 +14,9 @@ use super::output::CodexOutput;
 pub(super) struct CodexSession {
     pub(super) core: ProviderSessionCore,
     pub(super) thread_id: Mutex<Option<String>>,
-    usage: Mutex<Option<TokenUsageDelta>>,
+    pub(super) usage: Mutex<Option<TokenUsageDelta>>,
+    // Unlike the in-run accounting baseline, this must cover the latest provider process.
+    pub(super) checkpoint_usage: Mutex<Option<TokenUsageDelta>>,
 }
 
 impl CodexSession {
@@ -23,6 +25,7 @@ impl CodexSession {
             core: ProviderSessionCore::new(),
             thread_id: Mutex::new(None),
             usage: Mutex::new(None),
+            checkpoint_usage: Mutex::new(None),
         }
     }
 
@@ -71,6 +74,7 @@ impl CodexSession {
     }
 
     pub(super) async fn commit_usage(&self, observed: Option<TokenUsageDelta>, resumed: bool) {
+        *self.checkpoint_usage.lock().await = observed;
         // Missing usage preserves only the baseline of the thread being resumed.
         if !resumed || observed.is_some() {
             *self.usage.lock().await = observed;

@@ -65,6 +65,20 @@ impl RemoteCapsuleNodeRunner {
 
 #[async_trait]
 impl NodeRunner for RemoteCapsuleNodeRunner {
+    async fn capture_conversations(
+        &self,
+        run_id: &RunId,
+    ) -> crate::native_v2_runner::conversations::ConversationCapture {
+        self.channel.capture_conversations(run_id).await
+    }
+    async fn restore_conversations(
+        &self,
+        history: &[crate::full_v1_reducer::DurableExecution],
+        files: Option<crate::native_v2_runner::conversations::ConversationFiles>,
+    ) {
+        self.channel.restore_conversations(history, files).await;
+    }
+
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {
         start::remote_start(self, request).await
     }

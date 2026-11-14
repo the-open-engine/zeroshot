@@ -12,6 +12,8 @@ use super::*;
 
 #[path = "tests/continuation.rs"]
 mod continuation;
+#[path = "tests/settlement.rs"]
+mod settlement;
 
 struct ForceCleanup(std::sync::atomic::AtomicUsize);
 

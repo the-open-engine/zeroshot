@@ -85,6 +85,10 @@ impl NodeDriver for ClaudeAdapter {
                 })?
             {
                 retain_session(&invocation.node, session, state.resume_id.as_deref()).await?;
+                session
+                    .core
+                    .record_conversation(session.resume_id.lock().await.clone(), None)
+                    .await;
                 return Ok(outcome);
             }
         }
