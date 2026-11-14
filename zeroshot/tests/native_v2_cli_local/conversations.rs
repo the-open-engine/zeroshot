@@ -211,13 +211,14 @@ async fn missing_codex_usage_starts_a_new_conversation_and_logs_the_reason() {
 async fn selected_local_checkpoint_restores_conversation_without_provider_files() {
     let mut fixture = fixture();
     let run = fixture.submit_detached("checkpoint-fail").await;
-    let deadline = Instant::now() + CLI_TIMEOUT;
-    while fixture.json(&["status", &run], "checkpoint-fail").await["status"]["phase"] != "finished"
-    {
-        assert!(Instant::now() < deadline);
-        sleep(Duration::from_millis(30)).await;
-    }
+    // Wait for controller cleanup without repeatedly launching an instrumented status process.
     wait_for_exit(fixture.ready_pid(&run)).await;
+    let status = fixture.json(&["status", &run], "checkpoint-fail").await;
+    assert_eq!(status["status"]["phase"], "finished", "{status}");
+    assert_eq!(
+        status["status"]["terminalResult"]["status"], "failed",
+        "{status}"
+    );
     let checkpoints = fixture.json(&["checkpoints", &run], "finish").await;
 
     let checkpoint = checkpoints["checkpoints"]
