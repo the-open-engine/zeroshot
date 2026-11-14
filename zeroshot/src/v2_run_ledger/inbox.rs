@@ -98,8 +98,12 @@ pub async fn with_successor(
     mut request: InboxShowResult,
     successor: RunId,
 ) -> Result<InboxShowResult, RunLedgerError> {
+    // Workspace ownership can publish the successor before its admission reaches the ledger.
+    request.successor_run_id = Some(successor.clone());
+    if ledger.get(&successor).await?.is_none() {
+        return Ok(request);
+    }
     let mut after = None;
-    request.state = RequestState::Answered;
     loop {
         let page = super::vectors::list_full(
             ledger,
@@ -111,10 +115,14 @@ pub async fn with_successor(
         )
         .await?;
         for vector in page.vectors {
-            if let RunVectorContent::Expiry { request_id } = vector.content
-                && request_id == request.request.id
-            {
-                request.state = RequestState::Expired;
+            match vector.content {
+                RunVectorContent::Answer { request_id, .. } if request_id == request.request.id => {
+                    request.state = RequestState::Answered;
+                }
+                RunVectorContent::Expiry { request_id } if request_id == request.request.id => {
+                    request.state = RequestState::Expired;
+                }
+                _ => {}
             }
         }
         after = page.next_after;
@@ -122,7 +130,6 @@ pub async fn with_successor(
             break;
         }
     }
-    request.successor_run_id = Some(successor);
     Ok(request)
 }
 

@@ -123,6 +123,28 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
                 RequestState::Pending
             }
         );
+        // Retained workspace ownership is published before the successor ledger is created.
+        *allocator.successor.lock().assert_value() = Some(params.successor_run_id.clone());
+        let starting = controller
+            .inbox_show(RunStatusParams {
+                run_id: run.clone(),
+            })
+            .await
+            .assert_value();
+        assert_eq!(starting.state, list.requests[0].state);
+        assert_eq!(
+            starting.successor_run_id,
+            Some(params.successor_run_id.clone())
+        );
+        assert_eq!(starting.request.text, "Approve?");
+        assert!(
+            ledger
+                .get(&params.successor_run_id)
+                .await
+                .assert_value()
+                .is_none()
+        );
+        *allocator.successor.lock().assert_value() = None;
         let result = controller.resume(params.clone()).await;
         if expired {
             let error = result.unwrap_err();

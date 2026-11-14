@@ -684,6 +684,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   successor. Request, answer and expiry vectors retain full content through show and inheritance;
   bounded list summaries omit text, schemas and answers. Inbox reads project only each run's own
   request vectors, never apply expiry, and exclude continued or stopped runs from pending pages.
+  Inbox show preserves the original request and successor link while the successor starts,
+  until its answer or expiry vector is readable.
   Pending inbox pages use the durable suspension's request projection, apply cursors before reads,
   and stop after one lookahead row without scanning vector histories.
   Discovery adds `request_ask` (`openengine.request-ask/v1`); hosted inbox routes live in the separate

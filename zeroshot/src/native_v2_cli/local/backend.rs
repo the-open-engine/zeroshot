@@ -685,7 +685,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         require_local(target)?;
         let (paths, _directory) = self.recorded_storage(&params.run_id)?;
         let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
-        let request = crate::v2_run_ledger::inbox::show(
+        let mut request = crate::v2_run_ledger::inbox::show(
             &ledger,
             &params.run_id,
             crate::native_v2_runner::current_timestamp(),
@@ -694,7 +694,16 @@ impl NativeV2CliBackend for LocalCliBackend {
         .map_err(vector_error)?;
         let status = self.status_local(params).await?;
         if let Some(successor) = status.workspace_recovery.successor_run_id {
-            let (paths, _successor_directory) = self.recorded_storage(&successor)?;
+            request.successor_run_id = Some(successor.clone());
+            let (paths, _successor_directory) = match self.recorded_storage(&successor) {
+                Ok(storage) => storage,
+                Err(NativeV2CliError::RunNotFound { .. }) => return Ok(request),
+                Err(error) => return Err(error),
+            };
+            // SQLite creates the file before installing its first schema transaction.
+            if std::fs::metadata(paths.ledger()).map_err(local_io)?.len() == 0 {
+                return Ok(request);
+            }
             let successor_ledger =
                 SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
             crate::v2_run_ledger::inbox::with_successor(&successor_ledger, request, successor)

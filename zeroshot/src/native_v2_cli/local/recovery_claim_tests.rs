@@ -159,3 +159,170 @@ async fn interrupted_resume_with_a_durable_successor_keeps_the_claim() {
         Some(fixture.successor_run_id)
     );
 }
+
+#[tokio::test]
+async fn inbox_show_keeps_the_request_while_its_successor_is_starting() {
+    use crate::v2_run_ledger::{RunEvent, vector_event};
+    use openengine_cluster_protocol::{
+        NodeName, RequestState, RunRequest, RunSuspension, RunVectorContent,
+    };
+
+    for expired in [false, true] {
+        let fixture = resume_claim_fixture("inbox-start", "inbox-source");
+        std::fs::create_dir(fixture._root.child("workspace")).assert_value();
+        let admitted = NativeV2Admission
+            .admit(fixture.submission.clone())
+            .await
+            .assert_value();
+        let create = |run: &RunId| CreateRun {
+            run_id: run.clone(),
+            submission_key: IdempotencyKey::new(run.as_str()).assert_value(),
+            submission_digest: submission_digest(&fixture.submission).assert_value(),
+            admitted: admitted.clone(),
+        };
+        let ledger = SqliteRunLedger::open(
+            fixture
+                .backend
+                .paths(&fixture.run_id)
+                .assert_value()
+                .ledger(),
+        )
+        .assert_value();
+        ledger
+            .create_or_get(create(&fixture.run_id))
+            .await
+            .assert_value();
+        let mut request: RunRequest = serde_json::from_value(serde_json::json!({
+            "id":"approval-request", "text":"Approve?", "signals":{"decision":["approved"]},
+            "output":{"kind":"record","fields":{}},
+            "expiresAt": if expired { 1 } else { 16_725_225_600_000_i64 }
+        }))
+        .assert_value();
+        let node = NodeName::new("approval").assert_value();
+        let event = vector_event(
+            &fixture.run_id,
+            RunVectorContent::Request {
+                node: node.clone(),
+                text: request.text.clone(),
+                signals: request.signals.clone(),
+                output: request.output.clone(),
+                expires_at: request.expires_at,
+            },
+        )
+        .assert_value();
+        let RunEvent::Vector { vector } = &event else {
+            unreachable!()
+        };
+        request.id = vector.id.clone();
+        let suspension = RunSuspension::Request {
+            node,
+            created_at: vector.created_at,
+            request: Box::new(request.clone()),
+        };
+        ledger
+            .append(
+                &fixture.run_id,
+                vec![
+                    RunEvent::RunStarted,
+                    event,
+                    RunEvent::Suspended { suspension },
+                ],
+            )
+            .await
+            .assert_value();
+        let _claim = fixture
+            .backend
+            .claim_recovery_workspace(&fixture.run_id)
+            .assert_value();
+        let params = RunStatusParams {
+            run_id: fixture.run_id.clone(),
+        };
+        let mut expected = crate::v2_run_ledger::inbox::show(
+            &ledger,
+            &fixture.run_id,
+            crate::native_v2_runner::current_timestamp(),
+        )
+        .await
+        .assert_value();
+        expected.successor_run_id = Some(fixture.successor_run_id.clone());
+        assert_eq!(
+            fixture
+                .backend
+                .inbox_show(None, params.clone())
+                .await
+                .assert_value(),
+            expected,
+        );
+        let successor_path = fixture.successor_storage.join("runs.sqlite3");
+        assert!(
+            !successor_path.exists(),
+            "inbox show must not create the successor ledger"
+        );
+        drop(private_file(&successor_path, FileAccess::CreateNew).assert_value());
+        assert_eq!(
+            fixture
+                .backend
+                .inbox_show(None, params.clone())
+                .await
+                .assert_value(),
+            expected,
+        );
+        assert_eq!(std::fs::metadata(&successor_path).assert_value().len(), 0);
+        let empty = SqliteRunLedger::open(&successor_path).assert_value();
+        assert_eq!(
+            fixture
+                .backend
+                .inbox_show(None, params.clone())
+                .await
+                .assert_value(),
+            expected,
+        );
+        drop(empty);
+        let successor = SqliteRunLedger::open(&successor_path).assert_value();
+        successor
+            .create_or_get(create(&fixture.successor_run_id))
+            .await
+            .assert_value();
+        assert_eq!(
+            fixture
+                .backend
+                .inbox_show(None, params.clone())
+                .await
+                .assert_value(),
+            expected,
+        );
+        let resolution = if expired {
+            RunVectorContent::Expiry {
+                request_id: request.id,
+            }
+        } else {
+            RunVectorContent::Answer {
+                request_id: request.id,
+                answer: serde_json::from_value(serde_json::json!({
+                    "signals":{"decision":"approved"}, "output":{}
+                }))
+                .assert_value(),
+            }
+        };
+        successor
+            .append(
+                &fixture.successor_run_id,
+                vec![vector_event(&fixture.successor_run_id, resolution).assert_value()],
+            )
+            .await
+            .assert_value();
+        expected.state = if expired {
+            RequestState::Expired
+        } else {
+            RequestState::Answered
+        };
+        assert_eq!(
+            fixture
+                .backend
+                .inbox_show(None, params)
+                .await
+                .assert_value(),
+            expected,
+        );
+    }
+}
