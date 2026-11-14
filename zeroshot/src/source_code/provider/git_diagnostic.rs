@@ -1,4 +1,6 @@
 use std::fmt;
+use std::borrow::Cow;
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitCommandFailure {
@@ -12,17 +14,18 @@ pub struct GitCommandFailure {
     pub(crate) context: Box<str>,
     pub(crate) timed_out: bool,
     pub(crate) cleanup_unconfirmed: bool,
-    pub(crate) classification: Option<GitCommandClassification>,
+    pub(crate) classification: Option<Box<GitCommandClassification>>,
 }
 
 /// Secret-free control evidence captured before diagnostic redaction changes Git text.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GitCommandClassification {
     http_status: Option<u16>,
     authentication_rejection: bool,
     transient_transport_failure: bool,
     policy_rejection: bool,
     non_fast_forward: bool,
+    rejected_pushes: Vec<([u8; 32], [u8; 32], String)>,
 }
 
 impl fmt::Display for GitCommandFailure {
@@ -59,26 +62,62 @@ impl GitCommandFailure {
     }
 
     pub(crate) fn classify_stderr(&mut self, stderr: &str) {
-        self.classification = Some(GitCommandClassification::from_stderr(stderr));
+        self.classification = Some(Box::new(GitCommandClassification::from_stderr(stderr)));
     }
 
-    pub(crate) fn classify_stdout(&mut self, stdout: &str) {
-        let mut classification = self.stderr_classification();
+    pub(crate) fn classify_stdout(
+        &mut self,
+        stdout: &str,
+        complete: bool,
+        sanitize_reason: impl Fn(&str) -> String,
+    ) {
+        let mut classification = self.stderr_classification().into_owned();
         classification.non_fast_forward = stdout.lines().any(|line| {
             line.starts_with("!\t")
                 && line.contains("[rejected]")
                 && (line.ends_with("(non-fast-forward)") || line.ends_with("(fetch first)"))
         });
-        self.classification = Some(classification);
+        classification.rejected_pushes = if complete {
+            rejected_pushes(stdout)
+                .map(|(refspec, reason)| {
+                    (
+                        Sha256::digest(refspec).into(),
+                        Sha256::digest(reason).into(),
+                        sanitize_reason(reason),
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.classification = Some(Box::new(classification));
+    }
+
+    /// Match the exact pushed ref using raw evidence; printable text may have credentials redacted.
+    pub(crate) fn push_rejection(&self, branch: &str, revision: &str) -> Option<([u8; 32], &str)> {
+        let expected: [u8; 32] = Sha256::digest(format!("{revision}:refs/heads/{branch}")).into();
+        let mut rejected = self
+            .classification
+            .as_deref()?
+            .rejected_pushes
+            .iter()
+            .filter(|(refspec, _, _)| *refspec == expected);
+        let (_, reason, summary) = rejected.next()?;
+        rejected
+            .next()
+            .is_none()
+            .then_some((*reason, summary.as_str()))
     }
 
     pub(crate) fn non_fast_forward(&self) -> bool {
         self.stderr_classification().non_fast_forward
     }
 
-    fn stderr_classification(&self) -> GitCommandClassification {
-        self.classification
-            .unwrap_or_else(|| GitCommandClassification::from_stderr(&self.stderr))
+    fn stderr_classification(&self) -> Cow<'_, GitCommandClassification> {
+        self.classification.as_deref().map_or_else(
+            || Cow::Owned(GitCommandClassification::from_stderr(&self.stderr)),
+            Cow::Borrowed,
+        )
     }
 
     pub(crate) fn http_status(&self) -> Option<u16> {
@@ -149,8 +188,17 @@ impl GitCommandClassification {
             transient_transport_failure,
             policy_rejection,
             non_fast_forward: false,
+            rejected_pushes: Vec::new(),
         }
     }
+}
+
+fn rejected_pushes(stdout: &str) -> impl Iterator<Item = (&str, &str)> {
+    stdout.lines().filter_map(|line| {
+        let (refspec, reason) = line.strip_prefix("!\t")?.split_once('\t')?;
+        (!refspec.is_empty() && !reason.is_empty() && !reason.contains('\t'))
+            .then_some((refspec, reason))
+    })
 }
 
 fn transient_transport_line(line: &str) -> bool {

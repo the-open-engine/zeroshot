@@ -272,7 +272,20 @@ async fn capture_exchange(
         .flatten();
     (diagnostic.stdout, diagnostic.stdout_truncated) = sanitize(captured_stdout, &secrets);
     diagnostic.classify_stderr(&String::from_utf8_lossy(&captured_stderr.bytes));
-    diagnostic.classify_stdout(&raw_stdout);
+    diagnostic.classify_stdout(
+        &raw_stdout,
+        raw_stdout_valid_utf8 && !raw_stdout_truncated,
+        |reason| {
+            sanitize(
+                CapturedBytes {
+                    bytes: reason.as_bytes().to_vec(),
+                    truncated: false,
+                },
+                &secrets,
+            )
+            .0
+        },
+    );
     (diagnostic.stderr, diagnostic.stderr_truncated) = sanitize(captured_stderr, &secrets);
     match result {
         Ok(Ok(_)) => Ok(GitCommandOutput {

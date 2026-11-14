@@ -40,6 +40,98 @@ fn http_failure(status: u16) -> GitCommandFailure {
 }
 
 #[test]
+fn push_rejection_requires_complete_status_for_the_exact_ref() {
+    let revision = "a".repeat(40);
+    let branch = "zeroshot/run";
+    let rejected = format!("!\t{revision}:refs/heads/{branch}\t[remote rejected] (content rule)\n");
+    let mut diagnostic = failure("");
+    diagnostic.stdout.clone_from(&rejected);
+    diagnostic.classify_stdout(&rejected, true, str::to_owned);
+    assert!(diagnostic.push_rejection(branch, &revision).is_some());
+    assert!(diagnostic.push_rejection("other", &revision).is_none());
+    assert!(diagnostic.push_rejection(branch, &"b".repeat(40)).is_none());
+    diagnostic.classify_stdout(&rejected, false, str::to_owned);
+    assert!(diagnostic.push_rejection(branch, &revision).is_none());
+    for stdout in [
+        format!("remote: {rejected}"),
+        rejected.replace("!\t", " \t"),
+        format!("!\t{revision}:refs/heads/{branch}\t\n"),
+        format!("{rejected}{rejected}"),
+        "fatal: transport failed\n".to_owned(),
+    ] {
+        diagnostic.classify_stdout(&stdout, true, str::to_owned);
+        assert!(
+            diagnostic.push_rejection(branch, &revision).is_none(),
+            "{stdout}"
+        );
+    }
+}
+
+#[test]
+fn push_rejection_ignores_other_refs_but_requires_one_matching_status() {
+    let revision = "a".repeat(40);
+    let branch = "zeroshot/run";
+    let rejected = format!("!\t{revision}:refs/heads/{branch}\t[remote rejected] (branch rule)\n");
+    let tag = "!\trefs/tags/other:refs/tags/other\t[remote rejected] (tag rule)\n";
+    let mut diagnostic = failure("");
+    for stdout in [
+        format!("{tag}{rejected}"),
+        format!("{rejected}{tag}"),
+        format!("{tag}{tag}{rejected}"),
+    ] {
+        diagnostic.classify_stdout(&stdout, true, str::to_owned);
+        assert_eq!(
+            diagnostic.push_rejection(branch, &revision).unwrap().1,
+            "[remote rejected] (branch rule)"
+        );
+    }
+    for stdout in [tag.to_owned(), format!("{tag}{rejected}{rejected}")] {
+        diagnostic.classify_stdout(&stdout, true, str::to_owned);
+        assert!(diagnostic.push_rejection(branch, &revision).is_none());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn push_rejection_matches_raw_ref_and_reason_before_credential_redaction() {
+    let revision = "a".repeat(40);
+    let branch = "zeroshot/private-branch";
+    let secrets = [
+        revision.clone(),
+        branch.to_owned(),
+        "secret-one".to_owned(),
+        "secret-two".to_owned(),
+    ];
+    let mut fingerprints = Vec::new();
+    for reason in ["secret-one", "secret-two"] {
+        let stdout = format!(
+            "!\trefs/tags/other:refs/tags/other\t[remote rejected] (other rule)\n\
+             !\t{revision}:refs/heads/{branch}\t[remote rejected] ({reason})"
+        );
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "printf '%s\\n' \"$1\"; exit 1",
+            "push-fixture",
+            &stdout,
+        ]);
+        let diagnostic = capture_with_secrets(&mut command, Duration::from_secs(5), &secrets)
+            .await
+            .unwrap()
+            .require_success()
+            .unwrap_err();
+        let (fingerprint, summary) = diagnostic.push_rejection(branch, &revision).unwrap();
+        assert_eq!(summary, "[remote rejected] ([REDACTED])");
+        fingerprints.push(fingerprint);
+        let printable = format!("{diagnostic:?}\n{diagnostic}");
+        for secret in &secrets {
+            assert!(!printable.contains(secret), "{printable}");
+        }
+    }
+    assert_ne!(fingerprints[0], fingerprints[1]);
+}
+
+#[test]
 fn truncated_output_cannot_retain_a_partial_secret() {
     let captured = CapturedBytes {
         bytes: b"safe credential-val".to_vec(),

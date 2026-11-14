@@ -410,6 +410,8 @@ jobs:
           source_code_provider::adapters::core::github::api::tests
           source_code_provider::adapters::core::gitlab::tests::network_tests
           native_v2_local::token_file::tests::caller_network_snapshot
+          native_v2_delivery::command::tests
+          native_v2_delivery::tests::transport_matrix
       - name: Run macOS controller socket and workspace clone regressions
         run: >-
           ZEROSHOT_REQUIRE_APFS_CLONE=1
