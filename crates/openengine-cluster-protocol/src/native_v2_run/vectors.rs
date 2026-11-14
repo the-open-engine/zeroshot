@@ -70,6 +70,23 @@ pub struct RunVector {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunVectorContent {
+    Request {
+        node: NodeName,
+        text: String,
+        signals: std::collections::BTreeMap<crate::FieldName, crate::NonEmptyEnumSet>,
+        output: crate::PayloadType,
+        #[serde(rename = "expiresAt")]
+        expires_at: UnixTimestampMillis,
+    },
+    Answer {
+        #[serde(rename = "requestId")]
+        request_id: VectorId,
+        answer: crate::RequestAnswer,
+    },
+    Expiry {
+        #[serde(rename = "requestId")]
+        request_id: VectorId,
+    },
     SuspendRequest {},
     Suspension {
         reason: VectorSuspensionReason,
@@ -112,7 +129,7 @@ impl RunVectorsParams {
 pub struct RunVectorsResult {
     pub run_id: RunId,
     #[schemars(length(max = 100))]
-    pub vectors: Vec<RunVector>,
+    pub vectors: Vec<RunVectorSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_after: Option<VectorId>,
 }
@@ -132,12 +149,13 @@ pub type RunVectorResult = RunVector;
 pub enum VectorSuspensionReason {
     Command,
     Wait,
+    Request,
 }
 
 /// Independent bound for a full entry response, including one ledger event and framing.
-pub const MAX_VECTOR_RESPONSE_BYTES: usize = 1024 * 1024 + 1024;
+pub const MAX_VECTOR_RESPONSE_BYTES: usize = super::MAX_REQUEST_RESPONSE_BYTES;
 
-fn deserialize_record_run_id<'de, D: serde::Deserializer<'de>>(
+pub(super) fn deserialize_record_run_id<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<RunId, D::Error> {
     let value = String::deserialize(deserializer)?;
@@ -152,5 +170,81 @@ impl RunVector {
             VectorId::new(resumed_from.as_str())?;
         }
         Ok(())
+    }
+}
+
+/// Bounded list projection. Full text, schemas and answers require run/vector.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunVectorSummary {
+    pub id: VectorId,
+    #[serde(deserialize_with = "deserialize_record_run_id")]
+    #[schemars(with = "VectorId")]
+    pub run_id: RunId,
+    pub created_at: UnixTimestampMillis,
+    #[serde(flatten)]
+    pub content: RunVectorSummaryContent,
+}
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum RunVectorSummaryContent {
+    SuspendRequest {},
+    Suspension {
+        reason: VectorSuspensionReason,
+        node: NodeName,
+    },
+    Continuation {
+        #[serde(rename = "resumedFrom", deserialize_with = "deserialize_record_run_id")]
+        #[schemars(with = "VectorId")]
+        resumed_from: RunId,
+    },
+    Wait {
+        node: NodeName,
+        #[serde(rename = "dueAt")]
+        due_at: UnixTimestampMillis,
+    },
+    Request {
+        node: NodeName,
+        #[serde(rename = "expiresAt")]
+        expires_at: UnixTimestampMillis,
+    },
+    Answer {
+        #[serde(rename = "requestId")]
+        request_id: VectorId,
+    },
+    Expiry {
+        #[serde(rename = "requestId")]
+        request_id: VectorId,
+    },
+}
+impl From<RunVector> for RunVectorSummary {
+    fn from(vector: RunVector) -> Self {
+        let content = match vector.content {
+            RunVectorContent::SuspendRequest {} => RunVectorSummaryContent::SuspendRequest {},
+            RunVectorContent::Suspension { reason, node } => {
+                RunVectorSummaryContent::Suspension { reason, node }
+            }
+            RunVectorContent::Continuation { resumed_from } => {
+                RunVectorSummaryContent::Continuation { resumed_from }
+            }
+            RunVectorContent::Wait { node, due_at } => {
+                RunVectorSummaryContent::Wait { node, due_at }
+            }
+            RunVectorContent::Request {
+                node, expires_at, ..
+            } => RunVectorSummaryContent::Request { node, expires_at },
+            RunVectorContent::Answer { request_id, .. } => {
+                RunVectorSummaryContent::Answer { request_id }
+            }
+            RunVectorContent::Expiry { request_id } => {
+                RunVectorSummaryContent::Expiry { request_id }
+            }
+        };
+        Self {
+            id: vector.id,
+            run_id: vector.run_id,
+            created_at: vector.created_at,
+            content,
+        }
     }
 }

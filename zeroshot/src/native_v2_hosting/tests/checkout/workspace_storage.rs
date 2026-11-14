@@ -13,6 +13,8 @@ use crate::native_v2_supervisor::checkpoints::{
 struct ExternalStorage {
     vectors: Vec<openengine_cluster_protocol::RunVector>,
     resumed_from: Option<RunId>,
+    request: Option<crate::native_v2_hosting::HostedRequestContinuation>,
+    history: Vec<crate::full_v1_reducer::DurableExecution>,
     reject: bool,
     comment_publications: Option<Arc<dyn CommentPublicationStore>>,
 }
@@ -60,7 +62,8 @@ impl HostedWorkspaceStorage for ExternalStorage {
                     )?,
                 },
             )),
-            execution_seed: Vec::new(),
+            execution_seed: self.history.clone(),
+            request_continuation: self.request.clone(),
             // Recovery keeps the historical identity even after the product rename.
             delivery_run_id: Some(RunId::new("original-cloud-delivery")),
         })
@@ -411,5 +414,143 @@ async fn owned_storage_is_opt_in_and_returns_the_successors_exact_vector_record(
     assert!(
         !fixture.allocator.run_path(&fixture.run_id).exists(),
         "owned storage disposes the allocation after publication"
+    );
+}
+
+fn request_continuation(expired: bool) -> crate::native_v2_hosting::HostedRequestContinuation {
+    use openengine_cluster_protocol::{RunResumeFrom, UnixTimestampMillis};
+    crate::native_v2_hosting::HostedRequestContinuation {
+        suspension:serde_json::from_value(json!({"reason":"request","node":"approval","createdAt":1000,"request":{"id":"question","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":if expired {1001} else {UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION).assert_value().get()}}})).assert_value(),
+        from:if expired {RunResumeFrom::Expiry{}} else {serde_json::from_value(json!({"kind":"answer","signals":{"decision":"approved"},"output":{}})).assert_value()},
+    }
+}
+fn pending_request() -> crate::full_v1_reducer::DurableExecution {
+    use crate::full_v1_reducer::*;
+    DurableExecution {
+        delivery_state: None,
+        dispatch_position: HistoryPosition::new(1).assert_value(),
+        node_instance: NodeInstanceId::new(1).assert_value(),
+        execution: ExecutionId::new(1).assert_value(),
+        occurrence: StructuralOccurrence {
+            node: NodeName::new("approval").assert_value(),
+            map_indices: vec![],
+        },
+        attempt: openengine_cluster_protocol::PositiveInteger::new(1).assert_value(),
+        input: json!({"text":"Approve?"}),
+        state: DurableExecutionState::Active,
+    }
+}
+async fn request_workspace_fixture(enabled: bool, expired: bool) -> CheckoutFixture {
+    let storage = ExternalStorage {
+        resumed_from: Some(RunId::new("request-source")),
+        request: Some(request_continuation(expired)),
+        history: vec![pending_request()],
+        ..Default::default()
+    };
+    let mut fixture = CheckoutFixture::with_workspace_storage("", Some(Arc::new(storage))).await;
+    let mut config = (*fixture.config).clone();
+    config.request_ask = enabled;
+    config.suspension = Some(Default::default());
+    fixture.config = Arc::new(config);
+    fixture.allocator =
+        ProductionCapsuleAllocator::new(fixture.config.clone(), fixture.diagnostics.clone())
+            .assert_value()
+            .with_test_filesystem_and_source(
+                fixture._repository.remote.clone(),
+                portable_filesystem,
+            );
+    let runtime:RuntimePlan=serde_json::from_value(json!({"harness":"codex","provider":"openai","size":"small","activeMemory":{"repository":false,"graph":false},"nodes":{"approval":{"kind":"request"}}})).assert_value();
+    let mut request = submission(runtime, &fixture._repository.main_revision, "host-request");
+    request.graph=serde_json::from_value(json!({"profile":"openengine.graph.full/v1","initialInput":{"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}},"policy":{"policy":"policy.native-v2@1","default":"deny"},"root":{"kind":"seq","name":"root","state":{"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}},"children":[{"kind":"verifier","name":"approval","worker":crate::native_v2_request::ASK_WORKER_REF,"input":crate::native_v2_request::input_schema().assert_value(),"output":{"kind":"record","fields":{}},"signals":{"decision":["approved","rejected"]},"diagnostic":crate::native_v2_wait::diagnostic_schema().assert_value(),"inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],"writeBindings":[],"attempts":1},{"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}],"promotedStatePaths":[]}})).assert_value();
+    request.initial_input = json!({"text":"Approve?"});
+    fixture.admitted = admit(request).await;
+    fixture
+}
+#[tokio::test]
+async fn external_request_history_settles_before_any_worker_and_requires_independent_opt_in() {
+    use crate::full_v1_reducer::DurableExecutionState;
+    use openengine_cluster_protocol::{WorkerOutcome, WorkerErrorCode};
+    assert!(
+        request_workspace_fixture(false, false)
+            .await
+            .allocate()
+            .await
+            .is_err()
+    );
+    for expired in [false, true] {
+        let fixture = request_workspace_fixture(true, expired).await;
+        let capsule = fixture.allocate().await.assert_value();
+        let DurableExecutionState::Settled { outcome, .. } = &capsule.execution_seed[0].state
+        else {
+            panic!("request was not settled");
+        };
+        assert!(matches!(
+            (outcome, expired),
+            (WorkerOutcome::Verifier { .. }, false)
+                | (
+                    WorkerOutcome::Error {
+                        code: WorkerErrorCode::Timeout,
+                        ..
+                    },
+                    true
+                )
+        ));
+        assert!(capsule.vector_seed.iter().any(|entry| matches!(
+            (&entry.content, expired),
+            (
+                openengine_cluster_protocol::RunVectorContent::Answer { .. },
+                false
+            ) | (
+                openengine_cluster_protocol::RunVectorContent::Expiry { .. },
+                true
+            )
+        )));
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+            .await
+            .assert_value();
+    }
+}
+#[test]
+fn host_can_validate_shape_and_deadline_before_starting_anything() {
+    use openengine_cluster_protocol::{RunResumeFrom, UnixTimestampMillis};
+    let mut continuation = request_continuation(false);
+    if let openengine_cluster_protocol::RunSuspension::Request { request, .. } =
+        &mut continuation.suspension
+    {
+        request.expires_at = UnixTimestampMillis::new(2000).assert_value();
+    }
+    assert!(
+        continuation
+            .validate(UnixTimestampMillis::new(1999).assert_value())
+            .is_ok()
+    );
+    assert!(
+        continuation
+            .validate(UnixTimestampMillis::new(2000).assert_value())
+            .unwrap_err()
+            .contains("expired")
+    );
+    continuation.from = RunResumeFrom::Expiry {};
+    assert!(
+        continuation
+            .validate(UnixTimestampMillis::new(1999).assert_value())
+            .is_err()
+    );
+    assert!(
+        continuation
+            .validate(UnixTimestampMillis::new(2000).assert_value())
+            .is_ok()
+    );
+    continuation.from = RunResumeFrom::Answer {
+        signals: Default::default(),
+        output: json!({}),
+    };
+    assert!(
+        continuation
+            .validate(UnixTimestampMillis::new(1999).assert_value())
+            .unwrap_err()
+            .contains("signals.decision")
     );
 }

@@ -193,6 +193,27 @@ impl UtilityCommand {
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
             Self::Suspend(args) => args.into_selector().map(NativeV2CliCommand::Suspend),
+            Self::Answer(args) => Ok(NativeV2CliCommand::Answer {
+                run: args.run.into_selector()?,
+                input: args.input,
+                forward_github_token: args.forward_github_token,
+            }),
+            Self::Inbox(args) => match args.command {
+                super::InboxCommand::Show(run) => {
+                    run.into_selector().map(NativeV2CliCommand::InboxShow)
+                }
+                super::InboxCommand::List {
+                    route,
+                    after,
+                    limit,
+                } => Ok(NativeV2CliCommand::InboxList {
+                    target: validated_target(route.target)?,
+                    params: openengine_cluster_protocol::InboxListParams {
+                        after: after.map(openengine_cluster_protocol::RunId::new),
+                        limit,
+                    },
+                }),
+            },
             Self::Vectors(args) => {
                 if let Some(super::RunVectorCommand::Show { run, id }) = args.command {
                     return Ok(NativeV2CliCommand::Vector {

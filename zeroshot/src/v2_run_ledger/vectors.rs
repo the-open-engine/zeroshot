@@ -2,10 +2,29 @@
 use super::*;
 use openengine_cluster_protocol::{RunVector, RunVectorParams, RunVectorsParams, RunVectorsResult};
 
+#[derive(Debug, PartialEq)]
+pub struct FullVectorPage {
+    pub run_id: RunId,
+    pub vectors: Vec<RunVector>,
+    pub next_after: Option<openengine_cluster_protocol::VectorId>,
+}
+
 pub async fn list(
     ledger: &dyn RunLedger,
     params: RunVectorsParams,
 ) -> Result<RunVectorsResult, RunLedgerError> {
+    let page = list_full(ledger, params).await?;
+    Ok(RunVectorsResult {
+        run_id: page.run_id,
+        vectors: page.vectors.into_iter().map(Into::into).collect(),
+        next_after: page.next_after,
+    })
+}
+
+pub async fn list_full(
+    ledger: &dyn RunLedger,
+    params: RunVectorsParams,
+) -> Result<FullVectorPage, RunLedgerError> {
     params
         .validate()
         .map_err(|_| RunLedgerError::InvalidEvent("vector limit must be 1 through 100"))?;
@@ -24,7 +43,7 @@ pub async fn list(
             if let RunEvent::Vector { vector } = stored.event {
                 if vectors.len() == limit {
                     let next_after = vectors.last().map(|v: &RunVector| v.id.clone());
-                    return Ok(RunVectorsResult {
+                    return Ok(FullVectorPage {
                         run_id: params.run_id,
                         vectors,
                         next_after,
@@ -39,7 +58,7 @@ pub async fn list(
             break;
         }
     }
-    Ok(RunVectorsResult {
+    Ok(FullVectorPage {
         run_id: params.run_id,
         vectors,
         next_after: None,
@@ -80,7 +99,7 @@ pub async fn inherit(
 ) -> Result<(), RunLedgerError> {
     let mut after = None;
     loop {
-        let page = list(
+        let page = list_full(
             source,
             RunVectorsParams {
                 run_id: predecessor.clone(),

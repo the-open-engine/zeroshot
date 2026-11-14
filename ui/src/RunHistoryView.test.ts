@@ -935,3 +935,62 @@ test('a bounded history batch does not expose future failure context before an u
     assert.ok(container.querySelector('[aria-label="Current run status"]'));
   });
 });
+
+test('a request suspension shows its text, deadline and successor without an answer action', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const dueAt = Date.parse('2026-12-01T08:00:00Z');
+  const detail: RunDetail = {
+    ...runDetailFixture('sleeping-run'),
+    phase: 'suspended',
+    terminal: undefined,
+    suspension: {
+      reason: 'request',
+      node: 'approval',
+      createdAt: dueAt - 3600000,
+      request: {
+        id: 'question',
+        text: 'Approve these changes?',
+        signals: { decision: ['approved', 'rejected'] },
+        output: { kind: 'record', fields: {} },
+        expiresAt: dueAt,
+      },
+    },
+    workspaceRecovery: { successorRunId: 'continued-run' },
+    observation: { state: 'active' },
+  };
+  let watched = false;
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => ({ ...completePage(), finished: true }),
+    watch: () => {
+      watched = true;
+      return () => {};
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          runId: detail.runId,
+          source,
+          workers: [],
+          runHref: (id: string) => `/host/runs/${id}`,
+        })
+      )
+    );
+    await flushEffects();
+    assert.match(renderedText(container), /Approve these changes\?.*2026-12-01T08:00:00.000Z/);
+    assert.equal(container.querySelector('a')?.getAttribute('href'), '/host/runs/continued-run');
+    assert.equal(watched, false);
+    assert.doesNotMatch(renderedText(container), /Answer request/);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

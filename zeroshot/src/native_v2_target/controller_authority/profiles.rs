@@ -1,12 +1,15 @@
 use openengine_cluster_protocol::{
     RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
     RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileRunRequest,
-    RunProfileSelector, RunProfileSetRequest, RunSubmitResult, RuntimePlan,
+    GraphSpec, RunProfileSelector, RunProfileSetRequest, RunSubmitResult, RuntimePlan,
 };
 use reqwest::header::{ACCEPT, CACHE_CONTROL};
 
 use super::contract::{RunProfilesDescriptor, authority_error};
-use super::{TargetHttpControlAuthority, require_runtime_capabilities, require_git_transport};
+use super::{
+    TargetHttpControlAuthority, RequestCapabilities, graph_has_worker,
+    require_request_capabilities, require_git_transport,
+};
 use super::access::AccessToken;
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
@@ -44,7 +47,7 @@ impl ProfileOperation {
 }
 
 trait ProfileBody: serde::Serialize + Sync {
-    fn stored_runtime(&self) -> Option<&RuntimePlan> {
+    fn stored_plan(&self) -> Option<(&GraphSpec, &RuntimePlan)> {
         None
     }
 
@@ -63,8 +66,8 @@ impl ProfileBody for RunProfileRunRequest {
 }
 
 impl ProfileBody for RunProfileSetRequest {
-    fn stored_runtime(&self) -> Option<&RuntimePlan> {
-        Some(&self.runtime)
+    fn stored_plan(&self) -> Option<(&GraphSpec, &RuntimePlan)> {
+        Some((&self.graph, &self.runtime))
     }
 }
 
@@ -83,8 +86,22 @@ impl TargetHttpControlAuthority {
         let routes = auth.run_profiles.clone().ok_or_else(|| {
             authority_error("hosted target does not advertise profile management")
         })?;
-        if let Some(runtime) = input.stored_runtime() {
-            require_runtime_capabilities(&controller, runtime)?;
+        if let Some((graph, runtime)) = input.stored_plan() {
+            require_request_capabilities(
+                &controller,
+                RequestCapabilities {
+                    runtime: Some(runtime),
+                    request_ask: graph_has_worker(
+                        &graph.root,
+                        zeroshot_engine::native_v2_request::ASK_WORKER_REF,
+                    ),
+                    request_wait: graph_has_worker(
+                        &graph.root,
+                        zeroshot_engine::native_v2_wait::WAIT_WORKER_REF,
+                    ),
+                    ..RequestCapabilities::default()
+                },
+            )?;
         }
         require_git_transport(&controller, input.requires_git_transport())?;
         let access = self

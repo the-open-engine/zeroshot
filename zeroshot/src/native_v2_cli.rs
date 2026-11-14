@@ -424,6 +424,16 @@ pub enum NativeV2CliCommand {
         execution: ExecutionRef,
     },
     Suspend(RunSelector),
+    Answer {
+        run: RunSelector,
+        input: PathBuf,
+        forward_github_token: bool,
+    },
+    InboxList {
+        target: Option<String>,
+        params: openengine_cluster_protocol::InboxListParams,
+    },
+    InboxShow(RunSelector),
     Vectors(RunVectorsCommand),
     Vector {
         run: RunSelector,
@@ -875,6 +885,24 @@ pub trait NativeV2CliBackend: Send + Sync {
         Err(NativeV2CliError::Target(
             "target does not support suspend".to_owned(),
         ))
+    }
+
+    async fn validate_request_ask(&self, _target: Option<&str>) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
+    async fn inbox_list(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2CliError> {
+        Err(NativeV2CliError::Usage("inbox is unavailable".to_owned()))
+    }
+    async fn inbox_show(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2CliError> {
+        Err(NativeV2CliError::Usage("inbox is unavailable".to_owned()))
     }
 
     async fn run_vectors(

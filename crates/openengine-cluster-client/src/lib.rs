@@ -131,8 +131,9 @@ where
     }
 }
 
-/// Bounded NDJSON frame length, matching the server's `serve_ndjson` bound.
-const MAX_FRAME_BYTES: usize = 1_048_576;
+/// Full request responses include node input, its authored contract and JSON-RPC framing.
+/// The server's incoming request-frame bound remains independent.
+const MAX_FRAME_BYTES: usize = openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES + 1024;
 
 /// Bounded per-subscription local buffer of raw notification lines awaiting
 /// [`NdjsonReconnectingEventStream::next`]. Delivery into this queue is non-blocking so one
@@ -370,6 +371,22 @@ where
         params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<openengine_cluster_protocol::RunVectorsResult, ClientError> {
         self.call(openengine_cluster_protocol::RUN_VECTORS_METHOD, params)
+            .await
+    }
+
+    pub async fn inbox_show(
+        &self,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, ClientError> {
+        self.call(openengine_cluster_protocol::INBOX_SHOW_METHOD, params)
+            .await
+    }
+
+    pub async fn inbox_list(
+        &self,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, ClientError> {
+        self.call(openengine_cluster_protocol::INBOX_LIST_METHOD, params)
             .await
     }
 

@@ -122,6 +122,7 @@ pub const DEFAULT_PREPARATION_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub struct PortableControllerBootstrap {
     pub predecessor: Option<RunId>,
+    pub request_resolution: Option<openengine_cluster_protocol::RequestResolution>,
     pub delivery_receipt: Option<serde_json::Value>,
     pub checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     /// Bounds preparation work measured from controller start; a checkpoint restore stops here.

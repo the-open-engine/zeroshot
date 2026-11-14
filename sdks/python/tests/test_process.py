@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -14,7 +16,7 @@ from zeroshot import (
     SubmissionConflictError,
     TargetError,
 )
-from zeroshot._process import NativeProcess, _RunFailed
+from zeroshot._process import _MAX_STREAM_FRAME_BYTES, NativeProcess, _RunFailed
 
 
 def diagnostic(*, code: str = "run.failed", details: object) -> bytes:
@@ -118,3 +120,53 @@ def test_complete_multiline_diagnostic_remains_supported(tmp_path: Path) -> None
     error = native_process(tmp_path)._error(stderr, 1)
     assert isinstance(error, _RunFailed)
     assert error.run_id == "failed-run"
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_request_stream_frame_byte_ceiling(
+    fake_native: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: int
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_FRAME_BYTES", str(_MAX_STREAM_FRAME_BYTES + extra))
+    process = NativeProcess(
+        Path(os.environ["ZEROSHOT_PYTHON_NATIVE_BINARY"]),
+        cwd=tmp_path,
+        environment=os.environ,
+        secrets=(),
+    )
+
+    async def exercise() -> None:
+        if extra:
+            with pytest.raises(ProtocolError, match="oversized NDJSON"):
+                async for _ in process.json_lines(["watch", "original"]):
+                    pass
+        else:
+            events = [event async for event in process.json_lines(["watch", "original"])]
+            assert len(events) == 2
+            assert events[-1]["padding"].startswith("x")
+
+    asyncio.run(exercise())
+
+
+def test_oversized_request_stream_is_a_protocol_error_and_stops_the_child(
+    fake_native: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid_path = tmp_path / "watch.pid"
+    monkeypatch.setenv("FAKE_REQUEST_STREAM_BYTES", str(_MAX_STREAM_FRAME_BYTES + 1))
+    monkeypatch.setenv("FAKE_WATCH_HOLD_OPEN", "60")
+    monkeypatch.setenv("FAKE_WATCH_PID", str(pid_path))
+    process = NativeProcess(
+        Path(os.environ["ZEROSHOT_PYTHON_NATIVE_BINARY"]),
+        cwd=tmp_path,
+        environment=os.environ,
+        secrets=(),
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(ProtocolError, match="oversized NDJSON"):
+            async for _ in process.json_lines(["watch", "original"]):
+                pass
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=10))
+    if os.name != "nt":
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pid_path.read_text()), 0)

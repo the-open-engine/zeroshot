@@ -176,6 +176,7 @@ pub(super) fn bootstrap(
     .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
         predecessor: None,
+        request_resolution: None,
         delivery_receipt: None,
         local_branch: None,
         memory_storage: None,

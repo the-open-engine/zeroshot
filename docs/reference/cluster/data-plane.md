@@ -1,5 +1,5 @@
 ---
-description: "Reference for the WebSocket binding of the Open Engine Cluster Protocol, including framing, close codes and cancellation."
+description: 'Reference for the WebSocket binding of the Open Engine Cluster Protocol, including framing, close codes and cancellation.'
 ---
 
 # WebSocket data plane
@@ -16,11 +16,13 @@ bindings.
 One WebSocket text message carries exactly one JSON-RPC object (request, response, or notification);
 there is no line delimiter, and batching is not allowed. A binary frame is not a supported encoding:
 it closes the connection immediately with code `1003` (unsupported data). A text message
-whose UTF-8 byte length exceeds `1,048,576` after frame reassembly closes the connection with code
+whose UTF-8 byte length exceeds `2,097,152` after frame reassembly closes the connection with code
 `1009` (message too big), matching the NDJSON stdio binding's line-length bound. A text message that
 fails to parse as JSON-RPC receives a normal `PARSE_ERROR` JSON-RPC error response on the same
 connection; unlike the size and encoding violations above, a parse failure does not close the
-connection. Ping/pong control frames are answered automatically and otherwise ignored.
+connection. This transport allowance includes an answer, fresh credentials and JSON-RPC framing;
+the existing node-result size limit still applies to the answer. Ping/pong control frames are
+answered automatically and otherwise ignored.
 
 Subscription delivery uses the generic `event`/`subscription/cancel`/`subscription/closed`
 notification framing described in `watch.md`. The WebSocket binding adds no WebSocket-specific

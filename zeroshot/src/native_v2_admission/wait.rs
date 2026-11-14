@@ -7,12 +7,21 @@ pub(super) fn validate_position(
     concurrent: bool,
 ) -> Result<(), NativeV2AdmissionError> {
     if let GraphNode::Verifier(wait) = node
-        && wait.worker.as_str() == native_v2_wait::WAIT_WORKER_REF
-        && (concurrent || wait.timeout_ms.is_some())
+        && [
+            native_v2_wait::WAIT_WORKER_REF,
+            crate::native_v2_request::ASK_WORKER_REF,
+        ]
+        .contains(&wait.worker.as_str())
+        && (concurrent
+            || (wait.worker.as_str() == native_v2_wait::WAIT_WORKER_REF
+                && wait.timeout_ms.is_some())
+            || wait.timeout_ms.is_some_and(|timeout| {
+                timeout.get() > crate::native_v2_request::MAX_DEADLINE_MILLIS
+            }))
     {
         return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
             node: wait.name.clone(),
-            detail: "wait forbids timeoutMs and placement under par or map".to_owned(),
+            detail: "request nodes forbid par/map ancestry; wait forbids timeoutMs and ask permits at most 30 days".to_owned(),
         });
     }
     let concurrent = concurrent || matches!(node, GraphNode::Par(_) | GraphNode::Map(_));
@@ -27,24 +36,36 @@ pub(super) fn validate_binding(
     binding: &NodeRuntimeBinding,
 ) -> Result<(), NativeV2AdmissionError> {
     let wait = node.worker.as_str() == native_v2_wait::WAIT_WORKER_REF;
-    if !wait && !matches!(binding, NodeRuntimeBinding::Request {}) {
+    let ask = node.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF;
+    if !wait && !ask && !matches!(binding, NodeRuntimeBinding::Request {}) {
         return Ok(());
     }
-    let valid = wait
+    let valid = (wait || ask)
         && matches!(binding, NodeRuntimeBinding::Request {})
         && node.instructions.is_none()
         && node.attempts == 1
-        && native_v2_wait::input_schema().ok().as_ref() == Some(&node.contract.input)
-        && node.contract.output == PayloadType::Null
+        && (if ask {
+            crate::native_v2_request::input_schema()
+        } else {
+            native_v2_wait::input_schema()
+        })
+        .ok()
+        .as_ref()
+            == Some(&node.contract.input)
+        && (if ask {
+            crate::native_v2_request::valid_output(&node.contract.output)
+        } else {
+            node.contract.output == PayloadType::Null
+        })
         && node.contract.verifier.as_ref().is_some_and(|contract| {
-            native_v2_wait::signal_labels().ok().as_ref() == Some(&contract.signals)
+            (ask || native_v2_wait::signal_labels().ok().as_ref() == Some(&contract.signals))
                 && native_v2_wait::diagnostic_schema().ok().as_ref() == Some(&contract.diagnostic)
         });
     if valid {
         Ok(())
     } else {
         Err(NativeV2AdmissionError::InvalidRuntimeBinding {
-        node: node.name.clone(), detail: "request requires the fixed wait verifier contract, no instructions, and attempts: 1".to_owned(),
+        node: node.name.clone(), detail: "request requires a valid wait or ask verifier contract, no instructions, and attempts: 1".to_owned(),
     })
     }
 }

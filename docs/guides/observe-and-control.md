@@ -350,3 +350,13 @@ zeroshot vectors show RUN_ID ENTRY_ID
 A page contains `runId`, `vectors` and an optional `nextAfter` cursor. Limits are 1 through 100.
 `show` reads the complete entry; unknown IDs fail as not found. Both commands are read-only and
 accept `--target NAME` where `openengine.run-vectors/v1` is advertised.
+
+## Human requests
+
+A request suspends with reason `request` and carries its text, answer shape and `expiresAt` in
+status. Read `zeroshot inbox list` (paged with `--after` and `--limit`) or `zeroshot inbox show RUN_ID`,
+then use `zeroshot answer RUN_ID --input answer.json`. The file contains `signals` and `output`.
+The answer starts one successor on the retained workspace. Ordinary `resume` refuses requests.
+Deadlines default to 7 days and accept at most 30 days. A late answer starts the author's `timeout`
+route and exits 1 naming its successor. Reads never apply expiry. Add `--target NAME` for a target
+that advertises `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md).

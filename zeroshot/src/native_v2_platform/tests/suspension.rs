@@ -68,6 +68,9 @@ struct SuspensionAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SuspensionAllocator {
+    fn supports_request_ask(&self) -> bool {
+        true
+    }
     fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
         Some(self.policy.clone())
     }
@@ -385,11 +388,19 @@ async fn suspension_restart_due_guard_and_continuation_preserve_state_and_vector
         .assert_value();
     assert_eq!(
         page.vectors[..2],
-        *allocator.store.published.lock().assert_value()
+        allocator
+            .store
+            .published
+            .lock()
+            .assert_value()
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect::<Vec<openengine_cluster_protocol::RunVectorSummary>>()
     );
     assert!(matches!(
         page.vectors[2].content,
-        RunVectorContent::Continuation { .. }
+        openengine_cluster_protocol::RunVectorSummaryContent::Continuation { .. }
     ));
     let error = controller.resume(params).await.unwrap_err();
     assert!(error.to_string().contains("wait-successor"));
@@ -531,3 +542,6 @@ async fn hosts_without_opt_in_refuse_wait_plans_and_suspend_without_effects() {
         .await
         .assert_value();
 }
+
+#[path = "suspension/requests.rs"]
+mod requests;

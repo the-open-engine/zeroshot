@@ -296,3 +296,24 @@ async fn first_run_runtimes_validate_for_every_harness() {
         "{file} needs one runtime.json example per harness"
     );
 }
+
+#[tokio::test]
+async fn ask_a_person_example_passes_profile_validation() {
+    let text = include_str!("../../../../docs/guides/ask-a-person.md");
+    let [(_, graph)] = titled_json(text, "graph.json").try_into().assert_value();
+    let [(_, runtime)] = titled_json(text, "runtime.json").try_into().assert_value();
+    let [(_, input)] = titled_json(text, "input.json").try_into().assert_value();
+    let graph: openengine_cluster_protocol::GraphSpec =
+        serde_json::from_value(graph).assert_value();
+    let runtime: openengine_cluster_protocol::RuntimePlan =
+        serde_json::from_value(runtime).assert_value();
+    crate::native_v2_admission::NativeV2Admission
+        .validate_profile(
+            &graph,
+            &runtime,
+            crate::native_v2_admission::DeliveryPolicy::Optional,
+        )
+        .await
+        .assert_value();
+    graph.initial_input.validate_value(&input).assert_value();
+}

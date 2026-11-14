@@ -440,7 +440,9 @@ pub(super) fn durable_execution(
     node: &NodeSnapshot,
 ) -> Result<DurableExecution, NativeV2SupervisorError> {
     let state = match &node.state {
-        NodeState::Active | NodeState::SuspendedWait { .. } => DurableExecutionState::Active,
+        NodeState::Active
+        | NodeState::SuspendedWait { .. }
+        | NodeState::SuspendedRequest { .. } => DurableExecutionState::Active,
         NodeState::Completed { at, outcome } => DurableExecutionState::Settled {
             position: history_position(at)?,
             outcome: outcome.clone(),
@@ -612,4 +614,30 @@ pub(super) fn settled_failure_cause(result: &DispatchResult, force: bool) -> Opt
         DispatchResult::Completed(Err(error)) => Some(error.to_string()),
         _ => None,
     }
+}
+
+/// Settle exactly the request held by this attempt, retaining execution and loop identity.
+pub(crate) fn request_history(
+    snapshot: &RunSnapshot,
+    resolution: &openengine_cluster_protocol::RequestResolution,
+) -> Result<Vec<DurableExecution>, NativeV2SupervisorError> {
+    use crate::native_v2_request::RequestOutcome;
+    let mut continuation = snapshot.clone();
+    let mut found = false;
+    for node in continuation.executions.values_mut() {
+        if let NodeState::SuspendedRequest { at } = &node.state {
+            if found {
+                return Err(NativeV2SupervisorError::InvalidState);
+            }
+            found = true;
+            node.state = NodeState::Completed {
+                at: at.clone(),
+                outcome: resolution.outcome(),
+            };
+        }
+    }
+    if !found {
+        return Err(NativeV2SupervisorError::InvalidState);
+    }
+    durable_history(&continuation)
 }

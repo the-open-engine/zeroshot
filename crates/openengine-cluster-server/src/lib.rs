@@ -19,6 +19,9 @@ mod subscription_stream;
 mod wire;
 pub(crate) use wire::{serialize_backend_error, serialize_error, serialize_success};
 
+// A node-sized answer plus the existing request budget for fresh credentials and JSON-RPC framing.
+const MAX_INCOMING_FRAME_BYTES: usize = 2 * 1024 * 1024;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -367,6 +370,30 @@ pub trait ClusterBackend: Send + Sync + 'static {
         _context: &ConnectionContext,
         _params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support vectors",
+            None,
+        ))
+    }
+
+    async fn inbox_show(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support vectors",
+            None,
+        ))
+    }
+
+    async fn inbox_list(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, BackendError> {
         Err(BackendError::application(
             INVALID_PHASE,
             "Backend does not support vectors",

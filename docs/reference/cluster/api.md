@@ -427,6 +427,47 @@ This method has no parameters.
 | --- | --- |
 | <code>runVectorsResult</code> | <a href="../schema.json#/$defs/RunVectorsResult"><code>schema.json#/$defs/RunVectorsResult</code></a> |
 
+### <code>inbox/list</code>
+
+Read-only vector-backed request inbox. Requires request_ask, kind openengine.request-ask/v1, in target discovery. Reads do not apply expiry or start a successor.
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>after</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
+| <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>inboxListResult</code> | <a href="../schema.json#/$defs/InboxListResult"><code>schema.json#/$defs/InboxListResult</code></a> |
+
+### <code>inbox/show</code>
+
+Read-only vector-backed request inbox. Requires request_ask, kind openengine.request-ask/v1, in target discovery. Reads do not apply expiry or start a successor.
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>inboxShowResult</code> | <a href="../schema.json#/$defs/InboxShowResult"><code>schema.json#/$defs/InboxShowResult</code></a> |
+
 ### <code>run/vector</code>
 
 | Parameter structure | Transport | Server push | Inbound notifications |
@@ -470,7 +511,7 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 
 ### <code>run/resume</code>
 
-Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed. Credentials are resolved again for the successor; provider sessions are not resumed.
+Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed. Credentials are resolved again for the successor; provider sessions are not resumed. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.
 
 | Parameter structure | Transport | Server push | Inbound notifications |
 | --- | --- | --- | --- |

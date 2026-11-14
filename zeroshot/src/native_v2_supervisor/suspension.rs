@@ -12,11 +12,13 @@ impl NativeV2Supervisor {
             return Ok(());
         }
         self.runner.close_run(&self.run_id).await;
-        let events = vec![
+        let mut events = vec![
             crate::v2_run_ledger::vector_event(
                 &self.run_id,
                 RunVectorContent::Suspension {
-                    reason: if suspension.due_at().is_some() {
+                    reason: if matches!(suspension, RunSuspension::Request { .. }) {
+                        openengine_cluster_protocol::VectorSuspensionReason::Request
+                    } else if suspension.due_at().is_some() {
                         openengine_cluster_protocol::VectorSuspensionReason::Wait
                     } else {
                         openengine_cluster_protocol::VectorSuspensionReason::Command
@@ -31,8 +33,34 @@ impl NativeV2Supervisor {
                 line: SafeLogLine::new(format!("run suspended at {}", suspension.node().as_str()))?,
                 diagnostic: None,
             },
-            RunEvent::Suspended { suspension },
+            RunEvent::Suspended {
+                suspension: suspension.clone(),
+            },
         ];
+        if let RunSuspension::Request {
+            node,
+            created_at,
+            request,
+        } = &suspension
+        {
+            events.insert(
+                0,
+                RunEvent::Vector {
+                    vector: openengine_cluster_protocol::RunVector {
+                        id: request.id.clone(),
+                        run_id: self.run_id.clone(),
+                        created_at: *created_at,
+                        content: RunVectorContent::Request {
+                            node: node.clone(),
+                            text: request.text.clone(),
+                            signals: request.signals.clone(),
+                            output: request.output.clone(),
+                            expires_at: request.expires_at,
+                        },
+                    },
+                },
+            );
+        }
         // Keep admission live during host I/O. The first suspend request is the only concurrent
         // vector append here; republish if it arrived after this snapshot was taken.
         loop {
@@ -40,7 +68,7 @@ impl NativeV2Supervisor {
             let mut vectors = Vec::new();
             let mut after = None;
             loop {
-                let page = crate::v2_run_ledger::vectors::list(
+                let page = crate::v2_run_ledger::vectors::list_full(
                     self.ledger.as_ref(),
                     openengine_cluster_protocol::RunVectorsParams {
                         run_id: self.run_id.clone(),
@@ -55,9 +83,10 @@ impl NativeV2Supervisor {
                     break;
                 }
             }
-            if let RunEvent::Vector { vector } = &events[0] {
-                vectors.push(vector.clone());
-            }
+            vectors.extend(events.iter().filter_map(|event| match event {
+                RunEvent::Vector { vector } => Some(vector.clone()),
+                _ => None,
+            }));
             self.checkpoints
                 .as_ref()
                 .ok_or(NativeV2SupervisorError::InvalidState)?
@@ -199,5 +228,57 @@ impl NativeV2Supervisor {
             )
             .await?;
         Ok(())
+    }
+}
+
+impl NativeV2Supervisor {
+    pub(super) async fn execute_request(
+        &self,
+        program: &RunProgram,
+        dispatch: &Dispatch,
+    ) -> Result<(), NativeV2SupervisorError> {
+        if !self
+            .record_dispatches(std::slice::from_ref(dispatch))
+            .await?
+        {
+            return Ok(());
+        }
+        let node =
+            crate::native_v2_request::find(&program.admitted.graph.root, &dispatch.reference.node)
+                .ok_or(NativeV2SupervisorError::InvalidState)?;
+        let created_at = (self.wall_clock)();
+        let expires_at = crate::native_v2_request::deadline(
+            created_at,
+            node.timeout_ms.map(|timeout| timeout.get()),
+        )
+        .map_err(|_| NativeV2SupervisorError::InvalidState)?;
+        let text = dispatch
+            .input
+            .get("text")
+            .and_then(Value::as_str)
+            .ok_or(NativeV2SupervisorError::InvalidState)?
+            .to_owned();
+        let request = openengine_cluster_protocol::RunRequest {
+            id: openengine_cluster_protocol::VectorId::new(uuid::Uuid::now_v7().to_string())
+                .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+            text,
+            signals: node.signals.clone(),
+            output: node.output.clone(),
+            expires_at,
+        };
+        self.ledger
+            .append(
+                &self.run_id,
+                vec![RunEvent::RequestDeferred {
+                    reference: dispatch.reference.clone(),
+                }],
+            )
+            .await?;
+        self.suspend_at(RunSuspension::Request {
+            node: node.name.clone(),
+            created_at,
+            request: Box::new(request),
+        })
+        .await
     }
 }

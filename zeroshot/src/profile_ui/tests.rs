@@ -484,7 +484,7 @@ async fn static_assets_and_bootstrap_are_native_and_self_contained() {
         .await
         .assert_value();
     assert_eq!(bootstrap["templates"].as_array().assert_value().len(), 11);
-    assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 7);
+    assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 8);
     assert!(
         bootstrap["workers"]
             .as_array()
@@ -612,4 +612,59 @@ async fn setup_discovers_access_without_saving_and_keeps_the_browser_boundary() 
         .await
         .assert_value();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn request_catalog_contract_validates_and_round_trips_saved_profile() {
+    let server = server().await;
+    let client = reqwest::Client::new();
+    let catalog = crate::workspace::catalog().assert_value();
+    let ask = catalog["workers"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .find(|worker| worker["id"] == "request_ask")
+        .assert_value();
+    assert_eq!(ask["node"]["worker"], "builtin.request.ask@1");
+    assert_eq!(ask["runtimeBinding"], json!({"kind":"request"}));
+    let text = include_str!("../../../docs/guides/ask-a-person.md");
+    let document = |name: &str| -> Value {
+        let marker = format!("```json title=\"{name}\"\n");
+        serde_json::from_str(
+            text.split_once(&marker)
+                .assert_value()
+                .1
+                .split_once("```")
+                .assert_value()
+                .0,
+        )
+        .assert_value()
+    };
+    let request = json!({"name":"ask-person","graph":document("graph.json"),"runtime":document("runtime.json"),"expectedRevision":null});
+    let response = client
+        .post(format!("{}/ui/api/validate", server.url))
+        .json(&json!({"graph":request["graph"],"runtime":request["runtime"]}))
+        .send()
+        .await
+        .assert_value();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "{}",
+        response.text().await.assert_value()
+    );
+    let response = client
+        .post(format!("{}/ui/api/profiles", server.url))
+        .header("x-zeroshot-workspace", &server.workspace)
+        .json(&request)
+        .send()
+        .await
+        .assert_value();
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved: Value = response.json().await.assert_value();
+    assert_eq!(saved["profile"]["graph"], request["graph"]);
+    let restored: RuntimePlan =
+        serde_json::from_value(saved["profile"]["runtime"].clone()).assert_value();
+    let authored: RuntimePlan = serde_json::from_value(request["runtime"].clone()).assert_value();
+    assert_eq!(restored, authored);
 }

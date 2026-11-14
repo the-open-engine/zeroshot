@@ -180,7 +180,7 @@ export function RuntimeEditor(p: {
               {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
             </small>
           ) : kind(n.name) === 'request' ? (
-            <small>Wait</small>
+            <small>{n.worker === 'builtin.request.ask@1' ? 'Ask a person' : 'Wait'}</small>
           ) : kind(n.name) === 'script' ? (
             <small>Script: {scriptCommandLabel(bindingFor(doc.runtime, n.name)?.command)}</small>
           ) : kind(n.name) === 'decision' ? (

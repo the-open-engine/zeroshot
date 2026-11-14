@@ -190,6 +190,11 @@ pub trait ExclusiveControllerClaim: Send + Sync {}
 
 #[async_trait]
 pub trait CapsuleAllocator: Send + Sync {
+    /// Independent opt-in for human requests; requires suspension-capable checkpoint storage.
+    fn supports_request_ask(&self) -> bool {
+        false
+    }
+
     /// None refuses suspension and wait plans; hosts with remote storage explicitly opt in.
     fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
         None

@@ -47,6 +47,10 @@ from .runs import (
 from .runs import (
     FailureDiagnostic as FailureDiagnostic,
 )
+from .runs import HumanRequest as HumanRequest
+from .runs import InboxEntry as InboxEntry
+from .runs import InboxPage as InboxPage
+from .runs import InboxRequest as InboxRequest
 from .runs import (
     LogEvent as LogEvent,
 )

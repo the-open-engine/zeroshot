@@ -446,13 +446,24 @@ where
             if bootstrap.checkpoint.is_some() {
                 return Err(PortableControllerError::Bootstrap);
             }
-            runtime.execution_seed =
-                crate::native_v2_supervisor::continuation_history(&stored.snapshot)
-                    .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
+            runtime.execution_seed = match &bootstrap.request_resolution {
+                Some(resolution) => {
+                    crate::native_v2_supervisor::request_history(&stored.snapshot, resolution)
+                }
+                None if matches!(
+                    stored.snapshot.suspension,
+                    Some(openengine_cluster_protocol::RunSuspension::Request { .. })
+                ) =>
+                {
+                    return Err(PortableControllerError::Bootstrap);
+                }
+                None => crate::native_v2_supervisor::continuation_history(&stored.snapshot),
+            }
+            .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
         }
         let mut after = None;
         loop {
-            let page = crate::v2_run_ledger::vectors::list(
+            let page = crate::v2_run_ledger::vectors::list_full(
                 &source,
                 openengine_cluster_protocol::RunVectorsParams {
                     run_id: predecessor.clone(),
@@ -465,6 +476,20 @@ where
             after = page.next_after;
             if after.is_none() {
                 break;
+            }
+        }
+        if let (
+            Some(resolution),
+            Some(openengine_cluster_protocol::RunSuspension::Request { request, .. }),
+        ) = (&bootstrap.request_resolution, &stored.snapshot.suspension)
+        {
+            if let crate::v2_run_ledger::RunEvent::Vector { vector } =
+                crate::v2_run_ledger::vector_event(
+                    &bootstrap.run_id,
+                    crate::native_v2_request::resolution_vector(request, resolution),
+                )?
+            {
+                runtime.vector_seed.push(vector);
             }
         }
         if let crate::v2_run_ledger::RunEvent::Vector { vector } =
@@ -639,6 +664,10 @@ impl SingleRunAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SingleRunAllocator {
+    fn supports_request_ask(&self) -> bool {
+        true
+    }
+
     fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
         Some(Default::default())
     }

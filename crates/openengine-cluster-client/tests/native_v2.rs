@@ -101,3 +101,47 @@ async fn typed_run_calls_use_the_public_native_v2_method_names() {
         ["run/submit", "run/list", "run/status", "run/force"]
     );
 }
+
+#[tokio::test]
+async fn ndjson_inbox_show_reads_a_full_request_larger_than_one_mebibyte() {
+    use openengine_cluster_client::NdjsonTransport;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (client_stream, server_stream) = tokio::io::duplex(4096);
+    let (read, write) = tokio::io::split(client_stream);
+    let client = ClusterClient::new(NdjsonTransport::new(read, write));
+    let labels: Vec<_> = (0..4096)
+        .map(|index| format!("a{index:04}{}", "x".repeat(123)))
+        .collect();
+    let peer = tokio::spawn(async move {
+        let mut server = BufReader::new(server_stream);
+        let mut line = String::new();
+        server.read_line(&mut line).await.assert_value();
+        let request: Value = serde_json::from_str(&line).assert_value();
+        assert_eq!(request["method"], "inbox/show");
+        let response = json!({"jsonrpc":"2.0","id":request["id"],"result":{
+            "runId":"run-1","node":"approval","createdAt":1000,"state":"pending",
+            "request":{"id":"question","text":"x".repeat(1024 * 1024 - 1024),
+                "signals":{"decision":["approved","rejected"]},"expiresAt":2000,
+                "output":{"kind":"record","fields":{"selection":{"required":true,"type":{"kind":"enum","values":labels}}}}}
+        }}).to_string() + "\n";
+        assert!(response.len() > 1024 * 1024);
+        assert!(response.len() < openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES);
+        server
+            .get_mut()
+            .write_all(response.as_bytes())
+            .await
+            .assert_value();
+    });
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client.inbox_show(RunStatusParams {
+            run_id: RunId::new("run-1"),
+        }),
+    )
+    .await
+    .assert_value();
+    assert!(result.is_ok(), "{result:?}");
+    let result = result.assert_value();
+    assert_eq!(result.request.text.len(), 1024 * 1024 - 1024);
+    peer.await.assert_value();
+}

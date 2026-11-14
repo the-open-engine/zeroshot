@@ -1380,7 +1380,7 @@
               "type": "object"
             },
             "timeoutMs": {
-              "description": "Omit to run until completion or cancellation.",
+              "description": "Omit to run until completion or cancellation; request ask nodes default to seven days.",
               "maximum": 9007199254740991,
               "minimum": 1,
               "type": [
@@ -1948,6 +1948,126 @@
           "type": "object"
         }
       },
+      "type": "object"
+    },
+    "InboxEntry": {
+      "additionalProperties": false,
+      "description": "A bounded inbox row; text, shape and answers are available only through show.",
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "expiresAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "runId": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "state": {
+          "$ref": "#/$defs/RequestState"
+        }
+      },
+      "required": [
+        "runId",
+        "node",
+        "createdAt",
+        "expiresAt",
+        "state"
+      ],
+      "type": "object"
+    },
+    "InboxListParams": {
+      "additionalProperties": false,
+      "description": "Lists requests still holding their own run suspended, in run ID order.",
+      "properties": {
+        "after": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "maximum": 100,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "InboxListResult": {
+      "additionalProperties": false,
+      "properties": {
+        "nextAfter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requests": {
+          "items": {
+            "$ref": "#/$defs/InboxEntry"
+          },
+          "maxItems": 100,
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests"
+      ],
+      "type": "object"
+    },
+    "InboxShowResult": {
+      "additionalProperties": false,
+      "description": "The request made by this run, including its current disposition and continuation.",
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/RunRequest"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/RequestState"
+        },
+        "successorRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "node",
+        "createdAt",
+        "request",
+        "state"
+      ],
       "type": "object"
     },
     "InitializeParams": {
@@ -2621,7 +2741,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunVectorsParams"
+          "$ref": "#/$defs/InboxListParams"
         }
       },
       "required": [
@@ -2644,7 +2764,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunVectorParams"
+          "$ref": "#/$defs/RunVectorsParams"
         }
       },
       "required": [
@@ -2667,7 +2787,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunCheckpointsParams"
+          "$ref": "#/$defs/RunVectorParams"
         }
       },
       "required": [
@@ -2690,7 +2810,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunResumeParams"
+          "$ref": "#/$defs/RunCheckpointsParams"
         }
       },
       "required": [
@@ -2702,6 +2822,29 @@
       "type": "object"
     },
     "JsonRpcRequest24": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunResumeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest25": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -3055,6 +3198,26 @@
         }
       ]
     },
+    "JsonRpcResponse25": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess25"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse26": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess26"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
     "JsonRpcResponse3": {
       "anyOf": [
         {
@@ -3362,7 +3525,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunVectorsResult"
+          "$ref": "#/$defs/InboxListResult"
         }
       },
       "required": [
@@ -3381,7 +3544,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunVector"
+          "$ref": "#/$defs/InboxShowResult"
         }
       },
       "required": [
@@ -3400,7 +3563,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunCheckpointsResult"
+          "$ref": "#/$defs/RunVectorsResult"
         }
       },
       "required": [
@@ -3419,7 +3582,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunResumeResult"
+          "$ref": "#/$defs/RunVector"
         }
       },
       "required": [
@@ -3430,6 +3593,44 @@
       "type": "object"
     },
     "JsonRpcSuccess24": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunCheckpointsResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess25": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunResumeResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess26": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -4316,6 +4517,30 @@
       ],
       "type": "string"
     },
+    "RequestAnswer": {
+      "additionalProperties": false,
+      "description": "A person's complete verifier result; diagnostics and artifacts remain host-owned.",
+      "properties": {
+        "output": true,
+        "signals": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "signals",
+        "output"
+      ],
+      "type": "object"
+    },
     "RequestId": {
       "anyOf": [
         {
@@ -4326,6 +4551,15 @@
           "type": "integer"
         }
       ]
+    },
+    "RequestState": {
+      "enum": [
+        "pending",
+        "answered",
+        "expired",
+        "stopped"
+      ],
+      "type": "string"
     },
     "ResolvedGitRemote": {
       "additionalProperties": false,
@@ -5033,6 +5267,52 @@
       },
       "type": "object"
     },
+    "RunRequest": {
+      "additionalProperties": false,
+      "description": "The question and result shape declared by a host-run request verifier.",
+      "properties": {
+        "expiresAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "output": {
+          "$ref": "#/$defs/PayloadType"
+        },
+        "signals": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 4096,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "type": "object"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "signals",
+        "output",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
     "RunResumeFrom": {
       "description": "A successor restarts a failed graph or restores a selected checkpoint; a suspended attempt\ncontinues at its saved boundary without restoring workspace files. Provider sessions are never resumed.",
       "oneOf": [
@@ -5041,6 +5321,47 @@
           "properties": {
             "kind": {
               "const": "restart",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "answer",
+              "type": "string"
+            },
+            "output": true,
+            "signals": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "signals",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "expiry",
               "type": "string"
             }
           },
@@ -5256,6 +5577,35 @@
         {
           "description": "Durable end of an attempt whose graph can continue in a successor.",
           "oneOf": [
+            {
+              "properties": {
+                "createdAt": {
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "reason": {
+                  "const": "request",
+                  "type": "string"
+                },
+                "request": {
+                  "$ref": "#/$defs/RunRequest"
+                }
+              },
+              "required": [
+                "reason",
+                "node",
+                "createdAt",
+                "request"
+              ],
+              "type": "object"
+            },
             {
               "properties": {
                 "createdAt": {
@@ -5507,6 +5857,94 @@
       "oneOf": [
         {
           "properties": {
+            "expiresAt": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "request",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "signals": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "items": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                    "type": "string"
+                  },
+                  "maxItems": 4096,
+                  "minItems": 1,
+                  "type": "array",
+                  "uniqueItems": true
+                }
+              },
+              "type": "object"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "node",
+            "text",
+            "signals",
+            "output",
+            "expiresAt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "answer": {
+              "$ref": "#/$defs/RequestAnswer"
+            },
+            "kind": {
+              "const": "answer",
+              "type": "string"
+            },
+            "requestId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "requestId",
+            "answer"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "expiry",
+              "type": "string"
+            },
+            "requestId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "requestId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "kind": {
               "const": "suspend_request",
               "type": "string"
@@ -5618,6 +6056,163 @@
       ],
       "type": "object"
     },
+    "RunVectorSummary": {
+      "description": "Bounded list projection. Full text, schemas and answers require run/vector.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "suspend_request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "suspension",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/$defs/VectorSuspensionReason"
+            }
+          },
+          "required": [
+            "kind",
+            "reason",
+            "node"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "continuation",
+              "type": "string"
+            },
+            "resumedFrom": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "resumedFrom"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "dueAt": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "wait",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "node",
+            "dueAt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "expiresAt": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "request",
+              "type": "string"
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "node",
+            "expiresAt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "answer",
+              "type": "string"
+            },
+            "requestId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "requestId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "expiry",
+              "type": "string"
+            },
+            "requestId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "requestId"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "runId": {
+          "$ref": "#/$defs/VectorId"
+        }
+      },
+      "required": [
+        "id",
+        "runId",
+        "createdAt"
+      ],
+      "type": "object"
+    },
     "RunVectorsParams": {
       "additionalProperties": false,
       "properties": {
@@ -5667,7 +6262,7 @@
         },
         "vectors": {
           "items": {
-            "$ref": "#/$defs/RunVector"
+            "$ref": "#/$defs/RunVectorSummary"
           },
           "maxItems": 100,
           "type": "array"
@@ -6419,7 +7014,8 @@
     "VectorSuspensionReason": {
       "enum": [
         "command",
-        "wait"
+        "wait",
+        "request"
       ],
       "type": "string"
     },
@@ -6877,6 +7473,18 @@
     "get_response": {
       "$ref": "#/$defs/JsonRpcResponse4"
     },
+    "inbox_list_request": {
+      "$ref": "#/$defs/JsonRpcRequest20"
+    },
+    "inbox_list_response": {
+      "$ref": "#/$defs/JsonRpcResponse20"
+    },
+    "inbox_show_request": {
+      "$ref": "#/$defs/JsonRpcRequest15"
+    },
+    "inbox_show_response": {
+      "$ref": "#/$defs/JsonRpcResponse21"
+    },
     "initialize_request": {
       "$ref": "#/$defs/JsonRpcRequest"
     },
@@ -6923,16 +7531,16 @@
       "$ref": "#/$defs/JsonRpcResponse18"
     },
     "run_checkpoints_request": {
-      "$ref": "#/$defs/JsonRpcRequest22"
+      "$ref": "#/$defs/JsonRpcRequest23"
     },
     "run_checkpoints_response": {
-      "$ref": "#/$defs/JsonRpcResponse22"
+      "$ref": "#/$defs/JsonRpcResponse24"
     },
     "run_discard_workspace_request": {
-      "$ref": "#/$defs/JsonRpcRequest24"
+      "$ref": "#/$defs/JsonRpcRequest25"
     },
     "run_discard_workspace_response": {
-      "$ref": "#/$defs/JsonRpcResponse24"
+      "$ref": "#/$defs/JsonRpcResponse26"
     },
     "run_export_workspace_request": {
       "$ref": "#/$defs/RunExportWorkspaceParams",
@@ -6960,10 +7568,10 @@
       "$ref": "#/$defs/JsonRpcResponse17"
     },
     "run_resume_request": {
-      "$ref": "#/$defs/JsonRpcRequest23"
+      "$ref": "#/$defs/JsonRpcRequest24"
     },
     "run_resume_response": {
-      "$ref": "#/$defs/JsonRpcResponse23"
+      "$ref": "#/$defs/JsonRpcResponse25"
     },
     "run_status_request": {
       "$ref": "#/$defs/JsonRpcRequest15"
@@ -6984,16 +7592,16 @@
       "$ref": "#/$defs/JsonRpcResponse15"
     },
     "run_vector_request": {
-      "$ref": "#/$defs/JsonRpcRequest21"
+      "$ref": "#/$defs/JsonRpcRequest22"
     },
     "run_vector_response": {
-      "$ref": "#/$defs/JsonRpcResponse21"
+      "$ref": "#/$defs/JsonRpcResponse23"
     },
     "run_vectors_request": {
-      "$ref": "#/$defs/JsonRpcRequest20"
+      "$ref": "#/$defs/JsonRpcRequest21"
     },
     "run_vectors_response": {
-      "$ref": "#/$defs/JsonRpcResponse20"
+      "$ref": "#/$defs/JsonRpcResponse22"
     },
     "run_watch_event_notification": {
       "$ref": "#/$defs/JsonRpcNotification9"
@@ -7082,6 +7690,10 @@
     "run_force_response",
     "run_suspend_request",
     "run_suspend_response",
+    "inbox_list_request",
+    "inbox_list_response",
+    "inbox_show_request",
+    "inbox_show_response",
     "run_vectors_request",
     "run_vectors_response",
     "run_vector_request",

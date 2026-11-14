@@ -346,7 +346,7 @@ fn hundred_worst_case_vector_summaries_fit_hosted_response_bound() {
     };
     let result = RunVectorsResult {
         run_id: RunId::new("r".repeat(64)),
-        vectors: vec![vector; 100],
+        vectors: vec![vector.into(); 100],
         next_after: Some(VectorId::new("v".repeat(64)).assert_value()),
     };
     assert!(serde_json::to_vec(&result).assert_value().len() < 64 * 1024);
@@ -371,4 +371,54 @@ fn vector_identity_bounds_match_the_generated_schema() {
             assert_eq!(serde_json::from_value::<RunVector>(value).is_ok(), valid);
         }
     }
+}
+
+#[test]
+fn request_answers_and_vectors_round_trip() {
+    use openengine_cluster_protocol::{RunResumeFrom, RunVector, RunVectorSummary};
+    let answer = json!({"kind":"answer","signals":{"decision":"rejected"},"output":{"feedback":"Fix the empty case."}});
+    let selection: RunResumeFrom = serde_json::from_value(answer.clone()).assert_value();
+    assert_eq!(serde_json::to_value(selection).assert_value(), answer);
+    for content in [
+        json!({"kind":"request","node":"approval","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000}),
+        json!({"kind":"answer","requestId":"question","answer":{"signals":{"decision":"approved"},"output":{}}}),
+        json!({"kind":"expiry","requestId":"question"}),
+    ] {
+        let mut value = content;
+        let fields = value.as_object_mut().assert_value();
+        fields.insert("id".to_owned(), json!("entry"));
+        fields.insert("runId".to_owned(), json!("run"));
+        fields.insert("createdAt".to_owned(), json!(1000));
+        let entry: RunVector = serde_json::from_value(value.clone()).assert_value();
+        assert_eq!(serde_json::to_value(&entry).assert_value(), value);
+        let summary = serde_json::to_value(RunVectorSummary::from(entry)).assert_value();
+        for key in ["text", "signals", "output", "answer"] {
+            assert!(summary.get(key).is_none());
+        }
+    }
+}
+#[test]
+fn hundred_maximum_inbox_rows_fit_the_hosted_response_limit() {
+    use openengine_cluster_protocol::{
+        InboxEntry, InboxListResult, NodeName, RequestState, UnixTimestampMillis,
+    };
+    let row = InboxEntry {
+        run_id: RunId::new("r".repeat(64)),
+        node: NodeName::new("n".repeat(128)).assert_value(),
+        created_at: UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION)
+            .assert_value(),
+        expires_at: UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION)
+            .assert_value(),
+        state: RequestState::Expired,
+    };
+    let page = InboxListResult {
+        requests: vec![row; 100],
+        next_after: Some(RunId::new("r".repeat(64))),
+    };
+    let bytes = serde_json::to_vec(&page).assert_value();
+    assert!(bytes.len() < 65536);
+    assert_eq!(
+        serde_json::from_slice::<InboxListResult>(&bytes).assert_value(),
+        page
+    );
 }

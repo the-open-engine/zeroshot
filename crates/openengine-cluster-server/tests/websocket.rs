@@ -40,7 +40,7 @@ use admission_bound_support::{
 /// Matches `serve_websocket`'s documented `MAX_FRAME_BYTES` bound; hardcoded rather than imported
 /// since it is an internal implementation detail, not part of the public contract (mirrors
 /// `tests/subscription_ndjson.rs`'s identical `OVERSIZED_LINE_BYTES` convention).
-const OVERSIZED_TEXT_BYTES: usize = 1024 * 1024 + 16;
+const OVERSIZED_TEXT_BYTES: usize = 2 * 1024 * 1024 + 16;
 const MAX_CONNECTION_TASKS: i64 = 256;
 
 struct Harness {

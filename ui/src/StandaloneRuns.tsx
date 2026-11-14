@@ -21,7 +21,7 @@ const dateLabel = (time?: number | null) =>
     : '';
 const runState = (run: RunSummary) =>
   run.phase === 'suspended'
-    ? `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}`
+    ? `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}${run.suspension?.request ? `: ${run.suspension.request.text} (deadline ${new Date(run.suspension.request.expiresAt).toISOString()})` : ''}`
     : run.phase === 'running' && run.suspendRequested
       ? 'Suspension requested'
       : humanize(run.terminal?.status ?? (run.phase === 'finished' ? 'Finished' : run.phase));

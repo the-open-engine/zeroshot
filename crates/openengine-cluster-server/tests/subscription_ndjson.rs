@@ -45,9 +45,9 @@ use admission_bound_support::{
     SubscriptionValidationHarness,
 };
 
-/// Matches the issue's documented "> 1 MiB" oversized-frame threshold; the exact bound is an
+/// Exceeds the complete request's 2 MiB transport allowance; the exact bound is an
 /// internal `serve_ndjson` implementation detail, not part of the public contract.
-const OVERSIZED_LINE_BYTES: usize = 1024 * 1024 + 16;
+const OVERSIZED_LINE_BYTES: usize = 2 * 1024 * 1024 + 16;
 
 fn field<'a>(value: &'a Value, path: &[&str]) -> &'a Value {
     path.iter()
