@@ -23,11 +23,15 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::http::{StatusCode, Uri};
 use tokio_tungstenite::tungstenite::Error as TungsteniteError;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::connect_async_tls_with_config;
 
 use crate::multiplex;
 use crate::{PendingMap, SubscriptionMap, TransportError};
+
+// Preserve Tungstenite's previous message allowance outside the unpaged inventory.
+const MAX_ORDINARY_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Options applied to one outbound WebSocket connection.
 ///
@@ -121,7 +125,12 @@ pub async fn dial_websocket(
     } else {
         None
     };
-    let result = connect_async_tls_with_config(endpoint, None, false, connector).await;
+    // Run inventories have no aggregate size ceiling; the pump bounds their individual statuses
+    // and the response envelope, along with ordinary frames, after WebSocket reassembly.
+    let config = WebSocketConfig::default()
+        .max_frame_size(None)
+        .max_message_size(None);
+    let result = connect_async_tls_with_config(endpoint, Some(config), false, connector).await;
     match result {
         Ok((stream, _response)) => Ok(WebSocketTransport::new(stream)),
         Err(TungsteniteError::Http(response)) if response.status().is_redirection() => {
@@ -250,7 +259,8 @@ where
 
     /// Creates a dedicated bulk replay connection with an eight-frame receive queue.
     /// Pausing a subscriber backpressures the entire connection; use separate connections for
-    /// control requests and other observers. Messages above one MiB end the connection before entering the queue.
+    /// control requests and other observers. Messages above the ordinary response bound end the
+    /// connection before entering the queue.
     /// Configure the WebSocket frame/message limits when dialing to bound wire allocation too.
     #[must_use]
     pub fn with_subscription_backpressure(ws: WebSocketStream<S>) -> Self {
@@ -295,8 +305,8 @@ struct PumpRouting<S> {
 /// reassembly needed, unlike NDJSON's newline-delimited lines) and routes each one via
 /// [`multiplex::route_and_maybe_cancel`] -- shared verbatim with [`crate::NdjsonTransport`]'s pump,
 /// which routes the exact same decoded JSON bodies sourced from NDJSON lines instead of
-/// `Message::Text` frames. Non-text frames (`Binary`/`Ping`/`Pong`/`Frame`) are ignored; a `Close`
-/// frame or a read error ends the pump, exactly like NDJSON's stream-end handling. On stream end
+/// `Message::Text` frames. Non-text frames are ignored unless a binary message exceeds the ordinary
+/// response bound. A `Close` frame or a read error ends the pump, like NDJSON's stream-end handling. On stream end
 /// every pending request fails and every open subscription ends (dropping its sender).
 async fn run_pump<S>(
     mut stream: SplitStream<WebSocketStream<S>>,
@@ -310,11 +320,15 @@ async fn run_pump<S>(
         let text = match message {
             Message::Text(text) => text,
             Message::Close(_) => break,
+            Message::Binary(bytes) if bytes.len() > MAX_ORDINARY_RESPONSE_BYTES => break,
             Message::Binary(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {
                 continue;
             }
         };
-        if routing.backpressure && text.len() > crate::MAX_FRAME_BYTES {
+        if (routing.backpressure && text.len() > crate::MAX_FRAME_BYTES)
+            || crate::response_frame::validate(text.as_bytes(), MAX_ORDINARY_RESPONSE_BYTES)
+                .is_err()
+        {
             break;
         }
         if routing.backpressure {

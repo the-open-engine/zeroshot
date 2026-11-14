@@ -1,10 +1,21 @@
-//! NDJSON replies bound one status at a time in the unpaged run inventory.
+//! Replies bound one status at a time in the unpaged run inventory.
 
 use std::io;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use openengine_cluster_protocol::{
     MAX_REQUEST_RESPONSE_BYTES, RunStatusResult, bounded_json_from_slice,
 };
+
+pub(super) fn validate(bytes: &[u8], ordinary_limit: usize) -> io::Result<()> {
+    let mut bounds = Bounds {
+        ordinary_limit: Some(ordinary_limit),
+        ..Bounds::default()
+    };
+    for index in 0..bytes.len() {
+        bounds.push(&bytes[..=index])?;
+    }
+    Ok(())
+}
 
 pub(super) async fn next_line<R: AsyncBufRead + Unpin>(
     reader: &mut R,
@@ -43,6 +54,7 @@ fn finish(mut bytes: Vec<u8>) -> io::Result<String> {
 
 #[derive(Default)]
 struct Bounds {
+    ordinary_limit: Option<usize>,
     depth: usize,
     quoted: bool,
     escaped: bool,
@@ -69,9 +81,12 @@ impl Bounds {
         } else {
             self.framing + prefix.len() - self.segment
         };
-        if measured > super::MAX_FRAME_BYTES
-            && !(byte == b'\r' && measured == super::MAX_FRAME_BYTES + 1)
-        {
+        let limit = if self.collection {
+            super::MAX_FRAME_BYTES
+        } else {
+            self.ordinary_limit.unwrap_or(super::MAX_FRAME_BYTES)
+        };
+        if measured > limit && !(byte == b'\r' && measured == limit + 1) {
             return Err(too_large());
         }
         if self.escaped {

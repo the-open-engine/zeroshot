@@ -1089,6 +1089,81 @@ async fn direct_websocket_dialer_sends_no_authorization() {
 }
 
 #[tokio::test]
+async fn direct_websocket_inventory_above_default_wire_limits_keeps_pending_calls() {
+    use futures_util::{SinkExt, StreamExt};
+    use openengine_cluster_client::ClusterClient;
+    use openengine_cluster_protocol::{RunListParams, RunStatusParams};
+    use serde_json::{Value, json};
+    use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let address = listener.local_addr().assert_value();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.assert_value();
+        let mut socket = accept_async(stream).await.assert_value();
+        let mut requests = Vec::new();
+        for _ in 0..2 {
+            let message = socket.next().await.assert_value().assert_value();
+            requests.push(
+                serde_json::from_str::<Value>(message.to_text().assert_value()).assert_value(),
+            );
+        }
+        requests.sort_by_key(|request| request["method"].as_str().assert_value().to_owned());
+        let status = json!({
+            "runId":"run-1","title":"Approval",
+            "source":{"repository":"open-engine/zeroshot","branch":"main",
+                "revision":"0123456789abcdef0123456789abcdef01234567"},
+            "size":"small","atCursor":"v2:1","status":{"phase":"admitted"}
+        });
+        for request in requests {
+            let result = if request["method"] == "run/list" {
+                let runs: Vec<_> = (0..96)
+                    .map(|index| {
+                        let mut row = status.clone();
+                        row["runId"] = json!(format!("run-{index}"));
+                        row["status"] = json!({"phase":"suspended","reason":"request",
+                            "node":"approval","createdAt":1000,"metadata":{},
+                            "request":{"id":format!("question-{index}"),"text":"x".repeat(750_000),
+                                "signals":{"decision":["approved","rejected"]},
+                                "output":{"kind":"record","fields":{}},"expiresAt":2000}});
+                        row
+                    })
+                    .collect();
+                json!({"runs":runs})
+            } else {
+                status.clone()
+            };
+            let frame = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
+            if request["method"] == "run/list" {
+                assert!(frame.len() > 64 * 1024 * 1024);
+            }
+            socket.send(Message::text(frame)).await.assert_value();
+        }
+    });
+    let target = direct_target(format!("http://{address}"));
+    let session =
+        TargetOecpAccess::new(format!("ws://{address}/oecp"), None, &target.access).assert_value();
+    let transport = TargetOecpWebSocketDialer
+        .dial(&target, session)
+        .await
+        .assert_value();
+    let client = ClusterClient::new(transport.as_ref());
+    let (listed, status) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(
+            client.run_list(RunListParams::default()),
+            client.run_status(RunStatusParams {
+                run_id: RunId::new("run-1")
+            })
+        )
+    })
+    .await
+    .assert_value();
+    assert_eq!(listed.assert_value().runs.len(), 96);
+    assert_eq!(status.assert_value().run_id, RunId::new("run-1"));
+    server.await.assert_value();
+}
+
+#[tokio::test]
 async fn websocket_dialer_rejects_cross_authority_before_network() {
     let target = target();
     let session = TargetOecpAccess::new(

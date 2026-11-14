@@ -1,9 +1,9 @@
 //! Typed transport-neutral Cluster Protocol client.
 
 mod multiplex;
-mod ndjson_frame;
 mod ndjson_pump;
 mod ndjson_subscription;
+mod response_frame;
 
 pub mod agent_attach;
 pub mod logs;
@@ -252,7 +252,7 @@ async fn run_pump<R, W>(
     W: AsyncWrite + Unpin + Send,
 {
     let mut reader = BufReader::new(reader);
-    while let Ok(Some(line)) = ndjson_frame::next_line(&mut reader).await {
+    while let Ok(Some(line)) = response_frame::next_line(&mut reader).await {
         multiplex::route_and_maybe_cancel(line, &pending, &subscriptions, &sink).await;
     }
     multiplex::finish_pump(&pending, &subscriptions);

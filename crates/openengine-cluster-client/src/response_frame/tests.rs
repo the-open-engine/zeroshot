@@ -1,3 +1,5 @@
+//! Response bounds shared by NDJSON and WebSocket readers.
+
 use super::*;
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
@@ -59,4 +61,15 @@ async fn run_inventory_cannot_hide_an_oversized_envelope_or_non_status_items() {
     ] {
         assert!(read(frame.to_string().as_bytes()).await.is_err());
     }
+}
+
+#[test]
+fn ordinary_bounds_follow_the_transport_while_inventory_entries_keep_their_bound() {
+    let ordinary = json!({"jsonrpc":"2.0","id":1,"result":{"value":"x".repeat(4096)}}).to_string();
+    assert!(validate(ordinary.as_bytes(), 4096).is_err());
+    assert!(validate(ordinary.as_bytes(), 8192).is_ok());
+    let oversized = json!({"jsonrpc":"2.0","id":1,"result":{
+        "runs":[status("x".repeat(MAX_REQUEST_RESPONSE_BYTES))]}})
+    .to_string();
+    assert!(validate(oversized.as_bytes(), 64 * 1024 * 1024).is_err());
 }

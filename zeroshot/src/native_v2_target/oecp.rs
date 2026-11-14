@@ -6,6 +6,7 @@ use openengine_cluster_client::websocket::{DialedWebSocketTransport, WebSocketTr
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, HeaderValue};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use super::contract::{canonical_host, default_port, uri_text_is_invalid};
 use super::{TargetConnectorError, TargetOecpAccess, TargetRecord};
@@ -46,9 +47,14 @@ impl TargetOecpDialer for TargetOecpWebSocketDialer {
             value.set_sensitive(true);
             request.headers_mut().insert(AUTHORIZATION, value);
         }
-        let (stream, _response) = tokio_tungstenite::connect_async(request)
-            .await
-            .map_err(|error| TargetConnectorError::OecpConnection(error.to_string()))?;
+        // The shared transport bounds each status in an unpaged inventory and its envelope.
+        let config = WebSocketConfig::default()
+            .max_frame_size(None)
+            .max_message_size(None);
+        let (stream, _response) =
+            tokio_tungstenite::connect_async_with_config(request, Some(config), false)
+                .await
+                .map_err(|error| TargetConnectorError::OecpConnection(error.to_string()))?;
         Ok(Arc::new(WebSocketTransport::new(stream)))
     }
 }

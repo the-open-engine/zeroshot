@@ -1045,8 +1045,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   their opaque accepted resolution survives restoration without another deadline decision.
 - Durable observation replay reads bounded ledger pages that fit every accepted event, including
   combined request text and contracts, and retains its scan cursor across pages.
-  NDJSON run inventories bound each typed status separately from the response envelope, so several
-  full requests fit one unpaged reply without removing bounds from other frames.
+  NDJSON and WebSocket run inventories bound each typed status separately from the response
+  envelope, so several full requests fit one unpaged reply without removing bounds from other
+  responses. Both WebSocket dialers allow collection-sized frames and messages; the shared
+  transport applies response bounds after WebSocket reassembly.
   Vector pagination resolves entry IDs through a per-run ledger index, including inherited IDs,
   then replays after that cursor instead of reading earlier pages again.
   Local CLI inspection opens finished runs directly from read-only ledgers. Vector list and show

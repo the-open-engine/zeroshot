@@ -207,3 +207,71 @@ async fn ndjson_run_inventory_above_one_frame_preserves_other_pending_calls() {
     assert_eq!(status.assert_value().run_id, RunId::new("run-1"));
     peer.await.assert_value();
 }
+
+#[tokio::test]
+async fn websocket_run_inventory_above_default_wire_limits_preserves_other_pending_calls() {
+    use futures_util::{SinkExt, StreamExt};
+    use openengine_cluster_client::{WebSocketDialOptions, dial_websocket};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let endpoint = format!("ws://{}", listener.local_addr().assert_value());
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.assert_value();
+        let mut server = accept_async(stream).await.assert_value();
+        let mut requests = Vec::new();
+        for _ in 0..2 {
+            let message = server.next().await.assert_value().assert_value();
+            requests.push(
+                serde_json::from_str::<Value>(message.to_text().assert_value()).assert_value(),
+            );
+        }
+        requests.sort_by_key(|request| request["method"].as_str().assert_value().to_owned());
+        for request in requests {
+            let result = if request["method"] == "run/list" {
+                let runs: Vec<_> = (0..96)
+                    .map(|index| {
+                        let mut status = response("run/status");
+                        status["runId"] = json!(format!("run-{index}"));
+                        status["status"] = json!({"phase":"suspended","reason":"request",
+                            "node":"approval","createdAt":1000,"metadata":{},
+                            "request":{"id":format!("question-{index}"),"text":"x".repeat(750_000),
+                                "signals":{"decision":["approved","rejected"]},
+                                "output":{"kind":"record","fields":{}},"expiresAt":2000}});
+                        status
+                    })
+                    .collect();
+                json!({"runs":runs})
+            } else {
+                response("run/status")
+            };
+            let frame = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
+            if request["method"] == "run/list" {
+                // One frame exceeds both Tungstenite defaults: 16 MiB/frame and 64 MiB/message.
+                assert!(frame.len() > 64 * 1024 * 1024);
+            }
+            server.send(Message::text(frame)).await.assert_value();
+        }
+    });
+    let transport = dial_websocket(
+        &endpoint,
+        WebSocketDialOptions::default().allow_plaintext(true),
+    )
+    .await
+    .assert_value();
+    let client = ClusterClient::new(transport);
+    let (listed, status) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(
+            client.run_list(RunListParams::default()),
+            client.run_status(RunStatusParams {
+                run_id: RunId::new("run-1")
+            })
+        )
+    })
+    .await
+    .assert_value();
+    assert_eq!(listed.assert_value().runs.len(), 96);
+    assert_eq!(status.assert_value().run_id, RunId::new("run-1"));
+    peer.await.assert_value();
+}
