@@ -1628,9 +1628,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls",
- "tokio-stream",
  "tokio-tungstenite",
- "tokio-util",
  "webpki-roots",
 ]
 

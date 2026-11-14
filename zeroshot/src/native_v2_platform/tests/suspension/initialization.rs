@@ -9,6 +9,7 @@ enum FailurePoint {
     Vector,
     PriorExecution,
     Reload,
+    History,
 }
 
 struct InitializationLedger {
@@ -61,7 +62,7 @@ impl RunLedger for InitializationLedger {
                 if line.as_str().starts_with("Zeroshot version: ")),
                 FailurePoint::Vector => matches!(event, RunEvent::Vector { .. }),
                 FailurePoint::PriorExecution => matches!(event, RunEvent::PriorExecution { .. }),
-                FailurePoint::Reload => false,
+                FailurePoint::Reload | FailurePoint::History => false,
             }),
         )?;
         self.inner.append(run_id, events).await
@@ -88,6 +89,7 @@ impl RunLedger for InitializationLedger {
         run_id: &RunId,
         after: Option<&Cursor>,
     ) -> Result<SnapshotAndTail, RunLedgerError> {
+        self.fail_once(run_id, matches!(self.point, FailurePoint::History))?;
         self.inner.snapshot_and_tail(run_id, after).await
     }
 }
@@ -231,7 +233,7 @@ async fn rejected_initialization_leaves_source_resumable(point: FailurePoint, su
     );
     assert!(matches!(
         vectors[1].content,
-        RunVectorContent::Continuation { .. }
+        openengine_cluster_protocol::RunVectorSummaryContent::Continuation { .. }
     ));
     assert_eq!(
         driver.starts.load(Ordering::SeqCst),
@@ -295,4 +297,71 @@ async fn fresh_run_version_failure_also_releases_preparation_authority() {
     assert!(allocator.claim_controller(&run_id).await.is_ok());
     assert_eq!(driver.starts.load(Ordering::SeqCst), 0);
     assert_eq!(cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
+}
+
+#[tokio::test]
+async fn inbox_cursor_and_limit_do_not_load_histories_outside_the_page() {
+    use openengine_cluster_protocol::InboxListParams;
+    let driver = Arc::new(FakeDriver::new(Behavior::Complete));
+    let (inner, _, runtime) = runtime_parts(driver);
+    let ledger = Arc::new(InitializationLedger {
+        inner,
+        successor: RunId::new("inbox-c"),
+        point: FailurePoint::History,
+        failed: AtomicBool::new(true),
+    });
+    let allocator = Arc::new(SuspensionAllocator {
+        runtime,
+        policy: crate::native_v2_wait::WaitPolicy {
+            wall_clock: Arc::new(|| UnixTimestampMillis::new(1000).assert_value()),
+            ..Default::default()
+        },
+        store: Arc::new(SuspensionStore::default()),
+        successor: StdMutex::new(None),
+        preparation_gate: None,
+    });
+    let controller = NativeV2PlatformController::new_with_delivery_policy(
+        ledger.clone(),
+        allocator,
+        DeliveryPolicy::Optional,
+    )
+    .await
+    .assert_value();
+    for name in ["inbox-c", "inbox-a", "inbox-b"] {
+        let mut request = super::requests::ask_request();
+        request.run_id = RunId::new(name);
+        request.submission.submission_key = IdempotencyKey::new(name).assert_value();
+        let run = submit_test_request(&controller, request)
+            .await
+            .assert_value()
+            .run_id;
+        super::requests::suspended(&controller, &run).await;
+    }
+    ledger.failed.store(false, Ordering::SeqCst);
+    let page = controller
+        .inbox_list(InboxListParams {
+            after: Some(RunId::new("inbox-a")),
+            limit: Some(1),
+        })
+        .await
+        .assert_value();
+    assert_eq!(page.requests.len(), 1);
+    assert_eq!(page.requests[0].run_id, RunId::new("inbox-b"));
+    assert_eq!(page.next_after, Some(RunId::new("inbox-b")));
+    assert!(
+        !ledger.failed.load(Ordering::SeqCst),
+        "list loaded the lookahead run's vector history"
+    );
+    assert!(
+        controller
+            .inbox_show(RunStatusParams {
+                run_id: RunId::new("inbox-c")
+            })
+            .await
+            .is_err()
+    );
+    assert!(
+        ledger.failed.load(Ordering::SeqCst),
+        "the outside history read failure was armed"
+    );
 }

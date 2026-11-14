@@ -59,9 +59,13 @@ export function nodePresentation(document: Document, node: GraphNode, workers: W
       ? comment
         ? 'Comment delivery'
         : 'Git delivery'
-      : activityLabel(node.kind, binding?.kind),
+      : activityLabel(node.kind, binding?.kind, node.worker),
     delivery,
-    detail: delivery ? deliveryDetail(worker, comment) : activityDetail(binding),
+    detail: delivery
+      ? deliveryDetail(worker, comment)
+      : node.worker === 'builtin.request.ask@1'
+        ? 'Ask a person'
+        : activityDetail(binding),
   };
 }
 
@@ -77,8 +81,9 @@ function activityDetail(binding: Binding | undefined): string | undefined {
   return binding?.kind === 'script' ? scriptCommandLabel(binding.command) : binding?.model;
 }
 
-export function activityLabel(nodeKind: string, bindingKind?: string): string {
+export function activityLabel(nodeKind: string, bindingKind?: string, worker?: string): string {
   if (bindingKind === 'script') return 'Script';
-  if (bindingKind === 'request') return 'Wait';
+  if (bindingKind === 'request')
+    return worker === 'builtin.request.ask@1' ? 'Ask a person' : 'Wait';
   return bindingKind === 'decision' ? 'Decision' : labels[nodeKind];
 }

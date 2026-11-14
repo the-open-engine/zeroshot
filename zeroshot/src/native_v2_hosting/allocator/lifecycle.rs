@@ -1,5 +1,6 @@
 //! Allocation, cancellation cleanup and retained handoffs serialize only their own runs.
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::{Arc, Weak};
 
 use openengine_cluster_protocol::RunId;
@@ -149,4 +150,32 @@ impl ProductionCapsuleAllocator {
             original_source,
         })
     }
+}
+
+pub(super) fn transfer_workspace_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        if unsafe { libc::geteuid() } != 0 {
+            return Ok(());
+        }
+        transfer_entry_ownership(path, uid, gid)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (path, uid, gid);
+        Err(std::io::Error::other(
+            "hosted workspace ownership transfer requires Linux",
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn transfer_entry_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        for entry in std::fs::read_dir(path)? {
+            transfer_entry_ownership(&entry?.path(), uid, gid)?;
+        }
+    }
+    std::os::unix::fs::lchown(path, Some(uid), Some(gid))
 }

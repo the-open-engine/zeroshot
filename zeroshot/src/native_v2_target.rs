@@ -162,6 +162,7 @@ enum TargetSessionPurpose {
     General,
     WorkspaceRecovery,
     RunSuspension,
+    RequestAsk,
     RunVectors,
     WorkspaceCheckpoints,
 }
@@ -503,12 +504,29 @@ where
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
 
+    async fn validate_request_ask(&self, name: &str) -> Result<(), NativeV2CliError> {
+        let target = self.registry.get(name).map_err(cli_target_error)?;
+        self.authority
+            .validate_request_ask(&target)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
     async fn connect_run_suspension(
         &self,
         name: &str,
         run_id: openengine_cluster_protocol::RunId,
     ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
         self.connect_session(name, Some(run_id), TargetSessionPurpose::RunSuspension)
+            .await
+    }
+
+    async fn connect_request_ask(
+        &self,
+        name: &str,
+        run_id: Option<openengine_cluster_protocol::RunId>,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(name, run_id, TargetSessionPurpose::RequestAsk)
             .await
     }
 
@@ -656,6 +674,36 @@ where
         }
         self.authority
             .hosted_run_vectors(&target, params)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn hosted_inbox_show(
+        &self,
+        name: &str,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxShowResult>, NativeV2CliError> {
+        let target = self.target(name)?;
+        if matches!(target.access, TargetAccess::Direct) {
+            return Ok(None);
+        }
+        self.authority
+            .hosted_inbox_show(&target, params)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn hosted_inbox_list(
+        &self,
+        name: &str,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxListResult>, NativeV2CliError> {
+        let target = self.target(name)?;
+        if matches!(target.access, TargetAccess::Direct) {
+            return Ok(None);
+        }
+        self.authority
+            .hosted_inbox_list(&target, params)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
@@ -815,6 +863,9 @@ where
                 self.authority
                     .run_suspension_session(&target, &request)
                     .await
+            }
+            TargetSessionPurpose::RequestAsk => {
+                self.authority.request_ask_session(&target, &request).await
             }
             TargetSessionPurpose::RunVectors => {
                 self.authority.run_vectors_session(&target, &request).await

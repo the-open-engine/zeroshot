@@ -155,3 +155,9 @@ must finish first. When plans depend on each other, the skill offers to write a 
 [Plan work before running it](planning.md).
 
 Stack profiles cannot contain `builtin.request.wait@1` wait nodes; submission refuses them before sending the stack.
+
+Stack profiles cannot contain human request nodes (`builtin.request.ask@1`), including profiles
+used for merge or stacked pull-request delivery. These nodes need a retained interactive checkpoint
+and an answer successor, while stacks keep static inputs. Use a standalone graph and `answer`/`inbox`
+when a person must decide. Request deadlines default to 7 days and are bounded to 30 days; named
+targets must advertise `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md).

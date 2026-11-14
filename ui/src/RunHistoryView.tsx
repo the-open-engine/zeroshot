@@ -444,7 +444,7 @@ function currentHistoryState(
   atStart: boolean
 ) {
   if (run.phase === 'suspended')
-    return `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}`;
+    return `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}${run.suspension?.request ? `: ${run.suspension.request.text} (deadline ${new Date(run.suspension.request.expiresAt).toISOString()})` : ''}`;
   if (run.phase === 'running' && run.suspendRequested) return 'Suspension requested';
   if (terminal) return terminal.status;
   if (run.runtimeFailure) return 'failed';

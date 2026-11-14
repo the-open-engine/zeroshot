@@ -493,6 +493,21 @@ async fn direct_connector_binds_resume_fields_to_the_original_runtime() {
 
 #[tokio::test]
 async fn direct_connector_constrains_resume_values_and_propagates_authorization() {
+    assert_direct_continuation_authorization(None).await;
+}
+
+#[tokio::test]
+async fn direct_connector_constrains_answer_values_and_propagates_authorization() {
+    let from = serde_json::from_value(
+        serde_json::json!({"kind":"answer","signals":{"decision":"approved"},"output":{}}),
+    )
+    .assert_value();
+    assert_direct_continuation_authorization(Some(from)).await;
+}
+
+async fn assert_direct_continuation_authorization(
+    from: Option<openengine_cluster_protocol::RunResumeFrom>,
+) {
     let fixture = direct_recovery_fixture().await;
     let selected = EnvironmentVariableName::new("AWS_SECRET_ACCESS_KEY").assert_value();
     let successor_run_id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992");
@@ -509,7 +524,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
-        from: None,
+        from: from.clone(),
     };
     assert!(
         fixture
@@ -536,7 +551,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
-        from: None,
+        from,
     };
     assert!(
         fixture
@@ -1074,6 +1089,126 @@ async fn direct_websocket_dialer_sends_no_authorization() {
 }
 
 #[tokio::test]
+async fn direct_websocket_inventory_above_default_wire_limits_keeps_pending_calls() {
+    use futures_util::{SinkExt, StreamExt};
+    use openengine_cluster_client::ClusterClient;
+    use openengine_cluster_protocol::{RunListParams, RunStatusParams};
+    use serde_json::{Value, json};
+    use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let address = listener.local_addr().assert_value();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.assert_value();
+        let mut socket = accept_async(stream).await.assert_value();
+        let mut requests = Vec::new();
+        for _ in 0..2 {
+            let message = socket.next().await.assert_value().assert_value();
+            requests.push(
+                serde_json::from_str::<Value>(message.to_text().assert_value()).assert_value(),
+            );
+        }
+        requests.sort_by_key(|request| request["method"].as_str().assert_value().to_owned());
+        let status = json!({
+            "runId":"run-1","title":"Approval",
+            "source":{"repository":"open-engine/zeroshot","branch":"main",
+                "revision":"0123456789abcdef0123456789abcdef01234567"},
+            "size":"small","atCursor":"v2:1","status":{"phase":"admitted"}
+        });
+        for request in requests {
+            let result = if request["method"] == "run/list" {
+                let runs: Vec<_> = (0..96)
+                    .map(|index| {
+                        let mut row = status.clone();
+                        row["runId"] = json!(format!("run-{index}"));
+                        row["status"] = json!({"phase":"suspended","reason":"request",
+                            "node":"approval","createdAt":1000,"metadata":{},
+                            "request":{"id":format!("question-{index}"),"text":"x".repeat(750_000),
+                                "signals":{"decision":["approved","rejected"]},
+                                "output":{"kind":"record","fields":{}},"expiresAt":2000}});
+                        row
+                    })
+                    .collect();
+                json!({"runs":runs})
+            } else {
+                status.clone()
+            };
+            let frame = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
+            if request["method"] == "run/list" {
+                assert!(frame.len() > 64 * 1024 * 1024);
+            }
+            socket.send(Message::text(frame)).await.assert_value();
+        }
+    });
+    let target = direct_target(format!("http://{address}"));
+    let session =
+        TargetOecpAccess::new(format!("ws://{address}/oecp"), None, &target.access).assert_value();
+    let transport = TargetOecpWebSocketDialer
+        .dial(&target, session)
+        .await
+        .assert_value();
+    let client = ClusterClient::new(transport.as_ref());
+    let (listed, status) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(
+            client.run_list(RunListParams::default()),
+            client.run_status(RunStatusParams {
+                run_id: RunId::new("run-1")
+            })
+        )
+    })
+    .await
+    .assert_value();
+    assert_eq!(listed.assert_value().runs.len(), 96);
+    assert_eq!(status.assert_value().run_id, RunId::new("run-1"));
+    server.await.assert_value();
+}
+
+#[tokio::test]
+async fn direct_websocket_dialer_rejects_oversized_frame_headers_without_payload() {
+    use futures_util::StreamExt;
+    use openengine_cluster_client::ClusterClient;
+    use openengine_cluster_client::websocket::MAX_WIRE_RESPONSE_BYTES;
+    use openengine_cluster_protocol::RunListParams;
+    use tokio::io::AsyncWriteExt;
+
+    // Test the finite boundary before the attack-sized declaration to keep regressions bounded.
+    for declared_bytes in [
+        u64::try_from(MAX_WIRE_RESPONSE_BYTES).assert_value() + 1,
+        1 << 40,
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+        let address = listener.local_addr().assert_value();
+        let (release, held) = oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.assert_value();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.assert_value();
+            socket.next().await.assert_value().assert_value();
+            let mut header = vec![0x81, 127];
+            header.extend_from_slice(&declared_bytes.to_be_bytes());
+            socket.get_mut().write_all(&header).await.assert_value();
+            let _ = held.await;
+        });
+        let target = direct_target(format!("http://{address}"));
+        let session = TargetOecpAccess::new(format!("ws://{address}/oecp"), None, &target.access)
+            .assert_value();
+        let transport = TargetOecpWebSocketDialer
+            .dial(&target, session)
+            .await
+            .assert_value();
+        let client = ClusterClient::new(transport.as_ref());
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.run_list(RunListParams::default()),
+        )
+        .await
+        .assert_value();
+        assert!(result.is_err(), "oversized header was accepted: {result:?}");
+        release.send(()).assert_value();
+        server.await.assert_value();
+    }
+}
+
+#[tokio::test]
 async fn websocket_dialer_rejects_cross_authority_before_network() {
     let target = target();
     let session = TargetOecpAccess::new(
@@ -1256,4 +1391,52 @@ async fn suspend_and_both_vector_reads_reach_the_direct_runs_oecp_session() {
         );
         assert!(session.authorization.is_none());
     }
+}
+
+#[tokio::test]
+async fn inbox_reads_use_a_direct_targets_oecp_session() {
+    let root = temp_root();
+    let (origin, server) = spawn_direct_target_authority(4).await;
+    let registry = MemoryRegistry::default();
+    registry.insert(direct_target(origin)).assert_value();
+    let dialer = FakeDialer::default();
+    let backend = NamedTargetCliBackend::new(NativeV2TargetConnector::new(
+        registry,
+        test_http_authority(root.path("refresh-locks")),
+        dialer.clone(),
+    ));
+    backend
+        .inbox_list(
+            Some("vm"),
+            openengine_cluster_protocol::InboxListParams {
+                after: Some(RunId::new("before")),
+                limit: Some(2),
+            },
+        )
+        .await
+        .assert_error();
+    backend
+        .inbox_show(
+            Some("vm"),
+            openengine_cluster_protocol::RunStatusParams {
+                run_id: RunId::new("question"),
+            },
+        )
+        .await
+        .assert_error();
+    let requests = dialer.requests.lock().assert_value().clone();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request["method"].as_str().assert_value())
+            .collect::<Vec<_>>(),
+        ["inbox/list", "inbox/show"]
+    );
+    assert_eq!(requests[0]["params"]["after"], "before");
+    assert_eq!(requests[1]["params"]["runId"], "question");
+    assert_eq!(dialer.sessions.lock().assert_value().len(), 2);
+    tokio::time::timeout(std::time::Duration::from_secs(5), server)
+        .await
+        .assert_value()
+        .assert_value();
 }

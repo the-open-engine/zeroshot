@@ -108,6 +108,12 @@ where
             openengine_cluster_protocol::RUN_SUSPEND_METHOD => {
                 self.dispatch_run_suspend(id, params).await
             }
+            openengine_cluster_protocol::INBOX_LIST_METHOD => {
+                self.dispatch_inbox_list(id, params).await
+            }
+            openengine_cluster_protocol::INBOX_SHOW_METHOD => {
+                self.dispatch_inbox_show(id, params).await
+            }
             openengine_cluster_protocol::RUN_VECTORS_METHOD => {
                 self.dispatch_run_vectors(id, params).await
             }
@@ -373,6 +379,30 @@ where
                 Err(_) => return native_v2_invalid_params(id),
             };
         match self.run_vectors(params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_inbox_show(&self, id: RequestId, params: Value) -> String {
+        let params =
+            match serde_json::from_value::<openengine_cluster_protocol::InboxShowParams>(params) {
+                Ok(params) => params,
+                Err(_) => return native_v2_invalid_params(id),
+            };
+        match self.inbox_show(params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_inbox_list(&self, id: RequestId, params: Value) -> String {
+        let params =
+            match serde_json::from_value::<openengine_cluster_protocol::InboxListParams>(params) {
+                Ok(params) => params,
+                Err(_) => return native_v2_invalid_params(id),
+            };
+        match self.inbox_list(params).await {
             Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }

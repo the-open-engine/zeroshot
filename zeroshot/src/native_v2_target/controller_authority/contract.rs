@@ -68,6 +68,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) runtime_harnesses: Option<Vec<openengine_cluster_protocol::RuntimeLane>>,
     pub(super) run_sizes: Option<openengine_cluster_protocol::TargetRunSizesDiscovery>,
     pub(super) request_wait: bool,
+    pub(super) request_ask: bool,
     pub(super) decision_models: bool,
     pub(super) git_transport: bool,
     pub(super) comment_delivery: bool,
@@ -148,6 +149,11 @@ pub(super) fn build_controller_descriptor(
         node_runtime_lanes,
         runtime_harnesses,
         run_sizes,
+        request_ask: wire
+            .extensions
+            .request_ask
+            .as_ref()
+            .is_some_and(|marker| marker.kind == openengine_cluster_protocol::REQUEST_ASK_KIND),
         request_wait: wire
             .extensions
             .request_wait

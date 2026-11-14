@@ -426,6 +426,12 @@ define_run_status_projection!(
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "reason", rename_all = "snake_case")]
 pub enum RunSuspension {
+    Request {
+        node: NodeName,
+        #[serde(rename = "createdAt")]
+        created_at: UnixTimestampMillis,
+        request: Box<crate::RunRequest>,
+    },
     Command {
         node: NodeName,
         #[serde(rename = "createdAt")]
@@ -443,13 +449,15 @@ impl RunSuspension {
     #[must_use]
     pub const fn node(&self) -> &NodeName {
         match self {
-            Self::Command { node, .. } | Self::Wait { node, .. } => node,
+            Self::Command { node, .. } | Self::Wait { node, .. } | Self::Request { node, .. } => {
+                node
+            }
         }
     }
     #[must_use]
     pub const fn due_at(&self) -> Option<UnixTimestampMillis> {
         match self {
-            Self::Command { .. } => None,
+            Self::Command { .. } | Self::Request { .. } => None,
             Self::Wait { wait, .. } => Some(wait.due_at),
         }
     }
@@ -496,6 +504,8 @@ impl<'de> Deserialize<'de> for RunStatus {
                 #[serde(default)]
                 wait: Option<RunWait>,
                 #[serde(default)]
+                request: Option<Box<crate::RunRequest>>,
+                #[serde(default)]
                 metadata: RunMetadata,
             },
             Finished {
@@ -535,20 +545,30 @@ impl<'de> Deserialize<'de> for RunStatus {
                 node,
                 created_at,
                 wait,
+                request,
                 metadata,
             } => {
-                let suspension = match (reason, wait) {
-                    (crate::VectorSuspensionReason::Command, None) => {
+                let suspension = match (reason, wait, request) {
+                    (crate::VectorSuspensionReason::Command, None, None) => {
                         RunSuspension::Command { node, created_at }
                     }
-                    (crate::VectorSuspensionReason::Wait, Some(wait)) => RunSuspension::Wait {
-                        node,
-                        created_at,
-                        wait,
-                    },
+                    (crate::VectorSuspensionReason::Wait, Some(wait), None) => {
+                        RunSuspension::Wait {
+                            node,
+                            created_at,
+                            wait,
+                        }
+                    }
+                    (crate::VectorSuspensionReason::Request, None, Some(request)) => {
+                        RunSuspension::Request {
+                            node,
+                            created_at,
+                            request,
+                        }
+                    }
                     _ => {
                         return Err(serde::de::Error::custom(
-                            "suspended wait requires wait.dueAt; command forbids wait",
+                            "suspension reason requires its matching wait or request member",
                         ));
                     }
                 };

@@ -12,6 +12,10 @@ from .runs import (
     ExhaustedLoop,
     FailureContext,
     FailureDiagnostic,
+    HumanRequest,
+    InboxEntry,
+    InboxPage,
+    InboxRequest,
     LogEvent,
     RunResult,
     RunStatus,
@@ -97,6 +101,7 @@ def _summary(status: RunStatus) -> RunSummary:
         node=status.node,
         created_at=status.created_at,
         due_at=status.due_at,
+        request=status.request,
     )
 
 
@@ -409,10 +414,11 @@ def _nullable_string(value: Mapping[str, object], name: str, kind: str) -> str |
 
 class _SuspensionFields(TypedDict, total=False):
     suspend_requested: bool
-    reason: Literal["command", "wait"]
+    reason: Literal["command", "wait", "request"]
     node: str
     created_at: int
     due_at: int | None
+    request: HumanRequest | None
 
 
 def _suspension(value: Mapping[str, object], phase: str) -> _SuspensionFields:
@@ -423,14 +429,18 @@ def _suspension(value: Mapping[str, object], phase: str) -> _SuspensionFields:
         return {"suspend_requested": requested}
     wait = value.get("wait")
     reason = cast(
-        Literal["command", "wait"],
-        _enum_string(value, "reason", {"command", "wait"}, "suspension"),
+        Literal["command", "wait", "request"],
+        _enum_string(value, "reason", {"command", "wait", "request"}, "suspension"),
     )
+    request = value.get("request")
+    if (reason == "request") != (request is not None):
+        raise ProtocolError("Zeroshot emitted malformed suspension.request")
     if (reason == "wait") != (wait is not None):
         raise ProtocolError("Zeroshot emitted malformed suspension.wait")
     return {
         "suspend_requested": requested,
         "reason": reason,
+        "request": None if request is None else _human_request(request),
         "node": _string(value, "node", "suspension"),
         "created_at": _positive_javascript_safe_integer(value, "createdAt", "suspension"),
         "due_at": None
@@ -459,5 +469,55 @@ def _vectors(value: object) -> RunVectorsPage:
         vectors=tuple(_vector(item) for item in _mapping_list(page.get("vectors"), "vectors")),
         next_after=_nullable_string(
             {"nextAfter": page.get("nextAfter")}, "nextAfter", "vector page"
+        ),
+    )
+
+
+def _human_request(value: object) -> HumanRequest:
+    request = _mapping(value, "request")
+    return HumanRequest(
+        id=_string(request, "id", "request"),
+        text=_string(request, "text", "request"),
+        signals=cast(JsonValue, dict(_mapping(request.get("signals"), "request.signals"))),
+        output=cast(JsonValue, dict(_mapping(request.get("output"), "request.output"))),
+        expires_at=_positive_javascript_safe_integer(request, "expiresAt", "request"),
+    )
+
+
+def _inbox(value: object) -> InboxPage:
+    page = _mapping(value, "inbox")
+    return InboxPage(
+        requests=tuple(
+            InboxEntry(
+                run_id=_string(entry, "runId", "inbox"),
+                node=_string(entry, "node", "inbox"),
+                created_at=_positive_javascript_safe_integer(entry, "createdAt", "inbox"),
+                expires_at=_positive_javascript_safe_integer(entry, "expiresAt", "inbox"),
+                state=cast(
+                    Literal["pending", "expired"],
+                    _enum_string(entry, "state", {"pending", "expired"}, "inbox"),
+                ),
+            )
+            for entry in _mapping_list(page.get("requests"), "inbox.requests")
+        ),
+        next_after=_nullable_string({"nextAfter": page.get("nextAfter")}, "nextAfter", "inbox"),
+    )
+
+
+def _inbox_request(value: object) -> InboxRequest:
+    request = _mapping(value, "inbox request")
+    return InboxRequest(
+        run_id=_string(request, "runId", "inbox request"),
+        node=_string(request, "node", "inbox request"),
+        created_at=_positive_javascript_safe_integer(request, "createdAt", "inbox request"),
+        request=_human_request(request.get("request")),
+        state=cast(
+            Literal["pending", "answered", "expired", "stopped"],
+            _enum_string(
+                request, "state", {"pending", "answered", "expired", "stopped"}, "inbox request"
+            ),
+        ),
+        successor_run_id=_nullable_string(
+            {"successorRunId": request.get("successorRunId")}, "successorRunId", "inbox request"
         ),
     )

@@ -271,6 +271,7 @@ fn review_bootstrap(fixture: &Fixture, bin: &Path) -> PortableControllerBootstra
     })).unwrap();
     PortableControllerBootstrap {
         predecessor: None,
+        request_resolution: None,
         delivery_receipt: None,
         local_branch: None,
         checkpoint: None,

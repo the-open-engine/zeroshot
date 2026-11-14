@@ -108,6 +108,25 @@ impl ClusterBackend for NativeV2PlatformController {
         self.suspend(params).await.map_err(platform_backend_error)
     }
 
+    async fn inbox_list(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, BackendError> {
+        self.inbox_list(params)
+            .await
+            .map_err(platform_backend_error)
+    }
+    async fn inbox_show(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
+        self.inbox_show(params)
+            .await
+            .map_err(platform_backend_error)
+    }
+
     async fn run_vectors(
         &self,
         _context: &ConnectionContext,

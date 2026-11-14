@@ -2,7 +2,7 @@
 //! subscription framing to the wire. One JSON-RPC object per text message; this module reuses the
 //! transport-neutral connection core's exact admission and subscription-streaming machinery so
 //! results, events, and errors stay byte-equivalent between the NDJSON and WebSocket bindings.
-//! Framing rules unique to WebSocket -- binary rejection, the 1,048,576 UTF-8 byte bound, and
+//! Framing rules unique to WebSocket -- binary rejection, the 2,097,152 UTF-8 byte bound, and
 //! cooperative, ownership-safe `$/cancelRequest` -- live only here.
 
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ use crate::{ClusterBackend, Dispatcher};
 /// Bounded WebSocket text-frame length: a text message whose UTF-8 byte length exceeds this
 /// closes the connection with code 1009 (message too big), matching `stdio::serve_ndjson`'s
 /// NDJSON line bound.
-pub const MAX_FRAME_BYTES: usize = 1_048_576;
+pub const MAX_FRAME_BYTES: usize = crate::MAX_INCOMING_FRAME_BYTES;
 
 /// Bounded per-connection outbound queue, matching `stdio::serve_ndjson`'s bound.
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;

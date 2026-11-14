@@ -78,7 +78,7 @@ async fn fixture() -> (Harness, Arc<PublicationStore>) {
 }
 
 async fn vectors(harness: &Harness) -> Vec<RunVector> {
-    crate::v2_run_ledger::vectors::list(
+    crate::v2_run_ledger::vectors::list_full(
         harness.ledger.as_ref(),
         RunVectorsParams {
             run_id: harness.supervisor.run_id.clone(),

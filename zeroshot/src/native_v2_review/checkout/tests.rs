@@ -150,6 +150,7 @@ mod local_auth {
         let environment = RunEnvironment::exact_for_admitted(admitted, values).assert_value();
         PortableControllerBootstrap {
             predecessor: None,
+            request_resolution: None,
             delivery_receipt: None,
             local_branch: None,
             checkpoint: None,

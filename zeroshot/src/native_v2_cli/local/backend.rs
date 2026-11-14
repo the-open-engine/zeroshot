@@ -94,15 +94,33 @@ impl LocalCliBackend {
                     run_id: params.run_id.clone(),
                 })
                 .await?;
+            if let Some(successor) = &status.workspace_recovery.successor_run_id {
+                return Err(invalid_request(format!(
+                    "run already has successor {}",
+                    successor.as_str()
+                )));
+            }
             reject_suspended_selection(
                 &status.status,
                 params.from.as_ref(),
                 discard_workspace_changes,
             )?;
-            let recovery = self.claimable_recovery_document(
-                &params.run_id,
-                status.workspace_recovery.recoverable,
-            )?;
+            let recovery =
+                self.claimable_recovery_document(
+                    &params.run_id,
+                    status.workspace_recovery.recoverable
+                        || matches!(
+                            (&status.status, &params.from),
+                            (
+                                openengine_cluster_protocol::RunStatus::Suspended {
+                                    suspension:
+                                        openengine_cluster_protocol::RunSuspension::Request { .. },
+                                    ..
+                                },
+                                Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
+                            )
+                        ),
+                )?;
             let claim = self.claim_recovery_workspace(&params.run_id)?;
             self.retain_predecessor_delivery(&params.run_id, &recovery)
                 .await?;
@@ -228,6 +246,43 @@ impl LocalCliBackend {
                     .to_owned(),
             ));
         }
+        let request_resolution = if matches!(
+            params.from,
+            Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
+        ) {
+            let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+            let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
+            let stored = ledger
+                .get(&params.run_id)
+                .await
+                .map_err(local_error)?
+                .ok_or_else(|| invalid_request("run is not suspended"))?;
+            let suspension = stored
+                .snapshot
+                .suspension
+                .as_ref()
+                .filter(|_| stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended)
+                .ok_or_else(|| invalid_request("answer requires a suspended run"))?;
+            let resolution = crate::native_v2_request::resolve(
+                suspension,
+                params.from.as_ref(),
+                crate::native_v2_runner::current_timestamp(),
+            )
+            .map_err(invalid_request)?;
+            crate::native_v2_request::validate_resolution(
+                &stored.snapshot,
+                &params.successor_run_id,
+                &resolution,
+            )
+            .map_err(invalid_request)?;
+            Some(resolution)
+        } else {
+            None
+        };
+        let expired = matches!(
+            request_resolution,
+            Some(openengine_cluster_protocol::RequestResolution::Expiry {})
+        );
         let (checkpoint, restore) = self
             .checkpoint_selection(&params, &recovery, discard_workspace_changes)?
             .unzip();
@@ -256,7 +311,7 @@ impl LocalCliBackend {
         if let Err(failure) = self
             .start_prepared_controller_with_lineage(
                 prepared,
-                Some(params.run_id.clone()),
+                Some((params.run_id.clone(), request_resolution)),
                 checkpoint,
             )
             .await
@@ -281,6 +336,12 @@ impl LocalCliBackend {
         }
         let successor = self.read_recovery_document(&params.successor_run_id)?;
         debug_assert_eq!(successor.resumed_from.as_ref(), Some(&params.run_id));
+        if expired {
+            return Err(invalid_request(format!(
+                "request expired; successor {}",
+                params.successor_run_id.as_str()
+            )));
+        }
         Ok(openengine_cluster_protocol::RunResumeResult {
             run_id: params.successor_run_id,
             resumed_from: params.run_id,
@@ -579,6 +640,87 @@ impl NativeV2CliBackend for LocalCliBackend {
         .await
     }
 
+    async fn inbox_list(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2CliError> {
+        require_local(target)?;
+        params
+            .validate()
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        let mut requests = Vec::new();
+        let mut runs = self.list_local().await?.runs;
+        runs.sort_by(|a, b| a.run_id.as_str().cmp(b.run_id.as_str()));
+        let now = crate::native_v2_runner::current_timestamp();
+        for status in runs {
+            if params
+                .after
+                .as_ref()
+                .is_some_and(|after| status.run_id.as_str() <= after.as_str())
+            {
+                continue;
+            }
+            if !matches!(
+                status.status,
+                openengine_cluster_protocol::RunStatus::Suspended {
+                    suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
+                    ..
+                }
+            ) || status.workspace_recovery.successor_run_id.is_some()
+            {
+                continue;
+            }
+            if let openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } =
+                &status.status
+                && let Some(entry) =
+                    crate::v2_run_ledger::inbox::entry(status.run_id, suspension, now)
+            {
+                requests.push(entry);
+            }
+            if requests.len() > params.limit.unwrap_or(50) as usize {
+                break;
+            }
+        }
+        crate::v2_run_ledger::inbox::page(requests, params).map_err(vector_error)
+    }
+    async fn inbox_show(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2CliError> {
+        require_local(target)?;
+        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
+        let mut request = crate::v2_run_ledger::inbox::show(
+            &ledger,
+            &params.run_id,
+            crate::native_v2_runner::current_timestamp(),
+        )
+        .await
+        .map_err(vector_error)?;
+        let status = self.status_local(params).await?;
+        if let Some(successor) = status.workspace_recovery.successor_run_id {
+            request.successor_run_id = Some(successor.clone());
+            let (paths, _successor_directory) = match self.recorded_storage(&successor) {
+                Ok(storage) => storage,
+                Err(NativeV2CliError::RunNotFound { .. }) => return Ok(request),
+                Err(error) => return Err(error),
+            };
+            // SQLite creates the file before installing its first schema transaction.
+            if std::fs::metadata(paths.ledger()).map_err(local_io)?.len() == 0 {
+                return Ok(request);
+            }
+            let successor_ledger =
+                SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
+            crate::v2_run_ledger::inbox::with_successor(&successor_ledger, request, successor)
+                .await
+                .map_err(vector_error)
+        } else {
+            Ok(request)
+        }
+    }
+
     async fn run_vectors(
         &self,
         target: Option<&str>,
@@ -666,12 +808,54 @@ mod checkpoint_compatibility_tests;
 #[path = "backend/tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "backend/request_tests.rs"]
+pub(super) mod request_tests;
+
+pub(super) fn invalid_request(message: impl Into<String>) -> NativeV2CliError {
+    NativeV2CliError::Remote {
+        code: "invalid_request".to_owned(),
+        message: message.into(),
+        details: None,
+    }
+}
+
 fn reject_suspended_selection(
     status: &openengine_cluster_protocol::RunStatus,
     from: Option<&RunResumeFrom>,
     discard: bool,
 ) -> Result<(), NativeV2CliError> {
+    if !matches!(
+        status,
+        openengine_cluster_protocol::RunStatus::Suspended { .. }
+    ) && matches!(
+        from,
+        Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
+    ) {
+        return Err(invalid_request("answer requires a suspended run"));
+    }
     if let openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } = status {
+        if matches!(
+            suspension,
+            openengine_cluster_protocol::RunSuspension::Request { .. }
+        ) {
+            crate::native_v2_request::resolve(
+                suspension,
+                from,
+                crate::native_v2_runner::current_timestamp(),
+            )
+            .map_err(invalid_request)?;
+            if discard {
+                return Err(invalid_request("answer cannot discard workspace changes"));
+            }
+            return Ok(());
+        }
+        if matches!(
+            from,
+            Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
+        ) {
+            return Err(invalid_request("answer requires a request suspension"));
+        }
         if from.is_some() || discard {
             return Err(local_message(
                 "suspended runs accept only default resume without --discard-workspace-changes",

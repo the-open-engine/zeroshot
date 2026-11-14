@@ -35,10 +35,17 @@ export type RunSummary = {
   phase: string;
   suspendRequested?: boolean;
   suspension?: {
-    reason: 'command' | 'wait';
+    reason: 'command' | 'wait' | 'request';
     node: string;
     createdAt: number;
     wait?: { dueAt: number };
+    request?: {
+      id: string;
+      text: string;
+      signals: Record<string, string[]>;
+      output: unknown;
+      expiresAt: number;
+    };
   };
   workspaceRecovery?: { successorRunId?: string };
   cursor: string | null;
@@ -208,6 +215,7 @@ export function eventLabel(event: HistoryEvent['event']): string {
       return `${humanize(node ?? 'Node')} · ${signals.length ? signals.join(', ') : 'completed'}`;
     }
     case 'wait_deferred':
+    case 'request_deferred':
       return `${humanize(node ?? 'Wait')} suspended`;
     case 'execution_voided':
       return `${humanize(node ?? 'Node')} stopped`;
@@ -419,7 +427,10 @@ function readHistoryEvent(
       invocation.outcome = event.completion.outcome;
       invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
     }
-  } else if (['execution_voided', 'wait_deferred'].includes(event.kind) && event.reference) {
+  } else if (
+    ['execution_voided', 'wait_deferred', 'request_deferred'].includes(event.kind) &&
+    event.reference
+  ) {
     const invocation = byId.get(identity(event.reference.execution));
     if (
       invocation &&
@@ -427,7 +438,9 @@ function readHistoryEvent(
       invocation.end === undefined
     ) {
       invocation.end = index;
-      invocation.state = event.kind === 'wait_deferred' ? 'suspended' : 'skipped';
+      invocation.state = ['wait_deferred', 'request_deferred'].includes(event.kind)
+        ? 'suspended'
+        : 'skipped';
       invocation.reason = event.reason;
     }
   } else if (event.kind === 'safe_log') {

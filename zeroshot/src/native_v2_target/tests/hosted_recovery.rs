@@ -99,7 +99,10 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         )
         .await
         .assert_value();
-    assert_eq!(vector, vectors.vectors[0]);
+    assert_eq!(
+        openengine_cluster_protocol::RunVectorSummary::from(vector),
+        vectors.vectors[0]
+    );
     assert!(dialer.sessions.lock().assert_value().is_empty());
     let requests = tokio::time::timeout(std::time::Duration::from_secs(5), server)
         .await

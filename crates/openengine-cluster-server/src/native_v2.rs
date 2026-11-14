@@ -124,6 +124,20 @@ where
         self.backend().run_vectors(self.context(), params).await
     }
 
+    pub async fn inbox_show(
+        &self,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
+        self.backend().inbox_show(self.context(), params).await
+    }
+
+    pub async fn inbox_list(
+        &self,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, BackendError> {
+        self.backend().inbox_list(self.context(), params).await
+    }
+
     pub async fn run_vector(
         &self,
         params: openengine_cluster_protocol::RunVectorParams,

@@ -13,6 +13,8 @@ from .errors import InvalidRequestError, ProtocolError, TargetError, ZeroshotErr
 from .run_errors import RunNotFoundError, SubmissionConflictError
 
 _ERROR_SCHEMA = "zeroshot.error/v1"
+# Match the native protocol client's full-request response and JSON-RPC framing allowance.
+_MAX_STREAM_FRAME_BYTES = 3 * 1024 * 1024 + 2048
 
 
 class _RunFailed(ZeroshotError):
@@ -81,7 +83,15 @@ class NativeProcess:
         assert process.stderr is not None
         stderr_task = asyncio.create_task(process.stderr.read())
         try:
-            async for line in process.stdout:
+            while True:
+                try:
+                    line = await process.stdout.readline()
+                except ValueError as error:
+                    raise ProtocolError("Zeroshot emitted oversized NDJSON") from error
+                if not line:
+                    break
+                if len(line.removesuffix(b"\n").removesuffix(b"\r")) > _MAX_STREAM_FRAME_BYTES:
+                    raise ProtocolError("Zeroshot emitted oversized NDJSON")
                 try:
                     value = json.loads(line)
                 except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -112,6 +122,7 @@ class NativeProcess:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=_MAX_STREAM_FRAME_BYTES + 1,  # Permit CRLF framing at the byte ceiling.
             )
         )
         try:

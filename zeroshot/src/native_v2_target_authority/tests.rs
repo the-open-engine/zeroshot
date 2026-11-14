@@ -1101,3 +1101,6 @@ fn public_servers_reject_factories_without_a_size_catalog() {
         );
     }
 }
+
+#[path = "tests/requests.rs"]
+mod requests;

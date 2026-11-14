@@ -719,3 +719,6 @@ mod join_regressions;
 
 #[path = "tests/loop_limits.rs"]
 mod input_loop_limits;
+
+#[path = "tests/requests.rs"]
+mod requests;

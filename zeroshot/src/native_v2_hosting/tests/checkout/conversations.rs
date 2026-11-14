@@ -247,6 +247,7 @@ impl LegacyStorage {
             comment_publications: None,
             checkpoints: store,
             execution_seed: seed,
+            request_continuation: None,
             delivery_run_id: None,
         })
     }

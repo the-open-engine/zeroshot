@@ -46,3 +46,5 @@ pub mod profile_ui;
 pub mod workspace;
 
 pub mod native_v2_wait;
+
+pub mod native_v2_request;

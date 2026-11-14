@@ -2,7 +2,7 @@ use super::*;
 
 const TRANSCRIPT_MARKER: &str = "only-in-provider-session-7a8b63";
 
-fn fixture() -> LocalFixture {
+pub(super) fn fixture() -> LocalFixture {
     let mut fixture = LocalFixture::new();
     // Environment-cleared instrumented controllers write default profiles in their launch folder.
     // Keep those profiles outside the selected workspace so checkpoints measure conversation data.
@@ -59,7 +59,7 @@ fn fixture() -> LocalFixture {
     fixture
 }
 
-fn new_provider_home(fixture: &mut LocalFixture) {
+pub(super) fn new_provider_home(fixture: &mut LocalFixture) {
     fs::remove_dir_all(fixture.harness_environment.get("CODEX_HOME").assert_value()).assert_value();
     let provider = fixture.root.path("codex-two");
     fs::create_dir_all(&provider).assert_value();
@@ -70,7 +70,7 @@ fn new_provider_home(fixture: &mut LocalFixture) {
     assert_eq!(fs::read_dir(provider).assert_value().count(), 0);
 }
 
-fn worker_calls(fixture: &LocalFixture) -> Vec<String> {
+pub(super) fn worker_calls(fixture: &LocalFixture) -> Vec<String> {
     fs::read_to_string(fixture.repository.join("conversation-calls"))
         .assert_value()
         .lines()
@@ -106,7 +106,11 @@ async fn hold_and_suspend(fixture: &LocalFixture, run: &str, mode: &str, turn: u
     wait_for_exit(fixture.ready_pid(run)).await;
 }
 
-async fn assert_private_and_discarded(fixture: &LocalFixture, predecessor: &str, successor: &str) {
+pub(super) async fn assert_private_and_discarded(
+    fixture: &LocalFixture,
+    predecessor: &str,
+    successor: &str,
+) {
     for run in [predecessor, successor] {
         for command in ["logs", "status", "checkpoints"] {
             let output = fixture.output(&[command, run], "finish").await;

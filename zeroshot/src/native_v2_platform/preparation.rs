@@ -19,6 +19,7 @@ pub(super) struct PreparationStart {
 
 pub(super) struct ResumePreparation {
     pub source_run_id: RunId,
+    pub request_resolution: Option<openengine_cluster_protocol::RequestResolution>,
     pub selection: CheckpointRestoreSelection,
 }
 
@@ -217,13 +218,50 @@ impl NativeV2PlatformController {
                     .get(&resume.source_run_id)
                     .await?
                     .ok_or(RunLedgerError::RunNotFound)?;
-                for execution in
-                    crate::native_v2_supervisor::continuation_history(&source.snapshot)?
-                {
-                    self.ledger
-                        .append(run_id, vec![RunEvent::PriorExecution { execution }])
-                        .await?;
+                let history = match &resume.request_resolution {
+                    Some(resolution) => {
+                        crate::native_v2_supervisor::request_history(&source.snapshot, resolution)?
+                    }
+                    None => crate::native_v2_supervisor::continuation_history(&source.snapshot)?,
+                };
+                let expiry = match (&resume.request_resolution, &source.snapshot.suspension) {
+                    (
+                        Some(openengine_cluster_protocol::RequestResolution::Expiry {}),
+                        Some(openengine_cluster_protocol::RunSuspension::Request { node, .. }),
+                    ) => Some(node),
+                    _ => None,
+                };
+                let mut log =
+                    crate::native_v2_supervisor::logging::request_expiry_log(&history, expiry)?;
+                for execution in history {
+                    let mut events = Vec::new();
+                    if matches!(&log, Some((id, _)) if *id == execution.execution) {
+                        events.extend(log.take().map(|(_, event)| event));
+                    }
+                    events.push(RunEvent::PriorExecution { execution });
+                    self.ledger.append(run_id, events).await?;
                 }
+            }
+            if let Some(resolution) = &resume.request_resolution {
+                let source = self
+                    .ledger
+                    .get(&resume.source_run_id)
+                    .await?
+                    .ok_or(RunLedgerError::RunNotFound)?;
+                let Some(openengine_cluster_protocol::RunSuspension::Request { request, .. }) =
+                    &source.snapshot.suspension
+                else {
+                    return Err(NativeV2SupervisorError::InvalidState.into());
+                };
+                self.ledger
+                    .append(
+                        run_id,
+                        vec![crate::v2_run_ledger::vector_event(
+                            run_id,
+                            crate::native_v2_request::resolution_vector(request, resolution),
+                        )?],
+                    )
+                    .await?;
             }
             start.stored = self
                 .ledger

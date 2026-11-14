@@ -1,0 +1,29 @@
+{
+  "createdAt": 1762905600000,
+  "metadata": {},
+  "node": "approval",
+  "phase": "suspended",
+  "reason": "request",
+  "request": {
+    "expiresAt": 1763510400000,
+    "id": "request-1",
+    "output": {
+      "fields": {
+        "feedback": {
+          "required": true,
+          "type": {
+            "kind": "string"
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "signals": {
+      "decision": [
+        "approved",
+        "rejected"
+      ]
+    },
+    "text": "Ready to continue?"
+  }
+}

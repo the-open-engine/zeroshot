@@ -5,7 +5,7 @@ use environment_hooks::HookContext;
 mod identity_leases;
 mod lanes;
 mod lifecycle;
-use lifecycle::AllocationTurns;
+use lifecycle::{AllocationTurns, transfer_workspace_ownership};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
@@ -477,7 +477,7 @@ impl ProductionCapsuleAllocator {
         let directory = checkpoint_directory(&self.config.storage_root, request.run_id);
         let writers = writer_nodes(request.admitted);
         if let Some(storage) = &self.config.workspace_storage {
-            let prepared = storage
+            let mut prepared = storage
                 .prepare(HostedWorkspaceRequest {
                     run_id: request.run_id,
                     workspace: request.workspace,
@@ -485,6 +485,30 @@ impl ProductionCapsuleAllocator {
                     writers,
                 })
                 .await
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+            if prepared.request_continuation.is_some() && !self.config.request_ask {
+                return Err(CapsuleAllocationUnavailable::Runtime);
+            }
+            if let Some(continuation) = &prepared.request_continuation {
+                let openengine_cluster_protocol::RunSuspension::Request {
+                    node,
+                    request: question,
+                    ..
+                } = &continuation.suspension
+                else {
+                    return Err(CapsuleAllocationUnavailable::Runtime);
+                };
+                let verifier = crate::native_v2_request::find(&request.admitted.graph.root, node)
+                    .ok_or(CapsuleAllocationUnavailable::Runtime)?;
+                if verifier.worker.as_str() != crate::native_v2_request::ASK_WORKER_REF
+                    || verifier.signals != question.signals
+                    || verifier.output != question.output
+                {
+                    return Err(CapsuleAllocationUnavailable::Runtime);
+                }
+            }
+            prepared
+                .settle_request(request.run_id)
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
             transfer_retained_workspace_to_writer(request.workspace, request.process_pool)?;
             if let Some(id) = &prepared.delivery_run_id {
@@ -519,6 +543,7 @@ impl ProductionCapsuleAllocator {
                 .with_conversation_restore(request.state.conversation_restore.get().cloned()),
             ),
             execution_seed: Vec::new(),
+            request_continuation: None,
             vector_seed: Vec::new(),
             delivery_run_id: None,
         })
@@ -691,6 +716,11 @@ impl ProductionCapsuleAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for ProductionCapsuleAllocator {
+    fn supports_request_ask(&self) -> bool {
+        self.config.workspace_storage.is_none()
+            || (self.config.suspension.is_some() && self.config.request_ask)
+    }
+
     fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
         self.config.suspension.clone().or_else(|| {
             self.config
@@ -1264,34 +1294,6 @@ fn retained_claim_failure(
         Ok(()) => RetainedAllocationUnavailable::Settled(CapsuleAllocationUnavailable::Runtime),
         Err(error) => RetainedAllocationUnavailable::CleanupUnconfirmed(error),
     }
-}
-
-fn transfer_workspace_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        if unsafe { libc::geteuid() } != 0 {
-            return Ok(());
-        }
-        transfer_entry_ownership(path, uid, gid)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (path, uid, gid);
-        Err(std::io::Error::other(
-            "hosted workspace ownership transfer requires Linux",
-        ))
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn transfer_entry_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        for entry in std::fs::read_dir(path)? {
-            transfer_entry_ownership(&entry?.path(), uid, gid)?;
-        }
-    }
-    std::os::unix::fs::lchown(path, Some(uid), Some(gid))
 }
 
 pub(super) fn recovery_path(root: &Path, run_id: &RunId) -> PathBuf {

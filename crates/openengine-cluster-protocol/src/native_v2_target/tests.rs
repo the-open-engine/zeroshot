@@ -764,3 +764,27 @@ fn hosted_run_controls_leave_the_strict_v1_routes_unchanged() {
         );
     }
 }
+
+#[test]
+fn request_marker_is_an_independent_exact_discovery_capability() {
+    for auth in [
+        TargetAuthentication::None,
+        TargetAuthentication::PrivateCapability,
+        TargetAuthentication::HostedOauth,
+    ] {
+        let base = TargetDiscoveryDocument::direct(auth).with_run_suspension();
+        assert!(base.extensions.request_ask.is_none());
+        let enabled = base.with_request_ask();
+        let mut value = serde_json::to_value(&enabled).assert_value();
+        assert_eq!(
+            value["extensions"]["request_ask"],
+            serde_json::json!({"kind":"openengine.request-ask/v1"})
+        );
+        assert_eq!(
+            serde_json::from_value::<TargetDiscoveryDocument>(value.clone()).assert_value(),
+            enabled
+        );
+        value["extensions"]["request_ask"]["bounds"] = serde_json::json!({});
+        assert!(serde_json::from_value::<TargetDiscoveryDocument>(value).is_err());
+    }
+}

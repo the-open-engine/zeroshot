@@ -388,6 +388,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
     };
     ProductionHostingConfig {
         suspension: None,
+        request_ask: false,
         agent_context: None,
         run_sizes: Some(zeroshot_engine::native_v2_hosting::host_run_sizes()),
         memory_storage: None,

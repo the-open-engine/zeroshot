@@ -34,6 +34,10 @@ pub struct NativeV2ObservationSchema {
     pub attach_event_notification: JsonRpcNotification<RunAttachEventNotification>,
     pub suspend_request: JsonRpcRequest<openengine_cluster_protocol::RunSuspendParams>,
     pub suspend_response: JsonRpcResponse<openengine_cluster_protocol::RunSuspendResult>,
+    pub inbox_list_request: JsonRpcRequest<openengine_cluster_protocol::InboxListParams>,
+    pub inbox_list_response: JsonRpcResponse<openengine_cluster_protocol::InboxListResult>,
+    pub inbox_show_request: JsonRpcRequest<openengine_cluster_protocol::InboxShowParams>,
+    pub inbox_show_response: JsonRpcResponse<openengine_cluster_protocol::InboxShowResult>,
     pub vectors_request: JsonRpcRequest<openengine_cluster_protocol::RunVectorsParams>,
     pub vectors_response: JsonRpcResponse<openengine_cluster_protocol::RunVectorsResult>,
     pub vector_request: JsonRpcRequest<openengine_cluster_protocol::RunVectorParams>,
@@ -45,7 +49,8 @@ pub struct NativeV2ObservationSchema {
 pub(crate) fn artifacts() -> Vec<Artifact> {
     let schema = serde_json::to_value(schema_for!(NativeV2ObservationSchema))
         .assert_value_with("native-v2 observation schema serialization must succeed");
-    vec![
+    let mut result = crate::request_artifacts::artifacts();
+    result.extend(vec![
         json_artifact(
             format!("{ROOT}/fixtures/native_v2_observation/suspended-command.json"),
             suspension_fixture(false),
@@ -103,7 +108,8 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
             format!("{ROOT}/fixtures/native_v2_observation/force.json"),
             force_fixture(),
         ),
-    ]
+    ]);
+    result
 }
 
 fn run_id() -> RunId {

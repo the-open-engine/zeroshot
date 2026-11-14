@@ -16,7 +16,7 @@ pub(super) async fn assert_vectors(fixture: &Fixture) {
         .unwrap();
     assert_eq!(
         page.vectors.as_slice(),
-        std::slice::from_ref(&fixture.vector)
+        std::slice::from_ref(&fixture.vector.clone().into())
     );
     assert!(page.next_after.is_none());
     let vector = fixture

@@ -95,7 +95,7 @@ export function Inspector(p: InspectorProps) {
                         ? 'Run result'
                         : node.kind === 'fail'
                           ? 'Stop outcome'
-                          : activityLabel(node.kind, binding?.kind)}
+                          : activityLabel(node.kind, binding?.kind, node.worker)}
               </h2>
             </div>
             <NameField
@@ -443,7 +443,9 @@ function ActivitySettings({
               label="Timeout (ms)"
               value={node.timeoutMs}
               optional
-              placeholder="No limit"
+              placeholder={
+                node.worker === 'builtin.request.ask@1' ? '7 days (604800000)' : 'No limit'
+              }
               onChange={(value) => {
                 const next = { ...node };
                 if (value === undefined) delete next.timeoutMs;

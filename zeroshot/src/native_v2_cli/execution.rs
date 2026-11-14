@@ -200,6 +200,36 @@ where
         NativeV2CliCommand::ForceStop(run) => {
             return execute_force_stop(run, backend, output).await;
         }
+        NativeV2CliCommand::Answer {
+            run,
+            input,
+            forward_github_token,
+        } => {
+            return execute_answer((run, input, forward_github_token), context, output).await;
+        }
+        NativeV2CliCommand::InboxList { target, params } => {
+            write_json(
+                output,
+                &context
+                    .backend
+                    .inbox_list(target.as_deref(), params)
+                    .await?,
+            )?;
+            return Ok(CliOutcome::Completed);
+        }
+        NativeV2CliCommand::InboxShow(run) => {
+            write_json(
+                output,
+                &context
+                    .backend
+                    .inbox_show(
+                        run.target.as_deref(),
+                        openengine_cluster_protocol::InboxShowParams { run_id: run.run_id },
+                    )
+                    .await?,
+            )?;
+            return Ok(CliOutcome::Completed);
+        }
         NativeV2CliCommand::Resume(run) => {
             return execute_resume(run, context, output).await;
         }
@@ -242,8 +272,27 @@ where
             },
         )
         .await?;
+    let answering = matches!(
+        command.from,
+        Some(
+            openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+        )
+    );
+    if let CliRunStatus::Target(RunStatus::Suspended {
+        suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
+        ..
+    }) = &status.status
+    {
+        if !answering {
+            return Err(request_error(format!(
+                "run requires zeroshot answer {} --input FILE",
+                run.run_id.as_str()
+            )));
+        }
+    }
     if let CliRunStatus::Target(RunStatus::Suspended { suspension, .. }) = &status.status {
-        if command.from.is_some() || command.discard_workspace_changes {
+        if !answering && (command.from.is_some() || command.discard_workspace_changes) {
             return Err(NativeV2CliError::Usage(
                 "suspended runs accept only default resume".to_owned(),
             ));
@@ -263,7 +312,7 @@ where
             successor.as_str()
         )));
     }
-    if !status.workspace_recovery.recoverable {
+    if !status.workspace_recovery.recoverable && !answering {
         return Err(NativeV2CliError::Usage(
             "run does not have a recoverable workspace".to_owned(),
         ));
@@ -853,3 +902,117 @@ mod exact_miss_tests;
 #[cfg(test)]
 #[path = "execution/failure_tests.rs"]
 mod failure_tests;
+
+fn request_error(message: impl Into<String>) -> NativeV2CliError {
+    NativeV2CliError::Remote {
+        code: "invalid_request".to_owned(),
+        message: message.into(),
+        details: None,
+    }
+}
+
+async fn execute_answer<B: NativeV2CliBackend, W: Write>(
+    command: (RunSelector, std::path::PathBuf, bool),
+    context: &CliExecutionContext<'_, B>,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError> {
+    let (run, input, forward_github_token) = command;
+    context
+        .backend
+        .validate_request_ask(run.target.as_deref())
+        .await?;
+    let status = context
+        .backend
+        .run_status(
+            run.target.as_deref(),
+            RunStatusParams {
+                run_id: run.run_id.clone(),
+            },
+        )
+        .await?;
+    if let Some(successor) = status.workspace_recovery.successor_run_id {
+        return Err(request_error(format!(
+            "run already has successor {}",
+            successor.as_str()
+        )));
+    }
+    let CliRunStatus::Target(RunStatus::Suspended { suspension, .. }) = status.status else {
+        return Err(request_error("answer requires a suspended run"));
+    };
+    let openengine_cluster_protocol::RunSuspension::Request { .. } = &suspension else {
+        return Err(request_error(format!(
+            "answer requires a request; suspension reason is {}",
+            if suspension.due_at().is_some() {
+                "wait"
+            } else {
+                "command"
+            }
+        )));
+    };
+    let (from, input_error) = match read_request_answer(&input) {
+        Ok(from) => (from, None),
+        Err(error) => (
+            // Only the owning controller knows whether the deadline passed. An invalid
+            // result lets it apply expiry even when the file cannot be parsed, and can
+            // never answer a pending request because the output must be a record.
+            openengine_cluster_protocol::RunResumeFrom::Answer {
+                signals: Default::default(),
+                output: serde_json::Value::Null,
+            },
+            Some(error),
+        ),
+    };
+    let mut result = execute_resume(
+        RunResumeCommand {
+            run,
+            from: Some(from),
+            discard_workspace_changes: false,
+            forward_github_token,
+        },
+        context,
+        output,
+    )
+    .await;
+    if let (Some(input_error), Err(NativeV2CliError::Remote { message, .. })) =
+        (input_error, &mut result)
+    {
+        // Keep the controller's refusal (in particular expiry and its successor) first.
+        message.push_str("; answer file: ");
+        message.push_str(&input_error);
+    }
+    result
+}
+
+fn read_request_answer(
+    input: &std::path::Path,
+) -> Result<openengine_cluster_protocol::RunResumeFrom, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(input)
+        .map_err(|error| format!("$: cannot read answer file: {error}"))?;
+    let mut bytes = Vec::new();
+    file.take(openengine_cluster_protocol::MAX_VECTOR_RESPONSE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("$: cannot read answer file: {error}"))?;
+    if bytes.len() > openengine_cluster_protocol::MAX_VECTOR_RESPONSE_BYTES {
+        return Err("$: answer exceeds node result size limit".to_owned());
+    }
+    let answer = crate::native_v2_request::parse_answer(&bytes)?;
+    let from = openengine_cluster_protocol::RunResumeFrom::Answer {
+        signals: answer.signals,
+        output: answer.output,
+    };
+    // A legal node completion includes this result plus its execution envelope. Refuse
+    // necessarily oversized results without sending them through a smaller transport bound.
+    if serde_json::to_vec(&from)
+        .map_err(|error| format!("$: {error}"))?
+        .len()
+        > crate::v2_run_ledger::MAX_EVENT_BYTES
+    {
+        return Err("$: answer exceeds node result size limit".to_owned());
+    }
+    Ok(from)
+}
+
+#[cfg(test)]
+#[path = "execution/request_tests.rs"]
+mod request_tests;

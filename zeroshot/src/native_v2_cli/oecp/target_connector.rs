@@ -156,6 +156,20 @@ pub trait TargetConnector: Send + Sync {
         ))
     }
 
+    async fn validate_request_ask(&self, _name: &str) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise openengine.request-ask/v1".to_owned(),
+        ))
+    }
+    async fn connect_request_ask(
+        &self,
+        _name: &str,
+        _run_id: Option<openengine_cluster_protocol::RunId>,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise openengine.request-ask/v1".to_owned(),
+        ))
+    }
     async fn connect_run_vectors(
         &self,
         _name: &str,
@@ -241,6 +255,22 @@ pub trait TargetConnector: Send + Sync {
         _name: &str,
         _params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<Option<openengine_cluster_protocol::RunVectorsResult>, NativeV2CliError> {
+        Ok(None)
+    }
+
+    async fn hosted_inbox_show(
+        &self,
+        _name: &str,
+        _params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxShowResult>, NativeV2CliError> {
+        Ok(None)
+    }
+
+    async fn hosted_inbox_list(
+        &self,
+        _name: &str,
+        _params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxListResult>, NativeV2CliError> {
         Ok(None)
     }
 

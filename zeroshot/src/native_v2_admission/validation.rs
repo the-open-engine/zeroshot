@@ -33,6 +33,16 @@ pub(super) fn validate_executable_bindings(
     runtime: &RuntimePlan,
     context: super::NativeV2AdmissionContext<'_>,
 ) -> Result<(), NativeV2AdmissionError> {
+    if !runtime.workspace_checkpoints
+        && let Some(node) = declarations
+            .iter()
+            .find(|node| node.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF)
+    {
+        return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+            node: node.name.clone(),
+            detail: "request nodes require workspaceCheckpoints: true".to_owned(),
+        });
+    }
     validate_concurrency(runtime)?;
     context
         .harnesses

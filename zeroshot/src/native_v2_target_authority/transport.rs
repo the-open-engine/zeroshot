@@ -266,6 +266,7 @@ impl NativeV2TargetServer {
                 workspace_recovery: self.workspace_recovery(),
                 workspace_checkpoints: self.workspace_checkpoints(),
                 run_suspension: self.target.supports_run_suspension(),
+                request_ask: self.target.supports_request_ask(),
             }),
             StaticConnectionIdentityResolver::new(identity),
             SystemConnectionTime,
@@ -505,6 +506,9 @@ impl NativeV2TargetServer {
         if self.workspace_recovery() {
             document = document.with_workspace_recovery();
         }
+        if self.target.supports_request_ask() {
+            document = document.with_request_ask();
+        }
         if self.target.supports_run_suspension() {
             document = document.with_run_suspension();
         }
@@ -600,6 +604,7 @@ struct TargetOecpBackend {
     workspace_recovery: bool,
     workspace_checkpoints: bool,
     run_suspension: bool,
+    request_ask: bool,
 }
 
 #[async_trait]
@@ -710,6 +715,36 @@ impl ClusterBackend for TargetOecpBackend {
         ClusterBackend::run_vectors(self.controller.as_ref(), context, params).await
     }
 
+    async fn inbox_show(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
+        if !self.request_ask {
+            return Err(BackendError::application(
+                "invalid_request",
+                "openengine.request-ask/v1 is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::inbox_show(self.controller.as_ref(), context, params).await
+    }
+
+    async fn inbox_list(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, BackendError> {
+        if !self.request_ask {
+            return Err(BackendError::application(
+                "invalid_request",
+                "openengine.request-ask/v1 is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::inbox_list(self.controller.as_ref(), context, params).await
+    }
+
     async fn run_vector(
         &self,
         context: &ConnectionContext,
@@ -746,6 +781,17 @@ impl ClusterBackend for TargetOecpBackend {
     ) -> Result<RunResumeResult, BackendError> {
         if !self.workspace_recovery {
             return Err(workspace_recovery_unavailable());
+        }
+        if matches!(
+            params.from.as_ref(),
+            Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
+        ) && !self.request_ask
+        {
+            return Err(BackendError::application(
+                "invalid_request",
+                "openengine.request-ask/v1 is unavailable",
+                None,
+            ));
         }
         if matches!(params.from.as_ref(), Some(RunResumeFrom::Checkpoint { .. }))
             && !self.workspace_checkpoints

@@ -698,6 +698,10 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_wait: Option<TargetRequestWaitDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_ask: Option<TargetRequestAskDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hosted_inbox: Option<TargetHostedInboxDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub run_suspension: Option<TargetRunSuspensionDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_vectors: Option<TargetRunVectorsDiscovery>,
@@ -780,6 +784,8 @@ impl TargetDiscoveryExtensions {
             && self.hosted_run_controls.is_none()
             && self.run_vectors.is_none()
             && self.request_wait.is_none()
+            && self.request_ask.is_none()
+            && self.hosted_inbox.is_none()
             && self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
@@ -955,4 +961,34 @@ pub struct TargetRunSuspensionDiscovery {
 #[serde(deny_unknown_fields)]
 pub struct TargetRunVectorsDiscovery {
     pub kind: String,
+}
+
+pub const REQUEST_ASK_KIND: &str = "openengine.request-ask/v1";
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetRequestAskDiscovery {
+    pub kind: String,
+}
+/// Independent extension: the original hosted route objects remain frozen.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedInboxDiscovery {
+    pub kind: String,
+    pub route_templates: TargetHostedInboxRoutes,
+}
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedInboxRoutes {
+    pub list: String,
+    pub show: String,
+}
+pub const HOSTED_INBOX_KIND: &str = "openengine.hosted-inbox/v1";
+impl TargetDiscoveryDocument {
+    #[must_use]
+    pub fn with_request_ask(mut self) -> Self {
+        self.extensions.request_ask = Some(TargetRequestAskDiscovery {
+            kind: REQUEST_ASK_KIND.to_owned(),
+        });
+        self
+    }
 }

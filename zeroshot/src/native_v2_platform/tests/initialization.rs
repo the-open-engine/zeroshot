@@ -220,3 +220,121 @@ async fn asynchronous_initialization_failure_releases_preparation_and_controller
     assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 0);
     assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
 }
+
+#[tokio::test]
+async fn seeded_expiry_logs_before_settlement_and_later_continuations_do_not_repeat_it() {
+    use openengine_cluster_protocol::RunVectorContent;
+    let harness = harness(Behavior::Complete).await;
+    let run = seed_controller_reconstructed_run(&harness.ledger, "expiry-successor").await;
+    let mut stored = harness.ledger.get(&run).await.assert_value().assert_value();
+    let mut history = oversized_seed();
+    history[0].input = Value::Null;
+    history[0].state = DurableExecutionState::Settled {
+        position: HistoryPosition::new(2).assert_value(),
+        outcome: WorkerOutcome::declared_failure(
+            openengine_cluster_protocol::WorkerErrorCode::Timeout,
+        ),
+    };
+    let request = crate::v2_run_ledger::vector_event(&RunId::new("request-source"),
+        serde_json::from_value(json!({"kind":"request","node":"worker","text":"Approve?",
+            "signals":{"decision":["approved"]},"output":{"kind":"record","fields":{}},"expiresAt":2000})).assert_value(),
+    ).assert_value();
+    let RunEvent::Vector { vector: request } = request else {
+        panic!("request vector expected");
+    };
+    let expiry = crate::v2_run_ledger::vector_event(
+        &run,
+        RunVectorContent::Expiry {
+            request_id: request.id.clone(),
+        },
+    )
+    .assert_value();
+    let RunEvent::Vector { vector: expiry } = expiry else {
+        panic!("expiry vector expected");
+    };
+    let vectors = vec![request, expiry];
+    harness
+        .controller
+        .initialize_allocated(&mut stored, history.clone(), vectors.clone())
+        .await
+        .assert_value();
+    let tail = harness
+        .ledger
+        .snapshot_and_tail(&run, None)
+        .await
+        .assert_value();
+    let errors: Vec<_> = tail
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| {
+            matches!(&record.event,
+        RunEvent::SafeLog { line, .. } if line.as_str() == "Node worker failed: timeout")
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert!(matches!(
+        tail.events[errors[0].0 + 1].event,
+        RunEvent::PriorExecution { .. }
+    ));
+    assert!(tail.snapshot.failure_context.is_none());
+
+    let runner = NativeNodeRunner::new(
+        &stored.admitted,
+        harness.driver.clone(),
+        Arc::new(FakeSessionFactory::default()),
+    )
+    .assert_value();
+    let supervisor = crate::native_v2_supervisor::NativeV2Supervisor::new(
+        run.clone(),
+        harness.ledger.clone(),
+        Arc::new(runner),
+        Arc::new(exact_test_environment(&super::request(Value::Null)).assert_value()),
+    );
+    supervisor
+        .fail_runtime("capsule connection lost", || {})
+        .await
+        .assert_value();
+    let failed = harness.ledger.get(&run).await.assert_value().assert_value();
+    let Some(TerminalResult::Failed {
+        context: Some(context),
+        ..
+    }) = failed.snapshot.terminal
+    else {
+        panic!("runtime failure context expected");
+    };
+    assert_eq!(
+        context.primary.assert_value().message.as_str(),
+        "Runtime failed: capsule connection lost"
+    );
+    assert!(context.recorded.is_empty());
+
+    let mut continuation = super::request(Value::Null);
+    continuation.run_id = RunId::new("later-continuation");
+    continuation.submission.submission_key =
+        IdempotencyKey::new("later-continuation").assert_value();
+    persist_request(harness.ledger.as_ref(), &continuation).await;
+    let next = continuation.run_id;
+    let mut stored = harness
+        .ledger
+        .get(&next)
+        .await
+        .assert_value()
+        .assert_value();
+    harness
+        .controller
+        .initialize_allocated(&mut stored, history, vectors)
+        .await
+        .assert_value();
+    let tail = harness
+        .ledger
+        .snapshot_and_tail(&next, None)
+        .await
+        .assert_value();
+    assert!(
+        tail.events
+            .iter()
+            .all(|record| !matches!(record.event, RunEvent::SafeLog { .. }))
+    );
+    assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 0);
+}

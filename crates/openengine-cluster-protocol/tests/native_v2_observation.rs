@@ -397,3 +397,17 @@ fn suspended_statuses_round_trip_without_terminal_result() {
         assert_eq!(serde_json::to_value(status).assert_value(), value);
     }
 }
+
+#[test]
+fn request_suspension_round_trips_with_its_full_contract() {
+    let value = json!({"phase":"suspended","reason":"request","node":"approval","createdAt":1000,
+        "request":{"id":"request-1","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}});
+    let status: RunStatus = serde_json::from_value(value.clone()).assert_value();
+    assert_eq!(serde_json::to_value(status).assert_value(), value);
+    let mut missing = value.clone();
+    missing.as_object_mut().assert_value().remove("request");
+    assert!(serde_json::from_value::<RunStatus>(missing).is_err());
+    let mut wrong = value;
+    wrong["reason"] = json!("command");
+    assert!(serde_json::from_value::<RunStatus>(wrong).is_err());
+}

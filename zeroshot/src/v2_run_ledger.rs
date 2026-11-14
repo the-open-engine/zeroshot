@@ -43,7 +43,7 @@ pub const MAX_SAFE_LOG_BYTES: usize = 16 * 1024;
 /// Bounds one replay read independently of the size of retained history.
 pub const MAX_REPLAY_EVENTS: usize = 256;
 // Every accepted event must fit in an otherwise empty replay page.
-pub const MAX_REPLAY_BYTES: usize = MAX_PRIOR_EXECUTION_BYTES;
+pub const MAX_REPLAY_BYTES: usize = openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -267,7 +267,10 @@ impl NodeSnapshot {
     pub const fn outcome(&self) -> Option<&WorkerOutcome> {
         match &self.state {
             NodeState::Completed { outcome, .. } => Some(outcome),
-            NodeState::Active | NodeState::SuspendedWait { .. } | NodeState::Voided { .. } => None,
+            NodeState::Active
+            | NodeState::SuspendedWait { .. }
+            | NodeState::SuspendedRequest { .. }
+            | NodeState::Voided { .. } => None,
         }
     }
 }
@@ -278,6 +281,9 @@ pub enum NodeState {
     Active,
     /// No process remains; the continuation may settle this wait only once its due time is reached.
     SuspendedWait {
+        at: Cursor,
+    },
+    SuspendedRequest {
         at: Cursor,
     },
     Completed {
@@ -312,6 +318,9 @@ pub enum RunEvent {
         completion: NodeCompletion,
     },
     WaitDeferred {
+        reference: ExecutionRef,
+    },
+    RequestDeferred {
         reference: ExecutionRef,
     },
     ExecutionVoided {
@@ -589,3 +598,5 @@ pub(crate) fn vector_event(
 }
 
 pub mod vectors;
+
+pub mod inbox;

@@ -615,3 +615,29 @@ test('one node projection preserves structural details and authoritative leaf ou
   });
   assert.equal(projection.nodes.peer.state, 'idle');
 });
+
+test('request suspension retains the question and pending execution without a completion', () => {
+  const doc = document();
+  const history = events(
+    start(),
+    { kind: 'request_deferred', reference: ref() },
+    {
+      kind: 'suspended',
+      suspension: {
+        reason: 'request',
+        node: 'worker',
+        createdAt: 1000,
+        request: {
+          id: 'question',
+          text: 'Approve?',
+          signals: { decision: ['approved', 'rejected'] },
+          output: { kind: 'record', fields: {} },
+          expiresAt: 2000,
+        },
+      },
+    }
+  );
+  const projection = projectHistory(doc, history, history.length - 1);
+  assert.equal(projection.invocations[0].state, 'suspended');
+  assert.equal(projection.invocations[0].outcome, undefined);
+});

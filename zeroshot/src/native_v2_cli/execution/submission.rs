@@ -874,7 +874,11 @@ fn is_wait_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeName) 
     if root.name() == name
         && let openengine_cluster_protocol::GraphNode::Verifier(node) = root
     {
-        return node.worker.as_str() == crate::native_v2_wait::WAIT_WORKER_REF;
+        return [
+            crate::native_v2_wait::WAIT_WORKER_REF,
+            crate::native_v2_request::ASK_WORKER_REF,
+        ]
+        .contains(&node.worker.as_str());
     }
     openengine_cluster_server::graph_verifier::graph_node_children(root)
         .into_iter()

@@ -60,7 +60,7 @@ async fn exercise(ledger: &dyn RunLedger) {
     super::super::vectors::inherit(ledger, ledger, &source, &successor)
         .await
         .assert_value();
-    let original = super::super::vectors::list(
+    let original = super::super::vectors::list_full(
         ledger,
         RunVectorsParams {
             run_id: source.clone(),
@@ -70,7 +70,7 @@ async fn exercise(ledger: &dyn RunLedger) {
     )
     .await
     .assert_value();
-    let page = super::super::vectors::list(
+    let page = super::super::vectors::list_full(
         ledger,
         RunVectorsParams {
             run_id: successor.clone(),
@@ -81,7 +81,7 @@ async fn exercise(ledger: &dyn RunLedger) {
     .await
     .assert_value();
     assert_eq!(page.vectors, original.vectors);
-    let tail = super::super::vectors::list(
+    let tail = super::super::vectors::list_full(
         ledger,
         RunVectorsParams {
             run_id: successor.clone(),
@@ -159,7 +159,7 @@ async fn exercise_long_record(ledger: &dyn RunLedger) {
     let mut inherited = Vec::new();
     let mut after = None;
     loop {
-        let page = super::super::vectors::list(
+        let page = super::super::vectors::list_full(
             ledger,
             RunVectorsParams {
                 run_id: successor.clone(),
@@ -185,7 +185,7 @@ async fn exercise_long_record(ledger: &dyn RunLedger) {
         (RunId::new("missing"), RunLedgerError::RunNotFound),
     ] {
         assert_eq!(
-            super::super::vectors::list(
+            super::super::vectors::list_full(
                 ledger,
                 RunVectorsParams {
                     run_id,
@@ -251,7 +251,7 @@ async fn sqlite_read_only_pagination_seeks_past_earlier_events() {
     ).assert_value();
     drop(connection);
     let ledger = SqliteRunLedger::open_read_only(&path).assert_value();
-    let page = super::super::vectors::list(
+    let page = super::super::vectors::list_full(
         &ledger,
         RunVectorsParams {
             run_id: run,
@@ -263,4 +263,111 @@ async fn sqlite_read_only_pagination_seeks_past_earlier_events() {
     .assert_value();
     assert_eq!(page.vectors, vec![expected]);
     assert!(page.next_after.is_none());
+}
+
+async fn exercise_large_request(ledger: &dyn RunLedger) {
+    let run = RunId::new("large-request");
+    ledger
+        .create_or_get(create(run.as_str(), run.as_str(), 'f'))
+        .await
+        .assert_value();
+    let labels: Vec<_> = (0..4096).map(|index| format!("a{index:0127}")).collect();
+    let field = json!({"required":false,"type":{"kind":"enum","values":labels}});
+    let output = serde_json::from_value(json!({"kind":"record","fields":{
+        "first":field,"second":field,"third":field
+    }}))
+    .assert_value();
+    let event = super::super::vector_event(
+        &run,
+        RunVectorContent::Request {
+            node: NodeName::new("approval").assert_value(),
+            text: "x".repeat(super::super::MAX_EVENT_BYTES - 4096),
+            signals: Default::default(),
+            output,
+            expires_at: UnixTimestampMillis::new(1000).assert_value(),
+        },
+    )
+    .assert_value();
+    assert!(
+        serde_json::to_vec(&event).assert_value().len() > super::super::MAX_PRIOR_EXECUTION_BYTES
+    );
+    let RunEvent::Vector { vector } = &event else {
+        unreachable!()
+    };
+    let expected_vector = vector.clone();
+    let RunVectorContent::Request {
+        node,
+        text,
+        signals,
+        output,
+        expires_at,
+    } = &vector.content
+    else {
+        unreachable!()
+    };
+    let suspension = openengine_cluster_protocol::RunSuspension::Request {
+        node: node.clone(),
+        created_at: vector.created_at,
+        request: Box::new(openengine_cluster_protocol::RunRequest {
+            id: vector.id.clone(),
+            text: text.clone(),
+            signals: signals.clone(),
+            output: output.clone(),
+            expires_at: *expires_at,
+        }),
+    };
+    let expected = ledger
+        .append(
+            &run,
+            vec![
+                RunEvent::RunStarted,
+                event,
+                RunEvent::Suspended { suspension },
+            ],
+        )
+        .await
+        .assert_value()
+        .snapshot;
+    let mut replay = expected.replay_seed();
+    while replay.cursor != expected.cursor {
+        let page = ledger
+            .snapshot_and_tail(&run, Some(&replay.cursor))
+            .await
+            .assert_value();
+        assert!(
+            !page.events.is_empty(),
+            "an accepted request must fit in a replay page"
+        );
+        for stored in page.events {
+            apply_event(
+                &mut replay,
+                &stored.event,
+                cursor_sequence(&stored.cursor).assert_value(),
+            )
+            .assert_value();
+        }
+    }
+    assert_eq!(replay, expected);
+    assert_eq!(
+        super::super::vectors::show(
+            ledger,
+            RunVectorParams {
+                run_id: run,
+                id: expected_vector.id.clone()
+            }
+        )
+        .await
+        .assert_value(),
+        expected_vector
+    );
+}
+
+#[tokio::test]
+async fn fake_replays_requests_with_large_text_and_contract() {
+    exercise_large_request(&FakeRunLedger::new()).await;
+}
+
+#[tokio::test]
+async fn sqlite_replays_requests_with_large_text_and_contract() {
+    exercise_large_request(&SqliteRunLedger::open_in_memory().assert_value()).await;
 }
