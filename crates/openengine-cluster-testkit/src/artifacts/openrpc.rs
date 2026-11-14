@@ -446,8 +446,9 @@ fn run_resume_method() -> Value {
         "description": "Omitting from or selecting restart starts the graph at its root on the latest \
             retained workspace. Selecting checkpoint restores the matching workspace and predecessor \
             outputs and reruns the named node or atomic concurrent group. Original admission and \
-            delivery metadata remain fixed. Credentials are resolved again for the successor; provider \
-            sessions are not resumed.",
+            delivery metadata remain fixed. Credentials are resolved again for the successor. Checkpoint \
+            continuations and suspended successors restore captured node-instance provider conversations; \
+            restarts start new conversations.",
         "paramStructure": "by-name",
         "params": [
             {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},

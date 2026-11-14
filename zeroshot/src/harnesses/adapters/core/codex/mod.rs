@@ -6,6 +6,7 @@
 //! Provider sessions are harness-owned runtime state and never enter the durable runner contract.
 
 mod command;
+pub(crate) mod conversation;
 pub(crate) mod memory;
 mod native_config;
 mod output;
@@ -298,6 +299,13 @@ impl NativeV2CodexAdapter {
                     crate::harnesses::native_config::context_error(invocation, "codex", error)
                 })?
             {
+                session
+                    .core
+                    .record_conversation(
+                        session.thread_id.lock().await.clone(),
+                        *session.checkpoint_usage.lock().await,
+                    )
+                    .await;
                 return Ok(outcome);
             }
         }
@@ -341,7 +349,37 @@ impl NativeV2CodexAdapter {
         turn.session
             .core
             .ensure_live(ClosedSessionFailure::Driver)?;
+        let files = match turn.execution.prepare(turn.control).await {
+            Ok(files) => files,
+            Err(error) => {
+                return Ok(CodexTurnAdvance::ProviderFailure(format!(
+                    "provider process setup failed: {error}"
+                )));
+            }
+        };
+        let home = self
+            .config
+            .local_user
+            .as_ref()
+            .map_or_else(|| files.home().to_owned(), |user| user.codex_home.clone());
+        if let Some(metadata) = turn
+            .session
+            .core
+            .prepare_conversation(
+                Some(conversation::layout(home)),
+                turn.invocation,
+                turn.control,
+            )
+            .await?
+        {
+            *turn.session.thread_id.lock().await = Some(metadata.id);
+            *turn.session.usage.lock().await = metadata.usage;
+        }
         let resume = turn.session.thread_id.lock().await.clone();
+        // A failed or unmetered process may change the transcript. Never checkpoint its prior
+        // turn's metadata or usage as if it covered those new bytes.
+        *turn.session.checkpoint_usage.lock().await = None;
+        turn.session.core.record_conversation(None, None).await;
         let output = self
             .execute_turn(
                 turn,

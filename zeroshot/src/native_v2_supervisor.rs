@@ -133,6 +133,8 @@ pub struct NativeV2Supervisor {
     force_requested: Arc<AtomicBool>,
     resolution_stop: watch::Sender<bool>,
     version_initialized: Arc<Mutex<bool>>,
+    conversations_initialized: Arc<Mutex<bool>>,
+    conversation_notices: Arc<Mutex<BTreeSet<(NodeName, &'static str)>>>,
     drive_turn: Arc<Mutex<()>>,
     suspend_turn: Arc<Mutex<()>>,
     suspend_signal: watch::Sender<bool>,
@@ -161,6 +163,8 @@ impl NativeV2Supervisor {
             runtime_lost: Arc::new(AtomicBool::new(false)),
             force_requested: Arc::new(AtomicBool::new(false)),
             resolution_stop: watch::channel(false).0,
+            conversations_initialized: Arc::default(),
+            conversation_notices: Arc::default(),
             version_initialized: Arc::new(Mutex::new(false)),
             drive_turn: Arc::new(Mutex::new(())),
             suspend_turn: Arc::new(Mutex::new(())),
@@ -255,6 +259,20 @@ impl NativeV2Supervisor {
         }
         if stored.snapshot.phase != RunPhase::Running {
             return Err(NativeV2SupervisorError::InvalidState);
+        }
+        {
+            let mut initialized = self.conversations_initialized.lock().await;
+            if !*initialized {
+                if let Some(store) = &self.checkpoints {
+                    self.runner
+                        .restore_conversations(
+                            &stored.snapshot.execution_seed,
+                            store.restored_conversations().await,
+                        )
+                        .await;
+                }
+                *initialized = true;
+            }
         }
         let catalog = execution_catalog(&stored.admitted.graph.root);
         Ok(Initialization::Program(Box::new(RunProgram {
@@ -375,8 +393,10 @@ impl NativeV2Supervisor {
                 .await
                 .map(Some);
         }
-        self.checkpoint_boundary(reduction.boundary.as_ref(), snapshot, active)
-            .await?;
+        if active.is_quiescent(snapshot) {
+            self.checkpoint_boundary(&program.admitted, reduction.boundary.as_ref(), snapshot)
+                .await?;
+        }
         if active.is_quiescent(snapshot)
             && let Some(boundary) = &reduction.boundary
         {
@@ -406,16 +426,51 @@ impl NativeV2Supervisor {
         Ok(None)
     }
 
+    async fn capture_conversations(
+        &self,
+        store: &dyn checkpoints::RunCheckpointStore,
+    ) -> Result<(), NativeV2SupervisorError> {
+        let captured = self
+            .runner
+            .capture_conversations_until_stopped(
+                &self.run_id,
+                crate::execution::driver::DriverCancellation::new(self.resolution_stop.subscribe()),
+            )
+            .await;
+        let mut notices = self.conversation_notices.lock().await;
+        let mut events = Vec::new();
+        for (node, reason) in captured.notices {
+            if notices.insert((node.clone(), reason)) {
+                events.push(RunEvent::SafeLog {
+                    execution: None,
+                    timestamp: (self.wall_clock)(),
+                    stream: SafeLogStream::System,
+                    line: SafeLogLine::new(format!(
+                        "node {} conversation was not saved: {reason}",
+                        node.as_str()
+                    ))?,
+                    diagnostic: None,
+                });
+            }
+        }
+        if !events.is_empty() {
+            self.ledger.append(&self.run_id, events).await?;
+        }
+        // Storage implementations may predate this payload. Capture never fails the checkpoint.
+        let _ = store.retain_conversations(captured.files).await;
+        Ok(())
+    }
+
     async fn checkpoint_boundary(
         &self,
+        admitted: &AdmittedRun,
         boundary: Option<&crate::full_v1_reducer::ExecutionBoundary>,
         snapshot: &RunSnapshot,
-        active: &ActiveDispatches,
     ) -> Result<(), NativeV2SupervisorError> {
-        if !active.is_quiescent(snapshot) {
-            return Ok(());
-        }
         if let (Some(store), Some(boundary)) = (&self.checkpoints, boundary) {
+            if admitted.runtime.workspace_checkpoints {
+                self.capture_conversations(store.as_ref()).await?;
+            }
             store.enter(boundary, &durable_history(snapshot)?).await?;
         }
         Ok(())
@@ -430,8 +485,14 @@ impl NativeV2Supervisor {
         let terminal = self
             .latch_primary_graph(admitted, snapshot, terminal)
             .await?;
-        self.runner.close_run(&self.run_id).await;
         let succeeded = matches!(terminal, TerminalResult::Succeeded { .. });
+        if !succeeded
+            && admitted.runtime.workspace_checkpoints
+            && let Some(store) = &self.checkpoints
+        {
+            self.capture_conversations(store.as_ref()).await?;
+        }
+        self.runner.close_run(&self.run_id).await;
         self.finish_failed_checkpoints(succeeded, snapshot).await?;
         let exit = if succeeded {
             RunRuntimeExit::Completed

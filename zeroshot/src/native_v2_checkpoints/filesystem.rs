@@ -211,10 +211,10 @@ fn install_children(tree: &Path, workspace: &Path, preserve_git: bool) -> io::Re
     Ok(())
 }
 
-pub(super) struct PrivateStage(PathBuf);
+pub(crate) struct PrivateStage(PathBuf);
 
 impl PrivateStage {
-    pub(super) fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -225,7 +225,7 @@ impl Drop for PrivateStage {
     }
 }
 
-pub(super) fn private_stage(parent: &Path, prefix: &str) -> io::Result<PrivateStage> {
+pub(crate) fn private_stage(parent: &Path, prefix: &str) -> io::Result<PrivateStage> {
     owned_stage(&parent.join(format!("{prefix}{}", uuid::Uuid::now_v7())))
 }
 

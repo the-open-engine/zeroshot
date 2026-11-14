@@ -116,6 +116,11 @@ async fn missing_usage_preserves_only_a_resumed_threads_baseline() {
             .await;
         assert_eq!(session.usage_delta(None, resumed).await, None);
         session.commit_usage(None, resumed).await;
+        assert_eq!(
+            *session.checkpoint_usage.lock().await,
+            None,
+            "a retained in-run baseline must not be reused for checkpoint capture"
+        );
 
         let observed = usage(20, 8, Some(7), Some(6));
         let expected = if resumed {

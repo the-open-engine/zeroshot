@@ -30,6 +30,7 @@ use tokio::time::Instant;
 
 use crate::full_v1_reducer::{DurableExecution, DurableExecutionState, ExecutionBoundary};
 use filesystem::SnapshotId;
+use crate::native_v2_runner::conversations::ConversationFiles;
 
 #[derive(Debug, Error)]
 #[error("workspace checkpoint is unavailable: {0}")]
@@ -56,6 +57,21 @@ impl CheckpointError {
 /// Delivery receipt retention is independent of workspace capture and graph history.
 #[async_trait]
 pub trait RunCheckpointStore: Send + Sync {
+    /// Optional private checkpoint payload. Save these files alongside the next workspace
+    /// snapshot, outside the exported workspace tree. Older hosts may omit them.
+    async fn retain_conversations(
+        &self,
+        _files: Option<ConversationFiles>,
+    ) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+
+    /// Return the selected checkpoint's private payload, independently of workspace restoration.
+    /// None preserves compatibility with checkpoints and hosts predating conversation capture.
+    async fn restored_conversations(&self) -> Option<ConversationFiles> {
+        None
+    }
+
     /// Publish complete suspension history and the vector record before disposing allocation.
     /// A concurrent suspend request can require republishing; replace the previous full snapshot.
     async fn suspend(
@@ -316,6 +332,8 @@ pub struct ResticCheckpointStore {
     writers: BTreeSet<NodeName>,
     state: Arc<Mutex<CaptureState>>,
     delivery: DeliveryCheckpointStore,
+    conversations: Mutex<Option<ConversationFiles>>,
+    conversation_restore: Option<CheckpointRestore>,
 }
 
 #[cfg(test)]
@@ -341,6 +359,8 @@ impl ResticCheckpointStore {
             restic::ResticProgram::fake(&repository)
         });
         Ok(Self {
+            conversations: Mutex::new(None),
+            conversation_restore: None,
             stopping: None,
             delivery: DeliveryCheckpointStore::new(repository.clone()),
             directory,
@@ -355,6 +375,8 @@ impl ResticCheckpointStore {
     #[cfg(test)]
     pub(crate) fn with_program(config: ResticCheckpointStoreTestConfig) -> Self {
         Self {
+            conversations: Mutex::new(None),
+            conversation_restore: None,
             stopping: None,
             delivery: DeliveryCheckpointStore::new(config.repository.clone()),
             directory: config.directory,
@@ -364,6 +386,12 @@ impl ResticCheckpointStore {
             writers: config.writers,
             state: Arc::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_conversation_restore(mut self, selection: Option<CheckpointRestore>) -> Self {
+        self.conversation_restore = selection;
+        self
     }
 
     pub(crate) fn with_stop_request(
@@ -405,6 +433,8 @@ impl ResticCheckpointStore {
         let directory = self.directory.clone();
         let workspace = self.workspace.clone();
         let operation = filesystem::SnapshotOperation::current(self.stopping.clone());
+        let conversations = self.conversations.lock().await.clone();
+        let operation_stop = self.stopping.clone();
         let (stage, snapshot) = tokio::task::spawn_blocking(move || {
             let stages = directory.join("staging");
             crate::execution::platform::private_directory(&stages)?;
@@ -415,6 +445,26 @@ impl ResticCheckpointStore {
                 &(),
                 &operation,
             )?;
+            if let Some(conversations) = conversations {
+                // This optional payload must never prevent workspace checkpoint publication.
+                let target = stage
+                    .path()
+                    .join("snapshots")
+                    .join(snapshot.as_str())
+                    .join("conversations");
+                let request = operation_stop
+                    .clone()
+                    .unwrap_or_else(|| tokio::sync::watch::channel(false).1);
+                if crate::native_v2_capsule::provider_process::copy_workspace_entry_until_stopped(
+                    conversations.directory(),
+                    &target,
+                    &crate::execution::driver::DriverCancellation::new(request),
+                )
+                .is_err()
+                {
+                    let _ = std::fs::remove_dir_all(target);
+                }
+            }
             Ok::<_, std::io::Error>((stage, snapshot))
         })
         .await
@@ -470,6 +520,24 @@ fn publish_storage_configuration(
 
 #[async_trait]
 impl RunCheckpointStore for ResticCheckpointStore {
+    async fn retain_conversations(
+        &self,
+        files: Option<ConversationFiles>,
+    ) -> Result<(), CheckpointError> {
+        *self.conversations.lock().await = files;
+        Ok(())
+    }
+
+    async fn restored_conversations(&self) -> Option<ConversationFiles> {
+        let selection = self.conversation_restore.as_ref()?;
+        if selection.selection == CheckpointRestoreSelection::Latest {
+            return None;
+        }
+        restore_conversations(selection, self.stopping.clone())
+            .await
+            .ok()
+    }
+
     async fn suspend(
         &self,
         _history: &[DurableExecution],
@@ -526,6 +594,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
     }
 
     async fn discard(&self) -> Result<(), CheckpointError> {
+        self.conversations.lock().await.take();
         discard_lineage(&self.directory, &self.repository)
     }
 }
@@ -852,4 +921,39 @@ fn snapshot_path(directory: &Path, snapshot: &SnapshotId) -> PathBuf {
     directory
         .join("snapshots")
         .join(format!("{}.json", snapshot.as_str()))
+}
+
+async fn restore_conversations(
+    selection: &CheckpointRestore,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Result<ConversationFiles, CheckpointError> {
+    let snapshot = selected_snapshot(selection)?;
+    let (repository, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)?;
+    let repository = repository.with_stop_request(stopping);
+    let stage = tempfile::Builder::new()
+        .prefix("zeroshot-checkpoint-conversations-")
+        .tempdir()?;
+    repository.initialize().await?;
+    repository
+        .restore_conversations(&restic_snapshot, stage.path())
+        .await?;
+    let directory = stage.path().join("conversations");
+    if !directory.is_dir() {
+        return Err(catalog::invalid("checkpoint has no conversations"));
+    }
+    // Drop the independently extracted workspace immediately; it is never installed.
+    let workspace = stage.path().join("workspace");
+    let _ = filesystem::remove_disposable_tree(&workspace);
+    let retained = ConversationFiles::staged(stage);
+    Ok(ConversationFiles::nested(retained, directory))
+}
+
+pub(crate) async fn restore_checkpoint_conversations(
+    selection: &CheckpointRestore,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Option<ConversationFiles> {
+    if selection.selection == CheckpointRestoreSelection::Latest {
+        return None;
+    }
+    restore_conversations(selection, stopping).await.ok()
 }

@@ -17,3 +17,6 @@ mod tests;
 
 #[cfg(all(test, unix))]
 mod live_tests;
+
+#[cfg(all(test, unix))]
+pub(crate) mod conversation_tests;
