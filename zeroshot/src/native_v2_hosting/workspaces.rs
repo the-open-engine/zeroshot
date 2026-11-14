@@ -65,12 +65,17 @@ pub struct HostedRequestContinuation {
 }
 
 impl HostedRequestContinuation {
-    /// Validate the shape and deadline once, at the owning host's acceptance boundary.
+    /// Validate shape, deadline and durable event bounds before successor admission.
     pub fn validate(
         suspension: openengine_cluster_protocol::RunSuspension,
         from: openengine_cluster_protocol::RunResumeFrom,
         now: openengine_cluster_protocol::UnixTimestampMillis,
     ) -> Result<Self, String> {
+        use crate::native_v2_contract::{ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId};
+        use crate::native_v2_request::RequestOutcome;
+        use crate::v2_run_ledger::{RunEvent, validate_event};
+        use openengine_cluster_protocol::{RunSuspension, RunVector, UnixTimestampMillis, VectorId};
+
         let resolution = crate::native_v2_request::resolve(&suspension, Some(&from), now)?;
         if matches!(
             from,
@@ -81,6 +86,38 @@ impl HostedRequestContinuation {
         ) {
             return Err("request expired; select expiry explicitly".to_owned());
         }
+        let RunSuspension::Request { node, request, .. } = &suspension else {
+            return Err("request suspension required".to_owned());
+        };
+        // Allocation assigns the successor and execution identities later. Reserve their maximum
+        // wire widths, including the vector timestamp, so an accepted answer always fits there.
+        let identity = VectorId::new("x".repeat(64)).map_err(|error| error.to_string())?;
+        let run_id = RunId::new(identity.as_str());
+        validate_event(&RunEvent::NodeCompleted {
+            completion: NodeCompletion {
+                reference: ExecutionRef {
+                    run_id: run_id.clone(),
+                    node: node.clone(),
+                    node_instance: NodeInstanceId::new(u64::MAX)
+                        .map_err(|error| error.to_string())?,
+                    execution: ExecutionId::new(u64::MAX).map_err(|error| error.to_string())?,
+                },
+                outcome: resolution.outcome(),
+            },
+        })
+        .map_err(|error| format!("$.output: {error}"))?;
+        validate_event(&RunEvent::Vector {
+            vector: RunVector {
+                id: identity,
+                run_id,
+                created_at: UnixTimestampMillis::new(
+                    openengine_cluster_protocol::MAX_SAFE_GENERATION,
+                )
+                .map_err(|error| error.to_string())?,
+                content: crate::native_v2_request::resolution_vector(request, &resolution),
+            },
+        })
+        .map_err(|error| format!("$.output: {error}"))?;
         Ok(Self {
             suspension,
             resolution,
@@ -158,3 +195,6 @@ impl HostedWorkspace {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

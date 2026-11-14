@@ -1043,8 +1043,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `ProductionHostingConfig` can accept host-owned `HostedWorkspaceStorage`; the allocator invokes
   it after source checkout and before provider dispatch, imports settled prerequisites, and
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
-  Host-owned request continuations validate once against the owning host's clock before allocation;
-  their opaque accepted resolution survives restoration without another deadline decision.
+  Host-owned request continuations validate once against the owning host's clock before successor
+  admission. Acceptance checks both durable result events, reserving the maximum identity and
+  timestamp widths until allocation.
+  Their opaque accepted resolution survives restoration without another deadline decision.
 - Durable observation replay reads bounded ledger pages that fit every accepted event, including
   combined request text and contracts, and retains its scan cursor across pages.
   NDJSON and WebSocket run inventories bound each typed status separately from the response
