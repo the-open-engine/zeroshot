@@ -2,6 +2,8 @@ use super::*;
 use openengine_cluster_protocol::{RunSuspension, UnixTimestampMillis};
 use std::sync::atomic::AtomicU64;
 
+#[path = "suspension/conversations.rs"]
+mod conversations;
 #[path = "suspension/publication.rs"]
 mod publication;
 

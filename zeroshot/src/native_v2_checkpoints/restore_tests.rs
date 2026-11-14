@@ -99,6 +99,13 @@ async fn restore_after_restic_move_probe() {
         writers: BTreeSet::from([NodeName::new("writer").assert_value()]),
         program,
     });
+    let conversations = root.join("conversation-source");
+    fs::create_dir(&conversations).assert_value();
+    fs::write(conversations.join("session.json"), "conversation bytes").assert_value();
+    store
+        .retain_conversations(Some(ConversationFiles::new(conversations)))
+        .await
+        .assert_value();
     store.enter(&boundary("writer"), &[]).await.assert_value();
     fs::write(workspace.join("source"), "checkpoint bytes").assert_value();
     store
@@ -160,6 +167,14 @@ async fn restore_after_restic_move_probe() {
             assert_eq!(seed.len(), usize::from(selected));
             if selected {
                 assert_eq!(seed[0].execution.get(), 1);
+                let conversations = restore_checkpoint_conversations(&selection, None)
+                    .await
+                    .assert_value();
+                assert_eq!(
+                    fs::read_to_string(conversations.directory().join("session.json"))
+                        .assert_value(),
+                    "conversation bytes"
+                );
             }
             assert_eq!(
                 fs::read_to_string(workspace.join("source")).assert_value(),

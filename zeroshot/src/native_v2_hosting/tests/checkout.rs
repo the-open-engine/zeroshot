@@ -1,3 +1,4 @@
+mod conversations;
 mod delivery_recovery;
 mod workspace_storage;
 

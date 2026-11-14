@@ -8,6 +8,7 @@
 
 mod auth;
 mod command;
+mod conversation;
 mod login;
 mod memory;
 mod native_config;
@@ -128,6 +129,18 @@ impl OpenCodeAdapter {
                 ))
             }
         })?;
+        let layout = self
+            .config
+            .local_user_home
+            .is_none()
+            .then(|| conversation::layout(files.home()));
+        if let Some(metadata) = session
+            .core
+            .prepare_conversation(layout, invocation, control)
+            .await?
+        {
+            *session.id.lock().await = Some(metadata.id);
+        }
         let dialect = if self.config.provider == "anthropic" {
             ProviderSchemaDialect::Standard
         } else {
@@ -140,7 +153,14 @@ impl OpenCodeAdapter {
             files,
             dialect,
         };
-        self.advance_session(turn).await
+        let result = self.advance_session(turn).await;
+        if result.is_ok() {
+            session
+                .core
+                .record_conversation(session.id.lock().await.clone(), None)
+                .await;
+        }
+        result
     }
 
     async fn advance_session(

@@ -85,6 +85,15 @@ impl<'a> ProviderExecution<'a> {
             ProviderProcessRunners::Hosted(pool) => Some(pool.identity(scope)?),
             ProviderProcessRunners::Local => None,
         };
+        self.session
+            .conversation_owner(identity.map(|identity| {
+                crate::native_v2_runner::conversations::ConversationOwner {
+                    home: home.path().to_owned(),
+                    uid: identity.uid(),
+                    gid: identity.gid(),
+                }
+            }))
+            .await;
         Ok(ExecutionFilesystemSpec {
             runner,
             home,

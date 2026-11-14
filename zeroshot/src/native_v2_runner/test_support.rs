@@ -472,6 +472,7 @@ pub(crate) fn control_with_capacity(
     (
         cancel,
         DriverControl {
+            restored_conversation: Arc::default(),
             delivery_publication: Arc::new(tokio::sync::Mutex::new(DeliveryPublication::default())),
             delivery_state: None,
             cancellation,
