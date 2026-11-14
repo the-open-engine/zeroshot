@@ -86,7 +86,18 @@ async fn live_suspended_conversation() {
     runtime["nodes"] = json!({"worker":{"kind":"agent","model":model,"sessionScope":"node_instance","connections":{"live":fields}}});
     runtime["nodes"]["check"] = runtime["nodes"]["worker"].clone();
     runtime["nodes"]["check"]["sessionScope"] = json!("execution");
-    let instructions = "Choose exactly one branch based on whether secret-word exists at the START of this turn. If it exists at the start, use native tools to run `cat secret-word && rm -- secret-word && test ! -e secret-word` and remember the printed word in this conversation. Unlink the file completely; truncating it is insufficient. Do not take the absent branch after deleting it. Do not save it in any other workspace file. Return the literal string \"stored\" as output. If secret-word was absent at the start, return the word remembered from the earlier turn as output. Never include the word in diagnostic. Do not use Git or network tools.";
+    let instructions = concat!(
+        "Choose exactly one branch based on whether secret-word exists at the START of this turn. ",
+        "If it exists at the start, use native tools to run ",
+        "`cat secret-word && rm -- secret-word && test ! -e secret-word` ",
+        "and remember the printed word in this conversation. ",
+        "Unlink the file completely; truncating it is insufficient. ",
+        "Do not take the absent branch after deleting it. ",
+        "Do not save it in any other workspace file. ",
+        "Return the literal string \"stored\" as output. ",
+        "If secret-word was absent at the start, return the word remembered from the earlier turn as output. ",
+        "Never include the word in diagnostic. Do not use Git or network tools."
+    );
     let mut graph = local_graph::graph();
     graph["root"]["children"] = json!([
         {"kind":"loop","name":"twice","state":{"kind":"null"},"maxIterations":2,"promotedStatePaths":[],
