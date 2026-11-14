@@ -1101,6 +1101,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   The supervisor records every node error in durable logs before settlement, including handled
   failures and retries. A newly applied request expiry logs its timeout in the successor before
   importing that execution's settlement; inherited historical failures are not logged again.
+  Imported expiry logs do not establish a primary runtime failure.
   Summaries preserve error code, typed refusal/malformed reason, elapsed time,
   and returned error context; provider adapters redact credentials before returning details. Runtime failure,
   runtime loss/restart reconciliation, and force-stop use the same completion/log transaction for

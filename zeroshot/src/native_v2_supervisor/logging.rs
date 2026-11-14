@@ -83,11 +83,11 @@ pub(crate) fn request_expiry_log(
         ));
     }
     // Imported executions belong to checkpoint history, not this run's live execution map.
-    // Keep the node identity in the error line without claiming a new dispatch.
+    // Keep the node identity in the error line without claiming a new dispatch or runtime cause.
     let log = error_log(
         None,
         format!("Node {} failed: timeout", node.as_str()),
-        Some(FailureDiagnosticKind::Failure),
+        None,
     )?;
     Ok(Some((execution.execution, log)))
 }
