@@ -99,6 +99,7 @@ fn discovery(address: std::net::SocketAddr) -> String {
             .with_workspace_recovery()
             .with_workspace_checkpoints()
             .with_run_suspension()
+            .with_request_ask()
             .with_node_runtime_lanes()
             .with_run_history(TargetRunHistoryDiscovery {
                 kind: RUN_HISTORY_KIND.to_owned(),

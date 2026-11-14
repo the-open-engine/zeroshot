@@ -204,3 +204,15 @@ successor's `Run` handle. `run.watch()` ends at suspension. `Run.wait()` and `Cl
 expose `suspend_requested`, `reason`, `node`, `created_at` and `due_at`. Read the ordered record
 with `await run.vectors(after=None, limit=50)` (`RunVectorsPage.vectors`, `next_after`) and read a
 complete entry with `await run.vector(id)`. These methods use the client's selected target.
+
+## Answer a human request
+
+`await client.inbox(after=None, limit=50)` returns an `InboxPage` with requests and `next_after`.
+`await run.request()` returns the run's own `InboxRequest`, including text, declared signals/output,
+deadline, state and successor. `await run.answer({"signals": {"decision": "approved"}, "output":
+{"feedback": ""}})` returns the successor `Run`. `RunStatus.request` carries the human request.
+All methods use the client's local or named target arguments; named targets need
+`openengine.request-ask/v1`. Answers follow resume's credential and forwarding rules.
+Invalid, repeated and late answers raise the existing CLI command error with its message. A late
+answer still starts the `timeout` successor. Deadlines default to 7 days and have a 30-day maximum;
+inbox reads never apply them. See [Ask a person](ask-a-person.md).

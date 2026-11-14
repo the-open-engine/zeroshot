@@ -904,3 +904,106 @@ def test_wait_raises_suspended_with_handle_and_status(
             assert submitted.value.status.reason == "wait"
 
     asyncio.run(scenario())
+
+
+def test_request_inbox_and_answer_keep_client_target_arguments(fake_native: Path) -> None:
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("prod")) as client:
+            page = await client.inbox(after="before", limit=2)
+            assert page.next_after == "original"
+            assert page.requests[0].state == "pending"
+            run = client.get_run("original")
+            pending = await run.request()
+            assert pending.request.text == "Approve?"
+            successor = await run.answer({"signals": {"decision": "approved"}, "output": {}})
+            assert successor.id == "successor"
+
+    asyncio.run(exercise())
+    calls = read_invocations(fake_native)
+    assert calls[0]["args"] == [
+        "inbox",
+        "list",
+        "--limit",
+        "2",
+        "--after",
+        "before",
+        "--target",
+        "prod",
+    ]
+    assert calls[1]["args"] == ["inbox", "show", "original", "--target", "prod"]
+    assert calls[2]["--input"] == {"signals": {"decision": "approved"}, "output": {}}
+    assert calls[2]["args"][:2] == ["answer", "original"]
+    assert "prod" in calls[2]["args"]
+
+
+def test_request_is_preserved_by_status_and_run_inventory(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_REQUEST_STATUS", "1")
+    monkeypatch.setenv("FAKE_LIST_ONE", "1")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            status = await client.get_run("original").status()
+            listed = (await client.list_runs())[0]
+            assert status.reason == listed.reason == "request"
+            assert status.request == listed.request
+            assert status.request is not None
+            assert status.request.text == "Approve?"
+            assert status.request.expires_at == 2000
+            assert status.request.signals == {"decision": ["approved", "rejected"]}
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("text_bytes", [70_000, 1024 * 1024 - 4096])
+def test_watch_and_wait_preserve_large_request_suspensions(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch, text_bytes: int
+) -> None:
+    from zeroshot import RunSuspendedError
+
+    monkeypatch.setenv("FAKE_REQUEST_STREAM_BYTES", str(text_bytes))
+
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("prod")) as client:
+            run = client.get_run("original")
+            assert (await run.status()).phase == "admitted"
+            events = [event async for event in run.watch()]
+            assert [event.phase for event in events] == ["running", "suspended"]
+            suspended = events[-1]
+            assert suspended.reason == "request"
+            assert suspended.request is not None
+            assert suspended.request.text == "?" * text_bytes
+            with pytest.raises(RunSuspendedError) as error:
+                await run.wait()
+            assert error.value.run is run
+            assert error.value.status == suspended
+
+    asyncio.run(exercise())
+    calls = read_invocations(fake_native)
+    assert [call["args"][0] for call in calls] == ["status", "watch", "status", "watch"]
+    assert all("prod" in call["args"] for call in calls)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["$.output.feedback required", "already has successor next", "request expired; successor next"],
+)
+def test_answer_refusals_raise_existing_cli_error(fake_native: Path, message: str) -> None:
+    async def exercise() -> None:
+        async with Client(
+            environment={
+                "FAKE_ZEROSHOT_LOG": str(fake_native),
+                "FAKE_ANSWER_FAIL": str(
+                    [
+                        "$.output.feedback required",
+                        "already has successor next",
+                        "request expired; successor next",
+                    ].index(message)
+                ),
+            }
+        ) as client:
+            with pytest.raises(InvalidRequestError, match=__import__("re").escape(message)):
+                await client.get_run("original").answer({"signals": {}, "output": {}})
+
+    asyncio.run(exercise())

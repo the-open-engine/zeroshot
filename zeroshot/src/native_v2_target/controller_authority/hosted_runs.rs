@@ -25,6 +25,8 @@ const MAX_STREAM_FRAME_BYTES: usize = 64 * 1024;
 
 #[path = "hosted_runs/export_http.rs"]
 mod export_http;
+#[path = "hosted_runs/list_http.rs"]
+mod list_http;
 #[path = "hosted_runs/recovery_http.rs"]
 mod recovery_http;
 #[path = "hosted_runs/stacks_http.rs"]
@@ -33,15 +35,17 @@ mod stacks_http;
 struct HostedRunSubscription<E> {
     response: Response,
     buffered: Vec<u8>,
+    maximum_frame_bytes: usize,
     closed: bool,
     marker: std::marker::PhantomData<E>,
 }
 
 impl<E> HostedRunSubscription<E> {
-    const fn new(response: Response) -> Self {
+    const fn new(response: Response, maximum_frame_bytes: usize) -> Self {
         Self {
             response,
             buffered: Vec::new(),
+            maximum_frame_bytes,
             closed: false,
             marker: std::marker::PhantomData,
         }
@@ -61,7 +65,7 @@ where
             if let Some(line) = self.take_line() {
                 return self.decode(&line).map(Some);
             }
-            if self.buffered.len() > MAX_STREAM_FRAME_BYTES {
+            if self.buffered.len() > self.maximum_frame_bytes {
                 return Err(stream_error("hosted run stream frame is too large"));
             }
             if !self.read_more().await? {
@@ -102,7 +106,7 @@ where
     }
 
     fn decode(&mut self, line: &[u8]) -> Result<CliSubscriptionItem<E>, NativeV2CliError> {
-        if line.is_empty() || line.len() > MAX_STREAM_FRAME_BYTES {
+        if line.is_empty() || line.len() > self.maximum_frame_bytes {
             return Err(stream_error("hosted run stream frame is malformed"));
         }
         match serde_json::from_slice::<HostedRunStreamFrame<E>>(line)
@@ -172,26 +176,29 @@ impl TargetHttpControlAuthority {
 
     pub(super) async fn hosted_get_json<T: DeserializeOwned>(
         &self,
-        url: Url,
-        access: &AccessToken,
+        request: (Url, &AccessToken),
         operation: &'static str,
+        maximum_bytes: usize,
     ) -> Result<T, TargetAuthorityError> {
+        let (url, access) = request;
         let request = self
             .authorized(self.client.get(url.clone()), access)?
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store");
-        self.hosted_json((request, access), operation, None).await
+        self.hosted_json((request, access), operation, Some(maximum_bytes))
+            .await
     }
 
     async fn hosted_stream<E>(
         &self,
-        url: Url,
-        access: &AccessToken,
+        request: (Url, &AccessToken),
         operation: &'static str,
+        maximum_frame_bytes: usize,
     ) -> Result<BoxedSubscription<E>, TargetAuthorityError>
     where
         E: DeserializeOwned + Send + 'static,
     {
+        let (url, access) = request;
         let response = self
             .authorized(self.stream_client.get(url.clone()), access)?
             .header(ACCEPT, NDJSON_MEDIA_TYPE)
@@ -205,7 +212,10 @@ impl TargetHttpControlAuthority {
         if !response.status().is_success() {
             return Err(http_error(response, operation).await);
         }
-        Ok(BoxedSubscription::new(HostedRunSubscription::new(response)))
+        Ok(BoxedSubscription::new(HostedRunSubscription::new(
+            response,
+            maximum_frame_bytes,
+        )))
     }
 }
 
@@ -217,7 +227,20 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunListResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.list_url()?;
-        self.hosted_get_json(url, &access, "hosted run list").await
+        let response = self
+            .authorized(self.client.get(url.clone()), &access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .send()
+            .await
+            .map_err(|error| TargetAuthorityError::request_failed("hosted run list", &error))?;
+        require_response_route(&response, &url)?;
+        self.invalidate_rejected_access(&response, Some(&access))
+            .await;
+        if !response.status().is_success() {
+            return Err(http_error(response, "hosted run list").await);
+        }
+        list_http::read_run_list(response).await
     }
 
     pub(super) async fn hosted_run_status(
@@ -227,8 +250,12 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunStatusResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.status_url(&params.run_id)?;
-        self.hosted_get_json(url, &access, "hosted run status")
-            .await
+        self.hosted_get_json(
+            (url, &access),
+            "hosted run status",
+            openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES,
+        )
+        .await
     }
 
     pub(super) async fn hosted_run_watch(
@@ -238,7 +265,12 @@ impl TargetHttpControlAuthority {
     ) -> Result<BoxedSubscription<CliRunWatchEventNotification>, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.watch_url(&params.run_id, params.from_cursor.as_ref())?;
-        self.hosted_stream(url, &access, "hosted run watch").await
+        self.hosted_stream(
+            (url, &access),
+            "hosted run watch",
+            openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES,
+        )
+        .await
     }
 
     pub(super) async fn hosted_run_logs(
@@ -252,7 +284,8 @@ impl TargetHttpControlAuthority {
             params.from_cursor.as_ref(),
             params.execution.as_ref(),
         )?;
-        self.hosted_stream(url, &access, "hosted run logs").await
+        self.hosted_stream((url, &access), "hosted run logs", MAX_STREAM_FRAME_BYTES)
+            .await
     }
 
     pub(super) async fn hosted_run_force(

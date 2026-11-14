@@ -206,3 +206,15 @@ the original source authorization and resolves fresh values. The submission rece
 selected repository, branch and revision; uncommitted files stay on the client.
 
 Direct targets (`zeroshot target serve`) support suspension, wait verifiers and vector reads. Suspended attempts retain the same exclusively claimable workspace and checkpoints as failed attempts, including across target restart. Continuation preserves files changed after the checkpoint and resolves fresh credentials against the original admitted requirements.
+
+## Requests on targets
+
+Direct targets support `answer --target NAME` and `inbox list/show --target NAME` and advertise
+`request_ask: {"kind":"openengine.request-ask/v1"}`. Request suspension retains the workspace; an
+answer uses the existing resume route, fresh credentials matched to the original authorization,
+and a successor with no earlier node rerun. `--forward-gh-token` follows resume's rules. Requests
+have a 7-day default deadline and a 30-day maximum. A late answer continues through the request's
+`timeout` error; direct targets have no timer, and inbox reads never continue runs. Hosted inbox
+reads require advertised routes in the independent `hosted_inbox` extension, kind
+`openengine.hosted-inbox/v1`. Vector reads need only `openengine.run-vectors/v1`.
+See [Ask a person](../guides/ask-a-person.md).

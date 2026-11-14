@@ -670,6 +670,24 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   complete graph history and vector record before suspension cleanup. Direct targets enable it.
   Discovery uses separate strict `{kind}` markers: `request_wait` (`openengine.request-wait/v1`),
   `run_suspension` (`openengine.run-suspension/v1`), and `run_vectors` (`openengine.run-vectors/v1`).
+  `builtin.request.ask@1` uses the same host-owned binding with required string input `text`,
+  authored signals and a flat scalar-record output. It always suspends with reason `request`,
+  carrying its question, contract, identity and deadline, and permits the same placements and no
+  stack profiles. It requires workspace checkpoints, no instructions and one attempt. Ordinary
+  resume refuses it before credential resolution and reports recovery unavailable. Interrupted
+  answer launches still reconcile unadmitted successor claims before accepting another answer. `answer`
+  validates its complete verifier result before successor admission and continues on the retained
+  workspace; a late answer admits the existing timeout outcome and reports that successor as an
+  invalid_request refusal. The owning controller's clock checks expiry before shape; clients send
+  valid answers unchanged and defer file errors until that check, retaining the controller's
+  refusal and the file diagnostic. A second answer names the existing
+  successor. Request, answer and expiry vectors retain full content through show and inheritance;
+  bounded list summaries omit text, schemas and answers. Inbox reads project only each run's own
+  request vectors, never apply expiry, and exclude continued or stopped runs from pending pages.
+  Discovery adds `request_ask` (`openengine.request-ask/v1`); hosted inbox routes live in the separate
+  `hosted_inbox` (`openengine.hosted-inbox/v1`) extension. Host-owned storage has an independent,
+  default-off request opt-in beside suspension. Direct and local controllers enable requests.
+  Profile storage checks authored ask/wait workers against their own markers before access tokens.
   Missing or wrong kinds refuse their operations after discovery and before token/body/session;
   extra marker fields fail discovery while unknown extension keys remain ignored.
 - `code-review` reuses the `pr-review` input type and review continuation, so `--task-from`,
@@ -709,7 +727,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   only the exact cached issuance, never a newer concurrent token; only stacks retain their
   existing one-retry policy. Access tokens remain memory-only, and transport grant expiry continues
   to use durable observation reconnect/cursors without extending any lifetime.
-- Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
+- Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume and answer must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
 - Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding
   protocol, version, and profile values are bounded opaque strings; the protocol crate must not
   keep an external binding catalog. `openengine.worker.builtin/v1` is reserved for native
@@ -953,9 +971,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. Default resume of a failed run starts a fresh graph on the retained workspace;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
-  imports old provider sessions, secrets, or token usage. Suspended runs accept only default resume,
-  continuing at the held-back node, or after a due wait. Every successor inherits the ordered vector
-  record. Suspension keeps request admission open during host storage writes and republishes the
+  imports old provider sessions, secrets, or token usage. Suspended command/wait runs accept only default resume,
+  continuing at the held-back node, or after a due wait. Request suspensions require answer and
+  settle the held node with verifier output/signals or timeout in their successor. Every successor inherits the ordered vector
+  record. Request input text keeps the node-input bound; its persisted question also includes the
+  authored result contract, so request vectors and suspension records have a separate combined
+  bound. Answers must fit the existing node-completion and answer-vector event bounds before
+  successor admission. Full request/vector reads and hosted status/watch readers use
+  the explicit request response bound; hosted lists stream that bound per run rather than capping the
+  whole unpaged collection. Log stream frames retain their existing bound. Inbox rows remain
+  below the generic hosted page limit. Protocol client response frames include the full request
+  bound plus JSON-RPC framing; server incoming WebSocket and NDJSON request frames allow 2 MiB for
+  the answer, fresh credentials and envelope without changing node-result limits.
+  Python SDK NDJSON readers use the same full-request frame allowance as the native client and
+  report oversized events as protocol errors while stopping the child process.
+  Suspension keeps request admission open during host storage writes and republishes the
   complete record if a request arrives meanwhile. Final disposal and durable suspension share the
   request admission turn; force-stop remains independent. Storage replaces the full snapshot on
   republication. Continuation restores no file locally or on a direct target and accepts no discard flag. Checkpoint IDs never become filesystem paths.
@@ -1009,7 +1039,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `ProductionHostingConfig` can accept host-owned `HostedWorkspaceStorage`; the allocator invokes
   it after source checkout and before provider dispatch, imports settled prerequisites, and
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
-- Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
+- Durable observation replay reads bounded ledger pages that fit every accepted event, including
+  combined request text and contracts, and retains its scan cursor across pages.
   Vector pagination resolves entry IDs through a per-run ledger index, including inherited IDs,
   then replays after that cursor instead of reading earlier pages again.
   Local CLI inspection opens finished runs directly from read-only ledgers. Vector list and show
@@ -1057,6 +1088,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Cancellation drains output and provider cleanup before execution settlement. Run close reserves
   and tombstones execution activity atomically; no late work may surface after close returns.
 - Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
+  On a request node it is the deadline from creation, defaults to 7 days, and permits at most 30 days.
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
   The supervisor records every node error in durable logs before settlement, including handled
   failures and retries. Summaries preserve error code, typed refusal/malformed reason, elapsed time,
@@ -1626,11 +1658,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   it. A run's PR head is `native_v2_delivery::delivery_head_branch` of its delivery run ID; receipts
   stay unchanged. Zeroshot never retargets or restacks PRs. The target resolves each node's exact
   source branch and revision only after its dependencies succeed; stacks have static inputs, no
-  cross-node dataflow, no local execution, and no retry-in-place, and cannot contain wait nodes. Agent runtime bindings cannot
+  cross-node dataflow, no local execution, and no retry-in-place, and cannot contain wait or request nodes. Agent runtime bindings cannot
   declare `GH_TOKEN`; the sole delivery binding owns the GitHub write credential. A node's queue
   deadline is the earlier of stack expiry and seven days after readiness.
 - Read-only safe commands include `zeroshot list`, `zeroshot status`, `zeroshot logs`,
-  `zeroshot vectors`, and `zeroshot vectors show`.
+  `zeroshot vectors`, `zeroshot vectors show`, `zeroshot inbox list`, and `zeroshot inbox show`.
 - Destructive commands such as `zeroshot force-stop` require explicit user intent.
 
 ## Where to look
@@ -1866,6 +1898,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## Validation
 
 Run the narrowest relevant checks first, then the complete affected lane.
+The local CLI integration root includes its shared fixture before adding request scenarios, so
+other integration suites can reuse the fixture without duplicating those scenarios.
 
 ```bash
 cargo fmt --all -- --check

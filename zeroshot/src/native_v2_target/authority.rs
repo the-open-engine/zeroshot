@@ -103,6 +103,15 @@ pub trait TargetControlAuthority: Send + Sync {
         ))
     }
 
+    async fn validate_request_ask(
+        &self,
+        _target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.request-ask/v1",
+        ))
+    }
+
     async fn run_suspension_session(
         &self,
         _target: &TargetRecord,
@@ -110,6 +119,16 @@ pub trait TargetControlAuthority: Send + Sync {
     ) -> Result<TargetOecpAccess, TargetAuthorityError> {
         Err(TargetAuthorityError::new(
             "target does not advertise openengine.run-suspension/v1",
+        ))
+    }
+
+    async fn request_ask_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.request-ask/v1",
         ))
     }
 
@@ -243,6 +262,26 @@ pub trait TargetControlAuthority: Send + Sync {
         _target: &TargetRecord,
         _params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<Option<openengine_cluster_protocol::RunVectorsResult>, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-vectors/v1",
+        ))
+    }
+
+    async fn hosted_inbox_show(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxShowResult>, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-vectors/v1",
+        ))
+    }
+
+    async fn hosted_inbox_list(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxListResult>, TargetAuthorityError> {
         Err(TargetAuthorityError::new(
             "target does not advertise openengine.run-vectors/v1",
         ))

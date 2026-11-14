@@ -40,6 +40,8 @@ struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     predecessor: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    request_resolution: Option<openengine_cluster_protocol::RequestResolution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     delivery_receipt: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
@@ -101,6 +103,7 @@ impl PortableBootstrapDocument {
         }
         Ok(PortableControllerBootstrap {
             predecessor: self.predecessor,
+            request_resolution: self.request_resolution,
             delivery_receipt: self.delivery_receipt,
             local_branch: self.local_branch,
             checkpoint: self.checkpoint,
@@ -292,6 +295,7 @@ fn encode_bootstrap(
         .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
         predecessor: bootstrap.predecessor.clone(),
+        request_resolution: bootstrap.request_resolution.clone(),
         delivery_receipt: bootstrap.delivery_receipt.clone(),
         checkpoint: bootstrap.checkpoint.clone(),
         preparation_timeout_ms,

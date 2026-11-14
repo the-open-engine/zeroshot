@@ -431,59 +431,91 @@ where
         .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     require_not_stopping(prepared)?;
     runtime.execution_seed = execution_seed;
-    if let Some(predecessor) = &bootstrap.predecessor {
-        let root = bootstrap
-            .storage
-            .parent()
-            .ok_or(PortableControllerError::Bootstrap)?;
-        let source =
-            SqliteRunLedger::open_read_only(root.join(predecessor.as_str()).join("runs.sqlite3"))?;
-        let stored = source
-            .get(predecessor)
-            .await?
-            .ok_or(PortableControllerError::DurableIdentity)?;
-        if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended {
-            if bootstrap.checkpoint.is_some() {
-                return Err(PortableControllerError::Bootstrap);
-            }
-            runtime.execution_seed =
-                crate::native_v2_supervisor::continuation_history(&stored.snapshot)
-                    .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
-        }
-        let mut after = None;
-        loop {
-            let page = crate::v2_run_ledger::vectors::list(
-                &source,
-                openengine_cluster_protocol::RunVectorsParams {
-                    run_id: predecessor.clone(),
-                    after,
-                    limit: Some(100),
-                },
-            )
-            .await?;
-            runtime.vector_seed.extend(page.vectors);
-            after = page.next_after;
-            if after.is_none() {
-                break;
-            }
-        }
-        if let crate::v2_run_ledger::RunEvent::Vector { vector } =
-            crate::v2_run_ledger::vector_event(
-                &bootstrap.run_id,
-                openengine_cluster_protocol::RunVectorContent::Continuation {
-                    resumed_from: predecessor.clone(),
-                },
-            )?
-        {
-            runtime.vector_seed.push(vector);
-        }
-    }
+    seed_predecessor_history(bootstrap, &mut runtime).await?;
     let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
     Ok(PreparedRuntime {
         runtime: Some(runtime),
         workspace_identity: Some(workspace_identity),
         workspace_lease: Some(workspace_lease),
     })
+}
+
+async fn seed_predecessor_history(
+    bootstrap: &PortableControllerBootstrap,
+    runtime: &mut PortableRuntime,
+) -> Result<(), PortableControllerError> {
+    let Some(predecessor) = &bootstrap.predecessor else {
+        return Ok(());
+    };
+    let root = bootstrap
+        .storage
+        .parent()
+        .ok_or(PortableControllerError::Bootstrap)?;
+    let source =
+        SqliteRunLedger::open_read_only(root.join(predecessor.as_str()).join("runs.sqlite3"))?;
+    let stored = source
+        .get(predecessor)
+        .await?
+        .ok_or(PortableControllerError::DurableIdentity)?;
+    if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended {
+        if bootstrap.checkpoint.is_some() {
+            return Err(PortableControllerError::Bootstrap);
+        }
+        runtime.execution_seed = match &bootstrap.request_resolution {
+            Some(resolution) => {
+                crate::native_v2_supervisor::request_history(&stored.snapshot, resolution)
+            }
+            None if matches!(
+                stored.snapshot.suspension,
+                Some(openengine_cluster_protocol::RunSuspension::Request { .. })
+            ) =>
+            {
+                return Err(PortableControllerError::Bootstrap);
+            }
+            None => crate::native_v2_supervisor::continuation_history(&stored.snapshot),
+        }
+        .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
+    }
+    let mut after = None;
+    loop {
+        let page = crate::v2_run_ledger::vectors::list_full(
+            &source,
+            openengine_cluster_protocol::RunVectorsParams {
+                run_id: predecessor.clone(),
+                after,
+                limit: Some(100),
+            },
+        )
+        .await?;
+        runtime.vector_seed.extend(page.vectors);
+        after = page.next_after;
+        if after.is_none() {
+            break;
+        }
+    }
+    if let (
+        Some(resolution),
+        Some(openengine_cluster_protocol::RunSuspension::Request { request, .. }),
+    ) = (&bootstrap.request_resolution, &stored.snapshot.suspension)
+    {
+        if let crate::v2_run_ledger::RunEvent::Vector { vector } =
+            crate::v2_run_ledger::vector_event(
+                &bootstrap.run_id,
+                crate::native_v2_request::resolution_vector(request, resolution),
+            )?
+        {
+            runtime.vector_seed.push(vector);
+        }
+    }
+    if let crate::v2_run_ledger::RunEvent::Vector { vector } = crate::v2_run_ledger::vector_event(
+        &bootstrap.run_id,
+        openengine_cluster_protocol::RunVectorContent::Continuation {
+            resumed_from: predecessor.clone(),
+        },
+    )? {
+        runtime.vector_seed.push(vector);
+    }
+    Ok(())
 }
 
 fn require_not_stopping(prepared: &PreparedControllerStart) -> Result<(), PortableControllerError> {
@@ -639,6 +671,10 @@ impl SingleRunAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SingleRunAllocator {
+    fn supports_request_ask(&self) -> bool {
+        true
+    }
+
     fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
         Some(Default::default())
     }

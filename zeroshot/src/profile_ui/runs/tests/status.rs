@@ -578,6 +578,7 @@ mod local {
 async fn suspended_history_is_complete_and_ended_for_local_and_target_sources() {
     use openengine_cluster_protocol::{RunSuspension, RunWait};
     for suspension in [
+        serde_json::from_value(json!({"reason":"request","node":"worker","createdAt":1762905600000u64,"request":{"id":"question","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":1762992000000u64}})).assert_value(),
         RunSuspension::Command {
             node: NodeName::new("worker").assert_value(),
             created_at: UnixTimestampMillis::new(1762905600000).assert_value(),

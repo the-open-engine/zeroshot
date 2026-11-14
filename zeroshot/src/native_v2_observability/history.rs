@@ -228,7 +228,7 @@ fn stringify_identifiers(value: &mut Value, keys: &[&str]) {
 
 fn project_event(event: &mut Value) {
     match event["kind"].as_str() {
-        Some("node_started" | "execution_voided" | "wait_deferred") => {
+        Some("node_started" | "execution_voided" | "wait_deferred" | "request_deferred") => {
             stringify_identifiers(&mut event["reference"], &["execution", "nodeInstance"]);
         }
         Some("node_completed") => {

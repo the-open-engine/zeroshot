@@ -290,7 +290,7 @@ pub struct VerifierNode {
     pub output: PayloadType,
     pub input_bindings: Vec<InputBinding>,
     pub write_bindings: Vec<WriteBinding>,
-    /// Omit to run until completion or cancellation.
+    /// Omit to run until completion or cancellation; request ask nodes default to seven days.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<PositiveInteger>,
     pub attempts: PositiveInteger,

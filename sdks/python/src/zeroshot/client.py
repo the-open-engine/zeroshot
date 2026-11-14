@@ -15,10 +15,29 @@ from typing import TypedDict, Unpack, overload
 
 from ._binary import resolve_binary
 from ._process import NativeProcess, _RunFailed
-from ._projection import _log_event, _stack_status, _status, _summary, _vector, _vectors
+from ._projection import (
+    _inbox,
+    _inbox_request,
+    _log_event,
+    _stack_status,
+    _status,
+    _summary,
+    _vector,
+    _vectors,
+)
 from .errors import ClientClosedError, InvalidRequestError, ProtocolError, TargetError
 from .run_errors import RunSuspendedError, RunWaitTimeout
-from .runs import LogEvent, RunRequest, RunResult, RunStatus, RunSummary, RunVector, RunVectorsPage
+from .runs import (
+    InboxPage,
+    InboxRequest,
+    LogEvent,
+    RunRequest,
+    RunResult,
+    RunStatus,
+    RunSummary,
+    RunVector,
+    RunVectorsPage,
+)
 from .runtime import (
     DirectTarget,
     GraphSpec,
@@ -556,6 +575,27 @@ class Client:
         )
         return _stack_status(value)
 
+    async def inbox(self, after: str | None = None, limit: int = 50) -> InboxPage:
+        """Read requests still holding their runs suspended without applying expiry.
+
+        Args:
+            after: Exclusive run ID cursor, or None for the first page.
+            limit: Maximum entries, from 1 through 100.
+
+        Returns:
+            The request page and its next cursor.
+
+        Raises:
+            ValueError: If limit is outside 1 through 100.
+        """
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be from 1 through 100")
+        await self._ready()
+        arguments = ["inbox", "list", "--limit", str(limit)]
+        if after is not None:
+            arguments.extend(["--after", after])
+        return _inbox(await self._native().json([*arguments, *self._route_arguments()]))
+
     async def _status(self, run_id: str) -> RunStatus:
         await self._ready()
         value = await self._native().json(["status", run_id, *self._route_arguments()])
@@ -817,6 +857,45 @@ class Run:
         )
         if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
             raise ProtocolError("Zeroshot emitted malformed resume result")
+        return Run(self._client, value["runId"])
+
+    async def request(self) -> InboxRequest:
+        """Read the request this run made, including its state and successor.
+
+        Returns:
+            The complete inbox request. Inherited requests are excluded.
+        """
+        await self._client._ready()
+        return _inbox_request(
+            await self._client._native().json(
+                ["inbox", "show", self.id, *self._client._route_arguments()]
+            )
+        )
+
+    async def answer(self, answer: JsonValue) -> Run:
+        """Answer this run's request and start one successor on the retained workspace.
+
+        Args:
+            answer: Complete verifier result with signals and output matching the request.
+
+        Returns:
+            The successor run handle. Invalid, repeated and late answers raise the CLI error.
+        """
+        await self._client._ready()
+        with tempfile.TemporaryDirectory(prefix="zeroshot-python-answer-") as directory:
+            path = _write_json(Path(directory) / "answer.json", answer)
+            value = await self._client._native().json(
+                [
+                    "answer",
+                    self.id,
+                    "--input",
+                    str(path),
+                    *self._client._route_arguments(),
+                    *self._client._forwarding_arguments(),
+                ]
+            )
+        if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
+            raise ProtocolError("Zeroshot emitted malformed answer result")
         return Run(self._client, value["runId"])
 
     async def vectors(self, *, after: str | None = None, limit: int = 50) -> RunVectorsPage:

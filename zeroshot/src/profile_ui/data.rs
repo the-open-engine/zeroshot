@@ -940,7 +940,13 @@ fn update_bound_field(
     input: &str,
     value_type: Option<&Value>,
 ) -> Result<(), ApiError> {
-    let fixed_wait = schema == "input" && node["worker"] == crate::native_v2_wait::WAIT_WORKER_REF;
+    let fixed_wait = schema == "input"
+        && [
+            crate::native_v2_wait::WAIT_WORKER_REF,
+            crate::native_v2_request::ASK_WORKER_REF,
+        ]
+        .iter()
+        .any(|worker| node["worker"] == *worker);
     let fields = node[schema]["fields"]
         .as_object_mut()
         .ok_or_else(|| invalid("This input uses a scalar schema."))?;
@@ -951,7 +957,7 @@ fn update_bound_field(
                 .is_none_or(|field| field["type"] != *value_type)
         }) {
             return Err(invalid(
-                "Choose a source matching the wait input's fixed type.",
+                "Choose a source matching the request input's fixed type.",
             ));
         }
     } else if let Some(value_type) = value_type {

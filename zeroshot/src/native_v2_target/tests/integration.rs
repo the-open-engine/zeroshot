@@ -493,6 +493,21 @@ async fn direct_connector_binds_resume_fields_to_the_original_runtime() {
 
 #[tokio::test]
 async fn direct_connector_constrains_resume_values_and_propagates_authorization() {
+    assert_direct_continuation_authorization(None).await;
+}
+
+#[tokio::test]
+async fn direct_connector_constrains_answer_values_and_propagates_authorization() {
+    let from = serde_json::from_value(
+        serde_json::json!({"kind":"answer","signals":{"decision":"approved"},"output":{}}),
+    )
+    .assert_value();
+    assert_direct_continuation_authorization(Some(from)).await;
+}
+
+async fn assert_direct_continuation_authorization(
+    from: Option<openengine_cluster_protocol::RunResumeFrom>,
+) {
     let fixture = direct_recovery_fixture().await;
     let selected = EnvironmentVariableName::new("AWS_SECRET_ACCESS_KEY").assert_value();
     let successor_run_id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992");
@@ -509,7 +524,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
-        from: None,
+        from: from.clone(),
     };
     assert!(
         fixture
@@ -536,7 +551,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
-        from: None,
+        from,
     };
     assert!(
         fixture
@@ -1256,4 +1271,52 @@ async fn suspend_and_both_vector_reads_reach_the_direct_runs_oecp_session() {
         );
         assert!(session.authorization.is_none());
     }
+}
+
+#[tokio::test]
+async fn inbox_reads_use_a_direct_targets_oecp_session() {
+    let root = temp_root();
+    let (origin, server) = spawn_direct_target_authority(4).await;
+    let registry = MemoryRegistry::default();
+    registry.insert(direct_target(origin)).assert_value();
+    let dialer = FakeDialer::default();
+    let backend = NamedTargetCliBackend::new(NativeV2TargetConnector::new(
+        registry,
+        test_http_authority(root.path("refresh-locks")),
+        dialer.clone(),
+    ));
+    backend
+        .inbox_list(
+            Some("vm"),
+            openengine_cluster_protocol::InboxListParams {
+                after: Some(RunId::new("before")),
+                limit: Some(2),
+            },
+        )
+        .await
+        .assert_error();
+    backend
+        .inbox_show(
+            Some("vm"),
+            openengine_cluster_protocol::RunStatusParams {
+                run_id: RunId::new("question"),
+            },
+        )
+        .await
+        .assert_error();
+    let requests = dialer.requests.lock().assert_value().clone();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request["method"].as_str().assert_value())
+            .collect::<Vec<_>>(),
+        ["inbox/list", "inbox/show"]
+    );
+    assert_eq!(requests[0]["params"]["after"], "before");
+    assert_eq!(requests[1]["params"]["runId"], "question");
+    assert_eq!(dialer.sessions.lock().assert_value().len(), 2);
+    tokio::time::timeout(std::time::Duration::from_secs(5), server)
+        .await
+        .assert_value()
+        .assert_value();
 }

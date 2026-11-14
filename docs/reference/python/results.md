@@ -17,6 +17,10 @@ description: "Python API reference for run results, summaries, statuses, stack s
         - RunResult
         - RunStatus
         - RunSummary
+        - HumanRequest
+        - InboxEntry
+        - InboxPage
+        - InboxRequest
         - RunVector
         - RunVectorsPage
         - SourceForgeIdentity

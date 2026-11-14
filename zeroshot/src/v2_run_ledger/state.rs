@@ -42,6 +42,16 @@ pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
     }
     let maximum = match event {
         RunEvent::PriorExecution { .. } => MAX_PRIOR_EXECUTION_BYTES,
+        RunEvent::Vector {
+            vector:
+                openengine_cluster_protocol::RunVector {
+                    content: openengine_cluster_protocol::RunVectorContent::Request { .. },
+                    ..
+                },
+        }
+        | RunEvent::Suspended {
+            suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
+        } => openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES - 1024,
         _ => MAX_EVENT_BYTES,
     };
     bounded_json(event, maximum).map_err(|_| RunLedgerError::EventTooLarge)
@@ -136,6 +146,12 @@ fn apply_event_kind(
         }
         RunEvent::NodeCompleted { completion } => {
             apply_node_completed(snapshot, completion, sequence)
+        }
+        RunEvent::RequestDeferred { reference } => {
+            active_node_mut(snapshot, reference)?.state = NodeState::SuspendedRequest {
+                at: cursor_for(sequence),
+            };
+            Ok(())
         }
         RunEvent::WaitDeferred { reference } => {
             active_node_mut(snapshot, reference)?.state = NodeState::SuspendedWait {

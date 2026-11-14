@@ -37,6 +37,32 @@ impl TargetHttpControlAuthority {
         .map(Some)
     }
 
+    pub(in super::super) async fn hosted_inbox_show(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxShowResult>, TargetAuthorityError> {
+        let (auth, controller) = self
+            .descriptors_inner(target, super::super::TargetSessionPurpose::RequestAsk)
+            .await?;
+        let url = auth.hosted_runs.inbox_show_url(&params.run_id)?;
+        let access = self
+            .access_token(target, &auth, &controller.audience)
+            .await?;
+        let request = self
+            .authorized(self.client.post(url), &access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .json(&params);
+        self.hosted_json(
+            (request, &access),
+            "hosted inbox show",
+            Some(openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES),
+        )
+        .await
+        .map(Some)
+    }
+
     pub(in super::super) async fn hosted_run_vectors(
         &self,
         target: &TargetRecord,
@@ -57,6 +83,28 @@ impl TargetHttpControlAuthority {
             .header(CACHE_CONTROL, "no-store")
             .json(&params);
         self.hosted_json((request, &access), "hosted run vectors", None)
+            .await
+            .map(Some)
+    }
+
+    pub(in super::super) async fn hosted_inbox_list(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxListResult>, TargetAuthorityError> {
+        let (auth, controller) = self
+            .descriptors_inner(target, super::super::TargetSessionPurpose::RequestAsk)
+            .await?;
+        let url = auth.hosted_runs.inbox_list_url()?;
+        let access = self
+            .access_token(target, &auth, &controller.audience)
+            .await?;
+        let request = self
+            .authorized(self.client.post(url), &access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .json(&params);
+        self.hosted_json((request, &access), "hosted inbox list", None)
             .await
             .map(Some)
     }
@@ -91,6 +139,16 @@ impl TargetHttpControlAuthority {
         target: &TargetRecord,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, TargetAuthorityError> {
+        if matches!(
+            params.from,
+            Some(
+                openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                    | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+            )
+        ) {
+            crate::native_v2_target::TargetControlAuthority::validate_request_ask(self, target)
+                .await?;
+        }
         let (routes, access) = self
             .require_hosted_run_access_for(target, params.git_credentials.is_some())
             .await?;

@@ -410,9 +410,15 @@ impl LocalCliBackend {
     async fn start_prepared_controller_with_lineage(
         &self,
         prepared: PreparedLocalRun,
-        resumed_from: Option<RunId>,
+        continuation: Option<(
+            RunId,
+            Option<openengine_cluster_protocol::RequestResolution>,
+        )>,
         checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     ) -> Result<RunId, StartFailure> {
+        let (resumed_from, request_resolution) = continuation
+            .map(|(run, resolution)| (Some(run), resolution))
+            .unwrap_or_default();
         // Checkpoint restoration replaces this workspace under the controller's lease. A relative
         // executable may exist only in that snapshot, so the controller checks lanes and delivery
         // when it composes the restored run, before admission, and its startup report names them.
@@ -470,6 +476,7 @@ impl LocalCliBackend {
         let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
         let bootstrap_path = storage.join(BOOTSTRAP_FILE);
         let bootstrap = PortableControllerBootstrap {
+            request_resolution,
             predecessor: resumed_from,
             delivery_receipt,
             local_branch: prepared.local_branch.clone(),
@@ -1021,6 +1028,13 @@ impl LocalCliBackend {
         let loss_observed = status.controller.as_ref().is_some_and(|observation| {
             observation.state == openengine_cluster_protocol::ControllerState::Lost
         });
+        let request = matches!(
+            &status.status,
+            openengine_cluster_protocol::RunStatus::Suspended {
+                suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
+                ..
+            }
+        );
         let suspended = match &status.status {
             openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } => suspension
                 .due_at()
@@ -1056,7 +1070,7 @@ impl LocalCliBackend {
             successor => successor,
         };
         Ok(WorkspaceRecovery {
-            recoverable: unclaimed && successor_run_id.is_none(),
+            recoverable: !request && unclaimed && successor_run_id.is_none(),
             connection_requirements: document
                 .submission
                 .connection_requirements()

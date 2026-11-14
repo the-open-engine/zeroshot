@@ -78,6 +78,7 @@ impl TlsFixture {
         let prepared = self.prepared(mode, "test-private-token");
         crate::native_v2_portable_controller::PortableControllerBootstrap {
             predecessor: None,
+            request_resolution: None,
             delivery_receipt: None,
             checkpoint: Some(CheckpointRestore {
                 directory: storage.join("checkpoints"),

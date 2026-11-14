@@ -439,6 +439,65 @@ async fn local_recovery_contract_preserves_lineage_and_recoverability() {
 }
 
 #[tokio::test]
+async fn request_recovery_reconciles_interrupted_claims_without_enabling_resume() {
+    let root = TestDirectory::new("request-recovery-contract");
+    let backend = contract_backend(root.path());
+    let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000071");
+    let interrupted = RunId::new("0199f33f-3b44-7d21-9000-000000000072");
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    backend.create_run_storage(&run_id).assert_value();
+    let submission = contract_submission("request-recovery");
+    let mut status = contract_status(&submission, run_id.clone(), false);
+    status.status = serde_json::from_value(json!({
+        "phase":"suspended","reason":"request","node":"worker","createdAt":1000,
+        "request":{"id":"question","text":"Approve?","signals":{"decision":["approved","rejected"]},
+            "output":{"kind":"record","fields":{}},"expiresAt":604801000},"metadata":{}
+    }))
+    .assert_value();
+    for created_storage in [false, true] {
+        let mut document = recovery_document(submission.clone(), workspace.clone(), None);
+        document.successor_run_id = Some(interrupted.clone());
+        backend
+            .write_recovery_document(&run_id, &document)
+            .assert_value();
+        if created_storage {
+            backend.create_run_storage(&interrupted).assert_value();
+        }
+        let released = backend.workspace_recovery(&status).await.assert_value();
+        assert!(!released.recoverable);
+        assert!(released.successor_run_id.is_none());
+
+        let claim = backend.claim_recovery_workspace(&run_id).assert_value();
+        let launching = backend.workspace_recovery(&status).await.assert_value();
+        assert!(!launching.recoverable);
+        assert_eq!(launching.successor_run_id.as_ref(), Some(&interrupted));
+        drop(claim);
+        if created_storage {
+            let lease =
+                ControllerLease::acquire(backend.paths(&interrupted).assert_value().lease())
+                    .assert_value();
+            let live = backend.workspace_recovery(&status).await.assert_value();
+            assert!(!live.recoverable);
+            assert_eq!(live.successor_run_id.as_ref(), Some(&interrupted));
+            drop(lease);
+        }
+        backend
+            .reconcile_local_resume_claim(&run_id, Duration::ZERO)
+            .await
+            .assert_value();
+        assert!(
+            backend
+                .read_recovery_document(&run_id)
+                .assert_value()
+                .successor_run_id
+                .is_none()
+        );
+        assert!(!backend.run_storage(&interrupted).assert_value().exists());
+    }
+}
+
+#[tokio::test]
 async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_restore() {
     for restoring in [false, true] {
         // Windows also searches the parent PATH and executable directory, so an empty captured

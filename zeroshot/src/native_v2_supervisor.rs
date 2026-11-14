@@ -393,6 +393,12 @@ impl NativeV2Supervisor {
         }
         let dispatches = dispatch_decisions(&self.run_id, reduction.decisions);
         if dispatches.len() == 1
+            && dispatches[0].worker.as_str() == crate::native_v2_request::ASK_WORKER_REF
+        {
+            self.execute_request(program, &dispatches[0]).await?;
+            return Ok(None);
+        }
+        if dispatches.len() == 1
             && dispatches[0].worker.as_str() == crate::native_v2_wait::WAIT_WORKER_REF
         {
             self.execute_wait(&dispatches[0]).await?;
@@ -702,7 +708,9 @@ pub(crate) mod logging;
 mod postmortem;
 mod runtime;
 // Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
-pub(crate) use runtime::{continuation_history, durable_history, next_execution, next_node_instance};
+pub(crate) use runtime::{
+    request_history, continuation_history, durable_history, next_execution, next_node_instance,
+};
 pub use environment::{RunEnvironment, RunEnvironmentError};
 pub(crate) use environment::{ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver};
 use runtime::*;

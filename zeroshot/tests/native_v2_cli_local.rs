@@ -5,8 +5,12 @@ use std::fs;
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue, JsonAt};
 use serde_json::{Value, json};
 
-#[path = "native_v2_cli_local/fixture.rs"]
-mod fixture;
+mod fixture {
+    include!("native_v2_cli_local/fixture.rs");
+    mod requests {
+        include!("native_v2_cli_local/requests.rs");
+    }
+}
 use fixture::*;
 
 const TITLE: &str = "Local no-delivery acceptance";

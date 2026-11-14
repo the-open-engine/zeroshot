@@ -168,6 +168,7 @@ class RunStatus:
         node: Node held back by suspension.
         created_at: Suspension time in Unix epoch milliseconds.
         due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
+        request: Human request contract when suspended for a request.
     """
 
     run_id: str
@@ -181,10 +182,11 @@ class RunStatus:
     graph_result: RunResult | None = None
     controller: ControllerObservation | None = None
     suspend_requested: bool = False
-    reason: Literal["command", "wait"] | None = None
+    reason: Literal["command", "wait", "request"] | None = None
     node: str | None = None
     created_at: int | None = None
     due_at: int | None = None
+    request: HumanRequest | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -206,6 +208,7 @@ class RunSummary:
         node: Node held back by suspension.
         created_at: Suspension time in Unix epoch milliseconds.
         due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
+        request: Human request contract when suspended for a request.
     """
 
     run_id: str
@@ -218,10 +221,11 @@ class RunSummary:
     graph_result: RunResult | None = None
     controller: ControllerObservation | None = None
     suspend_requested: bool = False
-    reason: Literal["command", "wait"] | None = None
+    reason: Literal["command", "wait", "request"] | None = None
     node: str | None = None
     created_at: int | None = None
     due_at: int | None = None
+    request: HumanRequest | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -274,10 +278,82 @@ class RunVectorsPage:
 
     Args:
         run_id: Run whose record was read.
-        vectors: Ordered entries with their complete content.
+        vectors: Ordered bounded summaries; use Run.vector() for complete content.
         next_after: Cursor for the next page, or None at the end.
     """
 
     run_id: str
     vectors: tuple[RunVector, ...]
     next_after: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HumanRequest:
+    """A host-run question and its declared answer contract.
+
+    Args:
+        id: Opaque request vector identity.
+        text: Question supplied by the graph.
+        signals: Declared signals and their allowed labels.
+        output: Closed record payload schema.
+        expires_at: Exclusive answer deadline in Unix epoch milliseconds.
+    """
+
+    id: str
+    text: str
+    signals: JsonValue
+    output: JsonValue
+    expires_at: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboxEntry:
+    """One bounded request summary.
+
+    Args:
+        run_id: Run held suspended by this request.
+        node: Request verifier name.
+        created_at: Creation time in Unix epoch milliseconds.
+        expires_at: Exclusive answer deadline in Unix epoch milliseconds.
+        state: Pending or expired; reading never applies expiry.
+    """
+
+    run_id: str
+    node: str
+    created_at: int
+    expires_at: int
+    state: Literal["pending", "expired"]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboxPage:
+    """One request page in run ID order.
+
+    Args:
+        requests: Bounded summaries for runs still held suspended.
+        next_after: Run ID cursor for the next page, or None at the end.
+    """
+
+    requests: tuple[InboxEntry, ...]
+    next_after: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboxRequest:
+    """The request made by a run, including its disposition.
+
+    Args:
+        run_id: Run that asked the question.
+        node: Request verifier name.
+        created_at: Creation time in Unix epoch milliseconds.
+        request: Complete question and answer contract.
+        state: Pending, answered, expired, or stopped.
+        successor_run_id: Accepted continuation, if any.
+    """
+
+    run_id: str
+    node: str
+    created_at: int
+    request: HumanRequest
+    state: Literal["pending", "answered", "expired", "stopped"]
+    successor_run_id: str | None

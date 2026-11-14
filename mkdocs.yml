@@ -60,6 +60,7 @@ nav:
       - Prepare a runtime environment: guides/runtime-environments.md
       - Active Memory: guides/active-memory.md
       - Build a review loop: guides/review-loop.md
+      - Ask a person: guides/ask-a-person.md
       - Review an issue or PR: guides/review.md
       - Review a PR in depth: guides/code-review.md
       - GitHub and GitLab delivery: guides/forge-delivery.md

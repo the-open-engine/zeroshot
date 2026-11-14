@@ -246,7 +246,7 @@
               "type": "object"
             },
             "timeoutMs": {
-              "description": "Omit to run until completion or cancellation.",
+              "description": "Omit to run until completion or cancellation; request ask nodes default to seven days.",
               "maximum": 9007199254740991,
               "minimum": 1,
               "type": [

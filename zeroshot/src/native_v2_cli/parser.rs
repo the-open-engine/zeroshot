@@ -188,6 +188,16 @@ enum UtilityCommand {
     /// Request suspension at the next checkpoint and print status immediately.
     Suspend(RunSelectorArgs),
 
+    /// Answer a suspended request from a JSON file and start its successor.
+    ///
+    /// The file contains signals and output matching the request's declared shape. At or after
+    /// the deadline, the command starts the timeout successor and exits 1 naming it.
+    /// The retained workspace is used as it is; earlier nodes and agent sessions do not restart.
+    Answer(RunAnswerArgs),
+
+    /// Read pending requests or show the request made by one run. Reads never apply expiry.
+    Inbox(InboxArgs),
+
     /// Read one page of the run vector record, or show an entry in full.
     Vectors(RunVectorsArgs),
 
@@ -957,3 +967,34 @@ mod convert;
 mod profiles;
 use profiles::{ProfileCommand, ProfileNameArgs, ProfileScopeArg};
 pub use convert::parse_native_v2_args;
+
+#[derive(Debug, Args)]
+struct RunAnswerArgs {
+    #[command(flatten)]
+    run: RunSelectorArgs,
+    /// JSON answer file, containing signals and output. No standard-input form.
+    #[arg(long, value_name = "FILE")]
+    input: PathBuf,
+    /// Forward GH_TOKEN with a named-target continuation.
+    #[arg(long = "forward-gh-token")]
+    forward_github_token: bool,
+}
+#[derive(Debug, Args)]
+struct InboxArgs {
+    #[command(subcommand)]
+    command: InboxCommand,
+}
+#[derive(Debug, Subcommand)]
+enum InboxCommand {
+    /// List one JSON page in run ID order. Expired requests remain until continued or stopped.
+    List {
+        #[command(flatten)]
+        route: TargetRouteArgs,
+        #[arg(long, value_name = "RUN_ID")]
+        after: Option<String>,
+        #[arg(long, value_name = "COUNT", value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: Option<u32>,
+    },
+    /// Show this run's own request, shape, deadline, state and successor.
+    Show(RunSelectorArgs),
+}

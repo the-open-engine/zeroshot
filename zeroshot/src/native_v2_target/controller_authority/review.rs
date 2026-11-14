@@ -26,6 +26,8 @@ impl TargetHttpControlAuthority {
                 RequestCapabilities {
                     runtime: Some(resolution.runtime),
                     task_resolution: true,
+                    request_ask: false,
+                    request_wait: false,
                     ..Default::default()
                 },
             )

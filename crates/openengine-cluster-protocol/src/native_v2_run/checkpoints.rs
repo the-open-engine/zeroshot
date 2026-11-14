@@ -44,6 +44,11 @@ impl fmt::Display for CheckpointId {
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunResumeFrom {
     Restart {},
+    Answer {
+        signals: std::collections::BTreeMap<crate::FieldName, crate::EnumLabel>,
+        output: serde_json::Value,
+    },
+    Expiry {},
     Checkpoint {
         #[serde(rename = "checkpointId")]
         checkpoint_id: CheckpointId,

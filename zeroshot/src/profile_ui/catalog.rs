@@ -152,6 +152,15 @@ pub(super) fn workers() -> Result<Vec<Value>, ApiError> {
             "diagnostic":crate::native_v2_wait::diagnostic_schema().map_err(internal)?,
             "inputBindings":[],"writeBindings":[],"attempts":1}
     }));
+    result.push(json!({
+        "id":"request_ask", "label":"Ask a person", "runtimeKind":"request",
+        "workerRefs":[crate::native_v2_request::ASK_WORKER_REF], "runtimeBinding":{"kind":"request"},
+        "node":{"kind":"verifier", "name":"request", "worker":crate::native_v2_request::ASK_WORKER_REF,
+            "input":crate::native_v2_request::input_schema().map_err(internal)?,
+            "output":{"kind":"record", "fields":{}}, "signals":{"response":["answered"]},
+            "diagnostic":crate::native_v2_wait::diagnostic_schema().map_err(internal)?,
+            "inputBindings":[],"writeBindings":[],"attempts":1}
+    }));
     result.push(decision_worker()?);
     Ok(result)
 }

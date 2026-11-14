@@ -76,6 +76,11 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-attach"><code>zeroshot attach</code></a></li>
 <li><a href="#zeroshot-force-stop"><code>zeroshot force-stop</code></a></li>
 <li><a href="#zeroshot-suspend"><code>zeroshot suspend</code></a></li>
+<li><a href="#zeroshot-answer"><code>zeroshot answer</code></a></li>
+<li><a href="#zeroshot-inbox"><code>zeroshot inbox</code></a></li>
+<li><a href="#zeroshot-inbox-list"><code>zeroshot inbox list</code></a></li>
+<li><a href="#zeroshot-inbox-show"><code>zeroshot inbox show</code></a></li>
+<li><a href="#zeroshot-inbox-help"><code>zeroshot inbox help</code></a></li>
 <li><a href="#zeroshot-vectors"><code>zeroshot vectors</code></a></li>
 <li><a href="#zeroshot-vectors-show"><code>zeroshot vectors show</code></a></li>
 <li><a href="#zeroshot-vectors-help"><code>zeroshot vectors help</code></a></li>
@@ -112,6 +117,8 @@ Commands:
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
+  answer             Answer a suspended request from a JSON file and start its successor
+  inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
   resume             Start a successor from a failed or suspended run&#39;s retained workspace
   checkpoints        List one page of a run&#39;s saved workspace checkpoints as JSON
@@ -1350,6 +1357,83 @@ Options:
 
   -h, --help
           Print help</code></pre></section>
+<section id="zeroshot-answer"><h3><code>zeroshot answer</code></h3>
+<pre><code>Answer a suspended request from a JSON file and start its successor.
+
+The file contains signals and output matching the request&#39;s declared shape. At or after the deadline, the command starts the timeout successor and exits 1 naming it. The retained workspace is used as it is; earlier nodes and agent sessions do not restart.
+
+Usage: zeroshot answer [OPTIONS] --input &lt;FILE&gt; &lt;RUN_ID&gt;
+
+Arguments:
+  &lt;RUN_ID&gt;
+          Public run ID
+
+Options:
+      --target &lt;NAME&gt;
+          Use this named target. If omitted, use the local controller
+
+      --input &lt;FILE&gt;
+          JSON answer file, containing signals and output. No standard-input form
+
+      --forward-gh-token
+          Forward GH_TOKEN with a named-target continuation
+
+  -h, --help
+          Print help (see a summary with &#39;-h&#39;)</code></pre></section>
+<section id="zeroshot-inbox"><h3><code>zeroshot inbox</code></h3>
+<pre><code>Read pending requests or show the request made by one run. Reads never apply expiry
+
+Usage: zeroshot inbox &lt;COMMAND&gt;
+
+Commands:
+  list  List one JSON page in run ID order. Expired requests remain until continued or stopped
+  show  Show this run&#39;s own request, shape, deadline, state and successor
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-inbox-list"><h4><code>zeroshot inbox list</code></h4>
+<pre><code>List one JSON page in run ID order. Expired requests remain until continued or stopped
+
+Usage: zeroshot inbox list [OPTIONS]
+
+Options:
+      --target &lt;NAME&gt;
+          Use this named target. If omitted, use the local controller
+
+      --after &lt;RUN_ID&gt;
+
+
+      --limit &lt;COUNT&gt;
+
+
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-inbox-show"><h4><code>zeroshot inbox show</code></h4>
+<pre><code>Show this run&#39;s own request, shape, deadline, state and successor
+
+Usage: zeroshot inbox show [OPTIONS] &lt;RUN_ID&gt;
+
+Arguments:
+  &lt;RUN_ID&gt;
+          Public run ID
+
+Options:
+      --target &lt;NAME&gt;
+          Use this named target. If omitted, use the local controller
+
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-inbox-help"><h4><code>zeroshot inbox help</code></h4>
+<pre><code>Print this message or the help of the given subcommand(s)
+
+Usage: zeroshot inbox help [COMMAND]
+
+Commands:
+  list  List one JSON page in run ID order. Expired requests remain until continued or stopped
+  show  Show this run&#39;s own request, shape, deadline, state and successor
+  help  Print this message or the help of the given subcommand(s)</code></pre></section>
 <section id="zeroshot-vectors"><h3><code>zeroshot vectors</code></h3>
 <pre><code>Read one page of the run vector record, or show an entry in full
 
@@ -1527,6 +1611,8 @@ Commands:
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
+  answer             Answer a suspended request from a JSON file and start its successor
+  inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
   resume             Start a successor from a failed or suspended run&#39;s retained workspace
   checkpoints        List one page of a run&#39;s saved workspace checkpoints as JSON

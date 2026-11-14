@@ -63,6 +63,9 @@ fn method_document(descriptor: &MethodDescriptor) -> Value {
     let object = method
         .as_object_mut()
         .assert_value_with("OpenRPC method builders must return objects");
+    if matches!(descriptor.name, "inbox/list" | "inbox/show") {
+        object.insert("description".to_owned(),json!("Read-only vector-backed request inbox. Requires request_ask, kind openengine.request-ask/v1, in target discovery. Reads do not apply expiry or start a successor."));
+    }
     object.insert("name".to_owned(), json!(descriptor.name));
     object.insert(
         "x-subscription".to_owned(),
@@ -123,6 +126,12 @@ fn native_v2_method(name: &str) -> Option<Value> {
         openengine_cluster_protocol::RUN_SUSPEND_METHOD => {
             run_id_method::<RunStatusParams>("runSuspendResult", "RunStatusResult")
         }
+        openengine_cluster_protocol::INBOX_LIST_METHOD => inbox_list_method(),
+        openengine_cluster_protocol::INBOX_SHOW_METHOD => run_id_method::<
+            openengine_cluster_protocol::InboxShowParams,
+        >(
+            "inboxShowResult", "InboxShowResult"
+        ),
         openengine_cluster_protocol::RUN_VECTORS_METHOD => run_vectors_method(),
         openengine_cluster_protocol::RUN_VECTOR_METHOD => run_vector_method(),
         _ => return native_v2_recovery_method(name),
@@ -447,7 +456,10 @@ fn run_resume_method() -> Value {
             retained workspace. Selecting checkpoint restores the matching workspace and predecessor \
             outputs and reruns the named node or atomic concurrent group. Original admission and \
             delivery metadata remain fixed. Credentials are resolved again for the successor; provider \
-            sessions are not resumed.",
+            sessions are not resumed. Suspended command/wait runs continue without restoring files. \
+            Request suspensions require from.kind answer with signals and output, or explicit expiry. \
+            Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the \
+            held verifier with timeout.",
         "paramStructure": "by-name",
         "params": [
             {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
@@ -551,4 +563,14 @@ fn run_vector_method() -> Value {
             {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
             {"name":"id","required":true,"schema":{"$ref":"schema.json#/$defs/VectorId"}}],
         "result":{"name":"runVectorResult","schema":{"$ref":"schema.json#/$defs/RunVector"}}})
+}
+
+fn inbox_list_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(openengine_cluster_protocol::InboxListParams))
+        .assert_value();
+    json!({"summary":"Read requests still holding their runs suspended without applying expiry", "paramStructure":"by-name",
+        "params":[
+            {"name":"after","required":false,"schema":property_schema(&schema,"after")},
+            {"name":"limit","required":false,"schema":property_schema(&schema,"limit")}],
+        "result":{"name":"inboxListResult","schema":{"$ref":"schema.json#/$defs/InboxListResult"}}})
 }

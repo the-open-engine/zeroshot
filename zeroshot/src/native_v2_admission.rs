@@ -226,13 +226,16 @@ impl NativeV2Admission {
         runtime: &RuntimePlan,
         delivery: StackDelivery,
     ) -> Result<(), NativeV2AdmissionError> {
-        if let Some(node) = executable_declarations(&graph.root)
-            .iter()
-            .find(|node| node.worker.as_str() == crate::native_v2_wait::WAIT_WORKER_REF)
-        {
+        if let Some(node) = executable_declarations(&graph.root).iter().find(|node| {
+            [
+                crate::native_v2_wait::WAIT_WORKER_REF,
+                crate::native_v2_request::ASK_WORKER_REF,
+            ]
+            .contains(&node.worker.as_str())
+        }) {
             return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
                 node: node.name.clone(),
-                detail: "stack profiles cannot contain wait nodes".to_owned(),
+                detail: "stack profiles cannot contain wait or request nodes".to_owned(),
             });
         }
         self.validate_profile(graph, runtime, DeliveryPolicy::Required)

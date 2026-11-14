@@ -611,3 +611,15 @@ the run. Its effective default is 64 on every placement; explicit values range f
 65,536. Admission records the effective value in run metadata. Queued work has no execution
 identity, attempt, or timeout until admission. Map `maxItems` independently limits active complete
 item bodies. Neither limit changes the separate 65,536 logical-visit and loop-entry ceilings.
+
+## Human request binding
+
+`{"kind":"request"}` also binds the host-run verifier `builtin.request.ask@1`. It has exactly one
+required string input `text`, a flat scalar-record output (boolean, integer, number, string or enum),
+authored signals, the fixed `{message: string}` diagnostic, one attempt and no instructions.
+It has no model, lane, credentials or provider session. `--uniform-runtime-config` recognizes it.
+It requires workspace checkpoints and seq/choice/loop placement; par/map ancestry and stack
+profiles refuse it. The deadline is `timeoutMs` from request creation, 7 days by default and at
+most 30 days. `answer` validates signals and output and starts a successor; late answers settle
+with the existing `timeout` error. `inbox` reads pending or historical questions from vectors.
+Named targets require `openengine.request-ask/v1`. See [Ask a person](../guides/ask-a-person.md).

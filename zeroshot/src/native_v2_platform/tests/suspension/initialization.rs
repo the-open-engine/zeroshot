@@ -231,7 +231,7 @@ async fn rejected_initialization_leaves_source_resumable(point: FailurePoint, su
     );
     assert!(matches!(
         vectors[1].content,
-        RunVectorContent::Continuation { .. }
+        openengine_cluster_protocol::RunVectorSummaryContent::Continuation { .. }
     ));
     assert_eq!(
         driver.starts.load(Ordering::SeqCst),

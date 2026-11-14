@@ -547,6 +547,11 @@ where
             .map_err(protocol_error)
     }
 
+    async fn validate_request_ask(&self, target: Option<&str>) -> Result<(), NativeV2CliError> {
+        self.connector
+            .validate_request_ask(require_named_target(target)?)
+            .await
+    }
     async fn run_vectors(
         &self,
         target: Option<&str>,
@@ -566,6 +571,49 @@ where
             .await?;
         ClusterClient::new(transport.as_ref())
             .run_vectors(params)
+            .await
+            .map_err(protocol_error)
+    }
+
+    async fn inbox_show(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_inbox_show(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
+        let transport = self
+            .connector
+            .connect_request_ask(target, Some(params.run_id.clone()))
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .inbox_show(params)
+            .await
+            .map_err(protocol_error)
+    }
+
+    async fn inbox_list(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_inbox_list(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
+        let transport = self.connector.connect_request_ask(target, None).await?;
+        ClusterClient::new(transport.as_ref())
+            .inbox_list(params)
             .await
             .map_err(protocol_error)
     }
@@ -623,6 +671,16 @@ where
         _discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let target = require_named_target(target)?;
+        if matches!(
+            params.from,
+            Some(
+                openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                    | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+            )
+        ) {
+            self.connector.validate_request_ask(target).await?;
+        }
+
         if let Some(result) = self
             .connector
             .hosted_run_resume(target, params.clone())
