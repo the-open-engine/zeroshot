@@ -982,8 +982,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   authored result contract, so request vectors and suspension records have a separate combined
   bound. Answers must fit the existing node-completion and answer-vector event bounds before
   successor admission. Full request/vector reads and hosted status/watch readers use
-  the explicit request response bound; hosted lists stream that bound per run rather than capping the
-  whole unpaged collection. Log stream frames retain their existing bound. Inbox rows remain
+  the explicit request response bound; hosted lists stream that bound per run within the shared
+  128 MiB total receive ceiling. Log stream frames retain their existing bound. Inbox rows remain
   below the generic hosted page limit. Protocol client response frames include the full request
   bound plus JSON-RPC framing; server incoming WebSocket and NDJSON request frames allow 2 MiB for
   the answer, fresh credentials and envelope without changing node-result limits.
@@ -1049,8 +1049,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   combined request text and contracts, and retains its scan cursor across pages.
   NDJSON and WebSocket run inventories bound each typed status separately from the response
   envelope, so several full requests fit one unpaged reply without removing bounds from other
-  responses. NDJSON replies and both WebSocket dialers share a 128 MiB total receive ceiling;
-  NDJSON checks before buffer growth and WebSocket checks before frame allocation and reassembly.
+  responses. Hosted HTTP inventories, NDJSON replies and both WebSocket dialers share a 128 MiB
+  total receive ceiling. HTTP checks before retaining data, NDJSON before buffer growth and
+  WebSocket before frame allocation and reassembly.
   The shared transport retains tighter bounds for individual responses and inventory entries.
   Vector pagination resolves entry IDs through a per-run ledger index, including inherited IDs,
   then replays after that cursor instead of reading earlier pages again.

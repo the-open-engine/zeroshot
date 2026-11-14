@@ -1,5 +1,6 @@
-//! Decode the unpaged inventory with a bound per status, including its full request.
+//! Decode the unpaged inventory with bounds on each status and the complete response.
 
+use openengine_cluster_client::MAX_WIRE_RESPONSE_BYTES;
 use openengine_cluster_protocol::{MAX_REQUEST_RESPONSE_BYTES, bounded_json_from_slice};
 use reqwest::Response;
 use zeroshot_engine::native_v2_cli::{CliRunListResult, CliRunStatusResult};
@@ -34,6 +35,7 @@ enum Position {
 #[derive(Default)]
 struct RunListReader {
     position: Position,
+    received: usize,
     // The small outer object is validated separately with an empty runs array.
     framing: Vec<u8>,
     item: Vec<u8>,
@@ -45,6 +47,10 @@ struct RunListReader {
 
 impl RunListReader {
     fn push(&mut self, byte: u8) -> Result<(), TargetAuthorityError> {
+        if self.received >= MAX_WIRE_RESPONSE_BYTES {
+            return Err(too_large());
+        }
+        self.received += 1;
         if self.depth != 0 {
             return self.push_item(byte);
         }
@@ -128,7 +134,7 @@ fn malformed() -> TargetAuthorityError {
 }
 
 fn too_large() -> TargetAuthorityError {
-    authority_error("hosted run list response entry is too large")
+    authority_error("hosted run list response or entry is too large")
 }
 
 #[cfg(test)]
