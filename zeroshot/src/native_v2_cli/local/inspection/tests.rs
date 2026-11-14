@@ -17,6 +17,11 @@ async fn inbox_show_keeps_the_request_while_its_successor_is_starting() {
     super::super::recovery_claim_tests::assert_inbox_show_during_successor_startup().await;
 }
 
+#[tokio::test]
+async fn inbox_reads_pending_and_expired_requests_without_continuing_them() {
+    super::super::backend::request_tests::assert_local_inbox_reads_do_not_continue_requests().await;
+}
+
 struct Fixture {
     root: tempfile::TempDir,
     backend: LocalCliBackend,

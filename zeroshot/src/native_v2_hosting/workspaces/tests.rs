@@ -155,3 +155,155 @@ fn host_acceptance_at_each_event_ceiling_still_settles_the_answer() {
         );
     }
 }
+
+fn request() -> RunSuspension {
+    serde_json::from_value(json!({
+        "reason":"request", "node":"approval", "createdAt":1000,
+        "request":{"id":"question", "text":"Review?", "signals":{},
+            "output":{"kind":"record","fields":{}}, "expiresAt":2000}
+    }))
+    .assert_value()
+}
+
+fn restored_workspace() -> HostedWorkspace {
+    HostedWorkspace {
+        resumed_from: Some(RunId::new("predecessor")),
+        vector_seed: vec![],
+        comment_publications: None,
+        checkpoints: Arc::new(
+            crate::native_v2_supervisor::checkpoints::DeliveryCheckpointStore::new(
+                Default::default(),
+            ),
+        ),
+        execution_seed: vec![DurableExecution {
+            delivery_state: None,
+            dispatch_position: HistoryPosition::new(1).assert_value(),
+            node_instance: NodeInstanceId::new(1).assert_value(),
+            execution: ExecutionId::new(1).assert_value(),
+            occurrence: StructuralOccurrence {
+                node: NodeName::new("approval").assert_value(),
+                map_indices: vec![],
+            },
+            attempt: openengine_cluster_protocol::PositiveInteger::new(1).assert_value(),
+            input: json!({"text":"Review?"}),
+            state: DurableExecutionState::Active,
+        }],
+        request_continuation: Some(
+            HostedRequestContinuation::validate(
+                request(),
+                RunResumeFrom::Expiry {},
+                UnixTimestampMillis::new(2000).assert_value(),
+            )
+            .assert_value(),
+        ),
+        delivery_run_id: None,
+    }
+}
+
+#[test]
+fn host_acceptance_requires_explicit_expiry_and_checks_answer_shape_before_admission() {
+    let answer = RunResumeFrom::Answer {
+        signals: Default::default(),
+        output: json!({"unknown":true}),
+    };
+    let error = HostedRequestContinuation::validate(
+        request(),
+        answer.clone(),
+        UnixTimestampMillis::new(1999).assert_value(),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("$.output") && error.contains("undeclared field unknown"),
+        "{error}"
+    );
+    let error = HostedRequestContinuation::validate(
+        request(),
+        answer,
+        UnixTimestampMillis::new(2000).assert_value(),
+    )
+    .unwrap_err();
+    assert_eq!(error, "request expired; select expiry explicitly");
+    let error = HostedRequestContinuation::validate(
+        request(),
+        RunResumeFrom::Expiry {},
+        UnixTimestampMillis::new(1999).assert_value(),
+    )
+    .unwrap_err();
+    assert!(error.contains("not expired"), "{error}");
+}
+
+#[test]
+fn restored_request_rejects_missing_predecessor_and_ambiguous_or_foreign_history() {
+    for invalid in 0..5 {
+        let mut workspace = restored_workspace();
+        match invalid {
+            0 => workspace.resumed_from = None,
+            1 => workspace.execution_seed.clear(),
+            2 => workspace
+                .execution_seed
+                .push(workspace.execution_seed[0].clone()),
+            3 => {
+                workspace.execution_seed[0].occurrence.node =
+                    NodeName::new("foreign").assert_value()
+            }
+            _ => workspace.execution_seed[0].dispatch_position = HistoryPosition::MAX,
+        }
+        let history = workspace.execution_seed.clone();
+        let error = workspace
+            .settle_request(&RunId::new("successor"))
+            .unwrap_err();
+        let expected = match invalid {
+            0 => "request continuation requires its predecessor",
+            4 => "history position",
+            _ => "request checkpoint must contain its one pending execution",
+        };
+        assert!(error.contains(expected), "{error}");
+        assert_eq!(workspace.execution_seed, history);
+        assert!(workspace.vector_seed.is_empty());
+    }
+}
+
+#[test]
+fn explicit_expiry_settles_after_all_restored_history_and_without_replaying_it() {
+    use crate::full_v1_reducer::ExecutionVoidReason;
+    let mut workspace = restored_workspace();
+    let mut earlier = workspace.execution_seed[0].clone();
+    earlier.occurrence.node = NodeName::new("earlier").assert_value();
+    earlier.state = DurableExecutionState::Settled {
+        position: HistoryPosition::new(5).assert_value(),
+        outcome: openengine_cluster_protocol::RequestResolution::Expiry {}.outcome(),
+    };
+    let mut voided = earlier.clone();
+    voided.node_instance = NodeInstanceId::new(2).assert_value();
+    voided.execution = ExecutionId::new(2).assert_value();
+    voided.occurrence.node = NodeName::new("loser").assert_value();
+    voided.dispatch_position = HistoryPosition::new(6).assert_value();
+    voided.state = DurableExecutionState::Voided {
+        position: HistoryPosition::new(8).assert_value(),
+        reason: ExecutionVoidReason::ParallelJoin,
+    };
+    workspace.execution_seed[0].node_instance = NodeInstanceId::new(3).assert_value();
+    workspace.execution_seed[0].execution = ExecutionId::new(3).assert_value();
+    workspace.execution_seed[0].dispatch_position = HistoryPosition::new(10).assert_value();
+    workspace
+        .execution_seed
+        .extend([earlier.clone(), voided.clone()]);
+    let successor = RunId::new("successor");
+    workspace.settle_request(&successor).assert_value();
+    assert_eq!(workspace.execution_seed[1..], [earlier, voided]);
+    assert!(matches!(&workspace.execution_seed[0].state,
+        DurableExecutionState::Settled { position, outcome }
+        if position.get() == 11 && *outcome == openengine_cluster_protocol::RequestResolution::Expiry {}.outcome()));
+    assert_eq!(workspace.vector_seed.len(), 1);
+    assert_eq!(workspace.vector_seed[0].run_id, successor);
+    assert!(matches!(&workspace.vector_seed[0].content,
+        openengine_cluster_protocol::RunVectorContent::Expiry { request_id } if request_id.as_str() == "question"));
+    let history = workspace.execution_seed.clone();
+    workspace.settle_request(&successor).assert_value();
+    assert_eq!(workspace.execution_seed, history);
+    assert_eq!(
+        workspace.vector_seed.len(),
+        1,
+        "a consumed continuation cannot settle twice"
+    );
+}

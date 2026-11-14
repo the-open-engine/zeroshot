@@ -805,6 +805,10 @@ mod checkpoint_compatibility_tests;
 #[path = "backend/tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "backend/request_tests.rs"]
+pub(super) mod request_tests;
+
 pub(super) fn invalid_request(message: impl Into<String>) -> NativeV2CliError {
     NativeV2CliError::Remote {
         code: "invalid_request".to_owned(),
