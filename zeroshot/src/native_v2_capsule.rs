@@ -217,6 +217,29 @@ pub enum CapsuleConnectionError {
 
 #[async_trait]
 pub trait CapsuleNodeChannel: Send + Sync {
+    async fn capture_conversations(
+        &self,
+        _run_id: &RunId,
+    ) -> crate::native_v2_runner::conversations::ConversationCapture {
+        crate::native_v2_runner::conversations::ConversationCapture::default()
+    }
+    /// Capture observes a controller stop and drains blocking copies before releasing sessions.
+    /// Existing embedders retain their previous optional capture implementation.
+    async fn capture_conversations_until_stopped(
+        &self,
+        run_id: &RunId,
+        _cancellation: crate::execution::driver::DriverCancellation,
+    ) -> crate::native_v2_runner::conversations::ConversationCapture {
+        self.capture_conversations(run_id).await
+    }
+
+    async fn restore_conversations(
+        &self,
+        _history: &[crate::full_v1_reducer::DurableExecution],
+        _files: Option<crate::native_v2_runner::conversations::ConversationFiles>,
+    ) {
+    }
+
     /// Reserves execution and returns its stream before starting provider work.
     /// Dropping a pending start must leave no work or reservation behind. Once returned,
     /// the stream carries startup failures and terminal metadata through cancellation.

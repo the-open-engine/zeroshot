@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::{NodeName, RunId};
 
 use crate::full_v1_reducer::DurableExecution;
+
+pub use crate::native_v2_runner::conversations::ConversationFiles;
 use crate::native_v2_supervisor::checkpoints::{CheckpointError, RunCheckpointStore};
 
 /// Trusted allocation facts. Called after exact source checkout, before any worker starts.
@@ -34,6 +36,12 @@ pub struct HostedWorkspace {
 }
 
 /// An installed host may replace local checkpoint storage with its durable backend.
+///
+/// The returned `RunCheckpointStore` optionally receives `ConversationFiles` through
+/// `retain_conversations` before each checkpoint. Store the complete files outside the workspace
+/// tree served by export-workspace, and return the selected files through `restored_conversations`
+/// on restore, including continuations that retain their workspace. Default methods keep older
+/// hosts working: their successors start new conversations with a system log explanation.
 ///
 /// The host resolves its own authenticated restore selection; callers never supply filesystem
 /// paths or execution history. Restore must preserve the workspace root, finish before returning,

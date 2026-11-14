@@ -7,6 +7,7 @@
 mod access;
 mod auth;
 mod command;
+mod conversation;
 mod events;
 mod framing;
 mod native_config;
@@ -172,7 +173,9 @@ impl CopilotAdapter {
 
             match result.outcome {
                 Err(NodeRunnerError::DriverDetail(_))
-                    if retryable_grammar_rate_limit && retries < MAX_GRAMMAR_RATE_LIMIT_RETRIES =>
+                    if retryable_grammar_rate_limit
+                        && !control.is_restored_conversation()
+                        && retries < MAX_GRAMMAR_RATE_LIMIT_RETRIES =>
                 {
                     wait_for_grammar_retry(session, retries, control).await?;
                     retries += 1;
@@ -182,7 +185,15 @@ impl CopilotAdapter {
                         "Copilot grammar compilation rate limit persisted after {retries} retries: {message}"
                     )));
                 }
-                result => return result,
+                result => {
+                    if result.is_ok() {
+                        session
+                            .core
+                            .record_conversation(session.id.lock().await.clone(), None)
+                            .await;
+                    }
+                    return result;
+                }
             }
         }
     }
@@ -223,6 +234,19 @@ impl CopilotAdapter {
                 .prepare(control)
                 .await
                 .map_err(rpc::process_error)?;
+            let home = self
+                .config
+                .local_user
+                .as_ref()
+                .map_or_else(|| files.home().to_owned(), |user| user.copilot_home.clone());
+            if let Some(metadata) = turn
+                .session
+                .core
+                .prepare_conversation(Some(conversation::layout(home)), invocation, control)
+                .await?
+            {
+                *turn.session.id.lock().await = Some(metadata.id);
+            }
             let command =
                 command::command(&self.config, invocation, &files, local_provider.as_ref())?;
             let mut process = open_provider_process(files.clone(), command, control)
