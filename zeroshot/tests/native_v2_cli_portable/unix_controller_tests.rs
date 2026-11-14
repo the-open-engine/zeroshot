@@ -99,6 +99,88 @@ impl Drop for Run {
 }
 
 #[test]
+fn unix_controller_stalled_requests_return_without_killing_the_controller() {
+    use std::process::Stdio;
+
+    let run = Run::start();
+    let status = run.fixture.json(&["status", &run.id]);
+    let execution = status["status"]["activeExecutions"][0]["execution"]
+        .as_str()
+        .unwrap();
+    run.signal(libc::SIGSTOP);
+    let deadline = Instant::now() + Duration::from_secs(14);
+    let mut commands = Vec::new();
+    for name in [
+        "status",
+        "list",
+        "force-stop",
+        "resume",
+        "checkpoints",
+        "watch",
+        "logs",
+        "attach",
+    ] {
+        let arguments = match name {
+            "list" => vec![name],
+            "attach" => vec![name, &run.id, execution],
+            _ => vec![name, &run.id],
+        };
+        let child = run
+            .fixture
+            .command(&arguments)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        commands.push((name, child));
+    }
+    while commands
+        .iter_mut()
+        .any(|(_, child)| child.try_wait().unwrap().is_none())
+    {
+        if Instant::now() >= deadline {
+            for (_, child) in &mut commands {
+                let _ = child.kill();
+                child.wait().unwrap();
+            }
+            panic!("CLI commands exceeded the controller request deadline");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    for (name, child) in commands {
+        let output = child.wait_with_output().unwrap();
+        if matches!(name, "status" | "list" | "checkpoints") {
+            success(&output);
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let value = if name == "list" {
+                &value["runs"][0]
+            } else {
+                &value
+            };
+            assert_eq!(value["controller"]["state"], "unknown", "{name}: {value}");
+        } else {
+            assert_eq!(output.status.code(), Some(1), "{name}: {output:?}");
+        }
+        if name == "force-stop" {
+            let message = String::from_utf8_lossy(&output.stderr);
+            for expected in [
+                &run.id,
+                &run.controller.to_string(),
+                "queued",
+                "answers again",
+            ] {
+                assert!(message.contains(expected), "{message}");
+            }
+        }
+    }
+    assert!(process_exists(run.controller as u32));
+    assert!(run.terminal().is_null());
+    run.signal(libc::SIGCONT);
+    run.wait_closed(STOP_LIMIT);
+    assert_eq!(run.terminal()["reason"], "force_stopped");
+}
+
+#[test]
 fn unix_controller_sigterm_persists_stop_retains_checkpoints_and_resumes() {
     let run = Run::start();
     let catalog = std::fs::read_dir(run.storage.join("checkpoints"))

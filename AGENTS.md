@@ -1575,6 +1575,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   identity stays private and unredacted for exact watch matching; its printable message is redacted.
   ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
   context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
+- Local controller requests use the existing ten-second readiness deadline, separately from handoff
+  retries. List probes use bounded concurrency and one shared deadline; unavailable status retains the recorded state and controller
+  observation. Subscription setup waits for acknowledgement within that deadline, while established
+  streams have no idle timeout. A force-stop timeout is not retried: it names the run and readiness
+  PID and warns that the request remains queued, without killing the controller.
 - After opening observation, `run`, `watch`, `logs` and `attach` on direct or hosted named targets
   announce the first connection loss once on stderr and state that the run continues there.
   Reconnects back off from 100 ms to a five-second cap, preserving durable watch/log cursors.
@@ -1961,6 +1966,8 @@ python -m mkdocs build --strict
   so the intentional write failure cannot corrupt collected profiles.
   Local CLI fixture repositories exclude `*.profraw` through their shared Git exclude file,
   keeping profiles from environment-cleared instrumented processes out of delivery and status.
+  Conversation fixtures launch outside their explicit `--cwd` workspace so those profiles also
+  stay out of checkpoint contents and storage-growth measurements.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.

@@ -76,8 +76,8 @@ pub const LOCAL_CONTROLLER_MODE: &str = "__zeroshot-run-controller";
 
 const BOOTSTRAP_FILE: &str = "controller.bootstrap.json";
 const SUBMISSION_LOCK_FILE: &str = "submission.lock";
-/// Bounds controller handoffs: reconnecting to a live controller and reconciling a successor
-/// whose launcher may still be starting it. Preparation before readiness has its own deadline.
+/// Bounds local controller requests and handoffs. Each handoff keeps its own budget;
+/// preparation before readiness has a separate deadline.
 const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const PREPARATION_TIMEOUT_ENV: &str = "ZEROSHOT_PREPARATION_TIMEOUT";
 const MAX_PREPARATION_TIMEOUT_SECONDS: u64 = 86_400;
@@ -86,6 +86,7 @@ const MAX_PREPARATION_TIMEOUT_SECONDS: u64 = 86_400;
 const CONTROLLER_STOP_GRACE: Duration = Duration::from_secs(30);
 const STALE_BOOTSTRAP_AGE: Duration = Duration::from_secs(60);
 const CONTROLLER_HANDOFF_RETRY_DELAY: Duration = Duration::from_millis(25);
+const LIST_CONCURRENCY: usize = 16;
 const RECOVERY_FILE: &str = "workspace-recovery.json";
 const RECOVERY_CLAIM_FILE: &str = "workspace-recovery.claim";
 const MAX_RECOVERY_LINEAGE_DEPTH: usize = 64;
@@ -250,8 +251,10 @@ impl LocalCliBackend {
         }
         match check_controller(&paths, run_id).await {
             ControllerAvailability::Responding(transport, _) => return Ok(transport),
-            ControllerAvailability::Unavailable(observed)
-                if observed.state == openengine_cluster_protocol::ControllerState::Lost => {}
+            ControllerAvailability::Unavailable {
+                observation: observed,
+                ..
+            } if observed.state == openengine_cluster_protocol::ControllerState::Lost => {}
             _ => {
                 return Err(local_message(format!(
                     "controller availability is unknown; run {} is still owned or unreachable",
@@ -744,6 +747,8 @@ impl LocalCliBackend {
     }
 
     async fn list_local(&self) -> Result<RunListResult, NativeV2CliError> {
+        use futures_util::stream::{self, StreamExt};
+
         let runs_root = self.state_root.join("runs");
         let entries = match std::fs::read_dir(&runs_root) {
             Ok(entries) => entries,
@@ -753,8 +758,13 @@ impl LocalCliBackend {
             Err(error) => return Err(local_io(error)),
         };
         let mut runs = Vec::new();
-        for entry in entries {
-            if let Some(result) = self.list_entry(entry).await? {
+        // Bound open storage/transport handles while keeping one probe interval for the list.
+        let deadline = Instant::now() + DEFAULT_READY_TIMEOUT;
+        let mut pending = stream::iter(entries)
+            .map(|entry| self.list_entry(entry, deadline))
+            .buffer_unordered(LIST_CONCURRENCY);
+        while let Some(result) = pending.next().await {
+            if let Some(result) = result? {
                 runs.extend(result.runs);
             }
         }
@@ -765,30 +775,40 @@ impl LocalCliBackend {
     async fn list_entry(
         &self,
         entry: std::io::Result<std::fs::DirEntry>,
+        deadline: Instant,
     ) -> Result<Option<RunListResult>, NativeV2CliError> {
         let Some(run_id) = entry.ok().and_then(local_run_id_from_entry) else {
             return Ok(None);
         };
-        let result = match self.list_entry_once(&run_id).await {
+        let result = match self.list_entry_once(&run_id, deadline).await {
             Ok(result) => Ok(result),
+            Err(error @ NativeV2CliError::LocalRequestTimeout(_)) => Err(error),
             Err(_) => {
                 sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
-                self.list_entry_once(&run_id).await
+                self.list_entry_once(&run_id, deadline).await
             }
         };
         match result {
             Ok(result) => Ok(Some(result)),
-            Err(NativeV2CliError::Local(_)) => Ok(None),
+            Err(NativeV2CliError::Local(_) | NativeV2CliError::LocalRequestTimeout(_)) => Ok(None),
             Err(error) => Err(error),
         }
     }
 
-    async fn list_entry_once(&self, run_id: &RunId) -> Result<RunListResult, NativeV2CliError> {
-        let result = self
-            .status_local(RunStatusParams {
-                run_id: run_id.clone(),
-            })
+    async fn list_entry_once(
+        &self,
+        run_id: &RunId,
+        deadline: Instant,
+    ) -> Result<RunListResult, NativeV2CliError> {
+        let mut result = self
+            .inspect_status(
+                RunStatusParams {
+                    run_id: run_id.clone(),
+                },
+                deadline.saturating_duration_since(Instant::now()),
+            )
             .await?;
+        result.workspace_recovery = self.workspace_recovery(&result).await?;
         Ok(RunListResult { runs: vec![result] })
     }
 
@@ -802,6 +822,7 @@ impl LocalCliBackend {
                 result.workspace_recovery = self.workspace_recovery(&result).await?;
                 Ok(result)
             }
+            Err(error @ NativeV2CliError::LocalRequestTimeout(_)) => Err(error),
             Err(_) => {
                 sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
                 let mut result = self.status_once(retry).await?;
@@ -1094,7 +1115,7 @@ impl LocalCliBackend {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
-        self.inspect_status(params).await
+        self.inspect_status(params, DEFAULT_READY_TIMEOUT).await
     }
 
     async fn force_local(
@@ -1105,6 +1126,7 @@ impl LocalCliBackend {
         let retry = params.clone();
         match self.force_once(params).await {
             Ok(_) => {}
+            Err(error @ NativeV2CliError::LocalRequestTimeout(_)) => return Err(error),
             Err(_) => {
                 sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
                 self.force_once(retry).await?;
@@ -1163,11 +1185,43 @@ impl LocalCliBackend {
             });
         }
         let transport = self.connect_run(&params.run_id).await?;
-        ClusterClient::new(transport.as_ref())
-            .run_force(params)
-            .await
-            .map_err(protocol_error)
+        let pid = read_ready(&paths)
+            .ok()
+            .filter(|ready| ready.run_id == params.run_id)
+            .map(|ready| ready.pid.to_string())
+            .unwrap_or_else(|| "unavailable".to_owned());
+        controller_request(&params.run_id, "force-stop", async {
+            ClusterClient::new(transport.as_ref())
+                .run_force(params.clone())
+                .await
+                .map_err(protocol_error)
+        })
+        .await
+        .map_err(|error| match error {
+            NativeV2CliError::LocalRequestTimeout(message) => NativeV2CliError::LocalRequestTimeout(
+                format!("{message}; controller PID {pid}; the force-stop request stays queued and takes effect if the controller answers again"),
+            ),
+            error => error,
+        })
     }
+}
+
+async fn controller_request<T>(
+    run_id: &RunId,
+    operation: &str,
+    request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
+) -> Result<T, NativeV2CliError> {
+    tokio::time::timeout(DEFAULT_READY_TIMEOUT, request)
+        .await
+        .map_err(|_| controller_request_timeout(run_id, operation))?
+}
+
+fn controller_request_timeout(run_id: &RunId, operation: &str) -> NativeV2CliError {
+    NativeV2CliError::LocalRequestTimeout(format!(
+        "controller did not answer {operation} for run {} within {} seconds",
+        run_id.as_str(),
+        DEFAULT_READY_TIMEOUT.as_secs(),
+    ))
 }
 
 fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), NativeV2CliError> {

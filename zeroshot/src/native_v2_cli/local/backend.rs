@@ -569,11 +569,14 @@ impl NativeV2CliBackend for LocalCliBackend {
             });
         }
         let transport = self.connect_run(&params.run_id).await?;
-        ClusterClient::new(transport.as_ref())
-            .run_suspend(params)
-            .await
-            .map(Into::into)
-            .map_err(protocol_error)
+        controller_request(&params.run_id, "suspend", async {
+            ClusterClient::new(transport.as_ref())
+                .run_suspend(params.clone())
+                .await
+                .map(Into::into)
+                .map_err(protocol_error)
+        })
+        .await
     }
 
     async fn run_vectors(

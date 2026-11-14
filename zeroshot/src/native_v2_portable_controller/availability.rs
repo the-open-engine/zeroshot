@@ -19,17 +19,29 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 pub(crate) enum ControllerAvailability {
     Responding(Arc<PortableControllerTransport>, Box<RunStatusResult>),
     Embedded(ControllerObservation),
-    Unavailable(ControllerObservation),
+    Unavailable {
+        observation: ControllerObservation,
+        timed_out: bool,
+    },
 }
 
 pub(crate) async fn check_controller(
     paths: &PortableControllerPaths,
     id: &RunId,
 ) -> ControllerAvailability {
+    check_controller_with_timeout(paths, id, PROBE_TIMEOUT).await
+}
+
+pub(crate) async fn check_controller_with_timeout(
+    paths: &PortableControllerPaths,
+    id: &RunId,
+    timeout: Duration,
+) -> ControllerAvailability {
     let ready = read_ready(paths).ok().filter(|ready| ready.run_id == *id);
     let before = ControllerLease::probe(&paths.lease()).ok();
+    let mut timed_out = false;
     if ready.is_some() {
-        let response = tokio::time::timeout(PROBE_TIMEOUT, async {
+        let response = tokio::time::timeout(timeout, async {
             let transport = connect_transport(paths).await.ok()?;
             let status = ClusterClient::new(transport.as_ref())
                 .run_status(RunStatusParams { run_id: id.clone() })
@@ -38,6 +50,7 @@ pub(crate) async fn check_controller(
             (status.run_id == *id).then_some((transport, status))
         })
         .await;
+        timed_out = response.is_err();
         if let Ok(Some((transport, status))) = response {
             return ControllerAvailability::Responding(transport, Box::new(status));
         }
@@ -52,14 +65,17 @@ pub(crate) async fn check_controller(
     let lost = ready
         .as_ref()
         .is_some_and(|ready| confirmed_absence(paths, ready, before));
-    ControllerAvailability::Unavailable(ControllerObservation {
-        state: if lost {
-            ControllerState::Lost
-        } else {
-            ControllerState::Unknown
+    ControllerAvailability::Unavailable {
+        observation: ControllerObservation {
+            state: if lost {
+                ControllerState::Lost
+            } else {
+                ControllerState::Unknown
+            },
+            observed_at: observed_at(),
         },
-        observed_at: observed_at(),
-    })
+        timed_out,
+    }
 }
 
 /// Connects a control request to the endpoint named by `id`'s readiness record. No status reply

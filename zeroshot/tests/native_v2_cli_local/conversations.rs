@@ -4,6 +4,10 @@ const TRANSCRIPT_MARKER: &str = "only-in-provider-session-7a8b63";
 
 fn fixture() -> LocalFixture {
     let mut fixture = LocalFixture::new();
+    // Environment-cleared instrumented controllers write default profiles in their launch folder.
+    // Keep those profiles outside the selected workspace so checkpoints measure conversation data.
+    fixture.working_directory = fixture.root.as_path().to_owned();
+    fixture.cwd = Some(fixture.repository.clone());
     let mut graph = local_graph::graph();
     let worker = graph["root"]["children"][0].clone();
     graph["root"]["children"] = json!([
