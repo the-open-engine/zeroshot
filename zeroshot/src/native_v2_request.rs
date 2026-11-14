@@ -190,6 +190,7 @@ pub(crate) fn resolution_vector(
 /// Check the same durable result envelope used by executable nodes before claiming a successor.
 pub(crate) fn validate_resolution(
     snapshot: &crate::v2_run_ledger::RunSnapshot,
+    successor_run_id: &openengine_cluster_protocol::RunId,
     resolution: &RequestResolution,
 ) -> Result<(), String> {
     use crate::native_v2_contract::NodeCompletion;
@@ -199,9 +200,11 @@ pub(crate) fn validate_resolution(
         .values()
         .find(|node| matches!(node.state, NodeState::SuspendedRequest { .. }))
         .ok_or("request has no pending execution")?;
+    let mut reference = pending.reference.clone();
+    reference.run_id = successor_run_id.clone();
     let completion = RunEvent::NodeCompleted {
         completion: NodeCompletion {
-            reference: pending.reference.clone(),
+            reference,
             outcome: resolution.outcome(),
         },
     };
@@ -213,7 +216,7 @@ pub(crate) fn validate_resolution(
         return Err("run has no request".to_owned());
     };
     let vector = crate::v2_run_ledger::vector_event(
-        &snapshot.run_id,
+        successor_run_id,
         resolution_vector(request, resolution),
     )
     .map_err(|error| format!("$.output: {error}"))?;

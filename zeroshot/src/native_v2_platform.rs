@@ -635,8 +635,12 @@ impl NativeV2PlatformController {
             None
         };
         if let Some(resolution) = &request_resolution {
-            crate::native_v2_request::validate_resolution(&source.snapshot, resolution)
-                .map_err(NativeV2PlatformError::InvalidRequest)?;
+            crate::native_v2_request::validate_resolution(
+                &source.snapshot,
+                &successor_run_id,
+                resolution,
+            )
+            .map_err(NativeV2PlatformError::InvalidRequest)?;
         }
         let expired = matches!(
             request_resolution,

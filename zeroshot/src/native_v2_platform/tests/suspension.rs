@@ -15,6 +15,9 @@ mod races;
 #[path = "suspension/initialization.rs"]
 mod initialization;
 
+#[path = "suspension/request_bounds.rs"]
+mod request_bounds;
+
 #[derive(Default)]
 struct SuspensionStore {
     published: StdMutex<Vec<RunVector>>,

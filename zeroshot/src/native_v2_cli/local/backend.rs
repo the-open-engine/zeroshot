@@ -269,8 +269,12 @@ impl LocalCliBackend {
                 crate::native_v2_runner::current_timestamp(),
             )
             .map_err(invalid_request)?;
-            crate::native_v2_request::validate_resolution(&stored.snapshot, &resolution)
-                .map_err(invalid_request)?;
+            crate::native_v2_request::validate_resolution(
+                &stored.snapshot,
+                &params.successor_run_id,
+                &resolution,
+            )
+            .map_err(invalid_request)?;
             Some(resolution)
         } else {
             None
