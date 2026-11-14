@@ -22,16 +22,10 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "OPENCODE_CONFIG",
     "OPENCODE_CONFIG_DIR",
     "OPENCODE_CONFIG_CONTENT",
-    "OPENCODE_AUTH_CONTENT",
-    "OPENCODE_PERMISSION",
     "OPENCODE_GIT_BASH_PATH",
     "OPENCODE_MODELS_PATH",
-    "OPENCODE_DISABLE_AUTOCOMPACT",
     "OPENCODE_DISABLE_MODELS_FETCH",
-    "OPENCODE_DISABLE_LSP_DOWNLOAD",
-    "OPENCODE_DISABLE_DEFAULT_PLUGINS",
     "OPENCODE_DISABLE_PROJECT_CONFIG",
-    "OPENCODE_PURE",
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "OPENAI_API_BASE",
@@ -88,7 +82,6 @@ const AUTHENTICATION: &[&str] = &[
     "GATEWAY_API_KEY",
     "OPENCODE_API_KEY",
     "AWS_BEARER_TOKEN_BEDROCK",
-    "OPENCODE_AUTH_CONTENT",
     "AWS_PROFILE",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -285,15 +278,14 @@ pub(super) fn validate_connection_name(name: &str, windows: bool) -> Result<(), 
         "XDG_CACHE_HOME",
         "XDG_STATE_HOME",
     ];
-    let native_control = upper.starts_with("OPENCODE_")
-        && !["OPENCODE_PERMISSION", "OPENCODE_API_KEY"].contains(&name);
+    let native_control = upper.starts_with("OPENCODE_") && name != "OPENCODE_API_KEY";
     let reserved = reserved.contains(&name) || (windows && reserved.contains(&upper.as_str()));
     let native_names = LOCAL_ENVIRONMENT
         .iter()
         .chain(AWS_ENVIRONMENT)
         .chain(CREDENTIALS);
     let alias = windows && name != upper && native_names.into_iter().any(|field| *field == upper);
-    let host_control = ["ProgramData", super::login::SOURCE_ENV]
+    let host_control = ["ProgramData"]
         .iter()
         .any(|candidate| name.eq_ignore_ascii_case(candidate));
     if native_control || reserved || alias || host_control {
@@ -406,11 +398,7 @@ fn inline_parse_options() -> jsonc_parser::ParseOptions {
 
 pub(super) fn configuration_secrets(environment: &BTreeMap<String, String>) -> Vec<String> {
     let mut values = Vec::new();
-    for name in [
-        "OPENCODE_AUTH_CONTENT",
-        "OPENCODE_CONFIG_CONTENT",
-        super::login::SOURCE_ENV,
-    ] {
+    for name in ["OPENCODE_CONFIG_CONTENT"] {
         if let Some(value) = environment
             .get(name)
             .and_then(|value| serde_json::from_str::<Value>(value).ok())
@@ -465,6 +453,12 @@ pub(super) fn configure_provider(
     reject_foreign_credentials(invocation, field)?;
     let declared =
         declared_credential(invocation, environment, field, adapter.runners.is_hosted())?;
+    if provider == "github" && declared {
+        return Err(NodeRunnerError::DriverDetail(
+            "OpenCode 2 cannot take a declared GitHub Copilot token; sign in to GitHub Copilot in OpenCode instead"
+                .to_owned(),
+        ));
+    }
     validate_extended_provider(provider, invocation, environment, declared)?;
     let endpoints = endpoint_fields(provider);
     let declared_endpoint = invocation
@@ -492,6 +486,49 @@ pub(super) fn configure_provider(
         declared.then_some(field),
         endpoint.as_deref(),
     )?;
+    if declared {
+        if provider == "bedrock" {
+            let options = provider_options(config, "amazon-bedrock")?;
+            options.insert("region".to_owned(), json!(environment["AWS_REGION"]));
+            if let Some(endpoint) = &endpoint {
+                options.insert("endpoint".to_owned(), json!(endpoint));
+            }
+        }
+        if provider == "gateway" {
+            let (npm, _) = gateway_protocol(environment)?;
+            let NodeRuntimeBinding::Agent { model, .. } = &invocation.node.binding else {
+                return Err(NodeRunnerError::InvalidRole);
+            };
+            let gateway = config
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .entry("provider")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .entry("gateway")
+                .or_insert_with(|| json!({}));
+            gateway
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .insert("npm".to_owned(), json!(npm));
+            let models = gateway
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .entry("models")
+                .or_insert_with(|| json!({}));
+            if !models
+                .as_object()
+                .ok_or(NodeRunnerError::Driver)?
+                .contains_key(model.as_str())
+            {
+                models
+                    .as_object_mut()
+                    .ok_or(NodeRunnerError::Driver)?
+                    .insert(model.as_str().to_owned(), json!({"name": model.as_str()}));
+            }
+        }
+    }
     // Only the selected lane's ambient credentials enter this child.
     for foreign in CREDENTIALS.iter().copied() {
         if foreign != field {

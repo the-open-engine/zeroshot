@@ -11,7 +11,7 @@ fn stub(export_body: &str) -> String {
     let text = text_event("t1", "m1", "{\"response\":null}").to_string();
     let finish = finish_event("f1", "m1", "stop").to_string();
     format!(
-        "#!/bin/sh\nif [ \"$1\" = auth ] && [ \"$2\" = export ]; then echo \"$XDG_DATA_HOME\" >> export-env; {export_body}; exit 0; fi\nif [ \"$1\" = auth ] && [ \"$2\" = import ]; then echo \"$XDG_DATA_HOME\" >> import-env; cat >> import-stdin; exit 0; fi\necho \"$XDG_DATA_HOME\" >> run-env\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
+        "#!/bin/sh\nif [ \"$1\" = auth ] && [ \"$2\" = export ]; then echo \"$XDG_DATA_HOME\" >> export-env; {export_body}; exit 0; fi\nif [ \"$1\" = auth ] && [ \"$2\" = import ]; then echo \"$XDG_DATA_HOME\" >> import-env; cat >> import-stdin; exit 0; fi\necho \"$XDG_DATA_HOME\" >> run-env\n{LOADS_PLUGINS}\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
     )
 }
 

@@ -8,7 +8,6 @@
 
 mod auth;
 mod command;
-mod login;
 mod memory;
 mod native_config;
 mod permissions;
@@ -198,6 +197,14 @@ impl OpenCodeAdapter {
             }
             login.clone()
         };
+        let scratch = std::path::PathBuf::from(
+            turn.files
+                .scratch_text()
+                .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
+        );
+        plugin::reset(turn.files.home(), &scratch).map_err(|_| {
+            NodeRunnerError::DriverDetail("OpenCode plugin state could not be reset".to_owned())
+        })?;
         let mut command = command::command(command::CommandRequest {
             adapter: self,
             invocation: turn.invocation,
@@ -213,8 +220,21 @@ impl OpenCodeAdapter {
         let transcript = transcript::OpenCodeTranscript::new(expected.clone(), redactions.clone());
         let attempt = match turn::open(turn.files.clone(), command, turn.control).await? {
             ProviderProcessStart::Ready(mut process) => {
-                turn::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
-                    .await
+                let result =
+                    turn::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
+                        .await;
+                if let Some(id) = plugin::missing(turn.files.home(), &scratch) {
+                    let keep_process_result = matches!(
+                        &result,
+                        Err(NodeRunnerError::Cancelled) | Err(NodeRunnerError::CleanupUnconfirmed)
+                    );
+                    if !keep_process_result {
+                        return Err(NodeRunnerError::DriverDetail(format!(
+                            "OpenCode plugin {id} did not load"
+                        )));
+                    }
+                }
+                result
                     .map_err(|error| match error {
                         NodeRunnerError::ModelUnavailable(detail) => {
                             let crate::native_v2_contract::NodeRuntimeBinding::Agent {

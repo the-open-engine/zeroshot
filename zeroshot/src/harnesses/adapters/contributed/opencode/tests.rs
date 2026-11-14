@@ -8,6 +8,8 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
 use super::*;
+#[cfg(unix)]
+use crate::execution::process::ProcessSessionCommand;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
 use crate::native_v2_capsule::provider_process::{ProviderProcessFailure, ProviderProcessFailureKind};
@@ -24,6 +26,35 @@ fn node_command() -> std::process::Command {
     command.env_clear();
     command
 }
+
+#[cfg(unix)]
+pub(super) const LOADS_PLUGINS: &str = r#"for plugin in $(printf '%s' "$OPENCODE_CONFIG_CONTENT" | grep -o 'zeroshot-plugins/[^/"]*/' | cut -d/ -f2); do mkdir -p "$TMPDIR/zeroshot-plugins"; : > "$TMPDIR/zeroshot-plugins/$plugin.loaded"; done"#;
+
+#[cfg(unix)]
+pub(super) fn owned_plugin(command: &ProcessSessionCommand, id: &str) -> String {
+    let config: Value =
+        serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
+    let suffix = format!("/zeroshot-plugins/{id}/");
+    let matches = config["plugins"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|url| url.ends_with(&suffix))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one owned plugin for {id}"
+    );
+    matches.into_iter().next().assert_value().to_owned()
+}
+
+#[cfg(unix)]
+pub(super) const PLUGIN_SETUP: &str = r#"const {default:plugin} = await import(new URL('index.js', process.argv[1]));
+const hooks = {};
+const ctx = {location:{directory:process.argv[2]}, tool:{hook: async (name, fn) => { hooks['tool.' + name] = fn; }}, session:{hook: async (name, fn) => { hooks['session.' + name] = fn; }}};
+await plugin.setup(ctx);"#;
 
 fn event(kind: &str, id: &str, message: &str) -> Value {
     json!({"type":kind,"sessionID":"ses_fixture","part":{"id":id,"messageID":message}})
@@ -292,6 +323,7 @@ fn declared_launch_controls_cannot_restore_native_managed_authority() {
         "opencode_test_managed_config_dir",
         "OPENCODE_CONFIG",
         "OPENCODE_PURE",
+        "OPENCODE_PERMISSION",
         "ProgramData",
         "pRoGrAmDaTa",
         "HOME",
@@ -321,12 +353,7 @@ fn declared_launch_controls_cannot_restore_native_managed_authority() {
             "{name}"
         );
     }
-    for name in [
-        "OPENAI_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "OPENCODE_PERMISSION",
-        "CUSTOM_CONTEXT",
-    ] {
+    for name in ["OPENAI_API_KEY", "ANTHROPIC_BASE_URL", "CUSTOM_CONTEXT"] {
         command::validate_connection_name(name, true).assert_value();
         command::validate_connection_name(name, false).assert_value();
     }

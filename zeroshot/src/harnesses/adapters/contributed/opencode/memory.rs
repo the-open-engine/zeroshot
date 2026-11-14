@@ -4,7 +4,6 @@ use std::io;
 use std::path::Path;
 
 use crate::execution::process::ProcessSessionCommand;
-use crate::native_v2_capsule::provider_process::write_provider_file;
 
 pub(super) fn install(command: &mut ProcessSessionCommand, capability: &Path) -> io::Result<()> {
     let home = capability
@@ -16,14 +15,14 @@ pub(super) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
             "MAX_CONTEXT_BYTES",
             &crate::active_memory::MAX_INJECTION_BYTES.to_string(),
         );
-    let plugin = write_provider_file(home, "active-memory-opencode.mjs", source.as_bytes())?;
-    super::plugin::append(command, &plugin)
+    super::plugin::install(command, home, "zeroshot-active-memory", &source)
 }
 
 // This plugin imports only native modules; installing memory never installs an npm dependency.
 // An absolute timer bounds the whole callback, including peers that keep sending partial frames.
 const PLUGIN: &str = r#"import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
 const capabilityPath = CAPABILITY_PATH;
 const maxContextBytes = MAX_CONTEXT_BYTES;
 function retrieve(event) {
@@ -63,14 +62,20 @@ function retrieve(event) {
     } catch { fail(); }
   });
 }
-export default async ({directory}) => ({
-  'tool.execute.after': async (input, output) => {
-    const delivery = await retrieve({toolName:input.tool,input:input.args,cwd:directory,sessionId:input.sessionID});
-    if (!delivery) return;
-    if (Array.isArray(output?.content)) output.content.push({type:'text',text:delivery.context});
-    else if (typeof output?.output === 'string') output.output += delivery.context;
-    else return;
-    delivery.returned();
+export default {
+  id: 'zeroshot-active-memory',
+  async setup(ctx) {
+    fs.mkdirSync(path.dirname(LOADED_MARKER), {recursive: true}); fs.writeFileSync(LOADED_MARKER, '');
+    await ctx.tool.hook('execute.after', async (event) => {
+      if (event.status !== 'completed' || event.result == null || typeof event.result !== 'object') return;
+      const delivery = await retrieve({toolName: event.tool, input: event.input, cwd: ctx.location.directory, sessionId: event.sessionID});
+      if (!delivery) return;
+      if (Array.isArray(event.result.content)) event.result = {...event.result, content: [...event.result.content, {type:'text', text: delivery.context}]};
+      else if (typeof event.result.content === 'string') event.result = {...event.result, content: event.result.content + delivery.context};
+      else if (typeof event.result.output === 'string') event.result = {...event.result, output: event.result.output + delivery.context};
+      else return;
+      delivery.returned();
+    });
   }
-});
+};
 "#;

@@ -6,9 +6,31 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::execution::process::ProcessSessionCommand;
+use crate::native_v2_capsule::provider_process::write_provider_file;
 
-pub(super) fn append(command: &mut ProcessSessionCommand, path: &Path) -> io::Result<()> {
-    let plugin = url::Url::from_file_path(path)
+pub(super) fn install(
+    command: &mut ProcessSessionCommand,
+    home: &Path,
+    id: &str,
+    source: &str,
+) -> io::Result<()> {
+    let root = home.join("zeroshot-plugins");
+    let plugin_dir = root.join(id);
+    std::fs::create_dir_all(&plugin_dir)?;
+    let scratch = command
+        .environment
+        .get("TMPDIR")
+        .ok_or_else(|| io::Error::other("TMPDIR is not set"))?;
+    let marker = Path::new(scratch)
+        .join("zeroshot-plugins")
+        .join(format!("{id}.loaded"));
+    let source = source.replace("LOADED_MARKER", &serde_json::to_string(&marker)?);
+    write_provider_file(&plugin_dir, "package.json", br#"{"type":"module"}"#)?;
+    write_provider_file(&plugin_dir, "index.js", source.as_bytes())?;
+    let expected = root.join("expected");
+    std::fs::create_dir_all(&expected)?;
+    std::fs::File::create(expected.join(id))?;
+    let plugin = url::Url::from_directory_path(&plugin_dir)
         .map_err(|_| io::Error::other("OpenCode plugin path is invalid"))?;
     let mut config: Value = serde_json::from_str(
         command
@@ -20,7 +42,7 @@ pub(super) fn append(command: &mut ProcessSessionCommand, path: &Path) -> io::Re
     let plugins = config
         .as_object_mut()
         .ok_or_else(|| io::Error::other("inline config is not an object"))?
-        .entry("plugin")
+        .entry("plugins")
         .or_insert_with(|| json!([]));
     plugins
         .as_array_mut()
@@ -31,4 +53,36 @@ pub(super) fn append(command: &mut ProcessSessionCommand, path: &Path) -> io::Re
         serde_json::to_string(&config)?,
     );
     Ok(())
+}
+
+pub(super) fn reset(home: &Path, scratch: &Path) -> io::Result<()> {
+    remove_dir_all_if_exists(&home.join("zeroshot-plugins").join("expected"))?;
+    remove_dir_all_if_exists(&scratch.join("zeroshot-plugins"))
+}
+
+pub(super) fn missing(home: &Path, scratch: &Path) -> Option<String> {
+    let expected = home.join("zeroshot-plugins").join("expected");
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&expected) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    names.sort();
+    names.into_iter().find(|name| {
+        !scratch
+            .join("zeroshot-plugins")
+            .join(format!("{name}.loaded"))
+            .exists()
+    })
+}
+
+fn remove_dir_all_if_exists(path: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
 }

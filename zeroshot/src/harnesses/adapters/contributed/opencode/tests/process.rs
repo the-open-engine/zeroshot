@@ -119,7 +119,10 @@ async fn local_declared_execution_keeps_native_policy_without_debug_or_auto() {
     let marker = forbidden.to_string_lossy().replace('\'', "'\\''");
     let body = format!(
         "#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in debug|--auto) printf forbidden > '{marker}'; exit 99;; esac; done\n{}",
-        script("{\"response\":null}")
+        script("{\"response\":null}").replace(
+            "cat >/dev/null",
+            &format!("{LOADS_PLUGINS}\ncat >/dev/null"),
+        )
     );
     let mut adapter = adapter(&directory, &body);
     adapter.local_environment.insert(
@@ -190,32 +193,6 @@ fn declared_provider_keeps_native_homes_resources_and_mcp_configuration() {
         "native-mcp-key"
     );
     assert_eq!(inline["permission"]["bash"], "deny");
-}
-
-#[test]
-fn native_pure_mode_is_kept_without_declared_authentication() {
-    let directory = TestDirectory::new("opencode-native-pure-mode");
-    let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
-    adapter
-        .local_environment
-        .insert("OPENCODE_PURE".to_owned(), "1".to_owned());
-    let files =
-        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
-            .assert_value();
-    let native = invocation(&[]);
-    let native = command::command(command::CommandRequest {
-        adapter: &adapter,
-        invocation: &native,
-        files: &files,
-        session_id: None,
-    })
-    .assert_value();
-    assert_eq!(native.environment["OPENCODE_PURE"], "1");
-    let declared = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
-    assert!(
-        matches!(command::command(command::CommandRequest { adapter: &adapter, invocation: &declared, files: &files, session_id: None }),
-        Err(NodeRunnerError::DriverDetail(message)) if message.contains("pure mode disables"))
-    );
 }
 
 #[test]
@@ -396,13 +373,9 @@ fn native_context_captures_managed_location_and_project_discovery_controls() {
 }
 
 #[test]
-fn a_declared_key_suppresses_stored_auth_and_uses_environment_interpolation() {
+fn a_declared_key_drops_foreign_keys_and_uses_environment_interpolation() {
     let directory = TestDirectory::new("opencode-declared-auth");
     let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
-    adapter.local_environment.insert(
-        "OPENCODE_AUTH_CONTENT".to_owned(),
-        r#"{"anthropic":{"type":"api","key":"native-secret"}}"#.to_owned(),
-    );
     adapter
         .local_environment
         .insert("OPENAI_API_KEY".to_owned(), "foreign-secret".to_owned());
@@ -417,13 +390,6 @@ fn a_declared_key_suppresses_stored_auth_and_uses_environment_interpolation() {
         session_id: None,
     })
     .assert_value();
-    assert_eq!(
-        command
-            .environment
-            .get("OPENCODE_AUTH_CONTENT")
-            .map(String::as_str),
-        Some("{}")
-    );
     assert!(!command.environment.contains_key("OPENAI_API_KEY"));
     let config: Value =
         serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
@@ -433,6 +399,7 @@ fn a_declared_key_suppresses_stored_auth_and_uses_environment_interpolation() {
     );
     assert!(!config.to_string().contains("declared-secret"));
     assert_eq!(command.argv[5], "anthropic/opaque/model");
+    owned_plugin(&command, "zeroshot-provider-auth");
 }
 
 #[test]
@@ -494,13 +461,10 @@ fn a_declared_key_does_not_promote_ambient_endpoint_over_native_configuration() 
 fn contained_configuration_discards_native_homes_and_authentication() {
     let directory = TestDirectory::new("opencode-contained-native-state");
     let mut configuration = adapter(&directory, "#!/bin/sh\nexit 0\n").config;
-    configuration.native_environment = LocalHarnessEnvironment::new(BTreeMap::from([
-        ("ANTHROPIC_API_KEY".to_owned(), "ambient-secret".to_owned()),
-        (
-            "OPENCODE_AUTH_CONTENT".to_owned(),
-            r#"{"anthropic":{"type":"api","key":"stored-secret"}}"#.to_owned(),
-        ),
-    ]));
+    configuration.native_environment = LocalHarnessEnvironment::new(BTreeMap::from([(
+        "ANTHROPIC_API_KEY".to_owned(),
+        "ambient-secret".to_owned(),
+    )]));
     let contained = OpenCodeAdapter::new(configuration).assert_value();
     assert!(contained.config.local_user_home.is_none());
     assert!(contained.local_environment.is_empty());
@@ -525,7 +489,6 @@ fn contained_configuration_discards_native_homes_and_authentication() {
     contained.apply_permission_default(&mut command);
     assert!(command.argv.iter().any(|argument| argument == "--auto"));
     assert_eq!(command.environment["ANTHROPIC_API_KEY"], "declared-secret");
-    assert_eq!(command.environment["OPENCODE_AUTH_CONTENT"], "{}");
     assert_eq!(command.environment["HOME"], files.home().to_string_lossy());
 }
 
@@ -648,32 +611,32 @@ fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachment
     let config: Value =
         serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
     assert_eq!(config["permission"]["edit"], "deny");
-    let plugin_url = config["plugin"]
-        .as_array()
-        .assert_value()
-        .last()
-        .assert_value()
-        .as_str()
-        .assert_value();
+    let plugin_url = owned_plugin(&command, "zeroshot-active-memory");
     // Check the carrier's bytes directly. The production broker's 250 ms receipt deadline may
     // correctly mark an otherwise returned result unavailable when a loaded CI host delays it.
     let receipts = memory_callback_receipts(&files);
-    let source_code = r#"const {default:create}=await import(process.argv[1]);
-const plugin=await create({directory:process.argv[2]});
-const output={title:'read',output:'original',metadata:{}};
-await plugin['tool.execute.after']({tool:'read',sessionID:'ses_fixture',callID:'call1',args:{filePath:'README.md'}},output);
-const mcp={content:[
+    let source_code = format!(
+        "{PLUGIN_SETUP}\n{}",
+        r#"const after = hooks['tool.execute.after'];
+const builtin = {tool:'read', sessionID:'ses_fixture', input:{filePath:'README.md'}, status:'completed', result:{content:'original', output:'original', metadata:{}}};
+await after(builtin);
+const mcpResult = {content:[
   {type:'text',text:'original MCP text',annotations:{priority:0.5}},
   {type:'image',mimeType:'image/png',data:'AAAA'},
   {type:'resource',resource:{uri:'file:///native.pdf',mimeType:'application/pdf',blob:'AA=='}},
   {type:'resource_link',uri:'file:///native.txt',name:'native attachment'}
 ],output:'MCP extension output',structuredContent:{result:{count:2}},metadata:{native:true},_meta:{native:'unchanged'},isError:false};
-const before=structuredClone(mcp);
-await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fixture',callID:'call2',args:{marker:'mcp-fixture'}},mcp);
-await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fixture',callID:'call3',args:{marker:'mcp-fixture'}},null);
-console.log(JSON.stringify({output,mcp,before}));"#;
+const before = structuredClone(mcpResult);
+const mcp = {tool:'nativeproof_record', sessionID:'ses_fixture', input:{marker:'mcp-fixture'}, status:'completed', result:mcpResult};
+await after(mcp);
+const unsupported = {tool:'nativeproof_record', sessionID:'ses_fixture', input:{marker:'mcp-fixture'}, status:'completed', result:{metadata:{}}};
+await after(unsupported);
+const failed = {tool:'read', sessionID:'ses_fixture', input:{filePath:'README.md'}, status:'error'};
+await after(failed);
+console.log(JSON.stringify({builtin:builtin.result, mcp:mcp.result, before, unsupported:unsupported.result}));"#
+    );
     let output = node_command()
-        .args(["--input-type=module", "-e", source_code, plugin_url])
+        .args(["--input-type=module", "-e", &source_code, &plugin_url])
         .arg(&files.workspace)
         .output()
         .assert_value();
@@ -684,13 +647,14 @@ console.log(JSON.stringify({output,mcp,before}));"#;
         String::from_utf8_lossy(&output.stderr)
     );
     let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
-    assert_eq!(returned["output"]["output"], "original recalled-marker");
+    assert_eq!(returned["builtin"]["content"], "original recalled-marker");
+    assert_eq!(returned["builtin"]["output"], "original");
     let before = &returned["before"];
     let contents = returned["mcp"]["content"].as_array().assert_value();
     assert_eq!(&contents[..4], before["content"].as_array().assert_value());
     assert_eq!(
         contents[4],
-        serde_json::json!({"type":"text","text":" recalled-marker"})
+        json!({"type":"text","text":" recalled-marker"})
     );
     for field in [
         "output",
@@ -701,11 +665,61 @@ console.log(JSON.stringify({output,mcp,before}));"#;
     ] {
         assert_eq!(returned["mcp"][field], before[field]);
     }
+    assert_eq!(returned["unsupported"], json!({"metadata":{}}));
+    assert!(
+        std::path::Path::new(&files.scratch_text().assert_value())
+            .join("zeroshot-plugins")
+            .join("zeroshot-active-memory.loaded")
+            .exists(),
+        "the owned plugin must have written its load marker"
+    );
     drop(adapter);
     assert_eq!(
         receipts,
         vec![Some(1), Some(1), None],
-        "builtin and MCP results must acknowledge context; unsupported null output must not"
+        "builtin and MCP results must acknowledge context; unsupported results must not"
+    );
+}
+
+#[tokio::test]
+async fn a_turn_whose_owned_plugin_did_not_load_fails_the_node() {
+    let directory = TestDirectory::new("opencode-plugin-load-missing");
+    let body = script("{\"response\":null}");
+    let missing = adapter(&directory, &body);
+    let first = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    let error = run(&missing, first).await.err().assert_value();
+    let message = error.to_string();
+    assert!(
+        message.contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "{message}"
+    );
+    assert!(!message.contains("declared-key"), "{message}");
+
+    let directory = TestDirectory::new("opencode-plugin-load-present");
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!("{LOADS_PLUGINS}\ncat >/dev/null"),
+    );
+    let present = adapter(&directory, &body);
+    let second = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    run(&present, second).await.assert_value();
+
+    let directory = TestDirectory::new("opencode-plugin-load-once");
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!(
+            "if [ ! -f loaded-once ]; then : > loaded-once; {LOADS_PLUGINS}; fi\ncat >/dev/null"
+        ),
+    );
+    let once = adapter(&directory, &body);
+    let third = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    run(&once, third.clone()).await.assert_value();
+    let error = run(&once, third).await.err().assert_value();
+    assert!(
+        error
+            .to_string()
+            .contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "stale load markers from a previous turn must not count"
     );
 }
 
