@@ -12,7 +12,7 @@ fn source(root: &Path, names: Vec<PathBuf>) -> ConversationSource {
         names,
     )
 }
-fn saved(source: ConversationSource) -> ConversationCapture {
+pub(super) fn saved(source: ConversationSource) -> ConversationCapture {
     capture(ConversationSources::from([(
         NodeInstanceId::new(1).assert_value(),
         (NodeName::new("worker").assert_value(), Ok(source)),

@@ -9,6 +9,7 @@ pub(super) struct ActivityRegistry {
 struct ActivityState {
     active: BTreeMap<ActiveKey, ActiveInvocation>,
     closed_runs: BTreeSet<RunId>,
+    captures: Vec<(RunId, std::sync::Weak<AtomicBool>)>,
     closed: bool,
 }
 
@@ -34,7 +35,41 @@ pub(super) struct ActivityToken {
     key: ActiveKey,
 }
 
+impl ActivityState {
+    fn cancel_captures(&mut self, run_id: Option<&RunId>) {
+        self.captures.retain(|(owner, request)| {
+            let Some(request) = request.upgrade() else {
+                return false;
+            };
+            if run_id.is_none_or(|run_id| run_id == owner) {
+                request.store(true, Ordering::Release);
+                false
+            } else {
+                true
+            }
+        });
+    }
+}
+
 impl ActivityRegistry {
+    pub(super) async fn capture(
+        &self,
+        run_id: &RunId,
+        operation: &conversations::ConversationIo,
+    ) -> bool {
+        let mut state = self.state.lock().await;
+        if state.closed || state.closed_runs.contains(run_id) {
+            return false;
+        }
+        state
+            .captures
+            .retain(|(_, request)| request.strong_count() != 0);
+        state
+            .captures
+            .push((run_id.clone(), operation.stop_handle()));
+        true
+    }
+
     pub(super) async fn register(
         &self,
         reference: &ExecutionRef,
@@ -71,6 +106,7 @@ impl ActivityRegistry {
         let targets = {
             let mut state = self.state.lock().await;
             state.closed_runs.insert(run_id.clone());
+            state.cancel_captures(Some(run_id));
             state
                 .active
                 .iter()
@@ -86,6 +122,7 @@ impl ActivityRegistry {
         let targets = {
             let mut state = self.state.lock().await;
             state.closed = true;
+            state.cancel_captures(None);
             state.active.values().map(close_target).collect::<Vec<_>>()
         };
         cancel_targets(&targets);
@@ -244,6 +281,7 @@ impl SessionPool {
     pub(super) async fn capture_conversations(
         &self,
         run_id: &RunId,
+        operation: conversations::ConversationIo,
     ) -> conversations::ConversationCapture {
         if self.boundary != ReusableSessionBoundary::Run {
             return conversations::ConversationCapture::default();
@@ -256,10 +294,11 @@ impl SessionPool {
             .filter(|(_, (_, source))| source.is_ok())
             .map(|(id, value)| (*id, value.clone()))
             .collect::<conversations::ConversationSources>();
-        let sessions = self
-            .entries
-            .lock()
-            .await
+        let guard = operation.cancel_on_drop();
+        // Keep session ownership until the blocking copy has stopped, even if its caller drops.
+        // close_run/close_all must acquire this same lock before closing provider homes.
+        let entries = self.entries.clone().lock_owned().await;
+        let sessions = entries
             .iter()
             .filter_map(|(key, entry)| match (key, entry) {
                 (
@@ -278,9 +317,15 @@ impl SessionPool {
                 (session.node.clone(), session.inner.conversation().await),
             );
         }
-        tokio::task::spawn_blocking(move || conversations::capture(sources))
-            .await
-            .unwrap_or_default()
+        let copying = operation.clone();
+        let captured = tokio::task::spawn_blocking(move || {
+            let _entries = entries;
+            conversations::capture_until_stopped(sources, &copying)
+        })
+        .await
+        .unwrap_or_default();
+        guard.disarm();
+        captured
     }
 
     pub(super) fn isolated(&self) -> Self {

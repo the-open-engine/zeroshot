@@ -185,6 +185,15 @@ impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
     ) -> crate::native_v2_runner::conversations::ConversationCapture {
         self.runner.capture_conversations(run_id).await
     }
+    async fn capture_conversations_until_stopped(
+        &self,
+        run_id: &RunId,
+        cancellation: crate::execution::driver::DriverCancellation,
+    ) -> crate::native_v2_runner::conversations::ConversationCapture {
+        self.runner
+            .capture_conversations_until_stopped(run_id, cancellation)
+            .await
+    }
     async fn restore_conversations(
         &self,
         history: &[crate::full_v1_reducer::DurableExecution],

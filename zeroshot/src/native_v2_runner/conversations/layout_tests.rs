@@ -80,10 +80,17 @@ pub(crate) fn nested_storage_ownership(make: impl Fn(&Path) -> ConversationLayou
     assert!(!after.storage.exists());
     let mut assigned = Vec::new();
     after
-        .restore_with_ownership(&source, Some(&home), |path| {
-            assigned.push(path.to_owned());
-            Ok(())
-        })
+        .restore_with_ownership(
+            ConversationRestore {
+                source: &source,
+                private_home: Some(&home),
+                operation: &ConversationIo::default(),
+            },
+            |path| {
+                assigned.push(path.to_owned());
+                Ok(())
+            },
+        )
         .assert_value();
     let target = after.storage.join(filename);
     assert_eq!(fs::read(&target).assert_value(), b"first turn");
@@ -109,9 +116,54 @@ pub(crate) fn nested_storage_ownership(make: impl Fn(&Path) -> ConversationLayou
     }
     assert!(
         after
-            .restore_with_ownership(&source, Some(&root.path().join("unrelated")), |_| {
-                panic!("ownership must not escape the trusted private home")
-            })
+            .restore_with_ownership(
+                ConversationRestore {
+                    source: &source,
+                    private_home: Some(&root.path().join("unrelated")),
+                    operation: &ConversationIo::default()
+                },
+                |_| { panic!("ownership must not escape the trusted private home") }
+            )
             .is_err()
+    );
+}
+
+#[cfg(unix)]
+pub(crate) fn nested_storage_capture(make: impl Fn(&Path) -> ConversationLayout, filename: &str) {
+    let root = tempfile::tempdir().assert_value();
+    let home = root.path().join("home");
+    let layout = make(&home);
+    fs::create_dir_all(&layout.storage).assert_value();
+    fs::write(layout.storage.join(filename), b"provider first turn").assert_value();
+    let metadata = ConversationMetadata {
+        harness: layout.harness.to_owned(),
+        id: "checkpoint-id".to_owned(),
+        usage: usage(),
+    };
+    let source = layout
+        .capture_in_home(metadata.clone(), Some(home.clone()))
+        .assert_value();
+    let relative = layout.storage.strip_prefix(&home).assert_value();
+    let ancestor = home.join(relative.components().next().assert_value());
+    let outside = root.path().join("supervisor-only");
+    fs::rename(&ancestor, &outside).assert_value();
+    fs::write(
+        outside
+            .join(layout.storage.strip_prefix(&ancestor).assert_value())
+            .join(filename),
+        b"supervisor-only secret",
+    )
+    .assert_value();
+    std::os::unix::fs::symlink(&outside, &ancestor).assert_value();
+    // Reject both an already-linked layout and a link installed after filename selection.
+    assert!(layout.capture_in_home(metadata, Some(home)).is_err());
+    let captured = super::tests::saved(source);
+    assert_eq!(captured.notices.len(), 1);
+    assert!(captured.notices[0].1.contains("symbolic link"));
+    assert_eq!(
+        fs::read_dir(captured.files.assert_value().directory())
+            .assert_value()
+            .count(),
+        0
     );
 }

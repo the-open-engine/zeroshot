@@ -18,3 +18,12 @@ fn checkpoint_restore_assigns_nested_storage_ancestors_to_provider() {
         "checkpoint-id.jsonl",
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn checkpoint_capture_rechecks_nested_storage_ancestors() {
+    crate::native_v2_runner::conversations::layout_tests::nested_storage_capture(
+        |home| layout(home.join(".claude"), Path::new("/relocated/workspace")),
+        "checkpoint-id.jsonl",
+    );
+}

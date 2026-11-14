@@ -975,6 +975,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   at 1 GiB; capture/restore failures use a new conversation and a node-naming system log. Pending
   restored conversations survive checkpoints before their next turn. Adapters own filename selection
   and relocation; shared code bounds copies, rejects unsafe names and restores only those files.
+  Contained capture rechecks storage ancestors from the trusted private home at selection and
+  file reads; provider-owned symbolic links cannot redirect supervisor reads outside that home.
+  Conversation copies observe execution/controller cancellation between bounded reads. Blocking
+  workers retain the session state/home or pool lock until staging and rollback finish, including
+  when their async caller is dropped; close cancels restoration before awaiting those locks.
+  Workspace-checkpoint opt-out skips conversation capture while retaining delivery receipts.
   Contained restores assign ownership through the trusted private home, including newly created
   storage ancestors. Codex capture requires usage reported for the latest turn; missing usage must
   not carry an older in-run baseline into a successor.

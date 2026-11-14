@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::native_v2_contract::{NodeInstanceId, TokenUsageDelta};
 
+mod operation;
+pub(crate) use operation::ConversationIo;
+
 pub const MAX_CONVERSATION_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_FILES: usize = 65_536;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
@@ -78,12 +81,13 @@ impl ConversationFiles {
                     .ok_or("conversation contains an unsafe stored name")
             })
             .collect::<Result<Vec<_>, _>>()?;
-        validate_files(&directory.join("files"), &files)?;
+        validate_files(&directory.join("files"), &files, &ConversationIo::default())?;
         Ok(ConversationSource {
             metadata: manifest.metadata,
             storage: directory.join("files"),
             files,
             _retained: Some(self.clone()),
+            private_home: None,
         })
     }
 }
@@ -103,6 +107,7 @@ pub struct ConversationSource {
     pub storage: PathBuf,
     pub files: Vec<PathBuf>,
     _retained: Option<ConversationFiles>,
+    private_home: Option<PathBuf>,
 }
 
 impl ConversationSource {
@@ -113,6 +118,7 @@ impl ConversationSource {
             storage,
             files,
             _retained: None,
+            private_home: None,
         }
     }
 }
@@ -135,12 +141,20 @@ pub struct ConversationCapture {
 pub(crate) type ConversationSources =
     BTreeMap<NodeInstanceId, (NodeName, Result<ConversationSource, &'static str>)>;
 
+#[cfg(test)]
 pub(crate) fn capture(sources: ConversationSources) -> ConversationCapture {
-    let mut result = ConversationCapture::default();
+    capture_until_stopped(sources, &ConversationIo::default())
+}
+
+pub(crate) fn capture_until_stopped(
+    sources: ConversationSources,
+    operation: &ConversationIo,
+) -> ConversationCapture {
     let Ok(stage) = tempfile::Builder::new()
         .prefix("zeroshot-conversations-")
         .tempdir()
     else {
+        let mut result = ConversationCapture::default();
         result.notices.extend(
             sources
                 .into_values()
@@ -148,11 +162,23 @@ pub(crate) fn capture(sources: ConversationSources) -> ConversationCapture {
         );
         return result;
     };
+    capture_in(stage, sources, operation)
+}
+
+fn capture_in(
+    stage: tempfile::TempDir,
+    sources: ConversationSources,
+    operation: &ConversationIo,
+) -> ConversationCapture {
+    let mut result = ConversationCapture::default();
     for (instance, (node, source)) in sources {
         let directory = stage.path().join(instance.to_string());
         let saved = source.and_then(|source| {
-            validate_files(&source.storage, &source.files)?;
-            copy_files(&source.storage, &directory.join("files"), &source.files)?;
+            operation.check()?;
+            check_storage(&source.storage, source.private_home.as_deref())?;
+            validate_files(&source.storage, &source.files, operation)?;
+            copy_files(&source, &directory.join("files"), operation)?;
+            operation.check()?;
             let manifest = Manifest {
                 format: 1,
                 node: node.clone(),
@@ -227,7 +253,11 @@ fn checked_path(root: &Path, name: &Path) -> Result<PathBuf, &'static str> {
     Ok(path)
 }
 
-fn validate_files(root: &Path, files: &[PathBuf]) -> Result<(), &'static str> {
+fn validate_files(
+    root: &Path,
+    files: &[PathBuf],
+    operation: &ConversationIo,
+) -> Result<(), &'static str> {
     if files.is_empty() {
         return Err("provider conversation files are unavailable");
     }
@@ -237,6 +267,7 @@ fn validate_files(root: &Path, files: &[PathBuf]) -> Result<(), &'static str> {
     let mut size = 0_u64;
     let mut names = std::collections::BTreeSet::new();
     for name in files {
+        operation.check()?;
         if !names.insert(name) {
             return Err("conversation contains duplicate stored names");
         }
@@ -255,35 +286,64 @@ fn validate_files(root: &Path, files: &[PathBuf]) -> Result<(), &'static str> {
     Ok(())
 }
 
-pub(crate) fn copy_files(
-    root: &Path,
+fn check_storage(storage: &Path, private_home: Option<&Path>) -> Result<(), &'static str> {
+    if let Some(home) = private_home {
+        let relative = storage
+            .strip_prefix(home)
+            .map_err(|_| "conversation storage is outside the private provider home")?;
+        // Even storage equal to the home must reject a symlink at the trusted boundary.
+        if relative.as_os_str().is_empty() {
+            if fs::symlink_metadata(home).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                return Err("conversation storage is a symbolic link");
+            }
+        } else {
+            checked_path(home, relative)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_files(
+    source: &ConversationSource,
     destination: &Path,
-    files: &[PathBuf],
+    operation: &ConversationIo,
 ) -> Result<(), &'static str> {
     let mut remaining = MAX_CONVERSATION_BYTES;
-    for name in files {
-        let source = checked_path(root, name)?;
+    let mut buffer = [0; 64 * 1024];
+    for name in &source.files {
+        operation.check()?;
+        // Selection precedes this copy. Recheck the complete private-home path at the read.
+        check_storage(&source.storage, source.private_home.as_deref())?;
+        let path = checked_path(&source.storage, name)?;
         let target = checked_path(destination, name)?;
         crate::execution::platform::private_directory(
             target.parent().ok_or("invalid conversation name")?,
         )
         .map_err(|_| "conversation files could not be restored")?;
-        let mut input = fs::File::open(source).map_err(|_| "conversation files are unavailable")?;
+        let mut input = fs::File::open(path).map_err(|_| "conversation files are unavailable")?;
         let mut output = crate::execution::platform::private_file(
             &target,
             crate::execution::platform::FileAccess::CreateNew,
         )
         .map_err(|_| "conversation files could not be restored")?;
-        let copied = io::copy(
-            &mut Read::by_ref(&mut input).take(remaining + 1),
-            &mut output,
-        )
-        .map_err(|_| "conversation files could not be restored")?;
-        remaining = remaining
-            .checked_sub(copied)
-            .ok_or("conversation exceeds the 1 GiB cap")?;
+        loop {
+            operation.check()?;
+            let limit = buffer.len().min((remaining + 1) as usize);
+            let read = input
+                .read(&mut buffer[..limit])
+                .map_err(|_| "conversation files are unavailable")?;
+            if read == 0 {
+                break;
+            }
+            remaining = remaining
+                .checked_sub(read as u64)
+                .ok_or("conversation exceeds the 1 GiB cap")?;
+            output
+                .write_all(&buffer[..read])
+                .map_err(|_| "conversation files could not be restored")?;
+        }
     }
-    Ok(())
+    operation.check()
 }
 
 /// Pure provider layout: select only files belonging to the supplied conversation identifier.
@@ -301,6 +361,12 @@ pub(crate) struct ConversationOwner {
     pub(crate) gid: u32,
 }
 
+struct ConversationRestore<'a> {
+    source: &'a ConversationSource,
+    private_home: Option<&'a Path>,
+    operation: &'a ConversationIo,
+}
+
 impl ConversationLayout {
     fn validate_metadata(&self, metadata: &ConversationMetadata) -> Result<(), &'static str> {
         if self.harness == "codex" && metadata.usage.is_none() {
@@ -309,59 +375,82 @@ impl ConversationLayout {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn capture(
         &self,
         metadata: ConversationMetadata,
     ) -> Result<ConversationSource, &'static str> {
+        self.capture_in_home(metadata, None)
+    }
+
+    pub(crate) fn capture_in_home(
+        &self,
+        metadata: ConversationMetadata,
+        private_home: Option<PathBuf>,
+    ) -> Result<ConversationSource, &'static str> {
+        check_storage(&self.storage, private_home.as_deref())?;
         self.validate_metadata(&metadata)?;
         if !valid_id(&metadata.id) {
             return Err("provider conversation identifier is invalid");
         }
         let files = (self.select)(&self.storage, &metadata.id)
             .map_err(|_| "provider conversation layout cannot be captured")?;
-        Ok(ConversationSource::new(
-            metadata,
-            self.storage.clone(),
-            files,
-        ))
+        let mut source = ConversationSource::new(metadata, self.storage.clone(), files);
+        source.private_home = private_home;
+        Ok(source)
     }
 
+    #[cfg(test)]
     pub(crate) fn restore(
         &self,
         source: &ConversationSource,
         owner: Option<&ConversationOwner>,
     ) -> Result<(), &'static str> {
-        self.restore_with_ownership(source, owner.map(|owner| owner.home.as_path()), |path| {
-            #[cfg(target_os = "linux")]
-            if let Some(owner) = owner {
-                std::os::unix::fs::lchown(path, Some(owner.uid), Some(owner.gid))?;
-            }
-            #[cfg(not(target_os = "linux"))]
-            let _ = (owner.map(|owner| (owner.uid, owner.gid)), path);
-            Ok(())
-        })
+        self.restore_until_stopped(source, owner, &ConversationIo::default())
+    }
+
+    pub(crate) fn restore_until_stopped(
+        &self,
+        source: &ConversationSource,
+        owner: Option<&ConversationOwner>,
+        operation: &ConversationIo,
+    ) -> Result<(), &'static str> {
+        self.restore_with_ownership(
+            ConversationRestore {
+                source,
+                private_home: owner.map(|owner| owner.home.as_path()),
+                operation,
+            },
+            |path| {
+                #[cfg(target_os = "linux")]
+                if let Some(owner) = owner {
+                    std::os::unix::fs::lchown(path, Some(owner.uid), Some(owner.gid))?;
+                }
+                #[cfg(not(target_os = "linux"))]
+                let _ = (owner.map(|owner| (owner.uid, owner.gid)), path);
+                Ok(())
+            },
+        )
     }
 
     fn restore_with_ownership(
         &self,
-        source: &ConversationSource,
-        private_home: Option<&Path>,
+        request: ConversationRestore<'_>,
         mut assign_owner: impl FnMut(&Path) -> io::Result<()>,
     ) -> Result<(), &'static str> {
+        let ConversationRestore {
+            source,
+            private_home,
+            operation,
+        } = request;
+        operation.check()?;
         self.validate_metadata(&source.metadata)?;
         if source.metadata.harness != self.harness || !valid_id(&source.metadata.id) {
             return Err("checkpoint conversation belongs to a different provider layout");
         }
-        if let Some(home) = private_home {
-            let relative = self
-                .storage
-                .strip_prefix(home)
-                .map_err(|_| "conversation storage is outside the private provider home")?;
-            if !relative.as_os_str().is_empty() {
-                checked_path(home, relative)?;
-            }
-        }
-        validate_files(&source.storage, &source.files)?;
+        check_storage(&self.storage, private_home)?;
+        check_storage(&source.storage, source.private_home.as_deref())?;
+        validate_files(&source.storage, &source.files, operation)?;
         // Validate provider ownership as well as lexical containment. A manifest cannot smuggle
         // configuration/credentials into a provider home under an otherwise safe relative name.
         let selected = (self.select)(&source.storage, &source.metadata.id)
@@ -381,7 +470,8 @@ impl ConversationLayout {
             .prefix(".conversation-restore-")
             .tempdir_in(&self.storage)
             .map_err(|_| "provider conversation storage is unavailable")?;
-        copy_files(&source.storage, stage.path(), &source.files)?;
+        copy_files(source, stage.path(), operation)?;
+        operation.check()?;
         for name in old.iter().chain(&source.files) {
             checked_path(&self.storage, name)?;
         }
@@ -391,6 +481,7 @@ impl ConversationLayout {
         }
         let installed = (|| {
             for name in &source.files {
+                operation.check()?;
                 let target = checked_path(&self.storage, name)?;
                 crate::execution::platform::private_directory(
                     target.parent().ok_or("invalid conversation name")?,
@@ -410,7 +501,7 @@ impl ConversationLayout {
                     }
                 }
             }
-            Ok(())
+            operation.check()
         })();
         if installed.is_err() {
             // A failed install never leaves a partial conversation for a deterministic session ID.
@@ -495,3 +586,6 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod layout_tests;
+
+#[cfg(test)]
+pub(crate) mod cancellation_tests;

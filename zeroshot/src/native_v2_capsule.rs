@@ -223,6 +223,16 @@ pub trait CapsuleNodeChannel: Send + Sync {
     ) -> crate::native_v2_runner::conversations::ConversationCapture {
         crate::native_v2_runner::conversations::ConversationCapture::default()
     }
+    /// Capture observes a controller stop and drains blocking copies before releasing sessions.
+    /// Existing embedders retain their previous optional capture implementation.
+    async fn capture_conversations_until_stopped(
+        &self,
+        run_id: &RunId,
+        _cancellation: crate::execution::driver::DriverCancellation,
+    ) -> crate::native_v2_runner::conversations::ConversationCapture {
+        self.capture_conversations(run_id).await
+    }
+
     async fn restore_conversations(
         &self,
         _history: &[crate::full_v1_reducer::DurableExecution],

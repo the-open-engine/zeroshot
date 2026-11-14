@@ -1369,3 +1369,20 @@ fn restore_repeated_after_interrupted_workspace_replacement_installs_the_snapsho
         );
     }
 }
+
+#[test]
+fn macos_conversation_cancellation_discards_partial_capture_and_restore() {
+    use crate::native_v2_runner::conversations::cancellation_tests;
+    cancellation_tests::cancelled_capture_is_omitted();
+    cancellation_tests::cancelled_restore_is_not_installed();
+}
+
+#[cfg(unix)]
+#[test]
+fn macos_conversation_capture_rejects_symlinked_private_home_ancestors() {
+    use crate::native_v2_runner::conversations::layout_tests;
+    layout_tests::nested_storage_capture(
+        |home| crate::native_v2_codex::conversation::layout(home.join(".local/share/provider")),
+        "rollout-checkpoint-id.jsonl",
+    );
+}

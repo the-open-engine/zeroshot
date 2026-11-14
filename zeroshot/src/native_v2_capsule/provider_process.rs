@@ -233,7 +233,8 @@ pub(crate) struct ProviderSessionCore {
     live: AtomicBool,
     pub(crate) turn: Mutex<()>,
     home: Mutex<Option<Arc<filesystem::PrivateDirectory>>>,
-    conversation: Mutex<ProviderConversationState>,
+    conversation: Arc<Mutex<ProviderConversationState>>,
+    conversation_io: crate::native_v2_runner::conversations::ConversationIo,
 }
 
 #[derive(Default)]
@@ -355,29 +356,36 @@ impl ProviderSessionCore {
         control: &DriverControl,
     ) -> Result<Option<crate::native_v2_runner::conversations::ConversationMetadata>, NodeRunnerError>
     {
-        let mut state = self.conversation.lock().await;
+        let mut state = self.conversation.clone().lock_owned().await;
         state.layout = layout.clone();
         let Some(source) = state.pending.take() else {
             return Ok(None);
         };
-        let owner = state.owner.clone();
-        let restored = match layout {
-            Some(layout) => tokio::task::spawn_blocking(move || {
-                layout.restore(&source, owner.as_ref())?;
-                Ok(source.metadata)
-            })
-            .await
-            .unwrap_or(Err("conversation restoration task failed")),
-            None => Err("provider conversation layout cannot be restored"),
-        };
+        let operation = self.conversation_io.with_request(control.cancellation());
+        let guard = operation.cancel_on_drop();
+        let copying = operation.clone();
+        let home = self.home.lock().await.clone();
+        let restored = tokio::task::spawn_blocking(move || {
+            // The worker keeps both the state lock and home until staging/install/rollback ends.
+            // close() cancels before waiting for that lock; dropping this await cancels as well.
+            let _home = home;
+            let layout = layout.ok_or("provider conversation layout cannot be restored")?;
+            layout.restore_until_stopped(&source, state.owner.as_ref(), &copying)?;
+            state.metadata = Some(source.metadata.clone());
+            Ok(source.metadata)
+        })
+        .await
+        .unwrap_or(Err("conversation restoration task failed"));
+        guard.disarm();
+        if control.is_cancelled() || !self.is_live() {
+            return Err(NodeRunnerError::Cancelled);
+        }
         match restored {
             Ok(metadata) => {
                 control.mark_conversation_restored();
-                state.metadata = Some(metadata.clone());
                 Ok(Some(metadata))
             }
             Err(reason) => {
-                drop(state);
                 control
                     .emit(LiveOutput::new(
                         LiveOutputStream::System,
@@ -421,8 +429,9 @@ impl ProviderSessionCore {
             .metadata
             .clone()
             .ok_or("provider did not retain a conversation identifier")?;
+        let private_home = state.owner.as_ref().map(|owner| owner.home.clone());
         drop(state);
-        tokio::task::spawn_blocking(move || layout.capture(metadata))
+        tokio::task::spawn_blocking(move || layout.capture_in_home(metadata, private_home))
             .await
             .unwrap_or(Err("conversation capture task failed"))
     }
@@ -432,7 +441,8 @@ impl ProviderSessionCore {
             live: AtomicBool::new(true),
             turn: Mutex::new(()),
             home: Mutex::new(None),
-            conversation: Mutex::new(ProviderConversationState::default()),
+            conversation: Arc::default(),
+            conversation_io: Default::default(),
         }
     }
 
@@ -442,6 +452,7 @@ impl ProviderSessionCore {
 
     pub(crate) async fn close(&self) {
         self.live.store(false, Ordering::Release);
+        self.conversation_io.cancel();
         self.conversation.lock().await.pending.take();
         self.home.lock().await.take();
     }

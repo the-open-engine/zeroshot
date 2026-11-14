@@ -444,6 +444,16 @@ pub trait NodeRunner: Send + Sync {
         conversations::ConversationCapture::default()
     }
 
+    /// Capture observes a controller stop and drains blocking copies before releasing sessions.
+    /// Existing embedders retain their previous optional capture implementation.
+    async fn capture_conversations_until_stopped(
+        &self,
+        run_id: &RunId,
+        _cancellation: crate::execution::driver::DriverCancellation,
+    ) -> conversations::ConversationCapture {
+        self.capture_conversations(run_id).await
+    }
+
     /// Restored history identifies eligible node instances; ordinary restarts supply no history.
     async fn restore_conversations(
         &self,
@@ -613,7 +623,23 @@ impl NativeNodeRunner {
 #[async_trait]
 impl NodeRunner for NativeNodeRunner {
     async fn capture_conversations(&self, run_id: &RunId) -> conversations::ConversationCapture {
-        self.sessions.capture_conversations(run_id).await
+        self.capture_conversations_until_stopped(
+            run_id,
+            DriverCancellation::new(watch::channel(false).1),
+        )
+        .await
+    }
+
+    async fn capture_conversations_until_stopped(
+        &self,
+        run_id: &RunId,
+        cancellation: DriverCancellation,
+    ) -> conversations::ConversationCapture {
+        let operation = conversations::ConversationIo::default().with_request(cancellation);
+        if !self.activity.capture(run_id, &operation).await {
+            return conversations::ConversationCapture::default();
+        }
+        self.sessions.capture_conversations(run_id, operation).await
     }
 
     async fn restore_conversations(
