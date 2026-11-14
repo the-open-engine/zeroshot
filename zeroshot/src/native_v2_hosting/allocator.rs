@@ -91,6 +91,7 @@ struct CapsuleBuildRequest<'a> {
 
 struct WorkspacePreparation<'a> {
     run_id: &'a RunId,
+    checkpoint_source: Option<&'a RunId>,
     delivery_run_id: &'a RunId,
     workspace: &'a Path,
     admitted: &'a AdmittedRun,
@@ -321,6 +322,7 @@ impl ProductionCapsuleAllocator {
         let hosted_workspace = self
             .prepare_hosted_workspace(WorkspacePreparation {
                 run_id,
+                checkpoint_source: request.retained_restore.as_ref().map(|(source, _)| *source),
                 delivery_run_id: request.delivery_run_id,
                 workspace: &filesystem.workspace,
                 admitted: request.admitted,
@@ -491,11 +493,20 @@ impl ProductionCapsuleAllocator {
             resumed_from: None,
             comment_publications: None,
             checkpoints: Arc::new(
-                ResticCheckpointStore::new(
-                    directory.clone(),
-                    checkpoint_repository(&self.config.storage_root, request.delivery_run_id),
-                    request.workspace.to_owned(),
-                    writers,
+                ResticCheckpointStore::new_with_fallback(
+                    checkpoints::ResticCheckpointStoreRequest {
+                        directory: directory.clone(),
+                        repository: checkpoint_repository(
+                            &self.config.storage_root,
+                            request.delivery_run_id,
+                        ),
+                        workspace: request.workspace.to_owned(),
+                        writers,
+                    },
+                    Some(&checkpoint_directory(
+                        &self.config.storage_root,
+                        request.checkpoint_source.unwrap_or(request.run_id),
+                    )),
                 )
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             ),

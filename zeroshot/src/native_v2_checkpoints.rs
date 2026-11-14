@@ -318,6 +318,13 @@ pub struct ResticCheckpointStore {
     delivery: DeliveryCheckpointStore,
 }
 
+pub(crate) struct ResticCheckpointStoreRequest {
+    pub(crate) directory: PathBuf,
+    pub(crate) repository: PathBuf,
+    pub(crate) workspace: PathBuf,
+    pub(crate) writers: BTreeSet<NodeName>,
+}
+
 #[cfg(test)]
 pub(crate) struct ResticCheckpointStoreTestConfig {
     pub(crate) directory: PathBuf,
@@ -334,7 +341,40 @@ impl ResticCheckpointStore {
         workspace: PathBuf,
         writers: BTreeSet<NodeName>,
     ) -> Result<Self, CheckpointError> {
-        let program = restic::ResticProgram::discover();
+        Self::new_with_fallback(
+            ResticCheckpointStoreRequest {
+                directory,
+                repository,
+                workspace,
+                writers,
+            },
+            None,
+        )
+    }
+
+    pub(crate) fn new_with_fallback(
+        request: ResticCheckpointStoreRequest,
+        fallback: Option<&Path>,
+    ) -> Result<Self, CheckpointError> {
+        let ResticCheckpointStoreRequest {
+            directory,
+            repository,
+            workspace,
+            writers,
+        } = request;
+        let program = restic::ResticProgram::discover().or_else(|error| {
+            let Some(directory) = fallback else {
+                return Err(error);
+            };
+            let configuration = match storage_configuration(directory) {
+                Ok(configuration) => configuration,
+                Err(CheckpointError(missing)) if missing.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(error);
+                }
+                Err(CheckpointError(error)) => return Err(error),
+            };
+            configuration.program.for_restore()
+        });
         #[cfg(test)]
         let program = program.or_else(|_| {
             crate::execution::platform::private_directory(&repository)?;
@@ -684,11 +724,16 @@ async fn restore_with(
     let resolving = "resolving the checkpoint";
     let snapshot =
         selected_snapshot(selection).map_err(|error| progress.failed(resolving, error))?;
-    let (repository, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)
+    let (configuration, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)
         .map_err(|error| progress.failed(resolving, error))?;
     // Read the prerequisites first: a damaged seed must fail before the workspace changes.
     let seed = selected_seed(selection)
         .map_err(|error| progress.failed("reading the execution seed", error))?;
+    let program = configuration
+        .program
+        .for_restore()
+        .map_err(|error| progress.failed("locating restic", error))?;
+    let repository = restic::Repository::new(program, configuration.repository);
     let repository = match progress.deadline {
         Some(deadline) => repository.with_deadline(deadline),
         None => repository,
@@ -816,20 +861,22 @@ fn remove_lineage_catalogs(directory: &Path, repository: &Path) -> Result<(), Ch
 fn stored_snapshot(
     directory: &Path,
     point: &SnapshotId,
-) -> Result<(restic::Repository, restic::SnapshotId), CheckpointError> {
-    let configuration: StorageConfiguration = catalog::read(&directory.join("storage.json"))?;
-    if configuration.format != STORAGE_FORMAT {
-        return Err(catalog::invalid("unsupported checkpoint storage format"));
-    }
+) -> Result<(StorageConfiguration, restic::SnapshotId), CheckpointError> {
+    let configuration = storage_configuration(directory)?;
     let record: StoredSnapshot = catalog::read(&snapshot_path(directory, point))?;
     if record.format != STORAGE_FORMAT {
         return Err(catalog::invalid("unsupported stored snapshot format"));
     }
     let snapshot = restic::SnapshotId::parse(record.restic_snapshot)?;
-    Ok((
-        restic::Repository::new(configuration.program, configuration.repository),
-        snapshot,
-    ))
+    Ok((configuration, snapshot))
+}
+
+fn storage_configuration(directory: &Path) -> Result<StorageConfiguration, CheckpointError> {
+    let configuration: StorageConfiguration = catalog::read(&directory.join("storage.json"))?;
+    if configuration.format != STORAGE_FORMAT {
+        return Err(catalog::invalid("unsupported checkpoint storage format"));
+    }
+    Ok(configuration)
 }
 
 #[cfg(test)]

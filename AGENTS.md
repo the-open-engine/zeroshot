@@ -967,6 +967,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Restic drains progress and private stderr completely with bounded memory, retaining only the
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
+  Restores rediscover Restic through `ZEROSHOT_RESTIC`, the executable's sibling, then `PATH`,
+  falling back to the stored program only when discovery fails. Storage keeps its original program
+  and format; checkpoint pinning validates metadata without requiring an executable. Successor
+  checkpoint stores also retain that fallback from their predecessor's storage configuration.
   Versioned execution seeds live in separate files and are read only for selected continuation.
   Target restart restores the latest published snapshot without importing a seed. Local restart
   restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
