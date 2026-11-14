@@ -160,8 +160,7 @@ async fn interrupted_resume_with_a_durable_successor_keeps_the_claim() {
     );
 }
 
-#[tokio::test]
-async fn inbox_show_keeps_the_request_while_its_successor_is_starting() {
+pub(super) async fn assert_inbox_show_during_successor_startup() {
     use crate::v2_run_ledger::{RunEvent, vector_event};
     use openengine_cluster_protocol::{
         NodeName, RequestState, RunRequest, RunSuspension, RunVectorContent,

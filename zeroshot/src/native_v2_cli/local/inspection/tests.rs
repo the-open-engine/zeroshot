@@ -12,6 +12,11 @@ use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[tokio::test]
+async fn inbox_show_keeps_the_request_while_its_successor_is_starting() {
+    super::super::recovery_claim_tests::assert_inbox_show_during_successor_startup().await;
+}
+
 struct Fixture {
     root: tempfile::TempDir,
     backend: LocalCliBackend,
