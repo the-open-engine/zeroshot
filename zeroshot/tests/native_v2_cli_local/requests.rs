@@ -285,6 +285,49 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
     );
 }
 #[tokio::test(flavor = "multi_thread")]
+async fn request_suspension_waits_for_a_slow_checkpoint() {
+    let mut fixture = LocalFixture::new().with_request(None);
+    let delayed = fixture.root.path("checkpoint-delayed");
+    let wrapper = fixture.root.path("slow-restic");
+    openengine_cluster_testkit::fixture::write_executable(
+        &wrapper,
+        format!(
+            r#"#!/bin/sh
+for argument in "$@"; do
+  if test "$argument" = backup && test -f {mutation}; then
+    touch {delayed}
+    /bin/sleep 25
+    break
+  fi
+done
+exec {restic} "$@"
+"#,
+            mutation = shell_literal(
+                fixture.repository.join("local-mutation.txt").to_str().assert_value(),
+            ),
+            delayed = shell_literal(delayed.to_str().assert_value()),
+            restic = shell_literal(restic_selector::test_restic().to_str().assert_value()),
+        ),
+        0o755,
+    )
+    .assert_value_with("write delayed checkpoint tool");
+    fixture
+        .harness_environment
+        .insert("ZEROSHOT_RESTIC".to_owned(), wrapper.display().to_string());
+
+    let run = fixture.submit_detached("hold").await;
+    fixture.wait_running(&run).await;
+    let started = Instant::now();
+    fs::write(fixture.repository.join("release-turn"), "go").assert_value();
+    let suspended = fixture.wait_suspended(&run).await;
+    assert!(delayed.exists(), "the request checkpoint must be delayed");
+    assert!(started.elapsed() > CLI_TIMEOUT);
+    assert_eq!(suspended["status"]["reason"], "request");
+    assert_eq!(fixture.own_inbox(&run).await["state"], "pending");
+    wait_for_exit(fixture.ready_pid(&run)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn inbox_paginates_only_requests_that_still_hold_their_run() {
     let fixture = LocalFixture::new();
     let finished = fixture.submit_detached("finish").await;

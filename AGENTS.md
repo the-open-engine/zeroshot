@@ -1917,6 +1917,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 Run the narrowest relevant checks first, then the complete affected lane.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
+Suspension polling has a separate bounded checkpoint and cleanup budget from individual CLI calls.
 
 ```bash
 cargo fmt --all -- --check

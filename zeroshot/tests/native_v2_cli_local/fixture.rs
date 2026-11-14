@@ -11,6 +11,8 @@ use tokio::process::{Child, Command};
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
+// Suspension includes checkpoint I/O and runtime cleanup, beyond a single CLI request.
+const SUSPENSION_TIMEOUT: Duration = Duration::from_secs(120);
 const DECLARED_KEY: &str = "local-declared-key";
 
 pub(super) struct LocalFixture {
@@ -80,7 +82,7 @@ impl LocalFixture {
     }
 
     pub(super) async fn wait_suspended(&self, run_id: &str) -> Value {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let deadline = Instant::now() + SUSPENSION_TIMEOUT;
         loop {
             let status = self.json(&["status", run_id], "hold").await;
             if status["status"]["phase"] == "suspended" {
