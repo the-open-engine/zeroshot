@@ -4,7 +4,7 @@
 .defaults-page {
   height: 100dvh;
   overflow: auto;
-  background: var(--canvas);
+  background: transparent;
 }
 .defaults-menu {
   display: flex;
@@ -23,12 +23,11 @@
 }
 .defaults-content h1 {
   margin: 0 0 14px;
-  font: 500 clamp(28px, 4vw, 40px)/1.15 var(--font-display);
-  letter-spacing: -1px;
+  font: 400 clamp(40px, 6vw, 56px)/1 var(--font-marker);
   outline: none;
 }
 .defaults-intro {
-  color: var(--secondary);
+  color: var(--ink-secondary);
   font-size: 16px;
   line-height: 1.6;
   max-width: 570px;
@@ -51,12 +50,12 @@
 .defaults-content dd {
   margin: 0;
   line-height: 1.65;
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .defaults-note {
   border-top: 1px solid var(--hairline);
   padding-top: 22px;
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 13px;
   line-height: 1.65;
 }

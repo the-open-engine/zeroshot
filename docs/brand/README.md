@@ -28,7 +28,9 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
 
 ## Design
 
-Reenie Beanie is the handwriting face; Fraunces 600 is the company wordmark.
+Reenie Beanie is the handwriting face and the zeroshot product wordmark (the crow and "zeroshot"),
+as on zeroshot.sh, the docs header and the workspace UI ([ui/DESIGN.md](../../ui/DESIGN.md)).
+Fraunces 600 sets only the company name, "The Open Engine Company", in these banners.
 The light palette uses paper `#FAF7F1`, pen ink `#26221C`, and rust `#C2240C`.
 Dark mode uses `#171411`, cream text, and the documentation theme's lighter rust
 `#ED6B55` for readable accents. Notes retain yellow paper and dark ink in both themes.

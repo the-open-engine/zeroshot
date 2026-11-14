@@ -163,7 +163,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
       <div className="app-body">
         <nav className={`run-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Runs">
           <div className="sidebar-heading">
-            <span className="eyebrow">RUNS</span>
+            <span className="sidebar-title">Runs</span>
             <button
               className="icon-button"
               title="Refresh runs"

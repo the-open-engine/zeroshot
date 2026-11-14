@@ -16,19 +16,19 @@
 }
 .bindings-heading > span {
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
 }
 .bindings-helper,
 .bindings-empty,
 .bindings-unresolved {
   margin: 8px 0 12px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   font-size: 12px;
   line-height: 1.5;
 }
 .bindings-empty {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .bindings-row {
   min-width: 0;
@@ -40,8 +40,8 @@
 }
 .bindings-row > legend {
   padding: 0 4px;
-  color: var(--secondary);
-  font-size: 11px;
+  color: var(--ink-secondary);
+  font-size: 12px;
 }
 .bindings-field {
   min-width: 0;
@@ -50,12 +50,12 @@
 .bindings-field > label {
   display: block;
   margin: 0 0 5px;
-  color: var(--secondary);
-  font-size: 11px;
+  color: var(--ink-secondary);
+  font-size: 12px;
 }
 .bindings-field > select {
   font-size: 12px;
-  padding: 8px;
+  padding: 8px 26px 8px 8px;
   text-overflow: ellipsis;
 }
 .bindings-field > small {
@@ -67,11 +67,11 @@
   align-items: center;
   gap: 5px;
   padding: 3px 0;
-  color: var(--secondary);
-  font-size: 11px;
+  color: var(--ink-secondary);
+  font-size: 12px;
 }
 .bindings-remove:hover {
-  color: var(--rust-text);
+  color: var(--rust);
 }
 .bindings-add {
   font-size: 12px;
@@ -92,8 +92,8 @@
   border: 0;
 }
 .bindings-promotions > legend {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 12px;
   margin-bottom: 7px;
 }
 .bindings-promotions > label {
@@ -103,14 +103,13 @@
   padding: 6px 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .bindings-promotions input {
   width: 15px;
   height: 15px;
   margin: 2px 0 0;
   flex: 0 0 auto;
-  accent-color: var(--rust);
 }
 .bindings-promotions span {
   overflow-wrap: anywhere;
@@ -134,18 +133,18 @@
 .promotion-card > summary > span {
   display: block;
   padding: 4px 0 0 13px;
-  font-size: 11px;
-  color: var(--secondary);
+  font-size: 12px;
+  color: var(--ink-secondary);
 }
 .promotion-content {
   padding: 0 10px 10px;
 }
 .promotion-destination,
 .promotion-chain {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   overflow-wrap: anywhere;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   margin: 6px 0;
 }
 .promotion-chain {
@@ -156,15 +155,15 @@
   border-top: 1px solid var(--hairline);
 }
 .promotion-route .text-button {
-  font-size: 11px;
+  font-size: 12px;
 }
 .promotion-connect {
   margin: 12px 0;
 }
 .promotion-connect > label {
   display: block;
-  font-size: 11px;
-  color: var(--secondary);
+  font-size: 12px;
+  color: var(--ink-secondary);
   margin-bottom: 5px;
 }
 .promotion-connect > select {
@@ -174,8 +173,8 @@
   margin-top: 9px;
 }
 .promotion-unavailable > summary {
-  font-size: 11px;
-  color: var(--secondary);
+  font-size: 12px;
+  color: var(--ink-secondary);
   cursor: pointer;
 }
 .promotion-unavailable strong {
@@ -187,8 +186,8 @@
 .promotion-add > label {
   display: block;
   margin-bottom: 5px;
-  color: var(--secondary);
-  font-size: 11px;
+  color: var(--ink-secondary);
+  font-size: 12px;
 }
 .promotion-add > select {
   font-size: 12px;

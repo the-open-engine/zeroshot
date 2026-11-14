@@ -517,7 +517,11 @@ function workflowEdges(
     type: 'workflow',
     markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
     style: {
-      stroke: edge.secondary ? 'var(--muted)' : edge.repeat ? 'var(--rust-text)' : 'var(--edge)',
+      stroke: edge.secondary
+        ? 'var(--ink-muted)'
+        : edge.repeat
+          ? 'var(--ink-secondary)'
+          : 'var(--edge)',
       strokeWidth: edge.repeat ? 1.5 : 1.2,
       strokeDasharray: edge.secondary ? '4 5' : undefined,
     },
