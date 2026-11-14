@@ -130,6 +130,8 @@ One graph per process your team runs.
 - **[Delivery](docs/guides/forge-delivery.md):** a run can end by pushing a branch, opening a PR,
   or opening and merging one on GitHub, GitHub Enterprise or GitLab, or by leaving the change in
   your working copy. The built-in template `software-change` defaults to PR delivery.
+- **[Plans](docs/guides/planning.md):** `plan this with zeroshot` turns a big change into small
+  PRs, each with the tests it must pass.
 
 ### The engine enforces them
 
