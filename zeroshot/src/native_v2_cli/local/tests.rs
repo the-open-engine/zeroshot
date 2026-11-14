@@ -639,7 +639,10 @@ async fn local_enumeration_and_readiness_fail_closed_without_controller() {
     assert!(backend.list_local().await.assert_value().runs.is_empty());
     assert!(
         backend
-            .list_entry(Err(std::io::Error::other("unreadable entry")))
+            .list_entry(
+                Err(std::io::Error::other("unreadable entry")),
+                Instant::now() + DEFAULT_READY_TIMEOUT
+            )
             .await
             .assert_value()
             .is_none()

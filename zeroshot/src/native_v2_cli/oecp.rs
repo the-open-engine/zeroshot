@@ -122,7 +122,7 @@ impl<E> ChannelSubscription<E> {
 
     /// A connected transport alone does not establish observation. Keep setup owned by this
     /// subscription so cancellation aborts it, and return only after the OECP acknowledgement.
-    async fn established(mut self) -> Result<Self, NativeV2CliError> {
+    pub(super) async fn established(mut self) -> Result<Self, NativeV2CliError> {
         if (&mut self.established).await.is_ok() {
             return Ok(self);
         }

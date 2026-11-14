@@ -22,10 +22,16 @@ struct Fixture {
 
 impl Fixture {
     async fn new(finished: bool, lost: bool) -> Self {
+        Self::in_state(finished, lost, None).await
+    }
+
+    async fn in_state(finished: bool, lost: bool, state: Option<PathBuf>) -> Self {
         let root = tempfile::tempdir().unwrap();
         // Match the CLI's private state root, including explicit Windows ownership.
-        let state = root.path().join("state");
-        crate::execution::platform::create_private_directory(&state).unwrap();
+        let state = state.unwrap_or_else(|| root.path().join("state"));
+        if !state.is_dir() {
+            crate::execution::platform::create_private_directory(&state).unwrap();
+        }
         let backend =
             LocalCliBackend::new(state, "unused".into(), root.path().to_owned(), "git".into());
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
@@ -541,6 +547,9 @@ impl ClusterBackend for LiveController {
 
 #[path = "force_tests.rs"]
 mod force_tests;
+
+#[path = "request_tests.rs"]
+mod request_tests;
 
 #[path = "vector_tests.rs"]
 mod vector_tests;

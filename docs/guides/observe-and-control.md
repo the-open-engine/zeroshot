@@ -89,6 +89,12 @@ Unix epoch milliseconds, not the time the controller died. The entry is omitted 
 answers and for finished or suspended runs. `checkpoints` also includes it when applicable. These three commands
 exit 0 after a successful read, including when controller availability is lost or unknown.
 
+Local controller requests wait at most 10 seconds for an answer. This includes the status checks
+before `resume` and `checkpoints`, and the initial exchanges for `watch`, `logs` and `attach`.
+`list` checks controllers with bounded concurrency under one shared deadline. Runs that could not
+be checked within that budget retain their recorded status with an `unknown` controller. An established
+stream may stay quiet indefinitely. Controller handoffs keep their separate retry budget.
+
 For an unfinished run, `watch`, `logs` and `attach` print the recorded part, then exit 1 when the
 local controller is unavailable. Their error names `zeroshot resume RUN_ID` and `zeroshot force-stop RUN_ID`. Inspection
 does not record a terminal result: an unclaimed lost run keeps its recorded status on every read.
@@ -311,6 +317,10 @@ zeroshot force-stop RUN_ID
 
 The command asks the controller to stop active work and writes the resulting status as JSON. Read
 status first if another operator may already have stopped the run, or if it may have completed.
+
+If a local controller does not answer within 10 seconds, `force-stop` exits non-zero and names the
+run and the controller PID recorded at readiness. The request stays queued and takes effect if the
+controller answers again. The command does not kill the controller process.
 
 Python follows the same rule. A timeout or task cancellation detaches observation;
 `await run.force_stop()` changes the run lifetime.

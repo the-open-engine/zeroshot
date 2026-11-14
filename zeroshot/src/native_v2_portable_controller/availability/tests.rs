@@ -95,7 +95,7 @@ impl Fixture {
 
     async fn state(&self) -> ControllerObservation {
         match check_controller(&self.paths, &self.id).await {
-            ControllerAvailability::Unavailable(observed) => observed,
+            ControllerAvailability::Unavailable { observation, .. } => observation,
             _ => panic!("expected an unavailable controller"),
         }
     }

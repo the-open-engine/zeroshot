@@ -1631,6 +1631,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   deadline is the earlier of stack expiry and seven days after readiness.
 - Read-only safe commands include `zeroshot list`, `zeroshot status`, `zeroshot logs`,
   `zeroshot vectors`, and `zeroshot vectors show`.
+- Local controller requests use the existing ten-second readiness deadline, separately from handoff
+  retries. List probes use bounded concurrency and one shared deadline; unavailable status retains the recorded state and controller
+  observation. Subscription setup waits for acknowledgement within that deadline, while established
+  streams have no idle timeout. A force-stop timeout is not retried: it names the run and readiness
+  PID and warns that the request remains queued, without killing the controller.
 - Destructive commands such as `zeroshot force-stop` require explicit user intent.
 
 ## Where to look
