@@ -530,12 +530,30 @@ fn configure_workspace_checkpoints(
         repository: bootstrap.checkpoint_repository.clone(),
     });
     if prepared.admitted.runtime.workspace_checkpoints {
+        use crate::native_v2_supervisor::checkpoints::{
+            ResticCheckpointStore, ResticCheckpointStoreRequest,
+        };
+
+        let fallback = match &bootstrap.predecessor {
+            Some(predecessor) => Some(
+                bootstrap
+                    .storage
+                    .parent()
+                    .ok_or(PortableControllerError::DurableIdentity)?
+                    .join(predecessor.as_str())
+                    .join("checkpoints"),
+            ),
+            None => None,
+        };
         runtime.checkpoints = Some(Arc::new(
-            crate::native_v2_supervisor::checkpoints::ResticCheckpointStore::new(
-                prepared.paths.storage().join("checkpoints"),
-                bootstrap.checkpoint_repository.clone(),
-                bootstrap.workspace.clone(),
-                crate::native_v2_admission::writer_nodes(&prepared.admitted),
+            ResticCheckpointStore::new_with_fallback(
+                ResticCheckpointStoreRequest {
+                    directory: prepared.paths.storage().join("checkpoints"),
+                    repository: bootstrap.checkpoint_repository.clone(),
+                    workspace: bootstrap.workspace.clone(),
+                    writers: crate::native_v2_admission::writer_nodes(&prepared.admitted),
+                },
+                fallback.as_deref(),
             )
             .map_err(|error| PortableControllerError::Io(error.0))?
             .with_stop_request(prepared.stopping.clone()),

@@ -9,6 +9,10 @@ use serde_json::Value;
 
 use super::{Fixture, process_exists, success};
 
+// Keep portable resume coverage in the Unix controller suite selected by macOS CI.
+#[path = "restic_resume_tests.rs"]
+mod restic_resume_tests;
+
 #[path = "unix_controller_work_tests.rs"]
 mod work;
 
