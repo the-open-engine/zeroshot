@@ -436,3 +436,85 @@ async fn answer_refuses_finished_stopped_and_command_suspended_runs_without_star
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn request_answers_continue_the_checkpoint_conversation_without_replaying_workers() {
+    let mut fixture = request_conversation_fixture();
+    let run = fixture.submit_detached("finish").await;
+    fixture.wait_suspended(&run).await;
+    wait_for_exit(fixture.ready_pid(&run)).await;
+    assert_eq!(conversations::worker_calls(&fixture), ["fresh local-thread"]);
+    conversations::new_provider_home(&mut fixture);
+
+    let answer = fixture.root.path("answer.json");
+    write_json(&answer, &json!({"signals":{"done":"no"},"output":{}}));
+    let rejected = fixture
+        .json(
+            &["answer", &run, "--input", answer.to_str().assert_value()],
+            "finish",
+        )
+        .await;
+    let successor = rejected["runId"].as_str().assert_value();
+    fixture.wait_suspended(successor).await;
+    wait_for_exit(fixture.ready_pid(successor)).await;
+    assert_eq!(
+        conversations::worker_calls(&fixture),
+        ["fresh local-thread", "resume local-thread"],
+        "a rejected answer must continue the captured worker conversation"
+    );
+    let request = fixture.json(&["inbox", "show", &run], "finish").await;
+    assert_eq!(request["state"], "answered");
+    assert_eq!(request["successorRunId"], successor);
+    conversations::new_provider_home(&mut fixture);
+
+    write_json(&answer, &json!({"signals":{"done":"yes"},"output":{}}));
+    let approved = fixture
+        .json(
+            &[
+                "answer",
+                successor,
+                "--input",
+                answer.to_str().assert_value(),
+            ],
+            "finish",
+        )
+        .await;
+    let final_run = approved["runId"].as_str().assert_value();
+    fixture.wait_succeeded(final_run, "finish").await;
+    wait_for_exit(fixture.ready_pid(final_run)).await;
+    assert_eq!(
+        conversations::worker_calls(&fixture),
+        ["fresh local-thread", "resume local-thread"]
+    );
+    conversations::assert_private_and_discarded(&fixture, &run, final_run).await;
+}
+
+fn request_conversation_fixture() -> LocalFixture {
+    let fixture = conversations::fixture();
+    let mut graph: Value =
+        serde_json::from_slice(&fs::read(&fixture.graph).assert_value()).assert_value();
+    let state =
+        json!({"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}});
+    graph["initialInput"] = state.clone();
+    graph["root"]["state"] = state.clone();
+    graph["root"]["children"][0]["state"] = state.clone();
+    graph["root"]["children"][0]["body"]["state"] = state.clone();
+    graph["root"]["children"][1]["state"] = state.clone();
+    graph["root"]["children"][0]["body"]["children"][1] = json!({
+        "kind":"verifier","name":"check","worker":"builtin.request.ask@1",
+        "input":state,"output":{"kind":"record","fields":{}},"signals":{"done":["yes","no"]},
+        "diagnostic":{"kind":"record","fields":{"message":{"required":true,"type":{"kind":"string"}}}},
+        "inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],
+        "writeBindings":[],"attempts":1
+    });
+    write_json(&fixture.graph, &graph);
+    write_json(
+        &fixture.input,
+        &json!({"text":"Continue the worker conversation?"}),
+    );
+    let mut runtime: Value =
+        serde_json::from_slice(&fs::read(&fixture.runtime).assert_value()).assert_value();
+    runtime["nodes"]["check"] = json!({"kind":"request"});
+    write_json(&fixture.runtime, &runtime);
+    fixture
+}
