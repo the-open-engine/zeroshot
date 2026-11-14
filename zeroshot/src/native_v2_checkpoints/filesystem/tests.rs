@@ -43,6 +43,64 @@ fn initialize_git(directory: &Path) {
     git(directory, &["commit", "-m", "initial"]);
 }
 
+// The existing macOS checkpoint filter selects macos_* tests. Keep relocation and raw-file
+// privacy covered there as well as by Windows' complete workspace suite, without provider CLIs.
+#[test]
+fn macos_checkpoint_conversations_survive_relocation_outside_the_workspace() {
+    use crate::native_v2_runner::conversations::{
+        ConversationMetadata, ConversationSources, capture as capture_conversations, layout_tests,
+    };
+    use crate::native_v2_contract::NodeInstanceId;
+    use openengine_cluster_protocol::NodeName;
+
+    let fixture = Fixture::new();
+    fs::write(fixture.workspace.join("tracked"), "workspace bytes").assert_value();
+    let home = fixture._root.path().join("provider-before");
+    let before = crate::native_v2_codex::conversation::layout(home.clone());
+    fs::create_dir_all(before.storage.join("nested")).assert_value();
+    fs::write(
+        before.storage.join("nested/rollout-thread.jsonl"),
+        b"private transcript",
+    )
+    .assert_value();
+    fs::write(home.join("auth.json"), b"private credentials").assert_value();
+    let node = NodeName::new("worker").assert_value();
+    let instance = NodeInstanceId::new(1).assert_value();
+    let payload = capture_conversations(ConversationSources::from([(
+        instance,
+        (
+            node.clone(),
+            before.capture(ConversationMetadata {
+                harness: "codex".to_owned(),
+                id: "thread".to_owned(),
+                usage: layout_tests::usage(),
+            }),
+        ),
+    )]));
+    assert!(payload.notices.is_empty());
+    let payload = payload.files.assert_value();
+    let snapshot = capture(&fixture.workspace, &fixture.snapshots, &json!({})).assert_value();
+    fs::remove_dir_all(home).assert_value();
+    let workspace = fixture._root.path().join("relocated-workspace");
+    fs::create_dir(&workspace).assert_value();
+    restore(&fixture.snapshots, &snapshot, &workspace).assert_value();
+    assert_eq!(fs::read_dir(&workspace).assert_value().count(), 1);
+    assert_eq!(
+        fs::read(workspace.join("tracked")).assert_value(),
+        b"workspace bytes"
+    );
+    let home = fixture._root.path().join("provider-after");
+    let after = crate::native_v2_codex::conversation::layout(home.clone());
+    after
+        .restore(&payload.conversation(instance, &node).assert_value(), None)
+        .assert_value();
+    assert_eq!(
+        fs::read(after.storage.join("nested/rollout-thread.jsonl")).assert_value(),
+        b"private transcript"
+    );
+    assert!(!home.join("auth.json").exists());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn checkpoint_git_never_rewrites_invalid_utf8_as_a_different_reference() {
@@ -1310,4 +1368,21 @@ fn restore_repeated_after_interrupted_workspace_replacement_installs_the_snapsho
             "checkpoint"
         );
     }
+}
+
+#[test]
+fn macos_conversation_cancellation_discards_partial_capture_and_restore() {
+    use crate::native_v2_runner::conversations::cancellation_tests;
+    cancellation_tests::cancelled_capture_is_omitted();
+    cancellation_tests::cancelled_restore_is_not_installed();
+}
+
+#[cfg(unix)]
+#[test]
+fn macos_conversation_capture_rejects_symlinked_private_home_ancestors() {
+    use crate::native_v2_runner::conversations::layout_tests;
+    layout_tests::nested_storage_capture(
+        |home| crate::native_v2_codex::conversation::layout(home.join(".local/share/provider")),
+        "rollout-checkpoint-id.jsonl",
+    );
 }

@@ -5034,7 +5034,7 @@
       "type": "object"
     },
     "RunResumeFrom": {
-      "description": "A successor restarts a failed graph or restores a selected checkpoint; a suspended attempt\ncontinues at its saved boundary without restoring workspace files. Provider sessions are never resumed.",
+      "description": "A successor restarts a failed graph or continues from a selected checkpoint or suspension.\nCheckpoint continuations, including suspended successors, restore captured node-instance provider\nconversations; restarts start new ones. Suspended local/direct continuations retain workspace files.",
       "oneOf": [
         {
           "additionalProperties": false,

@@ -927,3 +927,9 @@ impl LocalFixture {
 
 #[path = "worktree_runs.rs"]
 mod worktree_runs;
+
+#[path = "conversations.rs"]
+mod conversations;
+
+#[path = "live_conversations.rs"]
+mod live_conversations;

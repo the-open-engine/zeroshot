@@ -19,7 +19,9 @@ pub use crate::active_memory::{
 };
 pub use crate::active_memory::runtime::{repository_key, authored_graph_hash};
 
-pub use workspaces::{HostedWorkspace, HostedWorkspaceRequest, HostedWorkspaceStorage};
+pub use workspaces::{
+    ConversationFiles, HostedWorkspace, HostedWorkspaceRequest, HostedWorkspaceStorage,
+};
 pub use delivery_validation::{HostedDeliveryValidationFactory, HostedDeliveryValidationRequest};
 
 #[cfg(test)]

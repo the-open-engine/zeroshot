@@ -378,3 +378,116 @@ async fn stalled_cleanup_publication_marks_diagnostics_incomplete_without_usage_
     );
     assert!(output.recv().await.is_err());
 }
+
+#[tokio::test]
+async fn conversation_capture_keeps_the_trusted_private_home_until_copying() {
+    use crate::native_v2_runner::conversations::{
+        ConversationMetadata, ConversationOwner, layout_tests,
+    };
+    let root = tempfile::tempdir().assert_value();
+    let home = root.path().join("home");
+    let layout = crate::native_v2_codex::conversation::layout(home.join("nested/provider"));
+    std::fs::create_dir_all(&layout.storage).assert_value();
+    std::fs::write(layout.storage.join("rollout-thread.jsonl"), b"first turn").assert_value();
+    let core = ProviderSessionCore::new();
+    {
+        let mut state = core.conversation.lock().await;
+        state.owner = Some(ConversationOwner {
+            home: home.clone(),
+            uid: 1,
+            gid: 1,
+        });
+        state.layout = Some(layout);
+        state.metadata = Some(ConversationMetadata {
+            harness: "codex".to_owned(),
+            id: "thread".to_owned(),
+            usage: layout_tests::usage(),
+        });
+    }
+    let source = core.capture_conversation().await.assert_value();
+    #[cfg(unix)]
+    {
+        let outside = root.path().join("outside");
+        std::fs::rename(home.join("nested"), &outside).assert_value();
+        std::os::unix::fs::symlink(outside, home.join("nested")).assert_value();
+        let capture =
+            crate::native_v2_runner::conversations::capture(std::collections::BTreeMap::from([(
+                crate::native_v2_contract::NodeInstanceId::new(1).assert_value(),
+                (
+                    openengine_cluster_protocol::NodeName::new("worker").assert_value(),
+                    Ok(source),
+                ),
+            )]));
+        assert_eq!(capture.notices.len(), 1);
+        assert!(capture.notices[0].1.contains("symbolic link"));
+        assert_eq!(
+            std::fs::read_dir(capture.files.assert_value().directory())
+                .assert_value()
+                .count(),
+            0
+        );
+    }
+    #[cfg(not(unix))]
+    let _ = source;
+}
+
+#[tokio::test]
+async fn cancelled_or_abandoned_restore_is_drained_before_session_close() {
+    use crate::native_v2_runner::conversations::cancellation_tests::{large_source, interrupt_copy};
+    use crate::native_v2_runner::test_support::{
+        control, null_worker_invocation, request, CountingSession,
+    };
+    for trigger in ["execution cancellation", "session close", "dropped future"] {
+        let root = tempfile::tempdir().assert_value();
+        let core = Arc::new(ProviderSessionCore::new());
+        core.queue_conversation(large_source(&root.path().join("old/sessions")))
+            .await;
+        let home = root.path().join("new");
+        std::fs::create_dir(&home).assert_value();
+        core.retain_home(home.clone()).await.assert_value();
+        let layout = crate::native_v2_codex::conversation::layout(home.clone());
+        let (cancel, control, _output) = control();
+        let restore = {
+            let core = core.clone();
+            let layout = layout.clone();
+            tokio::spawn(async move {
+                let invocation = null_worker_invocation(
+                    request("run", "worker", (1, 1)),
+                    Arc::new(CountingSession {
+                        closed: Arc::default(),
+                    }),
+                );
+                core.prepare_conversation(Some(layout), &invocation, &control)
+                    .await
+            })
+        };
+        let (started, observed) = tokio::sync::oneshot::channel();
+        let watcher = interrupt_copy(layout.storage.clone(), move || {
+            if trigger == "execution cancellation" {
+                cancel.send_replace(true);
+            }
+            let _ = started.send(());
+        });
+        observed.await.assert_value();
+        if trigger == "dropped future" {
+            restore.abort();
+        }
+        // close() must cancel and await the blocking worker before it releases this home.
+        tokio::time::timeout(std::time::Duration::from_secs(2), core.close())
+            .await
+            .assert_value();
+        assert!(watcher.join().assert_value() > 0);
+        assert!(
+            !home.exists(),
+            "{trigger}: session home survived confirmed close"
+        );
+        let result = restore.await;
+        if trigger != "dropped future" {
+            assert!(
+                matches!(result.assert_value(), Err(NodeRunnerError::Cancelled)),
+                "{trigger}"
+            );
+        }
+        assert!(!core.is_live());
+    }
+}

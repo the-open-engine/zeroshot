@@ -24,12 +24,14 @@ use super::{PiAdapter, PiTurn, prompt, schema_dialect};
 
 pub(crate) struct PiSession {
     pub(crate) core: ProviderSessionCore,
+    pub(super) id: tokio::sync::Mutex<Option<String>>,
 }
 
 impl PiSession {
     fn new() -> Self {
         Self {
             core: ProviderSessionCore::new(),
+            id: tokio::sync::Mutex::new(None),
         }
     }
 
@@ -95,6 +97,9 @@ impl NodeDriver for PiAdapter {
             &invocation,
             self.redactions(&invocation.environment),
         )?;
+        if let Some(id) = session.id.lock().await.as_ref() {
+            state.session_id = id.clone();
+        }
         loop {
             if let Some(outcome) = self
                 .advance_run(&turn, &mut state, &control)
@@ -104,6 +109,11 @@ impl NodeDriver for PiAdapter {
                     crate::harnesses::native_config::context_error(&invocation, "pi", error)
                 })?
             {
+                *session.id.lock().await = Some(state.session_id.clone());
+                session
+                    .core
+                    .record_conversation(Some(state.session_id.clone()), None)
+                    .await;
                 return Ok(outcome);
             }
         }

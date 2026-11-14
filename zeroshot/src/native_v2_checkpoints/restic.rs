@@ -207,6 +207,23 @@ impl Repository {
         Ok(())
     }
 
+    pub(super) async fn restore_conversations(
+        &self,
+        snapshot: &SnapshotId,
+        target: &Path,
+    ) -> io::Result<()> {
+        let arguments = [
+            OsString::from("restore"),
+            snapshot.as_str().into(),
+            "--target".into(),
+            target.as_os_str().to_owned(),
+            "--include".into(),
+            "/conversations".into(),
+        ];
+        self.run(&self.root, &arguments).await?;
+        Ok(())
+    }
+
     fn prepare_paths(&self) -> io::Result<()> {
         platform::private_directory(&self.root)?;
         platform::private_directory(&self.repository_path())?;

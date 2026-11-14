@@ -266,6 +266,10 @@ impl PortableRunController {
                         self.inner.wait_runtime_settled(&self.run_id),
                     )
                     .await;
+                } else {
+                    // Success is durable before checkpoint GC. Keep the process alive until its
+                    // runtime finishes deleting the lineage's private conversation files.
+                    self.inner.wait_runtime_settled(&self.run_id).await;
                 }
                 return Ok(());
             }
@@ -412,6 +416,7 @@ where
         return Err(PortableControllerError::Workspace);
     }
     require_not_stopping(prepared)?;
+    let mut conversation_restore = bootstrap.checkpoint.clone();
     let execution_seed =
         restore_execution_seed(bootstrap, preparation_deadline, prepared.stopping.clone()).await?;
     require_not_stopping(prepared)?;
@@ -446,6 +451,10 @@ where
             if bootstrap.checkpoint.is_some() {
                 return Err(PortableControllerError::Bootstrap);
             }
+            conversation_restore = Some(crate::native_v2_supervisor::checkpoints::CheckpointRestore {
+                directory: root.join(predecessor.as_str()).join("checkpoints"),
+                selection: crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Continue,
+            });
             runtime.execution_seed =
                 crate::native_v2_supervisor::continuation_history(&stored.snapshot)
                     .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
@@ -479,6 +488,17 @@ where
         }
     }
     let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
+    if let Some(selection) = conversation_restore {
+        let restored = crate::native_v2_supervisor::checkpoints::restore_checkpoint_conversations(
+            &selection,
+            prepared.stopping.clone(),
+        )
+        .await;
+        runtime
+            .runner
+            .restore_conversations(&runtime.execution_seed, restored)
+            .await;
+    }
     Ok(PreparedRuntime {
         runtime: Some(runtime),
         workspace_identity: Some(workspace_identity),

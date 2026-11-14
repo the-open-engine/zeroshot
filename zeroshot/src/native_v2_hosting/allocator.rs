@@ -256,6 +256,7 @@ impl ProductionCapsuleAllocator {
             recovery_path: recovery_path(&self.config.storage_root, request.run_id),
             delivery_run_id: request.delivery_run_id.clone(),
             restored_delivery_run_id: OnceLock::new(),
+            conversation_restore: OnceLock::new(),
             inherited_retained_workspace: request.transfer_retained_workspace,
             host_owned_workspace: self.config.workspace_storage.is_some(),
             process_pool: Mutex::new(Some(process_pool)),
@@ -308,6 +309,12 @@ impl ProductionCapsuleAllocator {
         )
         .await?;
         let restored_seed = if let Some((source_run_id, selection)) = &request.retained_restore {
+            if *selection != CheckpointRestoreSelection::Latest {
+                let _ = state.conversation_restore.set(CheckpointRestore {
+                    directory: checkpoint_directory(&self.config.storage_root, source_run_id),
+                    selection: selection.clone(),
+                });
+            }
             let seed = self
                 .restore_retained_workspace(source_run_id, selection.clone(), &filesystem.workspace)
                 .await?;
@@ -497,7 +504,8 @@ impl ProductionCapsuleAllocator {
                     request.workspace.to_owned(),
                     writers,
                 )
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+                .with_conversation_restore(request.state.conversation_restore.get().cloned()),
             ),
             execution_seed: Vec::new(),
             vector_seed: Vec::new(),
@@ -954,6 +962,7 @@ struct ProductionCapsuleState {
     recovery_path: PathBuf,
     delivery_run_id: RunId,
     restored_delivery_run_id: OnceLock<RunId>,
+    conversation_restore: OnceLock<CheckpointRestore>,
     inherited_retained_workspace: bool,
     host_owned_workspace: bool,
     // Retains the run's disjoint Linux identities until endpoint and workspace cleanup complete.

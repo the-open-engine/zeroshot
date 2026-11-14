@@ -370,3 +370,6 @@ fn assert_recall(settings: &LiveSettings, memory: &RecalledMemory, artifact: &st
 }
 
 mod active_memory_tests;
+
+#[path = "live_tests/tests/conversations.rs"]
+mod conversations;

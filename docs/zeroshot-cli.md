@@ -1472,7 +1472,9 @@ Options:
 ### `zeroshot suspend`
 
 ```text
-Request suspension at the next checkpoint and print status immediately
+Request suspension at the next checkpoint and print status immediately.
+
+Its successor continues captured node-instance conversations from that checkpoint.
 
 Usage: zeroshot suspend [OPTIONS] <RUN_ID>
 
@@ -1485,7 +1487,7 @@ Options:
           Use this named target. If omitted, use the local controller
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ### `zeroshot vectors`
@@ -1559,7 +1561,7 @@ Start a successor from a failed or suspended run's retained workspace.
 
 A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
 
-Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
+Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarts and execution-scoped agents start new conversations. Token usage starts at zero. Services and Docker state are not restored.
 
 Usage: zeroshot resume [OPTIONS] <RUN_ID>
 

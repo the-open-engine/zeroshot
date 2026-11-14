@@ -103,7 +103,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ceilings default to 16000 approximate tokens for node graph guidance and 8000 for repository hooks;
   each accepts 1..=64000 and converts one token to four UTF-8 bytes, including framing. There is no
   cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
-  including compaction; new conversations receive fresh delivery sets. Windows memory storage and initialization use shared
+  including compaction; new conversations and conversations continued in a successor receive fresh delivery sets. Windows memory storage and initialization use shared
   private-state helpers, including validation of SQLite sidecars. SQLite-created Windows children
   and externally written initialization responses may inherit the token's default owner only with
   an already private ACL and verified private parent; normalize them to explicit current-user
@@ -952,8 +952,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. Default resume of a failed run starts a fresh graph on the retained workspace;
-  checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
-  imports old provider sessions, secrets, or token usage. Suspended runs accept only default resume,
+  checkpoint resume restores a private input snapshot and settled prerequisite executions. Checkpoint
+  continuations, including suspended successors, restore captured `node_instance` provider conversations;
+  failed-run restarts and `execution` sessions start new conversations. Credentials are resolved again
+  and successor token usage starts at zero. Suspended runs accept only default resume,
   continuing at the held-back node, or after a due wait. Every successor inherits the ordered vector
   record. Suspension keeps request admission open during host storage writes and republishes the
   complete record if a request arrives meanwhile. Final disposal and durable suspension share the
@@ -967,6 +969,26 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Restic drains progress and private stderr completely with bounded memory, retaining only the
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
+  Conversations are raw adapter-selected provider files beside the snapshot's `workspace` tree,
+  with the same Restic paths across checkpoints, never inside execution seeds, ledgers or workspace
+  exports. A complete conversation (identifier, files and Codex cumulative usage baseline) is capped
+  at 1 GiB; capture/restore failures use a new conversation and a node-naming system log. Pending
+  restored conversations survive checkpoints before their next turn. Adapters own filename selection
+  and relocation; shared code bounds copies, rejects unsafe names and restores only those files.
+  Contained capture rechecks storage ancestors from the trusted private home at selection and
+  file reads; provider-owned symbolic links cannot redirect supervisor reads outside that home.
+  Conversation copies observe execution/controller cancellation between bounded reads. Blocking
+  workers retain the session state/home or pool lock until staging and rollback finish, including
+  when their async caller is dropped; close cancels restoration before awaiting those locks.
+  Workspace-checkpoint opt-out skips conversation capture while retaining delivery receipts.
+  Contained restores assign ownership through the trusted private home, including newly created
+  storage ancestors. Codex capture requires usage reported for the latest turn; missing usage must
+  not carry an older in-run baseline into a successor.
+  Optional `RunCheckpointStore` methods hand host storage the files and accept the selected files
+  independently of workspace restore; older implementations retain their new-conversation fallback.
+  Successful portable controllers drain runtime settlement before exit so post-terminal checkpoint
+  deletion can finish, including deletion of private conversation files.
+  ACP owner sessions and Active Memory delivery sets are not carried between runs.
   Versioned execution seeds live in separate files and are read only for selected continuation.
   Target restart restores the latest published snapshot without importing a seed. Local restart
   restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
@@ -1469,7 +1491,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   preparation before waiting for cleanup; failed cleanup retains authority for replay/recovery.
   `ZEROSHOT_TOOLS/bin` precedes the base PATH for hooks and all agents; shell exports do not persist.
   Startup services retain a separate run-owned process marker and stop at run cleanup. Checkpoints
-  retain files and graph state, not services, Docker state, or conversations; users reconstruct
+  retain files, graph state and supported node-instance conversations, but no services or Docker state; users reconstruct
   services idempotently and keep live database state outside file checkpoint guarantees.
   Local runs reject hooks and use the invoking environment. Direct Docker setup modifies its
   operator-owned target container, shared by that target's runs; separate target containers are
