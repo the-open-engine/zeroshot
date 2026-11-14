@@ -1674,6 +1674,50 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Run.suspend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;suspend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.vectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;vectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.vector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;vector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Run.force_stop" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2678,6 +2722,50 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Run.suspend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;suspend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.vectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;vectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.vector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;vector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Run.force_stop" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3109,6 +3197,13 @@ or Zeroshot rejects the request.</p>
             –
           <div class="doc-md-description">
             <p>If observation expires; its run attribute can resume waiting.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: _RunHandle, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the attempt suspends; carries its run handle and status.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -3633,7 +3728,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None)
 
   
       dataclass
@@ -3708,7 +3803,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None)
+              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None)
 
   
       dataclass
@@ -3852,6 +3947,13 @@ completes before local controller startup or direct-target contact.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: _RunHandle, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the attempt suspends; carries this handle and its status.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
               <code><a class="autorefs autorefs-internal" title="              RunNotFoundError(message: str, *, exit_code: int | None = None) (zeroshot.run_errors.RunNotFoundError)" href="../errors/#zeroshot.RunNotFoundError">RunNotFoundError</a></code>
             –
           <div class="doc-md-description">
@@ -3874,6 +3976,204 @@ completes before local controller startup or direct-target contact.</p>
         </li>
     </ul>
         <p>Python task cancellation remains asyncio.CancelledError and leaves the run active.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Run.suspend" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">suspend</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">RunStatus</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Run.suspend" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Request suspension and return the status immediately.</p>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None)
+
+  
+      dataclass
+   (zeroshot.runs.RunStatus)" href="../results/#zeroshot.RunStatus">RunStatus</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The current durable status with the suspension request recorded.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Run.resume" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">resume</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Run.resume" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Continue this attempt in a successor with fresh native sessions.</p>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The successor run handle.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Run.vectors" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">vectors</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">after</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">50</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RunVectorsPage</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Run.vectors" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read one ordered page of the vector record.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>after</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Opaque entry cursor, or None for the first page.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>limit</code></b>
+              (<code><span title="int">int</span></code>, default:
+                  <code>50</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Number of entries, from 1 through 100.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunVectorsPage(*, run_id: str, vectors: tuple[RunVector, ...], next_after: str | None)
+
+  
+      dataclass
+   (zeroshot.runs.RunVectorsPage)" href="../results/#zeroshot.RunVectorsPage">RunVectorsPage</a></code>
+          –
+          <div class="doc-md-description">
+            <p>Entries and the next cursor, if any.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If limit is outside 1 through 100.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Run.vector" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">vector</span><span class="p">(</span><span class="nb">id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RunVector</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Run.vector" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read a vector entry with its complete content.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>id</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Opaque entry identity.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunVector(*, id: str, run_id: str, created_at: int, kind: str, content: JsonValue)
+
+  
+      dataclass
+   (zeroshot.runs.RunVector)" href="../results/#zeroshot.RunVector">RunVector</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The durable entry.</p>
+          </div>
+        </li>
+    </ul>
 
 
     </div>
@@ -4185,7 +4485,7 @@ during review are not restacked, so rebase the pull requests above it by hand.</
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-13">13 November 2026</time>
+    Last updated <time datetime="2026-11-14">14 November 2026</time>
   </span>
 
     
