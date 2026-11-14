@@ -22,12 +22,12 @@
 .node-data-section > header .icon-button {
   width: 24px;
   height: 24px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .node-data-section input,
 .node-data-section select {
   font-size: 12px;
-  padding: 6px;
+  padding: 6px 26px 6px 6px;
   min-width: 0;
 }
 .node-data-bound,
@@ -49,15 +49,15 @@
 .node-data-declaration-heading .icon-button {
   width: 24px;
   height: 27px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .node-data-bound > select {
   width: 100%;
   margin-top: 5px;
 }
 .node-data-type {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -65,15 +65,14 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 12px;
   margin: 5px 0;
 }
 .node-data-required input {
   width: 12px;
   height: 12px;
   margin: 0;
-  accent-color: var(--rust);
 }
 .node-data-add-source {
   width: 100%;
@@ -97,8 +96,8 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   margin: 7px 0;
 }
 .node-data-items > label {
@@ -120,12 +119,12 @@
   padding: 7px 0;
   gap: 8px;
   font-size: 12px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .node-data-child small {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 12px;
 }
 .node-data-child:hover {
-  color: var(--rust-text);
+  color: var(--rust);
 }

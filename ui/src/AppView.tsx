@@ -686,7 +686,6 @@ function ValidationDetail({
 }) {
   return (
     <div className="validation-detail" role="alert">
-      <AlertCircle size={17} />
       <span>{validation.message}</span>
       {validation.field?.startsWith('runtime') && (
         <button className="text-button" onClick={openRuntime}>
@@ -963,7 +962,6 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
       )}
       {error && !(issues && error === validation.message) && (
         <div className="error-banner" role="alert">
-          <AlertCircle size={17} />
           <span>{error}</span>
           <button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}>
             <X size={16} />
@@ -993,7 +991,7 @@ function ProfileSidebar({ model }: { model: AppModel }) {
   return (
     <nav className={`profile-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Profiles">
       <div className="sidebar-heading">
-        <span className="eyebrow">PROFILES</span>
+        <span className="sidebar-title">Profiles</span>
         <button
           className="icon-button"
           title="New profile"

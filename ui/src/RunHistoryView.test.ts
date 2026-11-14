@@ -432,7 +432,7 @@ test('preparation logs are visible before the first node and remain readable aft
     assert.match(renderedText(container), /Environment setup failed/);
     assert.match(renderedText(container), /Graph execution did not start/);
     assert.match(renderedText(container), /Installing the project toolchain/);
-    assert.doesNotMatch(renderedText(container), /History incomplete/);
+    assert.doesNotMatch(renderedText(container), /History is incomplete/);
   } finally {
     await act(async () => root.unmount());
     container.remove();

@@ -5,7 +5,7 @@
   margin-left: 15px;
 }
 .app-sections button {
-  color: var(--muted);
+  color: var(--ink-muted);
   padding: 0 2px;
   border-bottom: 2px solid transparent;
   font-size: 13px;
@@ -30,7 +30,7 @@
   align-items: center;
   gap: 7px;
   margin: 0 8px 18px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .run-search input {
   border: none;
@@ -71,11 +71,11 @@
   overflow-wrap: anywhere;
 }
 .run-list-item small {
-  font-size: 10px;
+  font-size: 12px;
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  color: var(--muted);
+  color: var(--ink-muted);
   margin-top: 7px;
 }
 .run-list-item small span {
@@ -84,7 +84,7 @@
 .run-successor {
   display: block;
   margin: 0 10px 10px 25px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .run-dot {
   flex-shrink: 0;
@@ -92,26 +92,35 @@
   height: 6px;
   margin-top: 7px;
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--ink-muted);
 }
 .run-dot.state-succeeded {
-  background: var(--green);
+  background: var(--ok-green);
 }
 .run-dot.state-failed {
-  background: var(--error-text);
+  background: var(--rust);
 }
 .run-dot.state-running {
-  background: var(--rust-text);
+  background: var(--amber);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent);
+}
+.run-dot.state-suspended {
+  background: var(--amber);
+}
+.run-dot.state-idle,
+.run-dot.state-pending {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--ink-muted);
 }
 .run-empty,
 .history-inline-error {
   font-size: 12px;
   line-height: 1.55;
   padding: 0 10px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .history-inline-error {
-  color: var(--error-text);
+  color: var(--rust);
   overflow-wrap: anywhere;
 }
 .examples-toggle {
@@ -122,17 +131,17 @@
   width: 100%;
   align-items: center;
   gap: 6px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   font-size: 12px;
 }
 .examples-toggle span {
   margin-left: auto;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 12px;
 }
 .example-provenance {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 12px;
   margin: 0 10px 10px 28px;
 }
 .history-empty {
@@ -144,12 +153,12 @@
   gap: 13px;
   padding: 35px;
   text-align: center;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .history-empty h1 {
-  font-family: var(--font-display);
   color: var(--ink);
-  font-size: 32px;
+  font-size: 20px;
+  font-weight: 600;
   margin-top: 4px;
 }
 .history-empty p {
@@ -173,34 +182,72 @@
 .history-header h1 {
   font-size: 24px;
 }
+/* Status is a 6px dot and a word. Success and failure colour their word; the rest stay ink-secondary. */
 .run-status {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: 7px;
+  font-size: 13px;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--ink-secondary);
+}
+.run-status::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted);
 }
 .run-status.state-succeeded {
-  color: var(--green);
+  color: var(--ok-green);
+}
+.run-status.state-succeeded::before {
+  background: var(--ok-green);
 }
 .run-status.state-failed {
-  color: var(--error-text);
+  color: var(--rust);
 }
-.run-status.state-running {
-  color: var(--rust-text);
+.run-status.state-failed::before {
+  background: var(--rust);
+}
+.run-status.state-running::before {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent);
+}
+.run-status.state-suspended::before {
+  background: var(--amber);
+}
+.run-status.state-idle::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--ink-muted);
 }
 .history-body {
   position: relative;
 }
+/* A notice: a hairline row on the panel, its state a small dot leading the text. */
 .history-error {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
-  background: var(--error-surface);
-  color: var(--error-text);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--panel);
+  color: var(--ink);
   padding: 12px 20px;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.history-error::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  transform: translateY(-1px);
+}
+.history-error[role='alert']::before {
+  background: var(--rust);
 }
 .history-error span {
   flex: 1;
@@ -230,18 +277,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.timeline-caption .eyebrow {
-  font-size: 9px;
-  letter-spacing: 1px;
+.timeline-mode {
+  font-size: 12px;
+  color: var(--ink-muted);
   flex-shrink: 0;
 }
 .timeline-caption .text-button {
-  font-size: 11px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 .timeline-counter {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -252,12 +299,12 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
-  color: var(--secondary);
+  font-size: 12px;
+  color: var(--ink-secondary);
   white-space: nowrap;
 }
 .history-live.following {
-  color: var(--green);
+  color: var(--ok-green);
   opacity: 1;
 }
 .live-dot {
@@ -273,7 +320,6 @@
 }
 .timeline-controls input[type='range'] {
   flex: 1;
-  accent-color: var(--rust);
   height: 28px;
   border: 0;
   padding: 0;
@@ -288,8 +334,8 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--rust);
-  color: var(--on-rust);
+  background: var(--action);
+  color: var(--on-action);
 }
 .timeline-play:disabled {
   color: var(--disabled-text);
@@ -300,8 +346,8 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 12px;
   padding-top: 9px;
 }
 .history-load-state .text-button {
@@ -320,13 +366,15 @@
   gap: 12px;
 }
 .run-inspector-header h2 {
-  font-family: var(--font-display);
-  font-size: 23px;
+  font-size: 20px;
+  font-weight: 600;
   margin-top: 7px;
   overflow-wrap: anywhere;
 }
-.run-inspector-header .eyebrow {
-  font-size: 9px;
+.inspector-kind {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--ink-muted);
 }
 .run-inspector-content {
   padding: 20px;
@@ -336,13 +384,13 @@
 .run-facts {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   gap: 6px 10px;
   margin: 0 0 20px;
 }
 .run-facts dt {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .run-facts dd {
   margin: 0;
@@ -350,11 +398,11 @@
 }
 .mono {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
 }
 .execution-timeline h3 {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -377,7 +425,7 @@
   height: 26px;
 }
 .execution-timeline h3 span {
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .execution-timeline ol {
   position: relative;
@@ -412,7 +460,7 @@
   gap: 5px;
   width: 100%;
   padding: 4px 5px;
-  color: var(--muted);
+  color: var(--ink-muted);
   border-radius: 4px;
   background: transparent;
 }
@@ -427,23 +475,23 @@
   border: 1px solid var(--hairline);
   border-radius: 50%;
   background: var(--surface);
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .execution-stop.state-succeeded .execution-dot {
-  color: var(--green);
+  color: var(--ok-green);
 }
 .execution-stop.state-failed .execution-dot {
-  color: var(--error-text);
+  color: var(--rust);
 }
 .execution-stop.state-running .execution-dot {
-  color: var(--rust-text);
+  color: var(--amber);
 }
 .execution-stop[aria-pressed='true'] .execution-dot {
-  outline: 2px solid var(--rust);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 .execution-caption {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -451,7 +499,7 @@
   display: block;
 }
 .execution-name {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   max-width: 100%;
   overflow: hidden;
@@ -472,11 +520,11 @@
   text-align: left;
   font-size: 12px;
   padding: 7px 0;
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .observed-route span {
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--ink-muted);
+  font-size: 12px;
 }
 .recorded-signals {
   display: flex;
@@ -495,53 +543,68 @@
   font-size: 12px;
 }
 .recorded-signals span {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .recorded-signals strong {
   font-weight: 500;
 }
 .history-node-error {
-  color: var(--error-text);
-  background: var(--error-surface);
-  padding: 12px;
+  position: relative;
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  padding: 12px 12px 12px 26px;
   font-size: 13px;
   border-radius: 4px;
   margin: 14px 0;
 }
+.history-node-error::before,
+.failure-diagnostic::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 19px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rust);
+}
 .history-node-error small {
   display: block;
   margin-top: 6px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .run-failure-details {
   border-bottom: 1px solid var(--hairline);
   padding: 12px 0;
 }
 .run-failure-details h3 {
-  color: var(--secondary);
+  color: var(--ink-secondary);
   font-size: 12px;
   font-weight: 500;
   margin: 0 0 10px;
 }
 .failure-diagnostic {
-  background: var(--error-surface);
+  position: relative;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
   border-radius: 4px;
-  padding: 12px;
+  padding: 12px 12px 12px 26px;
   margin-bottom: 12px;
   font-size: 12px;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .failure-diagnostic strong {
-  color: var(--error-text);
-  font-size: 11px;
+  font-size: 13px;
+  font-weight: 600;
 }
 .failure-diagnostic p {
   margin: 4px 0 8px;
   white-space: pre-wrap;
 }
 .failure-diagnostic .text-button {
-  font-size: 11px;
+  font-size: 12px;
 }
 .history-value {
   border-bottom: 1px solid var(--hairline);
@@ -549,13 +612,13 @@
 }
 .history-value summary {
   font-size: 12px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   cursor: pointer;
 }
 .history-value pre {
   margin: 12px 0 3px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -569,8 +632,8 @@
   gap: 12px;
 }
 .recorded-values dt {
-  font-size: 10px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   margin-bottom: 5px;
 }
 .recorded-values dd {
@@ -594,18 +657,18 @@
   padding-left: 12px;
 }
 .recorded-path-separator {
-  color: var(--muted);
+  color: var(--ink-muted);
   padding: 0 2px;
 }
 .recorded-text {
   white-space: pre-wrap;
 }
 .recorded-scalar {
-  font-size: 11px;
+  font-size: 12px;
 }
 .recorded-empty,
 .recorded-limit {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .recorded-array {
   padding-left: 23px;
@@ -616,11 +679,11 @@
   margin-bottom: 12px;
 }
 .recorded-array > li::marker {
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--ink-muted);
+  font-size: 12px;
 }
 .recorded-group summary {
-  font-size: 11px;
+  font-size: 12px;
 }
 .recorded-group[open] > summary {
   margin-bottom: 10px;
@@ -631,11 +694,11 @@
   justify-content: space-between;
   gap: 8px;
   margin-top: 10px;
-  font-size: 10px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
 }
 .recorded-pager .text-button {
-  font-size: 10px;
+  font-size: 12px;
 }
 .history-transcript {
   margin: 22px 0;
@@ -657,12 +720,12 @@
   padding-bottom: 0;
 }
 .transcript-scroll:focus-visible {
-  outline: 2px solid var(--rust);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 .outcome-diagnostic h4 {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   margin: 14px 0 0;
   font-weight: 500;
 }
@@ -680,18 +743,18 @@
   font-weight: 500;
 }
 .transcript-heading h3 span {
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--ink-muted);
+  font-size: 12px;
   font-weight: 400;
   margin-left: 5px;
 }
 .transcript-heading select {
   width: auto;
   max-width: 140px;
-  padding: 5px;
-  font-size: 10px;
+  padding: 5px 26px 5px 5px;
+  font-size: 12px;
   border-color: var(--hairline);
-  background: var(--surface);
+  background-color: var(--surface);
 }
 .transcript-entry {
   padding-bottom: 19px;
@@ -701,26 +764,24 @@
 .transcript-entry header {
   display: flex;
   justify-content: space-between;
-  font-size: 10px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   margin-bottom: 9px;
 }
 .transcript-entry header > span {
-  text-transform: uppercase;
-  font-size: 9px;
-  letter-spacing: 0.7px;
+  font-size: 12px;
 }
 .transcript-entry.stream-output header > span {
-  color: var(--rust-text);
+  color: var(--ink-secondary);
 }
 .transcript-entry pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.75;
   font-family: var(--font-mono);
   margin: 0;
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .transcript-entry.stream-output pre {
   font-family: var(--font-ui);
@@ -728,14 +789,14 @@
   color: var(--ink);
 }
 .transcript-entry.stream-error pre {
-  color: var(--error-text);
+  color: var(--rust);
 }
 .transcript-entry .text-button {
   margin-top: 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .history-muted {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -820,9 +881,9 @@
     gap: 8px;
   }
   .timeline-caption strong {
-    font-size: 11px;
+    font-size: 12px;
   }
-  .timeline-caption .eyebrow {
+  .timeline-mode {
     display: none;
   }
   .timeline-controls {
