@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_client::SubscriptionTransport;
-use openengine_cluster_client::websocket::{DialedWebSocketTransport, WebSocketTransport};
+use openengine_cluster_client::websocket::{
+    DialedWebSocketTransport, MAX_WIRE_RESPONSE_BYTES, WebSocketTransport,
+};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, HeaderValue};
@@ -47,10 +49,10 @@ impl TargetOecpDialer for TargetOecpWebSocketDialer {
             value.set_sensitive(true);
             request.headers_mut().insert(AUTHORIZATION, value);
         }
-        // The shared transport bounds each status in an unpaged inventory and its envelope.
+        // Bound allocation before the shared transport validates inventory entries and envelopes.
         let config = WebSocketConfig::default()
-            .max_frame_size(None)
-            .max_message_size(None);
+            .max_frame_size(Some(MAX_WIRE_RESPONSE_BYTES))
+            .max_message_size(Some(MAX_WIRE_RESPONSE_BYTES));
         let (stream, _response) =
             tokio_tungstenite::connect_async_with_config(request, Some(config), false)
                 .await

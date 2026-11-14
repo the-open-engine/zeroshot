@@ -33,6 +33,10 @@ use crate::{PendingMap, SubscriptionMap, TransportError};
 // Preserve Tungstenite's previous message allowance outside the unpaged inventory.
 const MAX_ORDINARY_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
+/// Receive allocation ceiling for WebSocket frames and reassembled messages, including inventories.
+/// Individual inventory entries and ordinary responses retain their tighter application bounds.
+pub const MAX_WIRE_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
+
 /// Options applied to one outbound WebSocket connection.
 ///
 /// System trust roots are always loaded for `wss://`. Additional roots augment that store; they
@@ -125,11 +129,11 @@ pub async fn dial_websocket(
     } else {
         None
     };
-    // Run inventories have no aggregate size ceiling; the pump bounds their individual statuses
-    // and the response envelope, along with ordinary frames, after WebSocket reassembly.
+    // Bound wire allocation before reassembly; the pump separately bounds inventory entries,
+    // the response envelope and ordinary responses.
     let config = WebSocketConfig::default()
-        .max_frame_size(None)
-        .max_message_size(None);
+        .max_frame_size(Some(MAX_WIRE_RESPONSE_BYTES))
+        .max_message_size(Some(MAX_WIRE_RESPONSE_BYTES));
     let result = connect_async_tls_with_config(endpoint, Some(config), false, connector).await;
     match result {
         Ok((stream, _response)) => Ok(WebSocketTransport::new(stream)),

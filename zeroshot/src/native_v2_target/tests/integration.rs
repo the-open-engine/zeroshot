@@ -1164,6 +1164,51 @@ async fn direct_websocket_inventory_above_default_wire_limits_keeps_pending_call
 }
 
 #[tokio::test]
+async fn direct_websocket_dialer_rejects_oversized_frame_headers_without_payload() {
+    use futures_util::StreamExt;
+    use openengine_cluster_client::ClusterClient;
+    use openengine_cluster_client::websocket::MAX_WIRE_RESPONSE_BYTES;
+    use openengine_cluster_protocol::RunListParams;
+    use tokio::io::AsyncWriteExt;
+
+    // Test the finite boundary before the attack-sized declaration to keep regressions bounded.
+    for declared_bytes in [
+        u64::try_from(MAX_WIRE_RESPONSE_BYTES).assert_value() + 1,
+        1 << 40,
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+        let address = listener.local_addr().assert_value();
+        let (release, held) = oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.assert_value();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.assert_value();
+            socket.next().await.assert_value().assert_value();
+            let mut header = vec![0x81, 127];
+            header.extend_from_slice(&declared_bytes.to_be_bytes());
+            socket.get_mut().write_all(&header).await.assert_value();
+            let _ = held.await;
+        });
+        let target = direct_target(format!("http://{address}"));
+        let session = TargetOecpAccess::new(format!("ws://{address}/oecp"), None, &target.access)
+            .assert_value();
+        let transport = TargetOecpWebSocketDialer
+            .dial(&target, session)
+            .await
+            .assert_value();
+        let client = ClusterClient::new(transport.as_ref());
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.run_list(RunListParams::default()),
+        )
+        .await
+        .assert_value();
+        assert!(result.is_err(), "oversized header was accepted: {result:?}");
+        release.send(()).assert_value();
+        server.await.assert_value();
+    }
+}
+
+#[tokio::test]
 async fn websocket_dialer_rejects_cross_authority_before_network() {
     let target = target();
     let session = TargetOecpAccess::new(

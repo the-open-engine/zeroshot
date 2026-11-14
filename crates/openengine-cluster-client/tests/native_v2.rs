@@ -275,3 +275,49 @@ async fn websocket_run_inventory_above_default_wire_limits_preserves_other_pendi
     assert_eq!(status.assert_value().run_id, RunId::new("run-1"));
     peer.await.assert_value();
 }
+
+#[tokio::test]
+async fn websocket_dialer_rejects_oversized_frame_headers_without_payload() {
+    use futures_util::StreamExt;
+    use openengine_cluster_client::websocket::MAX_WIRE_RESPONSE_BYTES;
+    use openengine_cluster_client::{WebSocketDialOptions, dial_websocket};
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+
+    // Check the finite boundary first so removing the limit fails without attempting a TiB allocation.
+    for declared_bytes in [
+        u64::try_from(MAX_WIRE_RESPONSE_BYTES).assert_value() + 1,
+        1 << 40,
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+        let endpoint = format!("ws://{}", listener.local_addr().assert_value());
+        let (release, held) = oneshot::channel::<()>();
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.assert_value();
+            let mut server = tokio_tungstenite::accept_async(stream).await.assert_value();
+            server.next().await.assert_value().assert_value();
+            let mut header = vec![0x81, 127];
+            header.extend_from_slice(&declared_bytes.to_be_bytes());
+            server.get_mut().write_all(&header).await.assert_value();
+            // Keep the connection open without sending payload: rejection must use the header.
+            let _ = held.await;
+        });
+        let transport = dial_websocket(
+            &endpoint,
+            WebSocketDialOptions::default().allow_plaintext(true),
+        )
+        .await
+        .assert_value();
+        let client = ClusterClient::new(transport);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.run_list(RunListParams::default()),
+        )
+        .await
+        .assert_value();
+        assert!(result.is_err(), "oversized header was accepted: {result:?}");
+        release.send(()).assert_value();
+        peer.await.assert_value();
+    }
+}
