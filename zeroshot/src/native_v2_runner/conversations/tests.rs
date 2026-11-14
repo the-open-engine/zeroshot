@@ -113,6 +113,72 @@ fn restore_rolls_back_only_named_conversation_and_rejects_configuration() {
         "checkpoint bytes"
     );
 }
+
+#[test]
+fn restore_preserves_native_directories_and_creates_private_storage() {
+    use crate::execution::platform;
+
+    let root = tempfile::tempdir().assert_value();
+    let provider = root.path().join("old");
+    let name = PathBuf::from("existing/new/rollout-thread.jsonl");
+    fs::create_dir_all(provider.join("existing/new")).assert_value();
+    fs::write(provider.join(&name), b"checkpoint bytes").assert_value();
+    let source = source(&provider, vec![name.clone()]);
+    let layout = crate::native_v2_codex::conversation::layout(root.path().join("native"));
+    let existing = layout.storage.join("existing");
+    // Ordinary native directories may have Windows' default token owner, including Administrators.
+    fs::create_dir_all(&existing).assert_value();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&existing, fs::Permissions::from_mode(0o750)).assert_value();
+    }
+    layout
+        .restore(&source, None)
+        .expect("restore into native provider storage");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&existing).assert_value().permissions().mode() & 0o777,
+            0o750
+        );
+    }
+    let new_directory = platform::open_directory(&existing.join("new")).assert_value();
+    platform::validate_private_file(&new_directory)
+        .expect("new storage directory has private permissions and current-user ownership");
+    let transcript = layout.storage.join(&name);
+    platform::private_file(&transcript, platform::FileAccess::Read)
+        .expect("restored transcript has private permissions and current-user ownership");
+    assert_eq!(fs::read(transcript).assert_value(), b"checkpoint bytes");
+    assert_eq!(fs::read_dir(&layout.storage).assert_value().count(), 1);
+}
+
+#[test]
+fn concurrent_restores_can_create_the_same_provider_directories() {
+    let root = tempfile::tempdir().assert_value();
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        for _ in 0..2 {
+            let barrier = &barrier;
+            let root = root.path();
+            scope.spawn(move || {
+                let mut results = Vec::new();
+                for index in 0..64 {
+                    let directory = root.join(format!("{index}/provider/sessions"));
+                    barrier.wait();
+                    results.push(provider_directory(&directory));
+                    barrier.wait();
+                }
+                // Finish every rendezvous before reporting errors so neither peer is stranded.
+                for result in results {
+                    result.expect("simultaneous restores must share native storage directories");
+                }
+            });
+        }
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn symbolic_links_cannot_escape_conversation_storage() {

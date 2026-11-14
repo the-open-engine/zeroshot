@@ -303,6 +303,29 @@ fn check_storage(storage: &Path, private_home: Option<&Path>) -> Result<(), &'st
     Ok(())
 }
 
+// Existing directories belong to the native provider and may use Windows' default token owner.
+// Preserve their security; only directories we create receive the runtime's private owner/ACL.
+fn provider_directory(path: &Path) -> io::Result<()> {
+    match crate::execution::platform::open_directory(path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                provider_directory(parent)?;
+            }
+            match crate::execution::platform::create_private_directory(path) {
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    crate::execution::platform::open_directory(path).map(|_| ())
+                }
+                result => result,
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn copy_files(
     source: &ConversationSource,
     destination: &Path,
@@ -460,16 +483,17 @@ impl ConversationLayout {
         {
             return Err("checkpoint contains files outside the provider conversation");
         }
-        crate::execution::platform::private_directory(&self.storage)
+        provider_directory(&self.storage)
             .map_err(|_| "provider conversation storage is unavailable")?;
         // Discover existing files before staging under the storage root: the provider's filename
         // selector must never mistake the staged replacement for an old conversation file.
         let old = (self.select)(&self.storage, &source.metadata.id)
             .map_err(|_| "provider conversation files could not be replaced")?;
-        let stage = tempfile::Builder::new()
-            .prefix(".conversation-restore-")
-            .tempdir_in(&self.storage)
-            .map_err(|_| "provider conversation storage is unavailable")?;
+        let stage = crate::native_v2_supervisor::checkpoints::filesystem::private_stage(
+            &self.storage,
+            ".conversation-restore-",
+        )
+        .map_err(|_| "provider conversation storage is unavailable")?;
         copy_files(source, stage.path(), operation)?;
         operation.check()?;
         for name in old.iter().chain(&source.files) {
@@ -483,10 +507,8 @@ impl ConversationLayout {
             for name in &source.files {
                 operation.check()?;
                 let target = checked_path(&self.storage, name)?;
-                crate::execution::platform::private_directory(
-                    target.parent().ok_or("invalid conversation name")?,
-                )
-                .map_err(|_| "provider conversation files could not be restored")?;
+                provider_directory(target.parent().ok_or("invalid conversation name")?)
+                    .map_err(|_| "provider conversation files could not be restored")?;
                 fs::rename(stage.path().join(name), &target)
                     .map_err(|_| "provider conversation files could not be restored")?;
                 if let Some(home) = private_home {

@@ -53,7 +53,12 @@ pub(crate) fn roundtrip(make: impl Fn(PathBuf, &Path) -> ConversationLayout, nam
     assert!(!after.storage.exists());
     after
         .restore(&files.conversation(id, &node).assert_value(), None)
-        .assert_value();
+        .expect("restore into an empty provider home");
+    crate::execution::platform::private_file(
+        &after.storage.join(name),
+        crate::execution::platform::FileAccess::Read,
+    )
+    .expect("restored transcript must remain private to the current user");
     assert_eq!(
         fs::read(after.storage.join(name)).assert_value(),
         b"only the named conversation"
@@ -91,7 +96,7 @@ pub(crate) fn nested_storage_ownership(make: impl Fn(&Path) -> ConversationLayou
                 Ok(())
             },
         )
-        .assert_value();
+        .expect("restore into nested private provider storage");
     let target = after.storage.join(filename);
     assert_eq!(fs::read(&target).assert_value(), b"first turn");
     let expected = target

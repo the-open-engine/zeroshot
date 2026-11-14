@@ -982,7 +982,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   when their async caller is dropped; close cancels restoration before awaiting those locks.
   Workspace-checkpoint opt-out skips conversation capture while retaining delivery receipts.
   Contained restores assign ownership through the trusted private home, including newly created
-  storage ancestors. Codex capture requires usage reported for the latest turn; missing usage must
+  storage ancestors. Restore preserves existing native provider-directory security and creates
+  missing directories and temporary stages with private permissions and explicit Windows ownership.
+  Codex capture requires usage reported for the latest turn; missing usage must
   not carry an older in-run baseline into a successor.
   Optional `RunCheckpointStore` methods hand host storage the files and accept the selected files
   independently of workspace restore; older implementations retain their new-conversation fallback.
