@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { Document, GraphNode } from './domain';
-import { guardLabel, projectWorkflow, type WorkflowProjection } from './workflow-projection';
+import { readFileSync } from 'node:fs';
+import { allNodes, type Document, type GraphNode } from './domain';
+import {
+  drawnAncestors,
+  drawnOwners,
+  guardLabel,
+  projectWorkflow,
+  type WorkflowProjection,
+} from './workflow-projection';
 
 const state = {
   kind: 'record',
@@ -435,4 +442,55 @@ test('review-loop continuation says Approved only when other exits fail', () => 
     projectWorkflow(custom).edges.some((edge) => edge.label === 'Approved'),
     false
   );
+});
+
+test('a node trail lists only the root and groups the canvas draws', () => {
+  const examples: {
+    detail: { runId: string; graph: Document['graph']; runtime: Document['runtime'] };
+  }[] = JSON.parse(
+    readFileSync(new URL('../public/history-examples.json', import.meta.url), 'utf8')
+  );
+  let crumbs = 0;
+  for (const { detail } of examples) {
+    const document: Document = { name: detail.runId, graph: detail.graph, runtime: detail.runtime };
+    const drawn = drawnOwners(document);
+    for (const node of allNodes(document.graph.root)) {
+      const trail = drawnAncestors(document, node.name);
+      if (node !== document.graph.root) assert.equal(trail[0], document.graph.root);
+      for (const ancestor of trail.slice(1)) {
+        crumbs++;
+        assert.ok(drawn.has(ancestor.name), `${detail.runId}: ${ancestor.name} has no card`);
+        assert.notEqual(ancestor.kind, 'seq');
+      }
+    }
+  }
+  assert.ok(crumbs > 0);
+  // Folded error routes and decisions that share their verifier's card have no crumb.
+  for (const [runId, hidden] of [
+    ['example-security-patch-merge', ['worker_result', 'delivery_result']],
+    ['example-product-launch-content-kit', ['on_error_1', 'on_error']],
+    ['example-customer-onboarding-plan', ['requirements_route']],
+  ] as const) {
+    const { detail } = examples.find((example) => example.detail.runId === runId)!;
+    const document: Document = { name: runId, graph: detail.graph, runtime: detail.runtime };
+    const crumbsSeen = new Set(
+      allNodes(document.graph.root).flatMap((node) =>
+        drawnAncestors(document, node.name).map((ancestor) => ancestor.name)
+      )
+    );
+    for (const name of hidden) {
+      assert.ok(
+        allNodes(document.graph.root).some((node) => node.name === name),
+        name
+      );
+      assert.equal(crumbsSeen.has(name), false, `${runId}: ${name} is not drawn`);
+    }
+  }
+  // Selecting the root has no trail of its own.
+  const document: Document = {
+    name: 'only',
+    graph: examples[0].detail.graph,
+    runtime: examples[0].detail.runtime,
+  };
+  assert.deepEqual(drawnAncestors(document, document.graph.root.name), []);
 });

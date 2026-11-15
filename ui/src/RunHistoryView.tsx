@@ -9,9 +9,10 @@ import {
   Loader2,
   Pause,
   Play,
-  X,
 } from 'lucide-react';
 import { InspectorPanel } from './InspectorPanel';
+import { InspectorHeader } from './InspectorHeader';
+import { NodeTrail } from './NodeTrail';
 import { RunFailureDetails } from './RunFailureDetails';
 import {
   useRunView,
@@ -29,6 +30,7 @@ import { Transcript } from './Transcript';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { findNode, labels, type Document, type GraphNode, type Positions } from './domain';
 import type { WorkerOption } from './workers';
+import { nodeTitle } from './workflow-projection';
 import { appendHistory, type RunHistoryReader } from './run-history-source';
 import {
   currentInvocation,
@@ -1201,22 +1203,14 @@ function RunInspector({
 }: RunInspectorProps) {
   return (
     <InspectorPanel className="run-inspector" label="Run inspector">
-      <header className="run-inspector-header">
-        <div>
-          <h2>{node.name === document.graph.root.name ? 'Run details' : humanize(node.name)}</h2>
-          {node.name !== document.graph.root.name && (
-            <p className="inspector-kind">{labels[node.kind]}</p>
-          )}
-        </div>
-        <button
-          className="icon-button"
-          title="Close inspector"
-          aria-label="Close inspector"
-          onClick={close}
-        >
-          <X size={17} />
-        </button>
-      </header>
+      <InspectorHeader
+        trail={
+          <NodeTrail document={document} name={node.name} rootLabel="Run details" select={reveal} />
+        }
+        title={node.name === document.graph.root.name ? 'Run details' : nodeTitle(node.name)}
+        kind={node.name === document.graph.root.name ? undefined : labels[node.kind]}
+        close={close}
+      />
       <div className="run-inspector-content">
         {node.name === document.graph.root.name && (
           <>
