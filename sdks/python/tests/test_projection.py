@@ -356,3 +356,46 @@ def test_invalid_controller_observation_is_rejected(observation: object) -> None
     value["controller"] = observation
     with pytest.raises(ProtocolError):
         _status(value)
+
+
+@pytest.mark.parametrize("reason", ["command", "wait"])
+def test_suspended_status_and_summary_preserve_reason_node_and_times(reason: str) -> None:
+    value = local_status()
+    status: dict[str, object] = {
+        "phase": "suspended",
+        "reason": reason,
+        "node": "cooldown",
+        "createdAt": 1762905600000,
+    }
+    if reason == "wait":
+        status["wait"] = {"dueAt": 1762992000000}
+    value["status"] = status
+    projected = _status(value)
+    assert projected.phase == "suspended"
+    assert projected.reason == reason
+    assert projected.node == "cooldown"
+    assert projected.created_at == 1762905600000
+    assert projected.due_at == (1762992000000 if reason == "wait" else None)
+    assert _summary(projected).reason == reason
+    assert projected.result is None
+
+
+def test_running_status_exposes_requested_suspension() -> None:
+    value = local_status()
+    value["status"] = {"phase": "running", "activeExecutions": [], "suspendRequested": True}
+    assert _status(value).suspend_requested
+    assert _summary(_status(value)).suspend_requested
+
+
+@pytest.mark.parametrize("reason,wait", [("wait", None), ("command", {"dueAt": 1762992000000})])
+def test_suspended_status_rejects_incoherent_due_time(reason: str, wait: object) -> None:
+    value = local_status()
+    value["status"] = {
+        "phase": "suspended",
+        "reason": reason,
+        "node": "cooldown",
+        "createdAt": 1762905600000,
+        "wait": wait,
+    }
+    with pytest.raises(ProtocolError, match=r"suspension\.wait"):
+        _status(value)

@@ -190,7 +190,6 @@ fn invocation(
     scope: crate::execution::SessionScope,
     execution: u64,
 ) -> crate::native_v2_runner::DriverInvocation {
-    use crate::native_v2_runner::{DriverInvocation, NodeResponseContract, NodeRole};
     let mut request =
         crate::native_v2_runner::test_support::request("memory-runtime", "worker", (1, execution));
     if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { session_scope, .. } =
@@ -198,20 +197,12 @@ fn invocation(
     {
         *session_scope = scope;
     }
-    DriverInvocation {
-        dispatch: Default::default(),
-        host_context: None,
-        provider_session_slot: request.invocation.reference.node_instance,
-        node: request.invocation,
-        role: NodeRole::Worker,
-        response: NodeResponseContract::Worker {
-            output: openengine_cluster_protocol::PayloadType::Null,
-        },
-        environment: request.environment,
-        session: Arc::new(crate::native_v2_runner::test_support::CountingSession {
+    crate::native_v2_runner::test_support::null_worker_invocation(
+        request,
+        Arc::new(crate::native_v2_runner::test_support::CountingSession {
             closed: Arc::default(),
         }),
-    }
+    )
 }
 
 fn graph_lesson() -> crate::active_memory::Lesson {

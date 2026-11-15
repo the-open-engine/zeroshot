@@ -209,7 +209,7 @@ function structurallyContinues(node: GraphNode, ancestors = new Set<GraphNode>()
   // result. A terminal branch never becomes a run terminal by presentation.
   if (node.kind === 'par') return true;
   if (node.kind === 'loop') return !children.length || structurallyContinues(children[0], next);
-  // Empty input and item-limit overflow bypass even a terminal-only map body.
+  // Empty input bypasses even a terminal-only map body.
   if (node.kind === 'map') return true;
   return false;
 }
@@ -633,7 +633,7 @@ class WorkflowProjectionBuilder {
       node,
       'map-start',
       title(node.name),
-      `${mapSourceLabel(this.document, node)}${limit ? ` · Up to ${limit} items` : ''}`
+      `${mapSourceLabel(this.document, node)}${limit ? ` · ${limit} ${limit === 1 ? 'item' : 'items'} at a time` : ''}`
     );
     const body = nodeLike(node.body)
       ? this.visit(node.body, next)
@@ -644,20 +644,20 @@ class WorkflowProjectionBuilder {
     this.edge(start, end, {
       owner: node.name,
       secondary: true,
-      label: 'No items or item limit exceeded',
+      label: 'No items',
     });
-    if (body.exits.length && limit && limit > 1)
+    if (body.exits.length)
       this.edge(end, body.entry, {
         owner: node.name,
         repeat: true,
         secondary: true,
-        label: 'Repeat independently for other items',
+        label: 'Repeat for remaining items',
       });
     const ids = [start, ...body.ids, end];
     this.region(node, 'map', `${title(node.name)} · For each item`, ids);
     return {
       entry: start,
-      exits: [{ source: end, owner: node.name, label: 'Items processed or limit exceeded' }],
+      exits: [{ source: end, owner: node.name, label: 'Items processed' }],
       ids,
     };
   }

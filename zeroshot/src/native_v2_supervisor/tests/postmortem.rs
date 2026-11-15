@@ -491,6 +491,7 @@ async fn graph_result_is_visible_and_logged_while_postmortem_waits_then_only_ter
             .result;
         assert_eq!(matches!(result, TerminalResult::Failed { .. }), failed);
         let pending = RunStatus::Running {
+            suspend_requested: false,
             active_executions: vec![],
             graph_result: Some(result.clone()),
         };

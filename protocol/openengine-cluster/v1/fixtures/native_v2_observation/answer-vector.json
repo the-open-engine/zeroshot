@@ -1,0 +1,15 @@
+{
+  "answer": {
+    "output": {
+      "feedback": ""
+    },
+    "signals": {
+      "decision": "approved"
+    }
+  },
+  "createdAt": 1762905600001,
+  "id": "answer-1",
+  "kind": "answer",
+  "requestId": "request-1",
+  "runId": "run-2"
+}

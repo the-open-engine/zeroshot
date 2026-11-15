@@ -198,36 +198,6 @@ pub(super) fn validate_instance_lineage(
     Ok(())
 }
 
-pub(super) fn visit_key(name: &NodeName, map_indices: &[u64]) -> ControlKey {
-    ControlKey {
-        node: name.clone(),
-        source: ControlSource::Group,
-        field: Some("__reducer_visit".to_owned()),
-        map_indices: map_indices.to_vec(),
-    }
-}
-
-pub(super) fn next_visit(
-    name: &NodeName,
-    map_indices: &[u64],
-    controls: &BTreeMap<ControlKey, String>,
-) -> u64 {
-    controls
-        .get(&visit_key(name, map_indices))
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0)
-        + 1
-}
-
-pub(super) fn mark_visit(
-    name: &NodeName,
-    map_indices: &[u64],
-    controls: &mut BTreeMap<ControlKey, String>,
-    visit: u64,
-) {
-    controls.insert(visit_key(name, map_indices), visit.to_string());
-}
-
 pub(super) fn bind_payload(
     bindings: &[openengine_cluster_protocol::InputBinding],
     state: &Value,
@@ -360,6 +330,31 @@ fn bound_channel_value(
     }
 }
 
+impl Engine<'_> {
+    pub(super) fn promote_group(
+        &mut self,
+        group: (&NodeName, &[FieldPath]),
+        contexts: (&Context, &mut Context),
+        traversal: Traversal<'_>,
+    ) -> Result<(), ReducerError> {
+        promote(PromotionRequest {
+            node: group.0,
+            map_indices: traversal.map_indices,
+            paths: group.1,
+            optional_paths: self
+                .optional_promotions
+                .get(group.0)
+                .ok_or(ReducerError::InconsistentHistory)?,
+            local: contexts.0,
+            parent: contexts.1,
+            mode: traversal.mode,
+            decisions: &mut self.decisions,
+        })?;
+        self.continue_decision(group.0, traversal.mode);
+        Ok(())
+    }
+}
+
 pub(super) fn promote(request: PromotionRequest<'_>) -> Result<(), ReducerError> {
     let PromotionRequest {
         node,
@@ -398,7 +393,7 @@ pub(super) fn promote(request: PromotionRequest<'_>) -> Result<(), ReducerError>
             values,
         });
     }
-    merge_runtime_facts(local, parent);
+    merge_runtime_facts(local, parent)?;
     Ok(())
 }
 
@@ -456,20 +451,29 @@ pub(super) fn clear_scoped_runtime_facts(
     names: &BTreeSet<NodeName>,
     map_indices: &[u64],
 ) {
-    context.controls.retain(|key, _| {
-        !names.contains(&key.node)
-            || !key.map_indices.starts_with(map_indices)
-            || (key.source == ControlSource::Group
-                && key.field.as_deref() == Some("__reducer_visit"))
-    });
+    context
+        .completed
+        .retain(|(name, indices)| !names.contains(name) || !indices.starts_with(map_indices));
+    context
+        .controls
+        .retain(|key, _| !names.contains(&key.node) || !key.map_indices.starts_with(map_indices));
     context
         .channels
         .retain(|(name, indices), _| !names.contains(name) || !indices.starts_with(map_indices));
 }
 
-pub(super) fn merge_runtime_facts(source: &Context, target: &mut Context) {
+pub(super) fn merge_runtime_facts(
+    source: &Context,
+    target: &mut Context,
+) -> Result<(), ReducerError> {
+    target
+        .work
+        .merge(&source.work)
+        .map_err(|_| ReducerError::ProbeLoopLimit)?;
+    target.completed.extend(source.completed.clone());
     target.controls.extend(source.controls.clone());
     target.channels.extend(source.channels.clone());
+    Ok(())
 }
 
 pub(super) fn merge_scoped_runtime_facts(
@@ -477,7 +481,18 @@ pub(super) fn merge_scoped_runtime_facts(
     target: &mut Context,
     names: &BTreeSet<NodeName>,
     map_indices: &[u64],
-) {
+) -> Result<(), ReducerError> {
+    target
+        .work
+        .merge(&source.work)
+        .map_err(|_| ReducerError::ProbeLoopLimit)?;
+    target.completed.extend(
+        source
+            .completed
+            .iter()
+            .filter(|(name, indices)| names.contains(name) && indices.starts_with(map_indices))
+            .cloned(),
+    );
     target.controls.extend(
         source
             .controls
@@ -494,6 +509,7 @@ pub(super) fn merge_scoped_runtime_facts(
             .filter(|((name, indices), _)| names.contains(name) && indices.starts_with(map_indices))
             .map(|(key, value)| (key.clone(), value.clone())),
     );
+    Ok(())
 }
 
 pub(super) fn descendant_names(node: &GraphNode) -> BTreeSet<NodeName> {

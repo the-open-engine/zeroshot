@@ -4,6 +4,7 @@ pub mod admission;
 pub mod agent_attach;
 pub mod artifact;
 pub mod canonical;
+pub use wire::{bounded_json_from_slice, bounded_json_from_str};
 pub mod diagnostic;
 pub mod fault;
 pub mod graph;

@@ -33,6 +33,17 @@ pub(super) fn validate_executable_bindings(
     runtime: &RuntimePlan,
     context: super::NativeV2AdmissionContext<'_>,
 ) -> Result<(), NativeV2AdmissionError> {
+    if !runtime.workspace_checkpoints
+        && let Some(node) = declarations
+            .iter()
+            .find(|node| node.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF)
+    {
+        return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+            node: node.name.clone(),
+            detail: "request nodes require workspaceCheckpoints: true".to_owned(),
+        });
+    }
+    validate_concurrency(runtime)?;
     context
         .harnesses
         .validate_runtime(runtime)
@@ -41,6 +52,16 @@ pub(super) fn validate_executable_bindings(
         .active_memory()
         .validate()
         .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
+    validate_global_agents(runtime)?;
+    let bindings = runtime.nodes();
+    validate_attempts(declarations)?;
+    validate_binding_coverage(declarations, bindings)?;
+    validate_binding_kinds(declarations, bindings)?;
+    validate_delivery_policy(context.delivery_policy, declarations)?;
+    validate_declared_environment(runtime, None)
+}
+
+fn validate_global_agents(runtime: &RuntimePlan) -> Result<(), NativeV2AdmissionError> {
     runtime
         .global_agents()
         .postmortem
@@ -52,11 +73,17 @@ pub(super) fn validate_executable_bindings(
             return Err(NativeV2AdmissionError::MissingRuntimeBinding { node: node.clone() });
         }
     }
-    validate_attempts(declarations)?;
-    validate_binding_coverage(declarations, bindings)?;
-    validate_binding_kinds(declarations, bindings)?;
-    validate_delivery_policy(context.delivery_policy, declarations)?;
-    validate_declared_environment(runtime, None)
+    Ok(())
+}
+
+fn validate_concurrency(runtime: &RuntimePlan) -> Result<(), NativeV2AdmissionError> {
+    if runtime.effective_max_concurrency() > RuntimePlan::MAX_CONCURRENCY {
+        return Err(NativeV2AdmissionError::InvalidRuntime(format!(
+            "maxConcurrency exceeds {}",
+            RuntimePlan::MAX_CONCURRENCY
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -71,7 +98,7 @@ pub(super) struct ExecutableDeclaration {
     pub(super) worker: WorkerRef,
     pub(super) instructions: Option<NodeInstructions>,
     pub(super) contract: WorkerContract,
-    attempts: u64,
+    pub(super) attempts: u64,
     kind: LeafKind,
 }
 
@@ -204,6 +231,7 @@ fn validate_binding_kinds(
         if let NodeRuntimeBinding::Decision { .. } = binding {
             validate_decision_declaration(declaration, binding)?;
         }
+        super::wait::validate_binding(declaration, binding)?;
         validate_binding_kind(declaration, binding)?;
         validate_instructions(declaration, binding)?;
     }
@@ -327,7 +355,7 @@ pub(crate) fn writer_nodes(admitted: &AdmittedRun) -> BTreeSet<NodeName> {
         .filter(|declaration| {
             !matches!(
                 admitted.runtime.nodes().get(&declaration.name),
-                Some(NodeRuntimeBinding::Decision { .. })
+                Some(NodeRuntimeBinding::Decision { .. } | NodeRuntimeBinding::Request {})
             )
         })
         .map(|declaration| declaration.name)

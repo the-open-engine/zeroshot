@@ -37,7 +37,7 @@ fn assert_required_paths(paths: &std::collections::BTreeSet<&str>) {
         "/positive/guard-not.json",
         "/positive/guard-k-of-n.json",
         "/positive/map-item-k-of-map.json",
-        "/positive/map-signal-and-group.json",
+        "/positive/map-signal.json",
         "/positive/loop-and-group.json",
         "/positive/join-all.json",
         "/positive/join-any.json",

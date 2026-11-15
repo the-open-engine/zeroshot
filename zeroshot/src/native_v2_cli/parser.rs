@@ -100,7 +100,8 @@ enum CliCommand {
     /// dependencies and untracked resources are not copied or installed. Resume reuses the same
     /// workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
     ///
-    /// A foreground run follows NDJSON events until completion. --detach returns after submission.
+    /// A foreground run follows NDJSON events until completion or suspension. Suspension exits 0.
+    /// --detach returns after submission.
     /// It prints graphResult when the graph ends and keeps waiting through the Active Memory
     /// postmortem and finalization; its exit code follows the final terminalResult.
     /// Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the
@@ -184,9 +185,30 @@ enum UtilityCommand {
     /// Force a run to stop and write the result as JSON.
     ForceStop(RunSelectorArgs),
 
-    /// Start a new attempt from a failed run's retained workspace or a saved checkpoint.
+    /// Request suspension at the next checkpoint and print status immediately.
     ///
-    /// By default, restart the original graph on its retained workspace. A local run keeps its
+    /// Its successor continues captured node-instance conversations from that checkpoint.
+    Suspend(RunSelectorArgs),
+
+    /// Answer a suspended request from a JSON file and start its successor.
+    ///
+    /// The file contains signals and output matching the request's declared shape. At or after
+    /// the deadline, the command starts the timeout successor and exits 1 naming it.
+    /// The retained workspace is used as it is; earlier nodes and agent sessions do not restart.
+    Answer(RunAnswerArgs),
+
+    /// Read pending requests or show the request made by one run. Reads never apply expiry.
+    Inbox(InboxArgs),
+
+    /// Read one page of the run vector record, or show an entry in full.
+    Vectors(RunVectorsArgs),
+
+    /// Start a successor from a failed or suspended run's retained workspace.
+    ///
+    /// A suspended run continues at its saved boundary without restoring files. A suspended wait
+    /// continues after its wait node, from the due time onward. Suspended runs accept no checkpoint
+    /// selection or --discard-workspace-changes. Every successor takes over the vector record.
+    /// By default, a failed run restarts the original graph on its retained workspace. A local run keeps its
     /// checkout as it is now, including files and Git state changed after the failure; a named
     /// target restarts on the latest snapshot of its retained copy.
     /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a
@@ -200,7 +222,10 @@ enum UtilityCommand {
     ///
     /// Target runs reuse the saved environment definition: setup runs before workspace restore,
     /// then startup runs before the graph. Startup must tolerate existing workspace files.
-    /// Services, Docker state, and agent conversations are not restored.
+    /// Checkpoint continuations and suspended successors restore captured node-instance agent
+    /// conversations. Missing or unsupported conversations start new with a system log explanation.
+    /// Restarts and execution-scoped agents start new conversations. Token usage starts at zero.
+    /// Services and Docker state are not restored.
     Resume(RunResumeArgs),
 
     /// List one page of a run's saved workspace checkpoints as JSON.
@@ -844,6 +869,39 @@ struct RunExportWorkspaceArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(
+    subcommand_negates_reqs = true,
+    args_conflicts_with_subcommands = true,
+    subcommand_precedence_over_arg = true
+)]
+struct RunVectorsArgs {
+    /// Public run ID.
+    #[arg(value_name = "RUN_ID")]
+    run_id: Option<String>,
+    /// Use this named target. If omitted, use the local controller.
+    #[arg(long, value_name = "NAME")]
+    target: Option<String>,
+    /// List entries strictly after this vector ID.
+    #[arg(long, value_name = "ID")]
+    after: Option<String>,
+    /// Maximum entries to return, from 1 to 100. Defaults to 50.
+    #[arg(long, value_name = "COUNT", value_parser = clap::value_parser!(u32).range(1..=100))]
+    limit: Option<u32>,
+    #[command(subcommand)]
+    command: Option<RunVectorCommand>,
+}
+#[derive(Debug, Subcommand)]
+enum RunVectorCommand {
+    /// Read one vector entry in full.
+    Show {
+        #[command(flatten)]
+        run: RunSelectorArgs,
+        /// Opaque vector ID returned by vectors.
+        id: String,
+    },
+}
+
+#[derive(Debug, Args)]
 struct RunCheckpointsArgs {
     #[command(flatten)]
     run: RunSelectorArgs,
@@ -859,7 +917,7 @@ struct RunCheckpointsArgs {
 
 #[derive(Debug, Args)]
 #[command(after_long_help = r#"EXIT STATUS
-  0  The run succeeded, or Ctrl-C detached before it finished.
+  0  The run succeeded or suspended, or Ctrl-C detached before it finished.
   1  The run finished failed, or observation failed. A failed run prints the same failure summary
      on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event.
      An unavailable local controller replays recorded events, then names `zeroshot resume RUN_ID`
@@ -914,3 +972,34 @@ mod convert;
 mod profiles;
 use profiles::{ProfileCommand, ProfileNameArgs, ProfileScopeArg};
 pub use convert::parse_native_v2_args;
+
+#[derive(Debug, Args)]
+struct RunAnswerArgs {
+    #[command(flatten)]
+    run: RunSelectorArgs,
+    /// JSON answer file, containing signals and output. No standard-input form.
+    #[arg(long, value_name = "FILE")]
+    input: PathBuf,
+    /// Forward GH_TOKEN with a named-target continuation.
+    #[arg(long = "forward-gh-token")]
+    forward_github_token: bool,
+}
+#[derive(Debug, Args)]
+struct InboxArgs {
+    #[command(subcommand)]
+    command: InboxCommand,
+}
+#[derive(Debug, Subcommand)]
+enum InboxCommand {
+    /// List one JSON page in run ID order. Expired requests remain until continued or stopped.
+    List {
+        #[command(flatten)]
+        route: TargetRouteArgs,
+        #[arg(long, value_name = "RUN_ID")]
+        after: Option<String>,
+        #[arg(long, value_name = "COUNT", value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: Option<u32>,
+    },
+    /// Show this run's own request, shape, deadline, state and successor.
+    Show(RunSelectorArgs),
+}

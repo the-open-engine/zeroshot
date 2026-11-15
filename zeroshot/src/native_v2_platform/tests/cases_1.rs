@@ -4,6 +4,7 @@ use super::*;
 struct RetainedCleanupFailureAllocator {
     claims: FakeClaimAuthority,
     cleanup_calls: StdMutex<Vec<(RunId, RunRuntimeExit)>>,
+    reservation_failure: StdMutex<Option<CapsuleAllocationUnavailable>>,
 }
 
 async fn assert_reconstructed_discard_contracts(
@@ -42,6 +43,7 @@ impl RetainedCleanupFailureAllocator {
         Self {
             claims: FakeClaimAuthority::default(),
             cleanup_calls: StdMutex::new(Vec::new()),
+            reservation_failure: StdMutex::new(None),
         }
     }
 
@@ -55,6 +57,18 @@ impl RetainedCleanupFailureAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for RetainedCleanupFailureAllocator {
+    async fn reserve_retained_workspace(
+        &self,
+        _source: &RunId,
+        _successor: &RunId,
+        _selection: &crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection,
+    ) -> Result<(), RetainedAllocationUnavailable> {
+        self.reservation_failure
+            .lock()
+            .assert_value()
+            .take()
+            .map_or(Ok(()), |error| Err(error.into()))
+    }
     async fn claim_controller(
         &self,
         run_id: &RunId,
@@ -161,6 +175,17 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
     let allocator = TestAllocator::<ImmediateAllocation>::new(driver.clone(), cleanup.clone());
     let source_run_id = RunId::new("default-source");
     let run_id = RunId::new("default-successor");
+
+    assert!(
+        allocator
+            .reserve_retained_workspace(
+                &source_run_id,
+                &run_id,
+                &crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Continue,
+            )
+            .await
+            .is_err()
+    );
 
     assert!(matches!(
         allocator
@@ -290,6 +315,59 @@ async fn startup_reconciles_every_persisted_nonterminal_before_status_is_visible
 }
 
 #[tokio::test]
+async fn failed_reservation_returns_no_resume_receipt_and_settles_preparation() {
+    let ledger = Arc::new(FakeRunLedger::new());
+    let source_id = seed_controller_reconstructed_run(&ledger, "reservation-failure-source").await;
+    let source = ledger.get(&source_id).await.assert_value().assert_value();
+    append_terminal_failure(
+        ledger.as_ref(),
+        &source,
+        "worker_failed",
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+    )
+    .await
+    .assert_value();
+    let allocator = Arc::new(RetainedCleanupFailureAllocator::new());
+    *allocator.reservation_failure.lock().assert_value() =
+        Some(CapsuleAllocationUnavailable::Runtime);
+    let controller = NativeV2PlatformController::new(ledger, allocator.clone())
+        .await
+        .assert_value();
+    let successor = RunId::new("reservation-failure-successor");
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        controller.resume(RunResumeParams {
+            from: None,
+            run_id: source_id,
+            successor_run_id: successor.clone(),
+            connections: BTreeMap::from([(
+                ConnectionKey::new("test").assert_value(),
+                test_connection_values("fresh-secret"),
+            )]),
+            connection_resolver: None,
+            github_token: None,
+            git_credentials: None,
+            commit_identity: None,
+            commit_co_author: None,
+        }),
+    )
+    .await
+    .assert_value();
+    assert!(
+        result.is_err(),
+        "an unreserved successor must not be acknowledged"
+    );
+    assert!(matches!(terminal(&controller, &successor).await,
+        TerminalResult::Failed {reason,..} if reason.as_str() == "runtime_unavailable"));
+    controller.wait_runtime_settled(&successor).await;
+    assert_eq!(
+        allocator.cleanup_calls(),
+        vec![(successor.clone(), RunRuntimeExit::RuntimeLost)]
+    );
+    assert!(allocator.claim_controller(&successor).await.is_ok());
+}
+
+#[tokio::test]
 async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reconstruction() {
     let ledger = Arc::new(FakeRunLedger::new());
     let source_run_id = seed_controller_reconstructed_run(&ledger, "resume-source").await;
@@ -390,6 +468,14 @@ type CommitAttribution = (
 
 #[async_trait]
 impl CapsuleAllocator for SourceRecoveryAllocator {
+    async fn reserve_retained_workspace(
+        &self,
+        _source: &RunId,
+        _successor: &RunId,
+        _selection: &crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection,
+    ) -> Result<(), RetainedAllocationUnavailable> {
+        Ok(())
+    }
     async fn claim_controller(
         &self,
         run_id: &RunId,

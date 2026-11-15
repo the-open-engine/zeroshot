@@ -1152,3 +1152,25 @@ fn worktrees_are_opt_in_and_local_only() {
         assert!(parse_native_v2_args(args(&[basic.as_slice(), &extra].concat())).is_err());
     }
 }
+
+#[test]
+fn suspension_and_vector_commands_parse() {
+    for args in [
+        vec!["suspend", "run-1"],
+        vec!["vectors", "run-1", "--limit", "2"],
+        vec!["vectors", "show", "run-1", "vector-1"],
+    ] {
+        assert!(
+            parse_native_v2_args(args.iter().map(std::ffi::OsString::from)).is_ok(),
+            "{args:?}"
+        );
+    }
+    for limit in ["0", "101"] {
+        assert!(
+            parse_native_v2_args(
+                ["vectors", "run-1", "--limit", limit].map(std::ffi::OsString::from)
+            )
+            .is_err()
+        );
+    }
+}

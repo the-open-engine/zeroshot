@@ -152,15 +152,13 @@ fn provider_session_key(invocation: &DriverInvocation) -> String {
         NodeRuntimeBinding::Agent {
             session_scope: SessionScope::NodeInstance,
             ..
-        } => format!("node-instance/{}", invocation.provider_session_slot.get()),
-        _ => format!("execution/{}", invocation.node.reference.execution.get()),
+        } => format!("node-instance/{}", invocation.provider_home_slot.get()),
+        _ => format!("execution/{}", invocation.provider_home_slot.get()),
     }
 }
 
 fn auxiliary_invocation(invocation: &DriverInvocation) -> bool {
-    let offset = crate::native_v2_runner::AUXILIARY_PROVIDER_SLOT_OFFSET;
-    invocation.node.reference.execution.get() > offset
-        || invocation.provider_session_slot.get() > offset
+    invocation.auxiliary
 }
 
 /// Hidden CLI entry point. All failures return empty informational output and allow the native

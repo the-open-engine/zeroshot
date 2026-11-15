@@ -122,7 +122,7 @@ impl<E> ChannelSubscription<E> {
 
     /// A connected transport alone does not establish observation. Keep setup owned by this
     /// subscription so cancellation aborts it, and return only after the OECP acknowledgement.
-    async fn established(mut self) -> Result<Self, NativeV2CliError> {
+    pub(super) async fn established(mut self) -> Result<Self, NativeV2CliError> {
         if (&mut self.established).await.is_ok() {
             return Ok(self);
         }
@@ -507,6 +507,140 @@ where
             .await
     }
 
+    async fn run_suspend(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<CliRunStatusResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        self.connector.validate_run_suspension(target).await?;
+        if let Some(status) = self
+            .connector
+            .hosted_run_status(target, params.clone())
+            .await?
+            && !matches!(
+                status.status,
+                CliRunStatus::Target(RunStatus::Running { .. })
+            )
+        {
+            return Err(NativeV2CliError::Remote {
+                code: "invalid_request".to_owned(),
+                message: "suspend requires a running run".to_owned(),
+                details: None,
+            });
+        }
+        if let Some(result) = self
+            .connector
+            .hosted_run_suspend(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
+        let transport = self
+            .connector
+            .connect_run_suspension(target, params.run_id.clone())
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .run_suspend(params)
+            .await
+            .map(Into::into)
+            .map_err(protocol_error)
+    }
+
+    async fn validate_request_ask(&self, target: Option<&str>) -> Result<(), NativeV2CliError> {
+        self.connector
+            .validate_request_ask(require_named_target(target)?)
+            .await
+    }
+    async fn run_vectors(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_run_vectors(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
+        let transport = self
+            .connector
+            .connect_run_vectors(target, params.run_id.clone())
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .run_vectors(params)
+            .await
+            .map_err(protocol_error)
+    }
+
+    async fn inbox_show(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_inbox_show(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
+        let transport = self
+            .connector
+            .connect_request_ask(target, Some(params.run_id.clone()))
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .inbox_show(params)
+            .await
+            .map_err(protocol_error)
+    }
+
+    async fn inbox_list(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_inbox_list(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
+        let transport = self.connector.connect_request_ask(target, None).await?;
+        ClusterClient::new(transport.as_ref())
+            .inbox_list(params)
+            .await
+            .map_err(protocol_error)
+    }
+
+    async fn run_vector(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_run_vector(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
+        let transport = self
+            .connector
+            .connect_run_vectors(target, params.run_id.clone())
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .run_vector(params)
+            .await
+            .map_err(protocol_error)
+    }
+
     async fn run_checkpoints(
         &self,
         target: Option<&str>,
@@ -537,6 +671,16 @@ where
         _discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let target = require_named_target(target)?;
+        if matches!(
+            params.from,
+            Some(
+                openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                    | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+            )
+        ) {
+            self.connector.validate_request_ask(target).await?;
+        }
+
         if let Some(result) = self
             .connector
             .hosted_run_resume(target, params.clone())

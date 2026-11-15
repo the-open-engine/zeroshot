@@ -123,7 +123,9 @@ pub enum NativeV2AdmissionError {
         delivery: NodeName,
         writer: NodeName,
     },
-    #[error("map {map} may execute Git delivery node {delivery} concurrently across items")]
+    #[error(
+        "map {map} may repeat publication node {delivery} across items, including at concurrency one"
+    )]
     ConcurrentMapDelivery { map: NodeName, delivery: NodeName },
     #[error("graph-local worker descriptor could not be constructed: {0}")]
     WorkerDescriptor(String),
@@ -206,6 +208,7 @@ impl NativeV2Admission {
         }
         let declarations = executable_declarations(&graph.root);
         validate_executable_bindings(&declarations, runtime, context)?;
+        wait::validate_position(&graph.root, false)?;
         validate_delivery_concurrency(&graph.root)?;
         comment::validate_comment_profile(graph)?;
         let registry = GraphBoundWorkerRegistry::from_declarations(graph, &declarations, runtime)?;
@@ -223,6 +226,18 @@ impl NativeV2Admission {
         runtime: &RuntimePlan,
         delivery: StackDelivery,
     ) -> Result<(), NativeV2AdmissionError> {
+        if let Some(node) = executable_declarations(&graph.root).iter().find(|node| {
+            [
+                crate::native_v2_wait::WAIT_WORKER_REF,
+                crate::native_v2_request::ASK_WORKER_REF,
+            ]
+            .contains(&node.worker.as_str())
+        }) {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node.name.clone(),
+                detail: "stack profiles cannot contain wait or request nodes".to_owned(),
+            });
+        }
         self.validate_profile(graph, runtime, DeliveryPolicy::Required)
             .await?;
         let workers: &[&str] = match delivery {
@@ -443,7 +458,7 @@ fn prepare_submission(
         title,
         mut graph,
         initial_input,
-        runtime,
+        mut runtime,
         environment,
         branch: _,
         submission_key: _,
@@ -453,6 +468,11 @@ fn prepare_submission(
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
     validate_executable_bindings(&declarations, &runtime, context)?;
+    wait::validate_position(&graph.root, false)?;
+    runtime.max_concurrency = Some(
+        openengine_cluster_protocol::PositiveInteger::new(runtime.effective_max_concurrency())
+            .map_err(|error| NativeV2AdmissionError::InvalidRuntime(error.to_string()))?,
+    );
     validate_delivery_concurrency(&graph.root)?;
     comment::validate_comment_profile(&graph)?;
     comment::validate_comment_input_shape(&graph.root, &initial_input)?;
@@ -513,6 +533,7 @@ pub(crate) fn executable_runtime_roles(root: &GraphNode) -> Vec<(NodeName, bool)
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeRole {
+    Request,
     Script,
     Agent,
     Decision,
@@ -625,6 +646,7 @@ mod tests;
 
 fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
     match binding {
+        NodeRuntimeBinding::Request {} => RuntimeRole::Request,
         NodeRuntimeBinding::Script { .. } => RuntimeRole::Script,
         NodeRuntimeBinding::Agent { .. } => RuntimeRole::Agent,
         NodeRuntimeBinding::Decision { .. } => RuntimeRole::Decision,
@@ -632,3 +654,5 @@ fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
         NodeRuntimeBinding::CommentDelivery { .. } => RuntimeRole::CommentDelivery,
     }
 }
+
+mod wait;

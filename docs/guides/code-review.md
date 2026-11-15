@@ -41,8 +41,8 @@ agent has settled. The native header records the captured revisions once.
 
 Every agent is read-only: it inspects the checkout and the diff of the admitted head against its
 merge base with the captured base revision, without changing tracked files. A change with N units
-runs 5N + 8 agent executions. A crashed agent is retried once. Any other agent failure, or a
-triage result with more units than the maps allow, stops the run before publication. Finding
+runs 5N + 8 agent executions. A crashed agent is retried once. Any other agent failure stops the run before publication. Additional review units wait for map
+capacity. Finding
 problems is a successful review.
 
 A confirmed Claude usage quota refusal bypasses crash retries. Its failure context preserves

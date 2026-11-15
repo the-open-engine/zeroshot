@@ -95,7 +95,7 @@ export function Inspector(p: InspectorProps) {
                         ? 'Run result'
                         : node.kind === 'fail'
                           ? 'Stop outcome'
-                          : activityLabel(node.kind, binding?.kind)}
+                          : activityLabel(node.kind, binding?.kind, node.worker)}
               </h2>
             </div>
             <NameField
@@ -209,7 +209,7 @@ export function Inspector(p: InspectorProps) {
                 key={`${node.name}-items`}
                 node={node.name}
                 field="maxItems"
-                label="Maximum items"
+                label="Concurrent items"
                 value={node.maxItems}
                 onChange={(value) => graphChange('maxItems', value)}
               />
@@ -443,7 +443,9 @@ function ActivitySettings({
               label="Timeout (ms)"
               value={node.timeoutMs}
               optional
-              placeholder="No limit"
+              placeholder={
+                node.worker === 'builtin.request.ask@1' ? '7 days (604800000)' : 'No limit'
+              }
               onChange={(value) => {
                 const next = { ...node };
                 if (value === undefined) delete next.timeoutMs;

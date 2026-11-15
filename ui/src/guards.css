@@ -17,7 +17,7 @@
 }
 .guard-condition > legend,
 .signal-declaration > legend {
-  color: var(--secondary);
+  color: var(--ink-secondary);
   font-size: 12px;
   padding: 0 4px;
   max-width: 100%;
@@ -35,7 +35,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   font-size: 12px;
   margin-bottom: 10px;
   min-width: 0;
@@ -44,6 +44,9 @@
 .control-text input {
   font-size: 12px;
   padding: 7px;
+}
+.control-label select {
+  padding-right: 26px;
 }
 .control-text {
   min-width: 0;
@@ -67,7 +70,7 @@
 }
 .control-labels legend {
   font-size: 12px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   padding: 0 0 7px;
 }
 .control-labels > label,
@@ -76,7 +79,7 @@
   align-items: flex-start;
   gap: 7px;
   font-size: 12px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   padding: 4px 0;
   overflow-wrap: anywhere;
 }
@@ -86,18 +89,17 @@
   height: 14px;
   flex-shrink: 0;
   margin: 2px 0 0;
-  accent-color: var(--rust-text);
 }
 .control-labels small {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .control-add,
 .control-remove {
   font-size: 12px;
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .control-remove:hover:not(:disabled) {
-  color: var(--rust-text);
+  color: var(--rust);
 }
 .guard-child > .control-remove {
   margin: 0 0 6px 8px;

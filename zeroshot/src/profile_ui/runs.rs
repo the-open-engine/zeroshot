@@ -369,9 +369,18 @@ impl LocalRunHistory {
                                 .await
                                 .ok()
                                 .flatten();
-                        Ok(summary(&stored.snapshot, failure))
+                        let mut entry = summary(&stored.snapshot, failure);
+                        if let Some(reader) = &self.status
+                            && let Some(status) = reader.status(&id).await
+                        {
+                            entry.workspace_recovery = Some(status.workspace_recovery);
+                        }
+                        Ok(entry)
                     }
                     Err(_) => Ok(RunHistorySummary {
+                        suspension: None,
+                        suspend_requested: false,
+                        workspace_recovery: None,
                         title: RunTitle::new(id.as_str()).map_err(|_| unavailable())?,
                         created_at: created_at(&id),
                         run_id: id,
@@ -495,7 +504,7 @@ impl RemoteRunHistory {
         if !status.is_success() {
             return Err(remote_problem(status, &body));
         }
-        serde_json::from_slice(&body).map_err(|_| incompatible())
+        openengine_cluster_protocol::bounded_json_from_slice(&body).map_err(|_| incompatible())
     }
 }
 
@@ -568,9 +577,9 @@ fn invalid_remote_runtime_failure(run: &RunHistorySummary) -> bool {
 }
 
 fn remote_problem(status: StatusCode, body: &[u8]) -> ApiError {
-    let Ok(problem) =
-        serde_json::from_slice::<openengine_cluster_protocol::TargetHttpProblem>(body)
-    else {
+    let Ok(problem) = openengine_cluster_protocol::bounded_json_from_slice::<
+        openengine_cluster_protocol::TargetHttpProblem,
+    >(body) else {
         return unavailable();
     };
     let Some(code) = HistoryProblemCode::parse(problem.code()) else {
@@ -603,6 +612,9 @@ fn summary(snapshot: &RunSnapshot, runtime_failure: Option<RuntimeFailure>) -> R
                 .map(RunHistoryTerminalSynopsis::from)
         });
     RunHistorySummary {
+        suspension: snapshot.suspension.clone(),
+        suspend_requested: snapshot.suspend_requested,
+        workspace_recovery: None,
         run_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         phase: if runtime_failure.is_some() {

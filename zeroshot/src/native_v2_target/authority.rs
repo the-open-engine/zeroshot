@@ -94,6 +94,54 @@ pub trait TargetControlAuthority: Send + Sync {
             "target does not advertise workspace recovery",
         ))
     }
+    async fn validate_run_suspension(
+        &self,
+        _target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-suspension/v1",
+        ))
+    }
+
+    async fn validate_request_ask(
+        &self,
+        _target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.request-ask/v1",
+        ))
+    }
+
+    async fn run_suspension_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-suspension/v1",
+        ))
+    }
+
+    async fn request_ask_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.request-ask/v1",
+        ))
+    }
+
+    async fn run_vectors_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-vectors/v1",
+        ))
+    }
+
     async fn workspace_checkpoints_session(
         &self,
         _target: &TargetRecord,
@@ -199,6 +247,56 @@ pub trait TargetControlAuthority: Send + Sync {
             "target does not advertise workspace export",
         ))
     }
+    async fn hosted_run_suspend(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<Option<CliRunStatusResult>, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-suspension/v1",
+        ))
+    }
+
+    async fn hosted_run_vectors(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorsResult>, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-vectors/v1",
+        ))
+    }
+
+    async fn hosted_inbox_show(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxShowResult>, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-vectors/v1",
+        ))
+    }
+
+    async fn hosted_inbox_list(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxListResult>, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-vectors/v1",
+        ))
+    }
+
+    async fn hosted_run_vector(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<Option<openengine_cluster_protocol::RunVectorResult>, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.run-vectors/v1",
+        ))
+    }
+
     async fn hosted_run_checkpoints(
         &self,
         _target: &TargetRecord,

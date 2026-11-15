@@ -109,6 +109,16 @@ pub struct ImplementedProtocolSchema {
     pub run_attach_event_notification: JsonRpcNotification<RunAttachEventNotification>,
     pub run_force_request: JsonRpcRequest<RunForceParams>,
     pub run_force_response: JsonRpcResponse<RunForceResult>,
+    pub run_suspend_request: JsonRpcRequest<openengine_cluster_protocol::RunSuspendParams>,
+    pub run_suspend_response: JsonRpcResponse<openengine_cluster_protocol::RunSuspendResult>,
+    pub inbox_list_request: JsonRpcRequest<openengine_cluster_protocol::InboxListParams>,
+    pub inbox_list_response: JsonRpcResponse<openengine_cluster_protocol::InboxListResult>,
+    pub inbox_show_request: JsonRpcRequest<openengine_cluster_protocol::InboxShowParams>,
+    pub inbox_show_response: JsonRpcResponse<openengine_cluster_protocol::InboxShowResult>,
+    pub run_vectors_request: JsonRpcRequest<openengine_cluster_protocol::RunVectorsParams>,
+    pub run_vectors_response: JsonRpcResponse<openengine_cluster_protocol::RunVectorsResult>,
+    pub run_vector_request: JsonRpcRequest<openengine_cluster_protocol::RunVectorParams>,
+    pub run_vector_response: JsonRpcResponse<openengine_cluster_protocol::RunVectorResult>,
     pub run_checkpoints_request: JsonRpcRequest<RunCheckpointsParams>,
     pub run_checkpoints_response: JsonRpcResponse<RunCheckpointsResult>,
     pub run_resume_request: JsonRpcRequest<RunResumeParams>,
@@ -500,6 +510,7 @@ fn compiled_fixture(par_order: &[&str], sequence_order: &[&str]) -> Value {
             "promotedStatePaths": []
         },
         "bounds": {
+
             "termination": { "kind": "bounded", "ranking": [["count"]], "maxIterations": 4 },
             "maxNodeExecutions": 12, "peakConcurrency": 2,
             "attemptsPerNode": { "parallel": 1, "ordered": 1 }

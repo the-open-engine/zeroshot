@@ -116,11 +116,20 @@ pub enum ReducerError {
     Encoding,
     #[error("structural observation exceeds its bounded projection budget")]
     TraceLimit,
+    #[error("history probing reached the loop-entry ceiling")]
+    ProbeLoopLimit,
+    #[error("node {node} exceeds run ceiling {bound} for {kind}")]
+    WorkLimit {
+        node: NodeName,
+        bound: u64,
+        kind: &'static str,
+    },
 }
 
 pub struct FullV1Reducer<'a> {
     graph: &'a VerifiedGraph,
     execution_mode: ExecutionMode,
+    dispatch_limit: usize,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -135,6 +144,7 @@ impl<'a> FullV1Reducer<'a> {
         Self {
             graph,
             execution_mode: ExecutionMode::LegacyAttempts,
+            dispatch_limit: 64,
         }
     }
 
@@ -144,7 +154,15 @@ impl<'a> FullV1Reducer<'a> {
         Self {
             graph,
             execution_mode: ExecutionMode::NativeV2,
+            dispatch_limit: 64,
         }
+    }
+
+    /// Available run capacity; queued leaves remain structural occurrences without identities.
+    #[must_use]
+    pub const fn with_dispatch_limit(mut self, limit: usize) -> Self {
+        self.dispatch_limit = limit;
+        self
     }
 
     pub fn reduce(&self, input: ReductionInput<'_>) -> Result<Reduction, ReducerError> {
@@ -170,19 +188,18 @@ impl<'a> FullV1Reducer<'a> {
             state.materialize_missing_fields(&mut initial_state);
         }
         let mut engine = Engine::new(input, &self.graph.compiled_ir.root, self.execution_mode)?;
+        engine.dispatch_remaining = self.dispatch_limit;
+        engine.frontier_limit = if trace && self.dispatch_limit == 0 {
+            1024
+        } else {
+            self.dispatch_limit.clamp(1, 1024)
+        };
         engine.trace = trace.then(TraceCollector::default);
         let mut context = Context::new(initial_state);
         let status = engine.eval(
             &self.graph.compiled_ir.root,
             &mut context,
-            Traversal {
-                map_indices: &[],
-                loop_iterations: &[],
-                boundary: None,
-                item: None,
-                mode: EvalMode::Decide,
-                cutoff: HistoryPosition::MAX,
-            },
+            Traversal::root(),
         )?;
         engine.ensure_history_consumed()?;
         engine.canonicalize_void_decisions();
@@ -226,21 +243,31 @@ struct Channels {
     diagnostic: Option<Value>,
 }
 
+struct GroupMutation<'a, G> {
+    group: &'a G,
+    context: &'a mut Context,
+    traversal: Traversal<'a>,
+}
+
 #[derive(Clone)]
 struct Context {
     state: Value,
+    work: LoopWork,
     controls: BTreeMap<ControlKey, String>,
     channels: BTreeMap<(NodeName, Vec<u64>), Channels>,
     local_writes: BTreeSet<FieldPath>,
+    completed: BTreeSet<(NodeName, Vec<u64>)>,
 }
 
 impl Context {
     fn new(state: Value) -> Self {
         Self {
             state,
+            work: LoopWork::default(),
             controls: BTreeMap::new(),
             channels: BTreeMap::new(),
             local_writes: BTreeSet::new(),
+            completed: BTreeSet::new(),
         }
     }
 }
@@ -256,9 +283,8 @@ struct ControlKey {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum EvalMode {
     Decide,
-    Probe,
-    /// Retain canonical settled paths without emitting scheduling decisions.
     Replay,
+    Probe,
 }
 
 #[derive(Clone, Copy)]
@@ -269,6 +295,27 @@ struct Traversal<'a> {
     item: Option<&'a Value>,
     mode: EvalMode,
     cutoff: HistoryPosition,
+    after: HistoryPosition,
+    record_evidence: bool,
+}
+
+impl Traversal<'_> {
+    fn is_open(self) -> bool {
+        self.mode == EvalMode::Decide && self.cutoff == HistoryPosition::MAX
+    }
+
+    fn root() -> Self {
+        Self {
+            map_indices: &[],
+            loop_iterations: &[],
+            boundary: None,
+            item: None,
+            mode: EvalMode::Decide,
+            cutoff: HistoryPosition::MAX,
+            after: HistoryPosition::ZERO,
+            record_evidence: true,
+        }
+    }
 }
 
 struct ExecutableSpec<'a> {
@@ -295,16 +342,13 @@ struct GroupControlUpdate<'a> {
     map_indices: &'a [u64],
 }
 
-struct MapVoidScope<'a> {
-    common: VoidScope<'a>,
-    winner_scope: &'a [u64],
-}
-
 struct VoidScope<'a> {
     map_indices: &'a [u64],
+    // A map terminal retains the selected item's subtree.
+    excluded_scope: Option<&'a [u64]>,
     cutoff: HistoryPosition,
     reason: ExecutionVoidReason,
-    emit_decisions: bool,
+    mode: EvalMode,
 }
 
 struct WriteApplication<'a> {
@@ -365,6 +409,9 @@ impl Status {
                 position: position.max(prior),
                 projection,
             },
+            Self::Continue { position } => Self::Continue {
+                position: position.max(prior),
+            },
             other => other,
         }
     }
@@ -378,11 +425,18 @@ struct VoidCutoff {
 
 struct Engine<'a> {
     boundary: Option<ExecutionBoundary>,
+    dispatch_remaining: usize,
+    frontier_limit: usize,
+    pending_frontier: BTreeSet<(NodeName, Vec<u64>, Vec<u64>)>,
+    logical_visits: u64,
+    loop_entries: LoopWork,
     executions: &'a [DurableExecution],
     next_node_instance: u64,
     next_execution: u64,
     decisions: Vec<Decision>,
     map_depths: BTreeMap<NodeName, usize>,
+    map_owners: BTreeMap<NodeName, NodeName>,
+    by_occurrence: BTreeMap<StructuralOccurrence, Vec<&'a DurableExecution>>,
     optional_promotions: BTreeMap<NodeName, BTreeSet<FieldPath>>,
     consumed_executions: BTreeSet<ExecutionId>,
     void_cutoffs: BTreeMap<ExecutionId, VoidCutoff>,
@@ -398,8 +452,33 @@ impl<'a> Engine<'a> {
         execution_mode: ExecutionMode,
     ) -> Result<Self, ReducerError> {
         validate_history_for_mode(input.executions, execution_mode)?;
+        if input
+            .executions
+            .iter()
+            .filter(|execution| execution.attempt.get() == 1)
+            .count()
+            > 65_536
+        {
+            return Err(ReducerError::WorkLimit {
+                node: root.name().clone(),
+                bound: 65_536,
+                kind: "executable-node visits",
+            });
+        }
         let mut map_depths = BTreeMap::new();
         collect_map_depths(root, 0, &mut map_depths);
+        let mut map_owners = BTreeMap::new();
+        collect_map_owners(root, None, &mut map_owners);
+        let mut by_occurrence = BTreeMap::<StructuralOccurrence, Vec<&'a DurableExecution>>::new();
+        for execution in input.executions {
+            by_occurrence
+                .entry(execution.occurrence.clone())
+                .or_default()
+                .push(execution);
+        }
+        for history in by_occurrence.values_mut() {
+            history.sort_by_key(|execution| execution.dispatch_position);
+        }
         let mut executable_depths = BTreeMap::new();
         collect_executable_depths(root, 0, &mut executable_depths);
         let mut optional_promotions = BTreeMap::new();
@@ -415,11 +494,22 @@ impl<'a> Engine<'a> {
         }
         Ok(Self {
             boundary: None,
+            dispatch_remaining: 0,
+            frontier_limit: 1,
+            pending_frontier: BTreeSet::new(),
+            logical_visits: input
+                .executions
+                .iter()
+                .filter(|execution| execution.attempt.get() == 1)
+                .count() as u64,
+            loop_entries: LoopWork::default(),
             executions: input.executions,
             next_node_instance: input.next_node_instance,
             next_execution: input.next_execution,
             decisions: Vec::new(),
             map_depths,
+            map_owners,
+            by_occurrence,
             optional_promotions,
             consumed_executions: BTreeSet::new(),
             void_cutoffs: BTreeMap::new(),
@@ -496,6 +586,8 @@ impl<'a> Engine<'a> {
     // Executable evaluation lives in the evaluation companion module.
 }
 
+mod scheduling;
+use scheduling::{collect_map_owners, LoopWork};
 mod control;
 mod evaluation;
 mod groups;

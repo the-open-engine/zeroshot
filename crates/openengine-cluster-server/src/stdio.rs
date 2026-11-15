@@ -22,7 +22,7 @@ use crate::{serialize_error, ClusterBackend, Dispatcher};
 
 /// Bounded NDJSON frame length. A line exceeding this (with no terminating newline found first)
 /// is rejected with a `PARSE_ERROR` frame rather than buffered without limit.
-const MAX_FRAME_BYTES: usize = 1_048_576;
+const MAX_FRAME_BYTES: usize = crate::MAX_INCOMING_FRAME_BYTES;
 
 /// Bounded per-connection outbound queue: unary responses and subscription notifications share
 /// this single writer queue, so one pathologically slow peer backpressures further writes rather

@@ -258,3 +258,8 @@ cargo test -p zeroshot --features ui # Unix; Windows: powershell -NoProfile -Fil
 Default Cargo checks omit `ui`. Browser scenarios and evidence:
 [example processes](qa/real-user-processes.md), [replay](qa/replay-real-runs.md),
 [live runs](qa/live-run-review.md), and [standalone lifecycle](qa/standalone-integration.md).
+
+Map inspectors label `maxItems` as concurrent items. The runtime editor exposes optional
+`maxConcurrency`, with an effective default of 64. Canvas map regions show item concurrency and
+only empty-input bypasses. Derived history records expose queued leaves without inventing
+execution IDs or worker events; durable node starts remain the authority for running work.

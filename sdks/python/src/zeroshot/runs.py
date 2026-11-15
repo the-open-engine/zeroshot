@@ -21,6 +21,12 @@ class RunRequest:
         initial_input: Closed JSON input that Zeroshot validates against the graph.
         runtime: Opaque RuntimePlan passed to Zeroshot without changes.
         cwd: Working folder relative to the captured client workspace; None uses that workspace.
+        worktree: Create a retained Git worktree for local execution; False runs in place.
+            Only committed files are included; dependencies are not copied or installed.
+            Remove the retained worktree explicitly with Git when finished.
+        worktree_base: Requires worktree. None or local starts at the invoking checkout's HEAD;
+            remote fetches its branch's upstream and requires one. Direct/hosted targets reject
+            enabled worktrees in native preflight.
         repository: Source override as a Git clone URL or GitHub owner/name shorthand.
         source_connection: Explicit source-only named connection key.
         branch: Named-target source branch override.
@@ -33,6 +39,8 @@ class RunRequest:
     initial_input: JsonValue
     runtime: RuntimePlan
     cwd: str | Path | None = None
+    worktree: bool = False
+    worktree_base: Literal["local", "remote"] | None = None
     repository: str | None = None
     source_connection: str | None = None
     branch: str | None = None
@@ -158,11 +166,17 @@ class RunStatus:
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
-        phase: admitted, running, stopping, or finished.
+        phase: admitted, running, stopping, suspended, or finished.
         active_executions: Every currently active graph execution.
         result: Terminal result only when phase is finished.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
-        controller: Availability observation, omitted for responding controllers and finished runs.
+        controller: Availability observation, omitted for responding controllers and ended runs.
+        suspend_requested: Whether a running run has a durable suspension request.
+        reason: Why an ended attempt suspended.
+        node: Node held back by suspension.
+        created_at: Suspension time in Unix epoch milliseconds.
+        due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
+        request: Human request contract when suspended for a request.
     """
 
     run_id: str
@@ -170,11 +184,17 @@ class RunStatus:
     source: ResolvedSource | None
     size: str
     cursor: str
-    phase: Literal["admitted", "running", "stopping", "finished"]
+    phase: Literal["admitted", "running", "stopping", "suspended", "finished"]
     active_executions: tuple[ActiveExecution, ...] = ()
     result: RunResult | None = None
     graph_result: RunResult | None = None
     controller: ControllerObservation | None = None
+    suspend_requested: bool = False
+    reason: Literal["command", "wait", "request"] | None = None
+    node: str | None = None
+    created_at: int | None = None
+    due_at: int | None = None
+    request: HumanRequest | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -187,10 +207,16 @@ class RunSummary:
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
-        phase: admitted, running, stopping, or finished.
+        phase: admitted, running, stopping, suspended, or finished.
         force_stop_requested: Whether the current projection reflects a force-stop request.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
-        controller: Availability observation, omitted for responding controllers and finished runs.
+        controller: Availability observation, omitted for responding controllers and ended runs.
+        suspend_requested: Whether a running run has a durable suspension request.
+        reason: Why an ended attempt suspended.
+        node: Node held back by suspension.
+        created_at: Suspension time in Unix epoch milliseconds.
+        due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
+        request: Human request contract when suspended for a request.
     """
 
     run_id: str
@@ -198,10 +224,16 @@ class RunSummary:
     source: ResolvedSource | None
     size: str
     cursor: str
-    phase: Literal["admitted", "running", "stopping", "finished"]
+    phase: Literal["admitted", "running", "stopping", "suspended", "finished"]
     force_stop_requested: bool
     graph_result: RunResult | None = None
     controller: ControllerObservation | None = None
+    suspend_requested: bool = False
+    reason: Literal["command", "wait", "request"] | None = None
+    node: str | None = None
+    created_at: int | None = None
+    due_at: int | None = None
+    request: HumanRequest | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -227,3 +259,109 @@ class LogEvent:
     target: str
     message: str
     map_indices: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunVector:
+    """One immutable entry in the run's ordered vector record.
+
+    Args:
+        id: Opaque ordered entry identity, preserved by continuation.
+        run_id: Attempt that wrote the entry.
+        created_at: Entry time in Unix epoch milliseconds.
+        kind: Entry kind.
+        content: Complete kind-specific JSON fields.
+    """
+
+    id: str
+    run_id: str
+    created_at: int
+    kind: str
+    content: JsonValue
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunVectorsPage:
+    """A bounded page of the vector record.
+
+    Args:
+        run_id: Run whose record was read.
+        vectors: Ordered bounded summaries; use Run.vector() for complete content.
+        next_after: Cursor for the next page, or None at the end.
+    """
+
+    run_id: str
+    vectors: tuple[RunVector, ...]
+    next_after: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HumanRequest:
+    """A host-run question and its declared answer contract.
+
+    Args:
+        id: Opaque request vector identity.
+        text: Question supplied by the graph.
+        signals: Declared signals and their allowed labels.
+        output: Closed record payload schema.
+        expires_at: Exclusive answer deadline in Unix epoch milliseconds.
+    """
+
+    id: str
+    text: str
+    signals: JsonValue
+    output: JsonValue
+    expires_at: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboxEntry:
+    """One bounded request summary.
+
+    Args:
+        run_id: Run held suspended by this request.
+        node: Request verifier name.
+        created_at: Creation time in Unix epoch milliseconds.
+        expires_at: Exclusive answer deadline in Unix epoch milliseconds.
+        state: Pending or expired; reading never applies expiry.
+    """
+
+    run_id: str
+    node: str
+    created_at: int
+    expires_at: int
+    state: Literal["pending", "expired"]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboxPage:
+    """One request page in run ID order.
+
+    Args:
+        requests: Bounded summaries for runs still held suspended.
+        next_after: Run ID cursor for the next page, or None at the end.
+    """
+
+    requests: tuple[InboxEntry, ...]
+    next_after: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboxRequest:
+    """The request made by a run, including its disposition.
+
+    Args:
+        run_id: Run that asked the question.
+        node: Request verifier name.
+        created_at: Creation time in Unix epoch milliseconds.
+        request: Complete question and answer contract.
+        state: Pending, answered, expired, or stopped.
+        successor_run_id: Accepted continuation, if any.
+    """
+
+    run_id: str
+    node: str
+    created_at: int
+    request: HumanRequest
+    state: Literal["pending", "answered", "expired", "stopped"]
+    successor_run_id: str | None

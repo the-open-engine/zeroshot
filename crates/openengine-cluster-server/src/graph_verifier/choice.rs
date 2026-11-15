@@ -138,7 +138,6 @@ pub(super) struct AssignedControl {
 #[derive(Clone)]
 pub(super) struct MapAggregate {
     pub(super) owner: NodeName,
-    pub(super) maximum: u64,
 }
 
 pub(super) type Assignment = BTreeMap<SelectorKey, AssignedControl>;

@@ -15,7 +15,7 @@ use crate::native_v2_contract::{
 };
 use crate::native_v2_runner::{
     AttachReceiveError, DurableNodeEvent, DurableOutput, LiveOutputStream, NodeHandle,
-    NodeRunRequest, NodeRunner, NodeRunnerError, AUXILIARY_PROVIDER_SLOT_OFFSET, bounded_log_text,
+    NodeRunRequest, NodeRunner, NodeRunnerError, AUXILIARY_EXECUTION_OFFSET, bounded_log_text,
     current_timestamp,
 };
 use crate::v2_run_ledger::{RunEvent, SafeLogLine, SafeLogStream, MAX_SAFE_LOG_BYTES};
@@ -234,7 +234,7 @@ fn role_slot(attempt: u64, index: usize) -> Result<u64, PostmortemError> {
     let offset = attempt
         .checked_mul(1_000_000)
         .ok_or(PostmortemError::Preparation)?;
-    AUXILIARY_PROVIDER_SLOT_OFFSET
+    AUXILIARY_EXECUTION_OFFSET
         .checked_add(offset)
         .and_then(|value| value.checked_add(index as u64 + 1))
         .ok_or(PostmortemError::Preparation)

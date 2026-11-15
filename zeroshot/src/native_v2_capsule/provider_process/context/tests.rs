@@ -15,6 +15,8 @@ fn invocation() -> DriverInvocation {
         },
         host_context: None,
         provider_session_slot: NodeInstanceId::new(999).assert_value(),
+        provider_home_slot: NodeInstanceId::new(999).assert_value(),
+        auxiliary: false,
         node: request.invocation,
         role: NodeRole::Worker,
         response: NodeResponseContract::Worker {

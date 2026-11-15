@@ -290,7 +290,7 @@ pub struct VerifierNode {
     pub output: PayloadType,
     pub input_bindings: Vec<InputBinding>,
     pub write_bindings: Vec<WriteBinding>,
-    /// Omit to run until completion or cancellation.
+    /// Omit to run until completion or cancellation; request ask nodes default to seven days.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<PositiveInteger>,
     pub attempts: PositiveInteger,
@@ -361,6 +361,7 @@ pub struct MapNode {
     pub state: PayloadType,
     pub body: Box<GraphNode>,
     pub over: DataSelector,
+    /// Maximum active complete item bodies. Larger inputs queue; every item runs unless authored control flow stops it.
     pub max_items: PositiveInteger,
     pub promoted_state_paths: Vec<FieldPath>,
 }
@@ -485,3 +486,7 @@ impl GraphNode {
         }
     }
 }
+
+#[path = "guard_truth.rs"]
+mod guard_truth;
+pub use guard_truth::*;

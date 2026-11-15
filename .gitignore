@@ -11,6 +11,7 @@ __pycache__/
 !.env.example
 .vscode/
 .idea/
+/.playwright-cli/
 *.swp
 *.swo
 .DS_Store

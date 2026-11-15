@@ -118,16 +118,40 @@ async fn canonical_loop_evidence_excludes_map_losers_and_their_overflow() {
     ))
     .await;
     let mut history = Vec::new();
-    for index in 0..6 {
-        append_rounds(&mut history, "mapped_rounds", vec![index], 2);
+    for round in 0..2 {
+        for index in 0..6 {
+            let id = history.len() as u64 + 1;
+            history.push(settled(
+                SettledSpec::new(id, index + 1, "mapped_rounds_assessor")
+                    .map_indices(vec![index])
+                    .position(round * 12 + index + 7)
+                    .dispatched(round * 12 + index + 1),
+                verdict("rejected"),
+            ));
+        }
     }
-    append_rounds(&mut history, "other", vec![], 2);
+    history.push(settled(
+        SettledSpec::new(13, 7, "other_assessor")
+            .position(9)
+            .dispatched(0),
+        verdict("rejected"),
+    ));
+    history.push(settled(
+        SettledSpec::new(14, 7, "other_assessor")
+            .position(25)
+            .dispatched(10),
+        verdict("rejected"),
+    ));
+    history.sort_by_key(|execution| execution.dispatch_position);
+    for (index, execution) in history.iter_mut().enumerate() {
+        execution.execution = ExecutionId::new(index as u64 + 1).unwrap();
+    }
     let context = evidence(
         &graph,
         &json!({"items":[null,null,null,null,null,null]}),
         &history,
     );
-    assert_eq!(context.exhausted_loops.len(), 2);
+    assert_eq!(context.exhausted_loops.len(), 1);
     let selected = context
         .exhausted_loops
         .iter()

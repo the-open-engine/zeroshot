@@ -262,3 +262,32 @@ test('decision selection installs a verifier contract and remains distinct from 
   assert.equal(original.runtime.nodes.custom_worker.kind, 'agent');
   assert.equal(applyWorker(result, 'custom_worker', decision, [agent, decision]), result);
 });
+
+test('wait uses the fixed request binding and saves without instructions', () => {
+  const option: WorkerOption = {
+    id: 'request_wait',
+    label: 'Wait',
+    runtimeKind: 'request',
+    workerRefs: ['builtin.request.wait@1'],
+    runtimeBinding: { kind: 'request' },
+    node: {
+      ...deliveryNode,
+      worker: 'builtin.request.wait@1',
+      output: { kind: 'null' },
+      signals: { wait: ['elapsed'] },
+    },
+  };
+  const doc = document();
+  doc.graph.root.children[0].kind = 'verifier';
+  const next = applyWorker(doc, 'custom_worker', option, [agent, option]);
+  assert.deepEqual(next.runtime.nodes.custom_worker, { kind: 'request' });
+  assert.equal(findNode(next.graph.root, 'custom_worker')?.worker, 'builtin.request.wait@1');
+  assert.equal(findNode(next.graph.root, 'custom_worker')?.instructions, undefined);
+  assert.equal(
+    workerOption(findNode(next.graph.root, 'custom_worker')!, next.runtime.nodes.custom_worker, [
+      option,
+    ]),
+    option
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(next)), next);
+});

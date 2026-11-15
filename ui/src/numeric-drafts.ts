@@ -3,11 +3,13 @@ import { allNodes, executable, type GraphNode, type Runtime } from './domain';
 import { setPendingEdit } from './pending-edits';
 import { numericValue } from './numeric-edit';
 
-export type NumericField = 'timeoutMs' | 'maxIterations' | 'maxItems' | 'minProbability';
-type FieldDraft = { node: string; field: NumericField; text: string; base?: number | null };
+export type NumericField =
+  'timeoutMs' | 'maxIterations' | 'maxItems' | 'minProbability' | 'maxConcurrency';
+type FieldDraft = { node?: string; field: NumericField; text: string; base?: number | null };
 let nextScope = 0;
 
 function fieldOwner(node: GraphNode | undefined, field: NumericField, runtime?: Runtime) {
+  if (field === 'maxConcurrency') return runtime;
   if (!node) return undefined;
   if (field === 'minProbability') {
     const binding = runtime?.nodes[node.name];
@@ -20,13 +22,27 @@ function fieldOwner(node: GraphNode | undefined, field: NumericField, runtime?: 
   return visible ? node : undefined;
 }
 
+export function numericFieldValue(field: NumericField, text: string, optional = false) {
+  const parsed = numericValue(
+    { text, badInput: false },
+    optional,
+    field === 'minProbability' ? 'probability' : 'positiveInteger'
+  );
+  return field === 'maxConcurrency' &&
+    parsed.valid &&
+    parsed.value !== undefined &&
+    parsed.value > 65536
+    ? ({ valid: false } as const)
+    : parsed;
+}
+
 /** Unfinished numbers belong to the document, not an inspector's mounting lifetime. */
 export function createNumericDrafts() {
   const scope = `numeric-draft:${++nextScope}:`;
   const values = new Map<string, FieldDraft>();
   const listeners = new Set<() => void>();
   let version = 0;
-  const key = (node: string, field: NumericField) => JSON.stringify([node, field]);
+  const key = (node: string | undefined, field: NumericField) => JSON.stringify([node, field]);
   function notify() {
     version++;
     listeners.forEach((listener) => listener());
@@ -43,7 +59,7 @@ export function createNumericDrafts() {
     if (changed) notify();
   }
   return {
-    get: (node: string, field: NumericField) => values.get(key(node, field)),
+    get: (node: string | undefined, field: NumericField) => values.get(key(node, field)),
     set(value: FieldDraft) {
       const id = key(value.node, value.field);
       if (value.text === (value.base == null ? '' : String(value.base))) {
@@ -55,24 +71,21 @@ export function createNumericDrafts() {
       notify();
     },
     commit(
-      node: string,
+      node: string | undefined,
       field: NumericField,
       optional: boolean,
       save: (value: number | undefined) => void
     ) {
       const draft = values.get(key(node, field));
       if (!draft) return false;
-      const value = numericValue(
-        { text: draft.text, badInput: false },
-        optional,
-        field === 'minProbability' ? 'probability' : 'positiveInteger'
-      );
+      const value = numericFieldValue(field, draft.text, optional);
       if (!value.valid) return false;
       save(value.value);
       clear(node, field);
       return true;
     },
     clear,
+    pending: () => values.size > 0,
     rename(before: string, after: string) {
       for (const draft of [...values.values()]) {
         if (draft.node !== before) continue;
@@ -87,7 +100,11 @@ export function createNumericDrafts() {
     prune(root: GraphNode, runtime?: Runtime) {
       const nodes = new Map(allNodes(root).map((node) => [node.name, node]));
       for (const draft of [...values.values()]) {
-        const owner = fieldOwner(nodes.get(draft.node), draft.field, runtime);
+        const owner = fieldOwner(
+          draft.node === undefined ? undefined : nodes.get(draft.node),
+          draft.field,
+          runtime
+        );
         if (!owner || (owner[draft.field] ?? undefined) !== (draft.base ?? undefined))
           clear(draft.node, draft.field);
       }

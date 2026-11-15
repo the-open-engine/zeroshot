@@ -251,6 +251,7 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
       harness: 'codex',
       provider: 'openai',
       size: 'large',
+      maxConcurrency: 1,
       nodes: {
         plan: { kind: 'agent', model: 'model-a', effort: 'high' },
         build: { kind: 'agent', model: 'model-b' },
@@ -388,6 +389,18 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
   await click(button(dialog()!, 'Cancel'));
   assert.equal(dialog(), null);
   assert.equal(confirmDialog(), null);
+
+  await checkConcurrencyDrafts({
+    openRuntime,
+    type,
+    model,
+    click,
+    button,
+    dialog,
+    runtimeJson,
+    key,
+    confirmDialog,
+  });
 
   // Target-owned IDs pass through JSON unchanged; Target default keeps size omitted.
   await openRuntime();
@@ -698,10 +711,7 @@ test(
       history: {} as WorkspaceServices['history'],
     };
     const { browser, container } = await mountApp(t, services, bootstrap);
-    const identity = [...container.querySelectorAll<HTMLElement>('.workflow-node-identity')].find(
-      (element) => element.textContent === 'retrieve'
-    );
-    assert.ok(identity);
+    const identity = nodeIdentity(container, 'retrieve');
     const card = identity.closest('.react-flow__node')!;
     assert.match(card.textContent ?? '', /python3 retrieve.py/);
     assert.doesNotMatch(card.textContent ?? '', /Choose model/);
@@ -746,3 +756,127 @@ test(
     assert.match(container.textContent ?? '', /Profile saved/);
   }
 );
+
+async function checkConcurrencyDrafts(actions: {
+  openRuntime: () => Promise<void>;
+  type: (element: HTMLInputElement | HTMLTextAreaElement, value: string) => Promise<void>;
+  model: (label: string) => HTMLInputElement;
+  click: (element: HTMLElement) => Promise<void>;
+  button: (scope: ParentNode, text: string) => HTMLButtonElement;
+  dialog: () => HTMLDialogElement | null;
+  runtimeJson: () => Promise<{ editor: HTMLTextAreaElement; value: any }>;
+  key: (element: HTMLElement, key: string) => Promise<void>;
+  confirmDialog: () => HTMLDialogElement | null;
+}) {
+  const { openRuntime, type, model, click, button, dialog, runtimeJson, key, confirmDialog } =
+    actions;
+  // Unfinished concurrency text remains document-owned, including across Form/JSON navigation.
+  await openRuntime();
+  await type(model('Maximum concurrent executions'), '1e');
+  await click(button(dialog()!, 'Apply changes'));
+  assert.ok(dialog(), 'Apply must retain an incomplete concurrency draft');
+  assert.equal(model('Maximum concurrent executions').value, '1e');
+  assert.equal(model('Maximum concurrent executions').getAttribute('aria-invalid'), 'true');
+  assert.equal((await runtimeJson()).value.maxConcurrency, 1, 'the authored limit is unchanged');
+  await click(button(dialog()!, 'Form'));
+  assert.equal(model('Maximum concurrent executions').value, '1e');
+  await click(button(dialog()!, 'Cancel'));
+  assert.ok(confirmDialog(), 'discarding unfinished runtime text requires explicit cancellation');
+  await click(button(confirmDialog()!, 'Discard'));
+  assert.equal(dialog(), null);
+  await openRuntime();
+  assert.equal(model('Maximum concurrent executions').value, '1');
+  await type(model('Maximum concurrent executions'), '1e');
+  await key(model('Maximum concurrent executions'), 'Escape');
+  assert.equal(model('Maximum concurrent executions').value, '1');
+  await click(button(dialog()!, 'Cancel'));
+}
+
+test('Runtime Apply and Cancel preserve preexisting Inspector probability drafts', async (t) => {
+  const doc: Document = {
+    ...profile(),
+    graph: {
+      ...profile().graph,
+      root: {
+        kind: 'verifier',
+        name: 'judge',
+        worker: 'agent.verifier@1',
+        signals: { verdict: ['accepted', 'rejected', 'uncertain'] },
+        instructions: 'Judge the input.',
+      },
+    },
+    runtime: {
+      harness: 'codex',
+      provider: 'openai',
+      nodes: {
+        judge: {
+          kind: 'decision',
+          model: 'caller/model',
+          minProbability: 0.85,
+          uncertainLabel: 'uncertain',
+        },
+      },
+    },
+  };
+  const bootstrap: Bootstrap = {
+    version: 1,
+    workspace: { kind: 'local', id: 'draft-ownership' },
+    templates: [],
+    runtimeSchema: {},
+  };
+  const services: WorkspaceServices = {
+    mount: new URL('https://example.test/ui/'),
+    catalog: async () => bootstrap,
+    profiles: {
+      list: async () => ({ profiles: [{ id: 'drafts', name: doc.name, isDefault: false }] }),
+      load: async () => ({ profile: { ...doc, id: 'drafts', isDefault: false }, revision: 'r1' }),
+      save: async () => {
+        throw new Error('No save expected');
+      },
+    },
+    authoring,
+    history: {} as WorkspaceServices['history'],
+  };
+  const { browser, container } = await mountApp(t, services, bootstrap);
+  const identity = nodeIdentity(container, 'judge');
+  await act(async () => identity.click());
+  const inspector = container.querySelector<HTMLElement>('[aria-label="Profile inspector"]')!;
+  const label = [...inspector.querySelectorAll('label')].find(
+    (label) => label.textContent === 'Minimum probability'
+  )!;
+  const field = document.getElementById(label.htmlFor) as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')!.set!.call(
+      field,
+      '1e'
+    );
+    field.dispatchEvent(new browser.Event('input', { bubbles: true }));
+  });
+  const open = () =>
+    act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Runtime settings"]')!.click()
+    );
+  const dialog = () => container.querySelector<HTMLDialogElement>('dialog[aria-label="Runtime"]');
+  const click = async (text: string) => {
+    const button = [...dialog()!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === text
+    )!;
+    await act(async () => button.click());
+  };
+  await open();
+  await click('Cancel');
+  assert.equal(dialog(), null, 'untouched Runtime settings do not own the Inspector edit');
+  assert.equal(field.value, '1e');
+  await open();
+  await click('Apply changes');
+  assert.equal(dialog(), null, 'an unrelated Inspector draft cannot block Runtime Apply');
+  assert.equal(field.value, '1e');
+});
+
+function nodeIdentity(container: HTMLElement, name: string) {
+  const identity = [...container.querySelectorAll<HTMLElement>('.workflow-node-identity')].find(
+    (element) => element.textContent === name
+  );
+  assert.ok(identity, `workflow node ${name}`);
+  return identity;
+}

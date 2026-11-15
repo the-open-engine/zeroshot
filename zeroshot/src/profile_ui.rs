@@ -230,7 +230,7 @@ fn decode<T: serde::de::DeserializeOwned>(
 ) -> Result<T, ApiError> {
     let bytes = bytes
         .map_err(|_| ApiError::invalid("The profile exceeds the 2 MiB request limit.".into()))?;
-    serde_json::from_slice(&bytes)
+    openengine_cluster_protocol::bounded_json_from_slice(&bytes)
         .map_err(|e| ApiError::invalid(format!("Invalid profile JSON: {e}")))
 }
 fn envelope(profile: RunProfile) -> Result<Json<Value>, ApiError> {

@@ -50,8 +50,39 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn collect_map_execution_correlations(&mut self, group: &MapNode) {
+    pub(super) fn collect_map_execution_correlations(&mut self, group: &MapNode) {
         self.collect_map_node_execution(&group.body, &group.name, CompletionPredicate::Always);
+        let retention = self
+            .map_execution_correlations
+            .iter()
+            .filter(|(_, correlation)| correlation.owner == group.name)
+            .map(|(name, _)| {
+                (
+                    name.clone(),
+                    self.conditional_candidate_presence(name, group.body.name())
+                        .unwrap_or(CompletionPredicate::Always),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (name, condition) in retention {
+            if let Some(correlation) = self.map_execution_correlations.get_mut(&name) {
+                correlation.retention = condition;
+            }
+        }
+        let correlation = self
+            .map_execution_correlations
+            .entry(group.body.name().clone())
+            .or_insert(MapExecutionCorrelation {
+                owner: group.name.clone(),
+                retention: CompletionPredicate::Always,
+                presence: CompletionPredicate::Always,
+                item_predicates: BTreeMap::new(),
+            });
+        if let Some(completion) = self.node_completion.get(group.body.name()).cloned() {
+            if let Ok(field) = FieldName::new("__map_body_completed") {
+                correlation.item_predicates.insert(field, completion);
+            }
+        }
     }
 
     fn collect_map_node_execution(
@@ -66,6 +97,8 @@ impl<'a> Analyzer<'a> {
                     node.name().clone(),
                     MapExecutionCorrelation {
                         owner: owner.clone(),
+                        retention: CompletionPredicate::Always,
+                        item_predicates: BTreeMap::new(),
                         presence,
                     },
                 );
@@ -117,26 +150,15 @@ impl<'a> Analyzer<'a> {
                 }
             }
             GraphNode::Par(parallel) => {
-                self.map_execution_correlations.insert(
-                    parallel.name.clone(),
-                    MapExecutionCorrelation {
-                        owner: owner.clone(),
-                        presence: presence.clone(),
-                    },
-                );
-                if parallel_required_completions(&parallel.join, parallel.branches.as_slice().len())
-                    == u64::try_from(parallel.branches.as_slice().len()).unwrap_or(u64::MAX)
-                {
-                    for branch in parallel.branches.as_slice() {
-                        self.collect_map_node_execution(branch, owner, presence.clone());
-                    }
-                }
+                self.collect_parallel_execution(parallel, owner, presence);
             }
             GraphNode::Loop(group) => {
                 self.map_execution_correlations.insert(
                     group.name.clone(),
                     MapExecutionCorrelation {
                         owner: owner.clone(),
+                        retention: CompletionPredicate::Always,
+                        item_predicates: BTreeMap::new(),
                         presence: presence.clone(),
                     },
                 );
@@ -147,11 +169,33 @@ impl<'a> Analyzer<'a> {
                     nested.name.clone(),
                     MapExecutionCorrelation {
                         owner: owner.clone(),
+                        retention: CompletionPredicate::Always,
+                        item_predicates: BTreeMap::new(),
                         presence,
                     },
                 );
             }
             GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
+        }
+    }
+
+    fn collect_parallel_execution(
+        &mut self,
+        parallel: &ParNode,
+        owner: &NodeName,
+        presence: CompletionPredicate,
+    ) {
+        self.map_execution_correlations.insert(
+            parallel.name.clone(),
+            MapExecutionCorrelation {
+                owner: owner.clone(),
+                retention: CompletionPredicate::Always,
+                item_predicates: BTreeMap::new(),
+                presence: presence.clone(),
+            },
+        );
+        for branch in parallel.branches.as_slice() {
+            self.collect_map_node_execution(branch, owner, presence.clone());
         }
     }
 
@@ -197,9 +241,10 @@ impl<'a> Analyzer<'a> {
 fn map_effects(group: &MapNode, incoming: &Flow, body: &Effects) -> Effects {
     Effects {
         definite_nodes: BTreeSet::from([group.name.clone()]),
+        conditional_nodes: body.conditional_nodes.clone(),
         exit_failed: incoming.failed.union(&body.exit_failed).cloned().collect(),
         falls_through: true,
-        completion: CompletionPredicate::Always,
+        completion: map_completion_predicate(group).unwrap_or(CompletionPredicate::Always),
         ..Effects::default()
     }
 }

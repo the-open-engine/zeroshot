@@ -138,7 +138,7 @@ test('otherwise and repeat edges keep their authored meaning when targeting a lo
   );
 });
 
-test('map starts and empty/overflow bypasses survive unchanged, including nested loops', () => {
+test('map starts and empty bypasses survive unchanged, including nested loops', () => {
   const map: GraphNode = {
     kind: 'map',
     name: 'each',

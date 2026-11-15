@@ -7,6 +7,8 @@ use zeroshot_engine::full_v1_reducer::{
     StructuralOccurrence, TerminalProjection,
 };
 
+#[path = "support/impossible_joins.rs"]
+mod impossible_joins;
 #[path = "support/full_v1_reducer.rs"]
 mod reducer_test_support;
 use reducer_test_support::verifier;

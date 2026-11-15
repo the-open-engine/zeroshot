@@ -5,7 +5,7 @@
         "attemptsPerNode": {
           "mapWork": 1
         },
-        "maxNodeExecutions": 2,
+        "maxNodeExecutions": 65536,
         "peakConcurrency": 2,
         "termination": {
           "kind": "acyclic",

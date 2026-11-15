@@ -9,6 +9,7 @@ pub(super) struct ActivityRegistry {
 struct ActivityState {
     active: BTreeMap<ActiveKey, ActiveInvocation>,
     closed_runs: BTreeSet<RunId>,
+    captures: Vec<(RunId, std::sync::Weak<AtomicBool>)>,
     closed: bool,
 }
 
@@ -34,7 +35,41 @@ pub(super) struct ActivityToken {
     key: ActiveKey,
 }
 
+impl ActivityState {
+    fn cancel_captures(&mut self, run_id: Option<&RunId>) {
+        self.captures.retain(|(owner, request)| {
+            let Some(request) = request.upgrade() else {
+                return false;
+            };
+            if run_id.is_none_or(|run_id| run_id == owner) {
+                request.store(true, Ordering::Release);
+                false
+            } else {
+                true
+            }
+        });
+    }
+}
+
 impl ActivityRegistry {
+    pub(super) async fn capture(
+        &self,
+        run_id: &RunId,
+        operation: &conversations::ConversationIo,
+    ) -> bool {
+        let mut state = self.state.lock().await;
+        if state.closed || state.closed_runs.contains(run_id) {
+            return false;
+        }
+        state
+            .captures
+            .retain(|(_, request)| request.strong_count() != 0);
+        state
+            .captures
+            .push((run_id.clone(), operation.stop_handle()));
+        true
+    }
+
     pub(super) async fn register(
         &self,
         reference: &ExecutionRef,
@@ -71,6 +106,7 @@ impl ActivityRegistry {
         let targets = {
             let mut state = self.state.lock().await;
             state.closed_runs.insert(run_id.clone());
+            state.cancel_captures(Some(run_id));
             state
                 .active
                 .iter()
@@ -86,6 +122,7 @@ impl ActivityRegistry {
         let targets = {
             let mut state = self.state.lock().await;
             state.closed = true;
+            state.cancel_captures(None);
             state.active.values().map(close_target).collect::<Vec<_>>()
         };
         cancel_targets(&targets);
@@ -137,13 +174,17 @@ impl ActivityToken {
 #[derive(Clone)]
 pub(super) struct ManagedSession {
     inner: Arc<dyn NodeSession>,
+    node: NodeName,
     closed: Arc<AtomicBool>,
+    pub(super) process_slot: Arc<ProcessSlot>,
 }
 
 impl ManagedSession {
-    fn new(inner: Arc<dyn NodeSession>) -> Self {
+    fn new(inner: Arc<dyn NodeSession>, process_slot: Arc<ProcessSlot>, node: NodeName) -> Self {
         Self {
             inner,
+            node,
+            process_slot,
             closed: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -159,6 +200,7 @@ impl ManagedSession {
     async fn close(&self) {
         if !self.closed.swap(true, Ordering::SeqCst) {
             self.inner.close().await;
+            self.process_slot.release();
         }
     }
 
@@ -171,7 +213,9 @@ impl ManagedSession {
 pub(super) struct SessionPool {
     factory: Arc<dyn SessionFactory>,
     entries: Arc<Mutex<BTreeMap<SessionKey, SessionEntry>>>,
+    restored: Arc<Mutex<conversations::ConversationSources>>,
     boundary: ReusableSessionBoundary,
+    process_slots: ProcessSlots,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,14 +232,118 @@ pub(super) struct SessionCheckout<'a> {
 }
 
 impl SessionPool {
-    pub(super) fn factory(&self) -> Arc<dyn SessionFactory> {
-        self.factory.clone()
+    pub(super) async fn restore_conversations(
+        &self,
+        history: &[crate::full_v1_reducer::DurableExecution],
+        files: Option<conversations::ConversationFiles>,
+    ) {
+        if self.boundary != ReusableSessionBoundary::Run {
+            return;
+        }
+        let mut restored = self.restored.lock().await;
+        for execution in history {
+            restored.entry(execution.node_instance).or_insert_with(|| {
+                let node = execution.occurrence.node.clone();
+                let source = files
+                    .as_ref()
+                    .ok_or("checkpoint has no conversation")
+                    .and_then(|files| files.conversation(execution.node_instance, &node));
+                (node, source)
+            });
+        }
+    }
+
+    pub(super) async fn restore_session(
+        &self,
+        invocation: &NodeInvocation,
+        session: &ManagedSession,
+    ) -> Option<&'static str> {
+        if session_scope(&invocation.binding).ok() != Some(SessionScope::NodeInstance) {
+            return None;
+        }
+        let (_, source) = self
+            .restored
+            .lock()
+            .await
+            .remove(&invocation.reference.node_instance)?;
+        match source {
+            Ok(source) => {
+                if session.inner.restore_conversation(source).await {
+                    None
+                } else {
+                    Some("provider conversation restoration is unsupported")
+                }
+            }
+            Err(reason) => Some(reason),
+        }
+    }
+
+    pub(super) async fn capture_conversations(
+        &self,
+        run_id: &RunId,
+        operation: conversations::ConversationIo,
+    ) -> conversations::ConversationCapture {
+        if self.boundary != ReusableSessionBoundary::Run {
+            return conversations::ConversationCapture::default();
+        }
+        let mut sources = self
+            .restored
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, (_, source))| source.is_ok())
+            .map(|(id, value)| (*id, value.clone()))
+            .collect::<conversations::ConversationSources>();
+        let guard = operation.cancel_on_drop();
+        // Keep session ownership until the blocking copy has stopped, even if its caller drops.
+        // close_run/close_all must acquire this same lock before closing provider homes.
+        let entries = self.entries.clone().lock_owned().await;
+        let sessions = entries
+            .iter()
+            .filter_map(|(key, entry)| match (key, entry) {
+                (
+                    SessionKey::Run {
+                        run_id: owner,
+                        node_instance,
+                    },
+                    SessionEntry::Live(session),
+                ) if owner == run_id => Some((*node_instance, session.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for (instance, session) in sessions {
+            sources.insert(
+                instance,
+                (session.node.clone(), session.inner.conversation().await),
+            );
+        }
+        let copying = operation.clone();
+        let captured = tokio::task::spawn_blocking(move || {
+            let _entries = entries;
+            conversations::capture_until_stopped(sources, &copying)
+        })
+        .await
+        .unwrap_or_default();
+        guard.disarm();
+        captured
+    }
+
+    pub(super) fn isolated(&self) -> Self {
+        Self {
+            factory: self.factory.clone(),
+            entries: Arc::new(Mutex::new(BTreeMap::new())),
+            restored: Arc::default(),
+            boundary: ReusableSessionBoundary::Run,
+            process_slots: self.process_slots.clone(),
+        }
     }
     pub(super) fn new(factory: Arc<dyn SessionFactory>) -> Self {
         Self {
             factory,
             entries: Arc::new(Mutex::new(BTreeMap::new())),
+            restored: Arc::default(),
             boundary: ReusableSessionBoundary::Run,
+            process_slots: ProcessSlots::default(),
         }
     }
 
@@ -203,20 +351,9 @@ impl SessionPool {
         Self {
             factory,
             entries: Arc::new(Mutex::new(BTreeMap::new())),
+            restored: Arc::default(),
             boundary: ReusableSessionBoundary::Owner,
-        }
-    }
-
-    pub(super) fn provider_session_slot(
-        &self,
-        invocation: &NodeInvocation,
-        owner_slot: u64,
-    ) -> Result<NodeInstanceId, NodeRunnerError> {
-        match self.boundary {
-            ReusableSessionBoundary::Run => Ok(invocation.reference.node_instance),
-            ReusableSessionBoundary::Owner => {
-                NodeInstanceId::new(owner_slot).map_err(|_| NodeRunnerError::InvalidRole)
-            }
+            process_slots: ProcessSlots::default(),
         }
     }
 
@@ -230,11 +367,7 @@ impl SessionPool {
             let session = self
                 .open_session(request.invocation, request.environment, cancellation)
                 .await?;
-            return Ok(SessionLease {
-                session,
-                pool: self.clone(),
-                kind: SessionLeaseKind::Execution,
-            });
+            return SessionLease::checked(session, self.clone(), SessionLeaseKind::Execution);
         }
 
         let key = self.reusable_key(request.invocation, request.owner_slot)?;
@@ -253,7 +386,8 @@ impl SessionPool {
             },
             ReusableSessionBoundary::Owner => SessionKey::Owner {
                 node: invocation.reference.node.clone(),
-                provider_session_slot: self.provider_session_slot(invocation, owner_slot)?,
+                provider_session_slot: NodeInstanceId::new(owner_slot)
+                    .map_err(|_| NodeRunnerError::InvalidRole)?,
             },
         })
     }
@@ -312,11 +446,7 @@ impl SessionPool {
             self.invalidate(key, session, SessionEntry::Lost).await;
             return Err(NodeRunnerError::SessionLost);
         }
-        Ok(SessionLease {
-            session,
-            pool: self.clone(),
-            kind: SessionLeaseKind::Reusable(key),
-        })
+        SessionLease::checked(session, self.clone(), SessionLeaseKind::Reusable(key))
     }
 
     async fn open_session(
@@ -330,7 +460,14 @@ impl SessionPool {
             _ = wait_for_cancellation(cancellation) => return Err(NodeRunnerError::Cancelled),
             session = self.factory.open(invocation, environment) => session?,
         };
-        let session = ManagedSession::new(session);
+        let slot = match self.process_slots.acquire() {
+            Ok(slot) => slot,
+            Err(error) => {
+                session.close().await;
+                return Err(error);
+            }
+        };
+        let session = ManagedSession::new(session, slot, invocation.reference.node.clone());
         let live = tokio::select! {
             biased;
             _ = wait_for_cancellation(cancellation) => {
@@ -373,11 +510,11 @@ impl SessionPool {
                 match opened {
                     Ok(session) => {
                         entries.insert(key.clone(), SessionEntry::Live(session.clone()));
-                        Ok(SessionLease {
+                        SessionLease::checked(
                             session,
-                            pool: self.clone(),
-                            kind: SessionLeaseKind::Reusable(key),
-                        })
+                            self.clone(),
+                            SessionLeaseKind::Reusable(key),
+                        )
                     }
                     Err(error) => {
                         if error == NodeRunnerError::Cancelled {
@@ -417,6 +554,7 @@ impl SessionPool {
         if self.boundary == ReusableSessionBoundary::Owner {
             return;
         }
+        self.restored.lock().await.clear();
         let mut entries = self.entries.lock().await;
         let keys = entries
             .keys()
@@ -536,6 +674,19 @@ pub(super) struct SessionLease {
 }
 
 impl SessionLease {
+    fn checked(
+        session: ManagedSession,
+        pool: SessionPool,
+        kind: SessionLeaseKind,
+    ) -> Result<Self, NodeRunnerError> {
+        session.process_slot.begin()?;
+        Ok(Self {
+            session,
+            pool,
+            kind,
+        })
+    }
+
     pub(super) fn binding(&self) -> SessionBinding {
         SessionBinding {
             session: self.session.clone(),
@@ -544,6 +695,7 @@ impl SessionLease {
     }
 
     pub(super) async fn finish(self, clean: bool) {
+        let slot = self.session.process_slot.clone();
         match self.kind {
             SessionLeaseKind::Execution => self.session.close().await,
             SessionLeaseKind::Reusable(_) if clean => {}
@@ -553,6 +705,7 @@ impl SessionLease {
                     .await;
             }
         }
+        slot.end();
     }
 }
 

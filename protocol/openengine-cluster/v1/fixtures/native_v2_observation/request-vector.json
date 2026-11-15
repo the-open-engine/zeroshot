@@ -1,0 +1,26 @@
+{
+  "createdAt": 1762905600000,
+  "expiresAt": 1763510400000,
+  "id": "request-1",
+  "kind": "request",
+  "node": "approval",
+  "output": {
+    "fields": {
+      "feedback": {
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      }
+    },
+    "kind": "record"
+  },
+  "runId": "run-1",
+  "signals": {
+    "decision": [
+      "approved",
+      "rejected"
+    ]
+  },
+  "text": "Ready to continue?"
+}

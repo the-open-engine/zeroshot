@@ -329,7 +329,7 @@ pub(super) struct SettledExecutionSpec<'a> {
 }
 
 fn settled_execution(spec: SettledExecutionSpec<'_>, outcome: WorkerOutcome) -> DurableExecution {
-    let dispatch_position = HistoryPosition::new(spec.settled_at.saturating_sub(1)).assert_value();
+    let dispatch_position = HistoryPosition::new(spec.settled_at * 2 - 1).assert_value();
     let node_instance = NodeInstanceId::new(spec.node_instance).assert_value();
     let execution = ExecutionId::new(spec.execution).assert_value();
     let occurrence = StructuralOccurrence {
@@ -337,7 +337,7 @@ fn settled_execution(spec: SettledExecutionSpec<'_>, outcome: WorkerOutcome) -> 
         map_indices: Vec::new(),
     };
     let state = DurableExecutionState::Settled {
-        position: HistoryPosition::new(spec.settled_at).assert_value(),
+        position: HistoryPosition::new(spec.settled_at * 2).assert_value(),
         outcome,
     };
     DurableExecution {

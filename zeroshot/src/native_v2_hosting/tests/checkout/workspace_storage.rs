@@ -9,7 +9,12 @@ use crate::native_v2_supervisor::checkpoints::{
     CheckpointError, ResticCheckpointStore, ResticCheckpointStoreTestConfig,
 };
 
+#[derive(Default)]
 struct ExternalStorage {
+    vectors: Vec<openengine_cluster_protocol::RunVector>,
+    resumed_from: Option<RunId>,
+    request: Option<crate::native_v2_hosting::HostedRequestContinuation>,
+    history: Vec<crate::full_v1_reducer::DurableExecution>,
     reject: bool,
     comment_publications: Option<Arc<dyn CommentPublicationStore>>,
 }
@@ -40,6 +45,8 @@ impl HostedWorkspaceStorage for ExternalStorage {
             b"durable platform bytes",
         )?;
         Ok(HostedWorkspace {
+            resumed_from: self.resumed_from.clone(),
+            vector_seed: self.vectors.clone(),
             comment_publications: self.comment_publications.clone(),
             checkpoints: Arc::new(ResticCheckpointStore::with_program(
                 ResticCheckpointStoreTestConfig {
@@ -55,7 +62,8 @@ impl HostedWorkspaceStorage for ExternalStorage {
                     )?,
                 },
             )),
-            execution_seed: Vec::new(),
+            execution_seed: self.history.clone(),
+            request_continuation: self.request.clone(),
             // Recovery keeps the historical identity even after the product rename.
             delivery_run_id: Some(RunId::new("original-cloud-delivery")),
         })
@@ -69,6 +77,7 @@ async fn external_workspace_restore_precedes_dispatch_and_preserves_delivery_lin
         Some(Arc::new(ExternalStorage {
             reject: false,
             comment_publications: None,
+            ..Default::default()
         })),
     )
     .await;
@@ -100,6 +109,7 @@ async fn external_restore_failure_never_releases_an_allocated_capsule() {
         Some(Arc::new(ExternalStorage {
             reject: true,
             comment_publications: None,
+            ..Default::default()
         })),
     )
     .await;
@@ -213,6 +223,7 @@ async fn comment_fixture(
         reject: false,
         comment_publications: host_supplied_store
             .then(|| Arc::new(store.clone()) as Arc<dyn CommentPublicationStore>),
+        ..Default::default()
     }));
     fixture.allocator =
         ProductionCapsuleAllocator::new(Arc::new(config), fixture.diagnostics.clone())
@@ -349,6 +360,312 @@ async fn hosted_comment_candidate_uses_authorized_store_scope_and_restored_deliv
         successor
             .cleanup
             .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+            .await
+            .assert_value();
+    }
+}
+
+#[tokio::test]
+async fn owned_storage_is_opt_in_and_returns_the_successors_exact_vector_record() {
+    use crate::native_v2_target_authority::TargetControllerFactory;
+    use openengine_cluster_protocol::{RunVectorContent, VectorId};
+    let predecessor = RunId::new("host-predecessor");
+    let vector = openengine_cluster_protocol::RunVector {
+        id: VectorId::new("original-entry").assert_value(),
+        run_id: predecessor.clone(),
+        created_at: crate::native_v2_runner::current_timestamp(),
+        content: RunVectorContent::SuspendRequest {},
+    };
+    let mut fixture = CheckoutFixture::with_workspace_storage(
+        "",
+        Some(Arc::new(ExternalStorage {
+            vectors: vec![vector.clone()],
+            resumed_from: Some(predecessor.clone()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert!(fixture.allocator.suspension_policy().is_none());
+    assert!(
+        !ProductionTargetControllerFactory::new(fixture.config.as_ref().clone())
+            .supports_run_suspension()
+    );
+    let mut config = fixture.config.as_ref().clone();
+    config.suspension = Some(crate::native_v2_wait::WaitPolicy::default());
+    assert!(ProductionTargetControllerFactory::new(config.clone()).supports_run_suspension());
+    fixture.allocator =
+        ProductionCapsuleAllocator::new(Arc::new(config), fixture.diagnostics.clone())
+            .assert_value()
+            .with_test_filesystem_and_source(
+                fixture._repository.remote.clone(),
+                portable_filesystem,
+            );
+    assert!(fixture.allocator.suspension_policy().is_some());
+    let capsule = fixture.allocate().await.assert_value();
+    assert_eq!(capsule.vector_seed[0], vector);
+    assert!(
+        matches!(&capsule.vector_seed[1].content, RunVectorContent::Continuation {resumed_from} if resumed_from == &predecessor)
+    );
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Suspended)
+        .await
+        .assert_value();
+    assert!(
+        !fixture.allocator.run_path(&fixture.run_id).exists(),
+        "owned storage disposes the allocation after publication"
+    );
+}
+
+fn request_continuation(expired: bool) -> crate::native_v2_hosting::HostedRequestContinuation {
+    use openengine_cluster_protocol::{RunResumeFrom, UnixTimestampMillis};
+    let suspension = serde_json::from_value(json!({
+        "reason": "request", "node": "approval", "createdAt": 1000,
+        "request": {
+            "id": "question", "text": "Approve?",
+            "signals": {"decision": ["approved", "rejected"]},
+            "output": {"kind": "record", "fields": {}},
+            "expiresAt": if expired {1001} else {openengine_cluster_protocol::MAX_SAFE_GENERATION}
+        }
+    }))
+    .assert_value();
+    let from = if expired {
+        RunResumeFrom::Expiry {}
+    } else {
+        serde_json::from_value(
+            json!({"kind":"answer","signals":{"decision":"approved"},"output":{}}),
+        )
+        .assert_value()
+    };
+    crate::native_v2_hosting::HostedRequestContinuation::validate(
+        suspension,
+        from,
+        UnixTimestampMillis::new(if expired { 1001 } else { 1000 }).assert_value(),
+    )
+    .assert_value()
+}
+fn pending_request() -> crate::full_v1_reducer::DurableExecution {
+    use crate::full_v1_reducer::*;
+    DurableExecution {
+        delivery_state: None,
+        dispatch_position: HistoryPosition::new(1).assert_value(),
+        node_instance: NodeInstanceId::new(1).assert_value(),
+        execution: ExecutionId::new(1).assert_value(),
+        occurrence: StructuralOccurrence {
+            node: NodeName::new("approval").assert_value(),
+            map_indices: vec![],
+        },
+        attempt: openengine_cluster_protocol::PositiveInteger::new(1).assert_value(),
+        input: json!({"text":"Approve?"}),
+        state: DurableExecutionState::Active,
+    }
+}
+async fn request_workspace_fixture(enabled: bool, expired: bool) -> CheckoutFixture {
+    request_workspace_with_continuation(enabled, request_continuation(expired)).await
+}
+async fn request_workspace_with_continuation(
+    enabled: bool,
+    continuation: crate::native_v2_hosting::HostedRequestContinuation,
+) -> CheckoutFixture {
+    let storage = ExternalStorage {
+        resumed_from: Some(RunId::new("request-source")),
+        request: Some(continuation),
+        history: vec![pending_request()],
+        ..Default::default()
+    };
+    let mut fixture = CheckoutFixture::with_workspace_storage("", Some(Arc::new(storage))).await;
+    let mut config = (*fixture.config).clone();
+    config.request_ask = enabled;
+    config.suspension = Some(Default::default());
+    fixture.config = Arc::new(config);
+    fixture.allocator =
+        ProductionCapsuleAllocator::new(fixture.config.clone(), fixture.diagnostics.clone())
+            .assert_value()
+            .with_test_filesystem_and_source(
+                fixture._repository.remote.clone(),
+                portable_filesystem,
+            );
+    let runtime:RuntimePlan=serde_json::from_value(json!({"harness":"codex","provider":"openai","size":"small","activeMemory":{"repository":false,"graph":false},"nodes":{"approval":{"kind":"request"}}})).assert_value();
+    let mut request = submission(runtime, &fixture._repository.main_revision, "host-request");
+    request.graph = serde_json::from_value(json!({
+        "profile": "openengine.graph.full/v1",
+        "initialInput": {
+            "kind": "record",
+            "fields": {"text": {"required": true, "type": {"kind": "string"}}}
+        },
+        "policy": {"policy": "policy.native-v2@1", "default": "deny"},
+        "root": {
+            "kind": "seq",
+            "name": "root",
+            "state": {
+                "kind": "record",
+                "fields": {"text": {"required": true, "type": {"kind": "string"}}}
+            },
+            "children": [
+                {
+                    "kind": "verifier",
+                    "name": "approval",
+                    "worker": crate::native_v2_request::ASK_WORKER_REF,
+                    "input": crate::native_v2_request::input_schema().assert_value(),
+                    "output": {"kind": "record", "fields": {}},
+                    "signals": {"decision": ["approved", "rejected"]},
+                    "diagnostic": crate::native_v2_wait::diagnostic_schema().assert_value(),
+                    "inputBindings": [{
+                        "target": ["text"],
+                        "value": {"source": "state", "path": ["text"]}
+                    }],
+                    "writeBindings": [],
+                    "attempts": 1
+                },
+                {"kind": "succeed", "name": "done", "output": {"kind": "null"}, "bindings": []}
+            ],
+            "promotedStatePaths": []
+        }
+    }))
+    .assert_value();
+    request.initial_input = json!({"text":"Approve?"});
+    fixture.admitted = admit(request).await;
+    fixture
+}
+#[tokio::test]
+async fn external_request_history_settles_before_any_worker_and_requires_independent_opt_in() {
+    use crate::full_v1_reducer::DurableExecutionState;
+    use openengine_cluster_protocol::{WorkerOutcome, WorkerErrorCode};
+    assert!(
+        request_workspace_fixture(false, false)
+            .await
+            .allocate()
+            .await
+            .is_err()
+    );
+    for expired in [false, true] {
+        let fixture = request_workspace_fixture(true, expired).await;
+        let capsule = fixture.allocate().await.assert_value();
+        let DurableExecutionState::Settled { outcome, .. } = &capsule.execution_seed[0].state
+        else {
+            panic!("request was not settled");
+        };
+        assert!(matches!(
+            (outcome, expired),
+            (WorkerOutcome::Verifier { .. }, false)
+                | (
+                    WorkerOutcome::Error {
+                        code: WorkerErrorCode::Timeout,
+                        ..
+                    },
+                    true
+                )
+        ));
+        assert!(capsule.vector_seed.iter().any(|entry| matches!(
+            (&entry.content, expired),
+            (
+                openengine_cluster_protocol::RunVectorContent::Answer { .. },
+                false
+            ) | (
+                openengine_cluster_protocol::RunVectorContent::Expiry { .. },
+                true
+            )
+        )));
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+            .await
+            .assert_value();
+    }
+}
+#[test]
+fn host_can_validate_shape_and_deadline_before_starting_anything() {
+    use openengine_cluster_protocol::{RunResumeFrom, UnixTimestampMillis};
+    use crate::native_v2_hosting::HostedRequestContinuation;
+    let mut suspension = request_continuation(false).suspension;
+    if let openengine_cluster_protocol::RunSuspension::Request { request, .. } = &mut suspension {
+        request.expires_at = UnixTimestampMillis::new(2000).assert_value();
+    }
+    let answer: RunResumeFrom = serde_json::from_value(json!({
+        "kind":"answer", "signals":{"decision":"approved"}, "output":{}
+    }))
+    .assert_value();
+    let validate = |from, now| {
+        HostedRequestContinuation::validate(
+            suspension.clone(),
+            from,
+            UnixTimestampMillis::new(now).assert_value(),
+        )
+    };
+    assert!(validate(answer.clone(), 1999).is_ok());
+    assert!(validate(answer, 2000).unwrap_err().contains("expired"));
+    assert!(validate(RunResumeFrom::Expiry {}, 1999).is_err());
+    assert!(validate(RunResumeFrom::Expiry {}, 2000).is_ok());
+    assert!(
+        validate(
+            RunResumeFrom::Answer {
+                signals: Default::default(),
+                output: json!({}),
+            },
+            1999
+        )
+        .unwrap_err()
+        .contains("signals.decision")
+    );
+}
+
+#[tokio::test]
+async fn accepted_host_resolution_survives_restoration_after_deadline_or_on_a_behind_clock() {
+    use crate::full_v1_reducer::DurableExecutionState;
+    use crate::native_v2_hosting::HostedRequestContinuation;
+    use openengine_cluster_protocol::{
+        RunResumeFrom, RunSuspension, UnixTimestampMillis, WorkerOutcome, WorkerErrorCode,
+    };
+    for expired in [false, true] {
+        let mut suspension = request_continuation(false).suspension;
+        let deadline = if expired {
+            openengine_cluster_protocol::MAX_SAFE_GENERATION
+        } else {
+            1001
+        };
+        if let RunSuspension::Request { request, .. } = &mut suspension {
+            request.expires_at = UnixTimestampMillis::new(deadline).assert_value();
+        }
+        let now = crate::native_v2_runner::current_timestamp().get();
+        assert_eq!(
+            now < deadline,
+            expired,
+            "fixture must straddle the allocator's clock"
+        );
+        let from = if expired {
+            RunResumeFrom::Expiry {}
+        } else {
+            serde_json::from_value(
+                json!({"kind":"answer","signals":{"decision":"approved"},"output":{}}),
+            )
+            .assert_value()
+        };
+        let accepted = HostedRequestContinuation::validate(
+            suspension,
+            from,
+            UnixTimestampMillis::new(if expired { deadline } else { 1000 }).assert_value(),
+        )
+        .assert_value();
+        let fixture = request_workspace_with_continuation(true, accepted).await;
+        let capsule = fixture.allocate().await.assert_value();
+        let DurableExecutionState::Settled { outcome, .. } = &capsule.execution_seed[0].state
+        else {
+            panic!("host's accepted resolution was not settled");
+        };
+        assert!(matches!(
+            (outcome, expired),
+            (WorkerOutcome::Verifier { .. }, false)
+                | (
+                    WorkerOutcome::Error {
+                        code: WorkerErrorCode::Timeout,
+                        ..
+                    },
+                    true
+                )
+        ));
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Failed)
             .await
             .assert_value();
     }

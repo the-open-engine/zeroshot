@@ -87,6 +87,7 @@ async fn two_sessions_never_share_a_store() {
     let first = invocation(&[]);
     let mut second = invocation(&[]);
     second.provider_session_slot = NodeInstanceId::new(2).assert_value();
+    second.provider_home_slot = NodeInstanceId::new(2).assert_value();
     assert!(run(&adapter, first).await.is_ok());
     assert!(run(&adapter, second).await.is_ok());
     let run_env = std::fs::read_to_string(adapter.config.workspace.join("run-env")).assert_value();

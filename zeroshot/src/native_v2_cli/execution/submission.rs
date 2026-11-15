@@ -736,6 +736,11 @@ struct UniformRuntimePlan {
     provider: openengine_cluster_protocol::ProviderId,
     #[serde(default)]
     size: Option<RunSize>,
+    #[serde(
+        default,
+        deserialize_with = "openengine_cluster_protocol::RuntimePlan::deserialize_max_concurrency"
+    )]
+    max_concurrency: Option<openengine_cluster_protocol::PositiveInteger>,
     #[serde(default = "default_workspace_checkpoints")]
     workspace_checkpoints: bool,
     model: ModelId,
@@ -796,6 +801,10 @@ impl UniformRuntimePlan {
         let mut nodes = BTreeMap::new();
         let mode = crate::native_v2_admission::delivery_mode(&graph.root);
         for (name, delivery) in executable_runtime_roles(&graph.root) {
+            if is_wait_node(&graph.root, &name) {
+                nodes.insert(name, NodeRuntimeBinding::Request {});
+                continue;
+            }
             if is_comment_node(&graph.root, &name) {
                 nodes.insert(
                     name,
@@ -849,6 +858,7 @@ impl UniformRuntimePlan {
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
         Ok(RuntimePlan {
+            max_concurrency: self.max_concurrency,
             harness,
             provider: self.provider,
             size: self.size,
@@ -858,6 +868,21 @@ impl UniformRuntimePlan {
             nodes,
         })
     }
+}
+
+fn is_wait_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeName) -> bool {
+    if root.name() == name
+        && let openengine_cluster_protocol::GraphNode::Verifier(node) = root
+    {
+        return [
+            crate::native_v2_wait::WAIT_WORKER_REF,
+            crate::native_v2_request::ASK_WORKER_REF,
+        ]
+        .contains(&node.worker.as_str());
+    }
+    openengine_cluster_server::graph_verifier::graph_node_children(root)
+        .into_iter()
+        .any(|child| is_wait_node(child, name))
 }
 
 fn is_comment_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeName) -> bool {
@@ -944,10 +969,12 @@ where
         path: path.to_owned(),
         source,
     })?;
-    serde_json::from_slice(&bytes).map_err(|source| NativeV2CliError::Json {
-        kind,
-        path: path.to_owned(),
-        source,
+    openengine_cluster_protocol::bounded_json_from_slice(&bytes).map_err(|source| {
+        NativeV2CliError::Json {
+            kind,
+            path: path.to_owned(),
+            source,
+        }
     })
 }
 

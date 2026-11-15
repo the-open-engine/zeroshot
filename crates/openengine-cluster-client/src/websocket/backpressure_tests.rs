@@ -1,5 +1,5 @@
 use super::*;
-use crate::SubscriptionTransport;
+use crate::{JsonRpcTransport, SubscriptionTransport};
 use openengine_cluster_protocol::RequestId;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
@@ -27,6 +27,42 @@ async fn websocket_fixture(
 async fn receive_request(server: &mut WebSocketStream<DuplexStream>) -> serde_json::Value {
     let request = server.next().await.assert_value().assert_value();
     serde_json::from_str(request.to_text().assert_value()).assert_value()
+}
+
+#[tokio::test]
+async fn ordinary_replies_keep_their_allowance_and_inventory_entries_remain_bounded() {
+    let status = json!({
+        "runId":"run-1","title":"Approval",
+        "source":{"repository":"open-engine/zeroshot","branch":"main",
+            "revision":"0123456789abcdef0123456789abcdef01234567"},
+        "size":"small","atCursor":"v2:1","status":{"phase":"admitted"},
+        "padding":"x".repeat(openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES)
+    });
+    for (result, accepted) in [
+        (json!({"value":"x".repeat(4 * 1024 * 1024)}), true),
+        (json!({"runs":[status]}), false),
+    ] {
+        let (transport, mut server) = websocket_fixture(4_096, false).await;
+        let peer = tokio::spawn(async move {
+            let request = receive_request(&mut server).await;
+            server
+                .send(Message::text(
+                    json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string(),
+                ))
+                .await
+                .assert_value();
+        });
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            transport.request(
+                json!({"jsonrpc":"2.0","id":1,"method":"run/list","params":{}}).to_string(),
+            ),
+        )
+        .await
+        .assert_value();
+        assert_eq!(result.is_ok(), accepted, "{result:?}");
+        peer.await.assert_value();
+    }
 }
 
 async fn send_subscription_response(

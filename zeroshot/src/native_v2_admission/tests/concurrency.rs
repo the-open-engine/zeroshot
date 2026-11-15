@@ -116,7 +116,6 @@ async fn rejects_delivery_repeated_by_concurrent_maps_through_nested_groups() {
         choice(delivery(), None),
         choice(null_verifier("other", "agent.other@1"), Some(delivery())),
         sequence(vec![writer(), delivery()]),
-        mapped("inner", 1, delivery()),
     ] {
         assert_rejected(
             request(mapped("each", 2, body)),
@@ -145,8 +144,6 @@ async fn admits_delivery_after_joined_writers_and_in_sequential_groups() {
             delivery(),
         ]),
         sequence(vec![mapped("each", 2, writer()), delivery()]),
-        mapped("each", 1, delivery()),
-        mapped("outer", 1, mapped("inner", 1, delivery())),
         looped(sequence(vec![writer(), delivery()])),
         choice(writer(), Some(delivery())),
     ] {
@@ -167,4 +164,48 @@ async fn delivery_cannot_overlap_a_reviewer_of_the_shared_workspace() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn serial_concurrency_does_not_authorize_repeated_map_delivery() {
+    for node in [
+        mapped("each", 1, delivery()),
+        mapped("outer", 1, mapped("each", 1, delivery())),
+    ] {
+        let mut request = request(node);
+        request.runtime.max_concurrency =
+            Some(openengine_cluster_protocol::PositiveInteger::new(1).assert_value());
+        assert_rejected(
+            request,
+            NativeV2AdmissionError::ConcurrentMapDelivery {
+                map: named("each"),
+                delivery: named("deliver"),
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn admission_accepts_the_concurrency_ceiling_and_rejects_the_next_value() {
+    for (limit, valid) in [(65536, true), (65537, false)] {
+        let mut submission = request(writer());
+        submission.runtime.max_concurrency =
+            Some(openengine_cluster_protocol::PositiveInteger::new(limit).assert_value());
+        let result = NativeV2Admission
+            .validate_profile(
+                &submission.graph,
+                &submission.runtime,
+                DeliveryPolicy::Optional,
+            )
+            .await;
+        if valid {
+            result.assert_value();
+        } else {
+            assert!(matches!(
+                result,
+                Err(NativeV2AdmissionError::InvalidRuntime(_))
+            ));
+        }
+    }
 }

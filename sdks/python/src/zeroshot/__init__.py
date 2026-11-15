@@ -25,6 +25,7 @@ from .run_errors import (
 from .run_errors import (
     RunNotFoundError as RunNotFoundError,
 )
+from .run_errors import RunSuspendedError as RunSuspendedError
 from .run_errors import (
     RunWaitTimeout as RunWaitTimeout,
 )
@@ -46,6 +47,10 @@ from .runs import (
 from .runs import (
     FailureDiagnostic as FailureDiagnostic,
 )
+from .runs import HumanRequest as HumanRequest
+from .runs import InboxEntry as InboxEntry
+from .runs import InboxPage as InboxPage
+from .runs import InboxRequest as InboxRequest
 from .runs import (
     LogEvent as LogEvent,
 )
@@ -61,6 +66,8 @@ from .runs import (
 from .runs import (
     RunSummary as RunSummary,
 )
+from .runs import RunVector as RunVector
+from .runs import RunVectorsPage as RunVectorsPage
 from .runtime import (
     DirectTarget as DirectTarget,
 )

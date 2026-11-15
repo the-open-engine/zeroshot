@@ -90,6 +90,7 @@ async fn with_resolver(graph: GraphSpec, resolver: Arc<Resolver>) -> Harness {
         Value::Null,
         FakeDriver::default(),
         HarnessOptions {
+            max_concurrency: None,
             session_scope: SessionScope::Execution,
             resolver: Some(resolver),
         },

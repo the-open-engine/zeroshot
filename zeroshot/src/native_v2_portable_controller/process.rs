@@ -38,6 +38,10 @@ const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    predecessor: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    request_resolution: Option<openengine_cluster_protocol::RequestResolution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     delivery_receipt: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
@@ -98,6 +102,8 @@ impl PortableBootstrapDocument {
             return Err(PortableControllerError::Bootstrap);
         }
         Ok(PortableControllerBootstrap {
+            predecessor: self.predecessor,
+            request_resolution: self.request_resolution,
             delivery_receipt: self.delivery_receipt,
             local_branch: self.local_branch,
             checkpoint: self.checkpoint,
@@ -143,7 +149,8 @@ pub fn read_ready(
 ) -> Result<PortableControllerReady, PortableControllerError> {
     let bytes = read_bounded_regular_file(&paths.ready(), READY_MAX_BYTES)?;
     let ready: PortableControllerReady =
-        serde_json::from_slice(&bytes).map_err(|_| PortableControllerError::Readiness)?;
+        openengine_cluster_protocol::bounded_json_from_slice(&bytes)
+            .map_err(|_| PortableControllerError::Readiness)?;
     if ready.kind != READY_KIND || ready.socket != paths.socket() {
         return Err(PortableControllerError::Readiness);
     }
@@ -252,9 +259,10 @@ pub fn load_bootstrap_file(
 ) -> Result<PortableControllerBootstrap, PortableControllerError> {
     let file = validate_private_bootstrap(path)?;
     let bytes = read_bounded_file(file, BOOTSTRAP_MAX_BYTES)?;
-    let parsed = serde_json::from_slice::<PortableBootstrapDocument>(&bytes)
-        .map_err(|_| PortableControllerError::Bootstrap)
-        .and_then(PortableBootstrapDocument::validate);
+    let parsed =
+        openengine_cluster_protocol::bounded_json_from_slice::<PortableBootstrapDocument>(&bytes)
+            .map_err(|_| PortableControllerError::Bootstrap)
+            .and_then(PortableBootstrapDocument::validate);
     std::fs::remove_file(path).map_err(|_| PortableControllerError::BootstrapCleanup)?;
     parsed
 }
@@ -286,6 +294,8 @@ fn encode_bootstrap(
         .filter(|milliseconds| *milliseconds > 0)
         .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
+        predecessor: bootstrap.predecessor.clone(),
+        request_resolution: bootstrap.request_resolution.clone(),
         delivery_receipt: bootstrap.delivery_receipt.clone(),
         checkpoint: bootstrap.checkpoint.clone(),
         preparation_timeout_ms,

@@ -22,11 +22,11 @@ pub const FULL_V1_MAX_GRAPH_NODES: u64 = 4_096;
 pub const FULL_V1_MAX_GRAPH_DEPTH: u64 = 64;
 pub const FULL_V1_MAX_GUARD_NODES: u64 = 4_096;
 pub const FULL_V1_MAX_GUARD_ASSIGNMENTS: u64 = 65_536;
-pub const FULL_V1_MAX_MAP_ITEMS: u64 = 1_024;
+pub const FULL_V1_MAX_MAP_ITEMS: u64 = 65_536;
 pub const FULL_V1_MAX_ATTEMPTS_PER_NODE: u64 = 100;
 pub const FULL_V1_MAX_NODE_EXECUTIONS: u64 = 65_536;
 pub const FULL_V1_MAX_LOOP_ENTRIES: u64 = 65_536;
-pub const FULL_V1_MAX_PEAK_CONCURRENCY: u64 = 1_024;
+pub const FULL_V1_MAX_PEAK_CONCURRENCY: u64 = 65_536;
 
 /// Reusable full-v1 verifier. The registry is the verifier's only asynchronous input.
 pub struct ProductionGraphVerifier<R> {
@@ -154,6 +154,11 @@ enum CompletionPredicate {
     #[default]
     Never,
     Guard(Guard),
+    Shared(std::sync::Arc<Self>),
+    CandidateGuard {
+        guard: std::sync::Arc<Guard>,
+        available: std::sync::Arc<BTreeMap<SelectorKey, CompletionPredicate>>,
+    },
     Not(Box<Self>),
     All(Vec<Self>),
     Any(Vec<Self>),
@@ -167,17 +172,26 @@ enum CompletionPredicate {
 enum ParallelJoinCorrelation {
     Joined {
         completion: CompletionPredicate,
+        retention: ParallelRetention,
     },
     First {
         satisfaction: CompletionPredicate,
-        all_completions: CompletionPredicate,
+        retention: ParallelRetention,
     },
+}
+
+#[derive(Clone)]
+struct ParallelRetention {
+    branches: Vec<CompletionPredicate>,
+    required: u64,
 }
 
 #[derive(Clone)]
 struct MapExecutionCorrelation {
     owner: NodeName,
     presence: CompletionPredicate,
+    retention: CompletionPredicate,
+    item_predicates: BTreeMap<FieldName, CompletionPredicate>,
 }
 
 #[derive(Clone)]
@@ -186,17 +200,30 @@ struct ChoiceExecutionCorrelation {
     presence: CompletionPredicate,
 }
 
+impl MapExecutionCorrelation {
+    fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
+        self.retention.collect_guards(guards);
+        self.presence.collect_guards(guards);
+        for completion in self.item_predicates.values() {
+            completion.collect_guards(guards);
+        }
+    }
+}
+
 impl ParallelJoinCorrelation {
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
         match self {
-            Self::Joined { completion } => completion.collect_guards(guards),
-            Self::First {
-                satisfaction,
-                all_completions,
-            } => {
-                satisfaction.collect_guards(guards);
-                all_completions.collect_guards(guards);
-            }
+            Self::Joined { completion, .. } => completion.collect_guards(guards),
+            Self::First { satisfaction, .. } => satisfaction.collect_guards(guards),
+        }
+        for predicate in &self.retention().branches {
+            predicate.collect_guards(guards);
+        }
+    }
+
+    fn retention(&self) -> &ParallelRetention {
+        match self {
+            Self::Joined { retention, .. } | Self::First { retention, .. } => retention,
         }
     }
 
@@ -268,6 +295,21 @@ impl CompletionPredicate {
             Self::Always => true,
             Self::Never => false,
             Self::Guard(guard) => evaluate_guard(guard, assignment),
+            Self::Shared(predicate) => predicate.evaluate(assignment),
+            Self::CandidateGuard { guard, available } => {
+                openengine_cluster_protocol::evaluate_partial_guard(
+                    guard,
+                    &|selector, labels, _| {
+                        available
+                            .get(&SelectorKey::from(selector))
+                            .filter(|presence| {
+                                assignment.contains_key(&SelectorKey::from(selector))
+                                    && presence.evaluate(assignment)
+                            })
+                            .map(|_| selector_occurrences(selector, labels, assignment))
+                    },
+                ) == openengine_cluster_protocol::GuardTruth::True
+            }
             Self::Not(predicate) => !predicate.evaluate(assignment),
             Self::All(predicates) => predicates
                 .iter()
@@ -288,6 +330,13 @@ impl CompletionPredicate {
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
         match self {
             Self::Guard(guard) => guards.push(guard),
+            Self::Shared(predicate) => predicate.collect_guards(guards),
+            Self::CandidateGuard { guard, available } => {
+                guards.push(guard);
+                for presence in available.values() {
+                    presence.collect_guards(guards);
+                }
+            }
             Self::Not(predicate) => predicate.collect_guards(guards),
             Self::All(predicates) | Self::Any(predicates) | Self::AtLeast { predicates, .. } => {
                 for predicate in predicates {
@@ -351,12 +400,17 @@ impl Flow {
     }
 
     fn resolve_successful_writes(&mut self) {
-        let successful = self
-            .outcome_order
-            .iter()
-            .filter(|name| !self.failed.contains(*name))
-            .cloned()
-            .collect::<Vec<_>>();
+        let successful =
+            self.outcome_order
+                .iter()
+                .filter(|name| {
+                    !self.failed.contains(*name)
+                        && !self.conditional_nodes.iter().any(|(owner, nodes)| {
+                            self.failed.contains(owner) && nodes.contains(*name)
+                        })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
         for name in successful {
             if let Some(writes) = self.outcome_writes.remove(&name) {
                 retain_parallel_definition_effects(
@@ -441,10 +495,12 @@ struct Fold {
     executions: u64,
     concurrency: u64,
     loop_entries: u64,
+    dynamic: bool,
 }
 
 struct Analyzer<'a> {
     graph: &'a GraphSpec,
+    proof_work: ProofWork,
     nodes: BTreeMap<NodeName, NodeInfo<'a>>,
     authored: Vec<NodeName>,
     dependencies: BTreeMap<NodeName, BTreeSet<NodeName>>,
@@ -456,6 +512,7 @@ struct Analyzer<'a> {
     choice_reachability: BTreeMap<NodeName, ChoiceReachability>,
     choice_execution_correlations: BTreeMap<NodeName, Vec<ChoiceExecutionCorrelation>>,
     choice_write_conditions: BTreeMap<NodeName, CompletionPredicate>,
+    choice_routes: std::cell::RefCell<BTreeMap<NodeName, Vec<CompletionPredicate>>>,
     parallel_join_correlations: BTreeMap<NodeName, ParallelJoinCorrelation>,
     map_execution_correlations: BTreeMap<NodeName, MapExecutionCorrelation>,
     node_completion: BTreeMap<NodeName, CompletionPredicate>,
@@ -485,6 +542,7 @@ mod analyzer_parallel;
 mod analyzer_parallel_flow;
 mod analyzer_terminal;
 mod assignments;
+use assignments::ProofWork;
 mod choice;
 mod contexts;
 mod diagnostics;

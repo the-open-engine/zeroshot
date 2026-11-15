@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,73 @@ RUNTIME_PATH = Path(__file__).resolve().parents[1] / "native_runtime.py"
 spec = importlib.util.spec_from_file_location("hermes_native_runtime_test_subject", RUNTIME_PATH)
 runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
+
+
+class StartupTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="zeroshot-hermes-startup-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name).resolve()
+        self.home = self.root / "real" / "provider"
+        self.home.mkdir(parents=True)
+        for asset in RUNTIME_PATH.parent.glob("*.py"):
+            shutil.copyfile(asset, self.home / asset.name)
+        self.native = self.root / "native"
+        package = self.native / "hermes_cli"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "main.py").write_text(
+            "import os, sys\n"
+            "assert os.environ['NATIVE_STARTUP'] == 'preserved'\n"
+            "assert sys.argv[1:] == ['--version', '--help']\n"
+            "def main():\n    print('native metadata help')\n    return 0\n", encoding="utf-8")
+        (self.native / "sitecustomize.py").write_text(
+            "import os\nos.environ['NATIVE_STARTUP'] = 'preserved'\n", encoding="utf-8")
+
+    def startup(self, home, marker):
+        # Match bootstrap_environment: the private home precedes native Python resources,
+        # and the installed launcher receives only the fail-closed metadata arguments.
+        environment = {name: value for name, value in os.environ.items()
+                       if not name.startswith(("PYTHON", "HERMES_", "ZEROSHOT_"))}
+        environment["PYTHONPATH"] = os.pathsep.join(map(str, (home, self.native)))
+        if marker is not None:
+            environment["ZEROSHOT_HERMES_BRIDGE"] = str(marker)
+        result = subprocess.run(
+            [sys.executable, "-c", "from hermes_cli.main import main; raise SystemExit(main())",
+             "--version", "--help"], cwd=self.root, env=environment, input="",
+            capture_output=True, text=True, timeout=10)
+        self.assertNotIn("Error in sitecustomize", result.stderr)
+        return result
+
+    def test_real_and_symlinked_provider_homes_reach_ready(self):
+        homes = [self.home]
+        for name, target, suffix in [("direct", self.home, ()),
+                                     ("ancestor", self.home.parent, (self.home.name,))]:
+            alias = self.root / name
+            try:
+                alias.symlink_to(target, target_is_directory=True)
+            except OSError as error:
+                if os.name != "nt" or error.winerror != 1314:
+                    raise
+                self.skipTest("Creating directory symlinks requires Windows privileges.")
+            homes.append(alias.joinpath(*suffix))
+        for home in homes:
+            for marker in (home / "native_runtime.py", self.home / "native_runtime.py"):
+                with self.subTest(home=home, marker=marker):
+                    result = self.startup(home, marker)
+                    # The real bridge emits ready before native initialization, not exercised here.
+                    self.assertNotIn("native metadata help", result.stdout)
+                    self.assertEqual(json.loads(result.stdout.splitlines()[0]),
+                                     {"type": "ready", "protocol": 1})
+
+    def test_missing_invalid_and_mismatched_markers_remain_inactive(self):
+        for marker in (None, "", self.root / "missing.py", self.native / "hermes_cli" / "main.py",
+                       self.root / ("x" * 512) / "native_runtime.py",
+                       str(self.home / "native_runtime.py") + "/child"):
+            with self.subTest(marker=marker):
+                result = self.startup(self.home, marker)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "native metadata help\n")
 
 
 def _processes(snapshot, current):

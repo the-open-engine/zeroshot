@@ -40,9 +40,8 @@ fn bind_choice(group: &mut ChoiceNode, input: &Value) -> Result<(), NativeV2Admi
 fn bind_loop(group: &mut LoopNode, input: &Value) -> Result<(), NativeV2AdmissionError> {
     if let Some(path) = &group.max_iterations_input {
         if let Some(value) = input_at_path(input, path) {
-            group.max_iterations = value
-                .as_u64()
-                .and_then(|value| PositiveInteger::new(value).ok())
+            group.max_iterations = serde_json::from_value::<PositiveInteger>(value.clone())
+                .ok()
                 .ok_or_else(|| NativeV2AdmissionError::InvalidLoopLimit {
                     path: path
                         .segments()

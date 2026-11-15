@@ -13,17 +13,17 @@
   gap: 7px;
 }
 .workflow-card.chosen {
-  border-color: var(--rust-text);
+  border-color: var(--ink);
   box-shadow: 0 0 0 3px var(--selection-ring);
 }
 .workflow-card.observed.state-running {
-  border-color: var(--rust-text);
+  border-color: var(--amber);
 }
 .workflow-card.observed.state-succeeded {
-  border-color: color-mix(in srgb, var(--green) 65%, var(--card-border));
+  border-color: color-mix(in srgb, var(--ok-green) 65%, var(--card-border));
 }
 .workflow-card.observed.state-failed {
-  border-color: var(--error-text);
+  border-color: var(--rust);
 }
 .workflow-card.observed.state-idle,
 .workflow-card.observed.state-skipped {
@@ -31,7 +31,7 @@
   box-shadow: none;
 }
 .workflow-card.observed.chosen {
-  border-color: var(--rust-text);
+  border-color: var(--ink);
   box-shadow: 0 0 0 3px var(--selection-ring);
 }
 .workflow-observation {
@@ -39,14 +39,14 @@
   align-items: center;
   justify-content: center;
   gap: 3px;
-  min-width: 19px;
-  height: 19px;
-  padding: 2px 4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 1px 5px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
-  color: var(--muted);
+  color: var(--ink-muted);
   background: var(--surface);
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .workflow-card > .workflow-observation {
@@ -59,15 +59,15 @@
   right: -10px;
 }
 .workflow-observation.state-running {
-  color: var(--rust-text);
-  border-color: var(--rust-text);
+  color: var(--amber);
+  border-color: var(--amber);
 }
 .workflow-observation.state-succeeded {
-  color: var(--green);
+  color: var(--ok-green);
 }
 .workflow-observation.state-failed {
-  color: var(--error-text);
-  border-color: var(--error-border);
+  color: var(--rust);
+  border-color: var(--rust);
 }
 .workflow-readonly .react-flow__node-activity {
   cursor: pointer;
@@ -87,11 +87,11 @@
 }
 .workflow-card-heading svg {
   flex-shrink: 0;
-  color: var(--rust-text);
+  color: var(--ink-secondary);
 }
 .workflow-card small {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -139,7 +139,7 @@
 .workflow-card .react-flow__handle {
   width: 6px;
   height: 6px;
-  border: 1px solid var(--muted);
+  border: 1px solid var(--ink-muted);
   background: var(--surface);
 }
 .workflow-region {
@@ -158,7 +158,7 @@
   gap: 12px;
   padding: 12px 16px;
   pointer-events: auto;
-  color: var(--secondary);
+  color: var(--ink-secondary);
 }
 .workflow-region-header button {
   padding: 0;
@@ -176,17 +176,17 @@
   border: 1px solid var(--hairline);
   border-radius: 4px;
   background: var(--canvas);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   white-space: normal;
 }
 .workflow-edge-label:hover {
-  border-color: var(--rust-text);
+  border-color: var(--ink);
   color: var(--ink);
 }
 .workflow-edge-label.repeat-label {
-  color: var(--rust-text);
+  color: var(--ink);
 }
 .workflow-node-actions {
   display: flex;
@@ -214,7 +214,7 @@
   display: flex;
   align-items: center;
   font-size: 12px;
-  color: var(--rust-text);
+  color: var(--ink);
   padding: 0;
 }
 .workflow-legend {
@@ -225,8 +225,8 @@
   gap: 6px;
   align-items: center;
   pointer-events: none;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
 }
 .workflow-arranging .react-flow__nodes,
 .workflow-arranging .react-flow__edges {
@@ -285,8 +285,8 @@
   font-size: 13px;
 }
 .workflow-fields {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   line-height: 1.4;
 }
 .workflow-fields div {
@@ -296,7 +296,7 @@
 }
 .workflow-fields b {
   font-weight: 500;
-  color: var(--secondary);
+  color: var(--ink-secondary);
   margin-right: 4px;
 }
 .workflow-region-header button {
@@ -328,7 +328,7 @@
   background: var(--canvas);
 }
 .workflow-card.is-completion .workflow-card-heading {
-  font-size: 11px;
+  font-size: 12px;
   gap: 7px;
 }
 .workflow-card.is-completion .workflow-card-heading svg {
@@ -340,8 +340,8 @@
 }
 .outcome-count {
   float: right;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--ink-muted);
   font-weight: 400;
 }
 .outcome-policy + .outcome-policy {
@@ -355,8 +355,8 @@
 }
 .outcome-details summary {
   cursor: pointer;
-  font-size: 11px;
-  color: var(--secondary);
+  font-size: 12px;
+  color: var(--ink-secondary);
   margin: 10px 0;
 }
 .outcome-details .text-button {

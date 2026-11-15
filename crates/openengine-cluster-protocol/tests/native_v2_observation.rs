@@ -43,6 +43,7 @@ fn active(execution_ref: &str, node: &str) -> ActiveExecution {
 
 fn running_status() -> RunStatus {
     RunStatus::Running {
+        suspend_requested: false,
         graph_result: None,
         active_executions: vec![
             active("opaque-verifier-a", "verify-a"),
@@ -383,4 +384,30 @@ fn controller_availability_is_optional_observation_metadata() {
         invalid["controller"]["observedAt"] = json!(0);
         assert!(serde_json::from_value::<RunStatusResult>(invalid).is_err());
     }
+}
+
+#[test]
+fn suspended_statuses_round_trip_without_terminal_result() {
+    for value in [
+        json!({"phase":"suspended","reason":"command","node":"review","createdAt":1762905600000_u64,"metadata":{}}),
+        json!({"phase":"suspended","reason":"wait","node":"cooldown","createdAt":1762905600000_u64,"wait":{"dueAt":1762992000000_u64},"metadata":{}}),
+        json!({"phase":"running","activeExecutions":[],"suspendRequested":true}),
+    ] {
+        let status: RunStatus = serde_json::from_value(value.clone()).assert_value();
+        assert_eq!(serde_json::to_value(status).assert_value(), value);
+    }
+}
+
+#[test]
+fn request_suspension_round_trips_with_its_full_contract() {
+    let value = json!({"phase":"suspended","reason":"request","node":"approval","createdAt":1000,
+        "request":{"id":"request-1","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}});
+    let status: RunStatus = serde_json::from_value(value.clone()).assert_value();
+    assert_eq!(serde_json::to_value(status).assert_value(), value);
+    let mut missing = value.clone();
+    missing.as_object_mut().assert_value().remove("request");
+    assert!(serde_json::from_value::<RunStatus>(missing).is_err());
+    let mut wrong = value;
+    wrong["reason"] = json!("command");
+    assert!(serde_json::from_value::<RunStatus>(wrong).is_err());
 }

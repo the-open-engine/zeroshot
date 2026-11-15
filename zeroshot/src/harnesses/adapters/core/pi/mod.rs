@@ -11,6 +11,7 @@
 
 #[path = "command.rs"]
 mod command;
+mod conversation;
 pub(crate) mod memory;
 mod native_config;
 #[path = "provider_document.rs"]
@@ -464,13 +465,26 @@ impl PiAdapter {
     async fn execute_turn(
         &self,
         turn: &PiTurn<'_>,
-        state: &PiRunState,
+        state: &mut PiRunState,
         prompt: String,
     ) -> Result<PiAttempt, NodeRunnerError> {
         let files = match turn.execution.prepare(turn.control).await {
             Ok(files) => files,
             Err(error) => return failed_preparation(error, turn.control),
         };
+        if let Some(metadata) = turn
+            .session
+            .core
+            .prepare_conversation(
+                Some(conversation::layout(files.home())),
+                turn.invocation,
+                turn.control,
+            )
+            .await?
+        {
+            state.session_id = metadata.id.clone();
+            *turn.session.id.lock().await = Some(metadata.id);
+        }
         let mut command = self.command(turn.invocation, &files, &state.session_id)?;
         // The minimal base environment supplies the executable search path and any run tool
         // directory. It is never read from the ambient process, and a declared connection cannot

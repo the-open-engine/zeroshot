@@ -1,0 +1,22 @@
+{
+  "audience": "controller",
+  "authentication": "none",
+  "extensions": {
+    "request_ask": {
+      "kind": "openengine.request-ask/v1"
+    },
+    "request_wait": {
+      "kind": "openengine.request-wait/v1"
+    },
+    "run_suspension": {
+      "kind": "openengine.run-suspension/v1"
+    },
+    "run_vectors": {
+      "kind": "openengine.run-vectors/v1"
+    }
+  },
+  "kind": "zeroshot.native-v2-target/v2",
+  "oecpPath": "/native-v2/oecp",
+  "runPath": "/native-v2/run",
+  "sessionPath": "/native-v2/oecp-session"
+}

@@ -11,7 +11,7 @@ struct Observation {
     history: Vec<DurableExecution>,
 }
 
-struct RecordingCheckpointStore {
+pub(super) struct RecordingCheckpointStore {
     driver: Arc<FakeDriver>,
     ledger: Arc<FakeRunLedger>,
     records: StdMutex<Vec<Observation>>,
@@ -19,7 +19,7 @@ struct RecordingCheckpointStore {
 }
 
 impl RecordingCheckpointStore {
-    fn attach(harness: &Harness) -> (NativeV2Supervisor, Arc<Self>) {
+    pub(super) fn attach(harness: &Harness) -> (NativeV2Supervisor, Arc<Self>) {
         let store = Arc::new(Self {
             driver: harness.driver.clone(),
             ledger: harness.ledger.clone(),
@@ -72,6 +72,25 @@ impl RecordingCheckpointStore {
 
 #[async_trait]
 impl RunCheckpointStore for RecordingCheckpointStore {
+    async fn suspend(
+        &self,
+        history: &[DurableExecution],
+        _vectors: &[openengine_cluster_protocol::RunVector],
+    ) -> Result<(), CheckpointError> {
+        let snapshot = stored_run(&self.ledger).await.snapshot;
+        assert_eq!(self.driver.state().active, 0);
+        assert!(snapshot.active_executions().next().is_none());
+        assert_eq!(continuation_history(&snapshot).assert_value(), history);
+        self.records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Observation {
+                boundary: None,
+                history: history.to_vec(),
+            });
+        Ok(())
+    }
+
     async fn retain_delivery_state(
         &self,
         _state: &crate::native_v2_contract::DeliveryCheckpoint,
@@ -106,7 +125,7 @@ impl RunCheckpointStore for RecordingCheckpointStore {
     }
 }
 
-fn completed_after(millis: u64) -> Behavior {
+pub(super) fn completed_after(millis: u64) -> Behavior {
     Behavior::Complete {
         delay: Duration::from_millis(millis),
         outcome: success_for(NodeRole::Worker),
@@ -160,7 +179,7 @@ async fn checkpoint_shutdown_stops_before_dispatch_and_preserves_a_latched_graph
     }
 }
 
-fn mapped_waves_graph() -> GraphSpec {
+pub(super) fn mapped_waves_graph() -> GraphSpec {
     let state = record_type();
     let item_work = json!({
         "kind":"seq", "name":"item_work", "state":state,
@@ -385,5 +404,86 @@ async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace
     assert_eq!(
         std::fs::read_to_string(workspace.join("state")).assert_value(),
         "finished map"
+    );
+}
+
+struct ConversationCaptureMustNotRun;
+
+#[async_trait]
+impl NodeRunner for ConversationCaptureMustNotRun {
+    async fn capture_conversations(
+        &self,
+        _run_id: &RunId,
+    ) -> crate::native_v2_runner::conversations::ConversationCapture {
+        panic!("delivery-only storage must not select or copy provider files");
+    }
+
+    async fn start(
+        &self,
+        _request: NodeRunRequest,
+    ) -> Result<crate::native_v2_runner::NodeHandle, NodeRunnerError> {
+        panic!("this boundary has no active executions");
+    }
+
+    async fn close_run(&self, _run_id: &RunId) {}
+}
+
+#[tokio::test]
+async fn delivery_only_boundaries_and_failed_finish_skip_conversation_bytes_and_keep_receipts() {
+    use crate::native_v2_supervisor::checkpoints::DeliveryCheckpointStore;
+    use crate::native_v2_runner::test_support::delivery_history;
+    let root = tempfile::tempdir().assert_value();
+    let harness = harness(
+        graph(
+            json!({"kind":"fail","name":"failed","reason":"rejected"}),
+            null_type(),
+        ),
+        Value::Null,
+        FakeDriver::default(),
+    )
+    .await;
+    let mut stored = stored_run(&harness.ledger).await;
+    stored.admitted.runtime.workspace_checkpoints = false;
+    let snapshot = harness
+        .ledger
+        .append(&harness.supervisor.run_id, vec![RunEvent::RunStarted])
+        .await
+        .assert_value()
+        .snapshot;
+    let store = Arc::new(DeliveryCheckpointStore::new(root.path().join("receipts")));
+    let mut supervisor = harness.supervisor.with_checkpoints(Some(store.clone()));
+    supervisor.runner = Arc::new(ConversationCaptureMustNotRun);
+    let history = delivery_history(json!({"owned":"delivery receipt"}));
+    let expected = history[0].delivery_state.clone();
+    let mut boundary_snapshot = snapshot.clone();
+    boundary_snapshot.execution_seed = history;
+    let boundary = ExecutionBoundary {
+        node: NodeName::new("worker").assert_value(),
+        map_indices: Vec::new(),
+        loop_iterations: Vec::new(),
+        attempt: 1,
+    };
+    supervisor
+        .checkpoint_boundary(&stored.admitted, Some(&boundary), &boundary_snapshot)
+        .await
+        .assert_value();
+    assert_eq!(store.delivery_state().await.assert_value(), expected);
+    supervisor
+        .finish_reduction(
+            &stored.admitted,
+            &snapshot,
+            TerminalResult::Failed {
+                context: None,
+                reason: openengine_cluster_protocol::EnumLabel::new("rejected").assert_value(),
+            },
+        )
+        .await
+        .assert_value();
+    assert_eq!(store.delivery_state().await.assert_value(), expected);
+    assert_eq!(
+        std::fs::read_dir(root.path().join("receipts"))
+            .assert_value()
+            .count(),
+        1
     );
 }

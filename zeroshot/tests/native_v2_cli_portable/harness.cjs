@@ -25,6 +25,7 @@ if (process.argv.includes('--version')) {
   let inputBytes = 0;
   process.stdin.on('data', (chunk) => { inputBytes += chunk.length; });
   process.stdin.on('end', () => {
+    if (mode === 'fail') process.exit(1);
     if (mode === 'volume' && inputBytes < 256 * 1024) process.exit(42);
     fs.writeFileSync('mutation.txt', 'native worker ran');
     emit({ type: 'thread.started', thread_id: 'portable-session' });

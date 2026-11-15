@@ -21,6 +21,9 @@ struct PermissiveRegistry;
 impl WorkerRegistry for PermissiveRegistry {
     async fn resolve(&self, worker: &WorkerRef) -> Result<WorkerDescriptor, WorkerRegistryError> {
         let verifier_contract = match worker.as_str() {
+            "worker.route-verify@1" => {
+                json!({"signals":{"verdict":enum_labels("route",4096)},"diagnostic":{"kind":"null"}})
+            }
             "worker.wide-verify@1" => json!({
                 "signals": {
                     "left": enum_labels("left", 253),
@@ -427,7 +430,7 @@ fn exact_fold_map() -> Value {
 }
 
 #[tokio::test]
-async fn checked_folds_accept_exact_execution_loop_entry_and_concurrency_limits() {
+async fn dynamic_maps_report_runtime_ceilings_and_structural_concurrency() {
     let verified = verify(&graph(vec![exact_fold_map(), succeed("done")]))
         .await
         .assert_value();
@@ -435,10 +438,7 @@ async fn checked_folds_accept_exact_execution_loop_entry_and_concurrency_limits(
         verified.compiled_ir.bounds.max_node_executions.get(),
         FULL_V1_MAX_NODE_EXECUTIONS
     );
-    assert_eq!(
-        verified.compiled_ir.bounds.peak_concurrency.get(),
-        FULL_V1_MAX_PEAK_CONCURRENCY
-    );
+    assert_eq!(verified.compiled_ir.bounds.peak_concurrency.get(), 1024);
     let max_iterations = match verified.compiled_ir.bounds.termination {
         openengine_cluster_protocol::TerminationWitness::Bounded { max_iterations, .. } => {
             Some(max_iterations)
@@ -450,44 +450,33 @@ async fn checked_folds_accept_exact_execution_loop_entry_and_concurrency_limits(
 }
 
 #[tokio::test]
-async fn checked_execution_and_loop_entry_additions_reject_limit_plus_one() {
-    let execution_error = verify(&graph(vec![
+async fn dynamic_maps_report_runtime_work_enforcement_instead_of_cardinality_proofs() {
+    let verified = verify(&graph(vec![
         exact_fold_map(),
-        null_step("oneMoreExecution", 1),
+        null_step("later", 1),
         succeed("done"),
     ]))
     .await
-    .assert_error();
-    assert!(has_ceiling(execution_error, "children"));
-
-    let extra_loop = json!({
-        "kind":"loop","name":"oneMoreLoop","state":state(),
-        "body":null_verifier("extraVerify"),
-        "until":{"kind":"in","value":{"name":"extraVerify","source":"signal","field":"verdict"},"labels":["accepted"]},
-        "maxIterations":1,"promotedStatePaths":[]
-    });
-    let loop_error = verify(&graph(vec![exact_fold_map(), extra_loop, succeed("done")]))
-        .await
-        .assert_error();
-    assert!(has_ceiling(loop_error, "children"));
+    .assert_value();
+    assert_eq!(
+        verified.compiled_ir.bounds.max_node_executions.get(),
+        FULL_V1_MAX_NODE_EXECUTIONS
+    );
 }
 
 #[tokio::test]
-async fn parallel_concurrency_rejects_limit_plus_one_at_combining_branches() {
-    let wide_map = json!({
-        "kind":"map","name":"wide","state":state(),"body":null_step("wideWork",1),
-        "over":{"source":"state","path":["items"]},"maxItems":FULL_V1_MAX_MAP_ITEMS,
-        "promotedStatePaths":[]
-    });
-    let parallel = json!({
-        "kind":"par","name":"parallel","state":state(),
-        "branches":[wide_map,null_step("oneMore",1)],
-        "promotedStatePaths":[],"join":{"kind":"all"}
-    });
-    let error = verify(&graph(vec![parallel, succeed("done")]))
+async fn operational_concurrency_bounds_wide_parallel_work_at_runtime() {
+    let wide_map = json!({"kind":"map","name":"wide","state":state(),"body":null_step("wideWork",1),
+        "over":{"source":"state","path":["items"]},"maxItems":FULL_V1_MAX_MAP_ITEMS,"promotedStatePaths":[]});
+    let parallel = json!({"kind":"par","name":"parallel","state":state(),"branches":[wide_map,null_step("oneMore",1)],
+        "promotedStatePaths":[],"join":{"kind":"all"}});
+    let verified = verify(&graph(vec![parallel, succeed("done")]))
         .await
-        .assert_error();
-    assert!(has_ceiling(error, "branches"));
+        .assert_value();
+    assert_eq!(
+        verified.compiled_ir.bounds.peak_concurrency.get(),
+        FULL_V1_MAX_PEAK_CONCURRENCY
+    );
 }
 
 fn path_nodes(path: &[DiagnosticPathSegment]) -> Vec<&str> {
@@ -511,7 +500,7 @@ fn item_error_check(name: &str, work: &str, otherwise: Value) -> Value {
         "kind":"choice","name":name,"state":state(),"promotedStatePaths":[],
         "branches":[{
             "when":{
-                "kind":"k_of_map","count":1,
+                "kind":"k_of_map","count":65536,
                 "value":{"source":"error","name":work,"field":null},
                 "labels":["timeout","crash","malformed","refusal"]
             },
@@ -604,3 +593,93 @@ use assert_value::AssertValue;
 #[path = "support/assert_error.rs"]
 mod assert_error;
 use assert_error::AssertError;
+
+#[tokio::test]
+async fn zero_work_map_controls_use_bounded_analysis_without_a_cardinality_assumption() {
+    let mut mapped = checked_map("many", "unused");
+    mapped["body"] = json!({"kind":"par","name":"noWork","state":state(),
+        "branches":[{"kind":"fail","name":"skip","reason":"skipped"}],
+        "join":{"kind":"all"},"promotedStatePaths":[]});
+    let check = choice_with_guard(json!({"kind":"k_of_map","count":65537,
+        "value":{"name":"noWork","source":"group","field":"joined"},
+        "labels":["quorum_unreachable"]}));
+    let rejected = diagnostics(verify(&graph(vec![mapped, check])).await.assert_error());
+    assert!(
+        rejected
+            .iter()
+            .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
+    );
+    assert!(
+        !rejected
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("map bound"))
+    );
+}
+
+#[tokio::test]
+async fn wide_first_join_charges_selector_expansion_before_copying_branch_predicates() {
+    let branches = (0..2048)
+        .map(|index| null_verifier(&format!("v{index}")))
+        .collect::<Vec<_>>();
+    let selector = json!({"name":"v0","source":"signal","field":"verdict"});
+    let node = json!({"kind":"par","name":"race","state":state(),"branches":branches,"promotedStatePaths":[],"join":{"kind":"first","when":{"kind":"k_of_n","count":1,"values":vec![selector;4096],"labels":["accepted"]}}});
+    let error = verify(&graph(vec![node, succeed("done")]))
+        .await
+        .assert_error();
+    assert!(
+        diagnostics(error)
+            .iter()
+            .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
+    );
+}
+
+#[tokio::test]
+async fn static_visit_and_loop_entry_totals_keep_their_exact_ceilings() {
+    for (limit, valid) in [(65536, true), (65537, false)] {
+        let loop_node = json!({"kind":"loop","name":"repeat","state":state(),"body":null_step("work",1),"maxIterations":limit,"promotedStatePaths":[]});
+        let result = verify(&graph(vec![loop_node, succeed("done")])).await;
+        if valid {
+            let verified = result.assert_value();
+            assert_eq!(verified.compiled_ir.bounds.max_node_executions.get(), 65536);
+            let openengine_cluster_protocol::TerminationWitness::Bounded { max_iterations, .. } =
+                verified.compiled_ir.bounds.termination
+            else {
+                panic!("bounded loop")
+            };
+            assert_eq!(max_iterations.get(), 65536);
+        } else {
+            assert!(
+                diagnostics(result.assert_error())
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn choice_route_availability_shares_large_predicates_and_keeps_the_proof_ceiling() {
+    for count in [1, 2050] {
+        let mut gate = null_verifier("gate");
+        gate["worker"] = json!("worker.route-verify@1");
+        gate["signals"]["verdict"] = json!(enum_labels("route", 4096));
+        let children = (0..count)
+            .map(|index| null_verifier(&format!("v{index}")))
+            .collect::<Vec<_>>();
+        let choice = json!({"kind":"choice","name":"route","state":state(),"promotedStatePaths":[],
+            "branches":[{"when":{"kind":"in","value":{"name":"gate","source":"signal","field":"verdict"},"labels":enum_labels("route",4096)},
+                "node":{"kind":"seq","name":"selected","state":state(),"children":children,"promotedStatePaths":[]}}],
+            "otherwise":{"kind":"fail","name":"unselected","reason":"unselected"}});
+        let selectors = (0..count)
+            .map(|index| json!({"name":format!("v{index}"),"source":"error","field":null}))
+            .collect::<Vec<_>>();
+        let first = json!({"kind":"par","name":"race","state":state(),"branches":[choice],"promotedStatePaths":[],
+            "join":{"kind":"first","when":{"kind":"k_of_n","count":1,"values":selectors,"labels":["crash"]}}});
+        let result = verify(&graph(vec![gate, first, succeed("done")])).await;
+        if count == 1 {
+            result.unwrap_or_else(|error| panic!("ordinary route proof failed: {error:?}"));
+        } else {
+            assert_ceiling(result.assert_error());
+        }
+    }
+}

@@ -339,3 +339,10 @@ test('history observation calls browser fetch without a transport receiver', asy
   assert.equal(stream.pages.length, 1);
   assert.equal(stream.errors.length, 0);
 });
+
+test('a suspended history is ended even if stale observation metadata says active', () => {
+  assert.equal(
+    canFollowHistory({ phase: 'suspended', observation: { state: 'active' } } as RunDetail),
+    false
+  );
+});

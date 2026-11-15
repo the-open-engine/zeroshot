@@ -60,3 +60,5 @@ impl ClusterBackend for EmptyBackend {
         })
     }
 }
+
+mod request_artifacts;

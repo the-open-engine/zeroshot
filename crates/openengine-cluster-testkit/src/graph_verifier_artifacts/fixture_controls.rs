@@ -43,12 +43,7 @@ pub(super) fn map_signal_graph() -> Value {
         "kind":"k_of_map","count":1,
         "value":{"name":"mapVerify","source":"signal","field":"verdict"},"labels":["accepted"]
     });
-    let overflow = json!({
-        "kind":"in","value":{"name":"map","source":"group","field":"overflow"},
-        "labels":["overflow"]
-    });
-    let guard = json!({"kind":"any","guards":[aggregate,overflow]});
-    let after_group = choice("mapControl", data_state_type(), guard, succeed("done"));
+    let after_group = choice("mapControl", data_state_type(), aggregate, succeed("done"));
     graph(data_state_type(), data_state_type(), vec![map, after_group])
 }
 

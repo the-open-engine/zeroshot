@@ -5,7 +5,7 @@
 //! liveness signal, and one result-bearing cleanup authority for the run's capsule/workspace.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
@@ -66,6 +66,8 @@ pub type PlatformRunSubmission = RunSubmission;
 
 #[derive(Debug, Error)]
 pub enum NativeV2PlatformError {
+    #[error("{0}")]
+    InvalidRequest(String),
     #[error(transparent)]
     ControllerClaim(#[from] ControllerClaimUnavailable),
     #[error(transparent)]
@@ -95,6 +97,7 @@ pub struct NativeV2PlatformController {
     observability: NativeV2Observability,
     runtimes: Arc<Mutex<BTreeMap<RunId, RuntimeSlot>>>,
     submission_turn: Arc<Mutex<()>>,
+    control_turns: Arc<Mutex<BTreeMap<RunId, Weak<Mutex<()>>>>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
@@ -154,11 +157,13 @@ impl NativeV2PlatformController {
         delivery_policy: DeliveryPolicy,
     ) -> Result<Self, NativeV2PlatformError> {
         let controller = Self {
-            observability: NativeV2Observability::new(ledger.clone()),
+            observability: NativeV2Observability::new(ledger.clone())
+                .with_workspace_recovery(allocator.clone()),
             ledger,
             allocator,
             runtimes: Arc::new(Mutex::new(BTreeMap::new())),
             submission_turn: Arc::new(Mutex::new(())),
+            control_turns: Arc::default(),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
@@ -169,10 +174,31 @@ impl NativeV2PlatformController {
         Ok(controller)
     }
 
+    fn require_wait_support(
+        &self,
+        runtime: &crate::native_v2_contract::RuntimePlan,
+    ) -> Result<(), NativeV2AdmissionError> {
+        if self.allocator.suspension_policy().is_none()
+            && let Some((node, _)) = runtime.nodes().iter().find(|(_, binding)| {
+                matches!(
+                    binding,
+                    openengine_cluster_protocol::NodeRuntimeBinding::Request {}
+                )
+            })
+        {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node.clone(),
+                detail: "host does not enable openengine.request-wait/v1".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     fn validate_harnesses(
         &self,
         runtime: &crate::native_v2_contract::RuntimePlan,
     ) -> Result<(), NativeV2AdmissionError> {
+        self.require_wait_support(runtime)?;
         self.harnesses
             .validate_runtime(runtime)
             .map_err(|error| NativeV2AdmissionError::InvalidRuntime(error.to_string()))
@@ -213,7 +239,9 @@ impl NativeV2PlatformController {
                 .get(&summary.run_id)
                 .await?
                 .ok_or(RunLedgerError::RunNotFound)?;
-            if stored.snapshot.terminal.is_some() {
+            if stored.snapshot.terminal.is_some()
+                || stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            {
                 continue;
             }
             let _claim = self.allocator.claim_controller(&summary.run_id).await?;
@@ -255,6 +283,7 @@ impl NativeV2PlatformController {
         &self,
         request: RunSubmitParams,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
+        self.require_wait_support(&request.submission.runtime)?;
         let environment =
             RunEnvironment::exact_for_submission(&request.submission, BTreeMap::new())?;
         self.submit_inner(request, environment, RunSourceCredentials::default())
@@ -315,6 +344,15 @@ impl NativeV2PlatformController {
         let submission_key = submission.submission_key.clone();
         if let Some(receipt) = self.existing_submission(&submission_key, &digest).await? {
             return Ok(receipt);
+        }
+        if !self.allocator.supports_request_ask() {
+            if let Some(node) = find_request_node(&submission.graph.root) {
+                return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                    node: node.clone(),
+                    detail: "host does not enable openengine.request-ask/v1".to_owned(),
+                }
+                .into());
+            }
         }
         self.validate_harnesses(&submission.runtime)?;
         let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
@@ -423,13 +461,17 @@ impl NativeV2PlatformController {
         } = start;
         let run_id = stored.snapshot.run_id.clone();
         let AllocatedCapsule {
+            vector_seed,
             checkpoints,
             execution_seed,
             runner,
             loss,
             cleanup,
         } = capsule;
-        if let Err(error) = self.initialize_allocated(&mut stored, execution_seed).await {
+        if let Err(error) = self
+            .initialize_allocated(&mut stored, execution_seed, vector_seed)
+            .await
+        {
             // Runtime-loss cleanup preserves the restored workspace and its recovery lineage.
             cleanup
                 .destroy_or_confirm_absent(RunRuntimeExit::RuntimeLost)
@@ -442,6 +484,7 @@ impl NativeV2PlatformController {
         let mut runtime = PortableRuntime::with_cleanup(runner, cleanup);
         runtime.checkpoints = checkpoints;
         let engine = PortableRunEngine::start(PortableRunEngineBootstrap {
+            wait_policy: self.allocator.suspension_policy().unwrap_or_default(),
             run_id: run_id.clone(),
             ledger: self.ledger.clone(),
             environment: environment.as_ref().clone(),
@@ -467,12 +510,44 @@ impl NativeV2PlatformController {
         &self,
         stored: &mut StoredRun,
         execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
+        vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     ) -> Result<(), NativeV2PlatformError> {
+        let run_id = &stored.snapshot.run_id;
+        let expiry = vector_seed.iter().find_map(|vector| match &vector.content {
+            openengine_cluster_protocol::RunVectorContent::Expiry { request_id }
+                if &vector.run_id == run_id =>
+            {
+                Some(request_id)
+            }
+            _ => None,
+        });
+        let node = expiry.and_then(|id| {
+            vector_seed.iter().find_map(|vector| match &vector.content {
+                openengine_cluster_protocol::RunVectorContent::Request { node, .. }
+                    if &vector.id == id =>
+                {
+                    Some(node)
+                }
+                _ => None,
+            })
+        });
+        let mut log =
+            crate::native_v2_supervisor::logging::request_expiry_log(&execution_seed, node)?;
+        for vector in vector_seed {
+            stored.snapshot = self
+                .ledger
+                .append(&stored.snapshot.run_id, vec![RunEvent::Vector { vector }])
+                .await?
+                .snapshot;
+        }
         if !execution_seed.is_empty() {
-            let events = execution_seed
-                .into_iter()
-                .map(|execution| RunEvent::PriorExecution { execution })
-                .collect();
+            let mut events = Vec::new();
+            for execution in execution_seed {
+                if matches!(&log, Some((id, _)) if *id == execution.execution) {
+                    events.extend(log.take().map(|(_, event)| event));
+                }
+                events.push(RunEvent::PriorExecution { execution });
+            }
             stored.snapshot = self
                 .ledger
                 .append(&stored.snapshot.run_id, events)
@@ -499,7 +574,101 @@ impl NativeV2PlatformController {
             commit_identity,
             commit_co_author,
         } = params;
+        if matches!(
+            from,
+            Some(
+                openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                    | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+            )
+        ) && !self.allocator.supports_request_ask()
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "host does not enable openengine.request-ask/v1".to_owned(),
+            ));
+        }
+        // Refuse a live source before taking its control turn: cancellation must not wait for
+        // a resume's ledger reads. Recheck eligibility once ownership is serialized with force.
+        self.recoverable_resume_source(&run_id).await?;
+        let _control = self.lock_run_control(&run_id).await;
         let source = self.recoverable_resume_source(&run_id).await?;
+        let request_resolution = if let Some(suspension) = &source.snapshot.suspension {
+            if matches!(
+                suspension,
+                openengine_cluster_protocol::RunSuspension::Request { .. }
+            ) || matches!(
+                from,
+                Some(
+                    openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                        | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+                )
+            ) {
+                Some(
+                    crate::native_v2_request::resolve(
+                        suspension,
+                        from.as_ref(),
+                        (self
+                            .allocator
+                            .suspension_policy()
+                            .unwrap_or_default()
+                            .wall_clock)(),
+                    )
+                    .map_err(|message| {
+                        NativeV2PlatformError::InvalidRequest(
+                            message.replace("RUN_ID", run_id.as_str()),
+                        )
+                    })?,
+                )
+            } else {
+                None
+            }
+        } else if matches!(
+            from,
+            Some(
+                openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                    | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+            )
+        ) {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "answer requires a suspended run".to_owned(),
+            ));
+        } else {
+            None
+        };
+        if let Some(resolution) = &request_resolution {
+            crate::native_v2_request::validate_resolution(
+                &source.snapshot,
+                &successor_run_id,
+                resolution,
+            )
+            .map_err(NativeV2PlatformError::InvalidRequest)?;
+        }
+        let expired = matches!(
+            request_resolution,
+            Some(openengine_cluster_protocol::RequestResolution::Expiry {})
+        );
+        if let Some(suspension) = &source.snapshot.suspension {
+            // A settled attempt must release its owner before the successor can claim storage.
+            self.wait_runtime_settled(&run_id).await;
+            self.runtimes.lock().await.remove(&run_id);
+            if from.is_some() && request_resolution.is_none() {
+                return Err(NativeV2PlatformError::InvalidRequest(
+                    "suspended runs accept only default resume".to_owned(),
+                ));
+            }
+            if let Some(due) = suspension.due_at()
+                && (self
+                    .allocator
+                    .suspension_policy()
+                    .unwrap_or_default()
+                    .wall_clock)()
+                    < due
+            {
+                return Err(NativeV2PlatformError::InvalidRequest(format!(
+                    "wait is due at {}",
+                    due.get()
+                )));
+            }
+        }
         // Reconcile before claiming/moving the workspace or creating a successor. A hard exit
         // may leave acknowledged ledger receipts newer than the last workspace boundary.
         if let Some(state) = source.snapshot.delivery_checkpoint()? {
@@ -539,12 +708,21 @@ impl NativeV2PlatformController {
             controller_claim,
             resume: Some(ResumePreparation {
                 source_run_id: run_id.clone(),
-                selection: crate::native_v2_supervisor::checkpoints::restore_selection(
-                    from.as_ref(),
-                ),
+                request_resolution,
+                selection: if source.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended {
+                    crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Continue
+                } else {
+                    crate::native_v2_supervisor::checkpoints::restore_selection(from.as_ref())
+                },
             }),
         })
         .await?;
+        if expired {
+            return Err(NativeV2PlatformError::InvalidRequest(format!(
+                "request expired; successor {}",
+                successor_run_id.as_str()
+            )));
+        }
         Ok(RunResumeResult {
             run_id: successor_run_id,
             resumed_from: run_id,
@@ -564,7 +742,17 @@ impl NativeV2PlatformController {
             source.snapshot.terminal,
             Some(TerminalResult::Failed { .. })
         );
-        if !failed || !self.allocator.workspace_recovery(run_id).await.recoverable {
+        let recovery = self.allocator.workspace_recovery(run_id).await;
+        if let Some(successor) = &recovery.successor_run_id {
+            return Err(NativeV2PlatformError::InvalidRequest(format!(
+                "retained workspace was already claimed by {}",
+                successor.as_str()
+            )));
+        }
+        if (failed && source.snapshot.suspension.is_some())
+            || !(failed || source.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended)
+            || !recovery.recoverable
+        {
             return Err(CapsuleAllocationUnavailable::Runtime.into());
         }
         Ok(source)
@@ -579,6 +767,40 @@ impl NativeV2PlatformController {
             CreateRunOutcome::Created(stored) => Ok(stored),
             CreateRunOutcome::Existing(_) => Err(RunLedgerError::RunIdConflict.into()),
         }
+    }
+
+    pub async fn suspend(
+        &self,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, NativeV2PlatformError> {
+        let engine = match self.runtimes.lock().await.get(&params.run_id) {
+            Some(RuntimeSlot::Running(engine)) => engine.clone(),
+            _ => {
+                return Err(NativeV2PlatformError::InvalidRequest(
+                    "suspend requires a running run".to_owned(),
+                ));
+            }
+        };
+        if self.allocator.suspension_policy().is_none() {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "host does not enable openengine.run-suspension/v1".to_owned(),
+            ));
+        }
+        engine.suspend().await?;
+        self.status(params).await
+    }
+
+    pub async fn vectors(
+        &self,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, NativeV2PlatformError> {
+        Ok(crate::v2_run_ledger::vectors::list(self.ledger.as_ref(), params).await?)
+    }
+    pub async fn vector(
+        &self,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2PlatformError> {
+        Ok(crate::v2_run_ledger::vectors::show(self.ledger.as_ref(), params).await?)
     }
 
     pub async fn checkpoints(
@@ -647,7 +869,9 @@ impl NativeV2PlatformController {
             .get(&stored.snapshot.run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        if stored.snapshot.terminal.is_some() {
+        if stored.snapshot.terminal.is_some()
+            || stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+        {
             return Ok(());
         }
         let runtime = self
@@ -706,10 +930,31 @@ impl NativeV2PlatformController {
                 ..
             }
         );
-        if failed {
-            result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
+        result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
+        let suspended = matches!(result.status, RunStatus::Suspended { .. });
+        if !(failed || suspended) {
+            result.workspace_recovery.recoverable = false;
         }
-        if failed && result.workspace_recovery.recoverable {
+        if let RunStatus::Suspended {
+            suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
+            ..
+        } = &result.status
+        {
+            result.workspace_recovery.recoverable = false;
+        }
+        if let RunStatus::Suspended { suspension, .. } = &result.status
+            && suspension.due_at().is_some_and(|due| {
+                (self
+                    .allocator
+                    .suspension_policy()
+                    .unwrap_or_default()
+                    .wall_clock)()
+                    < due
+            })
+        {
+            result.workspace_recovery.recoverable = false;
+        }
+        if suspended || (failed && result.workspace_recovery.recoverable) {
             if let Some(stored) = self.ledger.get(&result.run_id).await? {
                 result.workspace_recovery.connection_requirements = stored
                     .admitted
@@ -781,7 +1026,8 @@ impl NativeV2PlatformController {
     }
 
     async fn prepare_force(&self, run_id: &RunId) -> Result<ForceTarget, NativeV2PlatformError> {
-        // An existing runtime owns cancellation independently of submission and storage.
+        // Capture live ownership before reconstruction; a running engine rechecks successor
+        // ownership under its control turn before it can be signalled.
         if let Some(target) = self.live_force_target(run_id).await {
             return Ok(target);
         }
@@ -795,11 +1041,34 @@ impl NativeV2PlatformController {
             .get(run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        if stored.snapshot.terminal.is_some() {
+        if stored.snapshot.terminal.is_some()
+            || (stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+                && self
+                    .allocator
+                    .workspace_recovery(run_id)
+                    .await
+                    .successor_run_id
+                    .is_some())
+        {
             return Ok(ForceTarget::Terminal);
         }
         self.ledger.request_force_stop(run_id).await?;
         Ok(ForceTarget::Reconstructed)
+    }
+
+    async fn lock_run_control(&self, run_id: &RunId) -> tokio::sync::OwnedMutexGuard<()> {
+        let turn = {
+            let mut turns = self.control_turns.lock().await;
+            turns.retain(|_, turn| turn.strong_count() > 0);
+            if let Some(turn) = turns.get(run_id).and_then(Weak::upgrade) {
+                turn
+            } else {
+                let turn = Arc::new(Mutex::new(()));
+                turns.insert(run_id.clone(), Arc::downgrade(&turn));
+                turn
+            }
+        };
+        turn.lock_owned().await
     }
 
     async fn force_running(
@@ -807,6 +1076,18 @@ impl NativeV2PlatformController {
         run_id: &RunId,
         engine: &PortableRunEngine,
     ) -> Result<(), NativeV2PlatformError> {
+        // A captured engine may already have published suspension. Serialize its force request
+        // with continuation ownership, including persistence, so it cannot stop a claimed source.
+        let _control = self.lock_run_control(run_id).await;
+        if self
+            .allocator
+            .workspace_recovery(run_id)
+            .await
+            .successor_run_id
+            .is_some()
+        {
+            return Ok(());
+        }
         // `drive` is internally serialized. Usually this waits behind the live driving turn; if
         // that turn stopped on cleanup error, this is the one retry that can finish cleanup.
         engine.force_stop().await?;
@@ -932,3 +1213,108 @@ mod source;
 use backend::{append_interrupted, append_terminal_failure};
 pub(crate) use backend::submission_digest;
 use source::source_credentials;
+
+fn find_request_node(
+    root: &openengine_cluster_protocol::GraphNode,
+) -> Option<&openengine_cluster_protocol::NodeName> {
+    if let openengine_cluster_protocol::GraphNode::Verifier(node) = root
+        && node.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF
+    {
+        return Some(&node.name);
+    }
+    openengine_cluster_server::graph_verifier::graph_node_children(root)
+        .into_iter()
+        .find_map(find_request_node)
+}
+
+impl NativeV2PlatformController {
+    pub async fn inbox_show(
+        &self,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2PlatformError> {
+        if !self.allocator.supports_request_ask() {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "host does not enable openengine.request-ask/v1".to_owned(),
+            ));
+        }
+        let now = (self
+            .allocator
+            .suspension_policy()
+            .unwrap_or_default()
+            .wall_clock)();
+        let request =
+            crate::v2_run_ledger::inbox::show(self.ledger.as_ref(), &params.run_id, now).await?;
+        match self
+            .allocator
+            .workspace_recovery(&params.run_id)
+            .await
+            .successor_run_id
+        {
+            Some(successor) => Ok(crate::v2_run_ledger::inbox::with_successor(
+                self.ledger.as_ref(),
+                request,
+                successor,
+            )
+            .await?),
+            None => Ok(request),
+        }
+    }
+    pub async fn inbox_list(
+        &self,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2PlatformError> {
+        if !self.allocator.supports_request_ask() {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "host does not enable openengine.request-ask/v1".to_owned(),
+            ));
+        }
+        params
+            .validate()
+            .map_err(|error| NativeV2PlatformError::InvalidRequest(error.to_string()))?;
+        let mut requests = Vec::new();
+        let mut runs = self.list().await?;
+        runs.sort_by(|a, b| a.run_id.as_str().cmp(b.run_id.as_str()));
+        let now = (self
+            .allocator
+            .suspension_policy()
+            .unwrap_or_default()
+            .wall_clock)();
+        for summary in runs {
+            if params
+                .after
+                .as_ref()
+                .is_some_and(|after| summary.run_id.as_str() <= after.as_str())
+            {
+                continue;
+            }
+            let stored = self
+                .ledger
+                .get(&summary.run_id)
+                .await?
+                .ok_or(RunLedgerError::RunNotFound)?;
+            if stored.snapshot.phase != crate::v2_run_ledger::RunPhase::Suspended
+                || !matches!(
+                    stored.snapshot.suspension,
+                    Some(openengine_cluster_protocol::RunSuspension::Request { .. })
+                )
+                || self
+                    .allocator
+                    .workspace_recovery(&summary.run_id)
+                    .await
+                    .successor_run_id
+                    .is_some()
+            {
+                continue;
+            }
+            if let Some(entry) = stored.snapshot.suspension.as_ref().and_then(|suspension| {
+                crate::v2_run_ledger::inbox::entry(summary.run_id, suspension, now)
+            }) {
+                requests.push(entry);
+            }
+            if requests.len() > params.limit.unwrap_or(50) as usize {
+                break;
+            }
+        }
+        Ok(crate::v2_run_ledger::inbox::page(requests, params)?)
+    }
+}

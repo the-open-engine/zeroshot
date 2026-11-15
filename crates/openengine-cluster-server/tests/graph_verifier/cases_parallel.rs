@@ -261,45 +261,59 @@ fn parallel_terminal_graph(join: Value) -> GraphSpec {
 }
 
 #[tokio::test]
-async fn parallel_terminal_reachability_uses_the_join_completion_count() {
-    ProductionGraphVerifier::new(registry())
-        .verify(&parallel_terminal_graph(json!({"kind":"quorum","count":1})))
-        .await
-        .assert_value();
-
-    for join in [json!({"kind":"quorum","count":2}), json!({"kind":"all"})] {
-        let error = ProductionGraphVerifier::new(registry())
-            .verify(&parallel_terminal_graph(join))
-            .await
-            .assert_error();
-        let diagnostics = rejection_diagnostics(error);
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == GraphDiagnosticCode::Reachability
-                && diagnostic
-                    .related_nodes
-                    .iter()
-                    .any(|name| name.as_str() == "afterParallel")
-        }));
+async fn settled_parallel_joins_keep_the_parent_terminal_reachable() {
+    for join in [
+        json!({"kind":"any"}),
+        json!({"kind":"quorum","count":1}),
+        json!({"kind":"quorum","count":2}),
+        json!({"kind":"all"}),
+    ] {
+        assert_graph_accepted(&parallel_terminal_graph(join)).await;
     }
 }
 
 #[tokio::test]
 async fn quorum_completion_sets_preserve_shared_guard_correlations() {
-    let graph = graph_with_valid_tail_nodes(json!([{
-        "kind":"par", "name":"correlatedQuorum", "state":record(),
-        "branches":[
-            conditional_quorum_branch(
-                "acceptedBranch","accepted","acceptedWork","rejectedDone"
-            ),
-            conditional_quorum_branch(
-                "rejectedBranch","rejected","rejectedWork","acceptedDone"
-            )
-        ],
-        "promotedStatePaths":[],
-        "join":{"kind":"quorum","count":2}
-    }]));
-
+    let graph = graph_with_valid_tail_nodes(json!([
+        {
+            "kind":"par", "name":"correlatedQuorum", "state":record(),
+            "branches":[
+                conditional_quorum_branch(
+                    "acceptedBranch","accepted","acceptedWork","rejectedDone"
+                ),
+                conditional_quorum_branch(
+                    "rejectedBranch","rejected","rejectedWork","acceptedDone"
+                )
+            ],
+            "promotedStatePaths":[],
+            "join":{"kind":"quorum","count":2}
+        },
+        {
+            "kind":"choice","name":"settledJoin","state":record(),
+            "branches":[{
+                "when":{"kind":"in","value":{"name":"correlatedQuorum","source":"group","field":"joined"},"labels":["quorum_unreachable"]},
+                "node":{"kind":"succeed","name":"handled","output":{"kind":"null"},"bindings":[]}
+            }],"promotedStatePaths":[]
+        }
+    ]));
     assert_graph_accepted(&graph).await;
+
+    // The shared verifier cannot select both normal-completion branches together.
+    let mut value = serde_json::to_value(graph).assert_value();
+    let route = value
+        .assert_at_mut("root")
+        .assert_at_mut("children")
+        .as_array_mut()
+        .assert_value()
+        .last_mut()
+        .assert_value();
+    *route
+        .assert_at_mut("branches")
+        .assert_at_mut(0)
+        .assert_at_mut("when")
+        .assert_at_mut("labels") = json!(["reached"]);
+    let graph = serde_json::from_value(value).assert_value();
+    assert_graph_rejected_with(&graph, GraphDiagnosticCode::ChoiceExhaustiveness).await;
 }
 
 fn conditional_quorum_branch(name: &str, label: &str, worker: &str, terminal: &str) -> Value {

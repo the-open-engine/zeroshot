@@ -22,7 +22,16 @@ def option(name):
     except ValueError:
         return None
 
+def request_status():
+    text_bytes = os.environ.get("FAKE_REQUEST_STREAM_BYTES")
+    return {"phase":"suspended","reason":"request","node":"approval","createdAt":1000,
+            "request":{"id":"question","text":"?" * int(text_bytes) if text_bytes else "Approve?",
+                       "signals":{"decision":["approved","rejected"]},
+                       "output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}}
+
 def projection(run_id, status, cursor):
+    if os.environ.get("FAKE_REQUEST_STATUS") == "1" and status["phase"] == "admitted":
+        status = request_status()
     return {
         "runId": run_id,
         "title": "Fake run",
@@ -123,6 +132,13 @@ elif args[:2] == ["stack", "watch"]:
 elif args[:2] == ["stack", "force-stop"]:
     print(json.dumps(stack_projection("cancelled")))
 elif args and args[0] == "run":
+    base = option("--worktree-base")
+    if base is not None and base not in ("local", "remote"):
+        fail("invalid_request", "request.invalid", "invalid --worktree-base", {})
+    if base is not None and "--worktree" not in args:
+        fail("invalid_request", "request.invalid", "--worktree-base requires --worktree", {})
+    if "--worktree" in args and "--target" in args:
+        fail("invalid_request", "request.invalid", "--worktree conflicts with --target", {})
     initial_input = entry.get("--input")
     task = initial_input.get("task") if isinstance(initial_input, dict) else None
     if task == "invalid":
@@ -155,12 +171,39 @@ elif args and args[0] == "list":
             )
         )
     print(json.dumps({"runs": runs}))
+elif args and args[0] == "suspend":
+    status = {"phase":"running","activeExecutions":[],"suspendRequested":True}
+    print(json.dumps(projection(args[1], status, "v2:1")))
+elif args[:2] in (["inbox", "list"], ["inbox", "show"]):
+    request={"id":"question","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000}
+    row={"runId":"original","node":"approval","createdAt":1000,"expiresAt":2000,"state":"pending"}
+    if args[1] == "list": print(json.dumps({"requests":[row],"nextAfter":"original"}))
+    else:
+        print(json.dumps({"runId":args[2],"node":"approval","createdAt":1000,
+                          "request":request,"state":"pending"}))
+elif args and args[0] == "answer":
+    if os.environ.get("FAKE_ANSWER_FAIL"):
+        messages = ["$.output.feedback required", "already has successor next",
+                    "request expired; successor next"]
+        fail("invalid_request","invalid_request",messages[int(os.environ["FAKE_ANSWER_FAIL"])],{})
+    print(json.dumps({"runId":"successor","resumedFrom":args[1]}))
+elif args and args[0] == "resume":
+    print(json.dumps({"runId":"successor","resumedFrom":args[1]}))
+elif args and args[0] == "vectors":
+    vector={"id":"vector-1","kind":"suspend_request","runId":"original","createdAt":1762905600000}
+    if args[1] == "show":
+        print(json.dumps(vector))
+    else:
+        print(json.dumps({"runId":args[1],"vectors":[vector],"nextAfter":"vector-1"}))
 elif args and args[0] == "status":
     if os.environ.get("FAKE_WATCH_FAILURE") in ("early", "outage_failed_run"):
         print(json.dumps(projection(args[1], failed_status, "v2:2")))
     else:
         print(json.dumps(projection(args[1], {"phase": "admitted"}, "v2:0")))
 elif args and args[0] == "watch":
+    if os.environ.get("FAKE_WATCH_PID"):
+        with open(os.environ["FAKE_WATCH_PID"], "w") as handle:
+            handle.write(str(os.getpid()))
     time.sleep(float(os.environ.get("FAKE_WATCH_DELAY", "0")))
     failure = os.environ.get("FAKE_WATCH_FAILURE")
     running = projection(
@@ -188,8 +231,21 @@ elif args and args[0] == "watch":
         },
         "v2:2",
     )
+    if os.environ.get("FAKE_SUSPEND") == "1":
+        finished["status"] = {
+            "phase":"suspended", "reason":"wait", "node":"cooldown",
+            "createdAt":1762905600000, "wait":{"dueAt":1762992000000}, "metadata":{},
+        }
+    if os.environ.get("FAKE_REQUEST_STREAM_BYTES"):
+        finished["status"] = request_status()
     finished["cursor"] = finished.pop("atCursor")
+    if os.environ.get("FAKE_WATCH_FRAME_BYTES"):
+        finished["padding"] = ""
+        finished["padding"] = "x" * (
+            int(os.environ["FAKE_WATCH_FRAME_BYTES"]) - len(json.dumps(finished))
+        )
     print(json.dumps(finished), flush=True)
+    time.sleep(float(os.environ.get("FAKE_WATCH_HOLD_OPEN", "0")))
     if failure == "terminal":
         fail(
             "run_failed", "run.failed", "run finished unsuccessfully: worker_failed",

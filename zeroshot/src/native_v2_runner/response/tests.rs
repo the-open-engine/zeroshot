@@ -28,10 +28,15 @@ fn workspace_and_verifier_guidance_are_runtime_owned() {
     assert!(prompt.contains(instructions.as_str()));
     assert!(!prompt.contains("Runtime-owned workspace setup guidance:"));
     assert!(prompt.contains("Do not run setup or dependency-install commands"));
+    assert!(prompt.contains("rewrite the checkout or shared dependencies"));
     assert!(prompt.contains("other nodes may run concurrently"));
     assert!(prompt.contains("Do not modify reviewed material"));
     assert!(prompt.contains("create artifacts"));
-    assert!(prompt.contains("missing declared dependency is an environment blocker"));
+    assert!(prompt.contains("installable setup gaps or an incomplete candidate build"));
+    assert!(prompt.contains("actionable rejected feedback for the worker"));
+    assert!(prompt.contains("missing prerequisites and command evidence"));
+    assert!(prompt.contains("Reserve blocked for a demonstrated external limitation"));
+    assert!(!prompt.contains("missing declared dependency is an environment blocker"));
     assert!(prompt.contains("do not request unrelated code repairs"));
     assert!(prompt.contains(&input.to_string()));
     assert!(prompt.contains(&serde_json::to_string(&verifier).assert_value()));
@@ -39,6 +44,11 @@ fn workspace_and_verifier_guidance_are_runtime_owned() {
     assert!(worker.contains("Runtime-owned workspace setup guidance:"));
     assert!(worker.contains("manifest/lockfile dependencies in the checkout"));
     assert!(worker.contains("Wait for setup to finish and check exit status"));
+    assert!(worker.contains("Homes are session-local"));
+    assert!(
+        worker.contains("Prepare required dependencies and candidate binaries in shared paths")
+    );
+    assert!(worker.contains("report the paths/settings fresh reviewers need"));
     assert!(worker.contains("`$ZEROSHOT_TOOLS/bin`"));
     assert!(worker.contains("`/tmp` (possibly `noexec`)"));
     assert!(!worker.contains("Runtime-owned verifier guidance:"));
@@ -174,7 +184,13 @@ fn native_schema_lanes_keep_the_contract_prompt_byte_for_byte() {
         "Authored instructions:\n",
         "Change the workspace.\n",
         "Runtime-owned workspace setup guidance:\n",
-        "Before returning, follow repository setup and install manifest/lockfile dependencies in the checkout; do not use an ad hoc unpinned list. Wait for setup to finish and check exit status. Leave ignored dependencies there. Put standalone tools under an executable user path: use `$ZEROSHOT_TOOLS/bin` when provided (shared by all nodes), otherwise `$HOME/.local/bin`. Do not install tools in `/tmp` (possibly `noexec`).\n",
+        "Before returning, follow repository setup and install manifest/lockfile dependencies in ",
+        "the checkout; do not use an ad hoc unpinned list. Wait for setup to finish and check exit ",
+        "status. Leave ignored dependencies there. Homes are session-local. Prepare required ",
+        "dependencies and candidate binaries in shared paths, and report the paths/settings fresh ",
+        "reviewers need. Put standalone tools under an executable user path: use ",
+        "`$ZEROSHOT_TOOLS/bin` when provided (shared by all nodes), otherwise `$HOME/.local/bin`. ",
+        "Do not install tools in `/tmp` (possibly `noexec`).\n",
         "Input JSON:\n",
         "{\"task\":\"change the workspace\"}\n",
         "Runtime-owned response contract:\n",

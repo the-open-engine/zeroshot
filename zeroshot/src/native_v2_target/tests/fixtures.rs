@@ -12,7 +12,7 @@ use openengine_cluster_protocol::{
     RunWatchParams, SourceBranchId, SourceRepositoryId, SourceRevisionId, SubscriptionId,
     TargetOecpSessionRequest,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use zeroshot_engine::native_v2_cli::{PreparedRunRequest, TargetRunIntent};
 
 use super::super::controller_authority::credentials::test_support::{
@@ -55,11 +55,14 @@ pub(super) struct FakeAuthority {
     receipt_run_id: Option<RunId>,
 }
 
-pub(super) struct StubTransport;
+pub(super) struct StubTransport {
+    requests: Arc<Mutex<Vec<Value>>>,
+}
 
 #[derive(Clone, Default)]
 pub(super) struct FakeDialer {
     pub(super) sessions: Arc<Mutex<Vec<(TargetRecord, String)>>>,
+    pub(super) requests: Arc<Mutex<Vec<Value>>>,
 }
 
 impl TargetRegistry for MemoryRegistry {
@@ -283,7 +286,11 @@ impl TargetControlAuthority for FakeAuthority {
 
 #[async_trait]
 impl JsonRpcTransport for StubTransport {
-    async fn request(&self, _request: String) -> Result<String, TransportError> {
+    async fn request(&self, request: String) -> Result<String, TransportError> {
+        self.requests
+            .lock()
+            .assert_value()
+            .push(serde_json::from_str(&request).assert_value());
         Err(TransportError::Protocol("unused test transport".to_owned()))
     }
 }
@@ -324,7 +331,9 @@ impl TargetOecpDialer for FakeDialer {
             .lock()
             .assert_value()
             .push((target.clone(), session.endpoint().to_owned()));
-        Ok(Arc::new(StubTransport))
+        Ok(Arc::new(StubTransport {
+            requests: self.requests.clone(),
+        }))
     }
 }
 

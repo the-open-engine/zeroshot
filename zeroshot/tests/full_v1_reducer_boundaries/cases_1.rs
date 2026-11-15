@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn exact_map_limit_dispatches_every_item_but_overflow_prunes_all_identities() {
+async fn map_item_limit_queues_excess_input_without_terminal_success() {
     let map = json!({
         "kind":"map","name":"mapped","state":boundary_state(),
         "body":step("item_work",1),"over":{"source":"state","path":["items"]},
@@ -22,13 +22,15 @@ async fn exact_map_limit_dispatches_every_item_but_overflow_prunes_all_identitie
     let overflow = FullV1Reducer::new(&graph)
         .reduce(input(&json!({"items":[1,2,3]}), &[]))
         .assert_value();
-    assert!(
-        !overflow
+    assert_eq!(
+        overflow
             .decisions
             .iter()
-            .any(|decision| matches!(decision, Decision::Dispatch { .. }))
+            .filter(|decision| matches!(decision, Decision::Dispatch { .. }))
+            .count(),
+        2
     );
-    assert!(overflow.terminal.is_some());
+    assert!(overflow.terminal.is_none());
 }
 
 #[tokio::test]

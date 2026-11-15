@@ -39,7 +39,7 @@ fn route_with_capacity(
     subscriptions: &SubscriptionMap,
     capacity: usize,
 ) -> Option<SubscriptionId> {
-    let Ok(value) = serde_json::from_str::<Value>(&line) else {
+    let Ok(value) = openengine_cluster_protocol::bounded_json_from_str::<Value>(&line) else {
         return None;
     };
     if value.get("method").is_some() {
@@ -113,7 +113,7 @@ pub(super) async fn route_backpressured_message(
     pending: &PendingMap,
     subscriptions: &SubscriptionMap,
 ) -> Option<SubscriptionId> {
-    let value: Value = serde_json::from_str(&line).ok()?;
+    let value: Value = openengine_cluster_protocol::bounded_json_from_str(&line).ok()?;
     if value.get("method").is_none() {
         return route_with_capacity(line, pending, subscriptions, 8);
     }

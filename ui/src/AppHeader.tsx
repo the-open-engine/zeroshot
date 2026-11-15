@@ -2,6 +2,10 @@ import type { ReactNode } from 'react';
 import { ThemeControl } from './ThemeControl';
 import type { WorkspaceIdentity } from './api';
 
+function workspaceKindLabel(kind: string) {
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
 export function AppHeader({
   section,
   navigate,
@@ -17,10 +21,9 @@ export function AppHeader({
     <header className="app-header">
       <div className="brand">
         <img src="./oec-mascot.webp" alt="The Open Engine Company" />
-        <span className="brand-rule" />
         <span>zeroshot</span>
       </div>
-      <span className="local-label">{workspace.kind.toUpperCase()}</span>
+      <span className="local-label">{workspaceKindLabel(workspace.kind)}</span>
       <nav className="app-sections" aria-label="Workspace">
         <button
           aria-current={section === 'profiles' ? 'page' : undefined}

@@ -76,6 +76,7 @@ pub enum RunRuntimeExit {
     Failed,
     ForceStopped,
     RuntimeLost,
+    Suspended,
 }
 
 /// Optional runtime cleanup seam used by the platform controller.
@@ -93,6 +94,8 @@ pub struct RuntimeCleanupUnavailable;
 
 #[derive(Debug, Error)]
 pub enum NativeV2SupervisorError {
+    #[error("run is suspended")]
+    Suspended,
     #[error("run was not found")]
     RunNotFound,
     #[error("durable run state is inconsistent with the active supervisor")]
@@ -130,7 +133,13 @@ pub struct NativeV2Supervisor {
     force_requested: Arc<AtomicBool>,
     resolution_stop: watch::Sender<bool>,
     version_initialized: Arc<Mutex<bool>>,
+    conversations_initialized: Arc<Mutex<bool>>,
+    conversation_notices: Arc<Mutex<BTreeSet<(NodeName, &'static str)>>>,
     drive_turn: Arc<Mutex<()>>,
+    suspend_turn: Arc<Mutex<()>>,
+    suspend_signal: watch::Sender<bool>,
+    wall_clock: crate::native_v2_wait::WallClock,
+    wait_threshold: Option<Duration>,
 }
 
 impl NativeV2Supervisor {
@@ -154,8 +163,14 @@ impl NativeV2Supervisor {
             runtime_lost: Arc::new(AtomicBool::new(false)),
             force_requested: Arc::new(AtomicBool::new(false)),
             resolution_stop: watch::channel(false).0,
+            conversations_initialized: Arc::default(),
+            conversation_notices: Arc::default(),
             version_initialized: Arc::new(Mutex::new(false)),
             drive_turn: Arc::new(Mutex::new(())),
+            suspend_turn: Arc::new(Mutex::new(())),
+            suspend_signal: watch::channel(false).0,
+            wall_clock: Arc::new(crate::native_v2_runner::current_timestamp),
+            wait_threshold: None,
         }
     }
 
@@ -195,7 +210,27 @@ impl NativeV2Supervisor {
         self
     }
 
-    /// Drives the run until it reaches its durable terminal result.
+    /// Configures the host's in-place wait threshold; no threshold means all waits stay in place.
+    #[must_use]
+    pub fn with_wait_threshold(mut self, threshold: Option<Duration>) -> Self {
+        self.wait_threshold = threshold;
+        self
+    }
+
+    #[must_use]
+    pub fn with_wall_clock(mut self, clock: crate::native_v2_wait::WallClock) -> Self {
+        self.wall_clock = clock;
+        self
+    }
+
+    pub async fn suspend(&self) -> Result<(), NativeV2SupervisorError> {
+        let _turn = self.suspend_turn.lock().await;
+        self.ledger.request_suspend(&self.run_id).await?;
+        self.suspend_signal.send_replace(true);
+        Ok(())
+    }
+
+    /// Drives the attempt until durable terminal completion or suspension.
     pub async fn drive(&self) -> Result<TerminalResult, NativeV2SupervisorError> {
         let _turn = self.drive_turn.lock().await;
         match self.initialize().await? {
@@ -219,8 +254,25 @@ impl NativeV2Supervisor {
                 .await?
                 .snapshot;
         }
+        if stored.snapshot.phase == RunPhase::Suspended {
+            return Err(NativeV2SupervisorError::Suspended);
+        }
         if stored.snapshot.phase != RunPhase::Running {
             return Err(NativeV2SupervisorError::InvalidState);
+        }
+        {
+            let mut initialized = self.conversations_initialized.lock().await;
+            if !*initialized {
+                if let Some(store) = &self.checkpoints {
+                    self.runner
+                        .restore_conversations(
+                            &stored.snapshot.execution_seed,
+                            store.restored_conversations().await,
+                        )
+                        .await;
+                }
+                *initialized = true;
+            }
         }
         let catalog = execution_catalog(&stored.admitted.graph.root);
         Ok(Initialization::Program(Box::new(RunProgram {
@@ -279,7 +331,7 @@ impl NativeV2Supervisor {
             .catch_unwind()
             .await
             .unwrap_or(Err(NativeV2SupervisorError::TaskPanicked));
-        if result.is_err() {
+        if result.is_err() && !matches!(result, Err(NativeV2SupervisorError::Suspended)) {
             self.resolution_stop.send_replace(true);
             self.runner.close_run(&self.run_id).await;
             // Keep ownership until every task has stopped, even when another output append failed.
@@ -341,9 +393,37 @@ impl NativeV2Supervisor {
                 .await
                 .map(Some);
         }
-        self.checkpoint_boundary(reduction.boundary.as_ref(), snapshot, active)
-            .await?;
+        if active.is_quiescent(snapshot) {
+            self.checkpoint_boundary(&program.admitted, reduction.boundary.as_ref(), snapshot)
+                .await?;
+        }
+        if active.is_quiescent(snapshot)
+            && let Some(boundary) = &reduction.boundary
+        {
+            if active.boundary.as_ref() != Some(boundary)
+                && self.snapshot().await?.suspend_requested
+            {
+                self.suspend_at(openengine_cluster_protocol::RunSuspension::Command {
+                    node: boundary.node.clone(),
+                    created_at: (self.wall_clock)(),
+                })
+                .await?;
+            }
+            active.boundary = Some(boundary.clone());
+        }
         let dispatches = dispatch_decisions(&self.run_id, reduction.decisions);
+        if dispatches.len() == 1
+            && dispatches[0].worker.as_str() == crate::native_v2_request::ASK_WORKER_REF
+        {
+            self.execute_request(program, &dispatches[0]).await?;
+            return Ok(None);
+        }
+        if dispatches.len() == 1
+            && dispatches[0].worker.as_str() == crate::native_v2_wait::WAIT_WORKER_REF
+        {
+            self.execute_wait(&dispatches[0]).await?;
+            return Ok(None);
+        }
         if !dispatches.is_empty() {
             self.dispatch(program, dispatches, active).await?;
             return Ok(None);
@@ -352,16 +432,51 @@ impl NativeV2Supervisor {
         Ok(None)
     }
 
+    async fn capture_conversations(
+        &self,
+        store: &dyn checkpoints::RunCheckpointStore,
+    ) -> Result<(), NativeV2SupervisorError> {
+        let captured = self
+            .runner
+            .capture_conversations_until_stopped(
+                &self.run_id,
+                crate::execution::driver::DriverCancellation::new(self.resolution_stop.subscribe()),
+            )
+            .await;
+        let mut notices = self.conversation_notices.lock().await;
+        let mut events = Vec::new();
+        for (node, reason) in captured.notices {
+            if notices.insert((node.clone(), reason)) {
+                events.push(RunEvent::SafeLog {
+                    execution: None,
+                    timestamp: (self.wall_clock)(),
+                    stream: SafeLogStream::System,
+                    line: SafeLogLine::new(format!(
+                        "node {} conversation was not saved: {reason}",
+                        node.as_str()
+                    ))?,
+                    diagnostic: None,
+                });
+            }
+        }
+        if !events.is_empty() {
+            self.ledger.append(&self.run_id, events).await?;
+        }
+        // Storage implementations may predate this payload. Capture never fails the checkpoint.
+        let _ = store.retain_conversations(captured.files).await;
+        Ok(())
+    }
+
     async fn checkpoint_boundary(
         &self,
+        admitted: &AdmittedRun,
         boundary: Option<&crate::full_v1_reducer::ExecutionBoundary>,
         snapshot: &RunSnapshot,
-        active: &ActiveDispatches,
     ) -> Result<(), NativeV2SupervisorError> {
-        if !active.is_quiescent(snapshot) {
-            return Ok(());
-        }
         if let (Some(store), Some(boundary)) = (&self.checkpoints, boundary) {
+            if admitted.runtime.workspace_checkpoints {
+                self.capture_conversations(store.as_ref()).await?;
+            }
             store.enter(boundary, &durable_history(snapshot)?).await?;
         }
         Ok(())
@@ -376,8 +491,14 @@ impl NativeV2Supervisor {
         let terminal = self
             .latch_primary_graph(admitted, snapshot, terminal)
             .await?;
-        self.runner.close_run(&self.run_id).await;
         let succeeded = matches!(terminal, TerminalResult::Succeeded { .. });
+        if !succeeded
+            && admitted.runtime.workspace_checkpoints
+            && let Some(store) = &self.checkpoints
+        {
+            self.capture_conversations(store.as_ref()).await?;
+        }
+        self.runner.close_run(&self.run_id).await;
         self.finish_failed_checkpoints(succeeded, snapshot).await?;
         let exit = if succeeded {
             RunRuntimeExit::Completed
@@ -648,7 +769,11 @@ pub(crate) mod logging;
 mod postmortem;
 mod runtime;
 // Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
-pub(crate) use runtime::{durable_history, next_execution, next_node_instance};
+pub(crate) use runtime::{
+    request_history, continuation_history, durable_history, next_execution, next_node_instance,
+};
 pub use environment::{RunEnvironment, RunEnvironmentError};
 pub(crate) use environment::{ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver};
 use runtime::*;
+
+mod suspension;

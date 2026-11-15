@@ -74,6 +74,8 @@ struct RequestCapabilities<'a> {
     runtime: Option<&'a RuntimePlan>,
     git_transport: bool,
     task_resolution: bool,
+    request_ask: bool,
+    request_wait: bool,
 }
 
 impl TargetHttpControlAuthority {
@@ -464,6 +466,14 @@ impl TargetHttpControlAuthority {
                 runtime: Some(&request.submission.runtime),
                 git_transport: request.requires_git_transport(),
                 task_resolution: false,
+                request_ask: graph_has_worker(
+                    &request.submission.graph.root,
+                    zeroshot_engine::native_v2_request::ASK_WORKER_REF,
+                ),
+                request_wait: graph_has_worker(
+                    &request.submission.graph.root,
+                    zeroshot_engine::native_v2_wait::WAIT_WORKER_REF,
+                ),
             },
         )
         .await
@@ -579,6 +589,15 @@ fn require_session_capability(
         TargetSessionPurpose::WorkspaceRecovery if !controller.workspace_recovery => Err(
             authority_error("target does not advertise workspace recovery"),
         ),
+        TargetSessionPurpose::RunSuspension if !controller.run_suspension => Err(authority_error(
+            "target does not advertise openengine.run-suspension/v1",
+        )),
+        TargetSessionPurpose::RequestAsk if !controller.request_ask => Err(authority_error(
+            "target does not advertise openengine.request-ask/v1",
+        )),
+        TargetSessionPurpose::RunVectors if !controller.run_vectors => Err(authority_error(
+            "target does not advertise openengine.run-vectors/v1",
+        )),
         TargetSessionPurpose::WorkspaceCheckpoints if !controller.workspace_checkpoints => Err(
             authority_error("target does not advertise workspace checkpoints"),
         ),
@@ -591,6 +610,16 @@ fn require_request_capabilities(
     controller: &ControllerDescriptor,
     capabilities: RequestCapabilities<'_>,
 ) -> Result<(), TargetAuthorityError> {
+    if capabilities.request_ask && !controller.request_ask {
+        return Err(authority_error(
+            "target does not advertise openengine.request-ask/v1",
+        ));
+    }
+    if capabilities.request_wait && !controller.request_wait {
+        return Err(authority_error(
+            "target does not advertise openengine.request-wait/v1",
+        ));
+    }
     if let Some(runtime) = capabilities.runtime {
         require_runtime_capabilities(controller, runtime)?;
     }
@@ -626,6 +655,18 @@ fn require_runtime_capabilities(
     }) {
         return Err(authority_error(
             "script bindings currently require local execution",
+        ));
+    }
+    if runtime.nodes().values().any(|binding| {
+        matches!(
+            binding,
+            openengine_cluster_protocol::NodeRuntimeBinding::Request {}
+        )
+    }) && !controller.request_wait
+        && !controller.request_ask
+    {
+        return Err(authority_error(
+            "target does not advertise openengine.request-wait/v1",
         ));
     }
     require_node_runtime_lanes(controller, runtime)?;
@@ -704,3 +745,19 @@ pub(super) use credentials::TargetCredentialStore;
 #[cfg(test)]
 #[path = "controller_authority/tests.rs"]
 mod tests;
+
+fn graph_has_worker(root: &openengine_cluster_protocol::GraphNode, worker: &str) -> bool {
+    match root {
+        openengine_cluster_protocol::GraphNode::Verifier(node)
+            if node.worker.as_str() == worker =>
+        {
+            true
+        }
+        openengine_cluster_protocol::GraphNode::Step(node) if node.worker.as_str() == worker => {
+            true
+        }
+        _ => openengine_cluster_server::graph_verifier::graph_node_children(root)
+            .into_iter()
+            .any(|child| graph_has_worker(child, worker)),
+    }
+}

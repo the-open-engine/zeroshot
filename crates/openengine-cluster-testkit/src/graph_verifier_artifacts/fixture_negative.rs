@@ -213,21 +213,18 @@ pub(super) fn unsafe_promotion_graph() -> Value {
 }
 
 pub(super) fn impossible_map_outcomes_graph() -> Value {
-    let map = json!({
-        "kind":"map","name":"map","state":data_state_type(),"body":verifier_node("mapVerify"),
-        "over":{"source":"state","path":["items"]},"maxItems":1,"promotedStatePaths":[]
-    });
     let guard = json!({"kind":"all","guards":[
-        {"kind":"k_of_map","count":1,"value":{"name":"mapVerify","source":"signal","field":"verdict"},"labels":["accepted"]},
-        {"kind":"k_of_map","count":1,"value":{"name":"mapVerify","source":"error","field":null},"labels":["timeout"]}
+        {"kind":"in","value":{"name":"mapVerify","source":"signal","field":"verdict"},"labels":["accepted"]},
+        {"kind":"in","value":{"name":"mapVerify","source":"error","field":null},"labels":["timeout"]}
     ]});
+    let body = json!({"kind":"seq","name":"body","state":data_state_type(),
+        "children":[verifier_node("mapVerify"),choice("decision",data_state_type(),guard,succeed("selected"))],"promotedStatePaths":[]});
+    let map = json!({"kind":"map","name":"map","state":data_state_type(),"body":body,
+        "over":{"source":"state","path":["items"]},"maxItems":1,"promotedStatePaths":[]});
     graph(
         data_state_type(),
         data_state_type(),
-        vec![
-            map,
-            choice("decision", data_state_type(), guard, succeed("selected")),
-        ],
+        vec![map, succeed("done")],
     )
 }
 

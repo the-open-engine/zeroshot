@@ -569,6 +569,9 @@ async fn remote_live_polling_backs_off_caps_resets_and_remains_demand_driven() {
 fn remote_list_requires_descending_unique_ids_and_an_exact_page_cursor() {
     fn queued(id: &str) -> RunHistorySummary {
         RunHistorySummary {
+            suspension: None,
+            suspend_requested: false,
+            workspace_recovery: None,
             run_id: RunId::new(id),
             title: RunTitle::new("Queued run").assert_value(),
             phase: RunHistoryPhase::Queued,
@@ -640,6 +643,9 @@ fn remote_summary_validation_preserves_terminal_authority() {
     let id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992");
     let title = RunTitle::new("Remote run").assert_value();
     let queued = RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         run_id: id.clone(),
         title: title.clone(),
         phase: RunHistoryPhase::Queued,
@@ -658,6 +664,9 @@ fn remote_summary_validation_preserves_terminal_authority() {
         reason: "runtime_failed".into(),
     };
     let valid_failed = RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         phase: RunHistoryPhase::Finished,
         cursor: Some(failure.at_cursor.clone()),
         terminal: Some(RunHistoryTerminalSynopsis::Failed {
@@ -671,38 +680,62 @@ fn remote_summary_validation_preserves_terminal_authority() {
 
     let mut invalid = Vec::new();
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         run_id: RunId::new("not-a-run-id"),
         ..queued.clone()
     });
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         cursor: Some(Cursor::new("v2:18446744073709551616")),
         history_available: true,
         ..queued.clone()
     });
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         cursor: Some(Cursor::new("v2:1")),
         ..queued.clone()
     });
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         phase: RunHistoryPhase::Unavailable,
         cursor: Some(Cursor::new("v2:1")),
         history_available: true,
         ..queued.clone()
     });
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         phase: RunHistoryPhase::Running,
         terminal: Some(RunHistoryTerminalSynopsis::Succeeded {}),
         ..queued.clone()
     });
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         terminal: None,
         ..valid_failed.clone()
     });
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         phase: RunHistoryPhase::Running,
         ..valid_failed.clone()
     });
     invalid.push(RunHistorySummary {
+        suspension: None,
+        suspend_requested: false,
+        workspace_recovery: None,
         terminal: Some(RunHistoryTerminalSynopsis::Failed {
             reason: "runtime_lost".into(),
         }),

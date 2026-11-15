@@ -51,6 +51,7 @@ impl CleanupFixture {
         let state = Arc::new(ProductionCapsuleState {
             environment: EnvironmentProcesses::default(),
             restored_delivery_run_id: OnceLock::new(),
+            conversation_restore: OnceLock::new(),
             endpoint: OnceLock::from(Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
                 IdleRunner,
             )))),
@@ -61,6 +62,7 @@ impl CleanupFixture {
             recovery_path: directory.child("recovery.json"),
             delivery_run_id: run_id.clone(),
             inherited_retained_workspace: false,
+            host_owned_workspace: false,
             process_pool: Mutex::new(Some(lease)),
             portable_processes: false,
             _loss_sender: loss,

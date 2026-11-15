@@ -828,3 +828,6 @@ async fn sqlite_rejects_unresolved_or_inconsistent_persisted_size_without_panick
         assert_eq!(ledger.list().await, Err(RunLedgerError::Corrupt));
     }
 }
+
+#[path = "tests/vectors.rs"]
+mod vector_tests;

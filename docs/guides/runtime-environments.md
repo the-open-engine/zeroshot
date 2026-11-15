@@ -119,8 +119,9 @@ suppress Debian package service autostart. Parallel graph branches share mutable
 and graphs must coordinate concurrent writes.
 
 Both hooks run again on resume: setup, restore workspace files, startup, then restart or continue
-the graph. Startup must be idempotent with respect to existing workspace files. Checkpoints do not
-restore running services, Docker images or volumes, database transactions, or agent conversations.
+the graph. Startup must be idempotent with respect to existing workspace files. Checkpoints restore supported node-instance agent conversations on checkpoint continuations and
+suspended successors. Running services, Docker images or volumes, and database transactions are not
+restored.
 A background process may change files while a checkpoint is captured; use application-managed
 exports for consistent database recovery.
 

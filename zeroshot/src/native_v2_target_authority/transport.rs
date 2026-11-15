@@ -265,6 +265,8 @@ impl NativeV2TargetServer {
                 controller,
                 workspace_recovery: self.workspace_recovery(),
                 workspace_checkpoints: self.workspace_checkpoints(),
+                run_suspension: self.target.supports_run_suspension(),
+                request_ask: self.target.supports_request_ask(),
             }),
             StaticConnectionIdentityResolver::new(identity),
             SystemConnectionTime,
@@ -329,13 +331,15 @@ impl NativeV2TargetServer {
     ) -> Result<DirectTaskResolutionRequest, serde_json::Error> {
         match &self.access {
             TargetServerAccess::Hosted(_) => {
-                serde_json::from_slice(body).map(|request| DirectTaskResolutionRequest {
-                    request,
-                    github_token: None,
+                openengine_cluster_protocol::bounded_json_from_slice(body).map(|request| {
+                    DirectTaskResolutionRequest {
+                        request,
+                        github_token: None,
+                    }
                 })
             }
             TargetServerAccess::Direct(_) | TargetServerAccess::Private { .. } => {
-                serde_json::from_slice(body)
+                openengine_cluster_protocol::bounded_json_from_slice(body)
             }
         }
     }
@@ -357,7 +361,10 @@ impl NativeV2TargetServer {
         let TargetServerAccess::Private { access, .. } = &self.access else {
             return not_found_response();
         };
-        let request = match serde_json::from_slice::<TargetPrivateBootstrapRequest>(&request.body) {
+        let request = match openengine_cluster_protocol::bounded_json_from_slice::<
+            TargetPrivateBootstrapRequest,
+        >(&request.body)
+        {
             Ok(request) => request,
             Err(_) => return invalid_request_response("private bootstrap request is malformed"),
         };
@@ -374,7 +381,10 @@ impl NativeV2TargetServer {
         if let Err(error) = self.authenticate_control(&request.head).await {
             return authority_error_response(error);
         }
-        let submission = match serde_json::from_slice::<TargetRunRequest>(&request.body) {
+        let submission = match openengine_cluster_protocol::bounded_json_from_slice::<
+            TargetRunRequest,
+        >(&request.body)
+        {
             Ok(submission) => submission,
             Err(_) => return invalid_request_response("target run request is malformed"),
         };
@@ -392,11 +402,13 @@ impl NativeV2TargetServer {
             Ok(identity) => identity,
             Err(error) => return authority_error_response(error),
         };
-        let session_request =
-            match serde_json::from_slice::<TargetOecpSessionRequest>(&request.body) {
-                Ok(request) if request.run_id.as_ref().is_none_or(is_canonical_uuid_v7) => request,
-                _ => return invalid_request_response("target OECP session request is malformed"),
-            };
+        let session_request = match openengine_cluster_protocol::bounded_json_from_slice::<
+            TargetOecpSessionRequest,
+        >(&request.body)
+        {
+            Ok(request) if request.run_id.as_ref().is_none_or(is_canonical_uuid_v7) => request,
+            _ => return invalid_request_response("target OECP session request is malformed"),
+        };
         if let Err(error) = self.target.controller().await {
             return authority_error_response(error);
         }
@@ -494,6 +506,12 @@ impl NativeV2TargetServer {
         if self.workspace_recovery() {
             document = document.with_workspace_recovery();
         }
+        if self.target.supports_request_ask() {
+            document = document.with_request_ask();
+        }
+        if self.target.supports_run_suspension() {
+            document = document.with_run_suspension();
+        }
         if self.workspace_checkpoints() {
             document = document.with_workspace_checkpoints();
         }
@@ -585,6 +603,8 @@ struct TargetOecpBackend {
     controller: Arc<NativeV2PlatformController>,
     workspace_recovery: bool,
     workspace_checkpoints: bool,
+    run_suspension: bool,
+    request_ask: bool,
 }
 
 #[async_trait]
@@ -665,6 +685,81 @@ impl ClusterBackend for TargetOecpBackend {
         ClusterBackend::run_force(self.controller.as_ref(), context, params).await
     }
 
+    async fn run_suspend(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
+        if !self.run_suspension {
+            return Err(BackendError::application(
+                "invalid_request",
+                "run suspension is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::run_suspend(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_vectors(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
+        if !self.run_suspension {
+            return Err(BackendError::application(
+                "invalid_request",
+                "run suspension is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::run_vectors(self.controller.as_ref(), context, params).await
+    }
+
+    async fn inbox_show(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
+        if !self.request_ask {
+            return Err(BackendError::application(
+                "invalid_request",
+                "openengine.request-ask/v1 is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::inbox_show(self.controller.as_ref(), context, params).await
+    }
+
+    async fn inbox_list(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, BackendError> {
+        if !self.request_ask {
+            return Err(BackendError::application(
+                "invalid_request",
+                "openengine.request-ask/v1 is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::inbox_list(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_vector(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
+        if !self.run_suspension {
+            return Err(BackendError::application(
+                "invalid_request",
+                "run suspension is unavailable",
+                None,
+            ));
+        }
+        ClusterBackend::run_vector(self.controller.as_ref(), context, params).await
+    }
+
     async fn run_checkpoints(
         &self,
         context: &ConnectionContext,
@@ -686,6 +781,17 @@ impl ClusterBackend for TargetOecpBackend {
     ) -> Result<RunResumeResult, BackendError> {
         if !self.workspace_recovery {
             return Err(workspace_recovery_unavailable());
+        }
+        if matches!(
+            params.from.as_ref(),
+            Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
+        ) && !self.request_ask
+        {
+            return Err(BackendError::application(
+                "invalid_request",
+                "openengine.request-ask/v1 is unavailable",
+                None,
+            ));
         }
         if matches!(params.from.as_ref(), Some(RunResumeFrom::Checkpoint { .. }))
             && !self.workspace_checkpoints

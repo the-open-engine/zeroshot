@@ -9,6 +9,7 @@ const MAX_TRACE_BYTES: usize = 4 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuralTraceState {
+    Queued,
     Entered,
     Completed,
     Succeeded,
@@ -106,6 +107,35 @@ impl TraceCollector {
 }
 
 impl Engine<'_> {
+    pub(super) fn trace_queued(
+        &mut self,
+        node: &NodeName,
+        traversal: Traversal<'_>,
+    ) -> Result<(), ReducerError> {
+        let Some(trace) = &mut self.trace else {
+            return Ok(());
+        };
+        if trace.records.len() >= MAX_TRACE_RECORDS {
+            return Err(ReducerError::TraceLimit);
+        }
+        trace.bytes = trace.bytes.saturating_add(
+            1024 + 8 * (traversal.map_indices.len() + traversal.loop_iterations.len()),
+        );
+        if trace.bytes > MAX_TRACE_BYTES {
+            return Err(ReducerError::TraceLimit);
+        }
+        trace.records.push(StructuralTrace {
+            node: node.clone(),
+            map_indices: traversal.map_indices.to_vec(),
+            loop_iterations: traversal.loop_iterations.to_vec(),
+            state: StructuralTraceState::Queued,
+            branch: None,
+            detail: None,
+            output: None,
+        });
+        Ok(())
+    }
+
     pub(super) fn trace_enter(
         &mut self,
         node: &GraphNode,

@@ -309,3 +309,116 @@ fn run_size_length_matches_unicode_character_limits_in_schema_and_rust() {
         assert_eq!(serde_json::from_value::<RunSize>(value).is_ok(), valid);
     }
 }
+
+#[test]
+fn vector_record_round_trips_and_rejects_invalid_page_limits() {
+    for value in [
+        serde_json::json!({"id":"vector-1","kind":"suspend_request","runId":"run-1","createdAt":1762905600000_u64}),
+        serde_json::json!({"id":"vector-2","kind":"suspension","runId":"run-1","createdAt":1762905600000_u64,"reason":"command","node":"review"}),
+        serde_json::json!({"id":"vector-3","kind":"continuation","runId":"run-2","createdAt":1762905600000_u64,"resumedFrom":"run-1"}),
+        serde_json::json!({"id":"vector-4","kind":"wait","runId":"run-2","createdAt":1762905600000_u64,"node":"cooldown","dueAt":1762992000000_u64}),
+    ] {
+        let vector: openengine_cluster_protocol::RunVector =
+            serde_json::from_value(value.clone()).assert_value();
+        assert_eq!(serde_json::to_value(vector).assert_value(), value);
+    }
+    for limit in [0, 101] {
+        assert!(
+            serde_json::from_value::<openengine_cluster_protocol::RunVectorsParams>(
+                serde_json::json!({"runId":"run-1","limit":limit})
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn hundred_worst_case_vector_summaries_fit_hosted_response_bound() {
+    use openengine_cluster_protocol::*;
+    let vector = RunVector {
+        id: VectorId::new("v".repeat(64)).assert_value(),
+        run_id: RunId::new("r".repeat(64)),
+        created_at: UnixTimestampMillis::new(MAX_SAFE_GENERATION).assert_value(),
+        content: RunVectorContent::Suspension {
+            reason: VectorSuspensionReason::Command,
+            node: NodeName::new("n".repeat(128)).assert_value(),
+        },
+    };
+    let result = RunVectorsResult {
+        run_id: RunId::new("r".repeat(64)),
+        vectors: vec![vector.into(); 100],
+        next_after: Some(VectorId::new("v".repeat(64)).assert_value()),
+    };
+    assert!(serde_json::to_vec(&result).assert_value().len() < 64 * 1024);
+}
+
+#[test]
+fn vector_identity_bounds_match_the_generated_schema() {
+    use openengine_cluster_protocol::RunVector;
+    let schema = serde_json::to_value(schemars::schema_for!(RunVector)).assert_value();
+    let validator = jsonschema::validator_for(&schema).assert_value();
+    let original = json!({"id":"entry", "kind":"continuation", "runId":"run", "resumedFrom":"prior", "createdAt":1});
+    for field in ["id", "runId", "resumedFrom"] {
+        for (identity, valid) in [
+            ("x".repeat(64), true),
+            ("x".repeat(65), false),
+            (String::new(), false),
+            ("line\nbreak".into(), false),
+        ] {
+            let mut value = original.clone();
+            value[field] = json!(identity);
+            assert_eq!(validator.is_valid(&value), valid, "{field}: {value}");
+            assert_eq!(serde_json::from_value::<RunVector>(value).is_ok(), valid);
+        }
+    }
+}
+
+#[test]
+fn request_answers_and_vectors_round_trip() {
+    use openengine_cluster_protocol::{RunResumeFrom, RunVector, RunVectorSummary};
+    let answer = json!({"kind":"answer","signals":{"decision":"rejected"},"output":{"feedback":"Fix the empty case."}});
+    let selection: RunResumeFrom = serde_json::from_value(answer.clone()).assert_value();
+    assert_eq!(serde_json::to_value(selection).assert_value(), answer);
+    for content in [
+        json!({"kind":"request","node":"approval","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000}),
+        json!({"kind":"answer","requestId":"question","answer":{"signals":{"decision":"approved"},"output":{}}}),
+        json!({"kind":"expiry","requestId":"question"}),
+    ] {
+        let mut value = content;
+        let fields = value.as_object_mut().assert_value();
+        fields.insert("id".to_owned(), json!("entry"));
+        fields.insert("runId".to_owned(), json!("run"));
+        fields.insert("createdAt".to_owned(), json!(1000));
+        let entry: RunVector = serde_json::from_value(value.clone()).assert_value();
+        assert_eq!(serde_json::to_value(&entry).assert_value(), value);
+        let summary = serde_json::to_value(RunVectorSummary::from(entry)).assert_value();
+        for key in ["text", "signals", "output", "answer"] {
+            assert!(summary.get(key).is_none());
+        }
+    }
+}
+#[test]
+fn hundred_maximum_inbox_rows_fit_the_hosted_response_limit() {
+    use openengine_cluster_protocol::{
+        InboxEntry, InboxListResult, NodeName, RequestState, UnixTimestampMillis,
+    };
+    let row = InboxEntry {
+        run_id: RunId::new("r".repeat(64)),
+        node: NodeName::new("n".repeat(128)).assert_value(),
+        created_at: UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION)
+            .assert_value(),
+        expires_at: UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION)
+            .assert_value(),
+        state: RequestState::Expired,
+    };
+    let page = InboxListResult {
+        requests: vec![row; 100],
+        next_after: Some(RunId::new("r".repeat(64))),
+    };
+    let bytes = serde_json::to_vec(&page).assert_value();
+    assert!(bytes.len() < 65536);
+    assert_eq!(
+        serde_json::from_slice::<InboxListResult>(&bytes).assert_value(),
+        page
+    );
+}

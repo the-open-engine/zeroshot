@@ -32,9 +32,33 @@ pub(crate) struct ResticProgram {
     #[cfg(test)]
     #[serde(default)]
     in_process_test_fake: bool,
+    #[cfg(test)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    stored_test_program: bool,
 }
 
 impl ResticProgram {
+    pub(super) fn for_restore(self) -> io::Result<Self> {
+        #[cfg(test)]
+        if self.in_process_test_fake || self.stored_test_program {
+            return Ok(self);
+        }
+        Self::discover().or_else(|error| {
+            if self.executable.is_file() {
+                Ok(self)
+            } else {
+                Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "restic was not found through ZEROSHOT_RESTIC, beside zeroshot, or on PATH; \
+                         stored executable {:?} is unavailable: {error}",
+                        self.executable,
+                    ),
+                ))
+            }
+        })
+    }
+
     pub(super) fn discover() -> io::Result<Self> {
         if let Some(configured) = std::env::var_os("ZEROSHOT_RESTIC") {
             return Self::from_path(PathBuf::from(configured)).map_err(|error| {
@@ -81,6 +105,8 @@ impl ResticProgram {
             arguments: Vec::new(),
             #[cfg(test)]
             in_process_test_fake: false,
+            #[cfg(test)]
+            stored_test_program: false,
         })
     }
 
@@ -88,6 +114,7 @@ impl ResticProgram {
     pub(super) fn test(executable: PathBuf, arguments: Vec<String>) -> io::Result<Self> {
         let mut program = Self::from_path(executable)?;
         program.arguments = arguments;
+        program.stored_test_program = true;
         Ok(program)
     }
 
@@ -97,6 +124,7 @@ impl ResticProgram {
             executable: PathBuf::from("in-process-test-restic"),
             arguments: Vec::new(),
             in_process_test_fake: true,
+            stored_test_program: false,
         })
     }
 }
@@ -202,6 +230,23 @@ impl Repository {
             snapshot.as_str().into(),
             "--target".into(),
             target.as_os_str().to_owned(),
+        ];
+        self.run(&self.root, &arguments).await?;
+        Ok(())
+    }
+
+    pub(super) async fn restore_conversations(
+        &self,
+        snapshot: &SnapshotId,
+        target: &Path,
+    ) -> io::Result<()> {
+        let arguments = [
+            OsString::from("restore"),
+            snapshot.as_str().into(),
+            "--target".into(),
+            target.as_os_str().to_owned(),
+            "--include".into(),
+            "/conversations".into(),
         ];
         self.run(&self.root, &arguments).await?;
         Ok(())

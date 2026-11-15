@@ -1,56 +1,84 @@
 use super::*;
 
-pub(in crate::graph_verifier) fn group_control_dimensions(
-    node: &GraphNode,
-    keys: &[SelectorKey],
-) -> Vec<Vec<Assignment>> {
-    keys.iter()
-        .filter(|key| key.source == ControlSourceKey::Group)
-        .map(|key| {
-            group_domain(node, key.field.as_ref())
-                .unwrap_or_default()
-                .into_iter()
-                .map(|label| BTreeMap::from([(key.clone(), assigned_control(Some(label), 1))]))
-                .collect()
-        })
-        .collect()
-}
-
-pub(in crate::graph_verifier) fn single_outcome_dimension(
-    node: &GraphNode,
-    keys: &[SelectorKey],
-) -> Option<Vec<Assignment>> {
-    let choices = per_execution_outcomes(node, keys)?;
-    (u64::try_from(choices.len()).unwrap_or(u64::MAX) <= FULL_V1_MAX_GUARD_ASSIGNMENTS)
-        .then_some(choices)
+pub(in crate::graph_verifier) struct AggregateCounts<'a> {
+    pub(super) keys: &'a [SelectorKey],
+    pub(super) outcomes: &'a [Assignment],
+    pub(super) count_limits: &'a CountLimits,
+    pub(super) budget: &'a ProofWork,
 }
 
 pub(in crate::graph_verifier) fn aggregate_assignments_from_outcomes(
-    keys: &[SelectorKey],
-    outcomes: &[Assignment],
-    maximum: u64,
+    context: AggregateCounts<'_>,
 ) -> Option<Vec<Assignment>> {
-    let count = bounded_distribution_count(maximum, outcomes.len())?;
-    if count > FULL_V1_MAX_GUARD_ASSIGNMENTS {
-        return None;
-    }
-    let expected = usize::try_from(count).ok()?;
-    let mut assignments = Vec::with_capacity(expected);
-    let mut valid = true;
-    let completed = for_each_outcome_multiset(outcomes.len(), maximum, |outcome_occurrences| {
-        if assignments.len() >= expected {
-            valid = false;
-            return false;
+    let keys = context.keys;
+    let empty = keys
+        .iter()
+        .cloned()
+        .map(|key| (key, assigned_control(None, 0)))
+        .collect::<Assignment>();
+    // Close over finite input cardinalities using saturated correlated counts.
+    let mut states = BTreeSet::from([empty.clone()]);
+    let mut frontier = BTreeSet::from([empty]);
+    loop {
+        let next = next_aggregate_layer(&frontier, &states, &context)?;
+        if next.is_empty() {
+            return Some(states.into_iter().collect());
         }
-        let Some(assignment) = combine_outcome_occurrences(keys, outcomes, outcome_occurrences)
-        else {
-            valid = false;
-            return false;
-        };
-        assignments.push(assignment);
-        true
-    });
-    (completed && valid && assignments.len() == expected).then_some(assignments)
+        if states.len().checked_add(next.len())? as u64 > FULL_V1_MAX_GUARD_ASSIGNMENTS {
+            return None;
+        }
+        states.extend(next.iter().cloned());
+        frontier = next;
+    }
+}
+
+fn next_aggregate_layer(
+    frontier: &BTreeSet<Assignment>,
+    excluded: &BTreeSet<Assignment>,
+    context: &AggregateCounts<'_>,
+) -> Option<BTreeSet<Assignment>> {
+    let mut next = BTreeSet::new();
+    for state in frontier {
+        for outcome in context.outcomes {
+            let candidate =
+                add_aggregate_outcome(state, outcome, context.count_limits, context.budget)?;
+            if excluded.contains(&candidate) {
+                continue;
+            }
+            if !next.contains(&candidate) && next.len() as u64 >= FULL_V1_MAX_GUARD_ASSIGNMENTS {
+                return None;
+            }
+            next.insert(candidate);
+        }
+    }
+    Some(next)
+}
+
+fn add_aggregate_outcome(
+    state: &Assignment,
+    outcome: &Assignment,
+    count_limits: &CountLimits,
+    budget: &ProofWork,
+) -> Option<Assignment> {
+    budget.charge(
+        2 * (1 + state.len() + state.values().map(|c| c.counts.len()).sum::<usize>())
+            + outcome.values().map(|c| c.counts.len()).sum::<usize>(),
+    )?;
+    let mut next = state.clone();
+    for (key, control) in outcome {
+        let target = next.get_mut(key)?;
+        for (label, count) in &control.counts {
+            // Refinement and correlations observe presence even when no authored guard does.
+            let limit = count_limits
+                .get(key)
+                .and_then(|limits| limits.get(label))
+                .copied()
+                .unwrap_or(1);
+            let previous = target.counts.entry(label.clone()).or_default();
+            *previous = previous.saturating_add(*count).min(limit);
+        }
+    }
+    Some(next)
 }
 
 pub(in crate::graph_verifier) fn assignment_matches_parallel_join_correlation(
@@ -58,6 +86,9 @@ pub(in crate::graph_verifier) fn assignment_matches_parallel_join_correlation(
     name: &NodeName,
     correlation: &ParallelJoinCorrelation,
 ) -> bool {
+    if !retained_selection_matches(assignment, name, correlation.retention()) {
+        return false;
+    }
     let Some(control) = parallel_join_control(assignment, name, correlation) else {
         return true;
     };
@@ -65,13 +96,12 @@ pub(in crate::graph_verifier) fn assignment_matches_parallel_join_correlation(
         return true;
     }
     match correlation {
-        ParallelJoinCorrelation::Joined { completion } => {
+        ParallelJoinCorrelation::Joined { completion, .. } => {
             joined_control_matches(control, completion, assignment)
         }
-        ParallelJoinCorrelation::First {
-            satisfaction,
-            all_completions,
-        } => first_control_matches(control, satisfaction, all_completions, assignment),
+        ParallelJoinCorrelation::First { satisfaction, .. } => {
+            first_control_matches(control, satisfaction, assignment)
+        }
     }
 }
 
@@ -88,14 +118,11 @@ fn joined_control_matches(
 fn first_control_matches(
     control: &AssignedControl,
     satisfaction: &CompletionPredicate,
-    all_completions: &CompletionPredicate,
     assignment: &Assignment,
 ) -> bool {
     let satisfied = satisfaction.evaluate(assignment);
     (control_reports(control, "satisfied") && satisfied)
-        || (control_reports(control, "no_satisfier")
-            && !satisfied
-            && all_completions.evaluate(assignment))
+        || (control_reports(control, "no_satisfier") && !satisfied)
 }
 
 fn parallel_join_control<'a>(
@@ -124,7 +151,9 @@ fn control_reports(control: &AssignedControl, expected: &str) -> bool {
 pub(in crate::graph_verifier) fn per_execution_outcomes(
     node: &GraphNode,
     keys: &[SelectorKey],
+    budget: &ProofWork,
 ) -> Option<Vec<Assignment>> {
+    let width = keys.len().saturating_mul(2).saturating_add(1);
     let keys = OutcomeKeys::from(keys);
     let successful_count = successful_outcome_count(node, &keys.emitted)?;
     let runtime_errors = runtime_errors_for_node(node);
@@ -132,6 +161,7 @@ pub(in crate::graph_verifier) fn per_execution_outcomes(
     if total_outcomes > FULL_V1_MAX_GUARD_ASSIGNMENTS {
         return None;
     }
+    budget.charge(usize::try_from(total_outcomes).ok()?.checked_mul(width)?)?;
     let successful = successful_outcomes(node, &keys);
     Some(with_runtime_errors(successful, &runtime_errors, &keys))
 }
@@ -256,31 +286,6 @@ pub(in crate::graph_verifier) fn insert_empty_controls(
     }
 }
 
-pub(in crate::graph_verifier) fn combine_outcome_occurrences(
-    keys: &[SelectorKey],
-    outcomes: &[Assignment],
-    outcome_occurrences: &[usize],
-) -> Option<Assignment> {
-    let mut combined = keys
-        .iter()
-        .cloned()
-        .map(|key| (key, assigned_control(None, 0)))
-        .collect::<Assignment>();
-    for outcome_index in outcome_occurrences {
-        let outcome = outcomes.get(*outcome_index)?;
-        for (key, value) in outcome {
-            let target = combined
-                .entry(key.clone())
-                .or_insert_with(|| assigned_control(None, 0));
-            for (label, count) in &value.counts {
-                let target_count = target.counts.entry(label.clone()).or_default();
-                *target_count = target_count.checked_add(*count)?;
-            }
-        }
-    }
-    Some(combined)
-}
-
 pub(in crate::graph_verifier) fn evaluate_guard(guard: &Guard, assignment: &Assignment) -> bool {
     match guard {
         Guard::In { value, labels } => selector_matches(value, labels.values(), assignment),
@@ -357,69 +362,6 @@ pub(in crate::graph_verifier) fn assigned_control(
     }
 }
 
-pub(in crate::graph_verifier) fn bounded_distribution_count(
-    maximum: u64,
-    labels: usize,
-) -> Option<u64> {
-    // Weak compositions of at most `maximum` occurrences across `labels` values:
-    // C(maximum + labels, labels). Stop as soon as the verifier ceiling is crossed.
-    let labels = u64::try_from(labels).ok()?;
-    let mut result = 1_u64;
-    for divisor in 1..=labels {
-        let numerator = maximum.checked_add(divisor)?;
-        result = result.checked_mul(numerator)?.checked_div(divisor)?;
-        if result > FULL_V1_MAX_GUARD_ASSIGNMENTS {
-            return Some(result);
-        }
-    }
-    Some(result)
-}
-
-pub(in crate::graph_verifier) fn for_each_outcome_multiset(
-    outcomes: usize,
-    maximum: u64,
-    mut visit: impl FnMut(&[usize]) -> bool,
-) -> bool {
-    if !visit(&[]) {
-        return false;
-    }
-    if outcomes == 0 {
-        return true;
-    }
-    let Ok(maximum) = usize::try_from(maximum) else {
-        return false;
-    };
-
-    // A nondecreasing sequence of outcome indexes is the sparse form of one
-    // count vector. Iterating multisets keeps stack and working memory bounded
-    // by `maximum`, even when one map item has tens of thousands of outcomes.
-    for total_occurrences in 1..=maximum {
-        let mut occurrence_indexes = vec![0; total_occurrences];
-        loop {
-            if !visit(&occurrence_indexes) {
-                return false;
-            }
-            let Some(position) = occurrence_indexes
-                .iter()
-                .rposition(|outcome| *outcome + 1 < outcomes)
-            else {
-                break;
-            };
-            let Some(next_outcome) = occurrence_indexes
-                .get(position)
-                .and_then(|outcome| outcome.checked_add(1))
-            else {
-                return false;
-            };
-            let Some(remaining) = occurrence_indexes.get_mut(position..) else {
-                return false;
-            };
-            remaining.fill(next_outcome);
-        }
-    }
-    true
-}
-
 pub(in crate::graph_verifier) fn selector_key_domain(
     key: &SelectorKey,
     node: &GraphNode,
@@ -435,7 +377,7 @@ pub(in crate::graph_verifier) fn selector_key_domain(
             _ => Vec::new(),
         },
         ControlSourceKey::Error => error_labels(),
-        ControlSourceKey::Group => group_domain(node, key.field.as_ref()).unwrap_or_default(),
+        ControlSourceKey::Group => proof_group_domain(node, key.field.as_ref()).unwrap_or_default(),
         ControlSourceKey::Execution => enum_label("executed").into_iter().collect(),
     }
 }
@@ -458,7 +400,7 @@ fn group_domain_labels(node: &GraphNode, field: &str) -> Option<&'static [&'stat
         "terminated" => {
             matches!(node, GraphNode::Loop(_)).then_some(&["converged", "exhausted"][..])
         }
-        "overflow" => matches!(node, GraphNode::Map(_)).then_some(&["ok", "overflow"][..]),
+
         "joined" => {
             parallel_join_domain(node, false).then_some(&["reached", "quorum_unreachable"][..])
         }
@@ -493,4 +435,29 @@ pub(in crate::graph_verifier) fn signal_path_type(
         .get(field)
         .cloned()
         .map(|values| PayloadType::Enum { values })
+}
+
+// Check before item aggregation: different map items may terminate differently, but a single
+// final body verdict and its loop label must describe the same legal outcome.
+pub(super) fn loop_outcome_matches(group: &LoopNode, assignment: &Assignment) -> bool {
+    let key = SelectorKey {
+        name: group.name.clone(),
+        source: ControlSourceKey::Group,
+        field: FieldName::new("terminated").ok(),
+    };
+    let Some(control) = assignment.get(&key) else {
+        return true;
+    };
+    let converged = group
+        .until
+        .as_ref()
+        .is_some_and(|until| evaluate_guard(until, assignment));
+    control.counts.iter().all(|(label, count)| {
+        *count == 0
+            || match label.as_str() {
+                "converged" => converged,
+                "exhausted" => !converged,
+                _ => false,
+            }
+    })
 }

@@ -26,6 +26,7 @@ fn target_api_keys_cannot_be_collected_by_a_runtime_connection_requirement() {
 
 fn uniform(harness: &str, provider: &str) -> UniformRuntimePlan {
     UniformRuntimePlan {
+        max_concurrency: None,
         harness: openengine_cluster_protocol::HarnessId::new(harness).assert_value(),
         provider: openengine_cluster_protocol::ProviderId::new(provider).assert_value(),
         size: Some(run_size("small")),

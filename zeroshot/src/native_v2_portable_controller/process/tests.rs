@@ -466,3 +466,35 @@ fn final_contract_controller_serves_a_runtime_failure_until_its_terminal_is_dura
          {terminal:?}"
     );
 }
+
+#[tokio::test]
+async fn bootstrap_round_trip_preserves_depth_64_and_admission_rejects_depth_65() {
+    use crate::native_v2_portable_controller::tests::{bootstrap, submission};
+    let root = tempfile::tempdir().assert_value();
+    let workspace = root.path().join("workspace");
+    let storage = root.path().join("state");
+    fs::create_dir(&workspace).assert_value();
+    crate::execution::platform::create_private_directory(&storage).assert_value();
+    for depth in [64, 65] {
+        let mut submitted = submission("deep-bootstrap");
+        let mut node = serde_json::json!({"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]});
+        for level in 1..depth {
+            node = serde_json::json!({"kind":"seq","name":format!("level{level}"),"state":{"kind":"null"},"children":[node],"promotedStatePaths":[]});
+        }
+        submitted.graph.root = serde_json::from_value(node).assert_value();
+        let document = bootstrap(
+            RunId::new(format!("depth-{depth}")),
+            submitted,
+            workspace.clone(),
+            storage.clone(),
+        );
+        let path = storage.join(format!("depth-{depth}.json"));
+        write_bootstrap_file(&path, &document).assert_value();
+        let decoded = load_bootstrap_file(&path).assert_value();
+        let admitted = crate::native_v2_admission::NativeV2Admission
+            .admit(decoded.submission)
+            .await;
+        assert_eq!(admitted.is_ok(), depth == 64, "{admitted:?}");
+        assert!(!path.exists());
+    }
+}

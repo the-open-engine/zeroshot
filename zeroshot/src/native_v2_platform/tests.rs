@@ -435,3 +435,6 @@ fn test_preparation() -> CapsulePreparation {
         progress: Arc::new(Quiet),
     }
 }
+
+#[path = "tests/suspension.rs"]
+mod suspension_tests;

@@ -447,6 +447,7 @@ impl CapsuleAllocator for CandidateAllocator {
         let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(local)));
         let remote = Arc::new(RemoteCapsuleNodeRunner::new(endpoint));
         Ok(AllocatedCapsule {
+            vector_seed: Vec::new(),
             checkpoints: None,
             execution_seed: Vec::new(),
             loss: remote.connection_loss(),

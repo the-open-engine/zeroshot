@@ -168,8 +168,6 @@ fn contained_native_configuration_cannot_override_host_policy() {
 
 #[tokio::test]
 async fn native_exec_subcommands_are_rejected_before_process_launch() {
-    use crate::native_v2_runner::{NodeDriver, NodeResponseContract, NodeRole, SessionFactory};
-
     let admitted = admitted(
         binding_with_model("opaque", SessionScope::NodeInstance, &["OPENAI_API_KEY"]),
         CodexProvider::OpenAi,
@@ -193,30 +191,8 @@ async fn native_exec_subcommands_are_rejected_before_process_launch() {
             json!({"args":["--color","never",command,"foreign-thread"]}),
         );
         // Exercise the adapter boundary directly, independently of registry admission.
-        let session = adapter
-            .open(&request.invocation, &request.environment)
-            .await
-            .assert_value();
-        let invocation = DriverInvocation {
-            dispatch: request.dispatch,
-            host_context: None,
-            provider_session_slot: request.invocation.reference.node_instance,
-            node: request.invocation,
-            role: NodeRole::Worker,
-            response: NodeResponseContract::Worker {
-                output: openengine_cluster_protocol::PayloadType::Null,
-            },
-            environment: request.environment,
-            session: session.clone(),
-        };
-        let (_cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
-        let (result, logs) = tokio::join!(adapter.run(invocation, control), async {
-            let mut logs = Vec::new();
-            while let Ok(output) = durable.recv_output().await {
-                logs.push(output.text);
-            }
-            logs.join("\n")
-        });
+        let (result, logs, session) =
+            crate::native_v2_runner::test_support::run_null_worker(adapter.as_ref(), request).await;
         let detail = result.unwrap_err().to_string();
         for expected in [
             "node `work`",

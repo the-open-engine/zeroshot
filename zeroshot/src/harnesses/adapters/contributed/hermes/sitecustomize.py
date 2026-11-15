@@ -65,5 +65,11 @@ class _EntryFinder(importlib.abc.MetaPathFinder):
         return spec
 
 
-if os.environ.get("ZEROSHOT_HERMES_BRIDGE") == _RUNTIME:
+try:
+    _marker = os.environ.get("ZEROSHOT_HERMES_BRIDGE")
+    _marker = str(Path(_marker).resolve()) if _marker else None
+except (OSError, RuntimeError, ValueError):
+    _marker = None
+
+if _marker == _RUNTIME:
     sys.meta_path.insert(0, _EntryFinder())

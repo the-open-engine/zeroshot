@@ -381,6 +381,102 @@ async fn connector_preserves_connection_and_checkpoint_authority_failures() {
 }
 
 #[tokio::test]
+async fn request_and_vector_refusals_preserve_the_marker_without_opening_a_session() {
+    let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
+    let connector = hosted_connector(authority.clone());
+    let run = RunId::new("pending-request");
+    let errors = [
+        (
+            connector
+                .validate_request_ask("platform")
+                .await
+                .assert_error(),
+            "openengine.request-ask/v1",
+        ),
+        (
+            connector
+                .connect_request_ask("platform", None)
+                .await
+                .assert_error(),
+            "openengine.request-ask/v1",
+        ),
+        (
+            connector
+                .validate_run_suspension("platform")
+                .await
+                .assert_error(),
+            "openengine.run-suspension/v1",
+        ),
+        (
+            connector
+                .connect_run_suspension("platform", run.clone())
+                .await
+                .assert_error(),
+            "openengine.run-suspension/v1",
+        ),
+        (
+            connector
+                .connect_run_vectors("platform", run.clone())
+                .await
+                .assert_error(),
+            "openengine.run-vectors/v1",
+        ),
+        (
+            connector
+                .hosted_inbox_list("platform", Default::default())
+                .await
+                .assert_error(),
+            "does not advertise",
+        ),
+        (
+            connector
+                .hosted_inbox_show("platform", RunStatusParams { run_id: run })
+                .await
+                .assert_error(),
+            "does not advertise",
+        ),
+    ];
+    for (error, marker) in errors {
+        assert!(error.to_string().contains(marker), "{error}");
+    }
+    assert!(authority.calls().is_empty());
+    assert!(connector.dialer.sessions.lock().assert_value().is_empty());
+    assert!(connector.dialer.requests.lock().assert_value().is_empty());
+}
+
+#[tokio::test]
+async fn direct_request_reads_decline_hosted_routes_without_contacting_the_authority() {
+    let registry = MemoryRegistry::default();
+    registry
+        .insert(direct_target("http://127.0.0.1:8080"))
+        .assert_value();
+    let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
+    let connector =
+        NativeV2TargetConnector::new(registry, authority.clone(), FakeDialer::default());
+    assert!(
+        connector
+            .hosted_inbox_list("vm", Default::default())
+            .await
+            .assert_value()
+            .is_none()
+    );
+    assert!(
+        connector
+            .hosted_inbox_show(
+                "vm",
+                RunStatusParams {
+                    run_id: RunId::new("pending-request")
+                }
+            )
+            .await
+            .assert_value()
+            .is_none()
+    );
+    assert!(authority.calls().is_empty());
+    assert!(connector.dialer.sessions.lock().assert_value().is_empty());
+}
+
+#[tokio::test]
 async fn connector_preserves_hosted_lifecycle_failures_without_fallback() {
     let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
     let connector = hosted_connector(authority.clone());

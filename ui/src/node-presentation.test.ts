@@ -73,3 +73,16 @@ test('comment publication has a distinct native delivery label and icon', () => 
   assert.equal(presentation.Icon, nodeIcons.comment_delivery);
   assert.equal(presentation.delivery, true);
 });
+
+test('wait has a clock and a model-free label without a worker catalog', () => {
+  const leaf = { ...deliver('cooldown'), worker: 'builtin.request.wait@1' };
+  const doc = document(seq('root', [leaf]));
+  doc.runtime.nodes.cooldown = { kind: 'request' };
+  const before = structuredClone(doc);
+  const presentation = nodePresentation(doc, leaf, []);
+  assert.equal(presentation.label, 'Wait');
+  assert.equal(presentation.detail, 'Wait');
+  assert.equal(presentation.Icon, nodeIcons.request);
+  assert.notEqual(presentation.Icon, nodeIcons.verifier);
+  assert.deepEqual(doc, before);
+});

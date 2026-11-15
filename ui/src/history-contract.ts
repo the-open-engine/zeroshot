@@ -87,6 +87,7 @@ export function observationEnded(
   return observation ? !['active', 'collecting'].includes(observation.state) : fallback;
 }
 export function canFollowHistory(run: RunDetail): boolean {
+  if (run.phase === 'suspended') return false;
   return (
     !run.example && !observationEnded(run.observation, run.history.complete || !!run.runtimeFailure)
   );

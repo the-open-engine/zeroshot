@@ -47,6 +47,7 @@ impl RuntimeObservation {
             runtime.metadata = run_metadata(snapshot);
             runtime.context = snapshot.failure_context.clone();
             if snapshot.terminal.is_none()
+                && snapshot.phase != RunPhase::Suspended
                 && let Some(RunStatus::Finished {
                     mut terminal_result,
                     ..
@@ -65,7 +66,10 @@ impl RuntimeObservation {
     pub(super) fn fail(&self, run_id: &RunId, cause: Option<&str>) {
         if let Some(runtime) = self.entries().get_mut(run_id) {
             runtime.failed = true;
-            if !matches!(runtime.last.status, RunStatus::Finished { .. }) {
+            if !matches!(
+                runtime.last.status,
+                RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+            ) {
                 let context = unpersisted_context(runtime.context.clone(), cause);
                 runtime.last.status = RunStatus::Finished {
                     metadata: runtime.metadata.clone(),
@@ -91,7 +95,9 @@ impl RuntimeObservation {
         snapshot: &RunSnapshot,
     ) -> Result<bool, NativeV2ObservationError> {
         self.observe(snapshot)?;
-        Ok(snapshot.terminal.is_some() || self.failure(&snapshot.run_id).is_some())
+        Ok(snapshot.terminal.is_some()
+            || snapshot.phase == RunPhase::Suspended
+            || self.failure(&snapshot.run_id).is_some())
     }
 
     pub(super) fn finish(&self, run_id: &RunId) {

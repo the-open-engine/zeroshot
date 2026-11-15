@@ -1,13 +1,10 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
-
 use crate::execution::process::HostedProcessPool;
-use crate::native_v2_runner::AUXILIARY_PROVIDER_SLOT_OFFSET;
 
-// Primary reducer references and built-in global agents occupy disjoint bounded ranges.
-const MAXIMUM_PROCESS_IDENTITY: u64 = AUXILIARY_PROVIDER_SLOT_OFFSET + FULL_V1_MAX_NODE_EXECUTIONS;
+// Cleanup identities are compact live-session leases; durable retries never select a process group.
+const MAXIMUM_PROCESS_IDENTITY: u64 = crate::native_v2_runner::MAX_PROCESS_SLOTS;
 
 #[derive(Clone)]
 pub(super) struct ActiveRunProcessPools {

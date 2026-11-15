@@ -61,10 +61,14 @@ pub(super) struct ControllerDescriptor {
     pub(super) session_url: Url,
     pub(super) audience: String,
     pub(super) workspace_recovery: bool,
+    pub(super) run_suspension: bool,
+    pub(super) run_vectors: bool,
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
     pub(super) runtime_harnesses: Option<Vec<openengine_cluster_protocol::RuntimeLane>>,
     pub(super) run_sizes: Option<openengine_cluster_protocol::TargetRunSizesDiscovery>,
+    pub(super) request_wait: bool,
+    pub(super) request_ask: bool,
     pub(super) decision_models: bool,
     pub(super) git_transport: bool,
     pub(super) comment_delivery: bool,
@@ -131,10 +135,30 @@ pub(super) fn build_controller_descriptor(
         session_url: same_origin_path(origin, &wire.session_path)?,
         audience: wire.audience,
         workspace_recovery,
+        run_suspension: wire
+            .extensions
+            .run_suspension
+            .as_ref()
+            .is_some_and(|marker| marker.kind == openengine_cluster_protocol::RUN_SUSPENSION_KIND),
+        run_vectors: wire
+            .extensions
+            .run_vectors
+            .as_ref()
+            .is_some_and(|marker| marker.kind == openengine_cluster_protocol::RUN_VECTORS_KIND),
         workspace_checkpoints,
         node_runtime_lanes,
         runtime_harnesses,
         run_sizes,
+        request_ask: wire
+            .extensions
+            .request_ask
+            .as_ref()
+            .is_some_and(|marker| marker.kind == openengine_cluster_protocol::REQUEST_ASK_KIND),
+        request_wait: wire
+            .extensions
+            .request_wait
+            .as_ref()
+            .is_some_and(|marker| marker.kind == openengine_cluster_protocol::REQUEST_WAIT_KIND),
         decision_models,
         git_transport,
         comment_delivery,
@@ -415,7 +439,7 @@ pub(super) async fn read_json_with_limit<T: DeserializeOwned>(
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes)
+    openengine_cluster_protocol::bounded_json_from_slice(&bytes)
         .map_err(|_| authority_error(format!("{operation} response is malformed")))
 }
 

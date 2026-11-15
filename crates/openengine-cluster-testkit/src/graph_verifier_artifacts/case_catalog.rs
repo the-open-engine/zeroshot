@@ -17,7 +17,7 @@ pub(super) fn positive_cases() -> Vec<(&'static str, Value)> {
         ),
         ("positive/guard-k-of-n.json", guarded_graph(k_of_n_guard())),
         ("positive/map-item-k-of-map.json", map_item_graph()),
-        ("positive/map-signal-and-group.json", map_signal_graph()),
+        ("positive/map-signal.json", map_signal_graph()),
         ("positive/loop-and-group.json", loop_graph()),
         ("positive/join-all.json", parallel_graph("all")),
         ("positive/join-any.json", parallel_graph("any")),

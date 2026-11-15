@@ -444,6 +444,8 @@ async fn invocation(adapter: &NativeV2CommentDeliveryAdapter, input: Value) -> D
         environment,
         session,
         provider_session_slot: NodeInstanceId::new(1).unwrap(),
+        provider_home_slot: NodeInstanceId::new(1).unwrap(),
+        auxiliary: false,
     }
 }
 

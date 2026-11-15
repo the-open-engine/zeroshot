@@ -3,8 +3,10 @@ use super::*;
 #[tokio::test]
 async fn nested_parallel_void_provenance_is_owned_during_outer_map_probing() {
     let graph = nested_void_graph().await;
-    assert_inner_parallel_void(&graph);
-    assert_post_prune_void(&graph);
+    for reducer in [FullV1Reducer::new(&graph), FullV1Reducer::native_v2(&graph)] {
+        assert_inner_parallel_void(&reducer);
+        assert_post_prune_void(&reducer);
+    }
 }
 
 async fn nested_void_graph() -> VerifiedGraph {
@@ -34,7 +36,7 @@ async fn nested_void_graph() -> VerifiedGraph {
     .await
 }
 
-fn assert_inner_parallel_void(graph: &VerifiedGraph) {
+fn assert_inner_parallel_void(reducer: &FullV1Reducer<'_>) {
     let mut inner_loser = execution(
         ExecutionSpec::new(1, 1, "nested_inner_loser")
             .indices(vec![0])
@@ -69,7 +71,7 @@ fn assert_inner_parallel_void(graph: &VerifiedGraph) {
         item_one_inner_winner.clone(),
         item_one_terminal.clone(),
     ];
-    let reduction = FullV1Reducer::new(graph)
+    let reduction = reducer
         .reduce(input(&json!({"items":[null,null]}), &history))
         .assert_value();
     assert!(reduction.terminal.is_some());
@@ -86,7 +88,7 @@ fn assert_inner_parallel_void(graph: &VerifiedGraph) {
         reason: ExecutionVoidReason::MapTerminal,
     };
     assert_eq!(
-        FullV1Reducer::new(graph)
+        reducer
             .reduce(input(
                 &json!({"items":[null,null]}),
                 &[
@@ -101,7 +103,7 @@ fn assert_inner_parallel_void(graph: &VerifiedGraph) {
     );
 }
 
-fn assert_post_prune_void(graph: &VerifiedGraph) {
+fn assert_post_prune_void(reducer: &FullV1Reducer<'_>) {
     let mut post_prune_inner_loser = execution(
         ExecutionSpec::new(5, 5, "nested_inner_loser")
             .indices(vec![0])
@@ -112,12 +114,13 @@ fn assert_post_prune_void(graph: &VerifiedGraph) {
         position: HistoryPosition::new(22).assert_value(),
         reason: ExecutionVoidReason::ParallelJoin,
     };
-    let late_item_zero_inner_winner = execution(
+    let mut late_item_zero_inner_winner = execution(
         ExecutionSpec::new(6, 6, "nested_inner_winner")
             .indices(vec![0])
             .settled_at(20),
         success(),
     );
+    late_item_zero_inner_winner.dispatch_position = HistoryPosition::new(15).assert_value();
     let early_item_one_inner_winner = execution(
         ExecutionSpec::new(7, 7, "nested_inner_winner")
             .indices(vec![1])
@@ -131,7 +134,7 @@ fn assert_post_prune_void(graph: &VerifiedGraph) {
         success(),
     );
     assert_eq!(
-        FullV1Reducer::new(graph)
+        reducer
             .reduce(input(
                 &json!({"items":[null,null]}),
                 &[
@@ -150,7 +153,7 @@ fn assert_post_prune_void(graph: &VerifiedGraph) {
         reason: ExecutionVoidReason::MapTerminal,
     };
     let post_prune_execution = post_prune_inner_loser.execution;
-    let reduction = FullV1Reducer::new(graph)
+    let reduction = reducer
         .reduce(input(
             &json!({"items":[null,null]}),
             &[

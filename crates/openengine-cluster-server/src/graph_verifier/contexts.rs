@@ -85,18 +85,9 @@ pub(super) struct KOfNLabelsValidationContext<'a> {
 }
 
 pub(super) struct KOfMapLabelsValidationContext<'a> {
-    pub(super) count: u64,
     pub(super) selector: &'a ControlSelector,
     pub(super) labels: &'a [EnumLabel],
     pub(super) guard: GuardValidationContext<'a>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct FoldLimitContext<'a> {
-    pub(super) ceiling: u64,
-    pub(super) path: &'a [DiagnosticPathSegment],
-    pub(super) field: &'a str,
-    pub(super) label: &'a str,
 }
 
 pub(super) struct PromotionValidationContext<'a> {

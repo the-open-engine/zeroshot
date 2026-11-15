@@ -30,6 +30,7 @@ use tokio::time::Instant;
 
 use crate::full_v1_reducer::{DurableExecution, DurableExecutionState, ExecutionBoundary};
 use filesystem::SnapshotId;
+use crate::native_v2_runner::conversations::ConversationFiles;
 
 #[derive(Debug, Error)]
 #[error("workspace checkpoint is unavailable: {0}")]
@@ -56,6 +57,35 @@ impl CheckpointError {
 /// Delivery receipt retention is independent of workspace capture and graph history.
 #[async_trait]
 pub trait RunCheckpointStore: Send + Sync {
+    /// Optional private checkpoint payload. Save these files alongside the next workspace
+    /// snapshot, outside the exported workspace tree. Older hosts may omit them.
+    async fn retain_conversations(
+        &self,
+        _files: Option<ConversationFiles>,
+    ) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+
+    /// Return the selected checkpoint's private payload, independently of workspace restoration.
+    /// None preserves compatibility with checkpoints and hosts predating conversation capture.
+    async fn restored_conversations(&self) -> Option<ConversationFiles> {
+        None
+    }
+
+    /// Publish complete suspension history and the vector record before disposing allocation.
+    /// A concurrent suspend request can require republishing; replace the previous full snapshot.
+    async fn suspend(
+        &self,
+        _history: &[DurableExecution],
+        _vectors: &[openengine_cluster_protocol::RunVector],
+    ) -> Result<(), CheckpointError> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "workspace storage does not support suspension",
+        )
+        .into())
+    }
+
     /// Reconcile acknowledged delivery facts before recovery, without capturing workspace bytes.
     /// Reject conflicting generations and never replace a newer retained generation.
     async fn retain_delivery_state(
@@ -185,6 +215,7 @@ pub struct CheckpointRestore {
 #[serde(deny_unknown_fields, rename_all = "camelCase", tag = "kind")]
 pub enum CheckpointRestoreSelection {
     Latest,
+    Continue,
     Checkpoint { checkpoint_id: CheckpointId },
 }
 
@@ -301,6 +332,15 @@ pub struct ResticCheckpointStore {
     writers: BTreeSet<NodeName>,
     state: Arc<Mutex<CaptureState>>,
     delivery: DeliveryCheckpointStore,
+    conversations: Mutex<Option<ConversationFiles>>,
+    conversation_restore: Option<CheckpointRestore>,
+}
+
+pub(crate) struct ResticCheckpointStoreRequest {
+    pub(crate) directory: PathBuf,
+    pub(crate) repository: PathBuf,
+    pub(crate) workspace: PathBuf,
+    pub(crate) writers: BTreeSet<NodeName>,
 }
 
 #[cfg(test)]
@@ -319,13 +359,48 @@ impl ResticCheckpointStore {
         workspace: PathBuf,
         writers: BTreeSet<NodeName>,
     ) -> Result<Self, CheckpointError> {
-        let program = restic::ResticProgram::discover();
+        Self::new_with_fallback(
+            ResticCheckpointStoreRequest {
+                directory,
+                repository,
+                workspace,
+                writers,
+            },
+            None,
+        )
+    }
+
+    pub(crate) fn new_with_fallback(
+        request: ResticCheckpointStoreRequest,
+        fallback: Option<&Path>,
+    ) -> Result<Self, CheckpointError> {
+        let ResticCheckpointStoreRequest {
+            directory,
+            repository,
+            workspace,
+            writers,
+        } = request;
+        let program = restic::ResticProgram::discover().or_else(|error| {
+            let Some(directory) = fallback else {
+                return Err(error);
+            };
+            let configuration = match storage_configuration(directory) {
+                Ok(configuration) => configuration,
+                Err(CheckpointError(missing)) if missing.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(error);
+                }
+                Err(CheckpointError(error)) => return Err(error),
+            };
+            configuration.program.for_restore()
+        });
         #[cfg(test)]
         let program = program.or_else(|_| {
             crate::execution::platform::private_directory(&repository)?;
             restic::ResticProgram::fake(&repository)
         });
         Ok(Self {
+            conversations: Mutex::new(None),
+            conversation_restore: None,
             stopping: None,
             delivery: DeliveryCheckpointStore::new(repository.clone()),
             directory,
@@ -340,6 +415,8 @@ impl ResticCheckpointStore {
     #[cfg(test)]
     pub(crate) fn with_program(config: ResticCheckpointStoreTestConfig) -> Self {
         Self {
+            conversations: Mutex::new(None),
+            conversation_restore: None,
             stopping: None,
             delivery: DeliveryCheckpointStore::new(config.repository.clone()),
             directory: config.directory,
@@ -349,6 +426,12 @@ impl ResticCheckpointStore {
             writers: config.writers,
             state: Arc::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_conversation_restore(mut self, selection: Option<CheckpointRestore>) -> Self {
+        self.conversation_restore = selection;
+        self
     }
 
     pub(crate) fn with_stop_request(
@@ -390,6 +473,8 @@ impl ResticCheckpointStore {
         let directory = self.directory.clone();
         let workspace = self.workspace.clone();
         let operation = filesystem::SnapshotOperation::current(self.stopping.clone());
+        let conversations = self.conversations.lock().await.clone();
+        let operation_stop = self.stopping.clone();
         let (stage, snapshot) = tokio::task::spawn_blocking(move || {
             let stages = directory.join("staging");
             crate::execution::platform::private_directory(&stages)?;
@@ -400,6 +485,26 @@ impl ResticCheckpointStore {
                 &(),
                 &operation,
             )?;
+            if let Some(conversations) = conversations {
+                // This optional payload must never prevent workspace checkpoint publication.
+                let target = stage
+                    .path()
+                    .join("snapshots")
+                    .join(snapshot.as_str())
+                    .join("conversations");
+                let request = operation_stop
+                    .clone()
+                    .unwrap_or_else(|| tokio::sync::watch::channel(false).1);
+                if crate::native_v2_capsule::provider_process::copy_workspace_entry_until_stopped(
+                    conversations.directory(),
+                    &target,
+                    &crate::execution::driver::DriverCancellation::new(request),
+                )
+                .is_err()
+                {
+                    let _ = std::fs::remove_dir_all(target);
+                }
+            }
             Ok::<_, std::io::Error>((stage, snapshot))
         })
         .await
@@ -455,6 +560,32 @@ fn publish_storage_configuration(
 
 #[async_trait]
 impl RunCheckpointStore for ResticCheckpointStore {
+    async fn retain_conversations(
+        &self,
+        files: Option<ConversationFiles>,
+    ) -> Result<(), CheckpointError> {
+        *self.conversations.lock().await = files;
+        Ok(())
+    }
+
+    async fn restored_conversations(&self) -> Option<ConversationFiles> {
+        let selection = self.conversation_restore.as_ref()?;
+        if selection.selection == CheckpointRestoreSelection::Latest {
+            return None;
+        }
+        restore_conversations(selection, self.stopping.clone())
+            .await
+            .ok()
+    }
+
+    async fn suspend(
+        &self,
+        _history: &[DurableExecution],
+        _vectors: &[openengine_cluster_protocol::RunVector],
+    ) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+
     async fn retain_delivery_state(
         &self,
         state: &crate::native_v2_contract::DeliveryCheckpoint,
@@ -503,6 +634,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
     }
 
     async fn discard(&self) -> Result<(), CheckpointError> {
+        self.conversations.lock().await.take();
         discard_lineage(&self.directory, &self.repository)
     }
 }
@@ -510,6 +642,18 @@ impl RunCheckpointStore for ResticCheckpointStore {
 pub fn discard_lineage(directory: &Path, repository: &Path) -> Result<(), CheckpointError> {
     remove_lineage_catalogs(directory, repository)?;
     remove_if_present(repository)
+}
+
+pub(crate) fn discard_recorded_lineage(directory: &Path) -> Result<(), CheckpointError> {
+    let configuration: StorageConfiguration = match catalog::read(&directory.join("storage.json")) {
+        Ok(configuration) => configuration,
+        Err(error) if error.0.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if configuration.format != STORAGE_FORMAT {
+        return Err(catalog::invalid("unsupported checkpoint storage format"));
+    }
+    discard_lineage(directory, &configuration.repository)
 }
 
 #[must_use]
@@ -541,7 +685,9 @@ pub fn pin(selection: &CheckpointRestore) -> Result<SnapshotId, CheckpointError>
 
 fn selected_snapshot(selection: &CheckpointRestore) -> Result<SnapshotId, CheckpointError> {
     match &selection.selection {
-        CheckpointRestoreSelection::Latest => catalog::latest(&selection.directory),
+        CheckpointRestoreSelection::Latest | CheckpointRestoreSelection::Continue => {
+            catalog::latest(&selection.directory)
+        }
         CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
             Ok(catalog::point(&selection.directory, checkpoint_id)?.snapshot)
         }
@@ -551,7 +697,7 @@ fn selected_snapshot(selection: &CheckpointRestore) -> Result<SnapshotId, Checkp
 /// Restart imports no seed; a selected checkpoint continues from its settled prerequisites.
 fn selected_seed(selection: &CheckpointRestore) -> Result<Vec<DurableExecution>, CheckpointError> {
     match &selection.selection {
-        CheckpointRestoreSelection::Latest => Ok(Vec::new()),
+        CheckpointRestoreSelection::Latest | CheckpointRestoreSelection::Continue => Ok(Vec::new()),
         CheckpointRestoreSelection::Checkpoint { checkpoint_id } => Ok(CheckpointSeed::read(
             &catalog::seed_path(&selection.directory, checkpoint_id),
         )?
@@ -647,11 +793,16 @@ async fn restore_with(
     let resolving = "resolving the checkpoint";
     let snapshot =
         selected_snapshot(selection).map_err(|error| progress.failed(resolving, error))?;
-    let (repository, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)
+    let (configuration, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)
         .map_err(|error| progress.failed(resolving, error))?;
     // Read the prerequisites first: a damaged seed must fail before the workspace changes.
     let seed = selected_seed(selection)
         .map_err(|error| progress.failed("reading the execution seed", error))?;
+    let program = configuration
+        .program
+        .for_restore()
+        .map_err(|error| progress.failed("locating restic", error))?;
+    let repository = restic::Repository::new(program, configuration.repository);
     let repository = match progress.deadline {
         Some(deadline) => repository.with_deadline(deadline),
         None => repository,
@@ -779,20 +930,22 @@ fn remove_lineage_catalogs(directory: &Path, repository: &Path) -> Result<(), Ch
 fn stored_snapshot(
     directory: &Path,
     point: &SnapshotId,
-) -> Result<(restic::Repository, restic::SnapshotId), CheckpointError> {
-    let configuration: StorageConfiguration = catalog::read(&directory.join("storage.json"))?;
-    if configuration.format != STORAGE_FORMAT {
-        return Err(catalog::invalid("unsupported checkpoint storage format"));
-    }
+) -> Result<(StorageConfiguration, restic::SnapshotId), CheckpointError> {
+    let configuration = storage_configuration(directory)?;
     let record: StoredSnapshot = catalog::read(&snapshot_path(directory, point))?;
     if record.format != STORAGE_FORMAT {
         return Err(catalog::invalid("unsupported stored snapshot format"));
     }
     let snapshot = restic::SnapshotId::parse(record.restic_snapshot)?;
-    Ok((
-        restic::Repository::new(configuration.program, configuration.repository),
-        snapshot,
-    ))
+    Ok((configuration, snapshot))
+}
+
+fn storage_configuration(directory: &Path) -> Result<StorageConfiguration, CheckpointError> {
+    let configuration: StorageConfiguration = catalog::read(&directory.join("storage.json"))?;
+    if configuration.format != STORAGE_FORMAT {
+        return Err(catalog::invalid("unsupported checkpoint storage format"));
+    }
+    Ok(configuration)
 }
 
 #[cfg(test)]
@@ -815,4 +968,43 @@ fn snapshot_path(directory: &Path, snapshot: &SnapshotId) -> PathBuf {
     directory
         .join("snapshots")
         .join(format!("{}.json", snapshot.as_str()))
+}
+
+async fn restore_conversations(
+    selection: &CheckpointRestore,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Result<ConversationFiles, CheckpointError> {
+    let snapshot = selected_snapshot(selection)?;
+    let (configuration, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)?;
+    let repository = restic::Repository::new(
+        configuration.program.for_restore()?,
+        configuration.repository,
+    )
+    .with_stop_request(stopping);
+    let stage = tempfile::Builder::new()
+        .prefix("zeroshot-checkpoint-conversations-")
+        .tempdir()?;
+    repository.initialize().await?;
+    repository
+        .restore_conversations(&restic_snapshot, stage.path())
+        .await?;
+    let directory = stage.path().join("conversations");
+    if !directory.is_dir() {
+        return Err(catalog::invalid("checkpoint has no conversations"));
+    }
+    // Drop the independently extracted workspace immediately; it is never installed.
+    let workspace = stage.path().join("workspace");
+    let _ = filesystem::remove_disposable_tree(&workspace);
+    let retained = ConversationFiles::staged(stage);
+    Ok(ConversationFiles::nested(retained, directory))
+}
+
+pub(crate) async fn restore_checkpoint_conversations(
+    selection: &CheckpointRestore,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Option<ConversationFiles> {
+    if selection.selection == CheckpointRestoreSelection::Latest {
+        return None;
+    }
+    restore_conversations(selection, stopping).await.ok()
 }

@@ -92,6 +92,7 @@ pub enum RunHistoryPhase {
     Admitted,
     Running,
     Stopping,
+    Suspended,
     Finished,
     Unavailable,
 }
@@ -102,6 +103,7 @@ impl From<RunPhase> for RunHistoryPhase {
             RunPhase::Admitted => Self::Admitted,
             RunPhase::Running => Self::Running,
             RunPhase::Stopping => Self::Stopping,
+            RunPhase::Suspended => Self::Suspended,
             RunPhase::Finished => Self::Finished,
         }
     }
@@ -130,6 +132,12 @@ impl From<&TerminalResult> for RunHistoryTerminalSynopsis {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunHistorySummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspension: Option<openengine_cluster_protocol::RunSuspension>,
+    #[serde(default)]
+    pub suspend_requested: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_recovery: Option<openengine_cluster_protocol::WorkspaceRecovery>,
     pub run_id: RunId,
     pub title: RunTitle,
     pub phase: RunHistoryPhase,
@@ -153,6 +161,12 @@ pub struct RunHistoryList {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunDefinition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspension: Option<openengine_cluster_protocol::RunSuspension>,
+    #[serde(default)]
+    pub suspend_requested: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_recovery: Option<openengine_cluster_protocol::WorkspaceRecovery>,
     pub version: u8,
     pub projection_version: u8,
     pub run_id: RunId,

@@ -15,6 +15,7 @@ description: "Python API reference for zeroshot exceptions, including invalid re
         - RunFailedError
         - RunNotFoundError
         - RunWaitTimeout
+        - RunSuspendedError
         - StackWaitTimeout
         - SubmissionConflictError
       show_if_no_docstring: false

@@ -291,7 +291,11 @@ async fn ssh_credential_for_https_refuses_before_git_effects() {
 #[tokio::test]
 async fn cancelled_git_cleans_up_descendants_and_private_ssh_material() {
     let fixture = ScriptTransport::new(
-        "#!/bin/sh\nprintf '%s' \"$$\" > \"$HOME/git-pid\"\n/usr/bin/sleep 120\n",
+        r#"#!/bin/sh
+printf '%s' "$$" > "$HOME/git-pid.tmp"
+/bin/mv "$HOME/git-pid.tmp" "$HOME/git-pid"
+/usr/bin/sleep 120
+"#,
         "ssh://deploy@forge.invalid/team/project.git",
     );
     let transport = fixture.transport.clone();
@@ -302,6 +306,7 @@ async fn cancelled_git_cleans_up_descendants_and_private_ssh_material() {
         });
         transport.read_ref("main", credential).await
     });
+    // Publish the complete PID before existence makes the fixture ready for cancellation.
     let marker = fixture.root.path().join("git-pid");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     while !marker.exists() {

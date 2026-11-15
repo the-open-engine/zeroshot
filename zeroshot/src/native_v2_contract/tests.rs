@@ -74,7 +74,8 @@ fn canonical_submission_round_trips_without_changing_graph_spec() {
         .get(&NodeName::new("worker").assert_value())
         .and_then(|binding| match binding {
             NodeRuntimeBinding::Agent { session_scope, .. } => Some(session_scope),
-            NodeRuntimeBinding::Script { .. }
+            NodeRuntimeBinding::Request {}
+            | NodeRuntimeBinding::Script { .. }
             | NodeRuntimeBinding::Decision { .. }
             | NodeRuntimeBinding::GitDelivery { .. }
             | NodeRuntimeBinding::CommentDelivery { .. } => None,

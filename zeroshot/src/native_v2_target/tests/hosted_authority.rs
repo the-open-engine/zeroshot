@@ -327,6 +327,7 @@ fn hosted_discovery(origin: &str) -> String {
             "cachePolicy": "no-store"
         },
         "extensions": {
+            "run_vectors": {"kind":"openengine.run-vectors/v1"},
             "api_key": {
                 "kind": "zeroshot.api-key-authentication/v1",
                 "header": "Authorization", "scheme": "Bearer",
@@ -350,6 +351,14 @@ fn hosted_discovery(origin: &str) -> String {
                 "kind": "zeroshot.hosted-runs/v1",
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
+            },
+            "hosted_run_controls": {
+                "kind": "openengine.hosted-run-controls/v1",
+                "route_templates": {
+                    "suspend": "/native-v2/runs/{run_id}/suspend",
+                    "vectors": "/native-v2/runs/{run_id}/vectors",
+                    "vector": "/native-v2/runs/{run_id}/vector"
+                }
             },
             "hosted_workspace_recovery": {
                 "kind": "openengine.hosted-workspace-recovery/v1",
@@ -442,9 +451,24 @@ async fn write_http_response_with_status(
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    stream.write_all(response.as_bytes()).await.assert_value();
-    stream.write_all(body.as_bytes()).await.assert_value();
-    stream.shutdown().await.assert_value();
+    let written = async {
+        stream.write_all(response.as_bytes()).await?;
+        stream.write_all(body.as_bytes()).await?;
+        stream.shutdown().await
+    }
+    .await;
+    // A bounded reader can reject a response and close before its body has finished writing.
+    if written.as_ref().is_err_and(|error| {
+        matches!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+        )
+    }) {
+        return;
+    }
+    written.assert_value();
 }
 
 pub(super) async fn read_http_request(stream: &mut tokio::net::TcpStream) -> CapturedHttpRequest {

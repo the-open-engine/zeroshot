@@ -20,6 +20,7 @@ use crate::native_v2_platform::{
     ExclusiveControllerClaim, NativeV2PlatformController,
 };
 use crate::native_v2_contract::AdmittedRun;
+use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, CheckpointRestoreSelection};
 use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
 use crate::v2_run_ledger::RunLedger;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
@@ -80,8 +81,8 @@ struct PreparedControllerStart {
 
 impl PortableRunController {
     /// Acquires a dead controller's lease and recovers its durable one-run ledger.
-    /// Any nonterminal run is finalized as `runtime_lost`; no runtime factory is consulted and no
-    /// node can be dispatched. The returned backend may be bound to the ordinary local socket.
+    /// Any interrupted active run is finalized as `runtime_lost`; suspended attempts remain ended.
+    /// No runtime factory is consulted and no node can be dispatched. The returned backend may be bound to the ordinary local socket.
     pub async fn open_observer(
         paths: PortableControllerPaths,
         run_id: RunId,
@@ -214,8 +215,8 @@ impl PortableRunController {
     }
 
     /// Reopens a durable one-run controller after its owning process exited. No runtime is
-    /// reconstructed: a nonterminal row is reconciled to `runtime_lost`, while terminal truth is
-    /// served unchanged.
+    /// reconstructed: an interrupted active row is reconciled to `runtime_lost`, while finished
+    /// and suspended attempts are served unchanged.
     pub async fn reopen(
         bootstrap: PortableControllerBootstrap,
     ) -> Result<Self, PortableControllerError> {
@@ -241,8 +242,8 @@ impl PortableRunController {
         self._lease.identity()
     }
 
-    /// Returns once the run is finished and a published runtime failure has had a bounded chance
-    /// to make its terminal durable, so ending the controller process cannot discard that append.
+    /// Returns once the attempt has finished or suspended. A published runtime failure gets a
+    /// bounded chance to become durable before the controller exits.
     pub(super) async fn wait_terminal(&self) -> Result<(), PortableControllerError> {
         loop {
             let status = self
@@ -251,6 +252,10 @@ impl PortableRunController {
                     run_id: self.run_id.clone(),
                 })
                 .await?;
+            if matches!(status.status, RunStatus::Suspended { .. }) {
+                self.inner.wait_runtime_settled(&self.run_id).await;
+                return Ok(());
+            }
             if let RunStatus::Finished {
                 terminal_result, ..
             } = status.status
@@ -262,6 +267,10 @@ impl PortableRunController {
                         self.inner.wait_runtime_settled(&self.run_id),
                     )
                     .await;
+                } else {
+                    // Success is durable before checkpoint GC. Keep the process alive until its
+                    // runtime finishes deleting the lineage's private conversation files.
+                    self.inner.wait_runtime_settled(&self.run_id).await;
                 }
                 return Ok(());
             }
@@ -427,12 +436,111 @@ where
         .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     require_not_stopping(prepared)?;
     runtime.execution_seed = execution_seed;
+    let conversation_restore = seed_predecessor_history(bootstrap, &mut runtime)
+        .await?
+        .or_else(|| bootstrap.checkpoint.clone());
     let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
+    if let Some(selection) = conversation_restore {
+        let restored = crate::native_v2_supervisor::checkpoints::restore_checkpoint_conversations(
+            &selection,
+            prepared.stopping.clone(),
+        )
+        .await;
+        runtime
+            .runner
+            .restore_conversations(&runtime.execution_seed, restored)
+            .await;
+    }
     Ok(PreparedRuntime {
         runtime: Some(runtime),
         workspace_identity: Some(workspace_identity),
         workspace_lease: Some(workspace_lease),
     })
+}
+
+async fn seed_predecessor_history(
+    bootstrap: &PortableControllerBootstrap,
+    runtime: &mut PortableRuntime,
+) -> Result<Option<CheckpointRestore>, PortableControllerError> {
+    let Some(predecessor) = &bootstrap.predecessor else {
+        return Ok(None);
+    };
+    let root = bootstrap
+        .storage
+        .parent()
+        .ok_or(PortableControllerError::Bootstrap)?;
+    let source =
+        SqliteRunLedger::open_read_only(root.join(predecessor.as_str()).join("runs.sqlite3"))?;
+    let stored = source
+        .get(predecessor)
+        .await?
+        .ok_or(PortableControllerError::DurableIdentity)?;
+    let conversation_restore = if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+    {
+        if bootstrap.checkpoint.is_some() {
+            return Err(PortableControllerError::Bootstrap);
+        }
+        runtime.execution_seed = match &bootstrap.request_resolution {
+            Some(resolution) => {
+                crate::native_v2_supervisor::request_history(&stored.snapshot, resolution)
+            }
+            None if matches!(
+                stored.snapshot.suspension,
+                Some(openengine_cluster_protocol::RunSuspension::Request { .. })
+            ) =>
+            {
+                return Err(PortableControllerError::Bootstrap);
+            }
+            None => crate::native_v2_supervisor::continuation_history(&stored.snapshot),
+        }
+        .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
+        Some(CheckpointRestore {
+            directory: root.join(predecessor.as_str()).join("checkpoints"),
+            selection: CheckpointRestoreSelection::Continue,
+        })
+    } else {
+        None
+    };
+    let mut after = None;
+    loop {
+        let page = crate::v2_run_ledger::vectors::list_full(
+            &source,
+            openengine_cluster_protocol::RunVectorsParams {
+                run_id: predecessor.clone(),
+                after,
+                limit: Some(100),
+            },
+        )
+        .await?;
+        runtime.vector_seed.extend(page.vectors);
+        after = page.next_after;
+        if after.is_none() {
+            break;
+        }
+    }
+    if let (
+        Some(resolution),
+        Some(openengine_cluster_protocol::RunSuspension::Request { request, .. }),
+    ) = (&bootstrap.request_resolution, &stored.snapshot.suspension)
+    {
+        if let crate::v2_run_ledger::RunEvent::Vector { vector } =
+            crate::v2_run_ledger::vector_event(
+                &bootstrap.run_id,
+                crate::native_v2_request::resolution_vector(request, resolution),
+            )?
+        {
+            runtime.vector_seed.push(vector);
+        }
+    }
+    if let crate::v2_run_ledger::RunEvent::Vector { vector } = crate::v2_run_ledger::vector_event(
+        &bootstrap.run_id,
+        openengine_cluster_protocol::RunVectorContent::Continuation {
+            resumed_from: predecessor.clone(),
+        },
+    )? {
+        runtime.vector_seed.push(vector);
+    }
+    Ok(conversation_restore)
 }
 
 fn require_not_stopping(prepared: &PreparedControllerStart) -> Result<(), PortableControllerError> {
@@ -459,12 +567,30 @@ fn configure_workspace_checkpoints(
         repository: bootstrap.checkpoint_repository.clone(),
     });
     if prepared.admitted.runtime.workspace_checkpoints {
+        use crate::native_v2_supervisor::checkpoints::{
+            ResticCheckpointStore, ResticCheckpointStoreRequest,
+        };
+
+        let fallback = match &bootstrap.predecessor {
+            Some(predecessor) => Some(
+                bootstrap
+                    .storage
+                    .parent()
+                    .ok_or(PortableControllerError::DurableIdentity)?
+                    .join(predecessor.as_str())
+                    .join("checkpoints"),
+            ),
+            None => None,
+        };
         runtime.checkpoints = Some(Arc::new(
-            crate::native_v2_supervisor::checkpoints::ResticCheckpointStore::new(
-                prepared.paths.storage().join("checkpoints"),
-                bootstrap.checkpoint_repository.clone(),
-                bootstrap.workspace.clone(),
-                crate::native_v2_admission::writer_nodes(&prepared.admitted),
+            ResticCheckpointStore::new_with_fallback(
+                ResticCheckpointStoreRequest {
+                    directory: prepared.paths.storage().join("checkpoints"),
+                    repository: bootstrap.checkpoint_repository.clone(),
+                    workspace: bootstrap.workspace.clone(),
+                    writers: crate::native_v2_admission::writer_nodes(&prepared.admitted),
+                },
+                fallback.as_deref(),
             )
             .map_err(|error| PortableControllerError::Io(error.0))?
             .with_stop_request(prepared.stopping.clone()),
@@ -588,6 +714,13 @@ impl SingleRunAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SingleRunAllocator {
+    fn supports_request_ask(&self) -> bool {
+        true
+    }
+
+    fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
+        Some(Default::default())
+    }
     async fn claim_controller(
         &self,
         run_id: &RunId,
@@ -612,6 +745,7 @@ impl CapsuleAllocator for SingleRunAllocator {
         Ok(AllocatedCapsule {
             checkpoints: runtime.checkpoints,
             execution_seed: runtime.execution_seed,
+            vector_seed: runtime.vector_seed,
             runner: runtime.runner,
             loss: self.loss_receiver.clone(),
             cleanup: runtime.cleanup,
@@ -638,6 +772,11 @@ impl CapsuleAllocator for SingleRunAllocator {
         }
         if let Some(runtime) = self.runtime.lock().await.take() {
             runtime.cleanup.destroy_or_confirm_absent(exit).await?;
+        } else if matches!(exit, RunRuntimeExit::ForceStopped) {
+            crate::native_v2_supervisor::checkpoints::discard_recorded_lineage(
+                &self.checkpoint_directory,
+            )
+            .map_err(|_| CapsuleCleanupUnavailable)?;
         }
         Ok(CapsuleDestroyed::confirmed())
     }

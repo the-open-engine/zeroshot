@@ -3,25 +3,14 @@ use super::*;
 mod state;
 use state::*;
 
-impl Engine<'_> {
+impl<'history> Engine<'history> {
     pub(super) fn eval(
         &mut self,
         node: &GraphNode,
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
-        let group_boundary = if traversal.boundary.is_none()
-            && matches!(node, GraphNode::Par(_) | GraphNode::Map(_))
-        {
-            Some(ExecutionBoundary {
-                node: node.name().clone(),
-                map_indices: traversal.map_indices.to_vec(),
-                loop_iterations: traversal.loop_iterations.to_vec(),
-                attempt: 0,
-            })
-        } else {
-            None
-        };
+        let group_boundary = group_boundary(node, traversal);
         let traversal = Traversal {
             boundary: traversal.boundary.or(group_boundary.as_ref()),
             ..traversal
@@ -39,7 +28,9 @@ impl Engine<'_> {
             GraphNode::Succeed(_) | GraphNode::Fail(_) => {
                 self.eval_terminal_node(node, context, traversal)
             }
-        }?;
+        }?
+        .after(traversal.after);
+        record_completed(node, context, traversal, &status);
         self.trace_finish(trace, &status, context);
         if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_)) {
             self.trace_terminal(trace, &status)?;
@@ -133,29 +124,31 @@ impl Engine<'_> {
         local.local_writes.clear();
         let mut position = HistoryPosition::ZERO;
         for child in group.children.as_slice() {
-            match self.eval(child, &mut local, traversal)? {
+            let result = self.eval(
+                child,
+                &mut local,
+                Traversal {
+                    after: traversal.after.max(position),
+                    ..traversal
+                },
+            );
+            match result? {
                 Status::Continue {
                     position: child_position,
                 } => {
                     position = position.max(child_position);
                 }
-                other => return Ok(other.after(position)),
+                other => {
+                    merge_runtime_facts(&local, context)?;
+                    return Ok(other.after(position));
+                }
             }
         }
-        promote(PromotionRequest {
-            node: &group.name,
-            map_indices: traversal.map_indices,
-            paths: &group.promoted_state_paths,
-            optional_paths: self
-                .optional_promotions
-                .get(&group.name)
-                .ok_or(ReducerError::InconsistentHistory)?,
-            local: &local,
-            parent: context,
-            mode: traversal.mode,
-            decisions: &mut self.decisions,
-        })?;
-        self.continue_decision(&group.name, traversal.mode);
+        self.promote_group(
+            (&group.name, &group.promoted_state_paths),
+            (&local, context),
+            traversal,
+        )?;
         Ok(Status::Continue { position })
     }
 
@@ -175,31 +168,41 @@ impl Engine<'_> {
             local.local_writes.clear();
             let mut loop_iterations = traversal.loop_iterations.to_vec();
             loop_iterations.push(iteration);
-            match self.eval(
+            let round_traversal = Traversal {
+                after: traversal.after.max(position),
+                loop_iterations: &loop_iterations,
+                ..traversal
+            };
+            self.enter_loop_round(group, &mut local, round_traversal)?;
+            let result = self.eval(
                 &group.body,
                 &mut local,
                 Traversal {
                     loop_iterations: &loop_iterations,
-                    ..traversal
+                    ..round_traversal
                 },
-            )? {
+            );
+            match result? {
                 Status::Continue {
                     position: body_position,
                 } => {
                     position = position.max(body_position);
                 }
-                other => return Ok(other.after(position)),
+                other => {
+                    merge_runtime_facts(&local, context)?;
+                    return Ok(other.after(position));
+                }
             }
-            let converged = match &group.until {
-                Some(until) => self.guard(until, &local, traversal.map_indices)?,
-                None => false,
-            };
+            let converged = group
+                .until
+                .as_ref()
+                .is_some_and(|guard| self.guard(guard, &local, traversal.map_indices));
             if converged {
                 return self.finish_loop(LoopFinishRequest {
                     group,
                     context,
                     traversal,
-                    completion: LoopCompletion::new(local, position, "converged"),
+                    completion: LoopCompletion::new(local, position, "converged", iteration),
                 });
             }
         }
@@ -207,8 +210,40 @@ impl Engine<'_> {
             group,
             context,
             traversal,
-            completion: LoopCompletion::new(local, position, "exhausted"),
+            completion: LoopCompletion::new(
+                local,
+                position,
+                "exhausted",
+                group.max_iterations.get(),
+            ),
         })
+    }
+
+    fn enter_loop_round(
+        &mut self,
+        group: &openengine_cluster_protocol::LoopNode,
+        context: &mut Context,
+        traversal: Traversal<'_>,
+    ) -> Result<(), ReducerError> {
+        let rounds = traversal.loop_iterations;
+        context
+            .work
+            .record(&group.name, traversal.map_indices, rounds)
+            .map_err(|_| {
+                if traversal.is_open() {
+                    ReducerError::WorkLimit {
+                        node: group.name.clone(),
+                        bound: 65_536,
+                        kind: "loop-body entries",
+                    }
+                } else {
+                    ReducerError::ProbeLoopLimit
+                }
+            })?;
+        if traversal.is_open() {
+            self.confirm_work(context, &group.name)?;
+        }
+        Ok(())
     }
 
     fn finish_loop(&mut self, request: LoopFinishRequest<'_, '_>) -> Result<Status, ReducerError> {
@@ -222,13 +257,21 @@ impl Engine<'_> {
             mut local,
             position,
             label,
+            iteration,
         } = completion;
-        if traversal.mode != EvalMode::Probe {
+        let mut final_round = traversal.loop_iterations.to_vec();
+        final_round.push(iteration);
+        let record_evidence = traversal.record_evidence
+            && (traversal.mode != EvalMode::Probe
+                || self
+                    .loop_entries
+                    .contains(&group.name, traversal.map_indices, &final_round));
+        if record_evidence {
             self.loop_evidence.exhausted_loops.retain(|prior| {
                 prior.node != group.name || prior.map_indices != traversal.map_indices
             });
         }
-        if traversal.mode != EvalMode::Probe && label == "exhausted" {
+        if record_evidence && label == "exhausted" {
             self.loop_evidence
                 .record_exhausted_loop(openengine_cluster_protocol::ExhaustedLoop {
                     node: group.name.clone(),
@@ -248,20 +291,11 @@ impl Engine<'_> {
                 map_indices: traversal.map_indices,
             },
         );
-        promote(PromotionRequest {
-            node: &group.name,
-            map_indices: traversal.map_indices,
-            paths: &group.promoted_state_paths,
-            optional_paths: self
-                .optional_promotions
-                .get(&group.name)
-                .ok_or(ReducerError::InconsistentHistory)?,
-            local: &local,
-            parent: context,
-            mode: traversal.mode,
-            decisions: &mut self.decisions,
-        })?;
-        self.continue_decision(&group.name, traversal.mode);
+        self.promote_group(
+            (&group.name, &group.promoted_state_paths),
+            (&local, context),
+            traversal,
+        )?;
         Ok(Status::Continue { position })
     }
 
@@ -271,32 +305,29 @@ impl Engine<'_> {
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
-        let resolution = self.resolve_visit(&spec, context, traversal.map_indices)?;
+        let resolution = self.resolve_visit(&spec, traversal)?;
         let VisitResolution::Ready(visit) = resolution else {
             return attempts_exhausted();
         };
         let visit = *visit;
-        let input = bind_payload(spec.input_bindings, &context.state, traversal.item)?;
-        for execution in &visit.executions {
-            if execution.input != input {
-                return Err(ReducerError::InconsistentHistory);
-            }
-            self.consumed_executions.insert(execution.execution);
-        }
-        mark_visit(
-            spec.name,
-            traversal.map_indices,
-            &mut context.controls,
-            visit.number,
-        );
         let Some(execution) = visit.existing else {
             return self.dispatch_missing(MissingDispatchRequest {
                 spec,
                 visit,
-                input,
+                context,
                 traversal,
             });
         };
+        // Discovery uses recorded input. Strict replay validates only owned executions.
+        let input = if traversal.mode == EvalMode::Probe {
+            execution.input.clone()
+        } else {
+            bind_payload(spec.input_bindings, &context.state, traversal.item)?
+        };
+        if traversal.mode != EvalMode::Probe {
+            self.consume_visit(&visit, &input)?;
+            self.confirm_work(context, spec.name)?;
+        }
         self.finish_existing_execution(ExistingExecutionRequest {
             spec,
             context,
@@ -306,9 +337,23 @@ impl Engine<'_> {
         })
     }
 
+    fn consume_visit(
+        &mut self,
+        visit: &ExecutableVisit<'_>,
+        input: &Value,
+    ) -> Result<(), ReducerError> {
+        for execution in &visit.executions {
+            if &execution.input != input {
+                return Err(ReducerError::InconsistentHistory);
+            }
+            self.consumed_executions.insert(execution.execution);
+        }
+        Ok(())
+    }
+
     fn finish_existing_execution(
         &mut self,
-        request: ExistingExecutionRequest<'_, '_, '_>,
+        request: ExistingExecutionRequest<'_, '_, '_, '_>,
     ) -> Result<Status, ReducerError> {
         let ExistingExecutionRequest {
             spec,
@@ -359,57 +404,61 @@ impl Engine<'_> {
     fn resolve_visit(
         &self,
         spec: &ExecutableSpec<'_>,
-        context: &Context,
-        map_indices: &[u64],
-    ) -> Result<VisitResolution, ReducerError> {
+        traversal: Traversal<'_>,
+    ) -> Result<VisitResolution<'history>, ReducerError> {
         let occurrence = StructuralOccurrence {
             node: spec.name.clone(),
-            map_indices: map_indices.to_vec(),
+            map_indices: traversal.map_indices.to_vec(),
         };
-        let mut matching = self
-            .executions
-            .iter()
-            .filter(|execution| execution.occurrence == occurrence)
-            .cloned()
-            .collect::<Vec<_>>();
-        let number = next_visit(spec.name, map_indices, &context.controls);
-        let (attempt, existing, executions) = match self.execution_mode {
+        let history = self
+            .by_occurrence
+            .get(&occurrence)
+            .map_or(&[][..], Vec::as_slice);
+        // ZERO is the empty prefix; settlements are strictly later than their starts.
+        let start = history.partition_point(|execution| {
+            traversal.after != HistoryPosition::ZERO
+                && execution.dispatch_position <= traversal.after
+        });
+        let current = &history[start..];
+        let (attempt, executions) = match self.execution_mode {
             ExecutionMode::LegacyAttempts => {
-                matching.sort_by_key(|execution| execution.attempt);
-                let attempt =
-                    PositiveInteger::new(number).map_err(|_| ReducerError::InconsistentHistory)?;
-                if attempt.get() > spec.attempt_ceiling.get() {
+                let attempt = PositiveInteger::new(start as u64 + 1)
+                    .map_err(|_| ReducerError::InconsistentHistory)?;
+                if attempt > spec.attempt_ceiling {
                     return Ok(VisitResolution::Exhausted);
                 }
-                let existing = matching
-                    .iter()
-                    .find(|execution| execution.attempt == attempt)
-                    .cloned();
-                let executions = existing.iter().cloned().collect();
-                (attempt, existing, executions)
+                let executions = current
+                    .first()
+                    .filter(|execution| execution.dispatch_position <= traversal.cutoff)
+                    .into_iter()
+                    .copied()
+                    .collect::<Vec<_>>();
+                (attempt, executions)
             }
             ExecutionMode::NativeV2 => {
-                matching.sort_by_key(|execution| execution.dispatch_position);
-                let executions = native_visit_executions(&matching, number);
-                let existing = executions.last().cloned();
-                let attempt = existing.as_ref().map_or_else(
-                    || {
-                        PositiveInteger::new(INITIAL_ATTEMPT)
-                            .expect("the initial attempt is positive")
-                    },
+                let end = current
+                    .iter()
+                    .skip(1)
+                    .position(|execution| execution.attempt.get() == INITIAL_ATTEMPT)
+                    .map_or(current.len(), |index| index + 1);
+                let through = current[..end]
+                    .partition_point(|execution| execution.dispatch_position <= traversal.cutoff);
+                let executions = current[..through].to_vec();
+                let attempt = executions.last().map_or(
+                    PositiveInteger::new(INITIAL_ATTEMPT).expect("positive initial attempt"),
                     |execution| execution.attempt,
                 );
                 if attempt > spec.attempt_ceiling {
                     return Err(ReducerError::InconsistentHistory);
                 }
-                (attempt, existing, executions)
+                (attempt, executions)
             }
         };
+        let existing = executions.last().copied();
         Ok(VisitResolution::Ready(Box::new(ExecutableVisit {
             occurrence,
-            matching,
+            node_instance: history.first().map(|execution| execution.node_instance),
             executions,
-            number,
             attempt,
             existing,
         })))
@@ -417,46 +466,41 @@ impl Engine<'_> {
 
     fn dispatch_missing(
         &mut self,
-        request: MissingDispatchRequest<'_, '_>,
+        request: MissingDispatchRequest<'_, '_, '_, '_>,
     ) -> Result<Status, ReducerError> {
         let MissingDispatchRequest {
             spec,
             visit,
-            input,
+            context,
             traversal,
         } = request;
-        if traversal.mode != EvalMode::Decide || traversal.cutoff != HistoryPosition::MAX {
+        if !traversal.is_open() {
+            self.observe_missing(spec.name, traversal);
             return Ok(Status::Pending);
         }
-        let node_instance = match visit.matching.last() {
-            Some(previous) => previous.node_instance,
-            None => {
-                let allocated = NodeInstanceId::new(self.next_node_instance)
-                    .map_err(|_| ReducerError::IdentityOutOfRange)?;
-                self.next_node_instance = self
-                    .next_node_instance
-                    .checked_add(1)
-                    .ok_or(ReducerError::IdentityOutOfRange)?;
-                allocated
-            }
+        if !self.admit_leaf(spec.name, traversal)? {
+            return Ok(Status::Pending);
+        }
+        let input = bind_payload(spec.input_bindings, &context.state, traversal.item)?;
+        self.charge_visit(spec.name)?;
+        let node_instance = match visit.node_instance {
+            Some(previous) => previous,
+            None => self.allocate_node_instance()?,
         };
-        self.record_boundary(&spec, traversal, visit.attempt.get())?;
-        let execution = self.allocate_execution()?;
-        self.decisions.push(Decision::Dispatch {
-            node_instance,
-            execution,
-            occurrence: visit.occurrence,
-            attempt: visit.attempt,
-            iteration: traversal.loop_iterations.last().copied().unwrap_or(0),
-            worker: spec.worker.clone(),
-            input,
-        });
-        Ok(Status::Pending)
+        self.dispatch_visit(
+            &spec,
+            DispatchVisit {
+                node_instance,
+                occurrence: visit.occurrence,
+                attempt: visit.attempt,
+            },
+            (input, traversal),
+        )
     }
 
     fn dispatch_retry(
         &mut self,
-        request: RetryDispatchRequest<'_, '_>,
+        request: RetryDispatchRequest<'_, '_, '_>,
     ) -> Result<Status, ReducerError> {
         let RetryDispatchRequest {
             spec,
@@ -464,7 +508,7 @@ impl Engine<'_> {
             execution: previous,
             input,
         } = request;
-        if traversal.mode != EvalMode::Decide || traversal.cutoff != HistoryPosition::MAX {
+        if !self.admit_leaf(spec.name, traversal)? {
             return Ok(Status::Pending);
         }
         let attempt = previous
@@ -475,13 +519,31 @@ impl Engine<'_> {
             .and_then(|value| {
                 PositiveInteger::new(value).map_err(|_| ReducerError::IdentityOutOfRange)
             })?;
-        self.record_boundary(&spec, traversal, attempt.get())?;
+        self.dispatch_visit(
+            &spec,
+            DispatchVisit {
+                node_instance: previous.node_instance,
+                occurrence: previous.occurrence.clone(),
+                attempt,
+            },
+            (input, traversal),
+        )
+    }
+
+    fn dispatch_visit(
+        &mut self,
+        spec: &ExecutableSpec<'_>,
+        visit: DispatchVisit,
+        request: (Value, Traversal<'_>),
+    ) -> Result<Status, ReducerError> {
+        let (input, traversal) = request;
+        self.record_boundary(spec, traversal, visit.attempt.get())?;
         let execution = self.allocate_execution()?;
         self.decisions.push(Decision::Dispatch {
-            node_instance: previous.node_instance,
+            node_instance: visit.node_instance,
             execution,
-            occurrence: previous.occurrence,
-            attempt,
+            occurrence: visit.occurrence,
+            attempt: visit.attempt,
             iteration: traversal.loop_iterations.last().copied().unwrap_or(0),
             worker: spec.worker.clone(),
             input,
@@ -513,6 +575,42 @@ impl Engine<'_> {
         }
         self.boundary = Some(boundary);
         Ok(())
+    }
+
+    fn admit_leaf(
+        &mut self,
+        node: &NodeName,
+        traversal: Traversal<'_>,
+    ) -> Result<bool, ReducerError> {
+        if traversal.cutoff != HistoryPosition::MAX {
+            return Ok(false);
+        }
+        if !self.pending_leaf(node, traversal) {
+            return Ok(false);
+        }
+        self.trace_queued(node, traversal)?;
+        Ok(self.admit_pending(traversal))
+    }
+
+    fn admit_pending(&mut self, traversal: Traversal<'_>) -> bool {
+        if traversal.mode != EvalMode::Decide
+            || traversal.cutoff != HistoryPosition::MAX
+            || self.dispatch_remaining == 0
+        {
+            return false;
+        }
+        self.dispatch_remaining -= 1;
+        true
+    }
+
+    fn allocate_node_instance(&mut self) -> Result<NodeInstanceId, ReducerError> {
+        let allocated = NodeInstanceId::new(self.next_node_instance)
+            .map_err(|_| ReducerError::IdentityOutOfRange)?;
+        self.next_node_instance = self
+            .next_node_instance
+            .checked_add(1)
+            .ok_or(ReducerError::IdentityOutOfRange)?;
+        Ok(allocated)
     }
 
     fn allocate_execution(&mut self) -> Result<ExecutionId, ReducerError> {
@@ -626,18 +724,28 @@ impl Engine<'_> {
     // Choice, parallel, and map evaluation live in the groups companion module.
 }
 
-fn native_visit_executions(
-    executions: &[DurableExecution],
-    requested_visit: u64,
-) -> Vec<DurableExecution> {
-    let mut visit = 0;
-    executions
-        .iter()
-        .filter_map(|execution| {
-            if execution.attempt.get() == 1 {
-                visit += 1;
-            }
-            (visit == requested_visit).then(|| execution.clone())
+fn record_completed(
+    node: &GraphNode,
+    context: &mut Context,
+    traversal: Traversal<'_>,
+    status: &Status,
+) {
+    if let Status::Continue { .. } = status {
+        context
+            .completed
+            .insert((node.name().clone(), traversal.map_indices.to_vec()));
+    }
+}
+
+fn group_boundary(node: &GraphNode, traversal: Traversal<'_>) -> Option<ExecutionBoundary> {
+    if traversal.boundary.is_none() && matches!(node, GraphNode::Par(_) | GraphNode::Map(_)) {
+        Some(ExecutionBoundary {
+            node: node.name().clone(),
+            map_indices: traversal.map_indices.to_vec(),
+            loop_iterations: traversal.loop_iterations.to_vec(),
+            attempt: 0,
         })
-        .collect()
+    } else {
+        None
+    }
 }

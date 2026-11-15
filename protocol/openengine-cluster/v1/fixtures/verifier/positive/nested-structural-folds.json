@@ -6,11 +6,11 @@
           "peer": 1,
           "verify": 1
         },
-        "maxNodeExecutions": 7,
+        "maxNodeExecutions": 65536,
         "peakConcurrency": 4,
         "termination": {
           "kind": "bounded",
-          "maxIterations": 6,
+          "maxIterations": 65536,
           "ranking": [
             [
               "innerLoop"

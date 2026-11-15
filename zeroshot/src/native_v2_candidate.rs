@@ -490,7 +490,8 @@ impl CandidateNodeLane {
                 .agents
                 .get(&lane.clone().unwrap_or_else(|| self.default_lane.clone()))
                 .ok_or(NodeRunnerError::Driver),
-            NodeRuntimeBinding::Script { .. }
+            NodeRuntimeBinding::Request {}
+            | NodeRuntimeBinding::Script { .. }
             | NodeRuntimeBinding::Decision { .. }
             | NodeRuntimeBinding::GitDelivery { .. }
             | NodeRuntimeBinding::CommentDelivery { .. } => Err(NodeRunnerError::Driver),
@@ -550,6 +551,7 @@ impl SessionFactory for CandidateNodeLane {
         environment: &ResolvedEnvironment,
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
         match &invocation.binding {
+            NodeRuntimeBinding::Request {} => Err(NodeRunnerError::InvalidRole),
             NodeRuntimeBinding::Agent { .. } => {
                 self.agents_for(&invocation.binding)?
                     .sessions
@@ -598,6 +600,7 @@ impl NodeDriver for CandidateNodeLane {
         control: DriverControl,
     ) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
         match &invocation.node.binding {
+            NodeRuntimeBinding::Request {} => Err(NodeRunnerError::InvalidRole),
             NodeRuntimeBinding::Agent { .. } => self.run_agent(invocation, control).await,
             NodeRuntimeBinding::Script { .. } => {
                 run_binding(self.scripts.as_ref(), invocation, control).await

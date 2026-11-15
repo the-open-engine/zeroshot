@@ -8,6 +8,9 @@ use serde_json::json;
 use super::*;
 use crate::full_v1_reducer::{ExecutionId, HistoryPosition, NodeInstanceId, StructuralOccurrence};
 
+#[path = "restore_tests.rs"]
+mod restore_tests;
+
 struct Fixture {
     _root: tempfile::TempDir,
     directory: PathBuf,

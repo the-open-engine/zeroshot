@@ -33,6 +33,7 @@ pub(super) fn status_from_snapshot(
     match snapshot.phase {
         RunPhase::Admitted => Ok(RunStatus::Admitted {}),
         RunPhase::Running => Ok(RunStatus::Running {
+            suspend_requested: snapshot.suspend_requested,
             active_executions: active_executions()?,
             graph_result: snapshot
                 .primary_graph
@@ -45,6 +46,13 @@ pub(super) fn status_from_snapshot(
                 .primary_graph
                 .as_ref()
                 .map(|primary| primary.result.clone()),
+        }),
+        RunPhase::Suspended => Ok(RunStatus::Suspended {
+            suspension: snapshot
+                .suspension
+                .clone()
+                .ok_or(NativeV2ObservationError::InvalidState)?,
+            metadata: run_metadata(snapshot),
         }),
         RunPhase::Finished => Ok(RunStatus::Finished {
             terminal_result: snapshot
@@ -66,7 +74,8 @@ pub(super) fn run_metadata(snapshot: &RunSnapshot) -> RunMetadata {
 pub(super) fn changes_public_status(event: &RunEvent) -> bool {
     !matches!(
         event,
-        RunEvent::DeliveryState { .. }
+        RunEvent::Vector { .. }
+            | RunEvent::DeliveryState { .. }
             | RunEvent::SafeLog { .. }
             | RunEvent::TokenUsageObserved { .. }
             | RunEvent::RunTokenUsageObserved { .. }

@@ -292,23 +292,46 @@ async function withRuntimeEditor(check: (RuntimeEditor: any) => void) {
   });
   try {
     const { RuntimeEditor } = await server.ssrLoadModule('/src/RuntimeEditor.tsx');
-    check(RuntimeEditor);
+    const { NumericDraftProvider, createNumericDrafts } =
+      await server.ssrLoadModule('/src/numeric-drafts.ts');
+    const drafts = createNumericDrafts();
+    try {
+      check((props: any) =>
+        createElement(NumericDraftProvider, { value: drafts }, createElement(RuntimeEditor, props))
+      );
+    } finally {
+      drafts.clear();
+    }
   } finally {
     await server.close();
   }
 }
 
-
 test('new documents preserve complete native template runtimes without flattening lanes', () => {
   const template = {
     name: 'mixed-template',
-    graph: { profile: 'full', initialInput: { kind: 'record', fields: {} },
-      policy: {}, root: { kind: 'seq', name: 'run', children: [] } },
-    runtime: { harness: 'claude', provider: 'anthropic', workspaceCheckpoints: true,
-      nodes: { review: { kind: 'agent', model: 'authored-model', effort: 'high',
-        lane: { harness: 'codex', provider: 'openai' }, sessionScope: 'node_instance',
-        connections: { custom: ['CUSTOM_KEY'] } },
-        deliver: { kind: 'comment_delivery', connections: { github: ['GH_TOKEN'] } } } },
+    graph: {
+      profile: 'full',
+      initialInput: { kind: 'record', fields: {} },
+      policy: {},
+      root: { kind: 'seq', name: 'run', children: [] },
+    },
+    runtime: {
+      harness: 'claude',
+      provider: 'anthropic',
+      workspaceCheckpoints: true,
+      nodes: {
+        review: {
+          kind: 'agent',
+          model: 'authored-model',
+          effort: 'high',
+          lane: { harness: 'codex', provider: 'openai' },
+          sessionScope: 'node_instance',
+          connections: { custom: ['CUSTOM_KEY'] },
+        },
+        deliver: { kind: 'comment_delivery', connections: { github: ['GH_TOKEN'] } },
+      },
+    },
   };
   const document = newDocument(template);
   assert.deepEqual(document.runtime, template.runtime);

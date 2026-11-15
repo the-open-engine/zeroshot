@@ -130,7 +130,7 @@ pub(crate) fn parse_subscription_response<R>(
 where
     R: serde::de::DeserializeOwned,
 {
-    let value: serde_json::Value = serde_json::from_str(line)
+    let value: serde_json::Value = openengine_cluster_protocol::bounded_json_from_str(line)
         .map_err(|error| crate::ClientError::InvalidResponse(error.to_string()))?;
     if value.get("error").is_some() {
         let response: openengine_cluster_protocol::JsonRpcErrorResponse =
@@ -173,7 +173,7 @@ pub(crate) fn parse_subscription_close(
 pub(crate) fn parse_subscription_notification(
     line: &str,
 ) -> Result<(Option<String>, serde_json::Value), crate::ClientError> {
-    let value: serde_json::Value = serde_json::from_str(line)
+    let value: serde_json::Value = openengine_cluster_protocol::bounded_json_from_str(line)
         .map_err(|error| crate::ClientError::InvalidResponse(error.to_string()))?;
     let method = value
         .get("method")
@@ -340,7 +340,7 @@ macro_rules! impl_ndjson_event_subscription {
         }
 
         fn $parse_notification_fn(line: &str) -> Result<$event_or_closed, crate::ClientError> {
-            let value: serde_json::Value = serde_json::from_str(line)
+            let value: serde_json::Value = openengine_cluster_protocol::bounded_json_from_str(line)
                 .map_err(|error| crate::ClientError::InvalidResponse(error.to_string()))?;
             match value.get("method").and_then(serde_json::Value::as_str) {
                 Some("event") => {

@@ -38,12 +38,18 @@ impl fmt::Display for CheckpointId {
     }
 }
 
-/// A new successor either restarts the graph on the latest workspace or continues from an entry
-/// checkpoint with its matching predecessor outputs. Provider sessions are never resumed.
+/// A successor restarts a failed graph or continues from a selected checkpoint or suspension.
+/// Checkpoint continuations, including suspended successors, restore captured node-instance provider
+/// conversations; restarts start new ones. Suspended local/direct continuations retain workspace files.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunResumeFrom {
     Restart {},
+    Answer {
+        signals: std::collections::BTreeMap<crate::FieldName, crate::EnumLabel>,
+        output: serde_json::Value,
+    },
+    Expiry {},
     Checkpoint {
         #[serde(rename = "checkpointId")]
         checkpoint_id: CheckpointId,
@@ -113,7 +119,7 @@ pub struct RunCheckpointsResult {
     pub next_after: Option<CheckpointId>,
 }
 
-fn validate_page_limit(value: u32) -> Result<(), NativeV2RunValueError> {
+pub(super) fn validate_page_limit(value: u32) -> Result<(), NativeV2RunValueError> {
     if (1..=MAX_CHECKPOINT_PAGE_SIZE).contains(&value) {
         Ok(())
     } else {
@@ -123,7 +129,7 @@ fn validate_page_limit(value: u32) -> Result<(), NativeV2RunValueError> {
     }
 }
 
-fn deserialize_page_limit<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+pub(super) fn deserialize_page_limit<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
 where
     D: Deserializer<'de>,
 {

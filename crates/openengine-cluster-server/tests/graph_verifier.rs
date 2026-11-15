@@ -476,3 +476,6 @@ mod parallel_definition_regressions;
 mod parallel_regressions;
 #[path = "graph_verifier/regressions.rs"]
 mod regressions;
+
+#[path = "graph_verifier/loop_outcomes.rs"]
+mod loop_outcomes;

@@ -16,7 +16,7 @@ import {
 export type WorkerOption = {
   id: string;
   label: string;
-  runtimeKind: 'agent' | 'decision' | 'git_delivery' | 'comment_delivery';
+  runtimeKind: 'agent' | 'decision' | 'git_delivery' | 'comment_delivery' | 'request';
   workerRefs: string[];
   node?: GraphNode;
   runtimeBinding: Binding;
@@ -28,7 +28,9 @@ export function workerOption(
   workers: WorkerOption[]
 ): WorkerOption | undefined {
   const delivery = workers.find(
-    (option) => isDeliveryKind(option.runtimeKind) && option.workerRefs.includes(node.worker)
+    (option) =>
+      (isDeliveryKind(option.runtimeKind) || option.runtimeKind === 'request') &&
+      option.workerRefs.includes(node.worker)
   );
   if (delivery) return delivery;
   return workers.find(
@@ -48,7 +50,11 @@ export function applyWorker(
   const current = workerOption(node, binding, workers.length ? workers : [option]);
   if (current?.id === option.id && binding?.kind === option.runtimeKind) return document;
   let replacement: GraphNode;
-  if (option.runtimeKind === 'decision') {
+  if (option.runtimeKind === 'request') {
+    if (node.kind !== 'verifier' || option.node?.kind !== 'verifier')
+      throw new Error('Select a Verifier for a wait node.');
+    replacement = { ...clone(option.node), name, inputBindings: [], writeBindings: [] };
+  } else if (option.runtimeKind === 'decision') {
     if (option.node?.kind !== 'verifier')
       throw new Error('The decision contract is unavailable. Reload the editor.');
     replacement = {

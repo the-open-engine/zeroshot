@@ -1,0 +1,21 @@
+{
+  "atCursor": "v2:7",
+  "runId": "run-1",
+  "size": "medium",
+  "source": {
+    "branch": "main",
+    "repository": "open-engine/zeroshot",
+    "revision": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "status": {
+    "createdAt": 1762905600000,
+    "metadata": {},
+    "node": "cooldown",
+    "phase": "suspended",
+    "reason": "wait",
+    "wait": {
+      "dueAt": 1762992000000
+    }
+  },
+  "title": "Repair checkout flow"
+}

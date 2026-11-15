@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
-  AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Check,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Clock3,
   Loader2,
   Pause,
   Play,
@@ -70,6 +67,8 @@ type RunHistoryViewProps = {
   workers: WorkerOption[];
   emptyAction?: ReactNode;
   viewKey?: string;
+  /** The host owns navigation between runs. */
+  runHref?: (runId: string) => string;
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
 };
@@ -79,6 +78,7 @@ export function RunHistoryView({
   workers,
   emptyAction,
   viewKey,
+  runHref,
   embedded = false,
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
@@ -274,6 +274,7 @@ export function RunHistoryView({
             openLog={() => inspect(document.graph.root.name)}
             retry={() => void loadHistory(run.runId, source, false)}
             embedded={embedded}
+            runHref={runHref}
           />
           <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
             <ReactFlowProvider>
@@ -439,6 +440,9 @@ function currentHistoryState(
   preparing: boolean,
   atStart: boolean
 ) {
+  if (run.phase === 'suspended')
+    return `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}${run.suspension?.request ? `: ${run.suspension.request.text} (deadline ${new Date(run.suspension.request.expiresAt).toISOString()})` : ''}`;
+  if (run.phase === 'running' && run.suspendRequested) return 'Suspension requested';
   if (terminal) return terminal.status;
   if (run.runtimeFailure) return 'failed';
   if (preparing) return 'Preparing environment';
@@ -483,6 +487,7 @@ function RunHistoryHeader({
   openLog,
   retry,
   embedded,
+  runHref,
 }: {
   run: RunDetail;
   terminal: RunTerminal | undefined;
@@ -492,6 +497,7 @@ function RunHistoryHeader({
   openLog: () => void;
   retry: () => void;
   embedded: boolean;
+  runHref?: (runId: string) => string;
 }) {
   const preparing = isPreparingEnvironment(run, history.events);
   const shownStatus =
@@ -504,10 +510,17 @@ function RunHistoryHeader({
         <div className="workspace-header history-header">
           <div className="profile-title">
             <h1 title={run.title}>{run.title}</h1>
+            {run.workspaceRecovery?.successorRunId && runHref && (
+              <a href={runHref(run.workspaceRecovery.successorRunId)}>Continue to successor</a>
+            )}
             <span
               className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
             >
-              {run.example ? 'Simulated' : humanize(shownStatus)}
+              {run.example
+                ? 'Simulated'
+                : run.phase === 'suspended' || (run.phase === 'running' && run.suspendRequested)
+                  ? shownStatus
+                  : humanize(shownStatus)}
             </span>
           </div>
         </div>
@@ -611,10 +624,7 @@ function RunHistoryAlerts({
       )}
       {run.runtimeFailure && (
         <div className="history-error" role="alert">
-          <AlertCircle size={16} />
-          <span>
-            <strong>History incomplete.</strong> Runtime failed before its final state was saved.
-          </span>
+          <span>History is incomplete: the runtime failed before its final state was saved.</span>
           <button className="text-button" disabled={loading} onClick={retry}>
             Reload
           </button>
@@ -622,7 +632,6 @@ function RunHistoryAlerts({
       )}
       {error && (
         <div className="history-error" role="alert">
-          <AlertCircle size={16} />
           <span>{error}</span>
           <button className="text-button" onClick={retry}>
             Retry
@@ -663,7 +672,6 @@ function HistoryEmpty({
         </>
       ) : error ? (
         <>
-          <AlertCircle size={25} />
           <h1>Could not open this run</h1>
           <p>{error}</p>
           {runId && (
@@ -674,7 +682,6 @@ function HistoryEmpty({
         </>
       ) : (
         <>
-          <Clock3 size={30} strokeWidth={1.3} />
           <h1>Run history</h1>
           <p>Select a run to inspect its graph and recorded history.</p>
           {emptyAction}
@@ -840,6 +847,8 @@ function useHistoryFeed(
   function retainEvents(next: HistoryEvent[]) {
     retained.current = next;
     setEvents(next);
+    if (next.some(({ event }) => event.kind === 'suspend_requested'))
+      setRun((previous) => (previous ? { ...previous, suspendRequested: true } : previous));
   }
   function retainControl(next: ControlRecord[]) {
     retainedControl.current = next;
@@ -1024,12 +1033,12 @@ function RunTimeline({
       <div className="timeline-caption">
         <div>
           {!(isLiveRun && following) && (
-            <span className="eyebrow">
+            <span className="timeline-mode">
               {safePosition === 0
-                ? 'START'
+                ? 'Start'
                 : safePosition === moments.length - 1 && loadedHead
-                  ? 'LATEST'
-                  : 'REPLAY'}
+                  ? 'Latest'
+                  : 'Replay'}
             </span>
           )}
           <strong>{moment.label}</strong>
@@ -1194,10 +1203,10 @@ function RunInspector({
     <InspectorPanel className="run-inspector" label="Run inspector">
       <header className="run-inspector-header">
         <div>
-          <span className="eyebrow">
-            {node.name === document.graph.root.name ? 'RUN OVERVIEW' : labels[node.kind]}
-          </span>
           <h2>{node.name === document.graph.root.name ? 'Run details' : humanize(node.name)}</h2>
+          {node.name !== document.graph.root.name && (
+            <p className="inspector-kind">{labels[node.kind]}</p>
+          )}
         </div>
         <button
           className="icon-button"
@@ -1380,7 +1389,6 @@ function InvocationView({
     <section className="invocation-detail">
       <div className="invocation-status">
         <span className={`run-status state-${invocation.state}`}>
-          {invocation.state === 'succeeded' && <Check size={12} />}
           {stateLabel(invocation.state)}
         </span>
       </div>

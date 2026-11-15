@@ -183,6 +183,129 @@ def test_exact_request_forwards_folder_and_source_only_connection(fake_native: P
         assert arguments[arguments.index("--repository") + 1] == request.repository
 
 
+@pytest.mark.parametrize("method", ["run", "submit"])
+@pytest.mark.parametrize("exact", [False, True], ids=["string", "request"])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        {"worktree": False},
+        {"worktree": True},
+        {"worktree": True, "worktree_base": "local"},
+        {"worktree": True, "worktree_base": "remote"},
+    ],
+    ids=["omitted", "false", "default-base", "local", "remote"],
+)
+def test_worktree_options_reach_preflight_and_submission(
+    fake_native: Path, method: str, exact: bool, options: dict[str, object]
+) -> None:
+    async def exercise() -> None:
+        async with Client(runtime=runtime()) as client:
+            submit = getattr(client, method)
+            common = {
+                "cwd": "../selected-folder",
+                "source_connection": "source-private",
+                "submission_key": "worktree-request",
+                **options,
+            }
+            if exact:
+                request = RunRequest(
+                    title="Isolated change",
+                    graph=GraphSpec.from_dict({"profile": "openengine.graph.full/v1"}),
+                    initial_input={"task": "inspect it"},
+                    runtime=RuntimePlan.from_dict({"harness": "codex", "nodes": {}}),
+                    **common,
+                )
+                await submit(request)
+            else:
+                await submit("inspect it", **common)
+
+    asyncio.run(exercise())
+    runs = [item for item in read_invocations(fake_native) if item["args"][0] == "run"]
+    assert len(runs) == 2
+    assert "--validate-only" in runs[0]["args"]
+    assert "--detach" not in runs[0]["args"]
+    assert "--detach" in runs[1]["args"]
+    for item in runs:
+        args = item["args"]
+        assert ("--worktree" in args) is options.get("worktree", False)
+        if "worktree_base" in options:
+            assert args[args.index("--worktree-base") + 1] == options["worktree_base"]
+        else:
+            assert "--worktree-base" not in args
+        assert args[args.index("--cwd") + 1] == "../selected-folder"
+        assert args[args.index("--source-connection") + 1] == "source-private"
+        assert args[args.index("--submission-key") + 1] == "worktree-request"
+        assert item["--input"] == {"task": "inspect it"}
+
+
+@pytest.mark.parametrize("method", ["run", "submit"])
+@pytest.mark.parametrize("exact", [False, True], ids=["string", "request"])
+@pytest.mark.parametrize(
+    ("target", "options", "message"),
+    [
+        (LocalTarget(), {"worktree_base": "remote"}, "requires --worktree"),
+        (LocalTarget(), {"worktree": True, "worktree_base": "other"}, "invalid --worktree-base"),
+        (DirectTarget("http://127.0.0.1:8080"), {"worktree": True}, "conflicts with --target"),
+        (HostedTarget("platform"), {"worktree": True}, "conflicts with --target"),
+    ],
+    ids=["missing-worktree", "invalid-base", "direct", "hosted"],
+)
+def test_worktree_rejection_stops_at_native_preflight(
+    fake_native: Path,
+    method: str,
+    exact: bool,
+    target: object,
+    options: dict[str, object],
+    message: str,
+) -> None:
+    async def exercise() -> None:
+        async with Client(target=target, runtime=runtime()) as client:
+            submit = getattr(client, method)
+            with pytest.raises(InvalidRequestError, match=message):
+                if exact:
+                    await submit(
+                        RunRequest(
+                            title="Invalid isolation",
+                            graph=GraphSpec.from_dict({"profile": "openengine.graph.full/v1"}),
+                            initial_input=None,
+                            runtime=RuntimePlan.from_dict({"harness": "codex", "nodes": {}}),
+                            **options,
+                        )
+                    )
+                else:
+                    await submit("inspect it", **options)
+
+    asyncio.run(exercise())
+    invocations = read_invocations(fake_native)
+    assert len(invocations) == 1
+    assert invocations[0]["args"][0] == "run"
+    assert "--validate-only" in invocations[0]["args"]
+
+
+@pytest.mark.parametrize("method", ["run", "submit"])
+@pytest.mark.parametrize(
+    "options", [{"worktree": False}, {"worktree": True}, {"worktree_base": "local"}]
+)
+def test_exact_request_rejects_worktree_overrides(
+    fake_native: Path, method: str, options: dict[str, object]
+) -> None:
+    request = RunRequest(
+        title="Exact request",
+        graph=GraphSpec.from_dict({"profile": "openengine.graph.full/v1"}),
+        initial_input=None,
+        runtime=RuntimePlan.from_dict({"harness": "codex", "nodes": {}}),
+    )
+
+    async def exercise() -> None:
+        async with Client() as client:
+            with pytest.raises(TypeError, match="RunRequest cannot be combined"):
+                await getattr(client, method)(request, **options)
+
+    asyncio.run(exercise())
+    assert read_invocations(fake_native) == []
+
+
 @pytest.mark.parametrize("forward", [False, True])
 def test_named_submissions_forward_gh_token_only_on_opt_in(
     fake_native: Path, forward: bool
@@ -846,3 +969,164 @@ def test_uniform_runtime_passes_native_configuration_without_shared_mutable_valu
     config["args"] = ["changed"]
     assert encoded["harnessConfig"] == {"args": ["--tools", "Read,Grep,Glob"]}
     assert "harnessConfig" not in runtime().to_dict()
+
+
+@pytest.mark.parametrize("forward", [False, True])
+@pytest.mark.parametrize("target_kind", ["hosted", "direct"])
+def test_suspension_continuation_and_vector_target_arguments(
+    fake_native: Path, forward: bool, target_kind: str
+) -> None:
+    async def scenario() -> None:
+        target = (
+            HostedTarget("prod")
+            if target_kind == "hosted"
+            else DirectTarget("https://target.example")
+        )
+        route = ["--target", "prod" if target_kind == "hosted" else "python-sdk"]
+        async with Client(target=target, forward_github_token=forward) as client:
+            run = client.get_run("original")
+            assert (await run.suspend()).suspend_requested
+            assert (await run.resume()).id == "successor"
+            page = await run.vectors(after="cursor", limit=2)
+            assert page.next_after == "vector-1"
+            assert (await run.vector(page.vectors[0].id)).run_id == "original"
+        args = [entry["args"] for entry in read_invocations(fake_native)]
+        assert ["suspend", "original", *route] in args
+        assert ["resume", "original", *route, *(["--forward-gh-token"] if forward else [])] in args
+        assert [
+            "vectors",
+            "original",
+            "--limit",
+            "2",
+            "--after",
+            "cursor",
+            *route,
+        ] in args
+        assert ["vectors", "show", "original", "vector-1", *route] in args
+
+    asyncio.run(scenario())
+
+
+def test_wait_raises_suspended_with_handle_and_status(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        from zeroshot import RunSuspendedError
+
+        monkeypatch.setenv("FAKE_SUSPEND", "1")
+        async with Client(target=LocalTarget()) as client:
+            run = client.get_run("original")
+            with pytest.raises(RunSuspendedError) as error:
+                await run.wait()
+            assert error.value.run is run
+            assert error.value.status.reason == "wait"
+            assert error.value.status.due_at == 1762992000000
+            with pytest.raises(RunSuspendedError) as submitted:
+                await client.run("change it", preset=Preset("single-worker"), runtime=runtime())
+            assert submitted.value.run.id == "01900000-0000-7000-8000-000000000001"
+            assert submitted.value.status.reason == "wait"
+
+    asyncio.run(scenario())
+
+
+def test_request_inbox_and_answer_keep_client_target_arguments(fake_native: Path) -> None:
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("prod")) as client:
+            page = await client.inbox(after="before", limit=2)
+            assert page.next_after == "original"
+            assert page.requests[0].state == "pending"
+            run = client.get_run("original")
+            pending = await run.request()
+            assert pending.request.text == "Approve?"
+            successor = await run.answer({"signals": {"decision": "approved"}, "output": {}})
+            assert successor.id == "successor"
+
+    asyncio.run(exercise())
+    calls = read_invocations(fake_native)
+    assert calls[0]["args"] == [
+        "inbox",
+        "list",
+        "--limit",
+        "2",
+        "--after",
+        "before",
+        "--target",
+        "prod",
+    ]
+    assert calls[1]["args"] == ["inbox", "show", "original", "--target", "prod"]
+    assert calls[2]["--input"] == {"signals": {"decision": "approved"}, "output": {}}
+    assert calls[2]["args"][:2] == ["answer", "original"]
+    assert "prod" in calls[2]["args"]
+
+
+def test_request_is_preserved_by_status_and_run_inventory(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_REQUEST_STATUS", "1")
+    monkeypatch.setenv("FAKE_LIST_ONE", "1")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            status = await client.get_run("original").status()
+            listed = (await client.list_runs())[0]
+            assert status.reason == listed.reason == "request"
+            assert status.request == listed.request
+            assert status.request is not None
+            assert status.request.text == "Approve?"
+            assert status.request.expires_at == 2000
+            assert status.request.signals == {"decision": ["approved", "rejected"]}
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("text_bytes", [70_000, 1024 * 1024 - 4096])
+def test_watch_and_wait_preserve_large_request_suspensions(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch, text_bytes: int
+) -> None:
+    from zeroshot import RunSuspendedError
+
+    monkeypatch.setenv("FAKE_REQUEST_STREAM_BYTES", str(text_bytes))
+
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("prod")) as client:
+            run = client.get_run("original")
+            assert (await run.status()).phase == "admitted"
+            events = [event async for event in run.watch()]
+            assert [event.phase for event in events] == ["running", "suspended"]
+            suspended = events[-1]
+            assert suspended.reason == "request"
+            assert suspended.request is not None
+            assert suspended.request.text == "?" * text_bytes
+            with pytest.raises(RunSuspendedError) as error:
+                await run.wait()
+            assert error.value.run is run
+            assert error.value.status == suspended
+
+    asyncio.run(exercise())
+    calls = read_invocations(fake_native)
+    assert [call["args"][0] for call in calls] == ["status", "watch", "status", "watch"]
+    assert all("prod" in call["args"] for call in calls)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["$.output.feedback required", "already has successor next", "request expired; successor next"],
+)
+def test_answer_refusals_raise_existing_cli_error(fake_native: Path, message: str) -> None:
+    async def exercise() -> None:
+        async with Client(
+            environment={
+                "FAKE_ZEROSHOT_LOG": str(fake_native),
+                "FAKE_ANSWER_FAIL": str(
+                    [
+                        "$.output.feedback required",
+                        "already has successor next",
+                        "request expired; successor next",
+                    ].index(message)
+                ),
+            }
+        ) as client:
+            with pytest.raises(InvalidRequestError, match=__import__("re").escape(message)):
+                await client.get_run("original").answer({"signals": {}, "output": {}})
+
+    asyncio.run(exercise())

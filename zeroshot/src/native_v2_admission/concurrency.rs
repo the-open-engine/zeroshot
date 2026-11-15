@@ -83,9 +83,7 @@ fn collect_writers<'a>(
 
 fn map_writers(group: &MapNode) -> Result<PossibleWriters<'_>, NativeV2AdmissionError> {
     let writers = possible_writers(&group.body)?;
-    if group.max_items.get() > 1
-        && let Some(delivery) = writers.delivery
-    {
+    if let Some(delivery) = writers.delivery {
         return Err(NativeV2AdmissionError::ConcurrentMapDelivery {
             map: group.name.clone(),
             delivery: delivery.clone(),

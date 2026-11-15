@@ -1,7 +1,9 @@
 //! Read-only local inspection. Recovery ownership belongs exclusively to control operations.
 use super::*;
 use crate::native_v2_observability::NativeV2Observability;
-use crate::native_v2_portable_controller::availability::{ControllerAvailability, check_controller};
+use crate::native_v2_portable_controller::availability::{
+    ControllerAvailability, check_controller_with_timeout,
+};
 use crate::native_v2_cli::CliSubscriptionItem;
 use openengine_cluster_protocol::{RunStatus, SubscriptionCloseReason};
 
@@ -15,7 +17,7 @@ enum Inspection {
 impl LocalCliBackend {
     /// Applies the retained-history reader's directory boundary, including native reparse
     /// checks. The returned handle keeps that directory open while its ledger is read.
-    fn recorded_storage(
+    pub(super) fn recorded_storage(
         &self,
         id: &RunId,
     ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
@@ -39,28 +41,54 @@ impl LocalCliBackend {
         Ok(read_ledger(&paths, &params.run_id).await?.1)
     }
 
-    async fn inspect_run(&self, id: &RunId) -> Result<Inspection, NativeV2CliError> {
+    async fn inspect_run(
+        &self,
+        id: &RunId,
+        timeout: Duration,
+    ) -> Result<Inspection, NativeV2CliError> {
+        let deadline = Instant::now() + timeout;
         let (paths, _directory) = self.recorded_storage(id)?;
         let (observation, mut status) = match read_ledger(&paths, id).await {
             Ok(recorded) => recorded,
             // A controller that still answers reports what its ledger cannot, such as a runtime
             // failure it could not persist. Without such an answer the read error stands.
             Err(error) => {
-                return match check_controller(&paths, id).await {
+                return match check_controller_with_timeout(
+                    &paths,
+                    id,
+                    deadline.saturating_duration_since(Instant::now()),
+                )
+                .await
+                {
                     ControllerAvailability::Responding(connection, current) => {
                         Ok(Inspection::Controller(connection, *current))
                     }
+                    ControllerAvailability::Unavailable {
+                        timed_out: true, ..
+                    } => Err(controller_request_timeout(id, "status")),
                     _ => Err(error),
                 };
             }
         };
-        if !matches!(status.status, RunStatus::Finished { .. }) {
-            match check_controller(&paths, id).await {
+        if !matches!(
+            status.status,
+            RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+        ) {
+            match check_controller_with_timeout(
+                &paths,
+                id,
+                deadline.saturating_duration_since(Instant::now()),
+            )
+            .await
+            {
                 ControllerAvailability::Responding(connection, current) => {
                     return Ok(Inspection::Controller(connection, *current));
                 }
                 ControllerAvailability::Embedded(controller)
-                | ControllerAvailability::Unavailable(controller) => {
+                | ControllerAvailability::Unavailable {
+                    observation: controller,
+                    ..
+                } => {
                     // The controller may have committed its terminal while the probe was in
                     // flight. Durable completion wins over an availability observation.
                     if let Ok(current) = observation
@@ -69,7 +97,10 @@ impl LocalCliBackend {
                     {
                         status = current;
                     }
-                    if !matches!(status.status, RunStatus::Finished { .. }) {
+                    if !matches!(
+                        status.status,
+                        RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+                    ) {
                         status.controller = Some(controller);
                     }
                 }
@@ -81,8 +112,9 @@ impl LocalCliBackend {
     pub(super) async fn inspect_status(
         &self,
         params: RunStatusParams,
+        timeout: Duration,
     ) -> Result<RunStatusResult, NativeV2CliError> {
-        Ok(match self.inspect_run(&params.run_id).await? {
+        Ok(match self.inspect_run(&params.run_id, timeout).await? {
             Inspection::Controller(_, status) | Inspection::Recorded(_, status) => status,
         })
     }
@@ -91,8 +123,18 @@ impl LocalCliBackend {
         &self,
         params: RunWatchParams,
     ) -> Result<ChannelSubscription<CliRunWatchEventNotification>, NativeV2CliError> {
-        let (observation, status) = match self.inspect_run(&params.run_id).await? {
-            Inspection::Controller(transport, _) => return Ok(spawn_watch(transport, params)),
+        let (observation, status) = match self
+            .inspect_run(&params.run_id, DEFAULT_READY_TIMEOUT)
+            .await?
+        {
+            Inspection::Controller(transport, _) => {
+                return controller_request(
+                    &params.run_id.clone(),
+                    "watch",
+                    spawn_watch(transport, params).established(),
+                )
+                .await;
+            }
             Inspection::Recorded(observation, status) => (observation, status),
         };
         let (_, mut replay) = observation.watch(params).await.map_err(local_error)?;
@@ -124,8 +166,18 @@ impl LocalCliBackend {
         &self,
         params: RunLogsParams,
     ) -> Result<ChannelSubscription<RunLogEventNotification>, NativeV2CliError> {
-        let (observation, status) = match self.inspect_run(&params.run_id).await? {
-            Inspection::Controller(transport, _) => return Ok(spawn_logs(transport, params)),
+        let (observation, status) = match self
+            .inspect_run(&params.run_id, DEFAULT_READY_TIMEOUT)
+            .await?
+        {
+            Inspection::Controller(transport, _) => {
+                return controller_request(
+                    &params.run_id.clone(),
+                    "logs",
+                    spawn_logs(transport, params).established(),
+                )
+                .await;
+            }
             Inspection::Recorded(observation, status) => (observation, status),
         };
         let (_, mut replay) = observation.logs(params).await.map_err(local_error)?;
@@ -157,11 +209,24 @@ impl LocalCliBackend {
         &self,
         params: RunAttachParams,
     ) -> Result<ChannelSubscription<RunAttachEventNotification>, NativeV2CliError> {
-        let (observation, status) = match self.inspect_run(&params.run_id).await? {
-            Inspection::Controller(transport, _) => return Ok(spawn_attach(transport, params)),
+        let (observation, status) = match self
+            .inspect_run(&params.run_id, DEFAULT_READY_TIMEOUT)
+            .await?
+        {
+            Inspection::Controller(transport, _) => {
+                return controller_request(
+                    &params.run_id.clone(),
+                    "attach",
+                    spawn_attach(transport, params).established(),
+                )
+                .await;
+            }
             Inspection::Recorded(observation, status) => (observation, status),
         };
-        if matches!(status.status, RunStatus::Finished { .. }) {
+        if matches!(
+            status.status,
+            RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+        ) {
             return Err(local_message("execution is not active"));
         }
         let (_, mut replay) = observation
@@ -212,12 +277,17 @@ impl LocalCliBackend {
         let status = self
             .read_recorded_status(RunStatusParams { run_id: id.clone() })
             .await;
-        if status.is_ok_and(|status| matches!(status.status, RunStatus::Finished { .. })) {
+        if status.is_ok_and(|status| {
+            matches!(
+                status.status,
+                RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+            )
+        }) {
             return Ok(());
         }
         let paths = self.existing_run_paths(id)?;
-        if matches!(check_controller(&paths, id).await,
-            ControllerAvailability::Unavailable(observed)
+        if matches!(check_controller_with_timeout(&paths, id, DEFAULT_READY_TIMEOUT).await,
+            ControllerAvailability::Unavailable { observation: observed, .. }
                 if observed.state == openengine_cluster_protocol::ControllerState::Lost)
         {
             // Recovery acquires and verifies the existing lease before any ledger write.
@@ -252,7 +322,10 @@ async fn finish_recorded<E>(
     sender: &tokio::sync::mpsc::Sender<Result<CliSubscriptionItem<E>, NativeV2CliError>>,
     status: &RunStatusResult,
 ) -> Result<(), NativeV2CliError> {
-    if !matches!(status.status, RunStatus::Finished { .. }) {
+    if !matches!(
+        status.status,
+        RunStatus::Finished { .. } | RunStatus::Suspended { .. }
+    ) {
         return Err(controller_unavailable(status));
     }
     let _ = sender

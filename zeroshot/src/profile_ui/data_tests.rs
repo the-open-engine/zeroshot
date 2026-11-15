@@ -231,6 +231,51 @@ async fn parallel_writers_promote_only_actual_values_and_fail_before_missing_rea
 }
 
 #[test]
+fn wait_bindings_preserve_fixed_inputs_when_sources_change_or_are_removed() {
+    let wait = super::super::catalog::workers()
+        .assert_value()
+        .into_iter()
+        .find(|worker| worker["id"] == "request_wait")
+        .assert_value()["node"]
+        .clone();
+    let fixed = wait["input"].clone();
+    let source = action(
+        graph(vec![wait, done()]),
+        json!({"kind":"run_input_field","name":"delay","type":{"kind":"integer"},"required":true}),
+    )
+    .assert_value();
+    let connected = action(
+        source.clone(),
+        json!({
+            "kind":"connect","target":{"node":"wait","input":"durationMs"},
+            "source":{"kind":"run_input","path":["delay"]}
+        }),
+    )
+    .assert_value();
+    assert_eq!(connected["root"]["children"][0]["input"], fixed);
+    for action_value in [
+        json!({"kind":"connect","target":{"node":"wait","input":"dueAt"},"source":{"kind":"run_input","path":["delay"]}}),
+        json!({"kind":"connect","target":{"node":"wait","input":"extra"},"source":{"kind":"run_input","path":["delay"]}}),
+        json!({"kind":"run_input_field","before":"delay","name":"delay","type":{"kind":"string"},"required":true}),
+    ] {
+        assert!(
+            action(connected.clone(), action_value)
+                .assert_error()
+                .contains("fixed type")
+        );
+    }
+    for action_value in [
+        json!({"kind":"remove_input","target":{"node":"wait","input":"durationMs"}}),
+        json!({"kind":"remove_run_input","name":"delay"}),
+    ] {
+        let disconnected = action(connected.clone(), action_value).assert_value();
+        let node = &disconnected["root"]["children"][0];
+        assert_eq!(node["input"], fixed);
+        assert_eq!(node["inputBindings"], json!([]));
+    }
+}
+
+#[test]
 fn run_inputs_sync_bindings_and_reject_overwritten_caller_data() {
     let source = action(
         graph(vec![worker("draft"), done()]),

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from .runs import RunStatus
 
 from .errors import TargetError, ZeroshotError
 
@@ -67,3 +70,17 @@ class RunFailedError(ZeroshotError):
     def __init__(self, result: _FailedResult) -> None:
         super().__init__(result.failure or f"run {result.run_id} failed")
         self.result = result
+
+
+class RunSuspendedError(ZeroshotError):
+    """Raised when observation reaches an ended, resumable attempt.
+
+    Args:
+        run: Suspended run handle.
+        status: Durable suspended status, including any wait deadline.
+    """
+
+    def __init__(self, run: _RunHandle, status: RunStatus) -> None:
+        super().__init__(f"run {run.id} suspended at {status.node}")
+        self.run = run
+        self.status = status

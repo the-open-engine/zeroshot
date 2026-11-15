@@ -56,6 +56,37 @@ Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspac
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 `run()` submits once and waits; `submit()` returns a durable `Run` handle immediately.
 
+## Use a local Git worktree
+
+Pass `worktree=True` to `run()` or `submit()` to create a retained Git worktree on a managed run
+branch, leaving the invoking checkout in place. The default is `worktree=False`.
+An omitted `worktree_base`, or `worktree_base="local"`, starts at the invoking checkout's exact HEAD.
+Use `worktree_base="remote"` to fetch and start at that branch's upstream; an upstream is required:
+
+```python
+from zeroshot import Client, UniformRuntime
+
+
+async def submit_isolated(runtime: UniformRuntime) -> None:
+    async with Client(runtime=runtime) as client:
+        run = await client.submit(
+            "Update the parser.",
+            cwd="/path/to/repository",
+            worktree=True,
+            worktree_base="remote",
+        )
+        print(run.id)
+```
+
+Only committed files from the selected base are included. Uncommitted changes, untracked files,
+and installed dependencies are not copied, and Zeroshot performs no dependency setup.
+Worktrees remain after the run; when finished, inspect them with `git worktree list` and remove the
+chosen worktree explicitly with `git worktree remove PATH`.
+
+These options apply only to local execution. Native preflight rejects `worktree=True` with
+`DirectTarget` or `HostedTarget`, a base without `worktree=True`, and bases other than `local` or
+`remote`, before target contact or controller startup.
+
 ## Watch a submitted run
 
 ```python
@@ -192,8 +223,29 @@ async def submit_exact(
 
 An opaque `RuntimePlan` may carry [per-node lanes](../reference/runtime-plan.md#per-node-lanes) and
 passes through unchanged, while `UniformRuntime` applies one lane to every agent node.
+For local execution, set `worktree=True` and optional `worktree_base` on the `RunRequest` itself.
+A complete request cannot be combined with string-submission overrides.
 
 Before starting a local controller or contacting a direct target, the bundled executable performs
 the same preflight as the CLI.
 
 The [Python API reference](../reference/python.md) documents the public client surface.
+
+`await run.suspend()` returns the current status immediately; `await run.resume()` returns the
+successor's `Run` handle. `run.watch()` ends at suspension. `Run.wait()` and `Client.run()` raise
+`RunSuspendedError`, carrying `run` and `status`, when an attempt suspends. Status and summaries
+expose `suspend_requested`, `reason`, `node`, `created_at` and `due_at`. Read the ordered record
+with `await run.vectors(after=None, limit=50)` (`RunVectorsPage.vectors`, `next_after`) and read a
+complete entry with `await run.vector(id)`. These methods use the client's selected target.
+
+## Answer a human request
+
+`await client.inbox(after=None, limit=50)` returns an `InboxPage` with requests and `next_after`.
+`await run.request()` returns the run's own `InboxRequest`, including text, declared signals/output,
+deadline, state and successor. `await run.answer({"signals": {"decision": "approved"}, "output":
+{"feedback": ""}})` returns the successor `Run`. `RunStatus.request` carries the human request.
+All methods use the client's local or named target arguments; named targets need
+`openengine.request-ask/v1`. Answers follow resume's credential and forwarding rules.
+Invalid, repeated and late answers raise the existing CLI command error with its message. A late
+answer still starts the `timeout` successor. Deadlines default to 7 days and have a 30-day maximum;
+inbox reads never apply them. See [Ask a person](ask-a-person.md).

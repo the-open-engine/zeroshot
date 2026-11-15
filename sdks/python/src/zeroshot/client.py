@@ -11,14 +11,33 @@ from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, Unpack, overload
+from typing import Literal, TypedDict, Unpack, overload
 
 from ._binary import resolve_binary
 from ._process import NativeProcess, _RunFailed
-from ._projection import _log_event, _stack_status, _status, _summary
+from ._projection import (
+    _inbox,
+    _inbox_request,
+    _log_event,
+    _stack_status,
+    _status,
+    _summary,
+    _vector,
+    _vectors,
+)
 from .errors import ClientClosedError, InvalidRequestError, ProtocolError, TargetError
-from .run_errors import RunWaitTimeout
-from .runs import LogEvent, RunRequest, RunResult, RunStatus, RunSummary
+from .run_errors import RunSuspendedError, RunWaitTimeout
+from .runs import (
+    InboxPage,
+    InboxRequest,
+    LogEvent,
+    RunRequest,
+    RunResult,
+    RunStatus,
+    RunSummary,
+    RunVector,
+    RunVectorsPage,
+)
 from .runtime import (
     DirectTarget,
     GraphSpec,
@@ -58,6 +77,8 @@ class _Submission:
     initial_input: JsonValue
     runtime: _Runtime
     cwd: str | Path | None
+    worktree: bool
+    worktree_base: Literal["local", "remote"] | None
     repository: str | None
     source_connection: str | None
     branch: str | None
@@ -70,6 +91,8 @@ class _SubmitOptions(TypedDict, total=False):
     preset: Preset | None
     runtime: _Runtime | None
     cwd: str | Path | None
+    worktree: bool
+    worktree_base: Literal["local", "remote"] | None
     repository: str | None
     source_connection: str | None
     branch: str | None
@@ -183,8 +206,10 @@ class Client:
 
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
-            options: Typed keyword options. title, preset, runtime, cwd, repository,
-                source_connection, branch, revision, and submission_key apply to string submissions.
+            options: Typed keyword options. title, preset, runtime, cwd, worktree, worktree_base,
+                repository, source_connection, branch, revision, and submission_key apply to
+                string submissions. worktree defaults to False; worktree_base accepts local or
+                remote. See RunRequest for local-only worktree and cleanup semantics.
                 wait_timeout is a non-negative observation deadline in seconds; omit it to wait
                 indefinitely.
 
@@ -195,6 +220,7 @@ class Client:
             InvalidRequestError: If a string submission has no effective preset or runtime,
                 or Zeroshot rejects the request.
             RunWaitTimeout: If observation expires; its run attribute can resume waiting.
+            RunSuspendedError: If the attempt suspends; carries its run handle and status.
             TargetError: If the sidecar or selected target is unavailable.
             ProtocolError: If native output is malformed or incompatible.
 
@@ -223,7 +249,9 @@ class Client:
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
             options: Typed keyword options for string submissions: title, preset, runtime,
-                cwd, repository, source_connection, branch, revision, and submission_key.
+                cwd, worktree, worktree_base, repository, source_connection, branch, revision,
+                and submission_key. worktree defaults to False; worktree_base accepts local or
+                remote. See RunRequest for local-only worktree and cleanup semantics.
 
         Returns:
             A durable run handle bound to this client's target.
@@ -379,6 +407,8 @@ class Client:
             initial_input={"task": request},
             runtime=selected_runtime,
             cwd=overrides.get("cwd"),
+            worktree=overrides.get("worktree", False),
+            worktree_base=overrides.get("worktree_base"),
             repository=overrides.get("repository"),
             source_connection=overrides.get("source_connection"),
             branch=overrides.get("branch"),
@@ -393,6 +423,10 @@ class Client:
         self._append_runtime(arguments, submission.runtime, root)
         if submission.cwd is not None:
             arguments.extend(["--cwd", str(submission.cwd)])
+        if submission.worktree:
+            arguments.append("--worktree")
+        if submission.worktree_base is not None:
+            arguments.extend(["--worktree-base", submission.worktree_base])
         if submission.source_connection is not None:
             arguments.extend(["--source-connection", submission.source_connection])
         if submission.repository is not None:
@@ -555,6 +589,27 @@ class Client:
         )
         return _stack_status(value)
 
+    async def inbox(self, after: str | None = None, limit: int = 50) -> InboxPage:
+        """Read requests still holding their runs suspended without applying expiry.
+
+        Args:
+            after: Exclusive run ID cursor, or None for the first page.
+            limit: Maximum entries, from 1 through 100.
+
+        Returns:
+            The request page and its next cursor.
+
+        Raises:
+            ValueError: If limit is outside 1 through 100.
+        """
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be from 1 through 100")
+        await self._ready()
+        arguments = ["inbox", "list", "--limit", str(limit)]
+        if after is not None:
+            arguments.extend(["--after", after])
+        return _inbox(await self._native().json([*arguments, *self._route_arguments()]))
+
     async def _status(self, run_id: str) -> RunStatus:
         await self._ready()
         value = await self._native().json(["status", run_id, *self._route_arguments()])
@@ -569,7 +624,10 @@ class Client:
         try:
             async with aclosing(stream) as values:
                 async for value in values:
-                    yield _status(value)
+                    status = _status(value)
+                    yield status
+                    if status.phase == "suspended":
+                        return
         except _RunFailed as error:
             # Failed results stay opt-in exceptions through RunResult.raise_for_failure().
             if error.run_id != run_id:
@@ -746,6 +804,7 @@ class Run:
         Raises:
             ValueError: If wait_timeout is negative.
             RunWaitTimeout: If the deadline expires. The exception carries this run handle.
+            RunSuspendedError: If the attempt suspends; carries this handle and its status.
             RunNotFoundError: If the target no longer retains this run.
             TargetError: If observation fails.
             ProtocolError: If native output is malformed.
@@ -757,14 +816,20 @@ class Run:
 
         async def observe() -> RunResult:
             current = await self.status()
+            if current.phase == "suspended":
+                raise RunSuspendedError(self, current)
             if current.result is not None:
                 return current.result
             stream = self._client._watch(self.id, current.cursor)
             async with aclosing(stream) as statuses:
                 async for status in statuses:
+                    if status.phase == "suspended":
+                        raise RunSuspendedError(self, status)
                     if status.result is not None:
                         return status.result
             current = await self.status()
+            if current.phase == "suspended":
+                raise RunSuspendedError(self, current)
             if current.result is not None:
                 return current.result
             raise ProtocolError("Zeroshot watch closed before a terminal result")
@@ -776,6 +841,115 @@ class Run:
                 return await observe()
         except TimeoutError as error:
             raise RunWaitTimeout(self, wait_timeout) from error
+
+    async def suspend(self) -> RunStatus:
+        """Request suspension and return the status immediately.
+
+        Returns:
+            The current durable status with the suspension request recorded.
+        """
+        await self._client._ready()
+        value = await self._client._native().json(
+            ["suspend", self.id, *self._client._route_arguments()]
+        )
+        return _status(value)
+
+    async def resume(self) -> Run:
+        """Continue this attempt in a successor with fresh native sessions.
+
+        Returns:
+            The successor run handle.
+        """
+        await self._client._ready()
+        value = await self._client._native().json(
+            [
+                "resume",
+                self.id,
+                *self._client._route_arguments(),
+                *self._client._forwarding_arguments(),
+            ]
+        )
+        if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
+            raise ProtocolError("Zeroshot emitted malformed resume result")
+        return Run(self._client, value["runId"])
+
+    async def request(self) -> InboxRequest:
+        """Read the request this run made, including its state and successor.
+
+        Returns:
+            The complete inbox request. Inherited requests are excluded.
+        """
+        await self._client._ready()
+        return _inbox_request(
+            await self._client._native().json(
+                ["inbox", "show", self.id, *self._client._route_arguments()]
+            )
+        )
+
+    async def answer(self, answer: JsonValue) -> Run:
+        """Answer this run's request and start one successor on the retained workspace.
+
+        Args:
+            answer: Complete verifier result with signals and output matching the request.
+
+        Returns:
+            The successor run handle. Invalid, repeated and late answers raise the CLI error.
+        """
+        await self._client._ready()
+        with tempfile.TemporaryDirectory(prefix="zeroshot-python-answer-") as directory:
+            path = _write_json(Path(directory) / "answer.json", answer)
+            value = await self._client._native().json(
+                [
+                    "answer",
+                    self.id,
+                    "--input",
+                    str(path),
+                    *self._client._route_arguments(),
+                    *self._client._forwarding_arguments(),
+                ]
+            )
+        if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
+            raise ProtocolError("Zeroshot emitted malformed answer result")
+        return Run(self._client, value["runId"])
+
+    async def vectors(self, *, after: str | None = None, limit: int = 50) -> RunVectorsPage:
+        """Read one ordered page of the vector record.
+
+        Args:
+            after: Opaque entry cursor, or None for the first page.
+            limit: Number of entries, from 1 through 100.
+
+        Returns:
+            Entries and the next cursor, if any.
+
+        Raises:
+            ValueError: If limit is outside 1 through 100.
+        """
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be from 1 through 100")
+        await self._client._ready()
+        arguments = ["vectors", self.id, "--limit", str(limit)]
+        if after is not None:
+            arguments.extend(["--after", after])
+        return _vectors(
+            await self._client._native().json([*arguments, *self._client._route_arguments()])
+        )
+
+    async def vector(self, id: str) -> RunVector:
+        """Read a vector entry with its complete content.
+
+        Args:
+            id: Opaque entry identity.
+
+        Returns:
+            The durable entry.
+        """
+        await self._client._ready()
+        return _vector(
+            await self._client._native().json(
+                ["vectors", "show", self.id, id, *self._client._route_arguments()]
+            )
+        )
 
     async def force_stop(self) -> RunResult:
         """Force-stop this run and wait for its durable terminal result.
@@ -813,6 +987,8 @@ def _exact_submission(request: RunRequest, overrides: _SubmitOptions) -> _Submis
             overrides.get("preset"),
             overrides.get("runtime"),
             overrides.get("cwd"),
+            overrides.get("worktree"),
+            overrides.get("worktree_base"),
             overrides.get("repository"),
             overrides.get("source_connection"),
             overrides.get("branch"),
@@ -827,6 +1003,8 @@ def _exact_submission(request: RunRequest, overrides: _SubmitOptions) -> _Submis
         initial_input=request.initial_input,
         runtime=request.runtime,
         cwd=request.cwd,
+        worktree=request.worktree,
+        worktree_base=request.worktree_base,
         repository=request.repository,
         source_connection=request.source_connection,
         branch=request.branch,

@@ -110,6 +110,41 @@ where
         self.backend().run_force(self.context(), params).await
     }
 
+    pub async fn run_suspend(
+        &self,
+        params: openengine_cluster_protocol::RunSuspendParams,
+    ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
+        self.backend().run_suspend(self.context(), params).await
+    }
+
+    pub async fn run_vectors(
+        &self,
+        params: openengine_cluster_protocol::RunVectorsParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
+        self.backend().run_vectors(self.context(), params).await
+    }
+
+    pub async fn inbox_show(
+        &self,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
+        self.backend().inbox_show(self.context(), params).await
+    }
+
+    pub async fn inbox_list(
+        &self,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, BackendError> {
+        self.backend().inbox_list(self.context(), params).await
+    }
+
+    pub async fn run_vector(
+        &self,
+        params: openengine_cluster_protocol::RunVectorParams,
+    ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
+        self.backend().run_vector(self.context(), params).await
+    }
+
     pub async fn run_checkpoints(
         &self,
         params: RunCheckpointsParams,

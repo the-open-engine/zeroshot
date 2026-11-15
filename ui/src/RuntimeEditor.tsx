@@ -3,6 +3,7 @@ import { DecisionControls } from './DecisionControls';
 import { useState } from 'react';
 import { allNodes, bindingFor, clone, executable, type Document, type Runtime } from './domain';
 import { Field } from './Field';
+import { NumberField } from './NumberField';
 import { ModelPicker } from './ModelPicker';
 import { modelGroups } from './models';
 import { effectiveLane } from './runtime-readiness';
@@ -128,6 +129,20 @@ export function RuntimeEditor(p: {
           ))}
         </select>
       </Field>
+      <NumberField
+        label="Maximum concurrent executions"
+        field="maxConcurrency"
+        optional
+        placeholder="64"
+        value={doc.runtime.maxConcurrency}
+        invalid={invalid('maxConcurrency', settingChanged('maxConcurrency'))}
+        onChange={(value) => {
+          const next = clone(doc);
+          if (value === undefined) delete next.runtime.maxConcurrency;
+          else next.runtime.maxConcurrency = value;
+          p.edit(next, 'runtime.maxConcurrency');
+        }}
+      />
       <RunSizePicker
         value={doc.runtime.size ?? undefined}
         runSizes={p.runSizes}
@@ -164,6 +179,8 @@ export function RuntimeEditor(p: {
             <small>
               {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
             </small>
+          ) : kind(n.name) === 'request' ? (
+            <small>{n.worker === 'builtin.request.ask@1' ? 'Ask a person' : 'Wait'}</small>
           ) : kind(n.name) === 'script' ? (
             <small>Script: {scriptCommandLabel(bindingFor(doc.runtime, n.name)?.command)}</small>
           ) : kind(n.name) === 'decision' ? (

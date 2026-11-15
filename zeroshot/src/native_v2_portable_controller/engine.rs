@@ -16,6 +16,7 @@ use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
 use crate::v2_run_ledger::RunLedger;
 
 pub struct PortableRuntime {
+    pub vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     pub checkpoints: Option<Arc<dyn crate::native_v2_supervisor::checkpoints::RunCheckpointStore>>,
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     pub runner: Arc<dyn NodeRunner>,
@@ -29,6 +30,7 @@ pub struct PortableRunEngine {
 }
 
 pub struct PortableRunEngineBootstrap {
+    pub wait_policy: crate::native_v2_wait::WaitPolicy,
     pub run_id: RunId,
     pub ledger: Arc<dyn RunLedger>,
     pub environment: RunEnvironment,
@@ -44,6 +46,7 @@ impl PortableRunEngine {
     #[must_use]
     pub fn start(bootstrap: PortableRunEngineBootstrap) -> Arc<Self> {
         let PortableRunEngineBootstrap {
+            wait_policy,
             run_id,
             ledger,
             environment,
@@ -62,6 +65,8 @@ impl PortableRunEngine {
                 runtime.runner,
                 Arc::new(environment),
             )
+            .with_wait_threshold(wait_policy.in_place_threshold)
+            .with_wall_clock(wait_policy.wall_clock)
             .with_postmortem(postmortem)
             .with_checkpoints(runtime.checkpoints)
             .with_delivery_policy(delivery_policy)
@@ -88,6 +93,12 @@ impl PortableRunEngine {
                 }
             })
             .await;
+            let result = match result {
+                Ok(Err(crate::native_v2_supervisor::NativeV2SupervisorError::Suspended)) => {
+                    Ok(Ok(()))
+                }
+                other => other.map(|result| result.map(|_| ())),
+            };
             match task_result(result) {
                 Ok(_) => observability.runtime_finished(&run_id),
                 Err(cause) => {
@@ -137,6 +148,12 @@ impl PortableRunEngine {
             removable_sender.send_replace(true);
         });
         engine
+    }
+
+    pub async fn suspend(
+        &self,
+    ) -> Result<(), crate::native_v2_supervisor::NativeV2SupervisorError> {
+        self.supervisor.suspend().await
     }
 
     pub async fn force_stop(
@@ -220,6 +237,7 @@ impl PortableRuntime {
             runner,
             checkpoints: None,
             execution_seed: Vec::new(),
+            vector_seed: Vec::new(),
             cleanup: Arc::new(ConfirmedCleanup),
         }
     }
@@ -231,6 +249,7 @@ impl PortableRuntime {
             cleanup,
             checkpoints: None,
             execution_seed: Vec::new(),
+            vector_seed: Vec::new(),
         }
     }
 }

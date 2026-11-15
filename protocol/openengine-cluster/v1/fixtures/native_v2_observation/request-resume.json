@@ -1,0 +1,14 @@
+{
+  "connections": {},
+  "from": {
+    "kind": "answer",
+    "output": {
+      "feedback": ""
+    },
+    "signals": {
+      "decision": "approved"
+    }
+  },
+  "runId": "run-1",
+  "successorRunId": "run-2"
+}

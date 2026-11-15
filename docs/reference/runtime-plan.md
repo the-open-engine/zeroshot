@@ -153,11 +153,15 @@ declarations, never inferences: they are validated at admission, emitted only in
 retains the provider's own limit; a present value must be a positive integer in the stated range.
 
 `sessionScope` controls provider conversation state. It does not change graph state or bindings.
+Checkpoint continuations and suspended successors restore supported `node_instance` conversations
+from the checkpoint, including their provider files. Restarts and `execution` scopes start fresh.
+Missing, oversized or unrestorable conversations start new with a system log explanation. Successor
+usage begins at zero; Active Memory delivery sets begin fresh even for a continued conversation.
 
-| `sessionScope`  | Behavior                                                                                      |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| `execution`     | Opens a fresh provider session for each execution of the node, then closes it                 |
-| `node_instance` | Reuses one session when the same node instance runs again, for example across loop iterations |
+| `sessionScope`  | Behavior                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| `execution`     | Opens a fresh provider session for each execution of the node, then closes it                           |
+| `node_instance` | Reuses one conversation across node-instance visits and supported checkpoint or suspended continuations |
 
 If a reused session is lost, zeroshot fails that execution with `session_lost`. It does not open a
 replacement session silently.
@@ -424,17 +428,18 @@ the fields of several providers.
 
 `--uniform-runtime-config` accepts a single agent configuration and expands it into a full plan:
 
-| Field           | Required | Value                                 |
-| --------------- | -------- | ------------------------------------- |
-| `harness`       | Yes      | As in `RuntimePlan`                   |
-| `provider`      | Yes      | As in `RuntimePlan`                   |
-| `size`          | No       | As in `RuntimePlan`; default `medium` |
-| `model`         | Yes      | As in an `agent` binding              |
-| `effort`        | No       | As in an `agent` binding              |
-| `contextWindow` | No       | As in an `agent` binding              |
-| `maxTokens`     | No       | As in an `agent` binding              |
-| `sessionScope`  | No       | As in an `agent` binding              |
-| `connections`   | No       | Applied to every agent node           |
+| Field            | Required | Value                                                                                                   |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `harness`        | Yes      | As in `RuntimePlan`                                                                                     |
+| `provider`       | Yes      | As in `RuntimePlan`                                                                                     |
+| `size`           | No       | As in `RuntimePlan`; default `medium`                                                                   |
+| `model`          | Yes      | As in an `agent` binding                                                                                |
+| `effort`         | No       | As in an `agent` binding                                                                                |
+| `contextWindow`  | No       | As in an `agent` binding                                                                                |
+| `maxTokens`      | No       | As in an `agent` binding                                                                                |
+| `maxConcurrency` | No       | Run-wide execution limit, default 64, range 1–65,536; also supported in exact plans and saved profiles. |
+| `sessionScope`   | No       | As in an `agent` binding                                                                                |
+| `connections`    | No       | Applied to every agent node                                                                             |
 
 `contextWindow` and `maxTokens` are available in both an exact `agent` binding and a uniform
 runtime configuration. They are caller declarations and are never inferred from the model
@@ -576,3 +581,49 @@ A native launch or session-initialization rejection fails the node with the nati
 normal bounded, redacted diagnostics and authored error routing. It does not trigger response
 correction, configuration fallback, or adapter retries of rejected initialization. Settings accepted
 or ignored by the native harness have no effective-configuration acknowledgement or added preflight.
+
+## Host-run wait verifier
+
+The worker `builtin.request.wait@1` uses the fieldless binding `{"kind":"request"}`. It is a
+verifier with no instructions or `timeoutMs`, exactly one attempt, no output beyond JSON null,
+signal `wait: ["elapsed"]` and diagnostic record `{message: string}`. Its fixed input schema is a
+record with optional string `dueAt` and integer `durationMs` fields. Supply exactly one, for example
+`{"dueAt":"2026-12-01T09:00:00+01:00"}` or `{"durationMs":3600000}`. Bind these inputs from graph
+state using ordinary input bindings. `--uniform-runtime-config` supplies the request binding.
+
+Past times and nonpositive durations succeed immediately. Missing/both fields, malformed times
+(including times without an offset), and deadlines over 30 days ahead produce `refusal` with a
+log explanation. Waits use wall time and recheck within one minute after machine sleep.
+Only seq, choice and loop placement is supported; par or map ancestry is refused.
+
+A host may configure an in-place threshold. A remaining duration at least that threshold suspends
+the attempt at its checkpoint with reason `wait` and `wait.dueAt`. A suspension request during an
+in-place wait does the same. Continuation is refused before due and skips the settled wait once
+due. Local and direct targets have no threshold and wait in place by default.
+
+Targets advertise strict marker objects under discovery extensions: `request_wait` is
+`{"kind":"openengine.request-wait/v1"}`, `run_suspension` is
+`{"kind":"openengine.run-suspension/v1"}`, and `run_vectors` is
+`{"kind":"openengine.run-vectors/v1"}`. Unknown extension keys are ignored; extra fields inside
+these markers are invalid. Clients require the relevant marker before requesting credentials,
+sending a plan or control body, or opening a session.
+
+## Execution concurrency
+
+Optional `maxConcurrency` limits executing leaf nodes and Zeroshot-owned auxiliary agents across
+the run. Its effective default is 64 on every placement; explicit values range from 1 through
+65,536. Admission records the effective value in run metadata. Queued work has no execution
+identity, attempt, or timeout until admission. Map `maxItems` independently limits active complete
+item bodies. Neither limit changes the separate 65,536 logical-visit and loop-entry ceilings.
+
+## Human request binding
+
+`{"kind":"request"}` also binds the host-run verifier `builtin.request.ask@1`. It has exactly one
+required string input `text`, a flat scalar-record output (boolean, integer, number, string or enum),
+authored signals, the fixed `{message: string}` diagnostic, one attempt and no instructions.
+It has no model, lane, credentials or provider session. `--uniform-runtime-config` recognizes it.
+It requires workspace checkpoints and seq/choice/loop placement; par/map ancestry and stack
+profiles refuse it. The deadline is `timeoutMs` from request creation, 7 days by default and at
+most 30 days. `answer` validates signals and output and starts a successor; late answers settle
+with the existing `timeout` error. `inbox` reads pending or historical questions from vectors.
+Named targets require `openengine.request-ask/v1`. See [Ask a person](../guides/ask-a-person.md).

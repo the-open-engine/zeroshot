@@ -71,9 +71,9 @@ postmortem failures and controller restart after confirmed cleanup preserve it t
 cleanup failure during finalization can instead prevent completion or end the run with
 `runtime_failed` or `runtime_lost`. Read `terminalResult` once the run is finished.
 
-Local inspection (`status`, `list`, `checkpoints`, `watch`, `logs` and `attach`) reads retained
-history without taking recovery ownership or writing to the run directory. Finished runs need no
-controller and retain their usual exit codes.
+Local inspection (`status`, `list`, `checkpoints`, `vectors`, `watch`, `logs` and `attach`) reads
+retained history without taking recovery ownership or writing to the run directory. Finished and
+suspended runs need no controller and retain their usual exit codes.
 
 For an unfinished local run whose controller does not answer, `status` and each `list` entry keep
 the recorded status and add an optional entry beside it:
@@ -86,11 +86,17 @@ the recorded status and add an optional entry beside it:
 `unknown` means the evidence is insufficient, including an unreachable endpoint, a stalled process,
 a reused PID, a replaced lease or a permission failure. `observedAt` is the time of this check in
 Unix epoch milliseconds, not the time the controller died. The entry is omitted when the controller
-answers and for finished runs. `checkpoints` also includes it when applicable. These three commands
+answers and for finished or suspended runs. `checkpoints` also includes it when applicable. These three commands
 exit 0 after a successful read, including when controller availability is lost or unknown.
 
-`watch`, `logs` and `attach` print the recorded part, then exit 1 when the local controller is
-unavailable. Their error names `zeroshot resume RUN_ID` and `zeroshot force-stop RUN_ID`. Inspection
+Local controller requests wait at most 10 seconds for an answer. This includes the status checks
+before `resume` and `checkpoints`, and the initial exchanges for `watch`, `logs` and `attach`.
+`list` checks controllers with bounded concurrency under one shared deadline. Runs that could not
+be checked within that budget retain their recorded status with an `unknown` controller. An established
+stream may stay quiet indefinitely. Controller handoffs keep their separate retry budget.
+
+For an unfinished run, `watch`, `logs` and `attach` print the recorded part, then exit 1 when the
+local controller is unavailable. Their error names `zeroshot resume RUN_ID` and `zeroshot force-stop RUN_ID`. Inspection
 does not record a terminal result: an unclaimed lost run keeps its recorded status on every read.
 Only these explicit controls confirm loss under the controller lease before recording `runtime_lost`;
 they refuse to take over a controller that still owns its lease or whose loss cannot be confirmed.
@@ -157,7 +163,7 @@ zeroshot logs RUN_ID --after LOG_CURSOR
 Cursors are opaque, so store the last fully consumed value and pass it back unchanged.
 `logs --execution EXECUTION_REF` restricts output to one execution selector from status.
 
-`watch` exits 0 when the run succeeded. When the run finished failed, it prints the same failure
+`watch` exits 0 when the run succeeded or suspended. When the run finished failed, it prints the same failure
 summary on stderr as a failed foreground `run` and exits 1, so a script can start a run with
 `--detach` and wait for its result with `zeroshot watch RUN_ID`. `logs` exits 0 when its stream
 ends, whatever the run's result. The [CLI reference](../zeroshot-cli.md) lists the exit status of
@@ -268,9 +274,19 @@ for the whole outer group, including nested groups and all mapped batches; indiv
 writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.
 
 Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
-resolve credentials again. The successor does not inherit provider sessions, secrets, or previous
-token usage. A sudden target loss can precede the next snapshot boundary, so the last writer may run
-again. Local workspaces must be idle while they are restored.
+resolve credentials again. A selected checkpoint or the continuation of a suspended run restores each supported
+`node_instance` agent's provider conversation as it was at the checkpoint, even on another machine
+or without restoring workspace files. A failed-run restart and every `execution`-scoped agent start
+new conversations. Successor token usage starts at zero.
+
+Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
+They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
+in workspace exports. Restoring replaces only that conversation's provider files, including later
+turns still present locally. If files are missing, oversized, unsupported or cannot be restored,
+the node starts a new conversation and the run log explains why. A failed continued turn follows
+the node's attempt policy; its retry starts a new conversation. A sudden target loss can precede
+the next snapshot boundary, so the last writer may run again. Local workspaces must be idle while
+they are restored.
 
 A local checkpoint resume restores the snapshot before any agent starts. That preparation may take
 up to 10 minutes. For larger workspaces or slower disks, set `ZEROSHOT_PREPARATION_TIMEOUT` to a
@@ -312,5 +328,56 @@ zeroshot force-stop RUN_ID
 The command asks the controller to stop active work and writes the resulting status as JSON. Read
 status first if another operator may already have stopped the run, or if it may have completed.
 
+If a local controller does not answer within 10 seconds, `force-stop` exits non-zero and names the
+run and the controller PID recorded at readiness. The request stays queued and takes effect if the
+controller answers again. The command does not kill the controller process.
+
 Python follows the same rule. A timeout or task cancellation detaches observation;
 `await run.force_stop()` changes the run lifetime.
+
+## Suspend and continue
+
+`zeroshot suspend RUN_ID` records a soft stop and returns the current status immediately.
+Running nodes finish, including the whole outer parallel or mapped group. At the next checkpoint,
+status becomes `suspended`, with `reason`, `node` and `createdAt`. The controller exits and releases
+the workspace lock. A graph that finishes first keeps its ordinary result. Running status includes
+`suspendRequested` after the request. Suspension requires workspace checkpoints.
+
+`zeroshot resume RUN_ID` creates a successor (`runId`, `resumedFrom`) beginning at the held-back
+node. It preserves workspace changes made after suspension and restores captured node-instance provider
+conversations from the checkpoint. Unsupported or missing conversations start new with a system log.
+A suspended wait can continue only from its reported `wait.dueAt`, and continues after the wait.
+No timer starts successors locally or on a direct target. Selected checkpoint resume and
+`--discard-workspace-changes` are refused for suspended runs. The predecessor stays suspended and
+`workspaceRecovery.successorRunId` links to its sole successor. `force-stop` can finish an unclaimed
+suspended attempt as `force_stopped` and removes its retained checkpoints.
+
+Foreground `run` and `watch` end with exit 0 at suspension. `logs` and read-only status commands
+continue to work after the controller exits. Add `--target NAME` for the same controls on a direct
+target. Hosts advertise suspension with `openengine.run-suspension/v1`.
+
+## Vector record
+
+Every run has an ordered, durable vector record. All resume successors inherit their predecessor's
+entries unchanged. Suspension writes `suspend_request`, `suspension`, then the successor's
+`continuation`; wait nodes also write `wait` with their due time.
+
+```console
+zeroshot vectors RUN_ID --limit 50
+zeroshot vectors RUN_ID --after ENTRY_ID --limit 100
+zeroshot vectors show RUN_ID ENTRY_ID
+```
+
+A page contains `runId`, `vectors` and an optional `nextAfter` cursor. Limits are 1 through 100.
+`show` reads the complete entry; unknown IDs fail as not found. Both commands are read-only and
+accept `--target NAME` where `openengine.run-vectors/v1` is advertised.
+
+## Human requests
+
+A request suspends with reason `request` and carries its text, answer shape and `expiresAt` in
+status. Read `zeroshot inbox list` (paged with `--after` and `--limit`) or `zeroshot inbox show RUN_ID`,
+then use `zeroshot answer RUN_ID --input answer.json`. The file contains `signals` and `output`.
+The answer starts one successor on the retained workspace. Ordinary `resume` refuses requests.
+Deadlines default to 7 days and accept at most 30 days. A late answer starts the author's `timeout`
+route and exits 1 naming its successor. Reads never apply expiry. Add `--target NAME` for a target
+that advertises `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md).

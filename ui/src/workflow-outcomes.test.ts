@@ -171,16 +171,11 @@ test('parallel policy association stays after the join and branch-local policies
 test('map error thresholds and known control failures are folded without inventing new defaults', () => {
   const map: GraphNode = { kind: 'map', name: 'items', body: work('work'), maxItems: 5 };
   const threshold = { ...errors(), kind: 'k_of_map', count: 1 };
-  const document = doc(
-    seq('run', [
-      map,
-      choice({ kind: 'any', guards: [threshold, group('items', 'overflow', 'overflow')] }),
-    ])
-  );
+  const document = doc(seq('run', [map, choice(threshold)]));
   const policy = analyzeWorkflowOutcomes(document).policies[0];
   assert.equal(policy.owner, 'items');
-  assert.equal(policy.kind, 'mixed-error');
-  assert.deepEqual(policy.sources, ['work', 'items']);
+  assert.equal(policy.kind, 'worker-error');
+  assert.deepEqual(policy.sources, ['work']);
   for (const [control, guard] of [
     [
       { kind: 'loop', name: 'rounds', body: work('work'), maxIterations: 3 },

@@ -4,6 +4,7 @@ use super::super::{CliOutcome, CliRunStatus};
 
 pub(super) fn outcome_for_status(status: &CliRunStatus) -> CliOutcome {
     match status {
+        CliRunStatus::Target(RunStatus::Suspended { .. }) => CliOutcome::Finished,
         CliRunStatus::Target(RunStatus::Finished {
             terminal_result: TerminalResult::Succeeded { .. },
             ..

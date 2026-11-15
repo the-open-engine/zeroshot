@@ -247,3 +247,19 @@ test('an authored node lane supplies model suggestions even when the graph defau
   assert.doesNotMatch(html, /Choose a harness and provider in/);
   assert.match(html, /value="custom-model"/);
 });
+
+test('request verifier heading and timeout distinguish asking from waiting', async (t) => {
+  const Inspector = await inspector(t);
+  const doc = fixture();
+  const node = findNode(doc.graph.root, 'reviewer')!;
+  node.worker = 'builtin.request.ask@1';
+  doc.runtime.nodes.reviewer = { kind: 'request' };
+  const markup = renderToStaticMarkup(createElement(Inspector, props(doc, 'reviewer')));
+  assert.match(markup, /<h2>Ask a person<\/h2>/);
+  assert.match(markup, /7 days/);
+  assert.doesNotMatch(markup, /placeholder="No limit"/);
+  node.worker = 'builtin.request.wait@1';
+  const wait = renderToStaticMarkup(createElement(Inspector, props(doc, 'reviewer')));
+  assert.match(wait, /<h2>Wait<\/h2>/);
+  assert.match(wait, /placeholder="No limit"/);
+});

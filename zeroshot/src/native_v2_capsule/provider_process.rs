@@ -14,7 +14,7 @@ use crate::execution::process::{
     ProcessRunnerError, ProcessSession, ProcessSessionCommand, ProcessSessionOutput,
     MAX_PROCESS_MESSAGE_BYTES,
 };
-use crate::native_v2_contract::NodeRuntimeBinding;
+use crate::native_v2_contract::{NodeInstanceId, NodeRuntimeBinding};
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRole, NodeRunnerError,
 };
@@ -113,16 +113,16 @@ impl ProviderProcessRunners {
     pub(crate) fn turn_process(
         self,
         root: &Path,
-        scope: HostedProcessScope,
+        scopes: (HostedProcessScope, HostedProcessScope),
     ) -> Result<(LocalProcessRunner, PathBuf), ProcessRunnerError> {
         match self {
             Self::Hosted(pool) => {
-                let identity = pool.identity(scope)?;
-                let home = identity.prepare_private_home(root)?;
+                let identity = pool.identity(scopes.0)?;
+                let home = identity.prepare_private_home_for(root, scopes.1)?;
                 Ok((identity.runner(), home))
             }
             Self::Local => {
-                let home = crate::execution::process::prepare_local_private_home(root, scope)?;
+                let home = crate::execution::process::prepare_local_private_home(root, scopes.1)?;
                 Ok((LocalProcessRunner::new(), home))
             }
         }
@@ -233,6 +233,16 @@ pub(crate) struct ProviderSessionCore {
     live: AtomicBool,
     pub(crate) turn: Mutex<()>,
     home: Mutex<Option<Arc<filesystem::PrivateDirectory>>>,
+    conversation: Arc<Mutex<ProviderConversationState>>,
+    conversation_io: crate::native_v2_runner::conversations::ConversationIo,
+}
+
+#[derive(Default)]
+struct ProviderConversationState {
+    owner: Option<crate::native_v2_runner::conversations::ConversationOwner>,
+    layout: Option<crate::native_v2_runner::conversations::ConversationLayout>,
+    metadata: Option<crate::native_v2_runner::conversations::ConversationMetadata>,
+    pending: Option<crate::native_v2_runner::conversations::ConversationSource>,
 }
 
 macro_rules! impl_provider_node_session {
@@ -249,6 +259,21 @@ macro_rules! impl_provider_node_session {
 
             async fn close(&self) {
                 self.core.close().await;
+            }
+
+            async fn conversation(
+                &self,
+            ) -> Result<crate::native_v2_runner::conversations::ConversationSource, &'static str>
+            {
+                self.core.capture_conversation().await
+            }
+
+            async fn restore_conversation(
+                &self,
+                source: crate::native_v2_runner::conversations::ConversationSource,
+            ) -> bool {
+                self.core.queue_conversation(source).await;
+                true
             }
         }
     };
@@ -310,11 +335,114 @@ impl ClosedSessionFailure {
 }
 
 impl ProviderSessionCore {
+    pub(super) async fn conversation_owner(
+        &self,
+        owner: Option<crate::native_v2_runner::conversations::ConversationOwner>,
+    ) {
+        self.conversation.lock().await.owner = owner;
+    }
+
+    pub(crate) async fn queue_conversation(
+        &self,
+        source: crate::native_v2_runner::conversations::ConversationSource,
+    ) {
+        self.conversation.lock().await.pending = Some(source);
+    }
+
+    pub(crate) async fn prepare_conversation(
+        &self,
+        layout: Option<crate::native_v2_runner::conversations::ConversationLayout>,
+        invocation: &DriverInvocation,
+        control: &DriverControl,
+    ) -> Result<Option<crate::native_v2_runner::conversations::ConversationMetadata>, NodeRunnerError>
+    {
+        let mut state = self.conversation.clone().lock_owned().await;
+        state.layout = layout.clone();
+        let Some(source) = state.pending.take() else {
+            return Ok(None);
+        };
+        let operation = self.conversation_io.with_request(control.cancellation());
+        let guard = operation.cancel_on_drop();
+        let copying = operation.clone();
+        let home = self.home.lock().await.clone();
+        let restored = tokio::task::spawn_blocking(move || {
+            // The worker keeps both the state lock and home until staging/install/rollback ends.
+            // close() cancels before waiting for that lock; dropping this await cancels as well.
+            let _home = home;
+            let layout = layout.ok_or("provider conversation layout cannot be restored")?;
+            layout.restore_until_stopped(&source, state.owner.as_ref(), &copying)?;
+            state.metadata = Some(source.metadata.clone());
+            Ok(source.metadata)
+        })
+        .await
+        .unwrap_or(Err("conversation restoration task failed"));
+        guard.disarm();
+        if control.is_cancelled() || !self.is_live() {
+            return Err(NodeRunnerError::Cancelled);
+        }
+        match restored {
+            Ok(metadata) => {
+                control.mark_conversation_restored();
+                Ok(Some(metadata))
+            }
+            Err(reason) => {
+                control
+                    .emit(LiveOutput::new(
+                        LiveOutputStream::System,
+                        format!(
+                            "node {} starts a new conversation: {reason}",
+                            invocation.node.reference.node.as_str()
+                        ),
+                    )?)
+                    .await?;
+                Ok(None)
+            }
+        }
+    }
+
+    pub(crate) async fn record_conversation(
+        &self,
+        id: Option<String>,
+        usage: Option<crate::native_v2_contract::TokenUsageDelta>,
+    ) {
+        let mut state = self.conversation.lock().await;
+        state.metadata = id.and_then(|id| {
+            state.layout.as_ref().map(|layout| {
+                crate::native_v2_runner::conversations::ConversationMetadata {
+                    harness: layout.harness.to_owned(),
+                    id,
+                    usage,
+                }
+            })
+        });
+    }
+
+    pub(crate) async fn capture_conversation(
+        &self,
+    ) -> Result<crate::native_v2_runner::conversations::ConversationSource, &'static str> {
+        let state = self.conversation.lock().await;
+        let layout = state
+            .layout
+            .clone()
+            .ok_or("provider conversation layout cannot be captured")?;
+        let metadata = state
+            .metadata
+            .clone()
+            .ok_or("provider did not retain a conversation identifier")?;
+        let private_home = state.owner.as_ref().map(|owner| owner.home.clone());
+        drop(state);
+        tokio::task::spawn_blocking(move || layout.capture_in_home(metadata, private_home))
+            .await
+            .unwrap_or(Err("conversation capture task failed"))
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             live: AtomicBool::new(true),
             turn: Mutex::new(()),
             home: Mutex::new(None),
+            conversation: Arc::default(),
+            conversation_io: Default::default(),
         }
     }
 
@@ -324,6 +452,8 @@ impl ProviderSessionCore {
 
     pub(crate) async fn close(&self) {
         self.live.store(false, Ordering::Release);
+        self.conversation_io.cancel();
+        self.conversation.lock().await.pending.take();
         self.home.lock().await.take();
     }
 
@@ -363,11 +493,24 @@ impl ProviderSessionCore {
 pub(crate) fn process_scope(
     invocation: &DriverInvocation,
 ) -> Result<HostedProcessScope, NodeRunnerError> {
+    provider_scope(invocation, invocation.provider_session_slot)
+}
+
+pub(crate) fn home_scope(
+    invocation: &DriverInvocation,
+) -> Result<HostedProcessScope, NodeRunnerError> {
+    provider_scope(invocation, invocation.provider_home_slot)
+}
+
+fn provider_scope(
+    invocation: &DriverInvocation,
+    identity: NodeInstanceId,
+) -> Result<HostedProcessScope, NodeRunnerError> {
     let NodeRuntimeBinding::Agent { session_scope, .. } = &invocation.node.binding else {
         return Err(NodeRunnerError::Driver);
     };
-    let node_instance = invocation.provider_session_slot.get();
-    let execution = invocation.node.reference.execution.get();
+    let node_instance = identity.get();
+    let execution = node_instance;
     match (invocation.role, *session_scope) {
         (NodeRole::Worker, SessionScope::NodeInstance) => {
             Ok(HostedProcessScope::WriterNodeInstance(node_instance))
@@ -548,7 +691,7 @@ impl ProviderFailureRetry {
     ) -> Result<String, NodeRunnerError> {
         let diagnostic =
             provider_failure_diagnostic(self.provider, failure.detail, None, &self.redactions);
-        if !failure.retryable || self.used {
+        if !failure.retryable || self.used || control.is_restored_conversation() {
             return Err(NodeRunnerError::DriverDetail(diagnostic));
         }
         control

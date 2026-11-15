@@ -103,7 +103,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ceilings default to 16000 approximate tokens for node graph guidance and 8000 for repository hooks;
   each accepts 1..=64000 and converts one token to four UTF-8 bytes, including framing. There is no
   cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
-  including compaction; new conversations receive fresh delivery sets. Windows memory storage and initialization use shared
+  including compaction; new conversations and conversations continued in a successor receive fresh delivery sets. Windows memory storage and initialization use shared
   private-state helpers, including validation of SQLite sidecars. SQLite-created Windows children
   and externally written initialization responses may inherit the token's default owner only with
   an already private ACL and verified private parent; normalize them to explicit current-user
@@ -165,16 +165,59 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`
   while running or stopping, including postmortem/finalization. Finished status carries only
   `terminalResult`. Graph-result logging and its watch event publish with `PrimaryGraphCompleted`;
-  terminalization never repeats that graph-result log. Foreground follow still waits for Finished.
+  terminalization never repeats that graph-result log. Foreground follow ends at Finished or Suspended.
 - Initial input remains caller-owned and is validated unchanged. A root group may add required
   state fields only when their payload types have deterministic implicit empty values; verification
   proves this and reduction materializes missing null, string, array, and recursively empty record values.
+- `maxItems` limits active complete map bodies, never total input cardinality. The reducer derives
+  a bounded pending frontier from dispatch-ordered history within the current visit window; prior
+  loop rounds do not exempt fresh items. Read-only probes discover settlement, strict closed-window
+  replay validates owned executions, and only current decisions admit new work. Execution progress
+  and confirmed loop work survive independently of discarded values and controls; do not encode
+  visit counters as control facts or infer executed prefixes from later-round descendants. Admission records effective `maxConcurrency` (default 64, maximum 65,536).
+  The supervisor admits leaf executions before allocating identities, attempts or timeouts and keeps
+  capacity through cleanup and durable settlement. Native auxiliary runners share the candidate's
+  execution capacity. Provider sessions lease compact cleanup slots independently of durable retry
+  IDs; monotonically fresh home identities prevent cleanup-slot reuse from reusing native session
+  directories and recall budgets. Auxiliary ownership is explicit; large primary retry IDs never
+  imply auxiliary work. Auxiliary metadata IDs start beyond the genuine primary visit/attempt ceiling,
+  independently of contained cleanup reservations. Uncertain cleanup quarantines those slots and capacity. Logical visits and loop entries each
+  have a separate run ceiling of 65,536, reconstructed from ledger/checkpoint history.
+  Admission retains the established structural-bounds wire shape; dynamic work uses runtime ceilings.
+  One scoped assignment traversal owns flat and nested map proofs, preserving shared item populations
+  and applying enclosing retention after candidate qualification. Incoming controls and lifted writes
+  retain their conditions. Choice routes and candidate availability are shared immutable proofs.
+  Correlated aggregate verification uses saturated joint counts and one deterministic 8 Mi count-cell
+  proof-work bound; an exhausted proof budget stays exhausted through admission.
+  Joins settle at the earliest actual history prefix proving success or impossibility, and use
+  actual settled outcomes and completed candidate facts. Pending candidates remain
+  potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
+  Shared short-circuiting three-valued guard evaluation preserves candidate-local first-join eligibility.
+  Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
+  branches on join settlement, consuming only executions owned by that visit window and preserving
+  earlier cancellation causes. Later-round executions never belong to an earlier join's losers.
+  Read-only probes reuse discovered results. Settled parallel groups and terminal maps validate
+  each owned branch/item once through the actual cutoff; winners supply the same traversal's values.
+  Closed-window replay never contributes pending work; terminal maps discard their queued siblings.
+  Static aggregate proofs check private qualification before exporting retained controls, preserve
+  presence and success/failure refinement in every compressed label class, saturate higher counts at
+  authored thresholds, and charge shared-guard expansion before allocation.
+  Aggregate guards can use nested map facts when an enclosing map dominates their scope.
+  The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
+  actual traversal to find ready work; static write/retention witnesses remain private to admission.
+  Cancel or void losers after an actual join or terminal decision through confirmed cleanup.
+  Do not predict future writes, map cardinalities, choice routes, convergence or loop exits.
+  Extra execution while an outcome remains unknown is permitted. Enforce work ceilings at
+  the next actual visit or loop entry, without forecasting or precharging unstarted work.
+  Map replay retains compact item-scoped facts and promoted values, discarding caller state
+  and temporary probe results. Graph-bearing JSON boundaries scan a 512-container envelope
+  before decoding depth-64 graphs and their payload/transport wrappers.
 - Map reduction collects a promoted field only when every item wrote it in that item scope. A worker
   error leaves an incomplete collection unchanged while its controls remain available to authored
   guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
 - Each full-v1 loop round starts with fresh error, signal, group, and output-channel facts for its
-  body at that map scope. Caller state persists across rounds; internal visit markers persist for
-  durable replay. Final-round facts replace older facts when the loop returns to its parent.
+  body at that map scope. Caller state persists across rounds; dispatch-ordered history identifies
+  visits during replay. Final-round facts replace older facts when the loop returns to its parent.
 - Harness integration lives in `harnesses/`: one registry supplies pure descriptors, provider
   requirements, executable lookup and factories for every adapter. Maintained implementations live
   in `harnesses/adapters/core`; contributions live in `harnesses/adapters/contributed` and register
@@ -447,6 +490,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   workspace and attached branch; local request fingerprints preserve replay before remote I/O.
   Resume reuses that workspace and attaches its branch without rewinding shared refs, refusing
   attachment when another registered checkout owns the branch.
+  Python `RunRequest` and string `Client.run()`/`submit()` expose `worktree=False` and optional
+  `worktree_base` (`local`/`remote`), forwarding both through native preflight and submission.
+  Worktree preparation and validation remain Rust-owned; Python never manages Git worktrees.
   Shutdown-aware controller startup forwards the recorded branch and review identity into
   candidate construction, including recovery after an interrupted checkpoint restore.
   Legacy local Git-delivery recovery without recorded branch ownership refuses before checkpoint
@@ -596,7 +642,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the checker preserves them in the comment. PR headers omit a source revision already named
   by their captured head. Classifier/checker are inspection-only verifiers; the reproducer is a step
   that can prepare the full local stack and browser tests without repairing tracked source.
-  Mapped runtime failures and overflow stop before publication; failed checks and environment
+  Mapped runtime failures stop before publication; failed checks and environment
   blockers return evidence for the report. All model choices remain caller-authored; the supplied
   PR runtime binds the three independent agents to `gpt-6.1-sol` with `xhigh`. Negative findings
   are successful reviews. Selecting a review template defaults to comment
@@ -613,15 +659,53 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the controller's workspace lease, after checkpoint restoration and before dispatch.
   Targets advertise comment delivery and
   task resolution through separate versioned discovery extensions.
+- `builtin.request.wait@1` is a host-run verifier with the fixed wait contract and a fieldless
+  `request` binding. It permits seq/choice/loop placement, one attempt and no instructions or
+  timeout; par/map ancestry and stack profiles refuse it. Exactly one RFC 3339 `dueAt` or integer
+  `durationMs` determines its deadline, bounded to 30 days. Wall-clock checks occur at least once
+  per minute. Local/direct hosts wait in place by default. A host-only in-place threshold or a
+  suspension request defers a wait until due, without a successful node outcome or Active Memory
+  postmortem. Its conditional continuation seed settles the wait only after the due-time check.
+  Suspension ends the controller only after checkpoint publication and runtime cleanup. Its
+  successor uses graph state without restoring local/direct workspace bytes. Vector entries live
+  in the ledger and retain identities and order across every successor.
+  Hosts with their own workspace storage opt in through one suspension policy and publish the
+  complete graph history and vector record before suspension cleanup. Direct targets enable it.
+  Discovery uses separate strict `{kind}` markers: `request_wait` (`openengine.request-wait/v1`),
+  `run_suspension` (`openengine.run-suspension/v1`), and `run_vectors` (`openengine.run-vectors/v1`).
+  `builtin.request.ask@1` uses the same host-owned binding with required string input `text`,
+  authored signals and a flat scalar-record output. It always suspends with reason `request`,
+  carrying its question, contract, identity and deadline, and permits the same placements and no
+  stack profiles. It requires workspace checkpoints, no instructions and one attempt. Ordinary
+  resume refuses it before credential resolution and reports recovery unavailable. Interrupted
+  answer launches still reconcile unadmitted successor claims before accepting another answer. `answer`
+  validates its complete verifier result before successor admission and continues on the retained
+  workspace; a late answer admits the existing timeout outcome and reports that successor as an
+  invalid_request refusal. The owning controller's clock checks expiry before shape; clients send
+  valid answers unchanged and defer file errors until that check, retaining the controller's
+  refusal and the file diagnostic. A second answer names the existing
+  successor. Request, answer and expiry vectors retain full content through show and inheritance;
+  bounded list summaries omit text, schemas and answers. Inbox reads project only each run's own
+  request vectors, never apply expiry, and exclude continued or stopped runs from pending pages.
+  Inbox show preserves the original request and successor link while the successor starts,
+  until its answer or expiry vector is readable.
+  Pending inbox pages use the durable suspension's request projection, apply cursors before reads,
+  and stop after one lookahead row without scanning vector histories.
+  Discovery adds `request_ask` (`openengine.request-ask/v1`); hosted inbox routes live in the separate
+  `hosted_inbox` (`openengine.hosted-inbox/v1`) extension. Host-owned storage has an independent,
+  default-off request opt-in beside suspension. Direct and local controllers enable requests.
+  Profile storage checks authored ask/wait workers against their own markers before access tokens.
+  Missing or wrong kinds refuse their operations after discovery and before token/body/session;
+  extra marker fields fail discovery while unknown extension keys remain ignored.
 - `code-review` reuses the `pr-review` input type and review continuation, so `--task-from`,
   comparison preparation and comment publication are unchanged. Triage returns a summary and at most
-  six units (maps allow eight; overflow fails). Per-unit maps run two broad, a depth and a design
+  six units (maps allow eight concurrent items). Per-unit maps run two broad, a depth and a design
   reviewer beside five whole-change hunters (logic, state, contracts, errors, claims); the claims
   hunter checks linked issue acceptance criteria. Per-unit and remaining-file finalizers merge, try to
   disprove and rewrite `{file,startLine,endLine,severity,title,body}` findings, and a report agent
   renders one Markdown comment. Every agent is a read-only verifier with two attempts and no deadline.
   One choice per agent or map keeps each guard's control space under the verifier ceiling; any
-  agent error or map overflow fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
+  agent error fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
   prompt parser. Inspectors do not install dependencies or start applications, services or browsers.
   The report stays under 12,000 characters and 48,000 UTF-8 bytes to leave room for the publisher header. The supplied runtime splits agents across Claude Code and Codex;
   model choices remain caller-authored. Its supplied local runtime sets `workspaceCheckpoints: false`
@@ -650,7 +734,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   only the exact cached issuance, never a newer concurrent token; only stacks retain their
   existing one-retry policy. Access tokens remain memory-only, and transport grant expiry continues
   to use durable observation reconnect/cursors without extending any lifetime.
-- Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
+- Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume and answer must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
 - Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding
   protocol, version, and profile values are bounded opaque strings; the protocol crate must not
   keep an external binding catalog. `openengine.worker.builtin/v1` is reserved for native
@@ -860,7 +944,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   latched primary outcome. No terminal is invented when settlement fails or
   the deadline/OS ends the process. Terminal closure remains detached. Windows keeps Ctrl-C and
   Ctrl-Break guards and adds no close/logoff/shutdown handler; cooperative stop uses force-stop.
-- Failed local and direct-target runs retain an exclusively claimable workspace for a successor
+- Failed and suspended local and direct-target runs retain an exclusively claimable workspace for a successor
   attempt. Local recovery metadata lives beside each run ledger while the checkout remains
   user-owned; direct targets retain only the candidate and Git metadata, dispose private runtime
   state after confirmed process cleanup, quarantine retained trees under supervisor ownership, and
@@ -870,9 +954,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   an interrupted launch before permitting another successor. A launch whose controller is confirmed
   stopped is reconciled without a handoff wait. Status reports a claim whose launcher released it
   and whose controller neither runs nor admitted the run as recoverable, so a crash cannot strand
-  the workspace. Direct-target retained-workspace handoff records both sides before moving the tree
-  and reconciles incomplete handoffs at startup.
-  Direct-target status exposes the immutable admitted connection requirements so the CLI resolves
+  the workspace. Local force-stop holds the same per-run recovery claim before reading status or
+  successor ownership and through the controller reply, including when the run is still running.
+  Direct-target retained-workspace handoff records both sides before moving the tree
+  and reconciles incomplete handoffs at startup. Resume reserves this durable handoff before
+  acknowledging the successor; asynchronous credential resolution and preparation reuse that claim.
+  Supervised preparation owns successor version logging, vector inheritance, continuation seeds
+  and snapshot loading before reserving the workspace. Initialization failure settles the successor
+  as `runtime_unavailable` after confirmed cleanup, leaving the unclaimed source resumable.
+  Live-engine force-stop shares a per-run control turn with resume and checks successor ownership
+  before signalling the engine, so a stale suspended engine cannot stop an accepted continuation.
+  Unrelated submissions and resume reads for an ineligible live source cannot block cancellation.
+  Direct-target status for failed and suspended runs exposes the immutable admitted connection requirements so the CLI resolves
   fresh resume values without consulting changed profiles. Recovery lineage also retains the root
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
   Successor composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned
@@ -883,9 +976,29 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
   not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
-  retained workspace recovery. Default resume starts a fresh graph on the retained workspace;
-  checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
-  imports old provider sessions, secrets, or token usage. Checkpoint IDs never become filesystem paths.
+  retained workspace recovery. Default resume of a failed run starts a fresh graph on the retained workspace;
+  checkpoint resume restores a private input snapshot and settled prerequisite executions. Checkpoint
+  continuations, including request and other suspended successors, restore captured `node_instance`
+  provider conversations; failed-run restarts and `execution` sessions start new conversations.
+  Credentials are resolved again and successor token usage starts at zero. Suspended command/wait
+  runs accept only default resume,
+  continuing at the held-back node, or after a due wait. Request suspensions require answer and
+  settle the held node with verifier output/signals or timeout in their successor. Every successor inherits the ordered vector
+  record. Request input text keeps the node-input bound; its persisted question also includes the
+  authored result contract, so request vectors and suspension records have a separate combined
+  bound. Answers must fit the existing node-completion and answer-vector event bounds before
+  successor admission. Full request/vector reads and hosted status/watch readers use
+  the explicit request response bound; hosted lists stream that bound per run within the shared
+  128 MiB total receive ceiling. Log stream frames retain their existing bound. Inbox rows remain
+  below the generic hosted page limit. Protocol client response frames include the full request
+  bound plus JSON-RPC framing; server incoming WebSocket and NDJSON request frames allow 2 MiB for
+  the answer, fresh credentials and envelope without changing node-result limits.
+  Python SDK NDJSON readers use the same full-request frame allowance as the native client and
+  report oversized events as protocol errors while stopping the child process.
+  Suspension keeps request admission open during host storage writes and republishes the
+  complete record if a request arrives meanwhile. Final disposal and durable suspension share the
+  request admission turn; force-stop remains independent. Storage replaces the full snapshot on
+  republication. Continuation restores no file locally or on a direct target and accepts no discard flag. Checkpoint IDs never become filesystem paths.
   The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
   and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
   read-only boundaries reuse bytes. Local/direct storage normalizes Git into a temporary private
@@ -894,6 +1007,32 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Restic drains progress and private stderr completely with bounded memory, retaining only the
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
+  Restores rediscover Restic through `ZEROSHOT_RESTIC`, the executable's sibling, then `PATH`,
+  falling back to the stored program only when discovery fails. Storage keeps its original program
+  and format; checkpoint pinning validates metadata without requiring an executable. Successor
+  checkpoint stores also retain that fallback from their predecessor's storage configuration.
+  Conversations are raw adapter-selected provider files beside the snapshot's `workspace` tree,
+  with the same Restic paths across checkpoints, never inside execution seeds, ledgers or workspace
+  exports. A complete conversation (identifier, files and Codex cumulative usage baseline) is capped
+  at 1 GiB; capture/restore failures use a new conversation and a node-naming system log. Pending
+  restored conversations survive checkpoints before their next turn. Adapters own filename selection
+  and relocation; shared code bounds copies, rejects unsafe names and restores only those files.
+  Contained capture rechecks storage ancestors from the trusted private home at selection and
+  file reads; provider-owned symbolic links cannot redirect supervisor reads outside that home.
+  Conversation copies observe execution/controller cancellation between bounded reads. Blocking
+  workers retain the session state/home or pool lock until staging and rollback finish, including
+  when their async caller is dropped; close cancels restoration before awaiting those locks.
+  Workspace-checkpoint opt-out skips conversation capture while retaining delivery receipts.
+  Contained restores assign ownership through the trusted private home, including newly created
+  storage ancestors. Restore preserves existing native provider-directory security and creates
+  missing directories and temporary stages with private permissions and explicit Windows ownership.
+  Codex capture requires usage reported for the latest turn; missing usage must
+  not carry an older in-run baseline into a successor.
+  Optional `RunCheckpointStore` methods hand host storage the files and accept the selected files
+  independently of workspace restore; older implementations retain their new-conversation fallback.
+  Successful portable controllers drain runtime settlement before exit so post-terminal checkpoint
+  deletion can finish, including deletion of private conversation files.
+  ACP owner sessions and Active Memory delivery sets are not carried between runs.
   Versioned execution seeds live in separate files and are read only for selected continuation.
   Target restart restores the latest published snapshot without importing a seed. Local restart
   restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
@@ -914,7 +1053,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   plain resume is refused while it remains. A `Latest` record left by an older plain resume is
   completed only with consent: `resume RUN_ID --discard-workspace-changes` replays its pinned
   snapshot. Outside that case the flag requires `--from-checkpoint`. Successful lineages
-  delete their catalogs and repository only after durable terminal success; failed lineages retain
+  delete their catalogs and repository only after durable terminal success; failed and suspended lineages retain
   both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable
   only inside private scratch; staging cleanup failure cannot block terminal truth or status.
@@ -936,10 +1075,25 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `ProductionHostingConfig` can accept host-owned `HostedWorkspaceStorage`; the allocator invokes
   it after source checkout and before provider dispatch, imports settled prerequisites, and
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
-- Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
-  Local CLI inspection opens finished runs directly from read-only ledgers. Unfinished local CLI
-  and UI history readers share the bounded portable-controller availability probe: original lease
-  identity bound in readiness, read-only shared-lock probes, endpoint response and process evidence.
+  Host-owned request continuations validate once against the owning host's clock before successor
+  admission. Acceptance checks both durable result events, reserving the maximum identity and
+  timestamp widths until allocation.
+  Their opaque accepted resolution survives restoration without another deadline decision.
+- Durable observation replay reads bounded ledger pages that fit every accepted event, including
+  combined request text and contracts, and retains its scan cursor across pages.
+  NDJSON and WebSocket run inventories bound each typed status separately from the response
+  envelope, so several full requests fit one unpaged reply without removing bounds from other
+  responses. Hosted HTTP inventories, NDJSON replies and both WebSocket dialers share a 128 MiB
+  total receive ceiling. HTTP checks before retaining data, NDJSON before buffer growth and
+  WebSocket before frame allocation and reassembly.
+  The shared transport retains tighter bounds for individual responses and inventory entries.
+  Vector pagination resolves entry IDs through a per-run ledger index, including inherited IDs,
+  then replays after that cursor instead of reading earlier pages again.
+  Local CLI inspection opens finished runs directly from read-only ledgers. Vector list and show
+  use the same retained-storage checks and keep the validated run directory open for the read.
+  Unfinished local CLI and UI history readers share the bounded portable-controller availability
+  probe: original lease identity bound in readiness, read-only shared-lock probes, endpoint response
+  and process evidence.
   Missing/inaccessible/replaced evidence and live or reused PIDs remain unknown; only an absent
   process with its original released lease establishes lost. Availability is optional controller
   metadata with observedAt, never a durable status, terminal outcome or inferred death time.
@@ -956,7 +1110,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   endpoint that accepts nothing is taken over only after confirmed loss.
   Loss recovery retains the original readiness evidence until reconciliation is durable, so
   failed or interrupted persistence cannot strand subsequent resume or force-stop attempts.
-  A finished snapshot closes a subscription only after replay reaches its durable cursor.
+  A finished or suspended snapshot closes a subscription only after replay reaches its durable cursor.
   A retiring local controller closes connection writers and joins their request cleanup before
   ending its runtime. EOF remains a reconnect signal; durable observation resumes from the last
   emitted cursor instead of reporting a storage failure caused by runtime shutdown.
@@ -980,9 +1134,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Cancellation drains output and provider cleanup before execution settlement. Run close reserves
   and tombstones execution activity atomically; no late work may surface after close returns.
 - Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
+  On a request node it is the deadline from creation, defaults to 7 days, and permits at most 30 days.
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
   The supervisor records every node error in durable logs before settlement, including handled
-  failures and retries. Summaries preserve error code, typed refusal/malformed reason, elapsed time,
+  failures and retries. A newly applied request expiry logs its timeout in the successor before
+  importing that execution's settlement; inherited historical failures are not logged again.
+  Imported expiry logs do not establish a primary runtime failure.
+  Summaries preserve error code, typed refusal/malformed reason, elapsed time,
   and returned error context; provider adapters redact credentials before returning details. Runtime failure,
   runtime loss/restart reconciliation, and force-stop use the same completion/log transaction for
   every active node. Failed runs also retain a run-wide error log, including before graph dispatch.
@@ -1392,7 +1550,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   preparation before waiting for cleanup; failed cleanup retains authority for replay/recovery.
   `ZEROSHOT_TOOLS/bin` precedes the base PATH for hooks and all agents; shell exports do not persist.
   Startup services retain a separate run-owned process marker and stop at run cleanup. Checkpoints
-  retain files and graph state, not services, Docker state, or conversations; users reconstruct
+  retain files, graph state and supported node-instance conversations, but no services or Docker state; users reconstruct
   services idempotently and keep live database state outside file checkpoint guarantees.
   Local runs reject hooks and use the invoking environment. Direct Docker setup modifies its
   operator-owned target container, shared by that target's runs; separate target containers are
@@ -1429,6 +1587,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
+- Hosted suspend and vector POST routes use the separate `hosted_run_controls` discovery extension
+  (`openengine.hosted-run-controls/v1`), relative to `hosted_runs.base_url`. Its strict
+  `route_templates` contains `suspend`, `vectors` and `vector`; the existing hosted run/recovery
+  route objects and the three capability markers stay unchanged.
 - `export-workspace` downloads only from named hosted targets advertising the separate
   `openengine.workspace-export/v1` extension. Its one strict `route_template` is relative to
   `hosted_runs.base_url`; existing hosted run/recovery route objects stay unchanged. The HTTP-only
@@ -1452,8 +1614,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   entering the backend. Once polled, that future is preserved through its receipt or error because
   it may cross an irreversible admission boundary before yielding. A successful receipt is emitted
   before detaching without opening observation. Ctrl-C never force-stops a run.
-- Foreground `run` and `watch` settle a followed run the same way. A watch that closes without a
-  terminal snapshot settles from run status, which Ctrl-C detaches like observation. A failed run
+- Foreground `run` and `watch` settle a followed run the same way. A watch that closes without an
+  ended snapshot settles from run status, which Ctrl-C detaches like observation. A suspended run
+  ends either command with exit 0. A failed run
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
@@ -1465,6 +1628,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   identity stays private and unredacted for exact watch matching; its printable message is redacted.
   ACP turns reuse the bounded failure formatter when recorded terminal context exists; without
   context they retain `Zeroshot run failed: REASON`. Their `rawOutput` remains `{"failed":"REASON"}`.
+- Local controller requests use the existing ten-second readiness deadline, separately from handoff
+  retries. List probes use bounded concurrency and one shared deadline; unavailable status retains the recorded state and controller
+  observation. Subscription setup waits for acknowledgement within that deadline, while established
+  streams have no idle timeout. A force-stop timeout is not retried: it names the run and readiness
+  PID and warns that the request remains queued, without killing the controller.
 - After opening observation, `run`, `watch`, `logs` and `attach` on direct or hosted named targets
   announce the first connection loss once on stderr and state that the run continues there.
   Reconnects back off from 100 ms to a five-second cap, preserving durable watch/log cursors.
@@ -1544,10 +1712,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   it. A run's PR head is `native_v2_delivery::delivery_head_branch` of its delivery run ID; receipts
   stay unchanged. Zeroshot never retargets or restacks PRs. The target resolves each node's exact
   source branch and revision only after its dependencies succeed; stacks have static inputs, no
-  cross-node dataflow, no local execution, and no retry-in-place. Agent runtime bindings cannot
+  cross-node dataflow, no local execution, and no retry-in-place, and cannot contain wait or request nodes. Agent runtime bindings cannot
   declare `GH_TOKEN`; the sole delivery binding owns the GitHub write credential. A node's queue
   deadline is the earlier of stack expiry and seven days after readiness.
-- Read-only safe commands include `zeroshot list`, `zeroshot status`, and `zeroshot logs`.
+- Read-only safe commands include `zeroshot list`, `zeroshot status`, `zeroshot logs`,
+  `zeroshot vectors`, `zeroshot vectors show`, `zeroshot inbox list`, and `zeroshot inbox show`.
 - Destructive commands such as `zeroshot force-stop` require explicit user intent.
 
 ## Where to look
@@ -1607,7 +1776,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   endpoints. Keep JSON writes, request bounds, and connection-owned SSE readers/timers.
 - SIGINT/SIGTERM close listeners and observers with bounded draining. Stopping the local UI leaves
   detached runs active. Target restart reconciles interrupted runs as runtime loss, never as an
-  invented user stop or automatic retry.
+  invented user stop or automatic retry. A suspended run has ended and is not interrupted.
 - `WorkspaceServices` separates profile storage, native authoring, run listing, and observation.
   `RunHistorySource` supplies the viewer's run identity and transport. The standalone shell owns
   selection/navigation; graph components must remain independent of the host.
@@ -1625,8 +1794,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   publication so accepted writes remain readable; unchanged entries stay opaque. Shared store envelope
   corruption still fails closed. Checked saves decode the selected profile for its revision.
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
-  generation; imports carry no foreign revision. Pending numeric text belongs to the document,
-  survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
+  generation; imports carry no foreign revision. Pending numeric text, including run-wide concurrency, belongs to the document,
+  survives inspector navigation, and commits only when valid. Runtime dialogs use a separate instance
+  of the same numeric draft store; Apply and Cancel own only those dialog drafts. Navigation must
+  preserve unsaved work. Queued/retried and stopped unstarted leaves use the latest queue transition,
+  while actual starts and outcomes remain authoritative for executions.
   Hosted workspaces use the `platform` kind with their existing opaque workspace IDs. The tag
   rename starts a new browser storage namespace; earlier drafts and preferences are not imported.
   Hosted environment saves use the same correlated snapshot/acknowledgement lifecycle: the iframe
@@ -1650,6 +1822,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and success proof. Later writes invalidate pending presence facts. Loop error exits require a
   guaranteed completing Step; fixed loops complete on normal exhaustion, review loops fail.
 - Data edits update only owned routes and linked schemas, including carried state and Map items.
+  Wait input bindings preserve the fixed optional input schema when connecting, changing, or
+  removing a source; a connected source must keep its declared input type.
   Removing a producer leaves typed, unbound inputs. Previous-attempt reuse requires native proof
   of the original source and compatible path. Label only unchanged caller values as Run input.
 - Structural actions are atomic and preserve identities, bindings, and completion checkpoints.
@@ -1720,7 +1894,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
   Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
   remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
-- Visual tokens/fonts live in `ui/src/styles.css` and `ui/src/theme.ts`; bundle all runtime assets.
+- [ui/DESIGN.md](ui/DESIGN.md) is the UI's visual source of truth; tokens and fonts live in
+  `ui/src/styles.css` and `ui/src/theme.ts`. Bundle all runtime assets, including the paper textures.
   `embed.html` mounts the same editor/viewer without standalone menus. Its version-1 bridge
   validates the parent window and exact origin, binds workspace authority, and correlates document
   generations and save snapshots. Host service URLs remain same-origin; optional CSRF configuration
@@ -1778,6 +1953,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## Validation
 
 Run the narrowest relevant checks first, then the complete affected lane.
+The local CLI integration root includes its shared fixture before adding request scenarios, so
+other integration suites can reuse the fixture without duplicating those scenarios.
+Suspension polling has a separate bounded checkpoint and cleanup budget from individual CLI calls.
 
 ```bash
 cargo fmt --all -- --check
@@ -1845,6 +2023,8 @@ python -m mkdocs build --strict
   so the intentional write failure cannot corrupt collected profiles.
   Local CLI fixture repositories exclude `*.profraw` through their shared Git exclude file,
   keeping profiles from environment-cleared instrumented processes out of delivery and status.
+  Conversation fixtures launch outside their explicit `--cwd` workspace so those profiles also
+  stay out of checkpoint contents and storage-growth measurements.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.

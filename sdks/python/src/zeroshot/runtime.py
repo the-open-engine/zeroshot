@@ -114,6 +114,7 @@ class UniformRuntime:
         max_tokens: Optional caller-declared model output limit. None keeps the provider's own
             default.
         size: Opaque target-owned size identifier. None leaves the choice to the target default.
+        max_concurrency: Optional run-wide owned execution limit. None uses the native default 64.
         workspace_checkpoints: Whether to capture workspace snapshots. Defaults to enabled.
         session_scope: execution opens a fresh session for each execution; node_instance reuses a
             live session when that graph node instance runs again.
@@ -138,6 +139,7 @@ class UniformRuntime:
     active_memory: Mapping[str, JsonValue] | None = None
     global_agents: Mapping[str, JsonValue] | None = None
     harness_config: Mapping[str, JsonValue] | None = None
+    max_concurrency: int | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
         """Encode the declarative uniform runtime consumed and validated by Zeroshot."""
@@ -149,6 +151,8 @@ class UniformRuntime:
         value["harness"] = self.harness
         if self.size is not None:
             value["size"] = self.size
+        if self.max_concurrency is not None:
+            value["maxConcurrency"] = self.max_concurrency
         if not self.workspace_checkpoints:
             value["workspaceCheckpoints"] = False
         if self.effort is not None:
