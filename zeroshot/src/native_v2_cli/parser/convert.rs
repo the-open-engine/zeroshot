@@ -193,6 +193,22 @@ impl UtilityCommand {
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
             Self::Suspend(args) => args.into_selector().map(NativeV2CliCommand::Suspend),
+            Self::Steer(args) => {
+                let text = match (args.text, args.text_file, args.text_stdin) {
+                    (Some(text), None, false) => crate::native_v2_cli::SteerText::Text(text),
+                    (None, Some(path), false) => crate::native_v2_cli::SteerText::File(path),
+                    (None, None, true) => crate::native_v2_cli::SteerText::Stdin,
+                    _ => {
+                        return Err(NativeV2CliError::Usage(
+                            "steer requires exactly one text source".into(),
+                        ));
+                    }
+                };
+                Ok(NativeV2CliCommand::Steer {
+                    run: args.run.into_selector()?,
+                    text,
+                })
+            }
             Self::Answer(args) => Ok(NativeV2CliCommand::Answer {
                 run: args.run.into_selector()?,
                 input: args.input,

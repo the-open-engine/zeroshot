@@ -484,7 +484,8 @@ impl NativeV2TargetServer {
     fn discovery_document(&self) -> TargetDiscoveryDocument {
         let mut document = TargetDiscoveryDocument::direct(self.access.authentication())
             .with_node_runtime_lanes()
-            .with_decision_models();
+            .with_decision_models()
+            .with_steering();
         if let Some(catalog) = self.target.run_sizes() {
             document = document.with_run_sizes(catalog);
         }
@@ -683,6 +684,14 @@ impl ClusterBackend for TargetOecpBackend {
         params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
         ClusterBackend::run_force(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_steer(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
+        ClusterBackend::run_steer(self.controller.as_ref(), context, params).await
     }
 
     async fn run_suspend(

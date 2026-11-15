@@ -119,8 +119,14 @@ impl Broker {
                         let _ = error;
                         continue;
                     }
-                    if let Ok(context) = response(&mut stream, &thread_scopes, source.as_ref()) {
-                        return_context(&mut stream, &context, source.as_ref());
+                    if let Ok((query, delivery)) =
+                        response(&mut stream, &thread_scopes, source.as_ref())
+                    {
+                        if return_context(&mut stream, &delivery.context, source.as_ref())
+                            && let Some(query) = query
+                        {
+                            source.acknowledged(&query, &delivery);
+                        }
                     }
                 }
             })?;
@@ -172,7 +178,7 @@ fn response(
     stream: &mut TcpStream,
     scopes: &Mutex<BTreeMap<String, HookScope>>,
     source: &dyn ActiveMemorySource,
-) -> io::Result<String> {
+) -> io::Result<(Option<HookQuery>, super::HookDelivery)> {
     let request: Request = serde_json::from_slice(&read_frame(stream, MAX_EVENT_BYTES)?)?;
     let scope = scopes
         .lock()
@@ -180,13 +186,15 @@ fn response(
         .get(&request.token)
         .cloned();
     let Some(scope) = scope else {
-        return Ok(String::new());
+        return Ok((None, super::HookDelivery::default()));
     };
     let query = scope.query(&request.event);
     if query.tool_name.is_empty() {
-        return Ok(String::new());
+        return Ok((None, super::HookDelivery::default()));
     }
-    Ok(native::bounded_context(source.tool_context(&query)))
+    let mut delivery = source.tool_delivery(&query);
+    delivery.context = native::bounded_context(delivery.context);
+    Ok((Some(query), delivery))
 }
 
 pub(super) fn run_helper(path: &Path) -> io::Result<()> {
@@ -225,13 +233,13 @@ fn helper_output(path: &Path, input: impl Read) -> io::Result<(Value, Option<Tcp
     ))
 }
 
-fn return_context(stream: &mut TcpStream, context: &str, source: &dyn ActiveMemorySource) {
+fn return_context(stream: &mut TcpStream, context: &str, source: &dyn ActiveMemorySource) -> bool {
     if write_frame(stream, context.as_bytes()).is_err() {
         source.unavailable("Active Memory callback context could not be returned");
-        return;
+        return false;
     }
     if context.is_empty() {
-        return;
+        return false;
     }
     // A successful socket write alone does not prove the helper returned its output.
     // The existing read timeout bounds this carrier receipt, including cancelled helpers.
@@ -242,7 +250,9 @@ fn return_context(stream: &mut TcpStream, context: &str, source: &dyn ActiveMemo
         || acknowledgement != [1]
     {
         source.unavailable("Active Memory callback carrier did not acknowledge context");
+        return false;
     }
+    true
 }
 
 fn read_capability(path: &Path) -> io::Result<Capability> {

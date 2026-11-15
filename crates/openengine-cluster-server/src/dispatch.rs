@@ -105,6 +105,9 @@ where
             RUN_LIST_METHOD => self.dispatch_run_list(id, params).await,
             RUN_STATUS_METHOD => self.dispatch_run_status(id, params).await,
             RUN_FORCE_METHOD => self.dispatch_run_force(id, params).await,
+            openengine_cluster_protocol::RUN_STEER_METHOD => {
+                self.dispatch_run_steer(id, params).await
+            }
             openengine_cluster_protocol::RUN_SUSPEND_METHOD => {
                 self.dispatch_run_suspend(id, params).await
             }
@@ -355,6 +358,18 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_force(params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_run_steer(&self, id: RequestId, params: Value) -> String {
+        let params =
+            match serde_json::from_value::<openengine_cluster_protocol::RunSteerParams>(params) {
+                Ok(params) => params,
+                Err(_) => return native_v2_invalid_params(id),
+            };
+        match self.run_steer(params).await {
             Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }

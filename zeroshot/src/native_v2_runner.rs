@@ -256,6 +256,12 @@ impl DriverInvocation {
         Ok(self.with_host_context(prompt))
     }
 
+    pub(crate) fn prepend_host_context(prompt: String, context: &str) -> String {
+        let prefix = "Runtime-owned execution context:\n";
+        let body = prompt.strip_prefix(prefix).unwrap_or(&prompt);
+        format!("{prefix}{context}\n\n{body}")
+    }
+
     fn with_host_context(&self, prompt: String) -> String {
         match self.host_context.as_deref().filter(|text| !text.is_empty()) {
             Some(context) => format!("Runtime-owned execution context:\n{context}\n\n{prompt}"),
@@ -426,6 +432,10 @@ impl DriverControl {
 /// Returned error details enter user logs; implementations must redact owned credentials.
 #[async_trait]
 pub trait NodeDriver: Send + Sync {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        None
+    }
+
     /// Runs until the provider has completed or consumed cancellation and finished process cleanup.
     async fn run(
         &self,
@@ -440,6 +450,10 @@ pub trait NodeDriver: Send + Sync {
 
 #[async_trait]
 pub trait NodeRunner: Send + Sync {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        None
+    }
+
     async fn capture_conversations(&self, _run_id: &RunId) -> conversations::ConversationCapture {
         conversations::ConversationCapture::default()
     }
@@ -622,6 +636,10 @@ impl NativeNodeRunner {
 
 #[async_trait]
 impl NodeRunner for NativeNodeRunner {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        self.driver.delivery_hooks()
+    }
+
     async fn capture_conversations(&self, run_id: &RunId) -> conversations::ConversationCapture {
         self.capture_conversations_until_stopped(
             run_id,

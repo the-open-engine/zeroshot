@@ -29,6 +29,7 @@ const CLEANUP_BUDGET: Duration = Duration::from_secs(30);
 pub(super) struct HermesConnection<'a> {
     stdout: ProcessStdout,
     control: &'a DriverControl,
+    hooks: Option<&'a crate::active_memory::hooks::ActiveMemoryHooks>,
     lines: ProviderJsonLines,
     pending: VecDeque<ProviderJsonLine>,
     output: ProviderText,
@@ -45,10 +46,12 @@ impl<'a> HermesConnection<'a> {
         stdout: ProcessStdout,
         control: &'a DriverControl,
         redactions: Vec<String>,
+        hooks: Option<&'a crate::active_memory::hooks::ActiveMemoryHooks>,
     ) -> Self {
         Self {
             stdout,
             control,
+            hooks,
             lines: ProviderJsonLines::new(),
             pending: VecDeque::new(),
             output: ProviderText::new(&redactions),
@@ -94,7 +97,15 @@ impl<'a> HermesConnection<'a> {
             self.redactions.clone(),
         );
         loop {
-            send(process, &json!({"type":"prompt","text":response.prompt()})).await?;
+            let prompt = match self.hooks {
+                Some(hooks) => {
+                    hooks
+                        .steer_prompt(invocation, self.control, response.prompt().to_owned())
+                        .await
+                }
+                None => response.prompt().to_owned(),
+            };
+            send(process, &json!({"type":"prompt","text":prompt})).await?;
             let message = self.turn(invocation).await?;
             let answer =
                 resolve_agent_response_with_schema(&invocation.response, &message, dialect)?;

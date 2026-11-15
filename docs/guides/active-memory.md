@@ -134,3 +134,9 @@ Concurrent runs check lesson revisions before publishing, so stale updates canno
 advice. Hosting integrations must explicitly provide a memory namespace and enforce its access.
 See [memory lifecycle and storage](../reference/active-memory.md) for maintenance, evidence and host
 contracts.
+
+The native tool-call carrier is installed for every agent conversation, including when Active
+Memory is off, so it can deliver standing [steers](../guides/observe-and-control.md#steer-a-run).
+Memory off still leaves its database unopened. Steers come from the run vector record and precede
+memory cards. They are delivered whole and do not count against `nodeInjectionTokens` or
+`hookInjectionTokens`; memory card selection keeps its own limits.

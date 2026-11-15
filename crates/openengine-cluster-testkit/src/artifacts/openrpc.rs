@@ -123,6 +123,15 @@ fn native_v2_method(name: &str) -> Option<Value> {
         RUN_LOGS_METHOD => run_logs_method(),
         RUN_ATTACH_METHOD => run_attach_method(),
         RUN_FORCE_METHOD => run_force_method(),
+        openengine_cluster_protocol::RUN_STEER_METHOD => {
+            let schema =
+                serde_json::to_value(schema_for!(openengine_cluster_protocol::RunSteerParams))
+                    .assert_value();
+            json!({"paramStructure":"by-name", "params":[
+                {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
+                {"name":"text","required":true,"schema":property_schema(&schema,"text")}
+            ], "result":{"name":"runSteerResult","schema":{"$ref":"schema.json#/$defs/RunSteerResult"}}})
+        }
         openengine_cluster_protocol::RUN_SUSPEND_METHOD => {
             run_id_method::<RunStatusParams>("runSuspendResult", "RunStatusResult")
         }

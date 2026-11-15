@@ -233,6 +233,29 @@ fn fallback_context(status: &RunStatusResult) -> &openengine_cluster_protocol::F
 }
 
 #[tokio::test]
+async fn steer_retained_runtime_failure_reads_directions_when_the_ledger_is_available() {
+    let (ledger, worker, _, service) = tracked_worker_run("steer-failure-status").await;
+    let recorded = crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: worker.run_id.clone(),
+            text: "Keep the observed failure evidence.".into(),
+        },
+    )
+    .await
+    .assert_value();
+    service.runtime_failed_with_cause(&worker.run_id, "runtime failed");
+    let status = service
+        .status(RunStatusParams {
+            run_id: worker.run_id,
+        })
+        .await
+        .assert_value();
+    fallback_context(&status);
+    assert_eq!(status.steering.steers, vec![recorded.steer]);
+}
+
+#[tokio::test]
 async fn failure_fallback_refreshes_recorded_evidence_without_replacing_its_first_cause() {
     let (ledger, worker, initial, service) = tracked_worker_run("failure-evidence-refresh").await;
     let run_id = worker.run_id.clone();

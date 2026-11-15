@@ -76,6 +76,7 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-attach"><code>zeroshot attach</code></a></li>
 <li><a href="#zeroshot-force-stop"><code>zeroshot force-stop</code></a></li>
 <li><a href="#zeroshot-suspend"><code>zeroshot suspend</code></a></li>
+<li><a href="#zeroshot-steer"><code>zeroshot steer</code></a></li>
 <li><a href="#zeroshot-answer"><code>zeroshot answer</code></a></li>
 <li><a href="#zeroshot-inbox"><code>zeroshot inbox</code></a></li>
 <li><a href="#zeroshot-inbox-list"><code>zeroshot inbox list</code></a></li>
@@ -117,6 +118,7 @@ Commands:
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
+  steer              Broadcast standing direction to every agent conversation in a running or suspended run
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
@@ -1359,6 +1361,30 @@ Options:
 
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
+<section id="zeroshot-steer"><h3><code>zeroshot steer</code></h3>
+<pre><code>Broadcast standing direction to every agent conversation in a running or suspended run
+
+Usage: zeroshot steer [OPTIONS] &lt;TEXT|--text-file &lt;FILE&gt;|--text-stdin&gt; &lt;RUN_ID&gt;
+
+Arguments:
+  &lt;RUN_ID&gt;
+          Public run ID
+
+  [TEXT]
+          Direction, as given. Do not put secrets in a steer
+
+Options:
+      --target &lt;NAME&gt;
+          Use this named target. If omitted, use the local controller
+
+      --text-file &lt;FILE&gt;
+          Read UTF-8 direction from this file
+
+      --text-stdin
+          Read UTF-8 direction from standard input
+
+  -h, --help
+          Print help</code></pre></section>
 <section id="zeroshot-answer"><h3><code>zeroshot answer</code></h3>
 <pre><code>Answer a suspended request from a JSON file and start its successor.
 
@@ -1613,6 +1639,7 @@ Commands:
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
+  steer              Broadcast standing direction to every agent conversation in a running or suspended run
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full

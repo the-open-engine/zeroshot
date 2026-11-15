@@ -759,6 +759,37 @@
       }
     },
     {
+      "name": "run/steer",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "text",
+          "required": true,
+          "schema": {
+            "$ref": "#/$defs/NodeInstructions"
+          }
+        }
+      ],
+      "result": {
+        "name": "runSteerResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunSteerResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
       "name": "run/suspend",
       "paramStructure": "by-name",
       "params": [

@@ -39,6 +39,7 @@ const HELP_PATHS: &[&[&str]] = &[
     &["logs"],
     &["attach"],
     &["force-stop"],
+    &["steer"],
     &["resume"],
     &["checkpoints"],
     &["export-workspace"],

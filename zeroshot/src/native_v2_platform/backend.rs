@@ -100,6 +100,14 @@ impl ClusterBackend for NativeV2PlatformController {
         self.force(params).await.map_err(platform_backend_error)
     }
 
+    async fn run_steer(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
+        self.steer(params).await.map_err(platform_backend_error)
+    }
+
     async fn run_suspend(
         &self,
         _context: &ConnectionContext,

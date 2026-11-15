@@ -75,6 +75,7 @@ fn recovery_document(
 
 fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> RunStatusResult {
     RunStatusResult {
+        steering: Default::default(),
         run_id,
         title: RunTitle::new("Local storage contract").assert_value(),
         source: submission.source.clone(),

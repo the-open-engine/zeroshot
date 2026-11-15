@@ -586,6 +586,9 @@ fn require_session_capability(
     purpose: TargetSessionPurpose,
 ) -> Result<(), TargetAuthorityError> {
     match purpose {
+        TargetSessionPurpose::Steering if !controller.steering => {
+            Err(authority_error("target does not advertise steering"))
+        }
         TargetSessionPurpose::WorkspaceRecovery if !controller.workspace_recovery => Err(
             authority_error("target does not advertise workspace recovery"),
         ),

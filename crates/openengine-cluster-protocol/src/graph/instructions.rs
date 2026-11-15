@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 /// Maximum UTF-8 byte length of authored instructions for one executable node.
-pub const MAX_NODE_INSTRUCTIONS_BYTES: usize = 16_384;
+pub const MAX_NODE_INSTRUCTIONS_BYTES: usize = 262_144;
 
 /// Authored behavior for one agent-backed graph leaf.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]

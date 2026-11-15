@@ -936,6 +936,12 @@
       ],
       "type": "object"
     },
+    "NodeInstructions": {
+      "maxLength": 262144,
+      "minLength": 1,
+      "pattern": "^[^\\u0000]*[^\\s\\u0000][^\\u0000]*$",
+      "type": "string"
+    },
     "PayloadType": {
       "oneOf": [
         {
@@ -1352,6 +1358,11 @@
           ],
           "description": "Omitted for responding controllers and finished runs. Never durable run state."
         },
+        "omittedSteers": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "runId": {
           "description": "Public identity of the run whose force request was recorded.",
           "type": "string"
@@ -1377,6 +1388,12 @@
         "status": {
           "$ref": "#/$defs/RunStatus",
           "description": "Public phase projected after the force request was recorded."
+        },
+        "steers": {
+          "items": {
+            "$ref": "#/$defs/RunSteer"
+          },
+          "type": "array"
         },
         "title": {
           "description": "Immutable title captured when the run was admitted.",
@@ -1798,6 +1815,11 @@
           ],
           "description": "Omitted for responding controllers and finished runs. Never durable run state."
         },
+        "omittedSteers": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "runId": {
           "type": "string"
         },
@@ -1820,6 +1842,12 @@
         "status": {
           "$ref": "#/$defs/RunStatus"
         },
+        "steers": {
+          "items": {
+            "$ref": "#/$defs/RunSteer"
+          },
+          "type": "array"
+        },
         "title": {
           "maxLength": 256,
           "minLength": 1,
@@ -1839,8 +1867,104 @@
       ],
       "type": "object"
     },
+    "RunSteer": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "executions": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "executionsOmitted": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "receivedExecutions": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "textBytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "textBytes",
+        "excerpt",
+        "receivedExecutions",
+        "executions"
+      ],
+      "type": "object"
+    },
     "RunVector": {
       "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "steer",
+              "type": "string"
+            },
+            "text": {
+              "$ref": "#/$defs/NodeInstructions"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "conversation": {
+              "type": "string"
+            },
+            "execution": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "steer_receipt",
+              "type": "string"
+            },
+            "nodeInstance": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "steerId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "steerId",
+            "conversation",
+            "execution",
+            "nodeInstance"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "expiresAt": {
@@ -2045,6 +2169,47 @@
     "RunVectorSummary": {
       "description": "Bounded list projection. Full text, schemas and answers require run/vector.",
       "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "steer",
+              "type": "string"
+            },
+            "textBytes": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "textBytes"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "execution": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "steer_receipt",
+              "type": "string"
+            },
+            "steerId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "steerId",
+            "execution"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "kind": {

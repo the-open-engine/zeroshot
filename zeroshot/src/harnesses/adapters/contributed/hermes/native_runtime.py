@@ -355,7 +355,7 @@ class Runtime:
         register_worker_hooks(self.policy)
         from hermes_cli.plugins import get_plugin_manager
         self.usage = Usage(get_plugin_manager(), self.emit)
-        sibling("native_memory").install(frame.get("memoryCapability"), self.tool)
+        sibling("native_memory").install(frame.get("memoryCapability"), self.tool, frame["memoryContextBytes"])
         self.db = SessionDB(db_path=Path(frame["dbPath"]))
         session_id = self.db.resolve_resume_session_id(frame["sessionId"])
         from gateway.session_policy import policy_scope

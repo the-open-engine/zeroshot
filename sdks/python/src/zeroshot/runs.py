@@ -169,6 +169,8 @@ class RunStatus:
         created_at: Suspension time in Unix epoch milliseconds.
         due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
         request: Human request contract when suspended for a request.
+        steers: Standing directions with confirmed receiving executions.
+        omitted_steers: Older directions omitted by the bounded status listing.
     """
 
     run_id: str
@@ -187,6 +189,8 @@ class RunStatus:
     created_at: int | None = None
     due_at: int | None = None
     request: HumanRequest | None = None
+    steers: tuple[RunSteer, ...] = ()
+    omitted_steers: int = 0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -251,6 +255,29 @@ class LogEvent:
     target: str
     message: str
     map_indices: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunSteer:
+    """A recorded direction and its confirmed receiving executions.
+
+    Args:
+        id: Vector entry identity, usable with Run.vector().
+        created_at: Recording time in Unix epoch milliseconds.
+        text_bytes: Full UTF-8 text length.
+        excerpt: First 1,024 bytes, cut at a character boundary.
+        received_executions: Total confirmed receiving executions.
+        executions: Up to 64 most recent execution references.
+        executions_omitted: Whether earlier receiving executions were omitted.
+    """
+
+    id: str
+    created_at: int
+    text_bytes: int
+    excerpt: str
+    received_executions: int
+    executions: tuple[str, ...]
+    executions_omitted: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

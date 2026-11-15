@@ -65,6 +65,10 @@ impl RemoteCapsuleNodeRunner {
 
 #[async_trait]
 impl NodeRunner for RemoteCapsuleNodeRunner {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        self.channel.delivery_hooks()
+    }
+
     async fn capture_conversations(
         &self,
         run_id: &RunId,

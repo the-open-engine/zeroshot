@@ -612,6 +612,79 @@ impl NativeV2CliBackend for LocalCliBackend {
         .map(|_| ())
     }
 
+    async fn run_steer(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2CliError> {
+        let run_id = params.run_id.clone();
+        tokio::time::timeout(DEFAULT_READY_TIMEOUT, async {
+            require_local(target)?;
+            openengine_cluster_protocol::validate_steer(&params.text)
+                .map_err(NativeV2CliError::Usage)?;
+            let _claim = if self.recovery_path(&params.run_id)?.exists() {
+                Some(self.claim_recovery_workspace(&params.run_id)?)
+            } else {
+                None
+            };
+            if let Ok(recovery) = self.read_recovery_document(&params.run_id)
+                && let Some(successor) = recovery.successor_run_id
+            {
+                return Err(local_message(format!(
+                    "run already has successor {}",
+                    successor.as_str()
+                )));
+            }
+            let status = self
+                .read_recorded_status(RunStatusParams {
+                    run_id: params.run_id.clone(),
+                })
+                .await?;
+            if matches!(
+                status.status,
+                openengine_cluster_protocol::RunStatus::Suspended { .. }
+            ) {
+                let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+                let ledger = crate::v2_run_ledger::sqlite::SqliteRunLedger::open(paths.ledger())
+                    .map_err(local_error)?;
+                return crate::v2_run_ledger::steering::record(&ledger, params)
+                    .await
+                    .map_err(local_error);
+            }
+            if !matches!(
+                status.status,
+                openengine_cluster_protocol::RunStatus::Admitted {}
+                    | openengine_cluster_protocol::RunStatus::Running {
+                        graph_result: None,
+                        ..
+                    }
+            ) {
+                return Err(local_message(
+                    "steer requires an admitted, running or suspended run before its graph ends",
+                ));
+            }
+            let transport = self.connect_run(&params.run_id).await?;
+            controller_request(
+                &params.run_id,
+                "steer (it may have been recorded; check status)",
+                async {
+                    ClusterClient::new(transport.as_ref())
+                        .run_steer(params.clone())
+                        .await
+                        .map_err(protocol_error)
+                },
+            )
+            .await
+        })
+        .await
+        .map_err(|_| {
+            local_message(format!(
+                "steer timed out; it may have been recorded; check status for {}",
+                run_id.as_str()
+            ))
+        })?
+    }
+
     async fn run_suspend(
         &self,
         target: Option<&str>,

@@ -358,3 +358,5 @@ are generated through the reusable server verifier.
 Nested map guards count only item occurrences on selected choice routes. Completed candidates
 can use settled aggregates from before their race. Pending map bodies and queued items remain
 potential contributors until actual outcomes settle the join.
+
+Authored node `instructions` accept up to 262,144 UTF-8 bytes. Steering uses the same bound.

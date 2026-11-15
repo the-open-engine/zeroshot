@@ -543,6 +543,7 @@ impl ClusterBackend for LiveController {
         }
         let stopped = self.stopped.clone();
         Ok(RunForceResult {
+            steering: Default::default(),
             run_id: stopped.run_id,
             title: stopped.title,
             source: stopped.source,

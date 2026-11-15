@@ -21,6 +21,7 @@ from ._projection import (
     _log_event,
     _stack_status,
     _status,
+    _steer,
     _summary,
     _vector,
     _vectors,
@@ -34,6 +35,7 @@ from .runs import (
     RunRequest,
     RunResult,
     RunStatus,
+    RunSteer,
     RunSummary,
     RunVector,
     RunVectorsPage,
@@ -897,6 +899,31 @@ class Run:
         if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
             raise ProtocolError("Zeroshot emitted malformed answer result")
         return Run(self._client, value["runId"])
+
+    async def steer(self, text: str) -> RunSteer:
+        """Record standing direction without continuing a suspended run.
+
+        Args:
+            text: Nonblank UTF-8 direction, at most 262,144 bytes. Do not include secrets.
+
+        Returns:
+            The recorded steer, including its vector identity and receipt summary.
+
+        Raises:
+            RunNotFoundError: If the run is no longer retained.
+            TargetError: If the run refuses steering or transport fails.
+            ProtocolError: If native output is malformed.
+        """
+        await self._client._ready()
+        with tempfile.TemporaryDirectory(prefix="zeroshot-python-steer-") as directory:
+            path = Path(directory) / "steer.txt"
+            path.write_bytes(text.encode("utf-8"))
+            value = await self._client._native().json(
+                ["steer", self.id, "--text-file", str(path), *self._client._route_arguments()]
+            )
+        if not isinstance(value, dict) or value.get("runId") != self.id:
+            raise ProtocolError("Zeroshot emitted malformed steer result")
+        return _steer(value.get("steer"))
 
     async def vectors(self, *, after: str | None = None, limit: int = 50) -> RunVectorsPage:
         """Read one ordered page of the vector record.

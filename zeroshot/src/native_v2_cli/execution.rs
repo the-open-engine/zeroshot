@@ -154,6 +154,22 @@ where
 {
     let backend = context.backend;
     let command = match command {
+        NativeV2CliCommand::Steer { run, text } => {
+            let text = read_steer_text(text)?;
+            write_json(
+                output,
+                &backend
+                    .run_steer(
+                        run.target.as_deref(),
+                        openengine_cluster_protocol::RunSteerParams {
+                            run_id: run.run_id,
+                            text,
+                        },
+                    )
+                    .await?,
+            )?;
+            return Ok(CliOutcome::Completed);
+        }
         NativeV2CliCommand::Suspend(run) => {
             write_json(
                 output,
@@ -1016,3 +1032,37 @@ fn read_request_answer(
 #[cfg(test)]
 #[path = "execution/request_tests.rs"]
 mod request_tests;
+
+fn read_steer_text(source: super::SteerText) -> Result<String, NativeV2CliError> {
+    use std::io::Read;
+    let limit = openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES;
+    let text = match source {
+        super::SteerText::Text(text) => text,
+        source => {
+            let reader: Box<dyn Read> = match source {
+                super::SteerText::File(path) => {
+                    Box::new(std::fs::File::open(path).map_err(|error| {
+                        NativeV2CliError::Usage(format!("cannot read steer text file: {error}"))
+                    })?)
+                }
+                _ => Box::new(std::io::stdin()),
+            };
+            let mut bytes = Vec::new();
+            reader
+                .take(limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| {
+                    NativeV2CliError::Usage(format!("cannot read steer text: {error}"))
+                })?;
+            if bytes.len() > limit {
+                return Err(NativeV2CliError::Usage(format!(
+                    "steer exceeds {limit} UTF-8 bytes"
+                )));
+            }
+            String::from_utf8(bytes)
+                .map_err(|_| NativeV2CliError::Usage("steer must be UTF-8".into()))?
+        }
+    };
+    openengine_cluster_protocol::validate_steer(&text).map_err(NativeV2CliError::Usage)?;
+    Ok(text)
+}

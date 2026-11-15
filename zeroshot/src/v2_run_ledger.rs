@@ -34,6 +34,8 @@ pub(crate) use state::{
     validate_event,
 };
 
+pub(crate) mod steering;
+
 pub const INITIAL_CURSOR: &str = "v2:0";
 pub const MAX_ADMITTED_RUN_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_EVENT_BYTES: usize = 1024 * 1024;

@@ -371,3 +371,158 @@ async fn fake_replays_requests_with_large_text_and_contract() {
 async fn sqlite_replays_requests_with_large_text_and_contract() {
     exercise_large_request(&SqliteRunLedger::open_in_memory().assert_value()).await;
 }
+
+async fn exercise_steer(ledger: &dyn RunLedger) {
+    use openengine_cluster_protocol::{RunSteerParams, MAX_NODE_INSTRUCTIONS_BYTES};
+    use super::super::steering;
+    let run = RunId::new("steer-source");
+    ledger
+        .create_or_get(create(run.as_str(), "steer-source", 'a'))
+        .await
+        .assert_value();
+    let text = "é".repeat(MAX_NODE_INSTRUCTIONS_BYTES / 2);
+    let receipt = steering::record(
+        ledger,
+        RunSteerParams {
+            run_id: run.clone(),
+            text: text.clone(),
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(receipt.steer.text_bytes, MAX_NODE_INSTRUCTIONS_BYTES);
+    assert_eq!(receipt.steer.excerpt.len(), 1024);
+    assert!(receipt.steer.executions.is_empty());
+    let vector = super::super::vectors::show(
+        ledger,
+        RunVectorParams {
+            run_id: run.clone(),
+            id: receipt.steer.id.clone(),
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(vector.content, RunVectorContent::Steer { text });
+    let execution = reference(&run, 1).public_execution().assert_value();
+    ledger
+        .append(
+            &run,
+            vec![
+                super::super::vector_event(
+                    &run,
+                    RunVectorContent::SteerReceipt {
+                        steer_id: receipt.steer.id.clone(),
+                        conversation: "steer-source/node-instance/1".into(),
+                        execution: execution.clone(),
+                        node_instance: 1,
+                    },
+                )
+                .assert_value(),
+            ],
+        )
+        .await
+        .assert_value();
+    let next = RunId::new("steer-next");
+    ledger
+        .create_or_get(create(next.as_str(), "steer-next", 'b'))
+        .await
+        .assert_value();
+    super::super::vectors::inherit(ledger, ledger, &run, &next)
+        .await
+        .assert_value();
+    let status = steering::status(ledger, &next).await.assert_value();
+    assert_eq!(status.steers[0].executions, vec![execution]);
+    assert_eq!(status.steers[0].received_executions, 1);
+    assert!(steering::all(ledger, &next).await.assert_value().iter().any(|vector| {
+        matches!(&vector.content, RunVectorContent::SteerReceipt { steer_id, conversation, .. }
+            if steer_id == &receipt.steer.id && conversation == "steer-source/node-instance/1")
+    }));
+    ledger.request_force_stop(&run).await.assert_value();
+    assert!(
+        steering::record(
+            ledger,
+            RunSteerParams {
+                run_id: run.clone(),
+                text: "late".into()
+            }
+        )
+        .await
+        .is_err()
+    );
+    for invalid in [" ", "bad\0text", "bad\u{1b}text"] {
+        assert!(
+            steering::record(
+                ledger,
+                RunSteerParams {
+                    run_id: next.clone(),
+                    text: invalid.into()
+                }
+            )
+            .await
+            .is_err()
+        );
+    }
+    assert_eq!(steering::all(ledger, &next).await.assert_value().len(), 2);
+}
+
+#[tokio::test]
+async fn steer_vector_preserves_full_text_receipts_and_successor_on_fake_ledger() {
+    exercise_steer(&FakeRunLedger::new()).await;
+}
+#[tokio::test]
+async fn steer_vector_preserves_full_text_receipts_and_successor_on_sqlite() {
+    exercise_steer(&SqliteRunLedger::open_in_memory().assert_value()).await;
+}
+
+#[tokio::test]
+async fn steer_status_bounds_listing_and_receipts_without_limiting_publication() {
+    use super::super::steering;
+    use openengine_cluster_protocol::RunSteerParams;
+    let ledger = FakeRunLedger::new();
+    let run = RunId::new("steer-bounds");
+    ledger
+        .create_or_get(create(run.as_str(), "steer-bounds", 'a'))
+        .await
+        .assert_value();
+    for _ in 0..70 {
+        steering::record(
+            &ledger,
+            RunSteerParams {
+                run_id: run.clone(),
+                text: "a".repeat(1023) + "é",
+            },
+        )
+        .await
+        .assert_value();
+    }
+    let status = steering::status(&ledger, &run).await.assert_value();
+    assert_eq!(status.steers.len(), 64);
+    assert_eq!(status.omitted_steers, 6);
+    assert_eq!(status.steers[0].excerpt.len(), 1023);
+    let id = status.steers[0].id.clone();
+    for index in 1..=70 {
+        ledger
+            .append(
+                &run,
+                vec![
+                    super::super::vector_event(
+                        &run,
+                        RunVectorContent::SteerReceipt {
+                            steer_id: id.clone(),
+                            conversation: format!("execution/{index}"),
+                            execution: reference(&run, index).public_execution().assert_value(),
+                            node_instance: index,
+                        },
+                    )
+                    .assert_value(),
+                ],
+            )
+            .await
+            .assert_value();
+    }
+    let status = steering::status(&ledger, &run).await.assert_value();
+    assert_eq!(status.steers[0].received_executions, 70);
+    assert_eq!(status.steers[0].executions.len(), 64);
+    assert!(status.steers[0].executions_omitted);
+    assert!(serde_json::to_vec(&status).assert_value().len() < 1024 * 1024);
+}

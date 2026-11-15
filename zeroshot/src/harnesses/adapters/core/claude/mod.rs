@@ -334,6 +334,14 @@ impl ClaudeAdapter {
             state.resume_id = Some(metadata.id.clone());
             *turn.session.resume_id.lock().await = Some(metadata.id);
         }
+        let prompt = match &self.active_memory {
+            Some(hooks) => {
+                hooks
+                    .steer_prompt(turn.invocation, turn.control, prompt)
+                    .await
+            }
+            None => prompt,
+        };
         let mut process = match self
             .open_turn_process(turn, state.resume_id.as_deref(), files)
             .await?
