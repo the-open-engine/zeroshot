@@ -223,17 +223,6 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   const Icon = activity ? presentation.Icon : (nodeIcons[item.kind] ?? presentation.Icon);
   const terminal = ['succeed', 'fail'].includes(item.kind);
   const junction = ['fork', 'join', 'loop-start', 'loop-end', 'map-end'].includes(item.role);
-  const outputFields = nodeOutputFields(node);
-  const outputs = outputFields.length
-    ? typeSummary({
-        kind: 'record',
-        fields: Object.fromEntries(outputFields.map((field) => [field.name, field])),
-      })
-    : node.output?.kind !== 'null' && node.output?.kind
-      ? typeSummary(node.output)
-      : '';
-  const waitingForPerson =
-    data.observation?.state === 'suspended' && node.worker === REQUEST_WORKER;
   return (
     <>
       <ActivityToolbar data={data} selected={selected} node={node} />
@@ -253,21 +242,18 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
           <span>{activity && presentation.delivery ? presentation.label : item.label}</span>
         </div>
         {activity && executable(node) && (
-          <small
-            className={
-              waitingForPerson ? 'workflow-waiting' : !presentation.detail ? 'needs-value' : ''
+          <ActivityDetail
+            detail={presentation.detail}
+            readOnly={data.readOnly}
+            waitingForPerson={
+              data.observation?.state === 'suspended' && node.worker === REQUEST_WORKER
             }
-          >
-            {/* Same one-line slot as the worker detail, so the measured layout is unchanged. */}
-            {waitingForPerson
-              ? 'Waiting for an answer'
-              : presentation.detail || (data.readOnly ? 'Agent' : 'Choose model')}
-          </small>
+          />
         )}
         {item.detail && !activity && !junction && item.role !== 'decision' && (
           <small title={item.detail}>{item.detail}</small>
         )}
-        {activity && executable(node) && <ActivityFields node={node} outputs={outputs} />}
+        {activity && executable(node) && <ActivityFields node={node} />}
         {activity && <span className="workflow-node-identity">{node.name}</span>}
         {item.role === 'collapsed' && (
           <button
@@ -291,7 +277,35 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   );
 }
 
-function ActivityFields({ node, outputs }: { node: GraphNode; outputs: string }) {
+/** The card's one-line worker detail; a request step waiting on a person says so instead. */
+function ActivityDetail({
+  detail,
+  readOnly,
+  waitingForPerson,
+}: {
+  detail?: string;
+  readOnly?: boolean;
+  waitingForPerson: boolean;
+}) {
+  // Same one-line slot as the worker detail, so the measured layout is unchanged.
+  if (waitingForPerson) return <small className="workflow-waiting">Waiting for an answer</small>;
+  return (
+    <small className={detail ? '' : 'needs-value'}>
+      {detail || (readOnly ? 'Agent' : 'Choose model')}
+    </small>
+  );
+}
+
+function ActivityFields({ node }: { node: GraphNode }) {
+  const outputFields = nodeOutputFields(node);
+  const outputs = outputFields.length
+    ? typeSummary({
+        kind: 'record',
+        fields: Object.fromEntries(outputFields.map((field) => [field.name, field])),
+      })
+    : node.output?.kind !== 'null' && node.output?.kind
+      ? typeSummary(node.output)
+      : '';
   return (
     <div className="workflow-fields">
       {node.input?.kind && node.input.kind !== 'null' && (

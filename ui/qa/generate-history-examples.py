@@ -59,9 +59,13 @@ def value(schema, values, key=""):
     return None
 
 
-def step(name, text, output=None, signals=None, inputs=None, item=None, error=None, tool=None, ask=None):
-    return dict(name=name, text=text, output=output or {}, signals=signals,
-                inputs=inputs or {}, item=item, error=error, tool=tool, ask=ask)
+def step(name, text, output=None, signals=None, inputs=None, **extra):
+    """One simulated execution. `extra` may name its map `item`, an `error`, a `tool` or an `ask`."""
+    unknown = set(extra) - {"item", "error", "tool", "ask"}
+    assert not unknown, unknown
+    return dict(name=name, text=text, output=output or {}, signals=signals, inputs=inputs or {},
+                item=extra.get("item"), error=extra.get("error"), tool=extra.get("tool"),
+                ask=extra.get("ask"))
 
 
 def ask(name, question):

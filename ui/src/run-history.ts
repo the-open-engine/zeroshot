@@ -496,7 +496,7 @@ function readHistoryEvent(
   index: number,
   projection: HistoryProjection
 ) {
-  const { byId, references, systemLogs } = projection;
+  const { byId, systemLogs } = projection;
   const prior = priorExecution(event);
   if (event.kind === 'node_started' && event.reference) {
     startInvocation(projection, index, {
@@ -506,71 +506,29 @@ function readHistoryEvent(
       input: event.input,
     });
   } else if (prior) {
-    // An earlier run's execution, carried into this one. One still active is held from that run
-    // (a request awaiting its answer, or a wait), so it reads as waiting until it settles here.
-    const invocation = startInvocation(projection, index, {
-      reference: {
-        node: prior.occurrence.node,
-        execution: prior.execution,
-        nodeInstance: prior.node_instance,
-      },
-      mapIndices: prior.occurrence.mapIndices ?? [],
-      attempt: prior.attempt ?? 1,
-      input: prior.input,
-    });
-    if (!invocation) return;
-    invocation.imported = true;
-    if (prior.state === 'Active') invocation.state = 'suspended';
-    else if ('Settled' in prior.state) {
-      invocation.end = index;
-      invocation.outcome = prior.state.Settled.outcome;
-      invocation.state = prior.state.Settled.outcome.status === 'error' ? 'failed' : 'succeeded';
-    } else if ('Voided' in prior.state) {
-      invocation.end = index;
-      invocation.state = 'skipped';
-      invocation.reason = prior.state.Voided.reason;
-    }
-    // Inherited questions are recorded before the executions they came with.
-    const question = projection.unowned.find((request) => couldHaveAsked(invocation, request));
-    if (question) {
-      invocation.request = question;
-      projection.unowned.splice(projection.unowned.indexOf(question), 1);
-    }
+    readPriorExecution(prior, index, projection);
   } else if (event.kind === 'vector' && event.vector) {
     readVector(event.vector, projection);
   } else if (event.kind === 'suspended' && event.suspension?.request) {
     const { request, node, createdAt } = event.suspension;
     recordRequest(projection, { ...request, node, createdAt });
   } else if (event.kind === 'node_completed' && event.completion) {
-    const reference = event.completion.reference;
-    const invocation = byId.get(identity(reference.execution));
-    if (
-      invocation &&
-      sameReference(references.get(invocation.id), reference, invocation.imported) &&
-      invocation.end === undefined
-    ) {
-      invocation.end = index;
-      invocation.outcome = event.completion.outcome;
-      invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
-    }
+    const invocation = openInvocation(projection, event.completion.reference);
+    if (!invocation) return;
+    invocation.end = index;
+    invocation.outcome = event.completion.outcome;
+    invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
   } else if (
     ['execution_voided', 'wait_deferred', 'request_deferred'].includes(event.kind) &&
     event.reference
   ) {
-    const invocation = byId.get(identity(event.reference.execution));
-    if (
-      invocation &&
-      sameReference(references.get(invocation.id), event.reference, invocation.imported) &&
-      invocation.end === undefined
-    ) {
-      invocation.end = index;
-      invocation.state = ['wait_deferred', 'request_deferred'].includes(event.kind)
-        ? 'suspended'
-        : 'skipped';
-      invocation.reason = event.reason;
-      // The question this execution asked is recorded right after its deferral.
-      if (event.kind === 'request_deferred') projection.asking = invocation;
-    }
+    const invocation = openInvocation(projection, event.reference);
+    if (!invocation) return;
+    invocation.end = index;
+    invocation.state = event.kind === 'execution_voided' ? 'skipped' : 'suspended';
+    invocation.reason = event.reason;
+    // The question this execution asked is recorded right after its deferral.
+    if (event.kind === 'request_deferred') projection.asking = invocation;
   } else if (event.kind === 'safe_log') {
     const log = {
       index,
@@ -583,6 +541,54 @@ function readHistoryEvent(
   } else if (event.kind === 'token_usage_observed' && event.execution != null) {
     const invocation = byId.get(identity(event.execution));
     if (invocation) invocation.usage = accumulateUsage(invocation.usage, event.usage);
+  }
+}
+
+/** The still-open execution a settling event names, when its reference matches how it started. */
+function openInvocation(
+  projection: HistoryProjection,
+  reference: Reference
+): Invocation | undefined {
+  const invocation = projection.byId.get(identity(reference.execution));
+  return invocation &&
+    sameReference(projection.references.get(invocation.id), reference, invocation.imported) &&
+    invocation.end === undefined
+    ? invocation
+    : undefined;
+}
+
+/**
+ * An earlier run's execution, carried into this one. One still active is held from that run (a
+ * request awaiting its answer, or a wait), so it reads as waiting until it settles here.
+ */
+function readPriorExecution(prior: PriorExecution, index: number, projection: HistoryProjection) {
+  const invocation = startInvocation(projection, index, {
+    reference: {
+      node: prior.occurrence.node,
+      execution: prior.execution,
+      nodeInstance: prior.node_instance,
+    },
+    mapIndices: prior.occurrence.mapIndices ?? [],
+    attempt: prior.attempt ?? 1,
+    input: prior.input,
+  });
+  if (!invocation) return;
+  invocation.imported = true;
+  if (prior.state === 'Active') invocation.state = 'suspended';
+  else if ('Settled' in prior.state) {
+    invocation.end = index;
+    invocation.outcome = prior.state.Settled.outcome;
+    invocation.state = prior.state.Settled.outcome.status === 'error' ? 'failed' : 'succeeded';
+  } else if ('Voided' in prior.state) {
+    invocation.end = index;
+    invocation.state = 'skipped';
+    invocation.reason = prior.state.Voided.reason;
+  }
+  // Inherited questions are recorded before the executions they came with.
+  const question = projection.unowned.find((request) => couldHaveAsked(invocation, request));
+  if (question) {
+    invocation.request = question;
+    projection.unowned.splice(projection.unowned.indexOf(question), 1);
   }
 }
 
