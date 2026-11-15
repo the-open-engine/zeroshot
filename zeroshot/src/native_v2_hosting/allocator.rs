@@ -1488,14 +1488,11 @@ fn remove_run_directory(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
     std::fs::remove_dir_all(path).map_err(|_| CapsuleCleanupUnavailable)
 }
 
-#[cfg(all(test, unix))]
-mod test_support;
-
-#[cfg(all(test, target_os = "linux"))]
-mod cleanup_tests;
-
 #[cfg(all(test, target_os = "linux"))]
 mod allocation_tests;
-
+#[cfg(all(test, target_os = "linux"))]
+mod cleanup_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod lifecycle_tests;
+#[cfg(all(test, unix))]
+mod test_support;
