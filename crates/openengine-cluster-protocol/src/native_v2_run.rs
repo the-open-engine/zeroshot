@@ -698,6 +698,9 @@ pub use wire::{
 #[path = "native_v2_run/tests.rs"]
 mod tests;
 
+mod steering;
+pub use steering::*;
+
 mod vectors;
 pub use vectors::*;
 

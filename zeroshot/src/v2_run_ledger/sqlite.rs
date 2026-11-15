@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS v2_run_events (
 CREATE INDEX IF NOT EXISTS v2_run_vector_ids
     ON v2_run_events (run_id, json_extract(event_json, '$.vector.id'), sequence)
     WHERE json_extract(event_json, '$.kind') = 'vector';
+CREATE INDEX IF NOT EXISTS v2_run_steering
+    ON v2_run_events (run_id, sequence)
+    WHERE json_extract(event_json, '$.kind') = 'vector'
+        AND json_extract(event_json, '$.vector.kind') IN ('steer', 'steer_receipt');
 ";
 
 const VECTOR_CURSOR_QUERY: &str = "SELECT sequence FROM v2_run_events
@@ -50,6 +54,8 @@ const HAS_RECORDED_AT_QUERY: &str =
 
 #[path = "sqlite/readonly.rs"]
 mod readonly;
+#[path = "sqlite/steering.rs"]
+mod steering;
 
 // The temporary recovered image must live through clones and cancelled blocking operations,
 // and must be removed only after SQLite has closed its handles (including on Windows).
@@ -314,6 +320,17 @@ impl RunLedger for SqliteRunLedger {
             snapshot_page(connection, recorded_at, &run_id, after.as_ref())
         })
         .await
+    }
+
+    async fn steering_events(
+        &self,
+        run_id: &RunId,
+        after: Option<&Cursor>,
+    ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+        let run_id = run_id.clone();
+        let after = after.cloned();
+        self.with_connection(move |connection| steering::read(connection, &run_id, after.as_ref()))
+            .await
     }
 }
 

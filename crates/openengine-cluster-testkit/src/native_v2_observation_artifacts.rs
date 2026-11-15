@@ -139,6 +139,7 @@ pub fn native_v2_source_fixture() -> ResolvedSource {
 
 fn status() -> RunStatusResult {
     RunStatusResult {
+        steering: Default::default(),
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
@@ -283,18 +284,19 @@ fn force_fixture() -> Value {
         graph_result: None,
     };
     json!({
-        "params": RunForceParams { run_id: run_id() },
-        "result": RunForceResult {
-            run_id: result.run_id,
-            title: result.title,
-            source: result.source,
-            size: result.size,
-            at_cursor: result.at_cursor,
-            status: result.status,
-            controller: None,
-            workspace_recovery: result.workspace_recovery,
-        }
-    })
+            "params": RunForceParams { run_id: run_id() },
+            "result": RunForceResult {
+    steering: Default::default(),
+    run_id: result.run_id,
+                title: result.title,
+                source: result.source,
+                size: result.size,
+                at_cursor: result.at_cursor,
+                status: result.status,
+                controller: None,
+                workspace_recovery: result.workspace_recovery,
+            }
+        })
 }
 
 fn suspension_fixture(wait: bool) -> Value {

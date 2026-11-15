@@ -769,6 +769,27 @@ impl NativeV2PlatformController {
         }
     }
 
+    pub async fn steer(
+        &self,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2PlatformError> {
+        openengine_cluster_protocol::validate_steer(&params.text)
+            .map_err(NativeV2PlatformError::InvalidRequest)?;
+        let _control = self.lock_run_control(&params.run_id).await;
+        if let Some(successor) = self
+            .allocator
+            .workspace_recovery(&params.run_id)
+            .await
+            .successor_run_id
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(format!(
+                "run already has successor {}",
+                successor.as_str()
+            )));
+        }
+        Ok(crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params).await?)
+    }
+
     pub async fn suspend(
         &self,
         params: openengine_cluster_protocol::RunSuspendParams,
@@ -1127,6 +1148,7 @@ impl NativeV2PlatformController {
 
     async fn force_result(&self, run_id: &RunId) -> Result<RunForceResult, NativeV2PlatformError> {
         let RunStatusResult {
+            steering: _,
             run_id,
             title,
             source,
@@ -1142,6 +1164,7 @@ impl NativeV2PlatformController {
             })
             .await?;
         Ok(RunForceResult {
+            steering: Default::default(),
             run_id,
             title,
             source,

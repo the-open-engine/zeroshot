@@ -94,6 +94,9 @@ for name in ("--input", "--graph", "--runtime-config", "--uniform-runtime-config
     if path:
         with open(path, encoding="utf-8") as stream:
             entry[name] = json.load(stream)
+if option("--text-file"):
+    with open(option("--text-file"), encoding="utf-8", newline="") as stream:
+        entry["text"] = stream.read()
 if args[:2] in (["stack", "validate"], ["stack", "submit"]):
     with open(args[2], encoding="utf-8") as stream:
         entry["stack"] = json.load(stream)
@@ -171,6 +174,13 @@ elif args and args[0] == "list":
             )
         )
     print(json.dumps({"runs": runs}))
+elif args and args[0] == "steer":
+    if os.environ.get("FAKE_STEER_FAIL"):
+        fail("invalid_request", "invalid_request", "run already has successor next", {})
+    text = entry["text"]
+    print(json.dumps({"runId":args[1],"steer":{"id":"steer-1","createdAt":1000,
+        "textBytes":len(text.encode()),"excerpt":text.encode()[:1024].decode("utf-8", "ignore"),
+        "receivedExecutions":0,"executions":[]}}))
 elif args and args[0] == "suspend":
     status = {"phase":"running","activeExecutions":[],"suspendRequested":True}
     print(json.dumps(projection(args[1], status, "v2:1")))
@@ -191,10 +201,17 @@ elif args and args[0] == "resume":
     print(json.dumps({"runId":"successor","resumedFrom":args[1]}))
 elif args and args[0] == "vectors":
     vector={"id":"vector-1","kind":"suspend_request","runId":"original","createdAt":1762905600000}
+    vectors=[vector]
+    if os.environ.get("FAKE_STEER_VECTORS"):
+        vector={"id":"steer-1","kind":"steer","runId":"original","createdAt":1762905600000}
+        receipt={"id":"receipt-1","kind":"steer_receipt","runId":"original",
+                 "createdAt":1762905600001,"steerId":"steer-1","execution":"execution-1"}
+        vectors=[{**vector,"textBytes":262144},receipt]
+        vector={**vector,"text":"é"*131072}
     if args[1] == "show":
         print(json.dumps(vector))
     else:
-        print(json.dumps({"runId":args[1],"vectors":[vector],"nextAfter":"vector-1"}))
+        print(json.dumps({"runId":args[1],"vectors":vectors,"nextAfter":"vector-1"}))
 elif args and args[0] == "status":
     if os.environ.get("FAKE_WATCH_FAILURE") in ("early", "outage_failed_run"):
         print(json.dumps(projection(args[1], failed_status, "v2:2")))

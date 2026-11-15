@@ -19,6 +19,7 @@ from .runs import (
     LogEvent,
     RunResult,
     RunStatus,
+    RunSteer,
     RunSummary,
     RunVector,
     RunVectorsPage,
@@ -77,6 +78,8 @@ def _status(value: object) -> RunStatus:
         cursor=_cursor(root),
         phase=phase,
         active_executions=active,
+        steers=tuple(_steer(item) for item in _mapping_list(root.get("steers", []), "steers")),
+        omitted_steers=_steer_count(root, "omittedSteers", default=0),
         result=result,
         graph_result=graph_result,
         controller=_controller(root.get("controller")),
@@ -520,4 +523,27 @@ def _inbox_request(value: object) -> InboxRequest:
         successor_run_id=_nullable_string(
             {"successorRunId": request.get("successorRunId")}, "successorRunId", "inbox request"
         ),
+    )
+
+
+def _steer_count(value: Mapping[str, object], name: str, *, default: int | None = None) -> int:
+    count = value.get(name, default)
+    if type(count) is not int or not 0 <= count <= _MAX_JAVASCRIPT_SAFE_INTEGER:
+        raise ProtocolError(f"Zeroshot emitted malformed steer.{name}")
+    return count
+
+
+def _steer(value: object) -> RunSteer:
+    entry = _mapping(value, "steer")
+    omitted = entry.get("executionsOmitted", False)
+    if type(omitted) is not bool:
+        raise ProtocolError("Zeroshot emitted malformed steer.executionsOmitted")
+    return RunSteer(
+        id=_string(entry, "id", "steer"),
+        created_at=_positive_javascript_safe_integer(entry, "createdAt", "steer"),
+        text_bytes=_steer_count(entry, "textBytes"),
+        excerpt=_string(entry, "excerpt", "steer"),
+        received_executions=_steer_count(entry, "receivedExecutions"),
+        executions=_string_list(entry, "executions", "steer"),
+        executions_omitted=omitted,
     )

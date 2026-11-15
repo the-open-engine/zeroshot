@@ -354,7 +354,7 @@ async fn conversation_checkpoints_deduplicate_growth_across_suspended_successors
     fixture.json(&["force-stop", successor], "finish").await;
 }
 
-const SCRIPT: &str = r#"#!/bin/sh
+pub(super) const SCRIPT: &str = r#"#!/bin/sh
 set -eu
 cat >/dev/null
 if test "$ZEROSHOT_NODE_NAME" = check; then

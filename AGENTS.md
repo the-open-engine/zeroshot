@@ -73,8 +73,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   database under local state; direct targets use one persistent target-wide database with repository
   scopes. Generic hosting embedders explicitly select a namespace; Platform and ACP integration are
   not enabled implicitly. Runtime `activeMemory` independently controls repository and graph
-  collection/recall; `globalAgents.postmortem` controls the built-in after-run agent and inherits an
-  existing agent node's provider/model/connections. Four isolated verifier specialists separately maintain
+  collection/recall and does not control steering; `globalAgents.postmortem` controls the built-in
+  after-run agent and inherits an existing agent node's provider/model/connections. Four isolated verifier specialists separately maintain
   graph lessons, maintain repository lessons, discover graph procedures, and discover repository
   lessons. Maintenance contexts and mutation authority are partitioned by lesson scope, including
   repository-qualified graph lessons; each scope's opt-out disables its maintenance and discovery.
@@ -97,13 +97,26 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   before runner closure/cleanup, preserves the durably latched primary outcome and its failure
   diagnostics on ordinary failure or controller restart after confirmed cleanup, and
   stays outside reducer/checkpoint history. All usage remains part of the run. Never turn incomplete
-  supplied-memory evidence into an empty manifest. Graph guidance supplements only private provider
-  invocations after plan validation; it never mutates authored instructions or graph hashes. Hooks
-  retrieve complete cards from a frozen resident index with relevance ranking. Separate per-injection
-  ceilings default to 16000 approximate tokens for node graph guidance and 8000 for repository hooks;
-  each accepts 1..=64000 and converts one token to four UTF-8 bytes, including framing. There is no
-  cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
-  including compaction; new conversations and conversations continued in a successor receive fresh delivery sets. Windows memory storage and initialization use shared
+  supplied-memory evidence into an empty manifest. Graph guidance and steers supplement only private
+  provider invocations after plan validation; they never mutate authored instructions or graph hashes. Hooks
+  retrieve complete cards from a frozen resident index with relevance ranking. Steers come from the
+  run's vector record, are not ranked, and go first. Separate per-injection ceilings for memory default
+  to 16000 approximate tokens for node graph guidance and 8000 for repository hooks; each accepts
+  1..=64000 and converts one token to four UTF-8 bytes, including framing. A steer is delivered whole
+  and does not count against them. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
+  including compaction; new conversations and conversations continued in a successor receive fresh
+  memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
+  keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
+  restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
+  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
+  than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
+  history is never replayed to build steering summaries; ledgers predating vectors have no steers.
+  Callback capabilities belong to their execution and are retired when it settles or its native
+  launch is replaced.
+  Aggregate steering prompts stream through adapter-owned transports: Copilot bounds inbound RPC,
+  while Hermes reassembles bounded private prompt frames before starting one native turn.
+  Windows memory storage and initialization use shared
   private-state helpers, including validation of SQLite sidecars. SQLite-created Windows children
   and externally written initialization responses may inherit the token's default owner only with
   an already private ACL and verified private parent; normalize them to explicit current-user
@@ -129,7 +142,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Codex trusts only the exact normalized hash of the product-owned session hook; never bypass trust
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
-  transport failure makes maintenance evidence unknown. Callback frames have absolute I/O deadlines
+  transport failure makes maintenance evidence unknown; a steer has no receipt and is offered again.
+  Native callback installation shares the updater's installed-executable path normalization, so
+  Linux controllers keep delivering after an atomic executable replacement.
+  Callback frames have absolute I/O deadlines
   so a stalled child cannot keep the resident broker or run cleanup alive indefinitely.
   Interrupted auxiliary work marks run usage incomplete. Discovery includes authentic main-run
   agent completions and bounded native tool receipts across all graph shapes, retries and locally
@@ -236,7 +252,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Existing public core module paths remain available for embedders. Core and contributed adapters
   implement the same complete execution and Active Memory contracts. The distinction controls
   distribution and maintenance ownership only.
-  Native memory hook/extension installation belongs to the adapter; shared memory owns the broker,
+  Native memory hook/extension installation belongs to the adapter; the carrier is installed for every
+  agent conversation, with memory off too. Shared memory owns the broker,
   frozen recall budgets, receipts and maintenance. Contributions never acquire a separate runtime
   or reduced feature path. Official local builds enable `contributed-harnesses`; target images and
   Platform dependencies disable default features, and target admission independently uses the

@@ -124,6 +124,30 @@ class RuntimeProtocolTests(unittest.TestCase):
         self.assertTrue(bridge.control_failed)
         self.assertTrue(bridge.commands.empty())
 
+    def test_steer_chunks_make_one_prompt_and_reset_for_the_next_turn(self):
+        bridge = runtime.Runtime(lambda *_args, **_kwargs: None)
+        bridge.interrupt = lambda: None
+        frames = [{"type": "prompt_chunk", "text": "first 🦀\t"},
+                  {"type": "prompt_chunk", "text": "second\r\n"},
+                  {"type": "prompt", "text": "last"},
+                  {"type": "prompt", "text": "next turn"}, {"type": "stop"}]
+        bridge.controls(io.BytesIO(b"".join(json.dumps(frame).encode() + b"\n" for frame in frames)))
+        self.assertFalse(bridge.control_failed)
+        self.assertEqual(bridge.commands.get_nowait(), "first 🦀\tsecond\r\nlast")
+        self.assertEqual(bridge.commands.get_nowait(), "next turn")
+        self.assertTrue(bridge.commands.empty())
+
+    def test_steer_incomplete_malformed_or_stopped_chunks_never_queue_a_partial_prompt(self):
+        for tail, failed in ((b"", True), (b'{"type":"prompt_chunk","text":{}}\n', True),
+                             (b'{"type":"stop"}\n', False)):
+            with self.subTest(tail=tail):
+                bridge = runtime.Runtime(lambda *_args, **_kwargs: None)
+                bridge.interrupt = lambda: None
+                bridge.controls(io.BytesIO(b'{"type":"prompt_chunk","text":"incomplete"}\n' + tail))
+                self.assertTrue(bridge.stop.is_set())
+                self.assertEqual(bridge.control_failed, failed)
+                self.assertTrue(bridge.commands.empty())
+
 
 class FailureDiagnosticTests(unittest.TestCase):
     def setUp(self):

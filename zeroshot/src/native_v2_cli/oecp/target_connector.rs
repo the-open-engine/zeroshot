@@ -146,6 +146,16 @@ pub trait TargetConnector: Send + Sync {
         Ok(())
     }
 
+    async fn connect_steering(
+        &self,
+        _name: &str,
+        _run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise steering".to_owned(),
+        ))
+    }
+
     async fn connect_run_suspension(
         &self,
         _name: &str,

@@ -179,6 +179,10 @@ impl NativeCapsuleNodeEndpoint {
 
 #[async_trait]
 impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        self.runner.delivery_hooks()
+    }
+
     async fn capture_conversations(
         &self,
         run_id: &RunId,

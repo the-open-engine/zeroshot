@@ -17,6 +17,7 @@ const DECLARED_KEY: &str = "local-declared-key";
 
 pub(super) struct LocalFixture {
     root: TemporaryDirectory,
+    executable: PathBuf,
     harness_environment: std::collections::BTreeMap<String, String>,
     pub(super) repository: PathBuf,
     working_directory: PathBuf,
@@ -55,6 +56,7 @@ impl LocalFixture {
         write_json(&runtime, &local_runtime());
         Self {
             root,
+            executable: env!("CARGO_BIN_EXE_zeroshot").into(),
             harness_environment: std::collections::BTreeMap::new(),
             working_directory: repository.clone(),
             cwd: None,
@@ -138,7 +140,7 @@ impl LocalFixture {
     }
 
     fn command_with_inline(&self, args: &[&str], mode: &str, inline: bool) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
+        let mut command = Command::new(&self.executable);
         command
             .args(args)
             .current_dir(&self.working_directory)

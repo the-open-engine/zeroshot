@@ -190,6 +190,9 @@ enum UtilityCommand {
     /// Its successor continues captured node-instance conversations from that checkpoint.
     Suspend(RunSelectorArgs),
 
+    /// Broadcast standing direction to every agent conversation in a running or suspended run.
+    Steer(RunSteerArgs),
+
     /// Answer a suspended request from a JSON file and start its successor.
     ///
     /// The file contains signals and output matching the request's declared shape. At or after
@@ -866,6 +869,22 @@ struct RunExportWorkspaceArgs {
     /// Explicit destination path for the raw tar archive; must not exist.
     #[arg(long, value_name = "PATH")]
     output: PathBuf,
+}
+
+#[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("text_source").required(true).args(["text", "text_file", "text_stdin"])))]
+struct RunSteerArgs {
+    #[command(flatten)]
+    run: RunSelectorArgs,
+    /// Direction, as given. Do not put secrets in a steer.
+    #[arg(value_name = "TEXT")]
+    text: Option<String>,
+    /// Read UTF-8 direction from this file.
+    #[arg(long, value_name = "FILE")]
+    text_file: Option<PathBuf>,
+    /// Read UTF-8 direction from standard input.
+    #[arg(long)]
+    text_stdin: bool,
 }
 
 #[derive(Debug, Args)]

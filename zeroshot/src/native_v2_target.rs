@@ -159,6 +159,7 @@ pub struct NativeV2TargetConnector<R, A, D> {
 
 #[derive(Clone, Copy)]
 enum TargetSessionPurpose {
+    Steering,
     General,
     WorkspaceRecovery,
     RunSuspension,
@@ -512,6 +513,15 @@ where
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
 
+    async fn connect_steering(
+        &self,
+        name: &str,
+        run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(name, Some(run_id), TargetSessionPurpose::Steering)
+            .await
+    }
+
     async fn connect_run_suspension(
         &self,
         name: &str,
@@ -853,6 +863,9 @@ where
         let target = self.registry.get(name).map_err(cli_target_error)?;
         let request = TargetOecpSessionRequest { run_id };
         let session = match purpose {
+            TargetSessionPurpose::Steering => {
+                self.authority.steering_session(&target, &request).await
+            }
             TargetSessionPurpose::General => self.authority.oecp_session(&target, &request).await,
             TargetSessionPurpose::WorkspaceRecovery => {
                 self.authority

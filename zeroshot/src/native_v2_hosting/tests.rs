@@ -844,3 +844,144 @@ fn unsupported_contained_targets_refuse_workspace_checkpoint_opt_out() {
             .contains("does not support disabling workspace checkpoints")
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn root_steer_direct_composition_delivers_without_active_memory() {
+    if !cfg!(target_os = "linux") || unsafe { libc::geteuid() } != 0 {
+        return;
+    }
+    use crate::v2_run_ledger::{CreateRun, RunLedger};
+    use openengine_cluster_protocol::{IdempotencyKey, RunSteerParams, RunVectorContent, Sha256Digest};
+    let repository = RepositoryFixture::new();
+    let root = TestDirectory::new("hosting-steer");
+    prepare_storage_root(&root.path().to_owned()).assert_value();
+    let mut submission = submission(
+        claude_runtime(),
+        repository.main_revision.as_str(),
+        "hosting-steer",
+    );
+    submission.runtime.active_memory.repository = false;
+    submission.runtime.active_memory.graph = false;
+    let admitted = admit(submission).await;
+    let cli = std::env::current_exe()
+        .assert_value()
+        .parent()
+        .assert_value()
+        .parent()
+        .assert_value()
+        .join("zeroshot");
+    assert!(
+        cli.is_file(),
+        "build the candidate CLI before running root_steer"
+    );
+    let callback = root.child("steer-callback");
+    fs::copy(&cli, &callback).assert_value();
+    let script = format!(
+        r#"import json, os, pathlib, shlex, subprocess, sys, time
+if '--version' in sys.argv:
+    print('2.1.318 (Claude Code)'); sys.exit(0)
+sys.stdin.read()
+settings = json.loads(sys.argv[sys.argv.index('--settings')+1])
+command = shlex.split(settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])
+command[0] = {cli}
+pathlib.Path('steer-held').touch()
+while not pathlib.Path('steer-release').exists(): time.sleep(.01)
+result = subprocess.run(command, input=json.dumps({{'hook_event_name':'PreToolUse','tool_name':'Read'}}), text=True, capture_output=True, check=True)
+pathlib.Path('steer-context').write_text(result.stdout)
+sys.exit(17)
+"#,
+        cli = serde_json::to_string(&callback).assert_value()
+    );
+    let mut config = capsule_config(root.path().to_owned());
+    config.claude_process_environment = ClaudeProcessEnvironment::default();
+    config.claude_executable = "/usr/bin/python3".into();
+    config.claude_prefix_arguments = vec!["-c".into(), script];
+    let allocator = capsule_allocator(config)
+        .assert_value()
+        .with_test_filesystem_and_source(repository.remote, portable_filesystem);
+    let run = RunId::new("root-steer");
+    let capsule = allocator
+        .allocate(
+            crate::native_v2_candidate::test_support::allocation_request(&run, &admitted, None),
+        )
+        .await
+        .assert_value();
+    let ledger: Arc<dyn RunLedger> = Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run.clone(),
+            submission_key: IdempotencyKey::new("root-steer").assert_value(),
+            submission_digest: Sha256Digest::new("a".repeat(64)).assert_value(),
+            admitted: admitted.clone(),
+        })
+        .await
+        .assert_value();
+    capsule
+        .runner
+        .delivery_hooks()
+        .assert_value()
+        .bind_ledger(run.clone(), ledger.clone());
+    let binding = admitted.runtime.nodes()[&NodeName::new("work").assert_value()].clone();
+    let request = crate::native_v2_candidate::test_support::NodeRequestFixture {
+        run_id: run.as_str(),
+        node: "work",
+        node_instance: 1,
+        execution: 1,
+        worker: "agent.work@1",
+        instructions: "Exercise the hosted node.",
+        input: Value::Null,
+        binding,
+        environment: BTreeMap::new(),
+    }
+    .into_request();
+    let mut handle = capsule.runner.start(request).await.assert_value();
+    let mut output = handle.take_initial_output().assert_value();
+    let workspace = allocator.run_path(&run).join("workspace");
+    tokio::select! {
+        ready = tokio::time::timeout(Duration::from_secs(10), async {
+            while !workspace.join("steer-held").is_file() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }) => ready.assert_value_with("contained steer provider ready"),
+        completion = handle.completion() => {
+            let mut diagnostics = Vec::new();
+            while let Ok(event) = output.recv().await {
+                diagnostics.push(event);
+            }
+            panic!("contained steer provider exited before readiness: {completion:?}; {diagnostics:?}");
+        }
+    }
+    crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        RunSteerParams {
+            run_id: run.clone(),
+            text: "Steer the contained agent.".into(),
+        },
+    )
+    .await
+    .assert_value();
+    fs::write(workspace.join("steer-release"), "").assert_value();
+    let _ = tokio::time::timeout(Duration::from_secs(10), handle.completion())
+        .await
+        .assert_value();
+    assert!(
+        fs::read_to_string(workspace.join("steer-context"))
+            .assert_value()
+            .contains("Steer the contained agent.")
+    );
+    let vectors = crate::v2_run_ledger::steering::all(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert_eq!(
+        vectors
+            .iter()
+            .filter(|v| matches!(v.content, RunVectorContent::SteerReceipt { .. }))
+            .count(),
+        1
+    );
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+}

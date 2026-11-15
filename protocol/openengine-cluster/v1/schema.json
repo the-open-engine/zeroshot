@@ -2741,7 +2741,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/InboxListParams"
+          "$ref": "#/$defs/RunSteerParams"
         }
       },
       "required": [
@@ -2764,7 +2764,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunVectorsParams"
+          "$ref": "#/$defs/InboxListParams"
         }
       },
       "required": [
@@ -2787,7 +2787,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunVectorParams"
+          "$ref": "#/$defs/RunVectorsParams"
         }
       },
       "required": [
@@ -2810,7 +2810,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunCheckpointsParams"
+          "$ref": "#/$defs/RunVectorParams"
         }
       },
       "required": [
@@ -2833,7 +2833,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunResumeParams"
+          "$ref": "#/$defs/RunCheckpointsParams"
         }
       },
       "required": [
@@ -2845,6 +2845,29 @@
       "type": "object"
     },
     "JsonRpcRequest25": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunResumeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest26": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -3218,6 +3241,16 @@
         }
       ]
     },
+    "JsonRpcResponse27": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess27"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
     "JsonRpcResponse3": {
       "anyOf": [
         {
@@ -3525,7 +3558,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/InboxListResult"
+          "$ref": "#/$defs/RunSteerResult"
         }
       },
       "required": [
@@ -3544,7 +3577,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/InboxShowResult"
+          "$ref": "#/$defs/InboxListResult"
         }
       },
       "required": [
@@ -3563,7 +3596,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunVectorsResult"
+          "$ref": "#/$defs/InboxShowResult"
         }
       },
       "required": [
@@ -3582,7 +3615,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunVector"
+          "$ref": "#/$defs/RunVectorsResult"
         }
       },
       "required": [
@@ -3601,7 +3634,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunCheckpointsResult"
+          "$ref": "#/$defs/RunVector"
         }
       },
       "required": [
@@ -3620,7 +3653,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunResumeResult"
+          "$ref": "#/$defs/RunCheckpointsResult"
         }
       },
       "required": [
@@ -3631,6 +3664,25 @@
       "type": "object"
     },
     "JsonRpcSuccess26": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunResumeResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess27": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -3910,7 +3962,7 @@
       "type": "object"
     },
     "NodeInstructions": {
-      "maxLength": 16384,
+      "maxLength": 262144,
       "minLength": 1,
       "pattern": "^[^\\u0000]*[^\\s\\u0000][^\\u0000]*$",
       "type": "string"
@@ -5082,6 +5134,11 @@
           ],
           "description": "Omitted for responding controllers and finished runs. Never durable run state."
         },
+        "omittedSteers": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "runId": {
           "description": "Public identity of the run whose force request was recorded.",
           "type": "string"
@@ -5107,6 +5164,12 @@
         "status": {
           "$ref": "#/$defs/RunStatus",
           "description": "Public phase projected after the force request was recorded."
+        },
+        "steers": {
+          "items": {
+            "$ref": "#/$defs/RunSteer"
+          },
+          "type": "array"
         },
         "title": {
           "description": "Immutable title captured when the run was admitted.",
@@ -5729,6 +5792,11 @@
           ],
           "description": "Omitted for responding controllers and finished runs. Never durable run state."
         },
+        "omittedSteers": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "runId": {
           "type": "string"
         },
@@ -5751,6 +5819,12 @@
         "status": {
           "$ref": "#/$defs/RunStatus"
         },
+        "steers": {
+          "items": {
+            "$ref": "#/$defs/RunSteer"
+          },
+          "type": "array"
+        },
         "title": {
           "maxLength": 256,
           "minLength": 1,
@@ -5767,6 +5841,85 @@
         "size",
         "atCursor",
         "status"
+      ],
+      "type": "object"
+    },
+    "RunSteer": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "executions": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "executionsOmitted": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "receivedExecutions": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "textBytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "textBytes",
+        "excerpt",
+        "receivedExecutions",
+        "executions"
+      ],
+      "type": "object"
+    },
+    "RunSteerParams": {
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "text": {
+          "$ref": "#/$defs/NodeInstructions"
+        }
+      },
+      "required": [
+        "runId",
+        "text"
+      ],
+      "type": "object"
+    },
+    "RunSteerResult": {
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "steer": {
+          "$ref": "#/$defs/RunSteer"
+        }
+      },
+      "required": [
+        "runId",
+        "steer"
       ],
       "type": "object"
     },
@@ -5855,6 +6008,55 @@
     },
     "RunVector": {
       "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "steer",
+              "type": "string"
+            },
+            "text": {
+              "$ref": "#/$defs/NodeInstructions"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "conversation": {
+              "type": "string"
+            },
+            "execution": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "steer_receipt",
+              "type": "string"
+            },
+            "nodeInstance": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "steerId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "steerId",
+            "conversation",
+            "execution",
+            "nodeInstance"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "expiresAt": {
@@ -6059,6 +6261,47 @@
     "RunVectorSummary": {
       "description": "Bounded list projection. Full text, schemas and answers require run/vector.",
       "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "steer",
+              "type": "string"
+            },
+            "textBytes": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "textBytes"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "execution": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "steer_receipt",
+              "type": "string"
+            },
+            "steerId": {
+              "$ref": "#/$defs/VectorId"
+            }
+          },
+          "required": [
+            "kind",
+            "steerId",
+            "execution"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "kind": {
@@ -7474,16 +7717,16 @@
       "$ref": "#/$defs/JsonRpcResponse4"
     },
     "inbox_list_request": {
-      "$ref": "#/$defs/JsonRpcRequest20"
+      "$ref": "#/$defs/JsonRpcRequest21"
     },
     "inbox_list_response": {
-      "$ref": "#/$defs/JsonRpcResponse20"
+      "$ref": "#/$defs/JsonRpcResponse21"
     },
     "inbox_show_request": {
       "$ref": "#/$defs/JsonRpcRequest15"
     },
     "inbox_show_response": {
-      "$ref": "#/$defs/JsonRpcResponse21"
+      "$ref": "#/$defs/JsonRpcResponse22"
     },
     "initialize_request": {
       "$ref": "#/$defs/JsonRpcRequest"
@@ -7531,16 +7774,16 @@
       "$ref": "#/$defs/JsonRpcResponse18"
     },
     "run_checkpoints_request": {
-      "$ref": "#/$defs/JsonRpcRequest23"
+      "$ref": "#/$defs/JsonRpcRequest24"
     },
     "run_checkpoints_response": {
-      "$ref": "#/$defs/JsonRpcResponse24"
+      "$ref": "#/$defs/JsonRpcResponse25"
     },
     "run_discard_workspace_request": {
-      "$ref": "#/$defs/JsonRpcRequest25"
+      "$ref": "#/$defs/JsonRpcRequest26"
     },
     "run_discard_workspace_response": {
-      "$ref": "#/$defs/JsonRpcResponse26"
+      "$ref": "#/$defs/JsonRpcResponse27"
     },
     "run_export_workspace_request": {
       "$ref": "#/$defs/RunExportWorkspaceParams",
@@ -7568,16 +7811,22 @@
       "$ref": "#/$defs/JsonRpcResponse17"
     },
     "run_resume_request": {
-      "$ref": "#/$defs/JsonRpcRequest24"
+      "$ref": "#/$defs/JsonRpcRequest25"
     },
     "run_resume_response": {
-      "$ref": "#/$defs/JsonRpcResponse25"
+      "$ref": "#/$defs/JsonRpcResponse26"
     },
     "run_status_request": {
       "$ref": "#/$defs/JsonRpcRequest15"
     },
     "run_status_response": {
       "$ref": "#/$defs/JsonRpcResponse15"
+    },
+    "run_steer_request": {
+      "$ref": "#/$defs/JsonRpcRequest20"
+    },
+    "run_steer_response": {
+      "$ref": "#/$defs/JsonRpcResponse20"
     },
     "run_submit_request": {
       "$ref": "#/$defs/JsonRpcRequest13"
@@ -7592,16 +7841,16 @@
       "$ref": "#/$defs/JsonRpcResponse15"
     },
     "run_vector_request": {
-      "$ref": "#/$defs/JsonRpcRequest22"
+      "$ref": "#/$defs/JsonRpcRequest23"
     },
     "run_vector_response": {
-      "$ref": "#/$defs/JsonRpcResponse23"
+      "$ref": "#/$defs/JsonRpcResponse24"
     },
     "run_vectors_request": {
-      "$ref": "#/$defs/JsonRpcRequest21"
+      "$ref": "#/$defs/JsonRpcRequest22"
     },
     "run_vectors_response": {
-      "$ref": "#/$defs/JsonRpcResponse22"
+      "$ref": "#/$defs/JsonRpcResponse23"
     },
     "run_watch_event_notification": {
       "$ref": "#/$defs/JsonRpcNotification9"
@@ -7688,6 +7937,8 @@
     "run_attach_event_notification",
     "run_force_request",
     "run_force_response",
+    "run_steer_request",
+    "run_steer_response",
     "run_suspend_request",
     "run_suspend_response",
     "inbox_list_request",

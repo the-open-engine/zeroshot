@@ -48,6 +48,64 @@ async fn internal_submission_and_oecp_listing_share_the_same_public_run_identity
 }
 
 #[tokio::test]
+async fn steer_target_list_omits_direction_while_status_keeps_bounded_summaries() {
+    let harness = harness(Behavior::Hang).await;
+    let receipt = submit_test_request(&harness.controller, request(Value::Null))
+        .await
+        .assert_value();
+    harness.driver.wait_started().await;
+    let context = ConnectionContext::default();
+    for _ in 0..65 {
+        ClusterBackend::run_steer(
+            &harness.controller,
+            &context,
+            openengine_cluster_protocol::RunSteerParams {
+                run_id: receipt.run_id.clone(),
+                text: "Standing direction belongs in status and vector reads".into(),
+            },
+        )
+        .await
+        .assert_value();
+    }
+    for finished in [false, true] {
+        if finished {
+            harness
+                .controller
+                .force(RunForceParams {
+                    run_id: receipt.run_id.clone(),
+                })
+                .await
+                .assert_value();
+            terminal(&harness.controller, &receipt.run_id).await;
+        }
+        let status = ClusterBackend::run_status(
+            &harness.controller,
+            &context,
+            RunStatusParams {
+                run_id: receipt.run_id.clone(),
+            },
+        )
+        .await
+        .assert_value();
+        assert_eq!(status.steering.steers.len(), 64);
+        assert_eq!(status.steering.omitted_steers, 1);
+        let listed = serde_json::to_value(
+            ClusterBackend::run_list(&harness.controller, &context, RunListParams::default())
+                .await
+                .assert_value(),
+        )
+        .assert_value();
+        let mut expected = serde_json::to_value(status).assert_value();
+        expected.as_object_mut().assert_value().remove("steers");
+        expected
+            .as_object_mut()
+            .assert_value()
+            .remove("omittedSteers");
+        assert_eq!(listed, json!({"runs": [expected]}));
+    }
+}
+
+#[tokio::test]
 async fn one_capsule_drives_worker_parallel_verifiers_and_loop() {
     let driver = Arc::new(GraphDriver::default());
     let (ledger, cleanup, allocator) = runtime_parts(driver.clone());

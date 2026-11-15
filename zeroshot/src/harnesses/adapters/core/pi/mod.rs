@@ -485,6 +485,14 @@ impl PiAdapter {
             state.session_id = metadata.id.clone();
             *turn.session.id.lock().await = Some(metadata.id);
         }
+        let prompt = match &self.active_memory {
+            Some(hooks) => {
+                hooks
+                    .steer_prompt(turn.invocation, turn.control, prompt)
+                    .await
+            }
+            None => prompt,
+        };
         let mut command = self.command(turn.invocation, &files, &state.session_id)?;
         // The minimal base environment supplies the executable search path and any run tool
         // directory. It is never read from the ambient process, and a declared connection cannot

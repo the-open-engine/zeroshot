@@ -43,6 +43,21 @@ pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> 
     native::private_file(path, access)
 }
 
+/// The installed path of the executable a process reports as `current`. Once another update has
+/// replaced the executable, Linux reports the former path followed by ` (deleted)`, and the
+/// installation is still at that former path.
+pub(crate) fn installed_path(current: &Path) -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        if let Some(installed) = current.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
+            return std::ffi::OsStr::from_bytes(installed).into();
+        }
+    }
+    current.to_owned()
+}
+
 pub(crate) fn user_home() -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     let variable = "USERPROFILE";

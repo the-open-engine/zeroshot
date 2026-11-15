@@ -34,6 +34,8 @@ pub(crate) use state::{
     validate_event,
 };
 
+pub(crate) mod steering;
+
 pub const INITIAL_CURSOR: &str = "v2:0";
 pub const MAX_ADMITTED_RUN_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_EVENT_BYTES: usize = 1024 * 1024;
@@ -556,6 +558,16 @@ pub trait RunLedger: Send + Sync {
         run_id: &RunId,
         id: &openengine_cluster_protocol::VectorId,
     ) -> Result<Cursor, RunLedgerError>;
+
+    /// Bounded steering-record reads. Storage adapters should seek their steering index;
+    /// the default preserves compatibility with existing ledger implementations.
+    async fn steering_events(
+        &self,
+        run_id: &RunId,
+        after: Option<&Cursor>,
+    ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+        Ok(self.snapshot_and_tail(run_id, after).await?.events)
+    }
 
     /// Reads the current projection and a bounded reconnect page under the same store snapshot.
     /// Pages contain at most `MAX_REPLAY_EVENTS` events and `MAX_REPLAY_BYTES` encoded event bytes.

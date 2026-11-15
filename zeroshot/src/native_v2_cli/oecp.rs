@@ -507,6 +507,21 @@ where
             .await
     }
 
+    async fn run_steer(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2CliError> {
+        let transport = self
+            .connector
+            .connect_steering(require_named_target(target)?, params.run_id.clone())
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .run_steer(params)
+            .await
+            .map_err(protocol_error)
+    }
+
     async fn run_suspend(
         &self,
         target: Option<&str>,
