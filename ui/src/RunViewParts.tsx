@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import type { Document } from './domain';
 import { PersonRequestView } from './PersonRequestView';
 import { RecordedValue } from './RecordedValue';
+import { Transcript } from './Transcript';
 import { humanize, type Invocation, type RunHandoff, type RunTerminal } from './run-history';
 import { projectOutcome } from './run-story';
 import './run-story.css';
@@ -22,7 +23,10 @@ export type RunContext = {
   currentFailure?: Extract<RunTerminal, { status: 'failed' }>;
   /** Unrecorded steps may still run at this position: live, or replaying before the end. */
   open: boolean;
+  /** The view follows the latest event, so new output streams into open transcripts. */
   following: boolean;
+  /** The run is suspended waiting for a person now; a pending question can still be answered. */
+  waiting: boolean;
   successor?: string;
   runHref?: (id: string) => string;
 };
@@ -38,14 +42,18 @@ export function RunViewToolbar({ toolbarStart }: { toolbarStart: ReactNode }) {
 
 /** Where the run stands at the replay position, then what history recorded so far. */
 export function RunOutcomeBar({ run }: { run: RunContext }) {
-  const { document, invocations, terminal, open, clock } = run;
+  const { document, invocations, terminal, open, clock, successor } = run;
   const outcome = useMemo(
-    () => projectOutcome(document, invocations, terminal, open, clock),
-    [document, invocations, terminal, open, clock]
+    () => projectOutcome(document, invocations, terminal, open, clock, successor),
+    [document, invocations, terminal, open, clock, successor]
   );
+  // Only the run's state is announced, and only while following it live: replay and its
+  // running counts would otherwise re-announce on every step.
   return (
-    <div className={`run-outcome state-${outcome.state}`} role="status">
-      <span className="run-outcome-text">{outcome.text}</span>
+    <div className={`run-outcome state-${outcome.state}`}>
+      <span className="run-outcome-text" aria-live={run.following ? 'polite' : 'off'}>
+        {outcome.text}
+      </span>
       {outcome.facts.length > 0 && (
         <span className="run-outcome-facts">{outcome.facts.join(' · ')}</span>
       )}
@@ -65,7 +73,7 @@ export function RunStartDetail({ run }: { run: RunContext }) {
       )}
       {run.systemLogs.length > 0 && (
         <DetailSection title="Run log" count={lines(run.systemLogs.length)}>
-          <StepLog logs={run.systemLogs} label="Run log entries" />
+          <Transcript title="Run log" logs={run.systemLogs} follow={run.following} titled={false} />
         </DetailSection>
       )}
     </div>
@@ -118,6 +126,8 @@ export function StepDetail({
         <PersonRequestView
           request={invocation.request}
           runId={invocation.request.runId ?? run.runId}
+          context={run}
+          runHref={run.runHref}
         />
       ) : (
         hasValue(invocation.input) && (
@@ -128,7 +138,7 @@ export function StepDetail({
       )}
       {invocation.logs.length > 0 ? (
         <DetailSection title="Transcript" count={lines(invocation.logs.length)}>
-          <StepLog logs={invocation.logs} />
+          <Transcript logs={invocation.logs} follow={run.following} titled={false} />
         </DetailSection>
       ) : (
         // A person's answer has no transcript anywhere; only an agent's stays with its run.
@@ -285,43 +295,6 @@ function Facts({ value }: { value: unknown }) {
         </div>
       ))}
     </dl>
-  );
-}
-
-const RECENT_LINES = 6;
-const clock = new Intl.DateTimeFormat(undefined, {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-});
-
-/** Transcript lines as framed rows: the time in the name column, the words beside it. */
-function StepLog({ logs, label }: { logs: Invocation['logs']; label?: string }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? logs : logs.slice(-RECENT_LINES);
-  return (
-    <ol className="step-frame step-log" aria-label={label}>
-      {logs.length > shown.length && (
-        <li className="step-row step-row-wide">
-          <button className="step-link" onClick={() => setAll(true)}>
-            Show {logs.length - shown.length} earlier
-          </button>
-        </li>
-      )}
-      {shown.map((log) => (
-        <li key={log.index} className={`step-row stream-${log.stream}`}>
-          <time
-            dateTime={
-              log.timestamp === undefined ? undefined : new Date(log.timestamp).toISOString()
-            }
-            title={log.timestamp === undefined ? undefined : new Date(log.timestamp).toISOString()}
-          >
-            {log.timestamp === undefined ? '' : clock.format(log.timestamp)}
-          </time>
-          <span className="step-log-text">{log.text}</span>
-        </li>
-      ))}
-    </ol>
   );
 }
 

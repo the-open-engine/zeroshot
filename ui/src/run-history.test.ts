@@ -726,9 +726,7 @@ test('a continued run carries earlier work over and settles the question a perso
     runId: 'second-run',
   });
   assert.equal(ship.state, 'running');
-  assert.deepEqual(projection.handoffs, [
-    { kind: 'continued', index: 3, at: 8_000, from: 'first-run' },
-  ]);
+  assert.deepEqual(projection.handoffs, [{ kind: 'continued', index: 3, from: 'first-run' }]);
   // Carried-over work is context, not a replay stop of its own.
   assert.equal(
     historyMoments(history).some((moment) => moment.label.includes('carried over')),

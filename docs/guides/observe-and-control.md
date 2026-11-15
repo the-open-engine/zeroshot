@@ -26,15 +26,18 @@ opens with only the groups that hold running, waiting or failed steps expanded.
 
 **Steps** lists the work in the order it started. Each step shows its state, its decision and its
 latest output line; steps that ran side by side stay together under the parallel group or map that
-ran them, and each loop round starts with a heading. Selecting a step opens its input, transcript
-and result in place, with a link to show it in the graph. The list opens with the run's start, which
-holds its input and run log, and a finished run closes with its result or failure.
+ran them, and each loop round starts with a heading, repeated where the run continued mid-round.
+Selecting a step opens its input, transcript and result in place, with a link to show it in the
+graph; opening steps never pauses the replay or following. The timeline's **Show node** opens that
+node's latest step in the list. The list opens with the run's start, which holds its input and run
+log, and a finished run closes with its result or failure.
 
 Each step shows how long it took, from the ledger's recorded times; work carried over from an
 earlier run shows none, because its recorded time is when it was imported. The status line adds the
-run's duration and its total tokens, marked as a lower bound when an agent step reported no usage,
-and an open step lists its own token usage. Steps flags only steps that failed or needed another
-attempt; decision values are shown as recorded and never judged.
+run's duration, unknown when its first events predate recorded times, and the total tokens of the
+work the run did itself, marked as a lower bound when an agent step reported no usage; an open step
+lists its own token usage. A failed step shows in rust and a step that needed another attempt shows
+its attempt count; decision values are shown as recorded and never judged.
 
 For a direct target, open `/ui/` on its configured public origin. Closing either browser view
 leaves the run active.
@@ -403,9 +406,12 @@ Deadlines default to 7 days and accept at most 30 days. A late answer starts the
 route and exits 1 naming its successor. Reads never apply expiry. Add `--target NAME` for a target
 that advertises `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md).
 
-In the browser, a request step shows its question and allowed answers. While it waits, the run's
-state reads **Waiting for a person** with the deadline and the `answer` command; once answered, the
-chosen answer is marked with how long the answer took, from the recorded request and answer times.
+In the browser, a request step shows its question and allowed answers. While the run waits, the
+status line reads **Waiting for a person** with the question, and the step shows the deadline and
+the `answer` command. Once a successor run took the question over, the step names that run and the
+status line reads **Continued in run** with its ID; a question the run stopped waiting for without
+a successor reads as closed without an answer. Once answered, the chosen answer is marked with how
+long the answer took, from the recorded request and answer times.
 Who answered is not recorded. A successor run lists the work it carried over, marks where it
 continued after each answer, and links back to the run that asked.
 

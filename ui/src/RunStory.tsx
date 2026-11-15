@@ -32,6 +32,7 @@ export function RunStory({
   toolbarStart,
   failureDetails,
   revealStart,
+  revealStep,
 }: {
   run: RunContext;
   execution: string;
@@ -42,6 +43,8 @@ export function RunStory({
   failureDetails: (context: FailureContext) => ReactNode;
   /** Changes when the run's log is asked for from elsewhere, which opens the run's start. */
   revealStart?: number;
+  /** An execution shown from elsewhere (the timeline's Show node): opened in place, in view. */
+  revealStep?: { invocation: string; tick: number };
 }) {
   const entries = useMemo(
     () => projectStory(run.document, run.invocations, run.handoffs, run.clock.at),
@@ -56,6 +59,7 @@ export function RunStory({
   const { terminal, currentFailure } = run;
   const failure = terminal?.status === 'failed' ? terminal : currentFailure;
   const startRef = useRef<HTMLLIElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const preparing = !run.invocations.length && run.systemLogs.length > 0;
   // Before any step runs, the run's log is all there is to read; a failure opens its evidence.
   useEffect(() => {
@@ -70,6 +74,14 @@ export function RunStory({
     steps.reveal(START);
     startRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [revealStart]);
+  useEffect(() => {
+    if (!revealStep) return;
+    steps.reveal(revealStep.invocation);
+    const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-invocation]') ?? [];
+    [...rows]
+      .find((row) => row.dataset.invocation === revealStep.invocation)
+      ?.scrollIntoView?.({ block: 'start' });
+  }, [revealStep?.tick]);
   const start = (
     <li className="story-entry" ref={startRef}>
       <RunBoundary
@@ -129,28 +141,28 @@ export function RunStory({
       <div className="run-steps-scroll">
         <div className="run-steps-page">
           <RunOutcomeBar run={run} />
-          <div className="story">
+          <div className="story" ref={listRef}>
             {sections.map((section, index) => (
               <section key={section.id} className="story-section">
-                {section.heading?.kind === 'round' && (
-                  // The loop names the section; with several loops, its round alone is ambiguous.
-                  <h3 className="story-round">
-                    {section.heading.loop}
-                    <span>Round {section.heading.round}</span>
-                  </h3>
-                )}
-                {section.heading?.kind === 'continued' && (
+                {section.handoff && (
                   <p className="story-handoff">
                     <CornerDownRight size={13} aria-hidden="true" />
                     <span>
                       Continued from{' '}
                       {run.runHref ? (
-                        <a href={run.runHref(section.heading.from)}>{section.heading.from}</a>
+                        <a href={run.runHref(section.handoff.from)}>{section.handoff.from}</a>
                       ) : (
-                        section.heading.from
+                        section.handoff.from
                       )}
                     </span>
                   </p>
+                )}
+                {section.round && (
+                  // The loop names the section; with several loops, its round alone is ambiguous.
+                  <h3 className="story-round">
+                    {section.round.loop}
+                    <span>Round {section.round.round}</span>
+                  </h3>
                 )}
                 <ol className="story-frame">
                   {index === 0 && start}
@@ -249,19 +261,30 @@ function RunBoundary({
   );
 }
 
-/** A round or a handoff titles a section; the steps after it share one frame. The first section
- * holds the run's start, so a list that opens with a round gets one without a title before it. */
+/**
+ * A round or a handoff titles a section; the steps after it share one frame. A round that resumes
+ * right after a handoff shares its section. The first section holds the run's start, so a list
+ * that opens with a round gets one without a title before it.
+ */
 function frameSections(entries: readonly StoryEntry[]): Section[] {
   const sections: Section[] = [{ id: 'start', work: [] }];
   for (const entry of entries) {
-    if (entry.kind === 'work') sections.at(-1)!.work.push(entry);
-    else sections.push({ id: entry.id, heading: entry, work: [] });
+    const last = sections.at(-1)!;
+    if (entry.kind === 'work') last.work.push(entry);
+    else if (entry.kind === 'continued') sections.push({ id: entry.id, handoff: entry, work: [] });
+    else if (last.handoff && !last.round && !last.work.length) last.round = entry;
+    else sections.push({ id: entry.id, round: entry, work: [] });
   }
   return sections;
 }
 
-type Work = Extract<StoryEntry, { kind: 'work' }>;
-type Section = { id: string; heading?: Exclude<StoryEntry, Work>; work: Work[] };
+type Entry<Kind extends StoryEntry['kind']> = Extract<StoryEntry, { kind: Kind }>;
+type Section = {
+  id: string;
+  handoff?: Entry<'continued'>;
+  round?: Entry<'round'>;
+  work: Entry<'work'>[];
+};
 
 function StoryLine({
   step,
@@ -279,16 +302,25 @@ function StoryLine({
   showInGraph: () => void;
 }) {
   const retried = step.attempts > 1;
+  // At the end of its history, a question this run handed to its successor no longer waits here.
+  const handedOff =
+    step.state === 'suspended' &&
+    !!step.request &&
+    !step.request.resolution &&
+    !!run.successor &&
+    !run.open;
+  const decision = handedOff ? 'Handed off' : step.decision;
   return (
     <div
       className={`story-step state-${step.state} ${retried ? 'retried' : ''} ${open ? 'open' : ''}`}
+      data-invocation={step.invocation}
     >
       <span className="story-dot" aria-hidden="true" />
       <button className="story-step-head" aria-expanded={open} onClick={toggle}>
         <span className="story-title">
           {step.request && <UserRound size={14} aria-label="Asked a person" />}
           <span className="story-name">{step.label}</span>
-          {step.decision && <span className="story-decision">{step.decision}</span>}
+          {decision && <span className="story-decision">{decision}</span>}
           {step.item && <span className="story-meta">{step.item}</span>}
           {retried && <span className="story-meta">{step.attempts} attempts</span>}
           {step.state === 'running' && <span className="story-meta">In progress</span>}
@@ -303,7 +335,7 @@ function StoryLine({
         {!open && step.request && (
           <>
             <span className="story-text">“{step.request.text}”</span>
-            <span className="story-meta">{requestStatus(step.request)}</span>
+            <span className="story-meta">{requestStatus(step.request, run)}</span>
           </>
         )}
         {!open && !step.request && step.line && (

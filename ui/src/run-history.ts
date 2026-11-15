@@ -215,10 +215,8 @@ export type PersonRequest = {
       }
     | { kind: 'expiry'; at?: number; runId?: string };
 };
-/** Where the run paused for later continuation, or where it continued an earlier run. */
-export type RunHandoff =
-  | { kind: 'paused'; index: number; at?: number; reason: string; node: string }
-  | { kind: 'continued'; index: number; at?: number; from: string };
+/** Where this run continued an earlier one, at the index of its continuation record. */
+export type RunHandoff = { kind: 'continued'; index: number; from: string };
 type PriorExecution = {
   execution: string | number;
   node_instance: string | number;
@@ -276,10 +274,17 @@ function priorExecution(event: HistoryEvent['event']): PriorExecution | undefine
   const value = (event as { execution?: unknown }).execution;
   return value && typeof value === 'object' ? (value as PriorExecution) : undefined;
 }
-/** What an execution decided, as recorded; a person's request reads as waiting or expired. */
+/**
+ * What an execution decided, as recorded; a person's request reads as answered, expired or
+ * waiting. A recorded answer or expiry outranks the suspended state it has not yet settled.
+ */
 export function executionDecision(invocation: Invocation): string | undefined {
   const resolution = invocation.request?.resolution;
   if (resolution?.kind === 'expiry') return 'No answer in time';
+  if (resolution?.kind === 'answer' && invocation.state === 'suspended') {
+    const chosen = Object.values(resolution.signals);
+    return chosen.length ? chosen.map(humanize).join(', ') : 'Answered';
+  }
   if (invocation.state === 'failed')
     return humanize(invocation.outcome?.code ?? invocation.outcome?.reason ?? 'failed');
   if (invocation.state === 'suspended')
@@ -457,12 +462,17 @@ export function projectHistory(
     unowned: [],
   };
   let terminal: RunTerminal | undefined;
-  /** The first recorded time and the latest one at this position, when the ledger kept times. */
+  /**
+   * The run's first recorded time and the latest one at this position, when the ledger kept times.
+   * Events from before the ledger recorded times leave the start unknown rather than estimated.
+   */
   const clock: { first?: number; at?: number } = {};
+  let untimedStart = false;
   for (let index = 0; index <= Math.min(through, events.length - 1); index++) {
     const { event, recordedAt } = events[index];
-    if (recordedAt !== undefined) {
-      clock.first ??= recordedAt;
+    if (recordedAt === undefined) untimedStart ||= clock.at === undefined;
+    else {
+      if (!untimedStart) clock.first ??= recordedAt;
       clock.at = recordedAt;
     }
     if (event.kind === 'terminal') terminal = event.result;
@@ -660,7 +670,7 @@ function startInvocation(
   return invocation;
 }
 
-/** Requests, answers, expiry and handoffs between runs, each with the time it was recorded. */
+/** Requests, answers and expiry, each with the time it was recorded, and handoffs between runs. */
 function readVector(vector: VectorRecord, index: number, projection: HistoryProjection) {
   const { requests, handoffs } = projection;
   const at = vector.createdAt;
@@ -687,16 +697,8 @@ function readVector(vector: VectorRecord, index: number, projection: HistoryProj
       vector.kind === 'answer' && vector.answer
         ? { kind: 'answer', ...vector.answer, at, runId: vector.runId }
         : { kind: 'expiry', at, runId: vector.runId };
-  } else if (vector.kind === 'suspension' && vector.node) {
-    handoffs.push({
-      kind: 'paused',
-      index,
-      at,
-      reason: vector.reason ?? 'command',
-      node: vector.node,
-    });
   } else if (vector.kind === 'continuation' && vector.resumedFrom) {
-    handoffs.push({ kind: 'continued', index, at, from: vector.resumedFrom });
+    handoffs.push({ kind: 'continued', index, from: vector.resumedFrom });
   }
 }
 

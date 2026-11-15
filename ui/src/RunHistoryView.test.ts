@@ -1010,3 +1010,99 @@ test('a request suspension shows its text, deadline and successor without an ans
     container.remove();
   }
 });
+
+test('opening steps keeps a live run followed, and Show node opens the step in Steps', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const base = runDetailFixture('live-run');
+  const detail: RunDetail = {
+    ...base,
+    graph: {
+      ...base.graph,
+      root: {
+        kind: 'seq',
+        name: 'run',
+        children: [
+          { kind: 'step', name: 'plan' },
+          { kind: 'step', name: 'build' },
+        ],
+      },
+    },
+    observation: { state: 'active' },
+  };
+  const reference = (node: string, execution: string) => ({
+    node,
+    execution,
+    nodeInstance: execution,
+    runId: detail.runId,
+  });
+  const events: HistoryPage['events'] = [
+    { cursor: 'v2:1', event: { kind: 'run_started' } },
+    { cursor: 'v2:2', event: { kind: 'node_started', reference: reference('plan', '1') } },
+    {
+      cursor: 'v2:3',
+      event: { kind: 'safe_log', execution: '1', stream: 'output', line: 'Planning the change' },
+    },
+  ];
+  let observer: Parameters<NonNullable<RunHistoryReader['watch']>>[2] | undefined;
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => ({ ...completePage(), events, nextCursor: 'v2:3', headCursor: 'v2:3' }),
+    watch(_id, _after, next) {
+      observer = next;
+      return () => {};
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const following = () => container.querySelector('.history-live')?.getAttribute('title');
+  try {
+    await act(async () =>
+      root.render(createElement(RunHistoryView, { runId: detail.runId, source, workers: [] }))
+    );
+    await flushEffects();
+    assert.ok(observer);
+    await act(async () => observer!.status('connected'));
+    assert.equal(following(), 'Following latest events');
+    const plan = [...container.querySelectorAll<HTMLButtonElement>('.story-step-head')].find(
+      (head) => head.textContent?.includes('Plan')
+    );
+    assert.ok(plan);
+    await act(async () => plan.click());
+    assert.match(container.querySelector('.story-step.open')!.textContent!, /Planning the change/);
+    assert.equal(following(), 'Following latest events', 'opening a step is not a seek');
+    await act(async () =>
+      observer!.page({
+        ...completePage(),
+        events: [
+          { cursor: 'v2:4', event: { kind: 'node_started', reference: reference('build', '2') } },
+        ],
+        nextCursor: 'v2:4',
+        headCursor: 'v2:4',
+      })
+    );
+    assert.match(
+      container.querySelector('.timeline-caption strong')!.textContent!,
+      /Build/,
+      'the live run is still followed after a step was opened'
+    );
+    const showNode = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Show node'
+    );
+    assert.ok(showNode);
+    await act(async () => showNode.click());
+    const open = [...container.querySelectorAll('.story-step.open')].map((row) => row.textContent);
+    assert.ok(
+      open.some((text) => text?.includes('Build')),
+      open.join(' | ')
+    );
+    assert.ok(container.querySelector('.run-steps-view'), 'Show node stays in Steps');
+    assert.equal(following(), 'Following latest events');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

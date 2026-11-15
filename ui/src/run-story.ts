@@ -32,34 +32,29 @@ export type StoryStep = {
    * it runs; unknown without ledger times, and for carried-over work, whose times are imports.
    */
   durationMs?: number;
-  /** Carried over from an earlier run, which kept its output lines. */
+  /** Carried over from an earlier run; its transcript and recorded times stay with that run. */
   imported?: boolean;
 };
+type RoundEntry = { kind: 'round'; id: string; round: number; loop: string };
 export type StoryEntry =
-  | { kind: 'round'; id: string; round: number; loop: string }
+  | RoundEntry
   /** This run picked up where an earlier one paused. */
-  | { kind: 'continued'; id: string; from: string; at?: number }
+  | { kind: 'continued'; id: string; from: string }
   | {
       kind: 'work';
       id: string;
       state: NodeState;
       /** What kept several steps together: a parallel group or one pass over a map. */
       group?: string;
-      /**
-       * A step failed or needed another attempt. Signal values are never judged: graphs author
-       * their own labels, and nothing records which of them is good or bad.
-       */
-      flagged: boolean;
       steps: StoryStep[];
     };
 export type StoryOutcome = { text: string; state: NodeState; facts: string[] };
 
 type Execution = StoryStep & {
   start: number;
-  end?: number;
   /** Innermost enclosing loop and its round, which places round dividers. */
   round?: { loop: string; number: number };
-  /** Innermost par or map whose members run side by side, keyed by its map position. */
+  /** Innermost par or map whose members run side by side, keyed by its map position and pass. */
   together?: { key: string; node: GraphNode };
 };
 
@@ -72,23 +67,19 @@ export function projectStory(
 ): StoryEntry[] {
   const executions = foldAttempts(document, invocations, at);
   const entries: StoryEntry[] = [];
-  const continuations = handoffs.filter(
-    (handoff): handoff is Extract<RunHandoff, { kind: 'continued' }> => handoff.kind === 'continued'
-  );
   let roundKey = '';
+  let round: RoundEntry | undefined;
   let group: Execution[] = [];
-  const starts = new Map<string, number>();
+  const placed: Placed = new Map();
   const flush = () => {
     if (!group.length) return;
-    starts.set(
-      group.map((execution) => execution.invocation).join('+'),
-      Math.min(...group.map((execution) => execution.start))
-    );
-    const steps = group.map(({ start, end, round, together, ...step }) => step);
+    const steps = group.map(({ start, round, together, ...step }) => step);
     const container = group[0].together?.node;
+    const id = group.map((execution) => execution.invocation).join('+');
+    placed.set(id, { start: Math.min(...group.map((execution) => execution.start)), round });
     entries.push({
       kind: 'work',
-      id: group.map((execution) => execution.invocation).join('+'),
+      id,
       state: worst(steps.map((step) => step.state)),
       group:
         steps.length > 1 && container
@@ -96,7 +87,6 @@ export function projectStory(
             ? `${steps.length} items · ${humanize(container.name)}`
             : `In parallel · ${humanize(container.name)}`
           : undefined,
-      flagged: steps.some((step) => step.state === 'failed' || step.attempts > 1),
       steps,
     });
     group = [];
@@ -106,60 +96,61 @@ export function projectStory(
     if (key !== roundKey) {
       flush();
       roundKey = key;
-      if (execution.round)
-        entries.push({
-          kind: 'round',
-          // A round can resume after a handoff, so its heading may appear more than once.
-          id: `round:${key}:${entries.length}`,
-          round: execution.round.number,
-          loop: humanize(execution.round.loop),
-        });
+      round = execution.round && {
+        kind: 'round',
+        id: `round:${key}:${entries.length}`,
+        round: execution.round.number,
+        loop: humanize(execution.round.loop),
+      };
+      if (round) entries.push(round);
     }
-    const previous = group.at(-1);
+    // One pass over a par or map stays together, however its lanes stagger the members' starts.
     const sideBySide =
-      previous &&
-      execution.together !== undefined &&
-      execution.together.key === previous.together?.key &&
-      // Members of one group start before any of them settles; a later start is a new pass.
-      // Carried-over work keeps no timing, so its members group by structure alone.
-      (execution.imported && group.every((member) => member.imported)
-        ? true
-        : group.every((member) => member.end === undefined || member.end > execution.start));
+      execution.together !== undefined && execution.together.key === group.at(-1)?.together?.key;
     if (!sideBySide) flush();
     group.push(execution);
   }
   flush();
-  for (const handoff of continuations) placeContinuation(entries, starts, handoff);
+  for (const handoff of handoffs) placeContinuation(entries, placed, handoff);
   return entries;
 }
+
+/** Each work entry's first start and the loop round it belongs to, which place handoffs. */
+type Placed = Map<string, { start: number; round?: RoundEntry }>;
 
 /**
  * Carried-over work keeps no timing, so a handoff is placed by what caused it: right after the
  * question its earlier run asked. Without one, it goes before the first work recorded after it.
+ * A round can resume after a handoff, so work after it in the same round repeats its heading.
  */
-function placeContinuation(
-  entries: StoryEntry[],
-  starts: ReadonlyMap<string, number>,
-  handoff: Extract<RunHandoff, { kind: 'continued' }>
-) {
+function placeContinuation(entries: StoryEntry[], placed: Placed, handoff: RunHandoff) {
   const entry: StoryEntry = {
     kind: 'continued',
     id: `continued:${handoff.index}`,
     from: handoff.from,
-    at: handoff.at,
   };
   const asked = entries.findIndex(
     (candidate) =>
       candidate.kind === 'work' &&
       candidate.steps.some((step) => step.request && step.request.runId === handoff.from)
   );
-  if (asked >= 0) return void entries.splice(asked + 1, 0, entry);
   const later = entries.findIndex(
-    (candidate) => candidate.kind === 'work' && (starts.get(candidate.id) ?? -1) > handoff.index
+    (candidate) =>
+      candidate.kind === 'work' && (placed.get(candidate.id)?.start ?? -1) > handoff.index
   );
-  // A round heading directly before that work stays with it.
-  const at = later > 0 && entries[later - 1].kind === 'round' ? later - 1 : later;
-  entries.splice(at < 0 ? entries.length : at, 0, entry);
+  // Without a question, a round heading directly before the later work stays with it.
+  const at =
+    asked >= 0
+      ? asked + 1
+      : later < 0
+        ? entries.length
+        : later > 0 && entries[later - 1].kind === 'round'
+          ? later - 1
+          : later;
+  entries.splice(at, 0, entry);
+  const next = entries[at + 1];
+  const round = next?.kind === 'work' ? placed.get(next.id)?.round : undefined;
+  if (round) entries.splice(at + 1, 0, { ...round, id: `${round.id}:after:${handoff.index}` });
 }
 
 function foldAttempts(
@@ -219,10 +210,14 @@ function collectAttempts(
         attempts: attempts.length,
         durationMs: duration(attempts, latest, at),
         start: Math.min(...attempts.map((invocation) => invocation.start)),
-        end: latest.end,
         round: loop && { loop: loop.name, number: latest.visit },
         together: concurrent && {
-          key: JSON.stringify([concurrent.name, mapPrefix(ancestors, concurrent, latest)]),
+          // A member's own visit counts the passes over its group, as loop rounds re-enter it.
+          key: JSON.stringify([
+            concurrent.name,
+            mapPrefix(ancestors, concurrent, latest),
+            latest.visit,
+          ]),
           node: concurrent,
         },
       };
@@ -283,7 +278,9 @@ export function projectOutcome(
   terminal: RunTerminal | undefined,
   open: boolean,
   /** The ledger's first and latest times at this position, when it kept times. */
-  clock: { first?: number; at?: number } = {}
+  clock: { first?: number; at?: number } = {},
+  /** The run an answer or resume continued this one in, which took over its open question. */
+  successor?: string
 ): StoryOutcome {
   const executions = foldAttempts(document, invocations, clock.at);
   const rounds = new Map<string, number>();
@@ -292,6 +289,12 @@ export function projectOutcome(
   const retried = executions.filter((execution) => execution.attempts > 1).length;
   const failed = executions.filter((execution) => execution.state === 'failed').length;
   const running = executions.filter((execution) => execution.state === 'running');
+  const asking = executions.find(
+    (execution) =>
+      execution.state === 'suspended' && execution.request && !execution.request.resolution
+  );
+  // At the end of its history, a run that handed its question on no longer waits for it.
+  const handedOff = !!asking?.request && !!successor && !open;
   const facts = [
     executions.length ? `${executions.length} ${executions.length === 1 ? 'step' : 'steps'}` : '',
     ...[...rounds].map(
@@ -301,7 +304,7 @@ export function projectOutcome(
     retried ? `${retried} retried` : '',
     failed ? `${failed} failed` : '',
     clock.first !== undefined && clock.at !== undefined && clock.at > clock.first
-      ? `${formatDuration(clock.at - clock.first)}${terminal ? '' : ' so far'}`
+      ? `${formatDuration(clock.at - clock.first)}${terminal || handedOff ? '' : ' so far'}`
       : '',
     tokens(document, invocations),
   ].filter(Boolean);
@@ -309,10 +312,7 @@ export function projectOutcome(
     return terminal.status === 'succeeded'
       ? { text: 'Run completed', state: 'succeeded', facts }
       : { text: `Run failed · ${humanize(terminal.reason)}`, state: 'failed', facts };
-  const asking = executions.find(
-    (execution) =>
-      execution.state === 'suspended' && execution.request && !execution.request.resolution
-  );
+  if (handedOff) return { text: `Continued in run ${successor}`, state: 'suspended', facts };
   if (asking?.request)
     return { text: `Waiting for a person · ${asking.request.text}`, state: 'suspended', facts };
   if (running.length)
@@ -330,14 +330,16 @@ export function projectOutcome(
 
 /**
  * Missing counters stay unknown: a total is a lower bound when an agent step reported none.
- * Steps that use no model (delivery, a person's answer) are never counted as missing.
+ * Steps that use no model (delivery, a person's answer) are never counted as missing, and
+ * carried-over work is not counted at all: its usage stays with the run that did it.
  */
 function tokens(document: Document, invocations: readonly Invocation[]) {
   const nodes = document.runtime.nodes as Record<string, { kind?: string } | undefined>;
   let total = 0,
     partial = false,
     known = false;
-  for (const { node, usage } of invocations) {
+  for (const { node, usage, imported } of invocations) {
+    if (imported) continue;
     const input = usage?.inputTokens,
       output = usage?.outputTokens;
     if (typeof input === 'number' && typeof output === 'number') {

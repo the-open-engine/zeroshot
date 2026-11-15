@@ -349,14 +349,9 @@ div.story-step-head:hover {
 .step-row-wide > * {
   grid-column: 1 / -1;
 }
-.step-row dt,
-.step-row time {
+.step-row dt {
   color: var(--ink-secondary);
   overflow-wrap: anywhere;
-}
-.step-row time {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 .step-row dd {
   min-width: 0;
@@ -368,8 +363,7 @@ div.story-step-head:hover {
   font-family: var(--font-mono);
   font-size: 12.5px;
 }
-.step-prose,
-.step-log-text {
+.step-prose {
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -377,24 +371,9 @@ div.story-step-head:hover {
 .step-empty {
   color: var(--ink-muted);
 }
-.step-log-text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 6;
-  overflow: hidden;
-  color: var(--ink);
-  overflow-wrap: anywhere;
-}
-.step-log .stream-system .step-log-text,
-.step-log .stream-error .step-log-text {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-}
-.step-log .stream-system .step-log-text {
-  color: var(--ink-secondary);
-}
-.step-log .stream-error .step-log-text {
-  color: var(--rust);
+/* An open step's transcript is the shared bounded one; its section already names it. */
+.step-section-body .history-transcript {
+  margin: 0;
 }
 .step-failure {
   margin: 0;
@@ -519,7 +498,10 @@ a.run-handoff:hover {
   .run-steps-page {
     padding: 16px 16px 32px;
   }
-  .story-step-head {
+  /* 44px touch targets on phones (ui/DESIGN.md); the controls stay visually quiet. */
+  .story-step-head,
+  .view-toggle button,
+  .step-link {
     min-height: 44px;
   }
 }

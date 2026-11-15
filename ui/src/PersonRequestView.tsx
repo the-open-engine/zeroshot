@@ -1,6 +1,14 @@
 import { humanize, type PersonRequest } from './run-history';
 
+/** The run lists' date and time format, local time; another year is named. */
 const dateTime = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+const datedYear = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
   month: 'short',
   day: 'numeric',
   hour: '2-digit',
@@ -8,8 +16,9 @@ const dateTime = new Intl.DateTimeFormat(undefined, {
 });
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
-export function formatMoment(ms: number) {
-  return dateTime.format(new Date(ms));
+export function formatMoment(ms: number, now = Date.now()) {
+  const date = new Date(ms);
+  return (date.getFullYear() === new Date(now).getFullYear() ? dateTime : datedYear).format(date);
 }
 
 /** A coarse distance ("in 6 days", "3 hours ago") for deadlines a person reads at a glance. */
@@ -35,19 +44,34 @@ export function formatWait(ms: number) {
   return `${Math.round(hours / 24)} days`;
 }
 
-/** One line on where a request stands: answered after a wait, expired, or still waiting. */
-export function requestStatus(request: PersonRequest, now = Date.now()) {
+/**
+ * Where the run that asked stands now. A question this run never saw answered still waits only
+ * while the run is suspended for it; otherwise a successor took it over, or the run moved on.
+ */
+export type RequestContext = {
+  /** The run is suspended waiting for a person now. */
+  waiting: boolean;
+  /** The run an answer or resume continued this one in. */
+  successor?: string;
+};
+
+/** One line on where a request stands: answered, expired, handed off, closed or still waiting. */
+export function requestStatus(request: PersonRequest, context: RequestContext, now = Date.now()) {
   const { resolution, createdAt, expiresAt } = request;
   if (resolution?.kind === 'answer')
     return resolution.at !== undefined && createdAt !== undefined
       ? `Answered after ${formatWait(resolution.at - createdAt)}`
       : 'Answered';
-  if (resolution?.kind === 'expiry') return `No answer before ${formatMoment(expiresAt)}`;
+  if (resolution?.kind === 'expiry') return `No answer before ${formatMoment(expiresAt, now)}`;
+  if (context.successor) return `Handed off to run ${context.successor}`;
+  const asked = createdAt !== undefined && formatMoment(createdAt, now);
+  if (!context.waiting)
+    return [asked && `Asked ${asked}`, 'closed without an answer'].filter(Boolean).join(' · ');
   return [
-    createdAt !== undefined && `Waiting since ${formatMoment(createdAt)}`,
+    asked && `Waiting since ${asked}`,
     expiresAt > now
       ? `expires ${fromNow(expiresAt, now)}`
-      : `deadline passed ${formatMoment(expiresAt)}`,
+      : `deadline passed ${formatMoment(expiresAt, now)}`,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -61,18 +85,21 @@ export function requestStatus(request: PersonRequest, now = Date.now()) {
 export function PersonRequestView({
   request,
   runId,
-  compact = false,
+  context,
+  runHref,
 }: {
   request: PersonRequest;
   /** The paused run an answer continues, for the command hint while waiting. */
-  runId?: string;
-  compact?: boolean;
+  runId: string;
+  context: RequestContext;
+  runHref?: (runId: string) => string;
 }) {
   const answer = request.resolution?.kind === 'answer' ? request.resolution : undefined;
   const fields = Object.entries(request.signals);
   const pending = !request.resolution;
+  const { successor } = context;
   return (
-    <div className={`person-request ${compact ? 'compact' : ''}`}>
+    <div className="person-request">
       <blockquote>{request.text}</blockquote>
       {fields.length > 0 && (
         <div className="request-options">
@@ -94,8 +121,16 @@ export function PersonRequestView({
           ))}
         </div>
       )}
-      <p className="request-status">{requestStatus(request)}</p>
-      {!compact && pending && runId && (
+      <p className="request-status">
+        {pending && successor && runHref ? (
+          <>
+            Handed off to run <a href={runHref(successor)}>{successor}</a>
+          </>
+        ) : (
+          requestStatus(request, context)
+        )}
+      </p>
+      {pending && context.waiting && !successor && (
         <p className="request-hint">
           Answer with <code>zeroshot answer {runId} --input answer.json</code>
         </p>

@@ -1,8 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Document, GraphNode } from './domain';
-import { projectHistory, type HistoryEvent, type Outcome, type Reference } from './run-history';
-import { formatDuration, projectOutcome, projectStory, type StoryEntry } from './run-story';
+import { requestStatus } from './PersonRequestView';
+import {
+  executionDecision,
+  projectHistory,
+  type HistoryEvent,
+  type Outcome,
+  type Reference,
+} from './run-history';
+import {
+  formatDuration,
+  projectOutcome,
+  projectStory,
+  type StoryEntry,
+  type StoryStep,
+} from './run-story';
 
 const step = (name: string): GraphNode => ({ name, kind: 'step' });
 const seq = (name: string, ...children: GraphNode[]): GraphNode => ({
@@ -59,13 +72,16 @@ function story(doc: Document, values: HistoryEvent['event'][], open = true) {
     outcome: projectOutcome(doc, invocations, terminal, open),
   };
 }
+/** "!" marks what the list shows in rust or with an attempt count: a failed or retried step. */
+const flagged = (steps: StoryStep[]) =>
+  steps.some((step) => step.state === 'failed' || step.attempts > 1);
 const read = (entries: StoryEntry[]) =>
   entries.map((entry) =>
     entry.kind === 'round'
       ? `— Round ${entry.round} · ${entry.loop}`
       : entry.kind === 'continued'
         ? `↪ continued from ${entry.from}`
-        : `${entry.flagged ? '!' : ' '} ${entry.steps
+        : `${flagged(entry.steps) ? '!' : ' '} ${entry.steps
             .map((step) => [step.label, step.decision].filter(Boolean).join(': '))
             .join(' | ')}`
   );
@@ -424,4 +440,215 @@ test('a step that uses no model never makes the token total a lower bound', () =
     complete(deliver),
   ]);
   assert.ok(outcome.facts.includes('2.5K tokens'), outcome.facts.join(' | '));
+});
+
+test('one map pass stays one group when its lanes stagger the items', () => {
+  const doc = document(seq('run', map('suites', step('investigate'))));
+  const items = [0, 1, 2].map((index) => ref('investigate', `l${index}`, `l${index}`));
+  const { entries } = story(doc, [
+    start(items[0], 1, [0]),
+    start(items[1], 1, [1]),
+    complete(items[0]),
+    start(items[2], 1, [2]),
+    complete(items[1]),
+    complete(items[2]),
+  ]);
+  assert.equal(entries.length, 1);
+  const [suites] = entries;
+  assert.equal(suites.kind === 'work' && suites.group, '3 items · Suites');
+  assert.equal(suites.kind === 'work' && suites.steps.length, 3);
+});
+
+/** A run that asked a question in a loop round, continued by the run its answer started. */
+function continuedRound(doc: Document, usage?: Record<string, number>) {
+  const implement = ref('implement'),
+    approval = ref('approval'),
+    ship = ref('ship');
+  const prior = (reference: Reference, state: unknown) =>
+    ({
+      kind: 'prior_execution',
+      execution: {
+        execution: reference.execution,
+        node_instance: reference.nodeInstance,
+        occurrence: { node: reference.node, mapIndices: [] },
+        state,
+      },
+    }) as unknown as HistoryEvent['event'];
+  const events: HistoryEvent['event'][] = [
+    prior(implement, { Settled: { outcome: { status: 'verified' } } }),
+    prior(approval, 'Active'),
+    {
+      kind: 'vector',
+      vector: {
+        kind: 'request',
+        id: 'q1',
+        node: 'approval',
+        createdAt: 1_000,
+        text: 'Approve?',
+        signals: { decision: ['approved', 'rejected'] },
+        output: null,
+        expiresAt: 9_000_000,
+      },
+    },
+    { kind: 'vector', vector: { kind: 'continuation', id: 'c1', resumedFrom: 'first-run' } },
+    {
+      kind: 'vector',
+      vector: {
+        kind: 'answer',
+        id: 'a1',
+        createdAt: 4_000,
+        requestId: 'q1',
+        answer: { signals: { decision: 'approved' }, output: {} },
+      },
+    },
+    complete(
+      { ...approval, runId: 'second-run' },
+      { status: 'verifier', signals: { decision: 'approved' } }
+    ),
+    start(ship),
+  ];
+  if (usage) events.push({ kind: 'token_usage_observed', execution: ship.execution, usage });
+  return story(doc, events);
+}
+
+test('work after a handoff in the middle of a round repeats the round heading', () => {
+  const ask: GraphNode = { name: 'approval', kind: 'verifier', worker: 'builtin.request.ask@1' };
+  const doc = document(seq('run', loop('rounds', step('implement'), ask, step('ship'))));
+  const { entries } = continuedRound(doc);
+  assert.deepEqual(read(entries), [
+    '— Round 1 · Rounds',
+    '  Implement',
+    '  Approval: Approved',
+    '↪ continued from first-run',
+    '— Round 1 · Rounds',
+    '  Ship',
+  ]);
+  assert.equal(new Set(entries.map((entry) => entry.id)).size, entries.length);
+});
+
+test('carried-over work never makes a successor run’s token total a lower bound', () => {
+  const ask: GraphNode = { name: 'approval', kind: 'verifier', worker: 'builtin.request.ask@1' };
+  const doc = document(seq('run', step('implement'), ask, step('ship')));
+  doc.runtime.nodes = { implement: { kind: 'agent' }, ship: { kind: 'agent' } };
+  const { outcome } = continuedRound(doc, { inputTokens: 1_000, outputTokens: 500 });
+  assert.ok(outcome.facts.includes('1.5K tokens'), outcome.facts.join(' | '));
+});
+
+test('a suspended request that has an answer reads as answered, not waiting', () => {
+  const request = {
+    id: 'q1',
+    node: 'approval',
+    text: 'Approve?',
+    signals: { decision: ['approved', 'rejected'] },
+    output: null,
+    expiresAt: 9_000,
+  };
+  const invocation = {
+    id: '1',
+    node: 'approval',
+    instance: '1',
+    attempt: 1,
+    mapIndices: [],
+    visit: 1,
+    start: 0,
+    input: null,
+    state: 'suspended' as const,
+    logs: [],
+  };
+  assert.equal(executionDecision({ ...invocation, request }), 'Waiting for an answer');
+  assert.equal(
+    executionDecision({
+      ...invocation,
+      request: {
+        ...request,
+        resolution: { kind: 'answer', signals: { decision: 'approved' }, output: {} },
+      },
+    }),
+    'Approved'
+  );
+  assert.equal(
+    executionDecision({
+      ...invocation,
+      request: { ...request, resolution: { kind: 'answer', signals: {}, output: {} } },
+    }),
+    'Answered'
+  );
+});
+
+test('a run whose early events predate recorded times has no start time or duration', () => {
+  const doc = document(seq('run', step('plan'), step('build')));
+  const plan = ref('plan'),
+    build = ref('build');
+  const history: HistoryEvent[] = [
+    { cursor: 'v2:1', event: start(plan) },
+    { cursor: 'v2:2', event: complete(plan) },
+    { cursor: 'v2:3', event: start(build), recordedAt: 50_000 },
+    { cursor: 'v2:4', event: complete(build), recordedAt: 80_000 },
+  ];
+  const { invocations, terminal, clock } = projectHistory(doc, history, history.length - 1);
+  assert.deepEqual(clock, { at: 80_000 });
+  const outcome = projectOutcome(doc, invocations, terminal, false, clock);
+  assert.deepEqual(outcome.facts, ['2 steps']);
+  const timed = history.map((entry, index) => ({ ...entry, recordedAt: 1_000 * (index + 1) }));
+  assert.deepEqual(projectHistory(doc, timed, timed.length - 1).clock, {
+    first: 1_000,
+    at: 4_000,
+  });
+});
+
+test('a question handed to a successor reads as handed off, never as still waiting', () => {
+  const ask: GraphNode = { name: 'approval', kind: 'verifier', worker: 'builtin.request.ask@1' };
+  const doc = document(seq('run', ask));
+  const approval = ref('approval');
+  const request = {
+    id: 'q1',
+    text: 'Approve?',
+    signals: { decision: ['approved'] },
+    output: null,
+    expiresAt: Date.UTC(2020, 0, 2),
+  };
+  const history = [
+    start(approval),
+    { kind: 'request_deferred', reference: approval },
+    {
+      kind: 'suspended',
+      suspension: { reason: 'request', node: 'approval', createdAt: Date.UTC(2020, 0, 1), request },
+    },
+  ].map((event, index) => ({ cursor: `v2:${index + 1}`, event }) as HistoryEvent);
+  const { invocations, terminal } = projectHistory(doc, history, history.length - 1);
+  const asked = invocations[0].request!;
+  assert.equal(
+    projectOutcome(doc, invocations, terminal, false, {}, 'next-run').text,
+    'Continued in run next-run'
+  );
+  // Its duration is final: the run stopped here and continued elsewhere.
+  assert.deepEqual(
+    projectOutcome(doc, invocations, terminal, false, { first: 1_000, at: 61_000 }, 'next-run')
+      .facts,
+    ['1 step', '1m 00s']
+  );
+  assert.ok(
+    projectOutcome(
+      doc,
+      invocations,
+      terminal,
+      true,
+      { first: 1_000, at: 61_000 },
+      'next-run'
+    ).facts.includes('1m 00s so far')
+  );
+  // While replaying, the run still waited at that position.
+  assert.equal(
+    projectOutcome(doc, invocations, terminal, true, {}, 'next-run').text,
+    'Waiting for a person · Approve?'
+  );
+  const now = Date.UTC(2026, 5, 1);
+  assert.equal(
+    requestStatus(asked, { waiting: false, successor: 'next-run' }, now),
+    'Handed off to run next-run'
+  );
+  assert.match(requestStatus(asked, { waiting: false }, now), /closed without an answer$/);
+  // A deadline in another year names its year, so it cannot be misread.
+  const waiting = requestStatus(asked, { waiting: true }, now);
+  assert.match(waiting, /^Waiting since .*2020.* · deadline passed .*2020/);
 });
