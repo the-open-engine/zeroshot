@@ -11,7 +11,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, Unpack, overload
+from typing import Literal, TypedDict, Unpack, overload
 
 from ._binary import resolve_binary
 from ._process import NativeProcess, _RunFailed
@@ -77,6 +77,8 @@ class _Submission:
     initial_input: JsonValue
     runtime: _Runtime
     cwd: str | Path | None
+    worktree: bool
+    worktree_base: Literal["local", "remote"] | None
     repository: str | None
     source_connection: str | None
     branch: str | None
@@ -89,6 +91,8 @@ class _SubmitOptions(TypedDict, total=False):
     preset: Preset | None
     runtime: _Runtime | None
     cwd: str | Path | None
+    worktree: bool
+    worktree_base: Literal["local", "remote"] | None
     repository: str | None
     source_connection: str | None
     branch: str | None
@@ -202,8 +206,10 @@ class Client:
 
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
-            options: Typed keyword options. title, preset, runtime, cwd, repository,
-                source_connection, branch, revision, and submission_key apply to string submissions.
+            options: Typed keyword options. title, preset, runtime, cwd, worktree, worktree_base,
+                repository, source_connection, branch, revision, and submission_key apply to
+                string submissions. worktree defaults to False; worktree_base accepts local or
+                remote. See RunRequest for local-only worktree and cleanup semantics.
                 wait_timeout is a non-negative observation deadline in seconds; omit it to wait
                 indefinitely.
 
@@ -243,7 +249,9 @@ class Client:
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
             options: Typed keyword options for string submissions: title, preset, runtime,
-                cwd, repository, source_connection, branch, revision, and submission_key.
+                cwd, worktree, worktree_base, repository, source_connection, branch, revision,
+                and submission_key. worktree defaults to False; worktree_base accepts local or
+                remote. See RunRequest for local-only worktree and cleanup semantics.
 
         Returns:
             A durable run handle bound to this client's target.
@@ -399,6 +407,8 @@ class Client:
             initial_input={"task": request},
             runtime=selected_runtime,
             cwd=overrides.get("cwd"),
+            worktree=overrides.get("worktree", False),
+            worktree_base=overrides.get("worktree_base"),
             repository=overrides.get("repository"),
             source_connection=overrides.get("source_connection"),
             branch=overrides.get("branch"),
@@ -413,6 +423,10 @@ class Client:
         self._append_runtime(arguments, submission.runtime, root)
         if submission.cwd is not None:
             arguments.extend(["--cwd", str(submission.cwd)])
+        if submission.worktree:
+            arguments.append("--worktree")
+        if submission.worktree_base is not None:
+            arguments.extend(["--worktree-base", submission.worktree_base])
         if submission.source_connection is not None:
             arguments.extend(["--source-connection", submission.source_connection])
         if submission.repository is not None:
@@ -973,6 +987,8 @@ def _exact_submission(request: RunRequest, overrides: _SubmitOptions) -> _Submis
             overrides.get("preset"),
             overrides.get("runtime"),
             overrides.get("cwd"),
+            overrides.get("worktree"),
+            overrides.get("worktree_base"),
             overrides.get("repository"),
             overrides.get("source_connection"),
             overrides.get("branch"),
@@ -987,6 +1003,8 @@ def _exact_submission(request: RunRequest, overrides: _SubmitOptions) -> _Submis
         initial_input=request.initial_input,
         runtime=request.runtime,
         cwd=request.cwd,
+        worktree=request.worktree,
+        worktree_base=request.worktree_base,
         repository=request.repository,
         source_connection=request.source_connection,
         branch=request.branch,

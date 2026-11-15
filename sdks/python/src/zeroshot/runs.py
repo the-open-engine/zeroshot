@@ -21,6 +21,12 @@ class RunRequest:
         initial_input: Closed JSON input that Zeroshot validates against the graph.
         runtime: Opaque RuntimePlan passed to Zeroshot without changes.
         cwd: Working folder relative to the captured client workspace; None uses that workspace.
+        worktree: Create a retained Git worktree for local execution; False runs in place.
+            Only committed files are included; dependencies are not copied or installed.
+            Remove the retained worktree explicitly with Git when finished.
+        worktree_base: Requires worktree. None or local starts at the invoking checkout's HEAD;
+            remote fetches its branch's upstream and requires one. Direct/hosted targets reject
+            enabled worktrees in native preflight.
         repository: Source override as a Git clone URL or GitHub owner/name shorthand.
         source_connection: Explicit source-only named connection key.
         branch: Named-target source branch override.
@@ -33,6 +39,8 @@ class RunRequest:
     initial_input: JsonValue
     runtime: RuntimePlan
     cwd: str | Path | None = None
+    worktree: bool = False
+    worktree_base: Literal["local", "remote"] | None = None
     repository: str | None = None
     source_connection: str | None = None
     branch: str | None = None

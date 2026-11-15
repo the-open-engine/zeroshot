@@ -56,6 +56,37 @@ Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspac
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 `run()` submits once and waits; `submit()` returns a durable `Run` handle immediately.
 
+## Use a local Git worktree
+
+Pass `worktree=True` to `run()` or `submit()` to create a retained Git worktree on a managed run
+branch, leaving the invoking checkout in place. The default is `worktree=False`.
+An omitted `worktree_base`, or `worktree_base="local"`, starts at the invoking checkout's exact HEAD.
+Use `worktree_base="remote"` to fetch and start at that branch's upstream; an upstream is required:
+
+```python
+from zeroshot import Client, UniformRuntime
+
+
+async def submit_isolated(runtime: UniformRuntime) -> None:
+    async with Client(runtime=runtime) as client:
+        run = await client.submit(
+            "Update the parser.",
+            cwd="/path/to/repository",
+            worktree=True,
+            worktree_base="remote",
+        )
+        print(run.id)
+```
+
+Only committed files from the selected base are included. Uncommitted changes, untracked files,
+and installed dependencies are not copied, and Zeroshot performs no dependency setup.
+Worktrees remain after the run; when finished, inspect them with `git worktree list` and remove the
+chosen worktree explicitly with `git worktree remove PATH`.
+
+These options apply only to local execution. Native preflight rejects `worktree=True` with
+`DirectTarget` or `HostedTarget`, a base without `worktree=True`, and bases other than `local` or
+`remote`, before target contact or controller startup.
+
 ## Watch a submitted run
 
 ```python
@@ -192,6 +223,8 @@ async def submit_exact(
 
 An opaque `RuntimePlan` may carry [per-node lanes](../reference/runtime-plan.md#per-node-lanes) and
 passes through unchanged, while `UniformRuntime` applies one lane to every agent node.
+For local execution, set `worktree=True` and optional `worktree_base` on the `RunRequest` itself.
+A complete request cannot be combined with string-submission overrides.
 
 Before starting a local controller or contacting a direct target, the bundled executable performs
 the same preflight as the CLI.

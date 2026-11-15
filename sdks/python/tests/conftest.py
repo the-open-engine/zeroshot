@@ -132,6 +132,13 @@ elif args[:2] == ["stack", "watch"]:
 elif args[:2] == ["stack", "force-stop"]:
     print(json.dumps(stack_projection("cancelled")))
 elif args and args[0] == "run":
+    base = option("--worktree-base")
+    if base is not None and base not in ("local", "remote"):
+        fail("invalid_request", "request.invalid", "invalid --worktree-base", {})
+    if base is not None and "--worktree" not in args:
+        fail("invalid_request", "request.invalid", "--worktree-base requires --worktree", {})
+    if "--worktree" in args and "--target" in args:
+        fail("invalid_request", "request.invalid", "--worktree conflicts with --target", {})
     initial_input = entry.get("--input")
     task = initial_input.get("task") if isinstance(initial_input, dict) else None
     if task == "invalid":

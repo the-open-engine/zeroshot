@@ -183,6 +183,129 @@ def test_exact_request_forwards_folder_and_source_only_connection(fake_native: P
         assert arguments[arguments.index("--repository") + 1] == request.repository
 
 
+@pytest.mark.parametrize("method", ["run", "submit"])
+@pytest.mark.parametrize("exact", [False, True], ids=["string", "request"])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        {"worktree": False},
+        {"worktree": True},
+        {"worktree": True, "worktree_base": "local"},
+        {"worktree": True, "worktree_base": "remote"},
+    ],
+    ids=["omitted", "false", "default-base", "local", "remote"],
+)
+def test_worktree_options_reach_preflight_and_submission(
+    fake_native: Path, method: str, exact: bool, options: dict[str, object]
+) -> None:
+    async def exercise() -> None:
+        async with Client(runtime=runtime()) as client:
+            submit = getattr(client, method)
+            common = {
+                "cwd": "../selected-folder",
+                "source_connection": "source-private",
+                "submission_key": "worktree-request",
+                **options,
+            }
+            if exact:
+                request = RunRequest(
+                    title="Isolated change",
+                    graph=GraphSpec.from_dict({"profile": "openengine.graph.full/v1"}),
+                    initial_input={"task": "inspect it"},
+                    runtime=RuntimePlan.from_dict({"harness": "codex", "nodes": {}}),
+                    **common,
+                )
+                await submit(request)
+            else:
+                await submit("inspect it", **common)
+
+    asyncio.run(exercise())
+    runs = [item for item in read_invocations(fake_native) if item["args"][0] == "run"]
+    assert len(runs) == 2
+    assert "--validate-only" in runs[0]["args"]
+    assert "--detach" not in runs[0]["args"]
+    assert "--detach" in runs[1]["args"]
+    for item in runs:
+        args = item["args"]
+        assert ("--worktree" in args) is options.get("worktree", False)
+        if "worktree_base" in options:
+            assert args[args.index("--worktree-base") + 1] == options["worktree_base"]
+        else:
+            assert "--worktree-base" not in args
+        assert args[args.index("--cwd") + 1] == "../selected-folder"
+        assert args[args.index("--source-connection") + 1] == "source-private"
+        assert args[args.index("--submission-key") + 1] == "worktree-request"
+        assert item["--input"] == {"task": "inspect it"}
+
+
+@pytest.mark.parametrize("method", ["run", "submit"])
+@pytest.mark.parametrize("exact", [False, True], ids=["string", "request"])
+@pytest.mark.parametrize(
+    ("target", "options", "message"),
+    [
+        (LocalTarget(), {"worktree_base": "remote"}, "requires --worktree"),
+        (LocalTarget(), {"worktree": True, "worktree_base": "other"}, "invalid --worktree-base"),
+        (DirectTarget("http://127.0.0.1:8080"), {"worktree": True}, "conflicts with --target"),
+        (HostedTarget("platform"), {"worktree": True}, "conflicts with --target"),
+    ],
+    ids=["missing-worktree", "invalid-base", "direct", "hosted"],
+)
+def test_worktree_rejection_stops_at_native_preflight(
+    fake_native: Path,
+    method: str,
+    exact: bool,
+    target: object,
+    options: dict[str, object],
+    message: str,
+) -> None:
+    async def exercise() -> None:
+        async with Client(target=target, runtime=runtime()) as client:
+            submit = getattr(client, method)
+            with pytest.raises(InvalidRequestError, match=message):
+                if exact:
+                    await submit(
+                        RunRequest(
+                            title="Invalid isolation",
+                            graph=GraphSpec.from_dict({"profile": "openengine.graph.full/v1"}),
+                            initial_input=None,
+                            runtime=RuntimePlan.from_dict({"harness": "codex", "nodes": {}}),
+                            **options,
+                        )
+                    )
+                else:
+                    await submit("inspect it", **options)
+
+    asyncio.run(exercise())
+    invocations = read_invocations(fake_native)
+    assert len(invocations) == 1
+    assert invocations[0]["args"][0] == "run"
+    assert "--validate-only" in invocations[0]["args"]
+
+
+@pytest.mark.parametrize("method", ["run", "submit"])
+@pytest.mark.parametrize(
+    "options", [{"worktree": False}, {"worktree": True}, {"worktree_base": "local"}]
+)
+def test_exact_request_rejects_worktree_overrides(
+    fake_native: Path, method: str, options: dict[str, object]
+) -> None:
+    request = RunRequest(
+        title="Exact request",
+        graph=GraphSpec.from_dict({"profile": "openengine.graph.full/v1"}),
+        initial_input=None,
+        runtime=RuntimePlan.from_dict({"harness": "codex", "nodes": {}}),
+    )
+
+    async def exercise() -> None:
+        async with Client() as client:
+            with pytest.raises(TypeError, match="RunRequest cannot be combined"):
+                await getattr(client, method)(request, **options)
+
+    asyncio.run(exercise())
+    assert read_invocations(fake_native) == []
+
+
 @pytest.mark.parametrize("forward", [False, True])
 def test_named_submissions_forward_gh_token_only_on_opt_in(
     fake_native: Path, forward: bool
