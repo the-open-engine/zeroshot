@@ -1207,6 +1207,7 @@ h2 {
 @media (max-width: 650px) {
   /* 44px touch targets on phones (ui/DESIGN.md); the line stays visually quiet. */
   .node-trail button {
+    min-width: 44px;
     min-height: 44px;
     padding: 0 4px;
   }
