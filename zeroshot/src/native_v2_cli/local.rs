@@ -816,6 +816,7 @@ impl LocalCliBackend {
             )
             .await?;
         result.workspace_recovery = self.workspace_recovery(&result).await?;
+        result.steering = Default::default();
         Ok(RunListResult { runs: vec![result] })
     }
 

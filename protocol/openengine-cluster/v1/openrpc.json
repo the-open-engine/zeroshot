@@ -773,7 +773,7 @@
           "name": "text",
           "required": true,
           "schema": {
-            "$ref": "#/$defs/NodeInstructions"
+            "$ref": "schema.json#/$defs/NodeInstructions"
           }
         }
       ],

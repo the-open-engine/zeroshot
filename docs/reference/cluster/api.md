@@ -400,7 +400,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
-| <code>text</code> | Yes | <a href="#/$defs/NodeInstructions"><code>#/$defs/NodeInstructions</code></a> |
+| <code>text</code> | Yes | <a href="../schema.json#/$defs/NodeInstructions"><code>schema.json#/$defs/NodeInstructions</code></a> |
 
 #### Result
 

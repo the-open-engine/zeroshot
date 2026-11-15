@@ -27,6 +27,80 @@ fn params() -> RunSteerParams {
 }
 
 #[tokio::test]
+async fn steer_local_list_omits_direction_while_status_keeps_bounded_summaries() {
+    let root = TestDirectory::new("steer-local-list");
+    let backend = backend(&root);
+    let params = params();
+    let ledger = create_contract_run(
+        &backend,
+        &params.run_id,
+        &contract_submission("steer-local-list"),
+    )
+    .await;
+    ledger
+        .append(
+            &params.run_id,
+            vec![
+                RunEvent::RunStarted,
+                RunEvent::Suspended {
+                    suspension: RunSuspension::Command {
+                        node: openengine_cluster_protocol::NodeName::new("next").assert_value(),
+                        created_at: UnixTimestampMillis::MIN,
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    for _ in 0..65 {
+        backend.run_steer(None, params.clone()).await.assert_value();
+    }
+    for finished in [false, true] {
+        if finished {
+            ledger
+                .append(
+                    &params.run_id,
+                    vec![
+                        RunEvent::ForceStopRequested,
+                        RunEvent::Terminal {
+                            result: TerminalResult::Succeeded {
+                                output: serde_json::Value::Null,
+                            },
+                        },
+                    ],
+                )
+                .await
+                .assert_value();
+        }
+        let status = backend
+            .run_status(
+                None,
+                RunStatusParams {
+                    run_id: params.run_id.clone(),
+                },
+            )
+            .await
+            .assert_value();
+        assert_eq!(status.steering.steers.len(), 64);
+        assert_eq!(status.steering.omitted_steers, 1);
+        let listed = serde_json::to_value(
+            backend
+                .run_list(None, RunListParams::default())
+                .await
+                .assert_value(),
+        )
+        .assert_value();
+        let mut expected = serde_json::to_value(status).assert_value();
+        expected.as_object_mut().assert_value().remove("steers");
+        expected
+            .as_object_mut()
+            .assert_value()
+            .remove("omittedSteers");
+        assert_eq!(listed, serde_json::json!({"runs": [expected]}));
+    }
+}
+
+#[tokio::test]
 async fn steer_suspended_local_command_records_full_text_without_resuming_and_refuses_successor() {
     let root = TestDirectory::new("steer-local-record");
     let backend = backend(&root);

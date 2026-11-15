@@ -46,13 +46,14 @@ impl ClusterBackend for NativeV2PlatformController {
         let summaries = self.list().await.map_err(platform_backend_error)?;
         let mut runs = Vec::with_capacity(summaries.len());
         for summary in summaries {
-            runs.push(
-                self.status(RunStatusParams {
+            let mut result = self
+                .status(RunStatusParams {
                     run_id: summary.run_id,
                 })
                 .await
-                .map_err(platform_backend_error)?,
-            );
+                .map_err(platform_backend_error)?;
+            result.steering = Default::default();
+            runs.push(result);
         }
         Ok(RunListResult { runs })
     }
