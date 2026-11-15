@@ -18,6 +18,27 @@ impl GhCliDeliveryAuthority {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Value, SourceDeliveryError> {
         let output = self.api_output(arguments, credential).await?;
+        self.decode_api_output(output, credential)
+    }
+
+    pub(super) async fn branch_rules(
+        &self,
+        review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<Value, SourceDeliveryError> {
+        let arguments = policy::branch_rules_arguments(review)?;
+        self.ensure_instance(credential).await?;
+        let output = self
+            .request_api_output(&arguments, credential, true)
+            .await?;
+        self.decode_api_output(output, credential)
+    }
+
+    fn decode_api_output(
+        &self,
+        output: Vec<u8>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<Value, SourceDeliveryError> {
         serde_json::from_slice(&output).map_err(|error| {
             let secrets = api_secrets(self.network.secrets(), credential);
             let (text, truncated) =
@@ -42,6 +63,15 @@ impl GhCliDeliveryAuthority {
         arguments: &[String],
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Vec<u8>, SourceDeliveryError> {
+        self.request_api_output(arguments, credential, false).await
+    }
+
+    async fn request_api_output(
+        &self,
+        arguments: &[String],
+        credential: SourceDeliveryCredential<'_>,
+        allow_unavailable_rules: bool,
+    ) -> Result<Vec<u8>, SourceDeliveryError> {
         let mut command = self.api_command(credential);
         command
             .arg("api")
@@ -52,26 +82,21 @@ impl GhCliDeliveryAuthority {
             "command: {:?} api {arguments:?}",
             self.config.gh_program
         ));
-        bounded_output(
-            command,
-            self.config.api_deadline,
-            credential,
-            self.network.secrets(),
-        )
-        .await
-        .map_err(|error| {
-            let retryable = error.retryable_operation();
-            let wrapped = redacted_api_error(
-                error.api_status(),
-                format!("{context}\n{error}"),
-                credential,
-            );
-            if retryable {
-                wrapped.temporary()
-            } else {
-                wrapped
-            }
-        })
+        bounded_output(command, self, credential, allow_unavailable_rules)
+            .await
+            .map_err(|error| {
+                let retryable = error.retryable_operation();
+                let wrapped = redacted_api_error(
+                    error.api_status(),
+                    format!("{context}\n{error}"),
+                    credential,
+                );
+                if retryable {
+                    wrapped.temporary()
+                } else {
+                    wrapped
+                }
+            })
     }
 
     pub(super) async fn job_log_output(
@@ -320,10 +345,11 @@ pub(super) fn command_failure(
 
 async fn bounded_output(
     mut command: Command,
-    deadline: Duration,
+    authority: &GhCliDeliveryAuthority,
     credential: SourceDeliveryCredential<'_>,
-    secrets: Vec<String>,
+    allow_unavailable_rules: bool,
 ) -> Result<Vec<u8>, SourceDeliveryError> {
+    let deadline = authority.config.api_deadline;
     command
         .kill_on_drop(true)
         .stdout(Stdio::piped())
@@ -342,7 +368,7 @@ async fn bounded_output(
         redacted_api_error(None, "command stderr pipe is unavailable", credential)
     })?;
     let mut output = ApiOutput {
-        secrets,
+        secrets: authority.network.secrets(),
         ..Default::default()
     };
     let result = timeout(deadline, async {
@@ -360,6 +386,13 @@ async fn bounded_output(
     .await;
     match result {
         Ok(Ok((status, (), ()))) if status.success() => validate_api_output(output.stdout),
+        Ok(Ok((status, (), ())))
+            if allow_unavailable_rules
+                && status.code() == Some(1)
+                && output.branch_rules_unavailable() =>
+        {
+            Ok(b"[[]]".to_vec())
+        }
         Ok(Ok((status, (), ()))) => Err(output.failure(
             Some(status),
             &format!("command exited unsuccessfully: {status}"),
@@ -387,6 +420,26 @@ struct ApiOutput {
 }
 
 impl ApiOutput {
+    fn branch_rules_unavailable(&self) -> bool {
+        const MESSAGE: &str =
+            "Upgrade to GitHub Pro or make this repository public to enable this feature.";
+        if self.stdout.len() > MAX_API_OUTPUT_BYTES || self.stderr.len() > MAX_API_ERROR_BYTES {
+            return false;
+        }
+        let expected = format!("gh: {MESSAGE} (HTTP 403)");
+        if std::str::from_utf8(&self.stderr).ok().map(str::trim) != Some(expected.as_str()) {
+            return false;
+        }
+        // Inspect complete raw protocol bytes before diagnostics or secret redaction. Slurp
+        // wraps even a first-request error; earlier successful pages must never be discarded.
+        let Ok(Value::Array(pages)) = serde_json::from_slice(&self.stdout) else {
+            return false;
+        };
+        matches!(pages.as_slice(), [error]
+            if github_api_status(error) == Some(403)
+                && error.get("message").and_then(Value::as_str) == Some(MESSAGE))
+    }
+
     fn failure(
         self,
         status: Option<std::process::ExitStatus>,

@@ -362,6 +362,30 @@ async fn branch_rules_errors_propagate_through_authority_without_enqueueing() {
             Some(503),
             true,
         ),
+        (
+            "branch-rules-error",
+            "gh: API rate limit exceeded for user ID 123. (HTTP 403)".to_owned(),
+            Some(403),
+            true,
+        ),
+        (
+            "branch-rules-error",
+            "gh: Too Many Requests (HTTP 429)".to_owned(),
+            Some(429),
+            true,
+        ),
+        (
+            "branch-rules-error",
+            "gh: Bad credentials (HTTP 401)".to_owned(),
+            Some(401),
+            false,
+        ),
+        (
+            "branch-rules-error",
+            "gh: unknown refusal (HTTP 403)".to_owned(),
+            Some(403),
+            false,
+        ),
     ] {
         let root = tempfile::tempdir().assert_value();
         std::fs::write(root.path().join(file), contents).assert_value();
@@ -399,6 +423,60 @@ async fn branch_rules_errors_propagate_through_authority_without_enqueueing() {
             assert_eq!(error.retryable_operation(), retryable, "{error}");
         }
         assert!(root.path().join("rules-reads").exists());
+        assert!(!root.path().join("mutations").exists());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn entitlement_error_after_rules_pages_never_discards_app_bound_checks() {
+    let denial = json!({
+        "message": "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+        "documentation_url": "https://docs.github.com/rest/repos/rules#get-rules-for-a-branch",
+        "status": "403",
+    });
+    for first_page in [json!([]), json!([pinned_rule(&["required"], 9000)])] {
+        let root = tempfile::tempdir().assert_value();
+        std::fs::write(
+            root.path().join("branch-rules.json"),
+            json!([first_page, denial]).to_string(),
+        )
+        .assert_value();
+        std::fs::write(
+            root.path().join("branch-rules-error"),
+            "gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)\n",
+        ).assert_value();
+        // The observed required check belongs to a different App than the first rule page.
+        let mut page = ruleset_policy(Some(vec![check_run(
+            "required",
+            "COMPLETED",
+            Some("SUCCESS"),
+            true,
+        )]));
+        page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
+        let response = format!(
+            "printf '%s' {}",
+            shell_literal(&queue_tests::enqueue_response().to_string())
+        );
+        let provider = queue_tests::queue_authority(
+            root.path(),
+            &[page],
+            &[("enqueuePullRequest", &response)],
+        );
+        let credential = SourceDeliveryCredential::token("Upgrade to GitHub Pro");
+        let inspection = provider
+            .inspect_review(&review(), credential)
+            .await
+            .assert_error();
+        let merge = provider
+            .request_merge(&review(), credential, &TestReviewCheckpoint)
+            .await
+            .assert_error();
+        for error in [inspection, merge] {
+            assert_eq!(error.api_status(), Some(403));
+            assert!(!error.retryable_operation());
+            assert!(!error.to_string().contains(credential.expose()));
+        }
         assert!(!root.path().join("mutations").exists());
     }
 }
