@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**A multi-agent orchestration engine that keeps coding agents from grading their own work. Runs locally on top of your agent subscription.**
+**A multi-agent orchestration engine that keeps coding agents from grading their own work.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Docs](https://zeroshot.sh/docs/) · [Research blog](https://zeroshot.sh/blog/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord)
 
@@ -20,7 +20,7 @@ assumptions and calls the work done, even when you tell it to check its work.
 The agent that wrote the code shouldn't be the one that says it works
 ([see our benchmark](https://zeroshot.sh/blog/review-loop/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot)).
 
-So zeroshot runs your team's process as a graph the engine enforces. You decide who writes, who
+So zeroshot runs your process as a graph the engine enforces. You decide who writes, who
 reviews, what must pass and where failures loop back, and pick the agent and model for each step.
 Every task runs through that graph, no agent can skip a step, and the graph, not the agent,
 decides what happens after a review.
