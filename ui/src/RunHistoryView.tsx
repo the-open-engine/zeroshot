@@ -200,13 +200,14 @@ export function RunHistoryView({
     if (run && (connection === 'limited' || connection === 'error' || (!loading && !loadedHead)))
       void loadHistory(run.runId, source, false);
   }
-  function inspect(name: string) {
+  /** Select a node, stopping any node replay; the empty canvas selects without opening the panel. */
+  function inspect(name: string, open = true) {
     setPlaying(false);
     setPlaybackNode(undefined);
     setSelected(name);
     setExecution('');
     setReadingExecution('');
-    setInspector(true);
+    if (open) setInspector(true);
   }
   function playNode(restart = false) {
     if (!selectedReplay.length) return;
@@ -293,6 +294,7 @@ export function RunHistoryView({
                 onViewChange={setCanvas}
                 inspectorHidden={!inspector}
                 showInspector={() => setInspector(true)}
+                deselect={() => inspect(document.graph.root.name, false)}
               />
             </ReactFlowProvider>
             {inspector && node && (

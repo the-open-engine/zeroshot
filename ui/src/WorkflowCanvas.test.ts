@@ -151,6 +151,7 @@ type CanvasOptions = {
   size?: typeof canvas;
   observer?: typeof MeasuringObserver;
   toolbarStart?: ReturnType<typeof createElement>;
+  deselect?: () => void;
 };
 
 /** A page where React Flow measures its nodes and ELK lays them out. */
@@ -252,6 +253,7 @@ async function mountRunGraph(
           inspectorHidden: false,
           showInspector: () => {},
           toolbarStart: options.toolbarStart,
+          deselect: options.deselect,
         })
       )
     )
@@ -370,15 +372,58 @@ for (const readOnly of [false, true]) {
   });
 }
 
-test('a host without its own header gets its controls beside the settings button', async (t) => {
+test('a host without its own header gets its controls beside Add activity', async (t) => {
   const container = await mountRunGraph(t, layoutWorker(), undefined, {
     readOnly: false,
     toolbarStart: createElement('button', { 'aria-label': 'Undo' }),
   });
   const start = container.querySelector('.canvas-toolbar .canvas-start');
-  assert.match(start?.textContent ?? '', /Run settings/);
+  assert.match(start?.textContent ?? '', /Add activity/);
+  assert.doesNotMatch(
+    container.querySelector('.canvas-toolbar')?.textContent ?? '',
+    /Run settings/
+  );
   assert.ok(start?.querySelector('.canvas-host-actions [aria-label="Undo"]'));
   assert.equal(container.querySelectorAll('.canvas-host-actions').length, 1);
+});
+
+test('Expand all and Collapse all are unavailable when they would do nothing, keeping focus', async (t) => {
+  const container = await mountRunGraph(t, layoutWorker());
+  const toggle = (label: string) =>
+    container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+  // The saved view folds the only group: nothing left to collapse.
+  assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'true');
+  assert.equal(toggle('Expand all groups').getAttribute('aria-disabled'), 'false');
+  toggle('Expand all groups').focus();
+  await click(container, 'Expand all groups');
+  await settle(container);
+  assert.equal(toggle('Expand all groups').getAttribute('aria-disabled'), 'true');
+  assert.equal(container.ownerDocument.activeElement, toggle('Expand all groups'));
+  assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'false');
+  // An unavailable toggle does nothing.
+  await click(container, 'Expand all groups');
+  assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'false');
+});
+
+test('an empty-canvas click shows the workflow details, but not when it starts a double-click', async (t) => {
+  let deselected = 0;
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    deselect: () => deselected++,
+  });
+  const pane = container.querySelector<HTMLElement>('.react-flow__pane')!;
+  const window = container.ownerDocument.defaultView!;
+  const press = (detail: number) =>
+    act(async () => {
+      pane.dispatchEvent(new window.MouseEvent('click', { bubbles: true, detail }));
+    });
+  const wait = () => act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  await press(1);
+  await wait();
+  assert.equal(deselected, 1);
+  await press(1);
+  await press(2);
+  await wait();
+  assert.equal(deselected, 1);
 });
 
 test('expanding and collapsing a group keep it where it was on screen, at the same zoom', async (t) => {

@@ -38,6 +38,7 @@ import {
   removeNode,
   reorder,
   replaceNode,
+  type GraphNode,
 } from './domain';
 import { AppHeader } from './AppHeader';
 import { StandaloneRuns } from './StandaloneRuns';
@@ -853,6 +854,7 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
                 }}
                 inspectorHidden={!inspector}
                 showInspector={() => setInspector(true)}
+                deselect={() => setSelected(doc.graph.root.name)}
               />
             </ReactFlowProvider>
             {inspector && (
@@ -926,13 +928,7 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
             <span className="status-message" role="status">
               {notice}
             </span>
-            <span className="status-count">
-              {
-                allNodes(doc.graph.root).filter((node) => ['step', 'verifier'].includes(node.kind))
-                  .length
-              }{' '}
-              activities
-            </span>
+            <span className="status-count">{activityCount(doc.graph.root)}</span>
           </footer>
           {issues && validation.message && (
             <ValidationDetail
@@ -1108,4 +1104,9 @@ function Modal({
       {children}
     </dialog>
   );
+}
+
+function activityCount(root: GraphNode) {
+  const count = allNodes(root).filter((node) => ['step', 'verifier'].includes(node.kind)).length;
+  return `${count} ${count === 1 ? 'activity' : 'activities'}`;
 }

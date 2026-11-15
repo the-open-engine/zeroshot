@@ -360,8 +360,14 @@ h2 {
   border-radius: 4px;
   flex-shrink: 0;
 }
-.icon-button:hover:not(:disabled) {
+.icon-button:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--hover);
+}
+/* Unavailable but still focusable, so a toggle that just did its work keeps keyboard focus. */
+.icon-button[aria-disabled='true'] {
+  cursor: default;
+  color: var(--disabled-text);
+  opacity: 0.65;
 }
 .profile-list {
   flex: 1;
