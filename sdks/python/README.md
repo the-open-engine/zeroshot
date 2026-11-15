@@ -59,13 +59,27 @@ from zeroshot import Client, UniformRuntime
 
 async def run_local(runtime: UniformRuntime) -> None:
     async with Client(runtime=runtime) as client:
-        result = await client.run("Update the parser.", cwd="/path/to/folder")
+        result = await client.run(
+            "Update the parser.",
+            cwd="/path/to/repository",
+            worktree=True,
+        )
 
     result.raise_for_failure()
 ```
 
-The same client reaches an unauthenticated Docker deployment or another direct target by changing
-only the target:
+`worktree=True` creates a retained Git worktree on a managed branch for local execution; it is also
+accepted by `submit()`. It defaults to `False` (run in place). Omitting `worktree_base`, or setting
+it to `"local"`, starts at the invoking checkout's exact HEAD. Set `worktree_base="remote"` to fetch
+and start at the invoking branch's upstream, which must exist. Only committed files are included;
+uncommitted changes, untracked files and dependencies are not copied, and dependencies are not
+installed. Worktrees remain after completion: use `git worktree list` and explicitly clean up with
+`git worktree remove PATH` when finished.
+
+Native preflight rejects a base without `worktree=True`, unsupported bases, and `worktree=True`
+with `DirectTarget` or `HostedTarget`, before target contact or controller startup.
+
+For an unauthenticated Docker deployment or another direct target, select `DirectTarget`:
 
 ```python
 from zeroshot import Client, DirectTarget, UniformRuntime
@@ -174,6 +188,9 @@ def exact_request(
 The Python package contains no copied preset registry, provider/model registry, graph schema, or
 semantic validator. Every submission runs the executable's preflight before a local controller
 starts or a direct target is contacted.
+Local `RunRequest` values also accept `worktree=True` and optional `worktree_base="local"` or
+`"remote"`. Set them on the request itself; complete requests cannot be combined with
+string-submission overrides.
 
 ## Durable observation
 

@@ -490,6 +490,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   workspace and attached branch; local request fingerprints preserve replay before remote I/O.
   Resume reuses that workspace and attaches its branch without rewinding shared refs, refusing
   attachment when another registered checkout owns the branch.
+  Python `RunRequest` and string `Client.run()`/`submit()` expose `worktree=False` and optional
+  `worktree_base` (`local`/`remote`), forwarding both through native preflight and submission.
+  Worktree preparation and validation remain Rust-owned; Python never manages Git worktrees.
   Shutdown-aware controller startup forwards the recorded branch and review identity into
   candidate construction, including recovery after an interrupted checkpoint restore.
   Legacy local Git-delivery recovery without recorded branch ownership refuses before checkpoint
