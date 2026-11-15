@@ -405,6 +405,40 @@ test('Expand all and Collapse all are unavailable when they would do nothing, ke
   assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'false');
 });
 
+test('a folded error route is no group to expand or collapse', async (t) => {
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    root: {
+      kind: 'seq',
+      name: 'run',
+      children: [
+        { kind: 'step', name: 'work' },
+        {
+          kind: 'choice',
+          name: 'work_route',
+          branches: [
+            {
+              when: {
+                kind: 'in',
+                value: { name: 'work', source: 'error', field: null },
+                labels: ['timeout', 'crash', 'malformed', 'refusal'],
+              },
+              node: { kind: 'fail', name: 'stop', reason: 'failed' },
+            },
+          ],
+          otherwise: { kind: 'succeed', name: 'done', output: { kind: 'null' }, bindings: [] },
+        },
+      ],
+    } as GraphNode,
+    view: { collapsed: [] },
+  });
+  for (const label of ['Collapse all groups', 'Expand all groups'])
+    assert.equal(
+      container.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-disabled'),
+      'true',
+      label
+    );
+});
+
 test('an empty-canvas click shows the workflow details at once; a group header keeps its own', async (t) => {
   let deselected = 0;
   const container = await mountRunGraph(t, layoutWorker(), undefined, {

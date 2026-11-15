@@ -60,7 +60,12 @@ import { typeSummary } from './schema';
 import { nodeOutputFields } from './node-data';
 import { nodePresentation, nodeIcons } from './node-presentation';
 import type { WorkerOption } from './workers';
-import { projectWorkflow, type WorkflowNode, type WorkflowEdge } from './workflow-projection';
+import {
+  drawnOwners,
+  projectWorkflow,
+  type WorkflowNode,
+  type WorkflowEdge,
+} from './workflow-projection';
 import { compactWorkflow } from './workflow-display';
 import { arrangeWorkflow } from './workflow-layout';
 import {
@@ -634,6 +639,16 @@ function clickNode(
   else if (node.type === 'region' && !target.closest('.workflow-region-header')) p.deselect?.();
 }
 
+/** Groups the canvas draws: a folded error route has no region to open or close. */
+function useDrawnGroups(document: Document) {
+  return useMemo(() => {
+    const drawn = drawnOwners(document);
+    return new Set(
+      [...collapsedWorkflowGroups(document.graph.root)].filter((name) => drawn.has(name))
+    );
+  }, [document]);
+}
+
 export function WorkflowCanvas(p: WorkflowCanvasProps) {
   const { fitView, setCenter, setViewport } = useReactFlow();
   const fitGraph = () => void fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 });
@@ -649,10 +664,7 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
     [p.document, collapsed]
   );
   const groups = useGroupToggles(projection, p.document.graph.root, setCollapsed);
-  const allGroups = useMemo(
-    () => collapsedWorkflowGroups(p.document.graph.root),
-    [p.document.graph.root]
-  );
+  const allGroups = useDrawnGroups(p.document);
   const signature = JSON.stringify([
     projection.nodes.map((n) => [n.id, dimensions(n)]),
     projection.edges.map((e) => [e.source, e.target, e.repeat]),
