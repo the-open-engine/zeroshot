@@ -104,6 +104,8 @@ pub struct RunProfileRunRequest {
     pub title: RunTitle,
     pub initial_input: serde_json::Value,
     pub source: ResolvedSource,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_sources: Vec<ResolvedSource>,
     pub submission_key: IdempotencyKey,
     /// Omission permits a host default; an empty definition explicitly selects its base environment.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -98,6 +98,7 @@ async fn admitted_with_git_mode(mode: crate::native_v2_delivery::DeliveryMode) -
     NativeV2Admission
         .admit_with_policy(
             RunSubmission {
+                context_sources: Vec::new(),
                 environment: None,
                 title: RunTitle::new("Required delivery gate").assert_value(),
                 graph,
@@ -115,6 +116,7 @@ async fn admitted_with_git_mode(mode: crate::native_v2_delivery::DeliveryMode) -
 async fn admitted_without_delivery() -> AdmittedRun {
     NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Local optional run").assert_value(),
             graph: full_graph(vec![success_node()]),
@@ -537,6 +539,7 @@ async fn cancellation_delivery_supervisor(
     let submission_key = IdempotencyKey::new("cancelled-writer-delivery").assert_value();
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Cancelled writer delivery").assert_value(),
             graph,
@@ -822,6 +825,7 @@ async fn all_supported_builtin_graphs_keep_success_independent_of_receipt_projec
             };
             let admitted = NativeV2Admission
                 .admit(RunSubmission {
+                    context_sources: Vec::new(),
                     environment: None,
                     title: RunTitle::new("builtin independent delivery").assert_value(),
                     graph,

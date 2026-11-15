@@ -61,7 +61,12 @@ impl ProfileBody for RunProfileSelector {}
 impl ProfileBody for RunProfileDefaultRequest {}
 impl ProfileBody for RunProfileRunRequest {
     fn requires_git_transport(&self) -> bool {
-        self.source.requires_git_transport() || self.git_credentials.is_some()
+        self.source.requires_git_transport()
+            || self
+                .context_sources
+                .iter()
+                .any(openengine_cluster_protocol::ResolvedSource::requires_git_transport)
+            || self.git_credentials.is_some()
     }
 }
 

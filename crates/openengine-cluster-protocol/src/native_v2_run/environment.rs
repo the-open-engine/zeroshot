@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{DeclaredConnections, EnvironmentVariableName, NativeV2RunValueError};
 
+mod context;
+pub use context::{ContextRepository, validate_context_sources};
+
 pub const MAX_RUNTIME_SCRIPT_BYTES: usize = 64 * 1024;
 pub const MAX_RUNTIME_VARIABLE_BYTES: usize = 256 * 1024;
 
@@ -14,6 +17,10 @@ pub const MAX_RUNTIME_VARIABLE_BYTES: usize = 256 * 1024;
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RuntimeEnvironment {
+    /// Read-only repositories pinned by the submitting client, in checkout order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 16))]
+    pub context_repositories: Vec<ContextRepository>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -27,6 +34,7 @@ pub struct RuntimeEnvironment {
 
 impl RuntimeEnvironment {
     pub fn validate(&self) -> Result<(), NativeV2RunValueError> {
+        context::validate_repositories(&self.context_repositories)?;
         for script in [&self.setup, &self.startup].into_iter().flatten() {
             if script.len() > MAX_RUNTIME_SCRIPT_BYTES || script.contains('\0') {
                 return Err(NativeV2RunValueError(
@@ -78,6 +86,7 @@ fn reserved_variable(name: &str) -> bool {
             | "PATH"
             | "TMPDIR"
             | "ZEROSHOT_TOOLS"
+            | "ZEROSHOT_CONTEXT"
             | "CODEX_HOME"
             | "CLAUDE_CONFIG_DIR"
             | "COPILOT_HOME"

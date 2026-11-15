@@ -80,6 +80,7 @@ fn graph_result_round_trips_only_in_unfinished_started_phases() {
 #[test]
 fn status_exposes_every_parallel_execution_without_private_identity() {
     let mut result = RunStatusResult {
+        context_sources: Vec::new(),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -113,6 +114,15 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
         })
     );
     let encoded = serde_json::to_string(&value).assert_value();
+    let legacy: RunStatusResult = serde_json::from_value(value).assert_value();
+    assert!(legacy.context_sources.is_empty());
+    result.context_sources = vec![source()];
+    let pinned = serde_json::to_value(&result).assert_value();
+    assert_eq!(pinned["contextSources"], json!([source()]));
+    assert_eq!(
+        serde_json::from_value::<RunStatusResult>(pinned).assert_value(),
+        result
+    );
     for private_name in ["capsule", "session", "provider", "executionId"] {
         assert!(!encoded.contains(private_name));
     }
@@ -203,6 +213,7 @@ fn durable_events_carry_run_and_stable_cursor() {
         "passed": true
     });
     let watch = RunWatchEventNotification {
+        context_sources: Vec::new(),
         subscription_id: SubscriptionId::new("watch-1"),
         run_id: RunId::new("run-1"),
         title: title(),
@@ -324,6 +335,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
     );
 
     let result = RunForceResult {
+        context_sources: Vec::new(),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -361,6 +373,7 @@ fn controller_availability_is_optional_observation_metadata() {
     use openengine_cluster_protocol::{ControllerObservation, ControllerState};
     for state in [ControllerState::Lost, ControllerState::Unknown] {
         let result = RunStatusResult {
+            context_sources: Vec::new(),
             run_id: RunId::new("run-1"),
             title: title(),
             source: None,

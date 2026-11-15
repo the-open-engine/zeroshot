@@ -207,6 +207,7 @@ where
         git_credentials: None,
         cwd: run.cwd.clone(),
         worktree: run.worktree,
+        context_sources: Vec::new(),
         source_connection: run.source_connection.clone(),
         source: input.review.map(|review| super::super::NamedRunSource {
             resolved: review.source,
@@ -308,7 +309,7 @@ fn resolved_initial_input(
     }
 }
 
-/// Token for the local `ls-remote` that resolves an omitted `--revision`.
+/// Token for local `ls-remote` calls that pin source and context branches.
 ///
 /// A token already in the request is reused. Otherwise the shell's `GH_TOKEN` is read, since this
 /// lookup runs in this process and never sends the value to the target.
@@ -317,11 +318,15 @@ fn branch_tip_lookup_token(
     params: &PreparedRunRequest,
     shell: &dyn Fn(&str) -> Option<OsString>,
 ) -> Result<Option<String>, NativeV2CliError> {
+    let has_context = params
+        .intent
+        .environment
+        .as_ref()
+        .is_some_and(|environment| !environment.context_repositories.is_empty());
     if params.github_token.is_some()
-        || params.source.is_some()
         || run.target.is_none()
         || run.validate_only
-        || run.revision.is_some()
+        || (!has_context && (params.source.is_some() || run.revision.is_some()))
     {
         return Ok(params.github_token.clone());
     }
@@ -361,7 +366,7 @@ where
             .map_err(NativeV2CliError::InvalidRun)?;
         select_source_connections(params)?;
     }
-    Ok(())
+    named_source::resolve_context_sources(run, params, lookup_token.as_deref()).await
 }
 
 fn validate_local_only_workspace(

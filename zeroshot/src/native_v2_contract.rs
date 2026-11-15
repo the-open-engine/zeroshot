@@ -82,6 +82,8 @@ pub struct AdmittedRun {
     pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_sources: Vec<ResolvedSource>,
 }
 
 impl AdmittedRun {

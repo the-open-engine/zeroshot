@@ -5,6 +5,98 @@ use super::*;
 use crate::native_v2_candidate::test_support::TestDirectory;
 
 #[tokio::test]
+async fn context_transport_retains_full_history_and_the_pin_after_branch_changes() {
+    use crate::native_v2_candidate::test_support::{git, git_output};
+    let root = TestDirectory::new("context-transport");
+    let seed = root.child("seed");
+    let remote = root.child("remote.git");
+    git(
+        root.path(),
+        &["init", "--initial-branch=main", seed.to_str().unwrap()],
+    );
+    let commit = |message| {
+        git(
+            &seed,
+            &[
+                "-c",
+                "user.name=Context",
+                "-c",
+                "user.email=context@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                message,
+            ],
+        );
+    };
+    commit("base");
+    let base = git_output(&seed, &["rev-parse", "HEAD"]);
+    commit("pinned");
+    let pinned = git_output(&seed, &["rev-parse", "HEAD"]);
+    git(
+        root.path(),
+        &[
+            "clone",
+            "--bare",
+            seed.to_str().unwrap(),
+            remote.to_str().unwrap(),
+        ],
+    );
+    for index in 0..2 {
+        let workspace = root.child(&format!("checkout-{index}"));
+        std::fs::create_dir(&workspace).assert_value();
+        let transport = GitTransport::new(
+            GitTransportConfig {
+                git_program: "/usr/bin/git".into(),
+                workspace: workspace.clone(),
+                home_directory: root.path().to_owned(),
+                private_directory: root.path().to_owned(),
+                identity: None,
+                local_environment: None,
+                deadline: Duration::from_secs(10),
+            },
+            remote.as_os_str(),
+        );
+        transport
+            .checkout_context(&pinned, source_credential("context-secret", None))
+            .await
+            .assert_value();
+        assert_eq!(git_output(&workspace, &["rev-parse", "HEAD"]), pinned);
+        assert_eq!(
+            git_output(&workspace, &["rev-list", "--count", "HEAD"]),
+            "2"
+        );
+        assert!(!workspace.join(".git/shallow").exists());
+        git(&remote, &["update-ref", "refs/heads/main", &base]);
+    }
+    for remote in [remote, root.child("missing.git")] {
+        let workspace = root.child(&format!(
+            "failure-{}",
+            remote.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::create_dir(&workspace).assert_value();
+        let transport = GitTransport::new(
+            GitTransportConfig {
+                git_program: "/usr/bin/git".into(),
+                workspace,
+                home_directory: root.path().to_owned(),
+                private_directory: root.path().to_owned(),
+                identity: None,
+                local_environment: None,
+                deadline: Duration::from_secs(10),
+            },
+            remote.as_os_str(),
+        );
+        assert!(
+            transport
+                .checkout_context(&"f".repeat(40), source_credential("context-secret", None))
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
 async fn fetch_waits_for_automatic_maintenance() {
     let root = TestDirectory::new("git-maintenance");
     let program = root.write_executable(

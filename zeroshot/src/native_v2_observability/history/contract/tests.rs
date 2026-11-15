@@ -280,3 +280,34 @@ async fn failure_context_requires_retained_cursors_and_coherent_runtime_metadata
         );
     }
 }
+
+#[tokio::test]
+async fn context_sources_are_retained_in_history_definition() {
+    let run_id = RunId::new(uuid::Uuid::now_v7().to_string());
+    let ledger = Arc::new(FakeRunLedger::new());
+    let pin = openengine_cluster_testkit::native_v2_source_fixture();
+    let mut admitted = crate::native_v2_runner::test_support::admitted();
+    admitted.context_sources = vec![pin.clone()];
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: IdempotencyKey::new("context-history").assert_value(),
+            submission_digest: Sha256Digest::new("b".repeat(64)).assert_value(),
+            admitted,
+        })
+        .await
+        .assert_value();
+    let definition = super::super::RunHistoryService::with_sources(
+        ledger,
+        super::super::ControlCache::default(),
+        None,
+    )
+    .definition(&run_id)
+    .await
+    .assert_value();
+    assert_eq!(definition.context_sources, vec![pin.clone()]);
+    assert_eq!(
+        serde_json::to_value(definition).assert_value()["contextSources"],
+        json!([pin])
+    );
+}

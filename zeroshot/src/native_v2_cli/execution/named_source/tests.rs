@@ -1207,3 +1207,111 @@ async fn explicit_instance_selection_refuses_other_hosts_prefixes_and_unknown_pr
         );
     }
 }
+
+#[tokio::test]
+async fn context_sources_pin_explicit_and_default_branches_and_name_missing_repositories() {
+    use crate::native_v2_cli::{PreparedRunRequest, BuiltinGraphTemplate, TemplateDelivery};
+    let seed = initialized_repository("context-seed");
+    output(
+        &seed.0,
+        &[
+            "-c",
+            "user.name=Context",
+            "-c",
+            "user.email=context@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "base",
+        ],
+    );
+    output(&seed.0, &["branch", "-M", "main"]);
+    output(&seed.0, &["checkout", "-b", "stable"]);
+    output(
+        &seed.0,
+        &[
+            "-c",
+            "user.name=Context",
+            "-c",
+            "user.email=context@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "stable",
+        ],
+    );
+    let stable = output(&seed.0, &["rev-parse", "HEAD"]).trim().to_owned();
+    let main = output(&seed.0, &["rev-parse", "main"]).trim().to_owned();
+    let client = initialized_repository("context-client");
+    let bare = client.0.join("context.git");
+    output(
+        &client.0,
+        &[
+            "clone",
+            "--bare",
+            seed.0.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    output(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    for name in ["library", "contracts"] {
+        output(
+            &client.0,
+            &[
+                "config",
+                "--add",
+                &format!("url.{}.insteadOf", bare.display()),
+                &format!("https://github.com/acme/{name}.git"),
+            ],
+        );
+    }
+    let source = openengine_cluster_testkit::native_v2_source_fixture();
+    let graph = BuiltinGraphTemplate::SingleWorker
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    let mut request = PreparedRunRequest {
+        run_id: openengine_cluster_protocol::RunId::new("context-cli"),
+        intent: crate::native_v2_contract::RunSubmissionIntent {
+            title: RunTitle::new("Context pinning").assert_value(), graph, initial_input: serde_json::Value::Null,
+            runtime: openengine_cluster_protocol::RuntimePlan::new(openengine_cluster_protocol::RuntimeLane::new("codex", "openai").assert_value(), None, Default::default()),
+            environment: Some(serde_json::from_value(serde_json::json!({"contextRepositories":[{"repository":"acme/library","branch":"stable"},{"repository":"acme/contracts"}]})).assert_value()),
+            branch: None, submission_key: openengine_cluster_protocol::IdempotencyKey::new("context-cli").assert_value(),
+        },
+        connections: Default::default(), github_token: None, git_credentials: None,
+        cwd: Some(client.0.clone()), worktree: None, source_connection: None,
+        source: Some(NamedRunSource { resolved: source, dirty: false }), context_sources: Vec::new(), profile: None,
+    };
+    let mut command = test_run_command();
+    command.target = Some("docker".to_owned());
+    command.cwd = Some(client.0.clone());
+    resolve_context_sources(&command, &mut request, Some("context-secret"))
+        .await
+        .assert_value();
+    assert_eq!(
+        request
+            .context_sources
+            .iter()
+            .map(|pin| pin.revision.as_str())
+            .collect::<Vec<_>>(),
+        vec![stable.as_str(), main.as_str()]
+    );
+    assert_eq!(request.context_sources[1].branch.as_str(), "main");
+    assert!(
+        request.github_token.is_none(),
+        "lookup authority is never forwarded"
+    );
+    request.context_sources.clear();
+    request
+        .intent
+        .environment
+        .as_mut()
+        .unwrap()
+        .context_repositories[0]
+        .branch = Some(SourceBranchId::new("missing").assert_value());
+    let error = resolve_context_sources(&command, &mut request, Some("context-secret"))
+        .await
+        .assert_error()
+        .to_string();
+    assert!(error.contains("acme/library"), "{error}");
+    assert!(!error.contains("context-secret"));
+}

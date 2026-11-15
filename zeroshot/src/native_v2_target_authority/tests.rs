@@ -319,6 +319,7 @@ fn request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: run_id(),
         submission: RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Target authority test").assert_value(),
             graph: graph_fixture("worker", json!({"kind": "null"})),

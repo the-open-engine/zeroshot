@@ -385,6 +385,7 @@ pub(super) fn run_intent() -> TargetRunIntent {
 
 pub(super) fn run_request() -> PreparedRunRequest {
     PreparedRunRequest {
+        context_sources: Vec::new(),
         cwd: None,
         worktree: None,
         source_connection: None,
@@ -412,6 +413,7 @@ pub(super) fn exact_run_request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: request.run_id,
         submission: openengine_cluster_protocol::RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: request.intent.title,
             graph: request.intent.graph,

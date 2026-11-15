@@ -83,6 +83,7 @@ async fn admitted_for(
         success_node(),
     ]);
     admit(RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Copilot contract test").assert_value(),
         graph,

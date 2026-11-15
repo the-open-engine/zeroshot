@@ -360,6 +360,7 @@ async fn admitted_routing_graph(
     };
     NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Delivery routing test").assert_value(),
             graph,

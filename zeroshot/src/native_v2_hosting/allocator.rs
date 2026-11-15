@@ -1,4 +1,5 @@
 mod comment;
+mod context;
 mod delivery;
 mod environment_hooks;
 use environment_hooks::HookContext;
@@ -337,6 +338,8 @@ impl ProductionCapsuleAllocator {
                 process_pool: active_process_pool,
             })
             .await?;
+        self.install_context_sources(request, &filesystem, active_process_pool)
+            .await?;
         self.run_environment_hook(
             request,
             &filesystem,
@@ -419,7 +422,11 @@ impl ProductionCapsuleAllocator {
             trusted,
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        let candidate = candidate.with_agent_context(self.config.agent_context.clone());
+        let candidate = candidate.with_agent_context(context::agent_context(
+            request.admitted,
+            &state.run_root,
+            self.config.agent_context.clone(),
+        ));
         let candidate: Arc<dyn crate::native_v2_runner::NodeRunner> = match memory {
             Ok(Some(memory)) => memory.wrap(request.admitted, candidate),
             Ok(None) => Arc::new(candidate),
@@ -1246,6 +1253,7 @@ fn retain_failed_workspace(
         &request.checkpoint_directory.join("staging"),
     );
     remove_run_directory(&request.run_root.join("tools"))?;
+    remove_run_directory(&context::directory(request.run_root))?;
     let runtime = request.run_root.join("runtime");
     if runtime.exists() {
         std::fs::remove_dir_all(runtime).map_err(|_| CapsuleCleanupUnavailable)?;
@@ -1480,14 +1488,11 @@ fn remove_run_directory(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
     std::fs::remove_dir_all(path).map_err(|_| CapsuleCleanupUnavailable)
 }
 
-#[cfg(all(test, unix))]
-mod test_support;
-
-#[cfg(all(test, target_os = "linux"))]
-mod cleanup_tests;
-
 #[cfg(all(test, target_os = "linux"))]
 mod allocation_tests;
-
+#[cfg(all(test, target_os = "linux"))]
+mod cleanup_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod lifecycle_tests;
+#[cfg(all(test, unix))]
+mod test_support;

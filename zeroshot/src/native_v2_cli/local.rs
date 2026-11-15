@@ -1148,6 +1148,7 @@ impl LocalCliBackend {
         };
         let status = self.status_local(RunStatusParams { run_id }).await?;
         Ok(RunForceResult {
+            context_sources: status.context_sources,
             run_id: status.run_id,
             title: status.title,
             source: status.source,
@@ -1188,6 +1189,7 @@ impl LocalCliBackend {
                 .is_ok_and(|recovery| recovery.successor_run_id.is_some())))
         {
             return Ok(RunForceResult {
+                context_sources: recorded.context_sources,
                 run_id: recorded.run_id,
                 title: recorded.title,
                 source: recorded.source,

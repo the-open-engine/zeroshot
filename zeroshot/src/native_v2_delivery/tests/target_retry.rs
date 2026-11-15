@@ -85,6 +85,7 @@ async fn admitted_legacy_delivery(
     }
     NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: original.title,
             graph: full_graph(vec![node, success_node()]),

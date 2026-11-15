@@ -521,6 +521,29 @@
       ],
       "type": "object"
     },
+    "ContextRepository": {
+      "additionalProperties": false,
+      "description": "A credential-free locator in the same forms as the CLI's `--repository`.",
+      "properties": {
+        "branch": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
     "ControlSelector": {
       "additionalProperties": false,
       "properties": {
@@ -1732,7 +1755,7 @@
             "reason": {
               "maxLength": 128,
               "minLength": 1,
-              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|environment_startup_failed|environment_preparation_timeout)$)[A-Za-z_][A-Za-z0-9_.-]*$",
+              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|environment_startup_failed|environment_preparation_timeout|context_checkout_unavailable)$)[A-Za-z_][A-Za-z0-9_.-]*$",
               "type": "string"
             }
           },
@@ -5071,6 +5094,12 @@
           "description": "Durable cursor after the force request was recorded.",
           "type": "string"
         },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "controller": {
           "anyOf": [
             {
@@ -5718,6 +5747,12 @@
         "atCursor": {
           "type": "string"
         },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "controller": {
           "anyOf": [
             {
@@ -5774,6 +5809,12 @@
       "additionalProperties": false,
       "description": "Immutable, secret-free native-v2 submission admitted by the selected target.",
       "properties": {
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "environment": {
           "anyOf": [
             {
@@ -6293,6 +6334,12 @@
       "additionalProperties": false,
       "description": "One durable public status projection. `cursor` is stable run history, not a connection-local\nsequence; clients resume strictly after it.",
       "properties": {
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "cursor": {
           "type": "string"
         },
@@ -6384,6 +6431,14 @@
         "connections": {
           "$ref": "#/$defs/DeclaredConnections",
           "description": "Exact connection fields available to setup and startup, separate from node credentials."
+        },
+        "contextRepositories": {
+          "description": "Read-only repositories pinned by the submitting client, in checkout order.",
+          "items": {
+            "$ref": "#/$defs/ContextRepository"
+          },
+          "maxItems": 16,
+          "type": "array"
         },
         "setup": {
           "type": [
