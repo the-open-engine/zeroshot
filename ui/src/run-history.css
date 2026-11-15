@@ -1,29 +1,5 @@
-.app-sections {
-  display: flex;
-  align-self: stretch;
-  gap: 22px;
-  margin-left: 15px;
-}
-.app-sections button {
-  color: var(--ink-muted);
-  padding: 0 2px;
-  border-bottom: 2px solid transparent;
-  font-size: 13px;
-}
-.app-sections button[aria-current='page'] {
-  color: var(--ink);
-  border-bottom-color: var(--rust);
-}
 .app[hidden] {
   display: none;
-}
-.run-sidebar {
-  width: var(--sidebar-width);
-  flex-shrink: 0;
-  border-right: 1px solid var(--hairline);
-  display: flex;
-  flex-direction: column;
-  padding: 22px 12px 12px;
 }
 .run-search {
   display: flex;
@@ -856,29 +832,8 @@
   padding: 12px 9px;
   font-size: 12px;
 }
-.history-sidebar-toggle {
-  display: none;
-}
-/* The shared layouts (styles.css, ui/DESIGN.md): medium puts the run list behind its menu button,
-   narrow slides the inspector over the view. */
+/* The shared layouts (styles.css, ui/DESIGN.md) fold the run list and the inspector there. */
 @media (max-width: 1150px) {
-  .run-sidebar {
-    display: none;
-    position: absolute;
-    left: 0;
-    top: var(--app-header-height);
-    bottom: 0;
-    z-index: 30;
-    background: var(--canvas);
-    width: var(--sidebar-width);
-    box-shadow: 5px 0 20px var(--shadow-panel);
-  }
-  .run-sidebar.visible {
-    display: flex;
-  }
-  .history-sidebar-toggle {
-    display: inline-flex;
-  }
   .run-inspector {
     --inspector-default-width: 330px;
   }
@@ -887,14 +842,6 @@
   }
 }
 @media (max-width: 720px) {
-  .run-inspector {
-    position: absolute;
-    z-index: 8;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    box-shadow: -5px 0 20px var(--shadow-panel);
-  }
   .history-header {
     padding: 0 16px;
   }

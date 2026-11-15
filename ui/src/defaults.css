@@ -6,11 +6,13 @@
   overflow: auto;
   background: transparent;
 }
+/* The top bar: the same height as the app header (ui/DESIGN.md, Layout). */
 .defaults-menu {
+  height: var(--app-header-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 28px;
+  padding: 0 28px;
   border-bottom: 1px solid var(--hairline);
 }
 .defaults-menu .theme-control {
@@ -61,7 +63,7 @@
 }
 @media (max-width: 720px) {
   .defaults-menu {
-    padding: 16px 20px;
+    padding: 0 20px;
   }
   .defaults-content {
     padding: 32px 22px;

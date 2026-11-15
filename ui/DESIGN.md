@@ -92,19 +92,27 @@ wordmark: the host owns that chrome.
 
 ## Layout
 
-Every page uses the same three layouts, and only these two widths (`max-width: 1150px` and
+Every page uses the same three layouts, and only these two page widths (`max-width: 1150px` and
 `max-width: 720px`):
 
 - **Wide** (above 1150px): sidebar, canvas or list, and the inspector side by side.
 - **Medium** (721–1150px): the sidebar goes behind its menu button; the inspector stays docked.
-- **Narrow** (720px and below): the header takes two rows and the inspector slides over the canvas.
+- **Narrow** (720px and below): the profile editor's title header wraps its actions onto a second
+  row (the run header stays one row), the wordmark keeps only its crow beside the workspace kind,
+  and the inspector slides over the canvas below its toolbar.
 
-Moving to a narrower layout only folds things away; nothing hidden at one width comes back at a
-narrower one. The top bar keeps one height (`--app-header-height`) and logo size at every width. Sidebars share
-`--sidebar-width`, docked or popped out. Canvas toolbars keep one row
-and answer to the canvas's own width (a container query), since the resizable inspector changes it
-too: below 600px the editor's quieter tools fold into a **More tools** menu. Pages work down to a
-360px-wide phone without clipping.
+Moving to a narrower page layout only folds the page away; nothing it hides at one width comes back
+at a narrower one. The top bar (the app header, and the Defaults page's bar) keeps one height
+(`--app-header-height`) and logo size at every width. Sidebars share `--sidebar-width`, docked or
+popped out; Escape closes a popped-out sidebar. Both inspectors overlay at one default width,
+starting below the canvas toolbar (`--canvas-toolbar-height`).
+
+Toolbars inside a page follow their own width instead (container queries), since the sidebar and
+the resizable inspector change it as well as the window, so a tool folded away can return when the
+sidebar or inspector stops docking. Canvas toolbars keep one row: at 600px or less the editor's
+quieter tools fold into a **More tools** menu, and at 440px or less Expand and Collapse all join
+them. The replay timeline moves its event and extras to a second row at 760px or less. Pages work
+down to a 360px-wide phone without clipping.
 
 ## Interaction
 

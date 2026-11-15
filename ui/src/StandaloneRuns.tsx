@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronRight, Menu, RefreshCw, Search } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { AppHeader } from './AppHeader';
 import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { workspaceStorageKeys } from './workspace-storage';
@@ -150,19 +150,14 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
         navigate={(section) => {
           if (section === 'profiles') window.location.hash = '';
         }}
-        sidebarToggle={
-          <button
-            className="icon-button history-sidebar-toggle"
-            title="Run list"
-            aria-label="Run list"
-            onClick={() => setSidebar(!sidebar)}
-          >
-            <Menu size={18} />
-          </button>
-        }
+        sidebar={{ label: 'Run list', id: 'runs-sidebar', open: sidebar, setOpen: setSidebar }}
       />
       <div className="app-body">
-        <nav className={`run-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Runs">
+        <nav
+          id="runs-sidebar"
+          className={`page-sidebar run-sidebar ${sidebar ? 'visible' : ''}`}
+          aria-label="Runs"
+        >
           <div className="sidebar-heading">
             <span className="sidebar-title">Runs</span>
             <button

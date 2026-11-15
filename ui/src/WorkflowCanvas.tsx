@@ -418,6 +418,20 @@ function CanvasToolbar({
   noneCollapsed: boolean;
   arrange: () => void;
 }) {
+  const groupTools = [
+    {
+      label: 'Expand all groups',
+      icon: <UnfoldVertical size={17} />,
+      disabled: noneCollapsed,
+      onSelect: expandAll,
+    },
+    {
+      label: 'Collapse all groups',
+      icon: <FoldVertical size={17} />,
+      disabled: allCollapsed,
+      onSelect: collapseAll,
+    },
+  ];
   const tools = [
     {
       label: 'Runtime settings',
@@ -481,24 +495,21 @@ function CanvasToolbar({
         )}
       </div>
       <div className="canvas-actions">
-        <button
-          className="icon-button"
-          title="Expand all groups"
-          aria-label="Expand all groups"
-          aria-disabled={noneCollapsed}
-          onClick={() => !noneCollapsed && expandAll()}
-        >
-          <UnfoldVertical size={17} />
-        </button>
-        <button
-          className="icon-button"
-          title="Collapse all groups"
-          aria-label="Collapse all groups"
-          aria-disabled={allCollapsed}
-          onClick={() => !allCollapsed && collapseAll()}
-        >
-          <FoldVertical size={17} />
-        </button>
+        {/* Kept in read-only views; the editor folds these into "More tools" on a phone. */}
+        <div className={`canvas-group-tools ${readOnly ? '' : 'foldable'}`}>
+          {groupTools.map((tool) => (
+            <button
+              key={tool.label}
+              className="icon-button"
+              title={tool.label}
+              aria-label={tool.label}
+              aria-disabled={tool.disabled}
+              onClick={() => !tool.disabled && tool.onSelect()}
+            >
+              {tool.icon}
+            </button>
+          ))}
+        </div>
         {!readOnly && (
           <>
             {/* Shown while the canvas is wide; folded behind "More tools" when it is narrow. */}
@@ -518,11 +529,10 @@ function CanvasToolbar({
             <div className="canvas-tools-more">
               <MoreMenu
                 label="More tools"
-                items={tools.map(({ label, icon, onSelect }) => ({
-                  label,
-                  icon,
-                  onSelect,
-                }))}
+                items={[
+                  ...groupTools.map((tool) => ({ ...tool, className: 'canvas-group-tool' })),
+                  ...tools.map(({ label, icon, onSelect }) => ({ label, icon, onSelect })),
+                ]}
               />
             </div>
           </>

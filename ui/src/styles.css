@@ -2,6 +2,7 @@
 :root {
   --sidebar-width: 248px;
   --app-header-height: 62px;
+  --canvas-toolbar-height: 59px;
   --canvas: #faf7f1;
   --surface: #ffffff;
   --panel: rgb(255 255 255 / 0.5);
@@ -325,6 +326,23 @@ h2 {
 .local-label {
   font-size: 13px;
   color: var(--ink-muted);
+  white-space: nowrap;
+}
+.app-sections {
+  display: flex;
+  align-self: stretch;
+  gap: 22px;
+  margin-left: 15px;
+}
+.app-sections button {
+  color: var(--ink-muted);
+  padding: 0 2px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+}
+.app-sections button[aria-current='page'] {
+  color: var(--ink);
+  border-bottom-color: var(--rust);
 }
 .sidebar-title {
   font-size: 13px;
@@ -337,7 +355,7 @@ h2 {
   min-height: 0;
 }
 /* Profiles and runs share one sidebar width and padding, docked or popped out. */
-.profile-sidebar {
+.page-sidebar {
   width: var(--sidebar-width);
   flex-shrink: 0;
   display: flex;
@@ -636,8 +654,8 @@ h2 {
 /* Always one row. It answers to the canvas's own width, which the inspector changes as well as the
    window: when that is narrow, the editor's quieter tools fold into "More tools". */
 .canvas-toolbar {
-  height: 59px;
-  min-height: 59px;
+  height: var(--canvas-toolbar-height);
+  flex-shrink: 0;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -646,7 +664,8 @@ h2 {
   gap: 10px;
   border-bottom: 1px solid var(--hairline);
   background: transparent;
-  z-index: 5;
+  /* Above the inspector where it overlays the canvas, so the More tools menu opens over it. */
+  z-index: 11;
 }
 .canvas-actions {
   display: flex;
@@ -668,6 +687,12 @@ h2 {
 .canvas-tools-more {
   display: none;
 }
+.canvas-group-tools {
+  display: contents;
+}
+.more-menu-list .canvas-group-tool {
+  display: none;
+}
 @container canvas (max-width: 600px) {
   .canvas-tools {
     display: none;
@@ -679,6 +704,16 @@ h2 {
   .canvas-actions,
   .canvas-start {
     gap: 4px;
+  }
+}
+/* A phone-width canvas: Expand and Collapse all join them, so an embedded editor's history
+   controls still fit on the one row at 360px. */
+@container canvas (max-width: 440px) {
+  .canvas-group-tools.foldable {
+    display: none;
+  }
+  .more-menu-list .canvas-group-tool {
+    display: flex;
   }
 }
 .more-menu {
@@ -710,7 +745,11 @@ h2 {
 .more-menu-list button svg {
   color: var(--ink-secondary);
 }
-.more-menu-list button:hover,
+.more-menu-list button[aria-disabled='true'] {
+  cursor: default;
+  color: var(--disabled-text);
+}
+.more-menu-list button:hover:not([aria-disabled='true']),
 .more-menu-list button:focus-visible {
   background: var(--subtle-hover);
 }
@@ -1173,12 +1212,9 @@ h2 {
   cursor: pointer;
   width: 100%;
 }
+/* The menu button leads the header, on the side its sidebar opens; its glyph lines up with the edge. */
 .sidebar-toggle {
   display: none;
-}
-/* The menu button leads the header, on the side its sidebar opens; its glyph lines up with the edge. */
-.sidebar-toggle,
-.history-sidebar-toggle {
   margin: 0 -10px 0 -7px;
 }
 .canvas-error {
@@ -1206,12 +1242,12 @@ h2 {
   gap: 20px;
 }
 /* Three layouts, shared by every page (ui/DESIGN.md, Layout): wide above 1150px, medium down to
-   721px, narrow at 720px and below. Each step only folds things away; nothing hidden at one width
-   comes back at a narrower one. */
+   721px, narrow at 720px and below. Each step only folds the page away; nothing it hides comes back
+   at a narrower one. Toolbars inside follow their own width instead (container queries). */
 
 /* Medium: the page list goes behind its menu button; the inspector stays beside the canvas. */
 @media (max-width: 1150px) {
-  .profile-sidebar {
+  .page-sidebar {
     display: none;
     position: absolute;
     left: 0;
@@ -1222,11 +1258,11 @@ h2 {
     width: var(--sidebar-width);
     box-shadow: 5px 0 20px var(--shadow-panel);
   }
-  .profile-sidebar.visible {
+  .page-sidebar.visible {
     display: flex;
   }
   .sidebar-toggle {
-    display: flex;
+    display: inline-flex;
   }
   .app-header {
     padding: 0 18px;
@@ -1244,15 +1280,12 @@ h2 {
   .canvas-toolbar {
     padding: 8px 13px;
   }
-  .profile-title h1 {
-    font-size: 24px;
-  }
   .inspector-scroll {
     padding: 22px 18px;
   }
 }
 
-/* Narrow: the header takes two rows and the inspector slides over the canvas. */
+/* Narrow: the profile header takes two rows and the inspector slides over the canvas. */
 @media (max-width: 720px) {
   /* 44px touch targets on phones (ui/DESIGN.md); the line stays visually quiet. */
   .node-trail button {
@@ -1260,13 +1293,25 @@ h2 {
     min-height: 44px;
     padding: 0 4px;
   }
-  /* The top bar keeps its height and logo size; only its horizontal spacing tightens. */
+  .more-menu > .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+  .more-menu-list button {
+    min-height: 44px;
+  }
+  /* The glyph keeps its place at the header's edge. */
+  .sidebar-toggle {
+    width: 44px;
+    height: 44px;
+    margin: 0 -16px 0 -13px;
+  }
+  /* The top bar keeps its height and logo size; only its horizontal spacing tightens. The
+     wordmark's text goes, the crow and the workspace kind stay. */
   .app-header {
     gap: 14px;
     padding: 0 15px;
   }
-  .app-header .local-label,
-  .app-header .brand-rule,
   .app-header .brand > span:last-child {
     display: none;
   }
@@ -1296,17 +1341,18 @@ h2 {
   .editor-body {
     position: relative;
   }
-  .inspector {
+  /* Profile and run inspectors overlay the canvas below its toolbar, at one default width. */
+  .editor-body > .inspector-panel {
     position: absolute;
     right: 0;
-    top: 59px;
+    top: var(--canvas-toolbar-height);
     bottom: 0;
     z-index: 10;
     --inspector-default-width: 310px;
     box-shadow: -5px 0 24px var(--shadow-panel);
   }
   .canvas-toolbar {
-    padding: 8px 10px;
+    padding: 0 10px;
   }
   .status-bar {
     padding: 0 13px;
