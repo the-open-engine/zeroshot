@@ -639,12 +639,19 @@ function clickNode(
   else if (node.type === 'region' && !target.closest('.workflow-region-header')) p.deselect?.();
 }
 
-/** Groups the canvas draws: a folded error route has no region to open or close. */
+/**
+ * Groups the canvas draws, expanded or folded. A decision that shares its verifier's card when
+ * expanded still has a card of its own when folded; a folded error route has neither.
+ */
 function useDrawnGroups(document: Document) {
   return useMemo(() => {
     const drawn = drawnOwners(document);
+    const foldedCard = (name: string) =>
+      projectWorkflow(document, new Set([name])).nodes.some((node) => node.owner === name);
     return new Set(
-      [...collapsedWorkflowGroups(document.graph.root)].filter((name) => drawn.has(name))
+      [...collapsedWorkflowGroups(document.graph.root)].filter(
+        (name) => drawn.has(name) || foldedCard(name)
+      )
     );
   }, [document]);
 }

@@ -439,6 +439,38 @@ test('a folded error route is no group to expand or collapse', async (t) => {
     );
 });
 
+test('a folded decision that shares its verifier card when open still counts for Expand all', async (t) => {
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    root: {
+      kind: 'seq',
+      name: 'run',
+      children: [
+        { kind: 'verifier', name: 'review', signals: { verdict: ['accepted', 'rejected'] } },
+        {
+          kind: 'choice',
+          name: 'review_route',
+          branches: [
+            {
+              when: {
+                kind: 'in',
+                value: { name: 'review', source: 'signal', field: 'verdict' },
+                labels: ['accepted'],
+              },
+              node: { kind: 'succeed', name: 'done', output: { kind: 'null' }, bindings: [] },
+            },
+          ],
+          otherwise: { kind: 'fail', name: 'rejected', reason: 'failed' },
+        },
+      ],
+    } as GraphNode,
+    view: { collapsed: ['review_route'] },
+  });
+  const disabled = (label: string) =>
+    container.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-disabled');
+  assert.equal(disabled('Expand all groups'), 'false');
+  assert.equal(disabled('Collapse all groups'), 'true');
+});
+
 test('an empty-canvas click shows the workflow details at once; a group header keeps its own', async (t) => {
   let deselected = 0;
   const container = await mountRunGraph(t, layoutWorker(), undefined, {
