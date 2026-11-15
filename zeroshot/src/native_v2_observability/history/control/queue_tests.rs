@@ -17,6 +17,7 @@ fn an_authentic_start_completes_the_queue_record_instead_of_stopping_it() {
     });
     replay
         .apply(StoredRunEvent {
+            recorded_at: None,
             cursor: cursor_for(1),
             event: RunEvent::RunStarted,
         })
@@ -29,6 +30,7 @@ fn an_authentic_start_completes_the_queue_record_instead_of_stopping_it() {
     );
     replay
         .apply(StoredRunEvent {
+            recorded_at: None,
             cursor: cursor_for(2),
             event: RunEvent::NodeStarted {
                 reference: ExecutionRef {
