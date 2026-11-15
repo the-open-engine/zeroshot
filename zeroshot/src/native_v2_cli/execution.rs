@@ -1033,6 +1033,10 @@ fn read_request_answer(
 #[path = "execution/request_tests.rs"]
 mod request_tests;
 
+#[cfg(test)]
+#[path = "execution/steer_tests.rs"]
+mod steer_tests;
+
 fn read_steer_text(source: super::SteerText) -> Result<String, NativeV2CliError> {
     use std::io::Read;
     let limit = openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES;
