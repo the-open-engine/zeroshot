@@ -469,7 +469,9 @@ function CanvasToolbar({
         ) : (
           <>
             <button
-              className="button compact"
+              className="button compact add-activity"
+              aria-label="Add activity"
+              title="Add activity"
               disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
               onClick={() =>
                 p.action?.({
@@ -488,7 +490,7 @@ function CanvasToolbar({
                 })
               }
             >
-              <Plus size={15} /> Add activity
+              <Plus size={15} /> <span className="add-activity-label">Add activity</span>
             </button>
             {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
           </>

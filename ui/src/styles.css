@@ -716,6 +716,13 @@ h2 {
     display: flex;
   }
 }
+/* The narrowest canvas, beside an inspector widened to its limit (240px): Add activity keeps only
+   its icon, so an embedded editor's history controls and More tools still fit on the row. */
+@container canvas (max-width: 340px) {
+  .add-activity-label {
+    display: none;
+  }
+}
 .more-menu {
   position: relative;
 }
