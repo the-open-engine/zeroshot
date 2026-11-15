@@ -214,15 +214,7 @@ function recordedRound(
   };
   const nearest = ancestors.at(-1);
   if (!nearest || ancestors.indexOf(nearest) <= ancestors.indexOf(loop)) return fallback;
-  const prefix = JSON.stringify(mapPrefix(ancestors, nearest, invocation));
-  const visit = controls
-    .filter(
-      (control) =>
-        control.node === nearest.name &&
-        JSON.stringify(control.mapIndices) === prefix &&
-        control.start <= invocation.start
-    )
-    .reduce<ControlVisit | undefined>((a, b) => (a && a.start > b.start ? a : b), undefined);
+  const visit = latestVisit(ancestors, nearest, invocation, controls);
   const rounds = visit && loopIterations(visit.visitId);
   if (!rounds || rounds.length !== loops.length) return fallback;
   return {
@@ -230,6 +222,37 @@ function recordedRound(
     number: rounds[position],
     scope: JSON.stringify([fallback.scope, rounds.slice(0, position)]),
   };
+}
+
+/** The latest structural visit of `group` in the execution's map item before it started. */
+function latestVisit(
+  ancestors: GraphNode[],
+  group: GraphNode,
+  invocation: Invocation,
+  controls: readonly ControlVisit[]
+): ControlVisit | undefined {
+  const prefix = JSON.stringify(mapPrefix(ancestors, group, invocation));
+  return controls
+    .filter(
+      (control) =>
+        control.node === group.name &&
+        JSON.stringify(control.mapIndices) === prefix &&
+        control.start <= invocation.start
+    )
+    .reduce<ControlVisit | undefined>((a, b) => (a && a.start > b.start ? a : b), undefined);
+}
+
+/**
+ * The recorded pass over a par or map: members that skipped earlier rounds have their own visit
+ * counts, but one pass shares the group's visit identity.
+ */
+function recordedPass(
+  ancestors: GraphNode[],
+  group: GraphNode,
+  invocation: Invocation,
+  controls: readonly ControlVisit[]
+): string | undefined {
+  return latestVisit(ancestors, group, invocation, controls)?.visitId;
 }
 
 /** A structural visit's identity is `[node, mapIndices, loopIterations]`. */
@@ -279,11 +302,11 @@ function collectAttempts(
         start: Math.min(...attempts.map((invocation) => invocation.start)),
         round: loop && recordedRound(ancestors, loop, latest, controls),
         together: concurrent && {
-          // A member's own visit counts the passes over its group, as loop rounds re-enter it.
+          // One pass over the group, as recorded; a member's own visit count stands in without one.
           key: JSON.stringify([
             concurrent.name,
             mapPrefix(ancestors, concurrent, latest),
-            latest.visit,
+            recordedPass(ancestors, concurrent, latest, controls) ?? latest.visit,
           ]),
           node: concurrent,
           lane:
@@ -404,10 +427,14 @@ export function projectOutcome(
 }
 
 /**
- * Missing counters stay unknown: a total is a lower bound when an agent step reported none.
- * Steps that use no model (delivery, a person's answer) are never counted as missing, and
- * carried-over work is not counted at all: its usage stays with the run that did it.
+ * Missing counters stay unknown: a total is a lower bound when a step that calls a model (an
+ * agent or a decision) reported none. Steps that use no model (delivery, a person's answer) are
+ * never counted as missing, and carried-over work is not counted at all: its usage stays with the
+ * run that did it.
  */
+/** Runtime bindings that call a model, so missing usage leaves the total a lower bound. */
+const modelKinds = new Set(['agent', 'decision']);
+
 function tokens(document: Document, invocations: readonly Invocation[]) {
   const nodes = document.runtime.nodes as Record<string, { kind?: string } | undefined>;
   let total = 0,
@@ -420,7 +447,7 @@ function tokens(document: Document, invocations: readonly Invocation[]) {
     if (typeof input === 'number' && typeof output === 'number') {
       known = true;
       total += input + output;
-    } else if (nodes[node]?.kind === 'agent') partial = true;
+    } else if (modelKinds.has(nodes[node]?.kind ?? '')) partial = true;
   }
   if (!known) return '';
   const amount = new Intl.NumberFormat('en', {

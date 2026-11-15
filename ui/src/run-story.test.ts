@@ -740,3 +740,39 @@ test('a live group keeps its key as members join, so open rows stay mounted', ()
   assert.equal(both.length, 1);
   assert.equal(first[0].id, both[0].id);
 });
+
+test('a decision step without reported usage leaves the token total a lower bound', () => {
+  const doc = document(seq('run', step('write'), step('judge')));
+  doc.runtime.nodes = { write: { kind: 'agent' }, judge: { kind: 'decision' } };
+  const write = ref('write'),
+    judge = ref('judge');
+  const { outcome } = story(doc, [
+    start(write),
+    {
+      kind: 'token_usage_observed',
+      execution: write.execution,
+      usage: { inputTokens: 2_000, outputTokens: 500 },
+    },
+    complete(write),
+    start(judge),
+    complete(judge),
+  ]);
+  assert.ok(outcome.facts.includes('≥ 2.5K tokens'), outcome.facts.join(' | '));
+});
+
+test('one recorded parallel pass stays together when a member skipped earlier rounds', () => {
+  const doc = document(seq('run', loop('rounds', par('checks', step('lint'), step('fuzz')))));
+  const [lint1, lint2, fuzz] = ['lint', 'lint', 'fuzz'].map((node) => ref(node));
+  const entries = storyWithRounds(doc, [
+    { event: start(lint1), rounds: ['checks', [], [1]] },
+    { event: complete(lint1) },
+    { event: start(lint2), rounds: ['checks', [], [2]] },
+    { event: start(fuzz) },
+  ]);
+  assert.deepEqual(read(entries), [
+    '— Round 1 · Rounds',
+    '  Lint',
+    '— Round 2 · Rounds',
+    '  Lint | Fuzz',
+  ]);
+});
