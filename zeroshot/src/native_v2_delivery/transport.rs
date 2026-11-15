@@ -281,6 +281,41 @@ impl GitTransport {
         .await
     }
 
+    /// Full-history context checkout, independent of the branch's current tip or existence.
+    pub(crate) async fn checkout_context(
+        &self,
+        revision: &str,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
+        let deadline = tokio::time::Instant::now() + self.config.deadline;
+        self.initialize_checkout(revision, credential, deadline)
+            .await?;
+        self.success_before(
+            &[
+                "fetch",
+                "--tags",
+                "--",
+                "origin",
+                "+refs/heads/*:refs/remotes/origin/*",
+                revision,
+            ],
+            credential,
+            deadline,
+        )
+        .await?;
+        self.success_before(&["checkout", "--detach", revision], credential, deadline)
+            .await?;
+        let head = self
+            .success_before(&["rev-parse", "HEAD"], credential, deadline)
+            .await?;
+        if head.stdout_truncated() || head.stdout().trim() != revision {
+            return Err(SourceDeliveryError::identity(
+                "context checkout revision mismatch",
+            ));
+        }
+        Ok(())
+    }
+
     async fn checkout_before(
         &self,
         source: CheckoutRequest<'_>,

@@ -231,6 +231,13 @@ fn platform_backend_error(error: NativeV2PlatformError) -> BackendError {
                 None,
             )
         }
+        NativeV2PlatformError::Allocation(CapsuleAllocationUnavailable::ContextCheckout) => {
+            BackendError::application(
+                "context_checkout_unavailable",
+                "context repository checkout failed; inspect the operator diagnostic",
+                None,
+            )
+        }
         NativeV2PlatformError::Environment(error) => match &error {
             RunEnvironmentError::MissingConnection(key)
             | RunEnvironmentError::MissingField(key, _) => BackendError::application(

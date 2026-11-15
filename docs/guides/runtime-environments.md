@@ -11,7 +11,11 @@ Run submissions to Docker targets accept an `environment` field alongside `runti
   "environment": {
     "setup": "apt-get update && apt-get install -y jq",
     "startup": "npm ci",
-    "variables": { "CI": "true" }
+    "variables": { "CI": "true" },
+    "contextRepositories": [
+      { "repository": "acme/shared-library", "branch": "main" },
+      { "repository": "acme/api-contracts" }
+    ]
   }
 }
 ```
@@ -35,6 +39,35 @@ If installation needs private registry access, add
 The CLI can collect hook credentials for a definition you supply. When a host selects a default,
 its connection store must supply those credentials; the CLI does not inspect saved environments
 to discover additional secrets in your shell.
+
+## Read-only context repositories
+
+`contextRepositories` lists up to 16 extra repositories that agents can inspect and build against.
+Each entry has a `repository` (GitHub `owner/name` or a credential-free HTTPS/SSH Git URL) and an
+optional `branch`. The CLI reads this list from `--environment FILE` and resolves each branch to an
+exact commit before submitting to a named target. An omitted branch uses the remote's default
+branch. Duplicate repositories and the run's own source repository are rejected. Context repositories
+must use the source repository's forge and be accessible with its existing source credential;
+there is no separate context credential.
+
+Targets clone full history before the startup hook. The clones live outside the workspace at
+`$ZEROSHOT_CONTEXT/<repository path>`: for example, `$ZEROSHOT_CONTEXT/acme/shared-library`.
+Startup and every agent receive `ZEROSHOT_CONTEXT`; private agent guidance also lists the paths and
+pinned commits. Status, list and history retain the ordered pins as `contextSources` beside `source`.
+
+These checkouts are readable but cannot be modified or pushed by agents or startup hooks. For
+experiments, copy a repository into `$TMPDIR`, make the copy writable if your copy tool preserves
+read-only permissions, and edit/build there. Keep experimental copies outside the workspace:
+delivery commits the workspace, which still belongs to exactly one source repository. Copies have
+no source credentials and cannot authenticate a push.
+
+Context repositories are excluded from checkpoints. Every allocation, including a resume or
+checkpoint restore, clones the original pinned commits again even if their branches have moved.
+An unavailable repository or commit stops preparation with `context_checkout_unavailable` before
+agents start. Cloning shares the existing preparation deadline. A host-selected default environment
+that lists context repositories also requires matching client pins; the target never resolves
+mutable branch tips on the client's behalf. Local runs reject context repositories, as they reject
+setup and startup hooks. Runs without context repositories receive no `ZEROSHOT_CONTEXT`.
 
 ## Example: pinned Node and npm dependencies
 

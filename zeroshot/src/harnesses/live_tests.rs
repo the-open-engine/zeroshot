@@ -224,6 +224,7 @@ async fn registered_harness_live_memory_sessions_and_verifier_contract() {
     let bindings = runtime_bindings(&settings, &registry);
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             title: RunTitle::new("Explicit live harness contract").assert_value(),
             graph: worker_verifier_graph(&worker, &verifier),
             initial_input: Value::Null,

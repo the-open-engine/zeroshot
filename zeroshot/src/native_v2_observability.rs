@@ -438,6 +438,7 @@ impl WatchFold<'_> {
                     run_id: self.projection.run_id.clone(),
                     title: self.projection.title.clone(),
                     source: self.projection.source.clone(),
+                    context_sources: self.projection.context_sources.clone(),
                     size: self.projection.size.clone(),
                     cursor: stored.cursor.clone(),
                     status: status_from_snapshot(self.projection)?,

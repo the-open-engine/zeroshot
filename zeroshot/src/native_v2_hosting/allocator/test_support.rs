@@ -1,6 +1,16 @@
 use super::*;
 
 impl ProductionCapsuleAllocator {
+    #[cfg(target_os = "linux")]
+    pub(in crate::native_v2_hosting) async fn allocated_process_pool(
+        &self,
+        run_id: &RunId,
+    ) -> Option<HostedProcessPool> {
+        let state = self.active.lock().await.get(run_id)?.clone();
+        let pool = state.process_pool.lock().await.as_ref()?.process_pool();
+        Some(pool)
+    }
+
     pub(in crate::native_v2_hosting) fn with_test_filesystem_and_source(
         mut self,
         source: PathBuf,

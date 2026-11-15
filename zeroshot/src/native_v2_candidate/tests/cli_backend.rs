@@ -63,6 +63,7 @@ impl NativeV2CliBackend for InProcessCliBackend {
         let params = RunSubmitParams {
             run_id,
             submission: RunSubmission {
+                context_sources: Vec::new(),
                 environment: intent.environment,
                 title: intent.title,
                 graph: intent.graph,

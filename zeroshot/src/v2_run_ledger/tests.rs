@@ -30,6 +30,7 @@ fn admitted_run() -> AdmittedRun {
     ))
     .assert_value();
     AdmittedRun {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Ledger test").assert_value(),
         graph,
@@ -831,3 +832,33 @@ async fn sqlite_rejects_unresolved_or_inconsistent_persisted_size_without_panick
 
 #[path = "tests/vectors.rs"]
 mod vector_tests;
+
+#[tokio::test]
+async fn context_sources_survive_sqlite_reopen_replay_and_summary() {
+    let path = unique_database_path();
+    let pin = openengine_cluster_testkit::native_v2_source_fixture();
+    {
+        let ledger = SqliteRunLedger::open(&path).assert_value();
+        let mut request = create("context-pins", "context-pins", 'a');
+        request.admitted.context_sources = vec![pin.clone()];
+        ledger.create_or_get(request).await.assert_value();
+    }
+    let reopened = SqliteRunLedger::open(&path).assert_value();
+    let stored = reopened
+        .get(&RunId::new("context-pins"))
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(stored.admitted.context_sources, vec![pin.clone()]);
+    assert_eq!(stored.snapshot.context_sources, vec![pin.clone()]);
+    assert_eq!(
+        stored.snapshot.replay_seed().context_sources,
+        vec![pin.clone()]
+    );
+    assert_eq!(
+        super::RunSummary::from(&stored.snapshot).context_sources,
+        vec![pin]
+    );
+    drop(reopened);
+    std::fs::remove_file(path).assert_value();
+}

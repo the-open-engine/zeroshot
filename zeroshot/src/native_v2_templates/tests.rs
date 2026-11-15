@@ -732,6 +732,7 @@ async fn verified_software_template(
     };
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Template behavior").assert_value(),
             graph,

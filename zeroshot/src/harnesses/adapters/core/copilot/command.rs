@@ -263,6 +263,7 @@ fn reserved_process_environment_for_platform(name: &str, windows: bool) -> bool 
         "TMPDIR",
         "TEMP",
         "TMP",
+        "ZEROSHOT_CONTEXT",
         "COPILOT_HOME",
         "COPILOT_AUTO_UPDATE",
         "COPILOT_DISABLE_KEYTAR",

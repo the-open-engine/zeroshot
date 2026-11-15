@@ -269,6 +269,7 @@ async fn run_conversation_loop(kind: &str, respond: bool, race: Option<&str>) {
     );
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Verified conversation repair").unwrap(),
             graph,

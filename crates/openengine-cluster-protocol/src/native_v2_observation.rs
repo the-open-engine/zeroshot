@@ -252,6 +252,8 @@ macro_rules! define_run_status_projection {
             $(#[$source_attribute])?
             #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_sources: Vec<ResolvedSource>,
             $(#[$size_attribute])?
             pub size: RunSize,
             $(#[$cursor_attribute])?
@@ -326,6 +328,8 @@ pub struct RunWatchEventNotification {
     pub title: RunTitle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_sources: Vec<ResolvedSource>,
     pub size: RunSize,
     pub cursor: Cursor,
     pub status: RunStatus,

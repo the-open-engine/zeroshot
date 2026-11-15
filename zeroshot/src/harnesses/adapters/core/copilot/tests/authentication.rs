@@ -171,6 +171,36 @@ async fn reserved_provider_controls_are_never_passed_to_agent_processes() {
 }
 
 #[tokio::test]
+async fn context_path_cannot_be_overridden_after_the_host_environment_merge() {
+    let fixture = Fixture::with_local_context(
+        "success",
+        BTreeMap::from([
+            ("GH_TOKEN".to_owned(), "gho_fake-secret".to_owned()),
+            ("ZEROSHOT_CONTEXT".to_owned(), "/trusted-context".to_owned()),
+        ]),
+    )
+    .await;
+    verified(complete(fixture.start(1).await).await.1);
+    std::fs::remove_file(fixture.directory.child("capture")).assert_value();
+    let mut request = fixture.request(2);
+    // Exercise the adapter's actual merge independently of declaration-time validation.
+    request.environment = request.environment.with_variables(&BTreeMap::from([(
+        environment_name("ZEROSHOT_CONTEXT"),
+        "/override".to_owned(),
+    )]));
+    let outcome = complete(fixture.runtime.start(request).await.assert_value())
+        .await
+        .1;
+    assert!(
+        matches!(outcome,
+            Err(NodeRunnerError::DriverDetail(ref detail)) if detail.contains("reserved runtime configuration")
+        ),
+        "{outcome:?}"
+    );
+    assert!(!fixture.directory.child("capture").exists());
+}
+
+#[tokio::test]
 async fn large_prompt_and_cumulative_rpc_output_do_not_deadlock_or_hit_a_total_limit() {
     let fixture = Fixture::new("duplex").await;
     let mut request = fixture.request(1);

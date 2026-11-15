@@ -28,6 +28,7 @@ pub(super) fn comment_submission() -> RunSubmission {
         },
     );
     RunSubmission {
+        context_sources: Vec::new(),
         title: RunTitle::new("Source-less comment").assert_value(),
         graph,
         initial_input: json!({"url":"https://github.com/acme/project/issues/7","body":"A report", "context":{"title":"An issue","body":"Description","reviewScope":{}}}),

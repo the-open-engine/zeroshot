@@ -139,6 +139,7 @@ pub fn native_v2_source_fixture() -> ResolvedSource {
 
 fn status() -> RunStatusResult {
     RunStatusResult {
+        context_sources: Vec::new(),
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
@@ -176,7 +177,7 @@ fn watch_fixture() -> Value {
             run_id: run_id(),
             at_cursor: cursor(7),
         },
-        "event": RunWatchEventNotification {
+        "event": RunWatchEventNotification { context_sources: Vec::new(),
             subscription_id: SubscriptionId::new("watch-1"),
             run_id: run_id(),
             title: title(),
@@ -284,7 +285,7 @@ fn force_fixture() -> Value {
     };
     json!({
         "params": RunForceParams { run_id: run_id() },
-        "result": RunForceResult {
+        "result": RunForceResult { context_sources: Vec::new(),
             run_id: result.run_id,
             title: result.title,
             source: result.source,

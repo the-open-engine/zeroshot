@@ -115,6 +115,7 @@ mod local_auth {
         declared: bool,
     ) -> PortableControllerBootstrap {
         let submission = RunSubmission {
+            context_sources: Vec::new(),
             title: admitted.title.clone(),
             graph: BuiltinGraphTemplate::IssueReview
                 .materialize(TemplateDelivery::Comment)

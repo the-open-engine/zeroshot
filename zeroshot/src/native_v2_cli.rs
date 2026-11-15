@@ -229,6 +229,7 @@ pub struct PreparedRunRequest {
     pub worktree: Option<LocalWorktreeBase>,
     pub source_connection: Option<ConnectionKey>,
     pub source: Option<NamedRunSource>,
+    pub context_sources: Vec<ResolvedSource>,
     /// Remote selector retained so the hosted target can resolve the profile atomically.
     pub profile: Option<RunProfileSelector>,
 }

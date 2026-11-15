@@ -75,6 +75,7 @@ fn recovery_document(
 
 fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> RunStatusResult {
     RunStatusResult {
+        context_sources: Vec::new(),
         run_id,
         title: RunTitle::new("Local storage contract").assert_value(),
         source: submission.source.clone(),
@@ -161,6 +162,7 @@ fn prepared_local_run(
 fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     let submission = contract_submission(submission_key);
     PreparedRunRequest {
+        context_sources: Vec::new(),
         git_credentials: None,
 
         cwd: None,

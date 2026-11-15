@@ -36,6 +36,9 @@ impl ProductionCapsuleAllocator {
                 .ok_or(CapsuleAllocationUnavailable::Runtime)?;
                 let mut base_environment = launch.environment;
                 base_environment.insert("ZEROSHOT_TOOLS".to_owned(), tools_directory.clone());
+                if !admitted.context_sources.is_empty() {
+                    base_environment.extend(super::context::process_environment(run_root));
+                }
                 registry
                     .configure(HarnessBuildContext {
                         lane,

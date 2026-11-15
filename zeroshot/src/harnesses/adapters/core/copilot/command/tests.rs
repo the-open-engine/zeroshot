@@ -1,6 +1,6 @@
 use super::{
     environment_names_match_for_platform, private_command_environment_name_for_platform,
-    secret_environment_name_for_platform,
+    reserved_process_environment_for_platform, secret_environment_name_for_platform,
 };
 
 #[test]
@@ -26,4 +26,14 @@ fn windows_secret_environment_names_are_case_insensitive_and_canonical() {
         "Copilot_Provider_Api_Key",
         true
     ));
+}
+
+#[test]
+fn context_path_is_reserved_for_the_host_on_every_platform() {
+    for (name, windows) in [("ZEROSHOT_CONTEXT", false), ("Zeroshot_Context", true)] {
+        assert!(reserved_process_environment_for_platform(name, windows));
+        assert!(!private_command_environment_name_for_platform(
+            name, windows
+        ));
+    }
 }

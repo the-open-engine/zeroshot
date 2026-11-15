@@ -351,6 +351,7 @@ async fn admitted_claude(
         BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),
     );
     admit(RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Claude adapter test").assert_value(),
         graph: graph(verifier),

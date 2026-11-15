@@ -644,6 +644,7 @@ async fn environment_hooks_prepare_private_homes_without_starting_scripts() {
     )
     .await;
     admitted.environment = Some(openengine_cluster_protocol::RuntimeEnvironment {
+        context_repositories: Vec::new(),
         setup: None,
         startup: None,
         variables: BTreeMap::new(),
@@ -723,4 +724,69 @@ async fn environment_hooks_prepare_private_homes_without_starting_scripts() {
             .next()
             .is_some()
     );
+}
+
+#[test]
+fn context_environment_and_private_guidance_reach_every_core_harness() {
+    let root = TestDirectory::new("context-harnesses");
+    let allocator = test_allocator(root.path());
+    let filesystem = CapsuleFilesystem {
+        workspace: root.child("workspace"),
+        runtime_home: root.child("runtime"),
+    };
+    for (harness, provider) in [
+        ("codex", "openai"),
+        ("claude", "anthropic"),
+        ("copilot", "github"),
+        ("pi", "anthropic"),
+    ] {
+        let mut admitted = crate::native_v2_runner::test_support::admitted();
+        admitted.runtime.harness =
+            openengine_cluster_protocol::HarnessId::new(harness).assert_value();
+        admitted.runtime.provider =
+            openengine_cluster_protocol::ProviderId::new(provider).assert_value();
+        let absent = allocator
+            .lanes(&admitted, &filesystem, allocator.config.process_pool)
+            .assert_value();
+        assert!(absent.iter().all(|lane| {
+            !lane
+                .context
+                .base_environment
+                .contains_key("ZEROSHOT_CONTEXT")
+        }));
+        assert!(context::agent_context(&admitted, root.path(), None).is_none());
+        admitted.context_sources = vec![openengine_cluster_testkit::native_v2_source_fixture()];
+        let authored = admitted.graph.clone();
+        let lanes = allocator
+            .lanes(&admitted, &filesystem, allocator.config.process_pool)
+            .assert_value();
+        let guidance = context::agent_context(&admitted, root.path(), None)
+            .assert_value()
+            .context();
+        for lane in lanes {
+            assert_eq!(
+                lane.context.base_environment["ZEROSHOT_CONTEXT"],
+                root.child("context").display().to_string()
+            );
+            // Claude/Pi use the minimal environment boundary; Codex/Copilot carry the same map.
+            crate::native_v2_capsule::HarnessProcessEnvironment::new(lane.context.base_environment)
+                .assert_value();
+        }
+        for required in [
+            "read-only",
+            "$TMPDIR",
+            "outside the workspace",
+            "cannot",
+            admitted.context_sources[0].repository.as_str(),
+            admitted.context_sources[0].revision.as_str(),
+        ] {
+            assert!(
+                guidance
+                    .to_ascii_lowercase()
+                    .contains(&required.to_ascii_lowercase()),
+                "{harness}: {guidance}"
+            );
+        }
+        assert_eq!(admitted.graph, authored);
+    }
 }

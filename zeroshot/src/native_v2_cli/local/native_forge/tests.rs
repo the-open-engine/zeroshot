@@ -588,6 +588,7 @@ fn local_selection_request(
 ) -> crate::native_v2_cli::PreparedRunRequest {
     let submission = comment_submission("github.com", &["GH_TOKEN"]);
     crate::native_v2_cli::PreparedRunRequest {
+        context_sources: Vec::new(),
         run_id: openengine_cluster_protocol::RunId::new("native-source-selection"),
         intent: (&submission).into(),
         connections: RunConnectionValues::new(),

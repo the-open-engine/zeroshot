@@ -86,6 +86,9 @@ impl RunHistoryService {
                 "limitations":["control_flow_projected_by_reducer","retained_provider_output_only"]
             }
         });
+        if !stored.admitted.context_sources.is_empty() {
+            value["contextSources"] = json!(stored.admitted.context_sources);
+        }
         if let Some(reader) = &self.status
             && let Some(status) = reader.status(id).await
             && (status.workspace_recovery.successor_run_id.is_some()

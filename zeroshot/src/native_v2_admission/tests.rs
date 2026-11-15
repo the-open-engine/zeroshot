@@ -129,6 +129,7 @@ fn resolved_source() -> ResolvedSource {
 
 fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -> RunSubmission {
     RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Admission test").assert_value(),
         graph,
@@ -365,6 +366,7 @@ async fn rejects_inconsistent_worker_reuse() {
 async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models() {
     let graph = graph(vec![null_step("work", "agent.work@1"), succeed("done")]);
     let codex_runtime = RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Opaque Codex model").assert_value(),
         graph: graph.clone(),
@@ -722,3 +724,73 @@ mod input_loop_limits;
 
 #[path = "tests/requests.rs"]
 mod requests;
+
+#[tokio::test]
+async fn context_sources_require_complete_ordered_pins_after_environment_selection() {
+    let mut request = submission(
+        graph(vec![null_step("work", "agent.work@1"), succeed("done")]),
+        BTreeMap::from([(named("work"), binding("model", None))]),
+    );
+    request.environment = Some(
+        serde_json::from_value(
+            json!({"contextRepositories":[{"repository":"open-engine/library","branch":"main"}]}),
+        )
+        .assert_value(),
+    );
+    assert!(matches!(
+        NativeV2Admission.admit(request.clone()).await,
+        Err(NativeV2AdmissionError::InvalidEnvironment(_))
+    ));
+    let pin: ResolvedSource = serde_json::from_value(
+        json!({"repository":"open-engine/library","branch":"main","revision":"b".repeat(40)}),
+    )
+    .assert_value();
+    request.context_sources = vec![pin.clone()];
+    let admitted = NativeV2Admission
+        .admit(request.clone())
+        .await
+        .assert_value();
+    assert_eq!(admitted.context_sources, vec![pin.clone()]);
+    for pins in [
+        vec![pin.clone(), pin.clone()],
+        vec![resolved_source()],
+        vec![ResolvedSource {
+            branch: openengine_cluster_protocol::SourceBranchId::new("other").assert_value(),
+            ..pin.clone()
+        }],
+    ] {
+        request.context_sources = pins;
+        assert!(matches!(
+            NativeV2Admission.admit(request.clone()).await,
+            Err(NativeV2AdmissionError::InvalidEnvironment(_))
+        ));
+    }
+    request.context_sources = vec![pin];
+    request.environment = None;
+    assert!(NativeV2Admission.admit(request).await.is_err());
+}
+
+#[tokio::test]
+async fn context_sources_cannot_alias_the_primary_source_through_percent_escapes() {
+    let mut request = submission(
+        graph(vec![null_step("work", "agent.work@1"), succeed("done")]),
+        BTreeMap::from([(named("work"), binding("model", None))]),
+    );
+    request.environment = Some(
+        serde_json::from_value(json!({
+            "contextRepositories":[{"repository":"https://github.com/open-engine/%7aeroshot.git"}]
+        }))
+        .assert_value(),
+    );
+    request.context_sources = vec![
+        serde_json::from_value(json!({
+            "repository":"open-engine/%7aeroshot", "branch":"main", "revision":"b".repeat(40),
+            "remote":{"url":"https://github.com/open-engine/%7aeroshot.git"}
+        }))
+        .assert_value(),
+    ];
+    assert!(matches!(
+        NativeV2Admission.admit(request).await,
+        Err(NativeV2AdmissionError::InvalidEnvironment(_))
+    ));
+}

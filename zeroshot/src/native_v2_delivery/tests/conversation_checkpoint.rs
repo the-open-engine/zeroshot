@@ -195,7 +195,7 @@ pub(crate) async fn assert_interrupted_conversation_driver(fixture: Arc<dyn Conv
     };
     let mut runtime = delivery_runtime(binding);
     runtime.workspace_checkpoints = false;
-    let admitted = NativeV2Admission.admit(RunSubmission { environment: None, title: RunTitle::new("Interrupted conversation delivery").unwrap(), graph: serde_json::from_value(graph).unwrap(), initial_input: json!({"title":"fix: guard input","description":"Guard empty input.","reviewResponses":[response]}), runtime, source: source_for_revision(&repo.base), submission_key: IdempotencyKey::new("interrupted-conversation").unwrap() }).await.unwrap();
+    let admitted = NativeV2Admission.admit(RunSubmission { context_sources: Vec::new(), environment: None, title: RunTitle::new("Interrupted conversation delivery").unwrap(), graph: serde_json::from_value(graph).unwrap(), initial_input: json!({"title":"fix: guard input","description":"Guard empty input.","reviewResponses":[response]}), runtime, source: source_for_revision(&repo.base), submission_key: IdempotencyKey::new("interrupted-conversation").unwrap() }).await.unwrap();
     let delivery = retained_adapter(
         &repo,
         authority.clone(),

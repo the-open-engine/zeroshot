@@ -344,6 +344,7 @@ async fn exhausted_delivery_loops_retain_latest_verifier_evidence() {
         ]);
         let admitted = NativeV2Admission
             .admit(RunSubmission {
+                context_sources: Vec::new(),
                 environment: None,
                 title: RunTitle::new("Delivery evidence").assert_value(),
                 graph,

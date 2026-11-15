@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-pub(crate) const MINIMAL_ENVIRONMENT_NAMES: [&str; 7] = [
+pub(crate) const MINIMAL_ENVIRONMENT_NAMES: [&str; 9] = [
     "HOME",
     "LANG",
     "LC_ALL",
@@ -10,6 +10,8 @@ pub(crate) const MINIMAL_ENVIRONMENT_NAMES: [&str; 7] = [
     "TERM",
     "TMPDIR",
     "ZEROSHOT_TOOLS",
+    "ZEROSHOT_CONTEXT",
+    "GIT_CONFIG_GLOBAL",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]

@@ -910,6 +910,7 @@ fn named_comment_request(url: &str) -> (RunCommand, PreparedRunRequest) {
         panic!("run command")
     };
     let request = PreparedRunRequest {
+        context_sources: Vec::new(),
         run_id: openengine_cluster_protocol::RunId::new("source-less-comment"),
         intent: TargetRunIntent {
             title: run.title.clone(),
@@ -1098,4 +1099,22 @@ fn branch_tip_lookup_reads_the_shell_token_without_sending_it() {
         branch_tip_lookup_token(&run, &request, &shell).assert_value(),
         None
     );
+    request.intent.environment = Some(
+        serde_json::from_value(serde_json::json!({
+            "contextRepositories": [{"repository":"team/library"}]
+        }))
+        .assert_value(),
+    );
+    request.source = Some(crate::native_v2_cli::NamedRunSource {
+        resolved: openengine_cluster_testkit::native_v2_source_fixture(),
+        dirty: false,
+    });
+    assert_eq!(
+        branch_tip_lookup_token(&run, &request, &shell)
+            .assert_value()
+            .as_deref(),
+        Some("shell-token"),
+        "context branches still need lookup authority when the primary source is pinned"
+    );
+    assert_eq!(request.github_token, None);
 }

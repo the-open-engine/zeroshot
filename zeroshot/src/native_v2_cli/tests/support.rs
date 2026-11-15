@@ -234,6 +234,7 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     error_logs: usize,
     pending_logs: bool,
     queued_lifecycle: bool,
+    context_sources: Vec<openengine_cluster_protocol::ResolvedSource>,
     terminal_stack_state: Option<StackState>,
     stack_template_delivery: Option<TemplateDelivery>,
     submitted_stacks: Arc<Mutex<Vec<PreparedStackRequest>>>,
@@ -254,6 +255,14 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
+    pub(super) fn with_context_sources(
+        mut self,
+        pins: Vec<openengine_cluster_protocol::ResolvedSource>,
+    ) -> Self {
+        self.context_sources = pins;
+        self
+    }
+
     pub(in crate::native_v2_cli) fn with_workspace_export(stream: WorkspaceExportStream) -> Self {
         Self {
             workspace_export: Arc::new(Mutex::new(Some(stream))),
@@ -773,6 +782,7 @@ impl NativeV2CliBackend for FakeBackend {
             github_token,
             run_id: _,
             source: _,
+            context_sources: _,
             profile: _,
             git_credentials: _,
             cwd: _,
@@ -853,14 +863,16 @@ impl NativeV2CliBackend for FakeBackend {
             }))
             .map_err(NativeV2CliError::OutputJson);
         }
-        Ok(status(
+        let mut result = status(
             "run-public",
             if self.queued_lifecycle {
                 "queued"
             } else {
                 "admitted"
             },
-        ))
+        );
+        result.context_sources = self.context_sources.clone();
+        Ok(result)
     }
 
     async fn run_watch(
