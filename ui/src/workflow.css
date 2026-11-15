@@ -363,3 +363,8 @@
   display: block;
   margin-top: 10px;
 }
+
+/* A request node waiting on a person: amber marks what to watch (ui/DESIGN.md). */
+.workflow-card small.workflow-waiting {
+  color: var(--amber);
+}

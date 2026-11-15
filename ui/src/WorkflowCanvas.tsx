@@ -54,6 +54,7 @@ import {
   type Document,
   type GraphNode,
   type Positions,
+  REQUEST_WORKER,
 } from './domain';
 import { typeSummary } from './schema';
 import { nodeOutputFields } from './node-data';
@@ -68,6 +69,9 @@ import {
   type WorkflowMeasurements,
 } from './workflow-measurements';
 import {
+  collapsedRunGroups,
+  currentRunWork,
+  revealRunWork,
   collapsedWorkflowGroups,
   revealWorkflowNode,
   type WorkflowNodeObservation,
@@ -219,15 +223,6 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   const Icon = activity ? presentation.Icon : (nodeIcons[item.kind] ?? presentation.Icon);
   const terminal = ['succeed', 'fail'].includes(item.kind);
   const junction = ['fork', 'join', 'loop-start', 'loop-end', 'map-end'].includes(item.role);
-  const outputFields = nodeOutputFields(node);
-  const outputs = outputFields.length
-    ? typeSummary({
-        kind: 'record',
-        fields: Object.fromEntries(outputFields.map((field) => [field.name, field])),
-      })
-    : node.output?.kind !== 'null' && node.output?.kind
-      ? typeSummary(node.output)
-      : '';
   return (
     <>
       <ActivityToolbar data={data} selected={selected} node={node} />
@@ -247,14 +242,18 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
           <span>{activity && presentation.delivery ? presentation.label : item.label}</span>
         </div>
         {activity && executable(node) && (
-          <small className={!presentation.detail ? 'needs-value' : ''}>
-            {presentation.detail || (data.readOnly ? 'Agent' : 'Choose model')}
-          </small>
+          <ActivityDetail
+            detail={presentation.detail}
+            readOnly={data.readOnly}
+            waitingForPerson={
+              data.observation?.state === 'suspended' && node.worker === REQUEST_WORKER
+            }
+          />
         )}
         {item.detail && !activity && !junction && item.role !== 'decision' && (
           <small title={item.detail}>{item.detail}</small>
         )}
-        {activity && executable(node) && <ActivityFields node={node} outputs={outputs} />}
+        {activity && executable(node) && <ActivityFields node={node} />}
         {activity && <span className="workflow-node-identity">{node.name}</span>}
         {item.role === 'collapsed' && (
           <button
@@ -278,7 +277,35 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   );
 }
 
-function ActivityFields({ node, outputs }: { node: GraphNode; outputs: string }) {
+/** The card's one-line worker detail; a request step waiting on a person says so instead. */
+function ActivityDetail({
+  detail,
+  readOnly,
+  waitingForPerson,
+}: {
+  detail?: string;
+  readOnly?: boolean;
+  waitingForPerson: boolean;
+}) {
+  // Same one-line slot as the worker detail, so the measured layout is unchanged.
+  if (waitingForPerson) return <small className="workflow-waiting">Waiting for an answer</small>;
+  return (
+    <small className={detail ? '' : 'needs-value'}>
+      {detail || (readOnly ? 'Agent' : 'Choose model')}
+    </small>
+  );
+}
+
+function ActivityFields({ node }: { node: GraphNode }) {
+  const outputFields = nodeOutputFields(node);
+  const outputs = outputFields.length
+    ? typeSummary({
+        kind: 'record',
+        fields: Object.fromEntries(outputFields.map((field) => [field.name, field])),
+      })
+    : node.output?.kind !== 'null' && node.output?.kind
+      ? typeSummary(node.output)
+      : '';
   return (
     <div className="workflow-fields">
       {node.input?.kind && node.input.kind !== 'null' && (
@@ -655,13 +682,24 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
       p.view
         ? new Set(p.view.collapsed)
         : readOnly
-          ? collapsedWorkflowGroups(p.document.graph.root)
+          ? collapsedRunGroups(p.document.graph.root, p.observation?.nodes)
           : new Set()
     );
     setDragPositions({});
     lastFocus.current = undefined;
     groups.forget();
   }, [contextKey, readOnly]);
+  // Live history arrives after the canvas mounts: unfold work as it becomes current, never refold.
+  const currentWork = readOnly
+    ? currentRunWork(p.document.graph.root, p.observation?.nodes).join('\n')
+    : '';
+  const revealedWork = useRef(p.view ? currentWork : '');
+  useEffect(() => {
+    if (currentWork === revealedWork.current) return;
+    revealedWork.current = currentWork;
+    if (currentWork)
+      setCollapsed((value) => revealRunWork(value, p.document.graph.root, currentWork.split('\n')));
+  }, [currentWork]);
   useEffect(() => {
     void layout();
     return () => {
@@ -872,7 +910,7 @@ function useCanvasView(p: WorkflowCanvasProps, readOnly: boolean) {
     p.view
       ? new Set(p.view.collapsed)
       : readOnly
-        ? collapsedWorkflowGroups(p.document.graph.root)
+        ? collapsedRunGroups(p.document.graph.root, p.observation?.nodes)
         : new Set()
   );
   const initialViewport = useRef(p.view?.viewport);

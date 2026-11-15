@@ -211,7 +211,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
               onClick={() => void showExamples()}
             >
               {examplesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Examples{' '}
-              <span>10</span>
+              {examples.length > 0 && <span>{examples.length}</span>}
             </button>
             {examplesOpen && (
               <>
@@ -241,7 +241,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
           }
           source={selection?.example ? exampleSource : history}
           workers={bootstrap.workers ?? []}
-          runHref={(id) => `#runs/local/${encodeURIComponent(id)}`}
+          runHref={(id) => runLink(id, selection?.example)}
           emptyAction={
             latest && (
               <button className="button" onClick={() => choose(latest)}>
@@ -283,11 +283,16 @@ function RunListItem({
       {run.workspaceRecovery?.successorRunId && (
         <a
           className="run-successor"
-          href={`#runs/local/${encodeURIComponent(run.workspaceRecovery.successorRunId)}`}
+          href={runLink(run.workspaceRecovery.successorRunId, run.example)}
         >
           Continue to successor
         </a>
       )}
     </div>
   );
+}
+
+/** Example runs link to examples; everything else to this workspace's own runs. */
+function runLink(id: string, example?: boolean): string {
+  return `#runs/${example ? 'example' : 'local'}/${encodeURIComponent(id)}`;
 }
