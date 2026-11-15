@@ -263,10 +263,10 @@
 }
 .timeline-bar {
   display: grid;
-  /* Controls, track, the event, then live status and Show node. The event's column has a fixed
-     width and Show node keeps its place, so the track keeps its length while dragging. */
-  grid-template-columns: auto minmax(120px, 1fr) clamp(180px, 34%, 420px) auto;
-  grid-template-areas: 'controls track caption extras';
+  /* Controls, track, then the event with live status and Show node. That last column has a fixed
+     width, so the track keeps its length while dragging whatever the event shows. */
+  grid-template-columns: auto minmax(120px, 1fr) clamp(240px, 42%, 560px);
+  grid-template-areas: 'controls track info';
   align-items: center;
   gap: 4px 12px;
 }
@@ -335,8 +335,15 @@
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
+.timeline-info {
+  grid-area: info;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
 .timeline-caption {
-  grid-area: caption;
+  flex: 1;
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -362,7 +369,7 @@
   flex-shrink: 0;
 }
 .timeline-extras {
-  grid-area: extras;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -373,17 +380,13 @@
   font-size: 12px;
   white-space: nowrap;
 }
-.timeline-show-node[hidden] {
-  display: inline-flex;
-  visibility: hidden;
-}
 /* Too narrow for one row: the event and its extras take a second row under the controls. */
 @container (max-width: 760px) {
   .timeline-bar {
-    grid-template-columns: auto minmax(80px, 1fr) auto;
+    grid-template-columns: auto minmax(80px, 1fr);
     grid-template-areas:
-      'controls track track'
-      'caption caption extras';
+      'controls track'
+      'info info';
   }
   .timeline-mode {
     display: none;

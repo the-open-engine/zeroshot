@@ -497,8 +497,8 @@ test('a remounted run restores its paused cursor, inspector and execution withou
   assert.ok(container.querySelector('[aria-label="Pause replay"]'));
   await click('Pause replay');
   assert.equal(position(), '1');
-  // Show node keeps its place in the bar, hidden when the event has no node.
-  assert.ok(container.querySelector('.timeline-show-node'));
+  // The event and its extras share one column, so the track keeps its length while scrubbing.
+  assert.ok(container.querySelector('.timeline-info .timeline-caption + .timeline-extras'));
   await act(async () => root.unmount());
   assert.equal(watches, 0);
   assert.equal(lastSignal?.aborted, true);
