@@ -47,8 +47,8 @@ export function RunStory({
   revealStep?: { invocation: string; tick: number };
 }) {
   const entries = useMemo(
-    () => projectStory(run.document, run.invocations, run.handoffs, run.clock.at),
-    [run.document, run.invocations, run.handoffs, run.clock.at]
+    () => projectStory(run.document, run.invocations, run.handoffs, run.clock.at, run.controls),
+    [run.document, run.invocations, run.handoffs, run.clock.at, run.controls]
   );
   const byId = useMemo(
     () => new Map(run.invocations.map((invocation) => [invocation.id, invocation])),
@@ -304,11 +304,7 @@ function StoryLine({
   const retried = step.attempts > 1;
   // At the end of its history, a question this run handed to its successor no longer waits here.
   const handedOff =
-    step.state === 'suspended' &&
-    !!step.request &&
-    !step.request.resolution &&
-    !!run.successor &&
-    !run.open;
+    step.state === 'suspended' && !!step.request && !step.request.resolution && !!run.successor;
   const decision = handedOff ? 'Handed off' : step.decision;
   return (
     <div

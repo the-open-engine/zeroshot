@@ -1011,7 +1011,7 @@ test('a request suspension shows its text, deadline and successor without an ans
   }
 });
 
-test('opening steps keeps a live run followed, and Show node opens the step in Steps', async (t) => {
+test('opening steps keeps a live run followed; Show node and a node picked in Graph open it in Steps', async (t) => {
   stubWorker(t);
   installBrowser(t);
   const { RunHistoryView } = await viewerModule(t);
@@ -1074,6 +1074,7 @@ test('opening steps keeps a live run followed, and Show node opens the step in S
     await act(async () => plan.click());
     assert.match(container.querySelector('.story-step.open')!.textContent!, /Planning the change/);
     assert.equal(following(), 'Following latest events', 'opening a step is not a seek');
+
     await act(async () =>
       observer!.page({
         ...completePage(),
@@ -1089,6 +1090,27 @@ test('opening steps keeps a live run followed, and Show node opens the step in S
       /Build/,
       'the live run is still followed after a step was opened'
     );
+
+    // A node picked in Graph is still picked after switching back to Steps.
+    await showGraph(container);
+    const graphShowNode = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Show node'
+    );
+    assert.ok(graphShowNode);
+    await act(async () => graphShowNode.click());
+    const steps = [...container.querySelectorAll<HTMLButtonElement>('.view-toggle button')].find(
+      (button) => button.textContent === 'Steps'
+    );
+    assert.ok(steps);
+    await act(async () => steps.click());
+    const reopened = [...container.querySelectorAll('.story-step.open')].map(
+      (row) => row.textContent
+    );
+    assert.ok(
+      reopened.some((text) => text?.includes('Build')),
+      reopened.join(' | ')
+    );
+
     const showNode = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === 'Show node'
     );

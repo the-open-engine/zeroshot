@@ -1,3 +1,4 @@
+import type { ControlVisit } from './control-history';
 import { pathTo, type Document, type GraphNode } from './domain';
 import {
   executionDecision,
@@ -52,10 +53,16 @@ export type StoryOutcome = { text: string; state: NodeState; facts: string[] };
 
 type Execution = StoryStep & {
   start: number;
-  /** Innermost enclosing loop and its round, which places round dividers. */
-  round?: { loop: string; number: number };
-  /** Innermost par or map whose members run side by side, keyed by its map position and pass. */
-  together?: { key: string; node: GraphNode };
+  /**
+   * Innermost enclosing loop and its round, which places round dividers. `scope` is the loop's own
+   * map position and outer rounds: each map item and each outer round counts its rounds afresh.
+   */
+  round?: { loop: string; number: number; scope: string };
+  /**
+   * Innermost par or map whose members run side by side, keyed by its map position and pass;
+   * `lane` is the member's item of that map.
+   */
+  together?: { key: string; node: GraphNode; lane?: number };
 };
 
 export function projectStory(
@@ -63,9 +70,11 @@ export function projectStory(
   invocations: readonly Invocation[],
   handoffs: readonly RunHandoff[] = [],
   /** The latest ledger time at the replay position, which bounds a running step. */
-  at?: number
+  at?: number,
+  /** Structural visits, whose identities record each loop round. */
+  controls: readonly ControlVisit[] = []
 ): StoryEntry[] {
-  const executions = foldAttempts(document, invocations, at);
+  const executions = foldAttempts(document, invocations, controls, at);
   const entries: StoryEntry[] = [];
   let roundKey = '';
   let round: RoundEntry | undefined;
@@ -76,6 +85,7 @@ export function projectStory(
     const steps = group.map(({ start, round, together, ...step }) => step);
     const container = group[0].together?.node;
     const id = group.map((execution) => execution.invocation).join('+');
+    const items = new Set(group.map((execution) => execution.together?.lane)).size;
     placed.set(id, { start: Math.min(...group.map((execution) => execution.start)), round });
     entries.push({
       kind: 'work',
@@ -84,7 +94,7 @@ export function projectStory(
       group:
         steps.length > 1 && container
           ? container.kind === 'map'
-            ? `${steps.length} items · ${humanize(container.name)}`
+            ? `${items} ${items === 1 ? 'item' : 'items'} · ${humanize(container.name)}`
             : `In parallel · ${humanize(container.name)}`
           : undefined,
       steps,
@@ -92,7 +102,9 @@ export function projectStory(
     group = [];
   };
   for (const execution of executions) {
-    const key = execution.round ? `${execution.round.loop}#${execution.round.number}` : '';
+    const key = execution.round
+      ? `${execution.round.loop}${execution.round.scope}#${execution.round.number}`
+      : '';
     if (key !== roundKey) {
       flush();
       roundKey = key;
@@ -156,31 +168,83 @@ function placeContinuation(entries: StoryEntry[], placed: Placed, handoff: RunHa
 function foldAttempts(
   document: Document,
   invocations: readonly Invocation[],
+  controls: readonly ControlVisit[],
   at?: number
 ): Execution[] {
-  return loopRounds(collectAttempts(document, invocations, at));
+  return loopRounds(collectAttempts(document, invocations, controls, at));
 }
 
 /**
- * A node's visit count is its own, not the loop's: a step that skips round 1 is still in round 2.
- * A loop only moves forward, so each execution's round is at least the round of the loop work
- * recorded before it.
+ * Without a recorded round, a node's visit count stands in, and it is the node's own: a step that
+ * skips round 1 is still in round 2. A loop only moves forward, so each execution's round is at
+ * least the round of the same loop's work recorded before it, in the same item and outer round.
  */
 function loopRounds(executions: Execution[]): Execution[] {
   const current = new Map<string, number>();
   for (const execution of executions) {
     if (!execution.round) continue;
-    const { loop, number } = execution.round;
-    const round = Math.max(number, current.get(loop) ?? 1);
-    current.set(loop, round);
-    execution.round = { loop, number: round };
+    const { loop, number, scope } = execution.round;
+    const round = Math.max(number, current.get(loop + scope) ?? 1);
+    current.set(loop + scope, round);
+    execution.round = { ...execution.round, number: round };
   }
   return executions;
+}
+
+/**
+ * The loop round an execution ran in, as recorded: every structural visit's identity carries the
+ * rounds of its enclosing loops, so the nearest structural ancestor's latest visit before the
+ * execution names them. A step that is the loop's whole body has none, and falls back to its visit.
+ */
+function recordedRound(
+  ancestors: GraphNode[],
+  loop: GraphNode,
+  invocation: Invocation,
+  controls: readonly ControlVisit[]
+): Execution['round'] {
+  const loops = ancestors.filter((node) => node.kind === 'loop');
+  const position = loops.indexOf(loop);
+  const fallback = {
+    loop: loop.name,
+    number: invocation.visit,
+    scope: JSON.stringify(mapPrefix(ancestors, loop, invocation)),
+  };
+  const nearest = ancestors.at(-1);
+  if (!nearest || ancestors.indexOf(nearest) <= ancestors.indexOf(loop)) return fallback;
+  const prefix = JSON.stringify(mapPrefix(ancestors, nearest, invocation));
+  const visit = controls
+    .filter(
+      (control) =>
+        control.node === nearest.name &&
+        JSON.stringify(control.mapIndices) === prefix &&
+        control.start <= invocation.start
+    )
+    .reduce<ControlVisit | undefined>((a, b) => (a && a.start > b.start ? a : b), undefined);
+  const rounds = visit && loopIterations(visit.visitId);
+  if (!rounds || rounds.length !== loops.length) return fallback;
+  return {
+    loop: loop.name,
+    number: rounds[position],
+    scope: JSON.stringify([fallback.scope, rounds.slice(0, position)]),
+  };
+}
+
+/** A structural visit's identity is `[node, mapIndices, loopIterations]`. */
+function loopIterations(visitId: string): number[] | undefined {
+  try {
+    const rounds: unknown = JSON.parse(visitId)?.[2];
+    return Array.isArray(rounds) && rounds.every((round) => Number.isInteger(round) && round > 0)
+      ? rounds
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function collectAttempts(
   document: Document,
   invocations: readonly Invocation[],
+  controls: readonly ControlVisit[],
   at?: number
 ): Execution[] {
   const executions = new Map<string, Invocation[]>();
@@ -210,7 +274,7 @@ function collectAttempts(
         attempts: attempts.length,
         durationMs: duration(attempts, latest, at),
         start: Math.min(...attempts.map((invocation) => invocation.start)),
-        round: loop && { loop: loop.name, number: latest.visit },
+        round: loop && recordedRound(ancestors, loop, latest, controls),
         together: concurrent && {
           // A member's own visit counts the passes over its group, as loop rounds re-enter it.
           key: JSON.stringify([
@@ -219,6 +283,10 @@ function collectAttempts(
             latest.visit,
           ]),
           node: concurrent,
+          lane:
+            concurrent.kind === 'map'
+              ? latest.mapIndices[mapPrefix(ancestors, concurrent, latest).length]
+              : undefined,
         },
       };
     })
@@ -242,10 +310,13 @@ export function formatDuration(ms: number) {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
-/** Items of one map run together; the same par inside different map items does not. */
-function mapPrefix(ancestors: GraphNode[], concurrent: GraphNode, invocation: Invocation) {
+/**
+ * The map positions above a group: items of one map run together; the same par inside different
+ * map items does not.
+ */
+function mapPrefix(ancestors: GraphNode[], group: GraphNode, invocation: Invocation) {
   const depth = ancestors
-    .slice(0, ancestors.indexOf(concurrent))
+    .slice(0, ancestors.indexOf(group))
     .filter((node) => node.kind === 'map').length;
   return invocation.mapIndices.slice(0, depth);
 }
@@ -280,9 +351,10 @@ export function projectOutcome(
   /** The ledger's first and latest times at this position, when it kept times. */
   clock: { first?: number; at?: number } = {},
   /** The run an answer or resume continued this one in, which took over its open question. */
-  successor?: string
+  successor?: string,
+  controls: readonly ControlVisit[] = []
 ): StoryOutcome {
-  const executions = foldAttempts(document, invocations, clock.at);
+  const executions = foldAttempts(document, invocations, controls, clock.at);
   const rounds = new Map<string, number>();
   for (const { round } of executions)
     if (round) rounds.set(round.loop, Math.max(rounds.get(round.loop) ?? 0, round.number));

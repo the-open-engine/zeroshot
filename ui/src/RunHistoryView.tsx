@@ -227,7 +227,15 @@ export function RunHistoryView({
   });
   const { node } = selection;
   const hasLog = (cursor: string) => events.some((entry) => entry.cursor === cursor);
-  const toggle = <RunViewToggle layout={layout} setLayout={setLayout} />;
+  /** A node picked in Graph stays picked in Steps: the execution its inspector shows opens there. */
+  function switchLayout(view: RunLayout) {
+    setLayout(view);
+    const shown = selection.activeInvocation;
+    if (view !== 'story' || !shown || !selected || selected === document?.graph.root.name) return;
+    setExecution(shown.id);
+    setRevealStep({ invocation: shown.id, tick: Date.now() });
+  }
+  const toggle = <RunViewToggle layout={layout} setLayout={switchLayout} />;
   return (
     <main className="workspace history-workspace">
       {run && document && projection ? (
@@ -406,10 +414,12 @@ function runContext(
     input: run.initialInput,
     invocations: projection.invocations,
     handoffs: projection.handoffs,
+    controls: projection.controls,
     systemLogs: projection.systemLogs,
     clock: projection.clock,
     waiting: !successor && run.phase === 'suspended' && !!run.suspension?.request,
-    successor,
+    // Replayed before the end, the run had not handed anything on yet.
+    successor: position.open ? undefined : successor,
   };
 }
 

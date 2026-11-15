@@ -652,3 +652,82 @@ test('a question handed to a successor reads as handed off, never as still waiti
   const waiting = requestStatus(asked, { waiting: true }, now);
   assert.match(waiting, /^Waiting since .*2020.* · deadline passed .*2020/);
 });
+
+test('a map heading counts its items, not the steps each item ran', () => {
+  const doc = document(seq('run', map('suites', seq('suite', step('build'), step('check')))));
+  const [build0, build1, check0, check1] = ['build', 'build', 'check', 'check'].map((node) =>
+    ref(node)
+  );
+  const { entries } = story(doc, [
+    start(build0, 1, [0]),
+    start(build1, 1, [1]),
+    complete(build0),
+    complete(build1),
+    start(check0, 1, [0]),
+    start(check1, 1, [1]),
+  ]);
+  const groups = entries.flatMap((entry) => (entry.kind === 'work' ? [entry.group] : []));
+  assert.deepEqual(groups, ['2 items · Suites']);
+});
+
+/** Projects a story with structural visits, as the reducer records them per loop round. */
+function storyWithRounds(
+  doc: Document,
+  values: {
+    event: HistoryEvent['event'];
+    rounds?: [node: string, mapIndices: number[], number[]];
+  }[]
+) {
+  const history = values.map(({ event }, index) => ({ cursor: `v2:${index + 1}`, event }));
+  const control = values.flatMap(({ rounds }, index) =>
+    rounds
+      ? [
+          {
+            cursor: `v2:${index + 1}`,
+            node: rounds[0],
+            mapIndices: rounds[1],
+            visitId: JSON.stringify(rounds),
+            state: 'entered' as const,
+          },
+        ]
+      : []
+  );
+  const { invocations, controls } = projectHistory(doc, history, history.length - 1, control);
+  return projectStory(doc, invocations, [], undefined, controls);
+}
+
+test('each map item counts its own loop rounds', () => {
+  const doc = document(seq('run', map('suites', loop('rounds', step('fix'), step('check')))));
+  const [fix0, fix0again, fix1] = ['fix', 'fix', 'fix'].map((node) => ref(node));
+  const entries = storyWithRounds(doc, [
+    { event: start(fix0, 1, [0]), rounds: ['rounds_body', [0], [1]] },
+    { event: complete(fix0) },
+    { event: start(fix0again, 1, [0]), rounds: ['rounds_body', [0], [2]] },
+    { event: complete(fix0again) },
+    { event: start(fix1, 1, [1]), rounds: ['rounds_body', [1], [1]] },
+  ]);
+  assert.deepEqual(
+    entries.flatMap((entry) => (entry.kind === 'round' ? [entry.round] : [])),
+    [1, 2, 1]
+  );
+});
+
+test('an inner loop counts its rounds afresh in each outer round', () => {
+  const doc = document(seq('run', loop('outer', loop('inner', step('draft'), step('review')))));
+  const drafts = [1, 2, 3].map(() => ref('draft'));
+  const entries = storyWithRounds(doc, [
+    { event: start(drafts[0]), rounds: ['inner_body', [], [1, 1]] },
+    { event: complete(drafts[0]) },
+    { event: start(drafts[1]), rounds: ['inner_body', [], [1, 2]] },
+    { event: complete(drafts[1]) },
+    { event: start(drafts[2]), rounds: ['inner_body', [], [2, 1]] },
+  ]);
+  assert.deepEqual(read(entries), [
+    '— Round 1 · Inner',
+    '  Draft',
+    '— Round 2 · Inner',
+    '  Draft',
+    '— Round 1 · Inner',
+    '  Draft',
+  ]);
+});

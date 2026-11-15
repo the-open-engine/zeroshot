@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
+import type { ControlVisit } from './control-history';
 import type { Document } from './domain';
 import { PersonRequestView } from './PersonRequestView';
 import { RecordedValue } from './RecordedValue';
@@ -15,6 +16,8 @@ export type RunContext = {
   input: unknown;
   invocations: readonly Invocation[];
   handoffs: readonly RunHandoff[];
+  /** Structural visits, whose identities record loop rounds. */
+  controls: readonly ControlVisit[];
   systemLogs: Invocation['logs'];
   /** The ledger's first and latest recorded times at this position, when it kept times. */
   clock: { first?: number; at?: number };
@@ -27,6 +30,7 @@ export type RunContext = {
   following: boolean;
   /** The run is suspended waiting for a person now; a pending question can still be answered. */
   waiting: boolean;
+  /** The run that took over this one, once the replay reaches the end of this run's history. */
   successor?: string;
   runHref?: (id: string) => string;
 };
@@ -42,10 +46,10 @@ export function RunViewToolbar({ toolbarStart }: { toolbarStart: ReactNode }) {
 
 /** Where the run stands at the replay position, then what history recorded so far. */
 export function RunOutcomeBar({ run }: { run: RunContext }) {
-  const { document, invocations, terminal, open, clock, successor } = run;
+  const { document, invocations, terminal, open, clock, successor, controls } = run;
   const outcome = useMemo(
-    () => projectOutcome(document, invocations, terminal, open, clock, successor),
-    [document, invocations, terminal, open, clock, successor]
+    () => projectOutcome(document, invocations, terminal, open, clock, successor, controls),
+    [document, invocations, terminal, open, clock, successor, controls]
   );
   // Only the run's state is announced, and only while following it live: replay and its
   // running counts would otherwise re-announce on every step.
