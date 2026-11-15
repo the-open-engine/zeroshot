@@ -181,10 +181,16 @@ including generic pre-receive hook messages, first return to the repair loop. If
 push has the same branch, revision and reason in Git's ref-status line, delivery stops with a plain
 refusal, preserving the work. Changing server messages outside that status line do not reset the
 rule. A different revision or reason gets another repair attempt; a successful or exact-ref-confirmed
-push clears the rejection. This applies to GitHub, GitLab and plain Git delivery. Resume starts with
-fresh rejection memory and retries the retained candidate from the delivery checkpoint, so delivery
-can continue once the cause is removed. Push failures without a rejected ref-status line retain their
-existing handling.
+push clears the rejection. This applies to GitHub, GitLab and plain Git delivery. Push failures
+without a rejected ref-status line retain their existing handling.
+
+Resume starts with fresh rejection memory. Once the cause is removed,
+[select the `deliver` checkpoint](observe-and-control.md#restart-or-resume-a-failed-run) with
+`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` to retry the retained candidate without
+another agent round. Local checkpoint restores also require `--discard-workspace-changes`, which
+replaces current files and the index; preserve any later edits first. A plain `zeroshot resume RUN_ID`
+restarts the graph and can run workers and reviewers again before delivery, potentially changing
+the candidate.
 
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
