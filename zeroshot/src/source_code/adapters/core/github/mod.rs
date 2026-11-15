@@ -7,7 +7,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use openengine_cluster_protocol::RunId;
 use tokio::process::Command;
-use crate::native_v2_delivery::command::{GitCommandOutput, capture, capture_sensitive};
+use crate::native_v2_delivery::command::{
+    ConfinedCommand, GitCommandOutput, capture, capture_sensitive,
+};
 
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use crate::source_code_provider::SourceReviewLinks;
@@ -808,12 +810,13 @@ fn clean_command(
     command
 }
 
-/// Workspace Git that carries the forge token; the workspace configuration is confined first.
+/// Workspace Git that carries the forge token; the workspace configuration is confined first,
+/// within the command's API deadline.
 async fn git_command(
     authority: &GhCliDeliveryAuthority,
     workspace: &std::path::Path,
     credential: SourceDeliveryCredential<'_>,
-) -> Result<Command, crate::source_code_provider::GitCommandFailure> {
+) -> Result<ConfinedCommand, crate::source_code_provider::GitCommandFailure> {
     let mut command = local_git_command(authority, workspace).await?;
     command
         .env("GH_HOST", "github.com")
@@ -824,14 +827,16 @@ async fn git_command(
 async fn local_git_command(
     authority: &GhCliDeliveryAuthority,
     workspace: &std::path::Path,
-) -> Result<Command, crate::source_code_provider::GitCommandFailure> {
+) -> Result<ConfinedCommand, crate::source_code_provider::GitCommandFailure> {
+    let config = &authority.config;
     if let Some(transport) = &authority.transport {
-        return transport.workspace_command(workspace).await;
+        return transport
+            .workspace_command_within(workspace, config.api_deadline)
+            .await;
     }
     // Every delivery authority, local or hosted, carries its run's transport. Only a contained
     // authority without one reaches this isolated Git, so its workspace is never a user checkout.
-    let config = &authority.config;
-    crate::native_v2_delivery::command::confine_repository_configuration(
+    let remaining = crate::native_v2_delivery::command::confine_repository_configuration(
         &config.git_program,
         workspace,
         crate::native_v2_delivery::command::GitCommandContext {
@@ -848,7 +853,7 @@ async fn local_git_command(
         config.git_identity,
     );
     command.env("HOME", &config.home_directory);
-    Ok(command)
+    Ok(ConfinedCommand::new(command, remaining))
 }
 
 async fn bounded_status(

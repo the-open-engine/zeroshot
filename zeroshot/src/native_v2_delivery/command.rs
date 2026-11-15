@@ -674,16 +674,17 @@ pub(crate) fn retained_repository_key(name: &str) -> bool {
 /// configuration files. It is permanent: later turns see the confined configuration, and anything
 /// added again is confined again before the next delivery command. Git has no way to read a
 /// different repository configuration file instead.
-/// `budget` bounds the whole confinement and can interrupt it. Local runs that use the invoking
-/// user's Git keep their configuration.
+/// `budget` is the delivery command's own deadline: confinement can interrupt it, and returns the
+/// part left for the command. Confinement that leaves no time fails as itself, not as the command.
+/// Local runs that use the invoking user's Git keep their configuration and their whole deadline.
 pub(crate) async fn confine_repository_configuration(
     program: &Path,
     workspace: &Path,
     context: GitCommandContext<'_>,
     budget: ConfinementBudget,
-) -> Result<(), GitCommandFailure> {
+) -> Result<Duration, GitCommandFailure> {
     if context.local_environment.is_some() {
-        return Ok(());
+        return Ok(budget.deadline);
     }
     let ConfinementBudget { deadline, stopping } = budget;
     let confinement = Confinement {
@@ -719,7 +720,63 @@ pub(crate) async fn confine_repository_configuration(
             }
         }
     }
-    Ok(())
+    let remaining = confinement
+        .end
+        .saturating_duration_since(tokio::time::Instant::now());
+    if remaining.is_zero() {
+        return Err(confinement.failure(
+            "confining workspace Git configuration used the delivery command's whole deadline"
+                .to_owned(),
+        ));
+    }
+    Ok(remaining)
+}
+
+/// A delivery Git command built after its workspace configuration was confined, and the part of
+/// the caller's deadline that confinement left for it.
+#[derive(Debug)]
+pub(crate) struct ConfinedCommand {
+    command: Command,
+    deadline: Duration,
+}
+
+impl ConfinedCommand {
+    pub(crate) const fn new(command: Command, deadline: Duration) -> Self {
+        Self { command, deadline }
+    }
+
+    /// What remains of the caller's deadline for this command.
+    pub(crate) const fn deadline(&self) -> Duration {
+        self.deadline
+    }
+
+    pub(crate) fn into_parts(self) -> (Command, Duration) {
+        (self.command, self.deadline)
+    }
+
+    pub(crate) async fn capture(&mut self) -> Result<GitCommandFailure, GitCommandFailure> {
+        capture(&mut self.command, self.deadline).await
+    }
+
+    pub(crate) async fn capture_sensitive(
+        &mut self,
+    ) -> Result<GitCommandOutput, GitCommandFailure> {
+        capture_sensitive(&mut self.command, self.deadline, &[]).await
+    }
+}
+
+impl std::ops::Deref for ConfinedCommand {
+    type Target = Command;
+
+    fn deref(&self) -> &Command {
+        &self.command
+    }
+}
+
+impl std::ops::DerefMut for ConfinedCommand {
+    fn deref_mut(&mut self) -> &mut Command {
+        &mut self.command
+    }
 }
 
 /// Distinct entry names contained delivery removes.
@@ -911,15 +968,8 @@ impl Confinement<'_> {
     }
 
     fn command(&self, repository: &Path) -> Command {
-        let mut command = git_command(self.program, repository, self.context);
-        // The repository is the given directory; discovery never continues into a parent.
-        if let Some(parent) = repository
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            command.env("GIT_CEILING_DIRECTORIES", parent);
-        }
-        command
+        // Contained `git_command` already stops discovery at the repository's parent.
+        git_command(self.program, repository, self.context)
     }
 
     fn failure(&self, message: String) -> GitCommandFailure {
@@ -1014,6 +1064,16 @@ pub(crate) fn git_command(
         }
     }
     remove_repository_environment(command.as_std_mut());
+    if local_environment.is_none() {
+        // Contained delivery Git uses the workspace's own repository or none. Without `.git`
+        // there is nothing to confine, so discovery must not continue into a parent repository.
+        if let Some(parent) = workspace
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            command.env("GIT_CEILING_DIRECTORIES", parent);
+        }
+    }
     pin_delivery_identity(&mut command, commit_identity);
     command
         .env("GIT_TERMINAL_PROMPT", "0")

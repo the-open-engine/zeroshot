@@ -390,12 +390,12 @@ impl SystemGit {
         workspace: &Path,
         arguments: &[&str],
     ) -> Result<command::GitCommandOutput, GitError> {
-        let deadline = Duration::from_secs(10 * 60);
-        command::confine_repository_configuration(
+        // Confinement and the command share one deadline.
+        let deadline = command::confine_repository_configuration(
             &self.program,
             workspace,
             self.context(),
-            command::ConfinementBudget::within(deadline),
+            command::ConfinementBudget::within(Duration::from_secs(10 * 60)),
         )
         .await?;
         command::capture_sensitive(&mut self.command(workspace, arguments), deadline, &[])

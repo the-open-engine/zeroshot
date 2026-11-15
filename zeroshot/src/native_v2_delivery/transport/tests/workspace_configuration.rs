@@ -294,21 +294,33 @@ async fn configured_transport_programs_never_replace_the_push_transport() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn confinement_never_edits_a_parent_repository_before_initialization() {
+async fn delivery_git_never_reaches_a_parent_repository_before_initialization() {
     let repository = Repository::new();
     let trap = Trap::new(repository.root.path());
     git(
         &repository.workspace,
         &["config", "filter.parent.clean", &trap.command("parent")],
     );
+    std::fs::write(
+        repository.workspace.join(".gitattributes"),
+        "* filter=parent\n",
+    )
+    .assert_value();
     let nested = repository.workspace.join("nested");
     std::fs::create_dir(&nested).assert_value();
+    std::fs::write(nested.join("file.txt"), "content\n").assert_value();
     let transport = repository.transport(Path::new("git"), &nested, repository.remote.as_os_str());
-    transport.workspace_command(&nested).await.assert_value();
+    let mut command = transport.workspace_command(&nested).await.assert_value();
     assert_eq!(
         git(&repository.workspace, &["config", "filter.parent.clean"]),
         trap.command("parent")
     );
+    // Without its own `.git` the workspace has nothing to confine, and the delivery command
+    // itself must not discover the parent repository and run its filter.
+    command.args(["add", "--all"]);
+    let output = command.capture().await.assert_value();
+    assert_ne!(output.exit_status, Some(0), "{output}");
+    assert_eq!(trap.fired(), Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -463,6 +475,44 @@ async fn confinement_shares_the_callers_deadline_and_stop_request() {
         .await
         .expect_err("a stop request interrupts confinement");
     assert!(failure.to_string().contains("stopped"), "{failure}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn delivery_commands_run_on_what_confinement_leaves_of_their_deadline() {
+    let repository = Repository::new();
+    // Each configuration read takes a second, as a slow filesystem would.
+    let program = repository.root.path().join("slow-config-git");
+    openengine_cluster_testkit::fixture::write_executable(
+        &program,
+        "#!/bin/sh\ncase \" $* \" in *\" config --local \"*) /bin/sleep 1 ;; esac\nexec /usr/bin/git \"$@\"\n",
+        0o700,
+    )
+    .assert_value();
+    let transport = repository.transport(
+        &program,
+        &repository.workspace,
+        repository.remote.as_os_str(),
+    );
+    let deadline = Duration::from_secs(20);
+    let command = transport
+        .workspace_command_within(&repository.workspace, deadline)
+        .await
+        .assert_value();
+    assert!(
+        command.deadline() <= deadline - Duration::from_secs(1),
+        "{:?}",
+        command.deadline()
+    );
+
+    // A confinement that leaves nothing fails as itself, not as a zero-second Git command.
+    let uninitialized = repository.root.path().join("uninitialized");
+    std::fs::create_dir(&uninitialized).assert_value();
+    let failure = transport
+        .workspace_command_within(&uninitialized, Duration::ZERO)
+        .await
+        .expect_err("an exhausted deadline leaves no time for the command");
+    assert!(failure.to_string().contains("whole deadline"), "{failure}");
 }
 
 #[cfg(unix)]

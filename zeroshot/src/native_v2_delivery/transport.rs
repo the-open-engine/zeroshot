@@ -10,8 +10,8 @@ use crate::execution::process::HostedProcessIdentity;
 use crate::native_v2_target_authority::{NewOperatorDiagnostic, OperatorDiagnosticStore};
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError, valid_git_revision};
 use super::command::{
-    GitCommandContext, GitCommandFailure, GitCommandOutput, capture_sensitive_until_stopped,
-    git_command,
+    ConfinedCommand, GitCommandContext, GitCommandFailure, GitCommandOutput,
+    capture_sensitive_until_stopped, git_command,
 };
 
 mod authentication;
@@ -464,11 +464,10 @@ impl GitTransport {
         deadline: Duration,
     ) -> Result<GitCommandOutput, GitCommandFailure> {
         // Confinement and the command share the caller's budget, such as a checkout's remainder.
-        let started = tokio::time::Instant::now();
         let mut command = self
             .workspace_command_within(&self.config.workspace, deadline)
             .await?;
-        let deadline = deadline.saturating_sub(started.elapsed());
+        let deadline = command.deadline();
         let authentication = GitAuthentication::prepare(&self.config, &self.remote, credential)
             .map_err(|error| super::command::preparation_failure(&command, error))?;
         if arguments.first().is_some_and(|operation| {
@@ -495,23 +494,24 @@ impl GitTransport {
     }
 
     /// Builds a workspace Git command after confining the workspace's repository configuration,
-    /// so delivery Git uses only configuration that names no program.
+    /// so delivery Git uses only configuration that names no program. Confinement and the command
+    /// share this transport's deadline.
     pub(crate) async fn workspace_command(
         &self,
         workspace: &Path,
-    ) -> Result<Command, GitCommandFailure> {
+    ) -> Result<ConfinedCommand, GitCommandFailure> {
         self.workspace_command_within(workspace, self.config.deadline)
             .await
     }
 
-    /// Like [`Self::workspace_command`], with confinement bounded by the caller's remaining
-    /// `deadline` and interrupted by this transport's stop request.
-    async fn workspace_command_within(
+    /// Like [`Self::workspace_command`], sharing the caller's `deadline` instead, with
+    /// confinement interrupted by this transport's stop request.
+    pub(crate) async fn workspace_command_within(
         &self,
         workspace: &Path,
         deadline: Duration,
-    ) -> Result<Command, GitCommandFailure> {
-        super::command::confine_repository_configuration(
+    ) -> Result<ConfinedCommand, GitCommandFailure> {
+        let remaining = super::command::confine_repository_configuration(
             &self.config.git_program,
             workspace,
             self.git_context(),
@@ -521,7 +521,10 @@ impl GitTransport {
             },
         )
         .await?;
-        Ok(self.unconfined_command(workspace))
+        Ok(ConfinedCommand::new(
+            self.unconfined_command(workspace),
+            remaining,
+        ))
     }
 
     /// The workspace command without configuration confinement, for inspecting its setup.

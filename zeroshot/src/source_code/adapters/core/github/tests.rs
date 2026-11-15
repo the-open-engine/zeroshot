@@ -58,27 +58,22 @@ async fn configured_transport_owns_workspace_git_context_and_hosted_isolation() 
             git.workspace_state(&fixture.workspace).await.assert_value(),
             (revision.clone(), false)
         );
-        let output = bounded_git_output(
-            local_git_command(&authority, &fixture.workspace)
-                .await
-                .assert_value()
-                .args(["config", "--get", "core.autocrlf"]),
-            Duration::from_secs(20),
-            128,
-        )
-        .await;
+        let (mut command, _) = local_git_command(&authority, &fixture.workspace)
+            .await
+            .assert_value()
+            .into_parts();
+        command.args(["config", "--get", "core.autocrlf"]);
+        let output = bounded_git_output(&mut command, Duration::from_secs(20), 128).await;
         if local {
             assert_eq!(output.assert_value().stdout(), "true\n");
-            let output = bounded_git_output(
-                local_git_command(&authority, &fixture.workspace)
-                    .await
-                    .assert_value()
-                    .args(["config", "--get", "core.autocrlf"]),
-                Duration::from_secs(20),
-                1,
-            )
-            .await
-            .unwrap_err();
+            let (mut command, _) = local_git_command(&authority, &fixture.workspace)
+                .await
+                .assert_value()
+                .into_parts();
+            command.args(["config", "--get", "core.autocrlf"]);
+            let output = bounded_git_output(&mut command, Duration::from_secs(20), 1)
+                .await
+                .unwrap_err();
             assert!(output.to_string().contains("[REDACTED]"));
             assert!(!output.to_string().contains("true"));
             // Head adoption compares raw object IDs while retaining printable diagnostics.

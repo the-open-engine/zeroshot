@@ -90,6 +90,8 @@ struct Request {
 }
 
 fn serve_connection(mut stream: TcpStream, root: &Path, faults: &TransportFaults) {
+    // BSD hands accepted sockets the listener's non-blocking mode; reads must wait for the client.
+    stream.set_nonblocking(false).assert_value();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .assert_value();

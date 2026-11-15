@@ -2,9 +2,7 @@ use std::path::{Component, Path};
 use super::target::{bounded_status, bounded_git_output};
 use super::GitTransport;
 use crate::source_code_provider::*;
-use crate::native_v2_delivery::command::{capture, identity_configuration};
-use tokio::process::Command;
-use std::time::Duration;
+use crate::native_v2_delivery::command::{ConfinedCommand, identity_configuration};
 
 const MAX_CONFLICT_PATH_OUTPUT_BYTES: usize = 6 * 1_024;
 
@@ -50,16 +48,12 @@ async fn require_clean_review_head(
     context: ConflictContext<'_>,
 ) -> Result<(), SourceDeliveryError> {
     let head = workspace_head(context).await?;
-    let status = bounded_git_output(
-        context
-            .transport
-            .workspace_command(&context.request.workspace)
-            .await?
-            .args(["status", "--porcelain=v1", "--untracked-files=all"]),
-        context.transport.config().deadline,
-        1,
-    )
-    .await?;
+    let mut status = context
+        .transport
+        .workspace_command(&context.request.workspace)
+        .await?;
+    status.args(["status", "--porcelain=v1", "--untracked-files=all"]);
+    let status = bounded_git_output(status, 1).await?;
     (head.trim() == context.request.review.head_revision && status.is_empty())
         .then_some(())
         .ok_or(SourceDeliveryError::Rejected)
@@ -74,7 +68,7 @@ async fn require_commit(
         .workspace_command(&context.request.workspace)
         .await?;
     command.args(["cat-file", "-e", &format!("{target_revision}^{{commit}}")]);
-    bounded_status(command, context.transport.config().deadline).await
+    bounded_status(command).await
 }
 
 async fn merge_target(
@@ -100,22 +94,18 @@ async fn merge_target(
         "--no-edit",
         target_revision,
     ]);
-    bounded_exit_code(command, context.transport.config().deadline).await
+    bounded_exit_code(command).await
 }
 
 async fn conflicted_paths(
     context: ConflictContext<'_>,
 ) -> Result<Vec<String>, SourceDeliveryError> {
-    let output = bounded_git_output(
-        context
-            .transport
-            .workspace_command(&context.request.workspace)
-            .await?
-            .args(["diff", "--name-only", "--diff-filter=U", "-z"]),
-        context.transport.config().deadline,
-        MAX_CONFLICT_PATH_OUTPUT_BYTES,
-    )
-    .await?;
+    let mut command = context
+        .transport
+        .workspace_command(&context.request.workspace)
+        .await?;
+    command.args(["diff", "--name-only", "--diff-filter=U", "-z"]);
+    let output = bounded_git_output(command, MAX_CONFLICT_PATH_OUTPUT_BYTES).await?;
     if !output.is_empty() && !output.ends_with('\0') {
         return Err(SourceDeliveryError::repairable(
             "Git conflict path inspection returned malformed output after merge materialization",
@@ -182,7 +172,7 @@ async fn restore_clean_review_head(
             .workspace_command(&context.request.workspace)
             .await?;
         command.args(["merge", "--abort"]);
-        bounded_status(command, context.transport.config().deadline).await?;
+        bounded_status(command).await?;
     }
     require_clean_review_head(context).await
 }
@@ -193,7 +183,7 @@ async fn merge_in_progress(context: ConflictContext<'_>) -> Result<bool, SourceD
         .workspace_command(&context.request.workspace)
         .await?;
     command.args(["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
-    match bounded_exit_code(command, context.transport.config().deadline).await? {
+    match bounded_exit_code(command).await? {
         0 => Ok(true),
         1 => Ok(false),
         _ => Err(SourceDeliveryError::Rejected),
@@ -204,16 +194,12 @@ async fn require_merge_head(
     context: ConflictContext<'_>,
     target_revision: &str,
 ) -> Result<(), SourceDeliveryError> {
-    let merge_head = bounded_git_output(
-        context
-            .transport
-            .workspace_command(&context.request.workspace)
-            .await?
-            .args(["rev-parse", "-q", "--verify", "MERGE_HEAD"]),
-        context.transport.config().deadline,
-        128,
-    )
-    .await;
+    let mut command = context
+        .transport
+        .workspace_command(&context.request.workspace)
+        .await?;
+    command.args(["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+    let merge_head = bounded_git_output(command, 128).await;
     merge_head
         .ok()
         .filter(|merge_head| merge_head.trim() == target_revision)
@@ -226,23 +212,16 @@ async fn require_merge_head(
 }
 
 async fn workspace_head(context: ConflictContext<'_>) -> Result<String, SourceDeliveryError> {
-    bounded_git_output(
-        context
-            .transport
-            .workspace_command(&context.request.workspace)
-            .await?
-            .args(["rev-parse", "HEAD"]),
-        context.transport.config().deadline,
-        128,
-    )
-    .await
+    let mut command = context
+        .transport
+        .workspace_command(&context.request.workspace)
+        .await?;
+    command.args(["rev-parse", "HEAD"]);
+    bounded_git_output(command, 128).await
 }
 
-async fn bounded_exit_code(
-    mut command: Command,
-    deadline: Duration,
-) -> Result<i32, SourceDeliveryError> {
-    let output = capture(&mut command, deadline).await?;
+async fn bounded_exit_code(mut command: ConfinedCommand) -> Result<i32, SourceDeliveryError> {
+    let output = command.capture().await?;
     match output.exit_status {
         Some(code @ (0 | 1)) => Ok(code),
         _ => Err(output.into()),

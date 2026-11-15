@@ -1,27 +1,19 @@
-use std::time::Duration;
-use tokio::process::Command;
 use crate::source_code_provider::*;
-use crate::native_v2_delivery::command::{
-    capture, capture_sensitive, delivery_identity, identity_configuration,
-};
+use crate::native_v2_delivery::command::{ConfinedCommand, delivery_identity, identity_configuration};
 use super::GitTransport;
 
 pub(super) async fn bounded_status(
-    mut command: Command,
-    deadline: Duration,
+    mut command: ConfinedCommand,
 ) -> Result<(), SourceDeliveryError> {
-    capture(&mut command, deadline).await?.require_success()?;
+    command.capture().await?.require_success()?;
     Ok(())
 }
 
 pub(super) async fn bounded_git_output(
-    command: &mut Command,
-    deadline: Duration,
+    mut command: ConfinedCommand,
     maximum: usize,
 ) -> Result<String, SourceDeliveryError> {
-    let output = capture_sensitive(command, deadline, &[])
-        .await?
-        .require_success()?;
+    let output = command.capture_sensitive().await?.require_success()?;
     if output.stdout_truncated() || output.stdout().len() > maximum {
         return Err(SourceDeliveryError::identity(
             "Git inspection exceeded its byte bound",
@@ -77,19 +69,12 @@ pub(crate) async fn integrate_review_target(
         return Err(SourceDeliveryError::Rejected);
     }
     transport.fetch_exact(target_revision, credential).await?;
-    let deadline = transport.config().deadline;
     let mut provenance = transport.workspace_command(&request.workspace).await?;
     provenance.args(["merge-base", "--is-ancestor", review_head, "HEAD"]);
-    bounded_status(provenance, deadline).await?;
-    let fork_point = bounded_git_output(
-        transport
-            .workspace_command(&request.workspace)
-            .await?
-            .args(["merge-base", review_head, target_revision]),
-        deadline,
-        128,
-    )
-    .await?;
+    bounded_status(provenance).await?;
+    let mut fork_point = transport.workspace_command(&request.workspace).await?;
+    fork_point.args(["merge-base", review_head, target_revision]);
+    let fork_point = bounded_git_output(fork_point, 128).await?;
     let target = DeliveryTarget::new(
         &request.review.repository,
         &request.review.target_branch,
@@ -116,7 +101,7 @@ async fn integrate(
     let source_revision = &context.request.target.base_revision;
     let mut provenance = local_command(context).await?;
     provenance.args(["merge-base", "--is-ancestor", source_revision, &head]);
-    bounded_status(provenance, context.transport.config().deadline).await?;
+    bounded_status(provenance).await?;
     if is_ancestor(context, target_revision, &head).await? {
         return Ok(SourceReconciliationOutcome::Unchanged);
     }
@@ -163,7 +148,7 @@ async fn merge_target(
         "--no-verify",
         target_revision,
     ]);
-    let output = capture(&mut command, context.transport.config().deadline).await?;
+    let output = command.capture().await?;
     match output.exit_status {
         Some(0) => require_completed_integration(context, target_revision, candidate).await?,
         Some(1) if has_exact_conflict(context, target_revision, candidate).await? => {}
@@ -203,27 +188,16 @@ async fn has_exact_conflict(
     candidate: &str,
 ) -> Result<bool, SourceDeliveryError> {
     for (reference, expected) in [("HEAD", candidate), ("MERGE_HEAD", target_revision)] {
-        let value = bounded_git_output(
-            local_command(context)
-                .await?
-                .args(["rev-parse", "--verify", reference]),
-            context.transport.config().deadline,
-            128,
-        )
-        .await?;
+        let mut value = local_command(context).await?;
+        value.args(["rev-parse", "--verify", reference]);
+        let value = bounded_git_output(value, 128).await?;
         if value.trim() != expected {
             return Ok(false);
         }
     }
-    let output = capture_sensitive(
-        local_command(context)
-            .await?
-            .args(["ls-files", "--unmerged", "-z"]),
-        context.transport.config().deadline,
-        &[],
-    )
-    .await?
-    .require_success()?;
+    let mut unmerged = local_command(context).await?;
+    unmerged.args(["ls-files", "--unmerged", "-z"]);
+    let output = unmerged.capture_sensitive().await?.require_success()?;
     Ok(!output.stdout().is_empty() || output.stdout_truncated())
 }
 
@@ -232,13 +206,9 @@ async fn is_ancestor(
     ancestor: &str,
     descendant: &str,
 ) -> Result<bool, SourceDeliveryError> {
-    let output = capture(
-        local_command(context)
-            .await?
-            .args(["merge-base", "--is-ancestor", ancestor, descendant]),
-        context.transport.config().deadline,
-    )
-    .await?;
+    let mut command = local_command(context).await?;
+    command.args(["merge-base", "--is-ancestor", ancestor, descendant]);
+    let output = command.capture().await?;
     if output.exit_status == Some(1) {
         return Ok(false);
     }
@@ -246,7 +216,7 @@ async fn is_ancestor(
     Ok(true)
 }
 
-async fn local_command(context: TargetContext<'_>) -> Result<Command, GitCommandFailure> {
+async fn local_command(context: TargetContext<'_>) -> Result<ConfinedCommand, GitCommandFailure> {
     context
         .transport
         .workspace_command(context.request.workspace)
@@ -268,7 +238,7 @@ pub(super) async fn configure_delivery_identity(
             .workspace_command(&transport.config().workspace)
             .await?;
         command.args(["config", "--local", "--replace-all", key, value]);
-        bounded_status(command, transport.config().deadline).await?;
+        bounded_status(command).await?;
     }
     Ok(())
 }
