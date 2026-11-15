@@ -110,8 +110,8 @@ starting below the canvas toolbar (`--canvas-toolbar-height`).
 Toolbars inside a page follow their own width instead (container queries), since the sidebar and
 the resizable inspector change it as well as the window, so a tool folded away can return when the
 sidebar or inspector stops docking. Canvas toolbars keep one row: at 600px or less the editor's
-quieter tools fold into a **More tools** menu, and at 440px or less Expand and Collapse all join
-them. The replay timeline moves its event and extras to a second row at 760px or less. Pages work
+quieter tools fold into a **More tools** menu, at 440px or less Expand and Collapse all join
+them, and at 340px or less Add activity keeps only its icon. The replay timeline moves its event and extras to a second row at 760px or less. Pages work
 down to a 360px-wide phone without clipping.
 
 ## Interaction
