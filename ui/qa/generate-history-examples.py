@@ -21,6 +21,10 @@ NAMES = [
     "flaky-test-investigation", "product-launch-content-kit",
     "security-patch-merge", "service-incident-handoff",
 ]
+# Derived from security-patch-merge on every regeneration: its acceptance review becomes a person.
+APPROVAL = "security-patch-approval"
+REQUEST_WORKER = "builtin.request.ask@1"
+HOUR = 3600000
 
 
 def walk(node):
@@ -55,9 +59,47 @@ def value(schema, values, key=""):
     return None
 
 
-def step(name, text, output=None, signals=None, inputs=None, item=None, error=None, tool=None):
+def step(name, text, output=None, signals=None, inputs=None, item=None, error=None, tool=None, ask=None):
     return dict(name=name, text=text, output=output or {}, signals=signals,
-                inputs=inputs or {}, item=item, error=error, tool=tool)
+                inputs=inputs or {}, item=item, error=error, tool=tool, ask=ask)
+
+
+def ask(name, question):
+    """A request node's execution: it records the question and the run pauses for a person."""
+    return step(name, question, inputs={"text": question}, ask=question)
+
+
+def approval_profile(merge):
+    """The security patch graph with its acceptance review asked of a person instead of an agent."""
+    profile = copy.deepcopy(merge)
+
+    def rename(value):
+        if isinstance(value, dict):
+            return {key: ("approval" if key in ("name", "node") and item == "acceptance" else rename(item))
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [rename(item) for item in value]
+        return value
+
+    profile["graph"] = rename(profile["graph"])
+    question = {"type": {"kind": "string"}, "required": True}
+    profile["graph"]["initialInput"]["fields"]["approvalQuestion"] = question
+    for node in walk(profile["graph"]["root"]):
+        if node.get("state", {}).get("kind") == "record":
+            node["state"]["fields"]["approvalQuestion"] = copy.deepcopy(question)
+    node = next(node for node in walk(profile["graph"]["root"]) if node["name"] == "approval")
+    node.pop("instructions", None)
+    node.update(
+        worker=REQUEST_WORKER, attempts=1,
+        input={"kind": "record", "fields": {"text": copy.deepcopy(question)}},
+        output={"kind": "record", "fields": {"feedback": copy.deepcopy(question)}},
+        inputBindings=[{"target": ["text"], "value": {"source": "state", "path": ["approvalQuestion"]}}],
+        writeBindings=[{"value": {"node": "approval", "channel": "out", "path": ["feedback"]},
+                        "target": ["acceptanceFeedback"]}])
+    runtime = profile["runtime"]["nodes"]
+    runtime.pop("acceptance", None)
+    runtime["approval"] = {"kind": "request"}
+    return profile
 
 
 def review(name, text, verdict="accepted", output=None):
@@ -65,13 +107,19 @@ def review(name, text, verdict="accepted", output=None):
 
 
 class Fixture:
-    def __init__(self, name, profile, initial, description, index):
+    def __init__(self, name, profile, initial, description, index, profile_name=None, created=None):
         self.name = name
+        self.profile_name = profile_name or name
         self.profile = profile
         self.run_id = "example-" + name
         self.initial = initial
         self.description = description
-        self.created = BASE_TIME + index * 3600000
+        self.created = created if created is not None else BASE_TIME + index * 3600000
+        # The ledger's clock: every event records when it was appended (`recordedAt`).
+        self.clock = self.created
+        self.settled = []
+        self.held = None
+        self.successor = None
         self.nodes = {node["name"]: node for node in walk(profile["graph"]["root"])}
         self.values = copy.deepcopy(initial)
         self.events = []
@@ -81,10 +129,29 @@ class Fixture:
         self.add(kind="safe_log", execution=None, stream="system",
                  line="Simulated example. No agent, repository change, or delivery operation was executed.")
 
-    def add(self, **event):
+    def now(self):
+        return self.clock
+
+    def add(self, advance=2000, **event):
         if event["kind"] == "safe_log":
-            event["timestamp"] = self.created + len(self.events) * 7000
-        self.events.append({"cursor": f"v2:{len(self.events) + 1}", "event": event})
+            event["timestamp"] = self.clock
+        self.events.append({"cursor": f"v2:{len(self.events) + 1}", "recordedAt": self.clock, "event": event})
+        self.clock += advance
+
+    def work(self, entry):
+        """A deterministic working time per step, so examples show believable durations."""
+        seed = sum(ord(char) for char in entry["name"] + entry["text"])
+        return (25 + seed % 420) * 1000
+
+    def usage(self, node, ref, entry):
+        """Provider-reported tokens for agent steps; other workers report none."""
+        if self.profile["runtime"].get("nodes", {}).get(node["name"], {}).get("kind") != "agent":
+            return
+        size = len(entry["text"])
+        inputs = 6000 + (size * 911) % 42000
+        self.add(kind="token_usage_observed", execution=ref["execution"], advance=0,
+                 usage={"inputTokens": inputs, "outputTokens": 400 + (size * 67) % 5200,
+                        "cacheReadInputTokens": inputs * 3 // 5})
 
     def batch(self, *entries):
         active = []
@@ -99,16 +166,24 @@ class Fixture:
                    "nodeInstance": self.instances[occurrence],
                    "execution": f"execution-{self.executions}"}
             inputs = value(node["input"], {**self.values, **entry["inputs"]})
-            self.add(kind="node_started", reference=ref,
+            # Steps started together are one append batch, so they share a recorded time.
+            self.add(kind="node_started", reference=ref, advance=0,
                      occurrence={"node": node["name"], "mapIndices": indices},
                      attempt=1, input=inputs)
-            active.append((entry, node, ref))
-        for entry, node, ref in active:
+            active.append((entry, node, ref, indices, inputs))
+        for entry, node, ref, *_ in active:
+            if entry["ask"]:
+                continue
+            self.clock += self.work(entry)
             self.add(kind="safe_log", execution=ref["execution"], stream="output", line=entry["text"])
             if entry["tool"]:
                 self.add(kind="safe_log", execution=ref["execution"], stream="system", line=entry["tool"])
+            self.usage(node, ref, entry)
         # Reverse completion order deliberately exercises overlapping execution histories.
-        for entry, node, ref in reversed(active):
+        for entry, node, ref, indices, inputs in reversed(active):
+            if entry["ask"]:
+                self.request(entry, node, ref, indices, inputs)
+                continue
             if entry["error"]:
                 outcome = {"status": "error", "code": entry["error"], "reason": "declared_failure"}
                 self.add(kind="safe_log", execution=ref["execution"], stream="error",
@@ -132,6 +207,90 @@ class Fixture:
                     if current is not None and len(binding["target"]) == 1:
                         self.values[binding["target"][0]] = current
             self.add(kind="node_completed", completion={"reference": ref, "outcome": outcome})
+            self.settled.append((ref, node, indices, inputs, outcome))
+        if self.held:
+            request = self.held["request"]
+            self.add(kind="suspended", suspension={
+                "reason": "request", "node": request["node"], "createdAt": request["createdAt"],
+                "request": {key: request[key] for key in ["id", "text", "signals", "output", "expiresAt"]}})
+
+    def request(self, entry, node, ref, indices, inputs):
+        """The request node defers, records its question, and the run pauses until an answer."""
+        assert node["worker"] == REQUEST_WORKER, node["name"]
+        self.add(kind="request_deferred", reference=ref)
+        request = {"kind": "request", "id": f"{self.run_id}-request", "runId": self.run_id,
+                   "createdAt": self.now(), "node": node["name"], "text": entry["ask"],
+                   "signals": node["signals"], "output": node["output"],
+                   "expiresAt": self.now() + 7 * 24 * HOUR}
+        self.add(kind="vector", vector=request)
+        self.held = {"ref": ref, "node": node, "indices": indices, "inputs": inputs, "request": request}
+
+    def pause(self, successor):
+        """The paused run's detail: suspended on its question, linked to the run an answer started."""
+        request = self.held["request"]
+        cursor = self.events[-1]["cursor"]
+        detail = self.detail(cursor, "suspended", None)
+        detail["suspension"] = self.events[-1]["event"]["suspension"]
+        detail["workspaceRecovery"] = {"successorRunId": successor.run_id}
+        return {"detail": detail, "events": self.events}
+
+    def continue_with(self, name, signals, feedback, waited, description):
+        """The successor an answer starts: earlier work carried over, then the held request settled."""
+        request = self.held["request"]
+        answered = request["createdAt"] + waited
+        successor = Fixture(name, self.profile, self.initial, description, 0,
+                            profile_name=self.profile_name, created=answered)
+        successor.events = []
+        successor.values = copy.deepcopy(self.values)
+        successor.executions = self.executions
+        successor.instances = dict(self.instances)
+        # The ledger's order for a continued run: inherited vectors and the continuation record,
+        # then the carried-over executions, then the run starts.
+        for event in self.events:
+            if event["event"]["kind"] == "vector":
+                successor.add(**copy.deepcopy(event["event"]))
+        successor.add(kind="vector", vector={"kind": "continuation", "id": f"{name}-continuation",
+                                             "runId": successor.run_id, "createdAt": answered,
+                                             "resumedFrom": self.run_id})
+        for ref, node, indices, inputs, outcome in self.settled:
+            successor.carry(ref, node, indices, inputs, {"Settled": {"position": 1, "outcome": outcome}})
+        held = self.held
+        successor.carry(held["ref"], held["node"], held["indices"], held["inputs"], "Active")
+        successor.add(kind="run_started")
+        successor.add(kind="safe_log", execution=None, stream="system",
+                      line="Simulated example. No agent, repository change, or delivery operation was executed.")
+        answer = {"signals": signals, "output": {"feedback": feedback}}
+        successor.add(kind="vector", vector={"kind": "answer", "id": f"{name}-answer", "runId": successor.run_id,
+                                             "createdAt": answered, "requestId": request["id"], "answer": answer})
+        reference = dict(held["ref"], runId=successor.run_id)
+        outcome = {"status": "verifier", "output": answer["output"], "artifacts": [], "signals": signals}
+        successor.add(kind="node_completed", completion={"reference": reference, "outcome": outcome})
+        successor.settled.append((held["ref"], held["node"], held["indices"], held["inputs"], outcome))
+        successor.values.update(signals)
+        successor.values["acceptanceFeedback"] = feedback
+        self.successor = successor
+        return successor
+
+    def carry(self, ref, node, indices, inputs, state):
+        self.add(kind="prior_execution", execution={
+            "execution": ref["execution"], "node_instance": ref["nodeInstance"],
+            "occurrence": {"node": node["name"], "mapIndices": indices},
+            "attempt": 1, "input": inputs, "state": state})
+        if state != "Active":
+            self.settled.append((ref, node, indices, inputs, state["Settled"]["outcome"]))
+
+    def detail(self, cursor, phase, result):
+        return {
+            "version": 1, "projectionVersion": 1,
+            "runId": self.run_id, "title": self.name.replace("-", " ").capitalize(),
+            "phase": phase, "cursor": cursor, "terminal": result,
+            "createdAt": self.created, "historyAvailable": True, "example": True,
+            "source": {"profile": self.profile_name, "simulation": self.description},
+            "graph": self.profile["graph"], "runtime": self.profile["runtime"],
+            "initialInput": self.initial,
+            "history": {"initialCursor": "v2:0", "cursor": cursor, "complete": True,
+                        "limitations": ["Simulated history for visual testing. No agents or delivery operations ran."]}
+        }
 
     def finish(self, terminal_name):
         node = self.nodes[terminal_name]
@@ -148,18 +307,7 @@ class Fixture:
                     output_values[binding["target"][0]] = current
             result = {"status": "succeeded", "output": value(node["output"], output_values)}
         self.add(kind="terminal", result=result)
-        cursor = self.events[-1]["cursor"]
-        return {"detail": {
-            "version": 1, "projectionVersion": 1,
-            "runId": self.run_id, "title": self.name.replace("-", " ").capitalize(),
-            "phase": "finished", "cursor": cursor, "terminal": result,
-            "createdAt": self.created, "historyAvailable": True, "example": True,
-            "source": {"profile": self.name, "simulation": self.description},
-            "graph": self.profile["graph"], "runtime": self.profile["runtime"],
-            "initialInput": self.initial,
-            "history": {"initialCursor": "v2:0", "cursor": cursor, "complete": True,
-                        "limitations": ["Simulated history for visual testing. No agents or delivery operations ran."]}
-        }, "events": self.events}
+        return {"detail": self.detail(self.events[-1]["cursor"], "finished", result), "events": self.events}
 
 
 def build(profiles):
@@ -316,7 +464,36 @@ def build_more(profiles):
     f.batch(step("draft_handoff", "Wrote a concise handoff linking the timeline, impact, owner, and next checkpoint.", {"handoffPath": "artifacts/incident/handoff.md"}))
     f.batch(review("verify_handoff", "The urgent handoff includes evidence, owners, and the next update time.", output={"reviewFeedback": "Accepted: complete and actionable."}))
     examples.append(f.finish("urgent_handoff_ready"))
-    return examples
+    return examples + build_approval(profiles)
+
+
+def build_approval(profiles):
+    """Three runs of one patch: asked, rejected with feedback and asked again, then approved."""
+    profile = approval_profile(profiles[NAMES[8]])
+    initial = {"task": "Patch tenant-boundary authorization and include focused regression coverage.",
+               "issueNumber": "42",
+               "approvalQuestion": "Does this patch close the tenant boundary bug? Approve, or reject with what is missing."}
+    review_code = lambda text: review("code", text)
+    first = Fixture("security-patch-approval", profile, initial,
+                    "A person reviews the patch: the run pauses for an answer, and each answer continues it in a new run.",
+                    10, profile_name=APPROVAL)
+    first.batch(step("worker", "Added the missing tenant boundary check and regression cases."))
+    first.batch(ask("approval", initial["approvalQuestion"]),
+                review_code("The guard runs before lookup, and public errors do not reveal another tenant's account."))
+    second = first.continue_with("security-patch-approval-revised", {"verdict": "rejected"},
+                                 "Add a regression test for tenants with no accounts.", 2 * HOUR + 14 * 60000,
+                                 "The person rejected the patch with feedback; the repair is asked about again.")
+    second.batch(step("review_repair", "Added a regression test for tenants with no accounts."))
+    second.values["approvalQuestion"] = "Regression test added for tenants with no accounts. Approve the patch now?"
+    second.batch(ask("approval", second.values["approvalQuestion"]),
+                 review_code("Empty-tenant case is covered and passes."))
+    third = second.continue_with("security-patch-approval-merged", {"verdict": "accepted"},
+                                 "Looks good.", 38 * 60000,
+                                 "The person approved the revised patch, and it was delivered.")
+    third.batch(step("deliver", "Simulated merge receipt: required checks passed and the exact candidate was merged.",
+                     {"headRevision": "3333333333333333333333333333333333333333", "mergeRevision": "4444444444444444444444444444444444444444", "mode": "merge", "outcome": "merged", "pullRequestId": "example-pr-42", "repository": "example/simulated-repository", "targetBranch": "main", "version": "v2"},
+                     {"delivery": "merged"}))
+    return [first.pause(second), second.pause(third), third.finish("done")]
 
 
 def main():
@@ -329,7 +506,7 @@ def main():
         existing = json.loads(OUTPUT.read_text())
         profiles = {item["detail"]["source"]["profile"]: item["detail"] for item in existing}
     examples = build(profiles)
-    assert len(examples) == 10
+    assert len(examples) == 13
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(examples, ensure_ascii=False, indent=2) + "\n")
     print(f"Wrote {len(examples)} simulated examples, {sum(len(x['events']) for x in examples)} events.")

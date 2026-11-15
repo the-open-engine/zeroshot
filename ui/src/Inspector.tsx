@@ -15,6 +15,7 @@ import {
   replaceNode,
   type Document,
   type GraphNode,
+  REQUEST_WORKER,
 } from './domain';
 import { WorkerControl } from './WorkerControl';
 import { isDeliveryKind, type WorkerOption } from './workers';
@@ -443,9 +444,7 @@ function ActivitySettings({
               label="Timeout (ms)"
               value={node.timeoutMs}
               optional
-              placeholder={
-                node.worker === 'builtin.request.ask@1' ? '7 days (604800000)' : 'No limit'
-              }
+              placeholder={node.worker === REQUEST_WORKER ? '7 days (604800000)' : 'No limit'}
               onChange={(value) => {
                 const next = { ...node };
                 if (value === undefined) delete next.timeoutMs;
