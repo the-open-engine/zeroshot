@@ -4,18 +4,31 @@ use crate::native_v2_capsule::provider_json_lines::{
     ProviderJsonLine, ProviderJsonLines, parse_provider_json,
 };
 use crate::native_v2_contract::{TokenUsageDelta, parse_token_usage_delta};
+use crate::native_v2_capsule::provider_process::{ProviderEmission, text::ProviderText};
 use crate::native_v2_runner::{LiveOutputStream, NodeRunnerError};
 
 pub(super) enum CodexEmission {
     AgentMessage(String),
     Progress(String),
+    StreamError(String),
 }
 
 impl CodexEmission {
     pub(super) fn log(&self) -> (LiveOutputStream, &str) {
         match self {
             Self::AgentMessage(message) => (LiveOutputStream::Output, message),
-            Self::Progress(message) => (LiveOutputStream::System, message.as_str()),
+            Self::Progress(message) | Self::StreamError(message) => {
+                (LiveOutputStream::System, message.as_str())
+            }
+        }
+    }
+
+    pub(super) fn emit(&self, publisher: &ProviderText, emissions: &mut Vec<ProviderEmission>) {
+        let (stream, message) = self.log();
+        if matches!(self, Self::StreamError(_)) {
+            publisher.emit_progress(emissions, message);
+        } else {
+            publisher.emit(emissions, stream, message);
         }
     }
 }
@@ -283,9 +296,14 @@ impl CodexOutput {
                 if event.get("usage").is_some() {
                     self.token_usage = token_usage(event.get("usage"));
                 }
-                self.failure = failure_detail(event, event_type)
+                let detail = failure_detail(event, event_type);
+                let message = detail.as_deref().map_or_else(
+                    || "Codex stream error".to_owned(),
+                    |detail| format!("Codex stream error: {detail}"),
+                );
+                self.failure = detail
                     .or_else(|| Some("Codex stream error without provider detail".to_owned()));
-                "Codex stream error"
+                return AcceptedLine::Emission(CodexEmission::StreamError(message));
             }
             _ => return AcceptedLine::Ignored,
         };

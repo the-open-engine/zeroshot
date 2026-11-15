@@ -745,8 +745,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   incomplete input, failed completion, and stderr-only diagnostics. Incomplete input fails that
   attempt and cannot itself authorize continuation; each native transcript retains its documented
   retry policy, event parsing, and final-answer semantics. Shared provider text publication batches deltas, redacts credentials
-  across event/stream boundaries, and emits bounded UTF-8 records. `HarnessProcessEnvironment`
-  owns the minimal nonsecret environment for Claude and Pi in local and hosted composition.
+  across event/stream boundaries, and emits bounded UTF-8 records.
+  Retry/error progress lines for Claude, Codex and Pi include native causes, redact before
+  shortening to `LIVE_LINE_BYTES`, and leave terminal diagnostics and continuation policy intact.
+  `HarnessProcessEnvironment` owns the minimal nonsecret environment for Claude and Pi in local and hosted composition.
   `inputTokens` means uncached input; input, output, cache reads and cache writes are disjoint.
   Adapters normalize native counters before publication: Codex subtracts cache reads and writes
   after its resumed-session delta while retaining native baselines; Copilot subtracts both per call.
