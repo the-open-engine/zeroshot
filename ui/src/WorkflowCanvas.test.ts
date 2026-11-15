@@ -405,25 +405,34 @@ test('Expand all and Collapse all are unavailable when they would do nothing, ke
   assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'false');
 });
 
-test('an empty-canvas click shows the workflow details, but not when it starts a double-click', async (t) => {
+test('an empty-canvas click shows the workflow details at once; a group header keeps its own', async (t) => {
   let deselected = 0;
   const container = await mountRunGraph(t, layoutWorker(), undefined, {
     deselect: () => deselected++,
+    view: { collapsed: [] },
   });
-  const pane = container.querySelector<HTMLElement>('.react-flow__pane')!;
   const window = container.ownerDocument.defaultView!;
-  const press = (detail: number) =>
+  const press = (target: Element, detail = 1) =>
     act(async () => {
-      pane.dispatchEvent(new window.MouseEvent('click', { bubbles: true, detail }));
+      target.dispatchEvent(new window.MouseEvent('click', { bubbles: true, detail }));
     });
-  const wait = () => act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-  await press(1);
-  await wait();
+  await press(container.querySelector('.react-flow__pane')!);
   assert.equal(deselected, 1);
-  await press(1);
-  await press(2);
-  await wait();
-  assert.equal(deselected, 1);
+  // The blank inside of a group's box is canvas too.
+  await press(container.querySelector('.workflow-region')!);
+  assert.equal(deselected, 2);
+  // Its header selects or folds the group instead.
+  await press(container.querySelector('.workflow-region-header button')!);
+  assert.equal(deselected, 2);
+  // A double-click neither zooms nor needs a delay to tell it apart.
+  const before = viewport(container);
+  await act(async () => {
+    container
+      .querySelector('.react-flow__pane')!
+      .dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+  });
+  await settle(container);
+  assert.deepEqual(viewport(container), before);
 });
 
 test('expanding and collapsing a group keep it where it was on screen, at the same zoom', async (t) => {
