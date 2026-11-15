@@ -874,6 +874,8 @@ async fn root_steer_direct_composition_delivers_without_active_memory() {
         cli.is_file(),
         "build the candidate CLI before running root_steer"
     );
+    let callback = root.child("steer-callback");
+    fs::copy(&cli, &callback).assert_value();
     let script = format!(
         r#"import json, os, pathlib, shlex, subprocess, sys, time
 if '--version' in sys.argv:
@@ -888,7 +890,7 @@ result = subprocess.run(command, input=json.dumps({{'hook_event_name':'PreToolUs
 pathlib.Path('steer-context').write_text(result.stdout)
 sys.exit(17)
 "#,
-        cli = serde_json::to_string(&cli).assert_value()
+        cli = serde_json::to_string(&callback).assert_value()
     );
     let mut config = capsule_config(root.path().to_owned());
     config.claude_process_environment = ClaudeProcessEnvironment::default();
@@ -926,21 +928,29 @@ sys.exit(17)
         node_instance: 1,
         execution: 1,
         worker: "agent.work@1",
-        instructions: "Read README.md.",
+        instructions: "Exercise the hosted node.",
         input: Value::Null,
         binding,
         environment: BTreeMap::new(),
     }
     .into_request();
     let mut handle = capsule.runner.start(request).await.assert_value();
+    let mut output = handle.take_initial_output().assert_value();
     let workspace = allocator.run_path(&run).join("workspace");
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !workspace.join("steer-held").is_file() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+    tokio::select! {
+        ready = tokio::time::timeout(Duration::from_secs(10), async {
+            while !workspace.join("steer-held").is_file() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }) => ready.assert_value_with("contained steer provider ready"),
+        completion = handle.completion() => {
+            let mut diagnostics = Vec::new();
+            while let Ok(event) = output.recv().await {
+                diagnostics.push(event);
+            }
+            panic!("contained steer provider exited before readiness: {completion:?}; {diagnostics:?}");
         }
-    })
-    .await
-    .assert_value();
+    }
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         RunSteerParams {
