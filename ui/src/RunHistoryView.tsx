@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
   ArrowLeft,
@@ -1018,6 +1026,7 @@ function liveStatusLabel(
               : 'Go live';
 }
 
+/** Replay, as one slim line under the view: step controls, a thin track, and where it stands. */
 function RunTimeline({
   moment,
   moments,
@@ -1037,99 +1046,105 @@ function RunTimeline({
   togglePlay,
   loadMore,
 }: RunTimelineProps) {
+  const last = moments.length - 1;
   return (
     <footer className="history-timeline" aria-label="Run timeline">
-      <div className="timeline-caption">
-        <div>
-          {!(isLiveRun && following) && (
-            <span className="timeline-mode">
-              {safePosition === 0
-                ? 'Start'
-                : safePosition === moments.length - 1 && loadedHead
-                  ? 'Latest'
-                  : 'Replay'}
-            </span>
-          )}
-          <strong>{moment.label}</strong>
-          {moment.node && (
-            <button className="text-button" onClick={showNode}>
-              Show node
-            </button>
-          )}
+      <div className="timeline-bar">
+        <div className="timeline-controls">
+          <button
+            className="icon-button"
+            title="Go to start"
+            aria-label="Go to start"
+            disabled={!safePosition}
+            onClick={() => scrub(0)}
+          >
+            <ChevronsLeft size={16} />
+          </button>
+          <button
+            className="icon-button"
+            title="Previous event"
+            aria-label="Previous event"
+            disabled={!safePosition}
+            onClick={() => scrub(safePosition - 1)}
+          >
+            <ArrowLeft size={15} />
+          </button>
+          <button
+            className="icon-button"
+            title={playing ? 'Pause replay' : 'Play replay'}
+            aria-label={playing ? 'Pause replay' : 'Play replay'}
+            disabled={moments.length < 2 || loading}
+            onClick={togglePlay}
+          >
+            {playing ? <Pause size={15} /> : <Play size={15} />}
+          </button>
+          <button
+            className="icon-button"
+            title="Next event"
+            aria-label="Next event"
+            disabled={safePosition === last}
+            onClick={() => scrub(safePosition + 1)}
+          >
+            <ArrowRight size={15} />
+          </button>
+          <button
+            className="icon-button"
+            title="Go to latest"
+            aria-label="Go to latest"
+            disabled={safePosition === last && loadedHead && (!isLiveRun || following)}
+            onClick={goLatest}
+          >
+            <ChevronsRight size={16} />
+          </button>
         </div>
-        <div className="timeline-progress">
-          {isLiveRun && (
-            <button
-              className={`history-live ${following && connection === 'connected' ? 'following' : ''}`}
-              disabled={loading || (following && connection === 'connected')}
-              title={following ? 'Following latest events' : 'Follow latest events'}
-              onClick={goLatest}
-            >
-              <span className="live-dot" />
-              {liveStatusLabel(connection, loading, loadedHead, following)}
-            </button>
-          )}
-          <span className="timeline-counter">
-            {safePosition} / {moments.length - 1}
-          </span>
-        </div>
-      </div>
-      <div className="timeline-controls">
-        <button
-          className="icon-button"
-          title="Go to start"
-          aria-label="Go to start"
-          disabled={!safePosition}
-          onClick={() => scrub(0)}
-        >
-          <ChevronsLeft size={18} />
-        </button>
-        <button
-          className="icon-button"
-          title="Previous event"
-          aria-label="Previous event"
-          disabled={!safePosition}
-          onClick={() => scrub(safePosition - 1)}
-        >
-          <ArrowLeft size={17} />
-        </button>
-        <button
-          className="timeline-play"
-          title={playing ? 'Pause replay' : 'Play replay'}
-          aria-label={playing ? 'Pause replay' : 'Play replay'}
-          disabled={moments.length < 2 || loading}
-          onClick={togglePlay}
-        >
-          {playing ? <Pause size={17} /> : <Play size={17} />}
-        </button>
         <input
           type="range"
           aria-label="History position"
           aria-valuetext={moment.label}
           min={0}
-          max={moments.length - 1}
+          max={last}
           step={1}
           value={safePosition}
+          style={
+            { '--progress': `${last > 0 ? (safePosition / last) * 100 : 0}%` } as CSSProperties
+          }
           onChange={(event) => scrub(Number(event.target.value))}
         />
-        <button
-          className="icon-button"
-          title="Next event"
-          aria-label="Next event"
-          disabled={safePosition === moments.length - 1}
-          onClick={() => scrub(safePosition + 1)}
-        >
-          <ArrowRight size={17} />
-        </button>
-        <button
-          className="icon-button"
-          title="Go to latest"
-          aria-label="Go to latest"
-          disabled={safePosition === moments.length - 1 && loadedHead && (!isLiveRun || following)}
-          onClick={goLatest}
-        >
-          <ChevronsRight size={18} />
-        </button>
+        {/* The event name leads its own column, so it starts in the same place while dragging. */}
+        <div className="timeline-caption">
+          <strong title={moment.label}>{moment.label}</strong>
+          {!(isLiveRun && following) && (
+            <span className="timeline-mode">
+              {safePosition === 0
+                ? 'Start'
+                : safePosition === last && loadedHead
+                  ? 'Latest'
+                  : 'Replay'}
+            </span>
+          )}
+          <span className="timeline-counter">
+            {safePosition} / {last}
+          </span>
+        </div>
+        <div className="timeline-extras">
+          {isLiveRun && (
+            <LiveStatus
+              connection={connection}
+              loading={loading}
+              loadedHead={loadedHead}
+              following={following}
+              goLatest={goLatest}
+            />
+          )}
+          {/* Holds its place when the event has no node, so the track keeps its length. */}
+          <button
+            className="text-button timeline-show-node"
+            hidden={!moment.node}
+            onClick={showNode}
+          >
+            Show node
+          </button>
+        </div>
       </div>
       {historyPending ? (
         <div className="history-load-state" role="status">
@@ -1150,6 +1165,28 @@ function RunTimeline({
         </div>
       ) : null}
     </footer>
+  );
+}
+
+/** Whether the run is live, and whether the view keeps up with it; a way back when it does not. */
+function LiveStatus({
+  connection,
+  loading,
+  loadedHead,
+  following,
+  goLatest,
+}: Pick<RunTimelineProps, 'connection' | 'loading' | 'loadedHead' | 'following' | 'goLatest'>) {
+  const current = following && connection === 'connected';
+  return (
+    <button
+      className={`history-live ${current ? 'following' : ''}`}
+      disabled={loading || current}
+      title={following ? 'Following latest events' : 'Follow latest events'}
+      onClick={goLatest}
+    >
+      <span className="live-dot" />
+      {liveStatusLabel(connection, loading, loadedHead, following)}
+    </button>
   );
 }
 

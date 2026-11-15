@@ -254,47 +254,142 @@
 }
 .history-timeline {
   flex-shrink: 0;
+  /* The bar lays itself out by its own width, which the sidebar and inspector change. */
+  container-type: inline-size;
   border-top: 1px solid var(--hairline);
   background: var(--surface);
-  padding: 16px 24px 12px;
+  padding: 4px 16px;
   z-index: 10;
 }
-.timeline-caption,
-.timeline-caption > div {
+.timeline-bar {
+  display: grid;
+  /* Controls, track, the event, then live status and Show node. The event's column has a fixed
+     width and Show node keeps its place, so the track keeps its length while dragging. */
+  grid-template-columns: auto minmax(120px, 1fr) clamp(180px, 34%, 420px) auto;
+  grid-template-areas: 'controls track caption extras';
+  align-items: center;
+  gap: 4px 12px;
+}
+.timeline-controls {
+  grid-area: controls;
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-width: 0;
+}
+.timeline-controls .icon-button {
+  width: 28px;
+  height: 28px;
+}
+/* Adjacent buttons: draw the focus ring inside so it never covers the neighbour. */
+.timeline-controls .icon-button:focus-visible {
+  outline-offset: -2px;
+}
+/* A thin track: replay is a tool to reach for, not the page's focus. The part already replayed is
+   ink (ui/DESIGN.md); the rest is a muted line that still reads against the surface. */
+.history-timeline input[type='range'] {
+  grid-area: track;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.history-timeline input[type='range']::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to right,
+    var(--ink) 0 var(--progress, 0%),
+    var(--ink-muted) var(--progress, 0%) 100%
+  );
+}
+.history-timeline input[type='range']::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink-muted);
+}
+.history-timeline input[type='range']::-moz-range-progress {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+.history-timeline input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.history-timeline input[type='range']::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.history-timeline input[type='range']:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 .timeline-caption {
-  justify-content: space-between;
-  margin-bottom: 13px;
+  grid-area: caption;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
 }
 .timeline-caption strong {
-  font-size: 13px;
+  min-width: 0;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .timeline-mode {
-  font-size: 12px;
   color: var(--ink-muted);
-  flex-shrink: 0;
-}
-.timeline-caption .text-button {
-  font-size: 12px;
   flex-shrink: 0;
 }
 .timeline-counter {
-  font-size: 12px;
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-.timeline-progress {
   flex-shrink: 0;
 }
+.timeline-extras {
+  grid-area: extras;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.timeline-extras .text-button {
+  padding: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.timeline-show-node[hidden] {
+  display: inline-flex;
+  visibility: hidden;
+}
+/* Too narrow for one row: the event and its extras take a second row under the controls. */
+@container (max-width: 760px) {
+  .timeline-bar {
+    grid-template-columns: auto minmax(80px, 1fr) auto;
+    grid-template-areas:
+      'controls track track'
+      'caption caption extras';
+  }
+  .timeline-mode {
+    display: none;
+  }
+}
+/* Live status: a dot and a word while the view keeps up with the run, a way back when it does not. */
 .history-live {
   display: inline-flex;
   align-items: center;
@@ -313,34 +408,6 @@
   border-radius: 50%;
   background: currentColor;
 }
-.timeline-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.timeline-controls input[type='range'] {
-  flex: 1;
-  height: 28px;
-  border: 0;
-  padding: 0;
-  background: none;
-  cursor: pointer;
-  margin: 0 14px;
-}
-.timeline-play {
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--action);
-  color: var(--on-action);
-}
-.timeline-play:disabled {
-  color: var(--disabled-text);
-  background: var(--disabled-surface);
-}
 .history-load-state {
   display: flex;
   align-items: center;
@@ -348,7 +415,7 @@
   gap: 10px;
   color: var(--ink-muted);
   font-size: 12px;
-  padding-top: 9px;
+  padding-bottom: 4px;
 }
 .history-load-state .text-button {
   font-size: inherit;
@@ -853,25 +920,26 @@
     display: none;
   }
   .history-timeline {
-    padding: 12px;
+    padding: 4px 8px;
   }
-  .timeline-caption {
-    gap: 6px;
+  /* 44px touch targets on phones (ui/DESIGN.md). */
+  .timeline-controls .icon-button,
+  .timeline-extras .text-button,
+  .timeline-extras .history-live {
+    min-width: 44px;
+    min-height: 44px;
   }
-  .timeline-caption > div {
-    gap: 8px;
+  .history-timeline input[type='range'] {
+    height: 44px;
   }
-  .timeline-caption strong {
-    font-size: 12px;
+  .history-timeline input[type='range']::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -7px;
   }
-  .timeline-mode {
-    display: none;
-  }
-  .timeline-controls {
-    gap: 1px;
-  }
-  .timeline-controls input[type='range'] {
-    margin: 0 6px;
+  .history-timeline input[type='range']::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
   }
 }
 @media (max-width: 450px) {

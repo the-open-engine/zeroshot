@@ -489,6 +489,16 @@ test('a remounted run restores its paused cursor, inspector and execution withou
   const position = () =>
     container.querySelector<HTMLInputElement>('[aria-label="History position"]')!.value;
   assert.equal(position(), '1');
+  await click('Next event');
+  await click('Previous event');
+  assert.equal(position(), '1');
+  // Play and pause swap one button; the slim bar keeps every step control.
+  await click('Play replay');
+  assert.ok(container.querySelector('[aria-label="Pause replay"]'));
+  await click('Pause replay');
+  assert.equal(position(), '1');
+  // Show node keeps its place in the bar, hidden when the event has no node.
+  assert.ok(container.querySelector('.timeline-show-node'));
   await act(async () => root.unmount());
   assert.equal(watches, 0);
   assert.equal(lastSignal?.aborted, true);

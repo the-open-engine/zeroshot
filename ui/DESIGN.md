@@ -43,10 +43,11 @@ Components use these semantic tokens, never raw values.
 The remaining tokens in `styles.css` (hover, grid, card border, edge, shadows) are editor surfaces
 derived from these; add one there rather than a raw value in a component.
 
-- **Ink is the action colour.** The primary button (Save profile, Save, play) is ink with paper text,
-  and a screen has at most one. Secondary buttons are a hairline outline on the surface. Text buttons
-  are the third tier. The focus ring, selection (a chosen node, a selected edge, the chosen option)
-  and native checkboxes and ranges are ink too.
+- **Ink is the action colour.** The primary button (Save profile, Save) is ink with paper text, and
+  a screen has at most one. Secondary buttons are a hairline outline on the surface. Text buttons
+  are the third tier. Replay controls are a tool to reach for, not the page's focus: play and the
+  step buttons stay plain icon buttons. The focus ring, selection (a chosen node, a selected edge,
+  the chosen option), checkboxes and the filled part of a range are ink too.
 - **Rust marks state, not actions:** errors, invalid or missing values, failed runs and nodes, the
   current tab's underline, and remove controls on hover. Keep it small.
 - **Green** marks success. **Amber** marks work in progress (running) and things to watch (an
