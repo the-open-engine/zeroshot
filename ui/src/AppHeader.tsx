@@ -9,16 +9,18 @@ function workspaceKindLabel(kind: string) {
 export function AppHeader({
   section,
   navigate,
-  children,
+  sidebarToggle,
   workspace,
 }: {
   section: 'profiles' | 'runs';
   navigate: (section: 'profiles' | 'runs') => void;
-  children?: ReactNode;
+  /** Opens the page's sidebar where it is folded away; it leads, on the side the sidebar opens. */
+  sidebarToggle?: ReactNode;
   workspace: WorkspaceIdentity;
 }) {
   return (
     <header className="app-header">
+      {sidebarToggle}
       <div className="brand">
         <img src="./oec-mascot.webp" alt="The Open Engine Company" />
         <span>zeroshot</span>
@@ -39,7 +41,6 @@ export function AppHeader({
         </button>
       </nav>
       <ThemeControl />
-      {children}
     </header>
   );
 }

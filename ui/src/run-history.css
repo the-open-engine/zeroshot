@@ -18,7 +18,7 @@
   display: none;
 }
 .run-sidebar {
-  width: 258px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   border-right: 1px solid var(--hairline);
   display: flex;
@@ -859,44 +859,18 @@
 .history-sidebar-toggle {
   display: none;
 }
-@media (max-width: 1200px) {
-  .run-sidebar {
-    width: 225px;
-  }
-  .run-inspector {
-    --inspector-default-width: 330px;
-  }
-  .history-header h1 {
-    font-size: 22px;
-  }
-}
-@media (max-width: 950px) {
-  .run-inspector {
-    position: absolute;
-    z-index: 8;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    --inspector-default-width: 350px;
-    box-shadow: -5px 0 20px var(--shadow-panel);
-  }
-  .history-header .profile-title {
-    gap: 7px;
-  }
-  .history-header h1 {
-    font-size: 21px;
-  }
-}
-@media (max-width: 720px) {
+/* The shared layouts (styles.css, ui/DESIGN.md): medium puts the run list behind its menu button,
+   narrow slides the inspector over the view. */
+@media (max-width: 1150px) {
   .run-sidebar {
     display: none;
     position: absolute;
     left: 0;
-    top: 62px;
+    top: var(--app-header-height);
     bottom: 0;
     z-index: 30;
     background: var(--canvas);
-    width: 275px;
+    width: var(--sidebar-width);
     box-shadow: 5px 0 20px var(--shadow-panel);
   }
   .run-sidebar.visible {
@@ -905,16 +879,27 @@
   .history-sidebar-toggle {
     display: inline-flex;
   }
-  .app-sections {
-    margin-left: 0;
-    gap: 13px;
+  .run-inspector {
+    --inspector-default-width: 330px;
   }
-  .app-header {
-    gap: 14px;
-    padding: 0 15px;
+  .history-header h1 {
+    font-size: 22px;
+  }
+}
+@media (max-width: 720px) {
+  .run-inspector {
+    position: absolute;
+    z-index: 8;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    box-shadow: -5px 0 20px var(--shadow-panel);
   }
   .history-header {
     padding: 0 16px;
+  }
+  .history-header .profile-title {
+    gap: 7px;
   }
   .history-header h1 {
     font-size: 20px;
@@ -943,12 +928,5 @@
   .history-timeline input[type='range']::-moz-range-thumb {
     width: 16px;
     height: 16px;
-  }
-}
-@media (max-width: 450px) {
-  .app-header .local-label,
-  .app-header .brand-rule,
-  .app-header .brand > span:last-child {
-    display: none;
   }
 }

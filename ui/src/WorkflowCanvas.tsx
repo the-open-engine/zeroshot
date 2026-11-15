@@ -73,6 +73,7 @@ import {
   withWorkflowDimensions,
   type WorkflowMeasurements,
 } from './workflow-measurements';
+import { MoreMenu } from './MoreMenu';
 import {
   collapsedRunGroups,
   currentRunWork,
@@ -498,18 +499,34 @@ function CanvasToolbar({
         >
           <FoldVertical size={17} />
         </button>
-        {!readOnly &&
-          tools.map((tool) => (
-            <button
-              key={tool.label}
-              className="icon-button"
-              title={tool.title}
-              aria-label={tool.label}
-              onClick={tool.onSelect}
-            >
-              {tool.icon}
-            </button>
-          ))}
+        {!readOnly && (
+          <>
+            {/* Shown while the canvas is wide; folded behind "More tools" when it is narrow. */}
+            <div className="canvas-tools">
+              {tools.map((tool) => (
+                <button
+                  key={tool.label}
+                  className="icon-button"
+                  title={tool.title}
+                  aria-label={tool.label}
+                  onClick={tool.onSelect}
+                >
+                  {tool.icon}
+                </button>
+              ))}
+            </div>
+            <div className="canvas-tools-more">
+              <MoreMenu
+                label="More tools"
+                items={tools.map(({ label, icon, onSelect }) => ({
+                  label,
+                  icon,
+                  onSelect,
+                }))}
+              />
+            </div>
+          </>
+        )}
         {p.inspectorHidden && (
           <button
             className="icon-button"

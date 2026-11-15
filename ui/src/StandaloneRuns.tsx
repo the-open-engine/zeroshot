@@ -150,16 +150,17 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
         navigate={(section) => {
           if (section === 'profiles') window.location.hash = '';
         }}
-      >
-        <button
-          className="icon-button history-sidebar-toggle"
-          title="Run list"
-          aria-label="Run list"
-          onClick={() => setSidebar(!sidebar)}
-        >
-          <Menu size={18} />
-        </button>
-      </AppHeader>
+        sidebarToggle={
+          <button
+            className="icon-button history-sidebar-toggle"
+            title="Run list"
+            aria-label="Run list"
+            onClick={() => setSidebar(!sidebar)}
+          >
+            <Menu size={18} />
+          </button>
+        }
+      />
       <div className="app-body">
         <nav className={`run-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Runs">
           <div className="sidebar-heading">

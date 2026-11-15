@@ -90,16 +90,17 @@ export function AppView({ model }: { model: AppModel }) {
               navigate={(section) => {
                 if (section === 'runs') window.location.hash = lastRun.current;
               }}
-            >
-              <button
-                className="icon-button sidebar-toggle"
-                title="Profiles"
-                aria-label="Profiles"
-                onClick={() => setSidebar(!sidebar)}
-              >
-                <Menu size={19} />
-              </button>
-            </AppHeader>
+              sidebarToggle={
+                <button
+                  className="icon-button sidebar-toggle"
+                  title="Profiles"
+                  aria-label="Profiles"
+                  onClick={() => setSidebar(!sidebar)}
+                >
+                  <Menu size={19} />
+                </button>
+              }
+            />
           )}
           <div className="app-body">
             {!host && <ProfileSidebar model={model} />}

@@ -59,7 +59,7 @@
   font-size: 13px;
   line-height: 1.65;
 }
-@media (max-width: 560px) {
+@media (max-width: 720px) {
   .defaults-menu {
     padding: 16px 20px;
   }

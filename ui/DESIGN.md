@@ -90,6 +90,22 @@ wordmark: the host owns that chrome.
   otherwise no decorative icon.
 - Shadows are rare and shallow; elevation comes from hairlines and surface contrast.
 
+## Layout
+
+Every page uses the same three layouts, and only these two widths (`max-width: 1150px` and
+`max-width: 720px`):
+
+- **Wide** (above 1150px): sidebar, canvas or list, and the inspector side by side.
+- **Medium** (721–1150px): the sidebar goes behind its menu button; the inspector stays docked.
+- **Narrow** (720px and below): the header takes two rows and the inspector slides over the canvas.
+
+Moving to a narrower layout only folds things away; nothing hidden at one width comes back at a
+narrower one. The top bar keeps one height (`--app-header-height`) and logo size at every width. Sidebars share
+`--sidebar-width`, docked or popped out. Canvas toolbars keep one row
+and answer to the canvas's own width (a container query), since the resizable inspector changes it
+too: below 600px the editor's quieter tools fold into a **More tools** menu. Pages work down to a
+360px-wide phone without clipping.
+
 ## Interaction
 
 Motion communicates state: quick colour changes, about 150–250ms. Respect `prefers-reduced-motion`.
