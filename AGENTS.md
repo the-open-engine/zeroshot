@@ -1378,6 +1378,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   branch-protection and active branch-ruleset contexts remain pending until they appear as required
   on the exact PR head. Supplement otherwise-ready observations with all pages of GitHub's effective
   branch-rules API, so a newly opened PR cannot look ready before its required workflow registers.
+  Only the known HTTP 403 GitHub Free private-repository plan refusal from that endpoint means no
+  additional rules. Recognize its complete standalone slurped response before diagnostic formatting
+  or credential redaction; permission/unknown errors, partial pagination, malformed, oversized and
+  timed-out responses retain their existing error handling.
   Ruleset App bindings require matching check-suite App identity. Legacy status contexts satisfy
   unbound ruleset checks; unresolved App-bound checks remain pending. Missing or stale human
   review may satisfy PR readiness when aggregate ref-update policy positively requires approval,

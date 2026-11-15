@@ -637,3 +637,145 @@ async fn malformed_success_redacts_proxy_credentials_before_diagnostic_cutoff() 
         assert_proxy_cutoff_redacted(error, &echoed);
     }
 }
+
+fn plan_unavailable_output() -> ApiOutput {
+    ApiOutput {
+        // Captured shape from real gh api --paginate --slurp, including the first-page error wrapper.
+        stdout: br#"[{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","documentation_url":"https://docs.github.com/rest/repos/rules#get-rules-for-a-branch","status":"403"}]"#.to_vec(),
+        stderr: b"gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)\n".to_vec(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn branch_rules_entitlement_requires_a_complete_standalone_protocol_response() {
+    let output = plan_unavailable_output();
+    assert!(output.branch_rules_unavailable());
+    let value: Value = serde_json::from_slice(&output.stdout).assert_value();
+    let error = &value[0];
+    let mut permission = error.clone();
+    permission["message"] = serde_json::json!("Resource not accessible by integration");
+    let mut wrong_status = error.clone();
+    wrong_status["status"] = serde_json::json!("401");
+    for value in [
+        Value::Null,
+        serde_json::json!([]),
+        error.clone(),
+        serde_json::json!([[], error]),
+        serde_json::json!([[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"required","integration_id":15368}]}}], error]),
+        serde_json::json!([error, error]),
+        serde_json::json!([permission]),
+        serde_json::json!([wrong_status]),
+        serde_json::json!([{"message":error["message"]}]),
+    ] {
+        let output = ApiOutput {
+            stdout: value.to_string().into_bytes(),
+            ..plan_unavailable_output()
+        };
+        assert!(!output.branch_rules_unavailable(), "{value}");
+    }
+    for stdout in [
+        Vec::new(),
+        output.stdout[..output.stdout.len() - 1].to_vec(),
+        [output.stdout.as_slice(), b"trailing garbage"].concat(),
+        [output.stdout.as_slice(), &[0xff]].concat(),
+        [output.stdout.as_slice(), &vec![b' '; MAX_API_OUTPUT_BYTES]].concat(),
+    ] {
+        assert!(
+            !ApiOutput {
+                stdout,
+                ..plan_unavailable_output()
+            }
+            .branch_rules_unavailable()
+        );
+    }
+    for stderr in [
+        Vec::new(),
+        b"gh: Resource not accessible by integration (HTTP 403)\n".to_vec(),
+        b"gh: API rate limit exceeded for user ID 123. (HTTP 403)\n".to_vec(),
+        [output.stderr.as_slice(), b"another failure\n"].concat(),
+        [output.stderr.as_slice(), &[0xff]].concat(),
+        [output.stderr.as_slice(), &vec![b' '; MAX_API_ERROR_BYTES]].concat(),
+    ] {
+        assert!(
+            !ApiOutput {
+                stderr,
+                ..plan_unavailable_output()
+            }
+            .branch_rules_unavailable()
+        );
+    }
+}
+
+#[cfg(unix)]
+fn plan_unavailable_script(root: &std::path::Path, ending: &str) -> PathBuf {
+    let output = plan_unavailable_output();
+    script(
+        root,
+        &format!(
+            "printf '%s' '{}'\nprintf '%s' '{}' >&2\n{ending}\n",
+            String::from_utf8(output.stdout).assert_value(),
+            String::from_utf8(output.stderr).assert_value(),
+        ),
+    )
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn branch_rules_entitlement_is_endpoint_scoped_and_precedes_redaction() {
+    let root = TemporaryDirectory::for_test("github-rules-entitlement");
+    // Matching command-path prose must neither grant nor suppress the exception.
+    let directory = root.as_path().join("gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)");
+    std::fs::create_dir(&directory).assert_value();
+    let program = plan_unavailable_script(&directory, "exit 1");
+    let provider = authority(program, Duration::from_secs(10));
+    for secret in ["test-token", "Upgrade to GitHub Pro", "403", "message"] {
+        let credential = SourceDeliveryCredential::token(secret);
+        let rules = provider
+            .branch_rules(&super::super::unit::review(), credential)
+            .await
+            .assert_value();
+        assert_eq!(rules, serde_json::json!([[]]));
+        let error = provider
+            .api(&["repos/acme/project/pulls".to_owned()], credential)
+            .await
+            .err()
+            .assert_value();
+        assert_eq!(error.api_status(), Some(403));
+        assert!(!error.retryable_operation());
+        assert!(!error.to_string().contains(secret));
+    }
+    // Identical command context and credential cannot convert a permission response to no rules.
+    script(
+        &directory,
+        "printf '%s' '[{\"message\":\"Resource not accessible by integration\",\"status\":\"403\"}]'\nprintf '%s\\n' 'gh: Resource not accessible by integration (HTTP 403)' >&2\nexit 1\n",
+    );
+    let error = provider
+        .branch_rules(
+            &super::super::unit::review(),
+            SourceDeliveryCredential::token("Resource not accessible by integration"),
+        )
+        .await
+        .err()
+        .assert_value();
+    assert_eq!(error.api_status(), Some(403));
+    assert!(!error.retryable_operation());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn timed_out_branch_rules_entitlement_remains_unknown_and_retryable() {
+    let root = TemporaryDirectory::for_test("github-rules-timeout");
+    let program = plan_unavailable_script(root.as_path(), "exec /bin/sleep 30");
+    let error = authority(program, Duration::from_secs(1))
+        .branch_rules(
+            &super::super::unit::review(),
+            SourceDeliveryCredential::token("test-token"),
+        )
+        .await
+        .err()
+        .assert_value();
+    assert_eq!(error.api_status(), None);
+    assert!(error.retryable_operation());
+    assert!(error.to_string().contains("command timed out"));
+}

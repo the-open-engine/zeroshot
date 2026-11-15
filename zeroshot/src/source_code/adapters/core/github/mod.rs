@@ -308,9 +308,7 @@ impl GhCliDeliveryAuthority {
                 checks: SourceChecks::NotRequired | SourceChecks::Passed
             }
         ) {
-            let rules = self
-                .api(&policy::branch_rules_arguments(review)?, credential)
-                .await?;
+            let rules = self.branch_rules(review, credential).await?;
             snapshot.apply_branch_rules(rules)?;
         }
         Ok(snapshot)
