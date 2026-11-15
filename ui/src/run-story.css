@@ -1,0 +1,537 @@
+/* The Steps run view. Tokens and rules: ui/DESIGN.md. It sits on the paper like the graph: state
+   is a 6px dot and a word, decisions are plain words, and a step's record opens in place behind
+   hairlines, never in a nested box. */
+.run-steps-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.run-steps-page {
+  max-width: 820px;
+  padding: 24px 28px 40px;
+}
+.run-steps-empty {
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+
+/* Where the run stands: a plain status line on the paper, like Platform's run page, set off from
+   the steps by one hairline. A dot and a word, then the recorded facts; never a banner. */
+.run-outcome {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 6px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.run-outcome-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.run-outcome-text::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: translateY(-2px);
+  background: var(--ink-muted);
+}
+/* Exception to ui/DESIGN.md (success colours its word green): on this page the word stays ink and
+   the green dot carries success, because a green headline over every finished run read as loud.
+   Failure keeps its rust word; it is the state that should stand out. */
+.run-outcome.state-failed .run-outcome-text {
+  color: var(--rust);
+}
+.run-outcome-facts {
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+/* One dot vocabulary for the outcome and every step (ui/DESIGN.md, Composition). */
+.run-outcome.state-succeeded .run-outcome-text::before,
+.story-step.state-succeeded .story-dot {
+  background: var(--ok-green);
+}
+.run-outcome.state-failed .run-outcome-text::before,
+.story-step.state-failed .story-dot {
+  background: var(--rust);
+}
+.run-outcome.state-running .run-outcome-text::before,
+.story-step.state-running .story-dot {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent);
+}
+.run-outcome.state-suspended .run-outcome-text::before,
+.story-step.state-suspended .story-dot {
+  background: var(--amber);
+}
+.run-outcome.state-idle .run-outcome-text::before,
+.story-step.state-idle .story-dot {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--ink-muted);
+}
+
+/* The steps hang off a hairline rail on the paper, indented under the round or handoff that
+   titles them; each has a status dot on the rail. No frames: the list stays a page, not a form. */
+.story-frame {
+  /* The rail sits indented under the headings, so each heading reads as the parent of its steps. */
+  margin: 0 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.story-entry {
+  position: relative;
+  padding-left: 26px;
+}
+.story-entry::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--hairline);
+}
+.story-section:first-child .story-entry:first-child::before {
+  top: 14px;
+}
+/* The run's end closes the rail at its dot. */
+.story-entry.run-end::before {
+  bottom: auto;
+  height: 14px;
+}
+/* The run's start and end are the rail's terminals: an ink dot opens it, the outcome's closes it. */
+.story-step.state-start .story-dot {
+  background: var(--ink);
+}
+div.story-step-head {
+  cursor: default;
+}
+div.story-step-head:hover {
+  background: transparent;
+}
+.story-group {
+  margin: 10px 0 2px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.story-step {
+  position: relative;
+}
+.story-dot {
+  position: absolute;
+  left: -23px;
+  top: 14px;
+  z-index: 1;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+}
+/* The open step marks itself on the rail: the 1px segment beside it, title to last line, turns ink
+   (ui/DESIGN.md allows no side line thicker than 1px). */
+.story-step.open::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink);
+}
+.story-step-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  margin: 0 -8px;
+  padding: 7px 8px 8px;
+  border-radius: 4px;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  transition: background-color 150ms;
+}
+.story-step-head:hover {
+  background: var(--subtle-hover);
+}
+/* Its title line takes the faint ink tint of a chosen item (ui/DESIGN.md). */
+.story-step.open > .story-step-head {
+  background: var(--selected);
+}
+.story-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.story-title > svg:first-child {
+  color: var(--ink-secondary);
+}
+.story-name {
+  font-weight: 600;
+}
+.story-decision {
+  color: var(--ink-secondary);
+}
+.story-decision::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--ink-muted);
+}
+.story-step.state-failed .story-decision {
+  color: var(--rust);
+}
+.story-step.state-suspended .story-decision {
+  color: var(--amber);
+}
+.story-meta {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.story-chevron {
+  color: var(--ink-muted);
+  opacity: 0;
+  transition:
+    opacity 150ms,
+    transform 150ms;
+}
+.story-step-head:hover .story-chevron,
+.story-step-head:focus-visible .story-chevron,
+.story-step-head[aria-expanded='true'] .story-chevron {
+  opacity: 1;
+}
+.story-step-head[aria-expanded='true'] .story-chevron {
+  transform: rotate(90deg);
+}
+/* A step's recorded time at the right of its line, quiet and in even figures. */
+.story-time {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+.story-step.state-running .story-time {
+  color: var(--amber);
+}
+.story-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Rounds and handoffs title the frames below them, like Platform's section titles. */
+.story-round {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 22px 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.story-round span {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+.story-handoff {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 8px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+.story-handoff svg {
+  color: var(--ink-muted);
+}
+.story-handoff a {
+  color: var(--ink);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+/* A step's record, opened under its line in the order it happened. Each section is a title on
+   the paper over framed rows, like Platform's item pages: one frame per section, never a box in a
+   box. */
+.step-detail {
+  display: grid;
+  gap: 14px;
+  margin: 6px 0 18px;
+  font-size: 14px;
+}
+.step-section > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: fit-content;
+  list-style: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.step-section > summary::-webkit-details-marker {
+  display: none;
+}
+.step-section > summary svg {
+  align-self: center;
+  margin-left: -2px;
+  color: var(--ink-muted);
+  transition: transform 150ms;
+}
+.step-section[open] > summary svg {
+  transform: rotate(90deg);
+}
+.step-section > summary small {
+  margin-left: 4px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+.step-section > summary:hover small {
+  color: var(--ink-secondary);
+}
+.step-section[open] > summary .step-section-hint {
+  display: none;
+}
+.step-section-body {
+  margin-top: 8px;
+}
+
+/* Framed rows (Platform's framed-rows): a faint ink frame, hairlines between rows, and one name
+   column width shared by every section, so a step's input, transcript and result line up. */
+.step-frame {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  font-size: 13px;
+}
+.step-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  gap: 16px;
+  min-height: 40px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+}
+.step-row + .step-row {
+  border-top: 1px solid var(--hairline);
+}
+.step-row-wide > * {
+  grid-column: 1 / -1;
+}
+.step-row dt,
+.step-row time {
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+.step-row time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.step-row dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.step-row code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.step-prose,
+.step-log-text {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.step-empty {
+  color: var(--ink-muted);
+}
+.step-log-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.step-log .stream-system .step-log-text,
+.step-log .stream-error .step-log-text {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.step-log .stream-system .step-log-text {
+  color: var(--ink-secondary);
+}
+.step-log .stream-error .step-log-text {
+  color: var(--rust);
+}
+.step-failure {
+  margin: 0;
+  max-width: 72ch;
+  font-weight: 500;
+  color: var(--rust);
+}
+.step-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.step-link {
+  justify-self: start;
+  padding: 0;
+  background: none;
+  font-size: 13px;
+  color: var(--ink-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 3px;
+}
+.step-link:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+/* An open step's record sits beside the ink rail segment, under its title. */
+.story-step .step-detail {
+  margin: 4px 0 16px;
+}
+
+@media (max-width: 720px) {
+  .step-frame {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .step-row {
+    gap: 2px;
+  }
+}
+
+/* A question to a person: quoted, with its allowed answers as plain words. */
+.person-request {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 72ch;
+}
+.person-request blockquote {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--ink-muted);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.request-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding-left: 13px;
+  font-size: 14px;
+}
+.request-field {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+.request-field-name {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.request-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-secondary);
+}
+/* The chosen answer is ink with a dot, like any chosen option (ui/DESIGN.md, Color). */
+.request-option.chosen {
+  font-weight: 600;
+  color: var(--ink);
+}
+.request-option.chosen::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.request-option.passed {
+  color: var(--ink-muted);
+}
+.request-status,
+.request-hint {
+  margin: 0;
+  padding-left: 13px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.request-hint code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.run-handoff {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 20px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+a.run-handoff:hover {
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .run-steps-page {
+    padding: 16px 16px 32px;
+  }
+  .story-step-head {
+    min-height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .story-step-head,
+  .story-chevron,
+  .step-section > summary svg {
+    transition: none;
+  }
+}
+
+/* Keyboard focus stays strong ink (ui/DESIGN.md), but hugs the row instead of floating outside it. */
+.story-step-head:focus-visible {
+  outline-offset: 0;
+}

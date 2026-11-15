@@ -43,6 +43,14 @@ async function clickButton(container: HTMLElement, label: string) {
   assert.ok(button, label);
   await act(async () => button.click());
 }
+/** Runs open in Steps; the inspector belongs to the graph. */
+async function showGraph(container: HTMLElement) {
+  const button = [...container.querySelectorAll<HTMLButtonElement>('.view-toggle button')].find(
+    (candidate) => candidate.textContent === 'Graph'
+  );
+  assert.ok(button, 'Graph');
+  await act(async () => button.click());
+}
 async function loadMoreHistory(container: HTMLElement) {
   const button = [...container.querySelectorAll('button')].find(
     (candidate) => candidate.textContent === 'Load more history'
@@ -483,6 +491,7 @@ test('a remounted run restores its paused cursor, inspector and execution withou
   await render();
   await flushEffects();
   assert.equal(watches, 1);
+  await showGraph(container);
   await click('Go to start');
   await click('Show details');
   await click('Next event');
@@ -708,16 +717,13 @@ for (const durable of [true, false])
       );
       assert.ok(log);
       await act(async () => log.click());
-      assert.equal(details(), null);
       assert.equal(
         container.querySelector<HTMLInputElement>('[aria-label="History position"]')?.value,
         '3'
       );
       assert.match(renderedText(container), /Recorded delivery detail/);
-      assert.match(
-        container.querySelector('[aria-label="Run inspector"]')!.textContent!,
-        /Deliver/
-      );
+      // Steps opens the step that wrote the log line in place.
+      assert.match(container.querySelector('.story-step.open')!.textContent!, /Deliver/);
     } finally {
       await act(async () => root.unmount());
       container.remove();

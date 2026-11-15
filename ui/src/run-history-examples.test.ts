@@ -81,6 +81,10 @@ test('a person approval spans three runs: asked, rejected and asked again, then 
     ['rejected', 'accepted']
   );
   assert.ok(final.invocations.filter((invocation) => invocation.imported).length >= 5);
+  assert.deepEqual(
+    final.handoffs.map((handoff) => handoff.kind === 'continued' && handoff.from),
+    [asked.detail.runId, revised.detail.runId]
+  );
 });
 
 test('examples exercise maps, retries through a review loop, long output, and an authored failure', () => {

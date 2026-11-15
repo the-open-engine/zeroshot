@@ -461,7 +461,7 @@ function CanvasToolbar({
   return (
     <div className="canvas-toolbar">
       <div className="canvas-start">
-        {/* The view's main use leads: adding to the profile, or a host's controls. The workflow's
+        {/* The view's main use leads: a run's view switch, or adding to the profile. The workflow's
             own details open from the inspector button, or, while the inspector is open, from the
             empty canvas or the breadcrumb's first link. */}
         {readOnly ? (

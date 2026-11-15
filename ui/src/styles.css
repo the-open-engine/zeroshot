@@ -767,6 +767,11 @@ h2 {
   padding-left: 12px;
   border-left: 1px solid var(--hairline);
 }
+/* The divider separates host controls from Add activity; leading the toolbar, they need none. */
+.canvas-host-actions:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
 .flow {
   flex: 1;
   min-height: 0;

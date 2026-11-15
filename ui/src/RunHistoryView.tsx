@@ -17,9 +17,11 @@ import {
 import { ExecutionTimeline } from './ExecutionTimeline';
 import { ControlTimeline } from './ControlTimeline';
 import { appendControlHistory, type ControlRecord } from './control-history';
-import { RecordedValue } from './RecordedValue';
 import { Transcript } from './Transcript';
+import { InvocationView, ValueSection } from './InvocationDetail';
 import { WorkflowCanvas } from './WorkflowCanvas';
+import { RunStory } from './RunStory';
+import type { RunContext } from './RunViewParts';
 import { findNode, labels, type Document, type GraphNode, type Positions } from './domain';
 import type { WorkerOption } from './workers';
 import { nodeTitle } from './workflow-projection';
@@ -35,7 +37,6 @@ import {
   humanize,
   observedRoutes,
   projectHistory,
-  stateLabel,
   type HistoryEvent,
   type HistoryPage,
   type Invocation,
@@ -92,9 +93,10 @@ export function RunHistoryView({
   runHref,
   embedded = false,
 }: RunHistoryViewProps) {
-  const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
+  const { saved: savedView, canvas, setCanvas, layout, setLayout } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
   const failureView = useFailurePresentation(savedView);
+  const [revealStart, setRevealStart] = useState(0);
   const [playbackNode, setPlaybackNode] = useState<string>();
   const [selected, setSelected] = useState(''),
     [inspector, setInspector] = useState(false),
@@ -149,6 +151,7 @@ export function RunHistoryView({
     execution,
     following,
     canvas,
+    layout,
     cursor: historyViewCursor(restoreCursor.current, events, cursorIndex),
   });
   const document: Document | undefined = useMemo(
@@ -271,6 +274,47 @@ export function RunHistoryView({
   const nodeControls = projection?.controls.filter((visit) => visit.node === node?.name) ?? [];
   const showExecutions =
     node && (['step', 'verifier'].includes(node.kind) || node.name === document?.graph.root.name);
+  // Steps not recorded yet may still run when the run is live or the replay is before its end.
+  const openPosition =
+    !displayedTerminal && (isLiveRun || safePosition < moments.length - 1 || !loadedHead);
+  const listRun: RunContext | undefined = projection &&
+    run &&
+    document && {
+      document,
+      runId: run.runId,
+      input: run.initialInput,
+      invocations: projection.invocations,
+      handoffs: projection.handoffs,
+      systemLogs: projection.systemLogs,
+      clock: projection.clock,
+      terminal: displayedTerminal,
+      currentFailure,
+      open: openPosition,
+      following,
+      successor: run.workspaceRecovery?.successorRunId,
+      runHref,
+    };
+  function selectWork(target: { node: string; invocation?: string }) {
+    inspect(target.node);
+    if (target.invocation) {
+      follow(false);
+      setExecution(target.invocation);
+    }
+  }
+  const layoutToggle = (
+    <div className="view-toggle" role="group" aria-label="Run view">
+      {(['story', 'graph'] as const).map((view) => (
+        <button
+          key={view}
+          type="button"
+          aria-pressed={layout === view}
+          onClick={() => setLayout(view)}
+        >
+          {view === 'graph' ? 'Graph' : 'Steps'}
+        </button>
+      ))}
+    </div>
+  );
   return (
     <main className="workspace history-workspace">
       {run && document && projection ? (
@@ -281,30 +325,57 @@ export function RunHistoryView({
             history={history}
             position={safePosition}
             momentsCount={moments.length}
-            openLog={() => inspect(document.graph.root.name)}
+            openLog={() =>
+              layout === 'story' ? setRevealStart(Date.now()) : inspect(document.graph.root.name)
+            }
             retry={() => void loadHistory(run.runId, source, false)}
             embedded={embedded}
             runHref={runHref}
           />
-          <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
-            <ReactFlowProvider>
-              <WorkflowCanvas
-                document={document}
-                selected={selected}
-                positions={positions}
-                setPositions={setPositions}
-                workers={workers}
-                select={inspect}
-                focus={focus}
-                observation={observed(run.runId, projection.nodes, isLiveRun && following)}
-                view={canvas}
-                onViewChange={setCanvas}
-                inspectorHidden={!inspector}
-                showInspector={() => setInspector(true)}
-                deselect={() => inspect(document.graph.root.name, false)}
+          <div
+            className={`editor-body history-body ${inspector && layout === 'graph' ? '' : 'inspector-closed'}`}
+          >
+            {layout === 'story' && listRun ? (
+              <RunStory
+                run={listRun}
+                execution={execution}
+                select={selectWork}
+                showInGraph={(target) => {
+                  selectWork(target);
+                  setLayout('graph');
+                  if (target.invocation) setFocus({ name: target.node, tick: Date.now() });
+                }}
+                toolbarStart={layoutToggle}
+                revealStart={revealStart}
+                failureDetails={(context) => (
+                  <RunFailureDetails
+                    context={context}
+                    openLog={inspectDiagnostic}
+                    hasLog={(cursor) => events.some((entry) => entry.cursor === cursor)}
+                  />
+                )}
               />
-            </ReactFlowProvider>
-            {inspector && node && (
+            ) : (
+              <ReactFlowProvider>
+                <WorkflowCanvas
+                  document={document}
+                  selected={selected}
+                  positions={positions}
+                  setPositions={setPositions}
+                  workers={workers}
+                  select={inspect}
+                  focus={focus}
+                  observation={observed(run.runId, projection.nodes, isLiveRun && following)}
+                  view={canvas}
+                  onViewChange={setCanvas}
+                  inspectorHidden={!inspector}
+                  showInspector={() => setInspector(true)}
+                  deselect={() => inspect(document.graph.root.name, false)}
+                  toolbarStart={layoutToggle}
+                />
+              </ReactFlowProvider>
+            )}
+            {inspector && node && layout === 'graph' && (
               <RunInspector
                 run={run}
                 document={document}
@@ -1195,98 +1266,5 @@ function RunInspector({
         />
       </div>
     </InspectorPanel>
-  );
-}
-
-function InvocationView({
-  invocation,
-  showNode,
-  reveal,
-  follow,
-  reading,
-}: {
-  invocation: Invocation;
-  showNode: boolean;
-  reveal: () => void;
-  follow: boolean;
-  reading: (value: boolean) => void;
-}) {
-  const outcome = invocation.outcome;
-  return (
-    <section className="invocation-detail">
-      <div className="invocation-status">
-        <span className={`run-status state-${invocation.state}`}>
-          {stateLabel(invocation.state)}
-        </span>
-      </div>
-      {showNode && (
-        <button className="invocation-node" onClick={reveal}>
-          {humanize(invocation.node)}
-          <ChevronRight size={15} />
-        </button>
-      )}
-      <ValueSection title="Input" value={invocation.input} />
-      {outcome && (
-        <details className="history-value invocation-output" open>
-          <summary>Output</summary>
-          {outcome.signals && Object.keys(outcome.signals).length > 0 && (
-            <div className="recorded-signals">
-              {Object.entries(outcome.signals).map(([key, value]) => (
-                <div key={key}>
-                  <span>{humanize(key)}</span>
-                  <strong>{humanize(value)}</strong>
-                </div>
-              ))}
-            </div>
-          )}
-          {outcome.status === 'error' && (
-            <div className="history-node-error">
-              {humanize(outcome.code ?? 'Error')}
-              {outcome.reason && outcome.reason !== 'declared_failure' && (
-                <small>{humanize(outcome.reason)}</small>
-              )}
-            </div>
-          )}
-          {outcome.output != null && <RecordedValue value={outcome.output} />}
-          {outcome.diagnostic != null && (
-            <div className="outcome-diagnostic">
-              {outcome.output != null && <h4>Details</h4>}
-              <RecordedValue value={outcome.diagnostic} />
-            </div>
-          )}
-          {!!outcome.artifacts?.length && (
-            <RecordedValue value={{ artifacts: outcome.artifacts }} />
-          )}
-          {outcome.status !== 'error' &&
-            outcome.output == null &&
-            outcome.diagnostic == null &&
-            !Object.keys(outcome.signals ?? {}).length &&
-            !outcome.artifacts?.length && <p className="history-muted">No returned value.</p>}
-        </details>
-      )}
-      {invocation.reason && (
-        <ValueSection title="Stopped because" value={humanize(invocation.reason)} open />
-      )}
-      <Transcript logs={invocation.logs} follow={follow} onReadingChange={reading} />
-    </section>
-  );
-}
-function ValueSection({
-  title,
-  value,
-  open = false,
-  raw = false,
-}: {
-  title: string;
-  value: unknown;
-  open?: boolean;
-  raw?: boolean;
-}) {
-  if (value === undefined || value === null) return null;
-  return (
-    <details className="history-value" open={open || undefined}>
-      <summary>{title}</summary>
-      {raw ? <pre>{JSON.stringify(value, null, 2)}</pre> : <RecordedValue value={value} />}
-    </details>
   );
 }
