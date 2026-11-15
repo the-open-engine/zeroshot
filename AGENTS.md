@@ -1822,8 +1822,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - The structured graph is canonical; React Flow/ELK provide presentation only. Flattening sequences
   or folding standard error routes must preserve scopes, identities, priority, conditions, and
   runtime bindings. Custom/unfamiliar routes stay visible. Layout and themes stay out of profiles.
-- Normal authoring exposes Inputs and Outputs. Run inputs/results and runtime settings belong in
-  the toolbar. Do not restore state, mapping, promotion, join-strategy, or error-policy panels.
+- Normal authoring exposes Inputs and Outputs. Run inputs/results open as the workflow's own
+  details, from the empty canvas, the inspector button, or the breadcrumb's first link; runtime
+  settings belong in the toolbar. Do not restore state, mapping, promotion, join-strategy, or
+  error-policy panels.
   Keep defaults/restriction prose on the info icon's `#defaults` page, preserving the mounted editor.
 - `/ui/api/data` creates typed bindings/promotions; `/ui/api/authoring` creates ordinary
   completion/error nodes. Their existing `profile_ui/data.rs` and `profile_ui/outcomes.rs` helpers

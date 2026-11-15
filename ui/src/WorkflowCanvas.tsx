@@ -36,7 +36,6 @@ import {
   ChevronRight,
   Repeat2,
   Columns3,
-  Settings2,
   PanelRightOpen,
   Info,
   Check,
@@ -45,6 +44,7 @@ import {
   X,
   Minus,
   FoldVertical,
+  UnfoldVertical,
   Clock3,
 } from 'lucide-react';
 import {
@@ -384,96 +384,121 @@ function CanvasToolbar({
   readOnly,
   selectedNode,
   collapseAll,
+  expandAll,
+  allCollapsed,
+  noneCollapsed,
   arrange,
 }: {
   p: WorkflowCanvasProps;
   readOnly: boolean;
   selectedNode: GraphNode | undefined;
   collapseAll: () => void;
+  expandAll: () => void;
+  allCollapsed: boolean;
+  noneCollapsed: boolean;
   arrange: () => void;
 }) {
+  const tools = [
+    {
+      label: 'Runtime settings',
+      title: 'Runtime settings · whole graph',
+      icon: <SlidersHorizontal size={17} />,
+      onSelect: () => p.runtime?.(),
+    },
+    {
+      label: 'Graph JSON',
+      title: 'Graph JSON',
+      icon: <Braces size={17} />,
+      onSelect: () => p.json?.(),
+    },
+    {
+      label: 'Workflow defaults',
+      title: 'Workflow defaults',
+      icon: <Info size={17} />,
+      onSelect: () => p.info?.(),
+    },
+    {
+      label: 'Arrange workflow',
+      title: 'Arrange workflow',
+      icon: <LayoutGrid size={17} />,
+      onSelect: arrange,
+    },
+  ];
   return (
     <div className="canvas-toolbar">
       <div className="canvas-start">
-        <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
-          {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
-          {readOnly ? 'Run overview' : 'Run settings'}
-        </button>
-        {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
-      </div>
-      <div className="canvas-actions">
+        {/* The view's main use leads: adding to the profile, or a host's controls. The workflow's
+            own details open from the inspector button, or, while the inspector is open, from the
+            empty canvas or the breadcrumb's first link. */}
         {readOnly ? (
-          <button
-            className="icon-button"
-            title="Collapse all groups"
-            aria-label="Collapse all groups"
-            onClick={collapseAll}
-          >
-            <FoldVertical size={17} />
-          </button>
+          p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>
         ) : (
           <>
             <button
-              className="icon-button"
-              title="Runtime settings · whole graph"
-              aria-label="Runtime settings"
-              onClick={p.runtime}
+              className="button compact"
+              disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
+              onClick={() =>
+                p.action?.({
+                  kind:
+                    selectedNode && executable(selectedNode)
+                      ? 'next'
+                      : selectedNode?.kind === 'choice'
+                        ? 'outcome'
+                        : 'append',
+                  owner:
+                    selectedNode &&
+                    (['seq', 'choice', 'loop', 'map', 'par'].includes(selectedNode.kind) ||
+                      executable(selectedNode))
+                      ? selectedNode.name
+                      : p.document.graph.root.name,
+                })
+              }
             >
-              <SlidersHorizontal size={17} />
+              <Plus size={15} /> Add activity
             </button>
-            <button
-              className="icon-button"
-              title="Graph JSON"
-              aria-label="Graph JSON"
-              onClick={p.json}
-            >
-              <Braces size={17} />
-            </button>
-            <button
-              className="icon-button"
-              title="Workflow defaults"
-              aria-label="Workflow defaults"
-              onClick={p.info}
-            >
-              <Info size={17} />
-            </button>
-            <button
-              className="icon-button"
-              title="Arrange workflow"
-              aria-label="Arrange workflow"
-              onClick={arrange}
-            >
-              <LayoutGrid size={17} />
-            </button>
+            {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
           </>
         )}
+      </div>
+      <div className="canvas-actions">
+        <button
+          className="icon-button"
+          title="Expand all groups"
+          aria-label="Expand all groups"
+          aria-disabled={noneCollapsed}
+          onClick={() => !noneCollapsed && expandAll()}
+        >
+          <UnfoldVertical size={17} />
+        </button>
+        <button
+          className="icon-button"
+          title="Collapse all groups"
+          aria-label="Collapse all groups"
+          aria-disabled={allCollapsed}
+          onClick={() => !allCollapsed && collapseAll()}
+        >
+          <FoldVertical size={17} />
+        </button>
+        {!readOnly &&
+          tools.map((tool) => (
+            <button
+              key={tool.label}
+              className="icon-button"
+              title={tool.title}
+              aria-label={tool.label}
+              onClick={tool.onSelect}
+            >
+              {tool.icon}
+            </button>
+          ))}
         {p.inspectorHidden && (
-          <button className="icon-button" aria-label="Open inspector" onClick={p.showInspector}>
-            <PanelRightOpen size={17} />
-          </button>
-        )}
-        {!readOnly && (
           <button
-            className="button compact"
-            disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
-            onClick={() =>
-              p.action?.({
-                kind:
-                  selectedNode && executable(selectedNode)
-                    ? 'next'
-                    : selectedNode?.kind === 'choice'
-                      ? 'outcome'
-                      : 'append',
-                owner:
-                  selectedNode &&
-                  (['seq', 'choice', 'loop', 'map', 'par'].includes(selectedNode.kind) ||
-                    executable(selectedNode))
-                    ? selectedNode.name
-                    : p.document.graph.root.name,
-              })
-            }
+            className="icon-button"
+            title="Show details"
+            aria-label="Show details"
+            onClick={p.showInspector}
           >
-            <Plus size={15} /> Add activity
+            <PanelRightOpen size={17} />
           </button>
         )}
       </div>
@@ -574,7 +599,9 @@ type WorkflowCanvasProps = {
   info?: () => void;
   inspectorHidden: boolean;
   showInspector: () => void;
-  /** Controls a host places beside the settings button when it has no header of its own. */
+  /** Clicking the empty canvas: selects the whole graph without opening the inspector. */
+  deselect?: () => void;
+  /** Controls a host places at the start of the toolbar when it has no header of its own. */
   toolbarStart?: ReactNode;
 };
 
@@ -593,6 +620,19 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
     [p.document, collapsed]
   );
   const groups = useGroupToggles(projection, p.document.graph.root, setCollapsed);
+  // A click on empty canvas shows the workflow's details, but not when it starts a double-click
+  // zoom, which would otherwise replace what is being inspected.
+  const emptyClickTimer = useRef<number>(undefined);
+  useEffect(() => () => window.clearTimeout(emptyClickTimer.current), []);
+  function emptyClick(event: { detail: number }) {
+    window.clearTimeout(emptyClickTimer.current);
+    if (!p.deselect || event.detail > 1) return;
+    emptyClickTimer.current = window.setTimeout(() => p.deselect?.(), 250);
+  }
+  const allGroups = useMemo(
+    () => collapsedWorkflowGroups(p.document.graph.root),
+    [p.document.graph.root]
+  );
   const signature = JSON.stringify([
     projection.nodes.map((n) => [n.id, dimensions(n)]),
     projection.edges.map((e) => [e.source, e.target, e.repeat]),
@@ -803,6 +843,9 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
         readOnly={readOnly}
         selectedNode={selectedNode}
         collapseAll={groups.collapseAll}
+        expandAll={groups.expandAll}
+        allCollapsed={[...allGroups].every((name) => collapsed.has(name))}
+        noneCollapsed={![...allGroups].some((name) => collapsed.has(name))}
         arrange={() => void layout(true)}
       />
       <div ref={canvasRef} className={`flow ${layoutBusy ? 'workflow-arranging' : ''}`}>
@@ -812,8 +855,11 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          onNodeClick={(_, node) => {
+          onPaneClick={emptyClick}
+          onNodeClick={(event, node) => {
             if (node.type === 'activity') p.select((node.data as ActivityData).item.owner);
+            // A group's box is drawn space, not a target of its own: treat it as the canvas.
+            else if (node.type === 'region') emptyClick(event);
           }}
           onNodeDragStop={(_, node) => {
             if (readOnly) return;
@@ -962,6 +1008,10 @@ function useGroupToggles(
     collapseAll() {
       anchor.current = undefined;
       setCollapsed(collapsedWorkflowGroups(root));
+    },
+    expandAll() {
+      anchor.current = undefined;
+      setCollapsed(new Set());
     },
     forget() {
       anchor.current = undefined;
