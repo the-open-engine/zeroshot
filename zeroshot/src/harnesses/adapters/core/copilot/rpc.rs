@@ -86,9 +86,8 @@ pub(super) async fn write_messages(
     while let Some((message, acknowledged)) = receiver.recv().await {
         let body = serde_json::to_vec(&message)
             .map_err(|_| failure("Copilot RPC serialization failed"))?;
-        if body.len() > super::framing::MAX_BODY {
-            return Err(failure("Copilot RPC request exceeds 64 MiB"));
-        }
+        // Owned prompts can contain arbitrarily many standing steers. Stream them through
+        // the existing bounded process frames; MAX_BODY bounds untrusted inbound RPC only.
         let written = write_body(process, &body).await;
         match written {
             Err(ProcessRunnerError::Io(_)) if message["method"] == "session.detach" => {

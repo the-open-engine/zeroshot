@@ -831,3 +831,6 @@ async fn sqlite_rejects_unresolved_or_inconsistent_persisted_size_without_panick
 
 #[path = "tests/vectors.rs"]
 mod vector_tests;
+
+#[path = "tests/steering.rs"]
+mod steering;

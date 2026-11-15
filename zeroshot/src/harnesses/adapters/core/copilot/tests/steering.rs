@@ -1,5 +1,48 @@
 use super::*;
 
+struct SteerContext(String);
+
+impl crate::native_v2_runner::AgentContextProvider for SteerContext {
+    fn context(&self) -> String {
+        self.0.clone()
+    }
+}
+
+#[tokio::test]
+async fn steer_copilot_streams_aggregate_prompts_across_the_inbound_rpc_bound() {
+    for count in [255, 256] {
+        let mut context = String::from("<steer>\n");
+        for i in 0..count {
+            context.push_str(&format!(
+                "[steer-{i}] {i:03}{}\n",
+                "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES - 3)
+            ));
+        }
+        context.push_str("</steer>\nUTF-8: 🦀\t\"\\\r\n");
+        let fixture = Fixture::new("success").await;
+        let request = fixture.request(1);
+        let runtime = fixture
+            .runtime
+            .with_agent_context(Some(Arc::new(SteerContext(context.clone()))));
+        verified(
+            complete(runtime.start(request).await.assert_value())
+                .await
+                .1,
+        );
+        let capture = fixture.directory.read("capture");
+        let send: Value = capture
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).assert_value())
+            .find(|message| message["method"] == "session.send")
+            .assert_value();
+        let prompt = send["params"]["prompt"].as_str().assert_value();
+        assert_eq!(prompt.len() > super::super::framing::MAX_BODY, count == 256);
+        assert!(prompt.starts_with(&format!("Runtime-owned execution context:\n{context}\n\n")));
+        assert_eq!(prompt.matches(INSTRUCTIONS).count(), 1);
+        assert_eq!(prompt.matches("[steer-").count(), count);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn steer_copilot_acknowledges_after_native_rpc_handoff_once() {
     use crate::active_memory::hooks::ActiveMemoryHooks;

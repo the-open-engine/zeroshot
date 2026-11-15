@@ -78,6 +78,21 @@ impl ActiveMemoryHooks {
     ) {
         self.source.bind(run, ledger);
     }
+    pub(crate) fn restore_steers(
+        &self,
+        instance: u64,
+        receipts: crate::native_v2_runner::conversations::SteeringReceipts,
+    ) {
+        self.source.restore(instance, receipts);
+    }
+    pub(crate) fn capture_steers(
+        &self,
+    ) -> std::collections::BTreeMap<
+        crate::native_v2_contract::NodeInstanceId,
+        crate::native_v2_runner::conversations::SteeringReceipts,
+    > {
+        self.source.capture()
+    }
     pub(crate) async fn prepare_steers(
         &self,
         invocation: &mut DriverInvocation,
@@ -90,6 +105,7 @@ impl ActiveMemoryHooks {
     }
     /// Settles an execution or releases unconfirmed prompt offers before a native retry.
     pub(crate) async fn finish_steers(&self, execution: u64, success: bool) {
+        self.broker.retire(execution);
         self.source.finish(execution, success).await;
     }
     pub(crate) async fn steer_prompt(

@@ -172,3 +172,84 @@ fn native_shared_lock_blocks_database_writes_and_detects_reserved_writers() {
     drop(guard);
     writer.execute_batch("BEGIN EXCLUSIVE; ROLLBACK").unwrap();
 }
+
+#[test]
+fn steer_legacy_read_only_status_seeks_vector_index_without_scanning_logs() {
+    use crate::v2_run_ledger::sqlite::{SCHEMA, readonly, steering};
+    use openengine_cluster_protocol::RunId;
+    use openengine_cluster_testkit::assertions::AssertValue;
+    use rusqlite::params;
+    let root = tempfile::tempdir().assert_value();
+    let path = root.path().join("legacy.sqlite");
+    let connection = Connection::open(&path).assert_value();
+    connection.execute_batch(SCHEMA).assert_value();
+    connection
+        .execute_batch(
+            "DROP INDEX v2_run_steering;
+         INSERT INTO v2_runs VALUES ('legacy', 'legacy', 'digest', 20000, '{}');
+         WITH RECURSIVE entries(sequence) AS (
+             SELECT 1 UNION ALL SELECT sequence + 1 FROM entries WHERE sequence < 20000
+         ) INSERT INTO v2_run_events SELECT 'legacy', sequence, '{\"kind\":\"log\"}' FROM entries;",
+        )
+        .assert_value();
+    drop(connection);
+    let before = std::fs::read(&path).assert_value();
+    let reader = readonly::open(&path).assert_value();
+    let connection = &reader.connection;
+    let query = steering::query(connection).assert_value().assert_value();
+    let mut plan = connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
+        .assert_value();
+    let plan: Vec<String> = plan
+        .query_map(params!["legacy", 0, 256], |row| row.get(3))
+        .assert_value()
+        .map(|row| row.assert_value())
+        .collect();
+    assert!(
+        plan.iter()
+            .any(|line| line.contains("USING INDEX v2_run_vector_ids")),
+        "{plan:?}"
+    );
+    let mut statement = connection.prepare(query).assert_value();
+    assert!(
+        statement
+            .query(params!["legacy", 0, 256])
+            .assert_value()
+            .next()
+            .assert_value()
+            .is_none()
+    );
+    let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+    assert!(
+        steps < 1000,
+        "empty steering lookup executed {steps} SQLite instructions"
+    );
+    assert!(
+        steering::read(connection, &RunId::new("legacy"), None)
+            .assert_value()
+            .is_empty()
+    );
+    assert_eq!(std::fs::read(&path).assert_value(), before);
+}
+
+#[test]
+fn steer_pre_vector_status_has_no_event_history_query() {
+    use crate::v2_run_ledger::sqlite::{SCHEMA, steering};
+    use openengine_cluster_protocol::RunId;
+    use openengine_cluster_testkit::assertions::AssertValue;
+    let connection = Connection::open_in_memory().assert_value();
+    connection.execute_batch(SCHEMA).assert_value();
+    connection
+        .execute_batch(
+            "DROP INDEX v2_run_steering;
+             DROP INDEX v2_run_vector_ids;
+             INSERT INTO v2_runs VALUES ('legacy', 'legacy', 'digest', 20000, '{}');",
+        )
+        .assert_value();
+    assert!(steering::query(&connection).assert_value().is_none());
+    assert!(
+        steering::read(&connection, &RunId::new("legacy"), None)
+            .assert_value()
+            .is_empty()
+    );
+}

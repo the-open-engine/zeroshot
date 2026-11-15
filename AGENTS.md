@@ -106,8 +106,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and does not count against them. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
   including compaction; new conversations and conversations continued in a successor receive fresh
   memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
-  keeps its steer receipts only after native restoration succeeds; a fresh fallback receives standing
-  steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
+  restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
+  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
+  than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
+  history is never replayed to build steering summaries; ledgers predating vectors have no steers.
+  Callback capabilities belong to their execution and are retired when it settles or its native
+  launch is replaced.
+  Aggregate steering prompts stream through adapter-owned transports: Copilot bounds inbound RPC,
+  while Hermes reassembles bounded private prompt frames before starting one native turn.
   Windows memory storage and initialization use shared
   private-state helpers, including validation of SQLite sidecars. SQLite-created Windows children
   and externally written initialization responses may inherit the token's default owner only with

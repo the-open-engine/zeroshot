@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use openengine_cluster_protocol::{Cursor, RunId, RunVector, RunVectorContent, VectorId};
-use crate::native_v2_runner::DriverInvocation;
+use crate::native_v2_runner::{DriverInvocation, conversations::SteeringReceipts};
 use crate::v2_run_ledger::{RunEvent, RunLedger, RunLedgerError, SnapshotAndTail, vector_event};
 use super::{ActiveMemorySource, HookDelivery, HookQuery};
 
@@ -40,8 +40,7 @@ struct Scan {
 #[derive(Default)]
 struct Index {
     steers: Vec<RunVector>,
-    receipts: BTreeSet<(String, VectorId)>,
-    previous: BTreeMap<u64, String>,
+    receipts: BTreeMap<(String, VectorId), BTreeMap<VectorId, RunId>>,
     initialized: bool,
 }
 impl Index {
@@ -51,22 +50,28 @@ impl Index {
             RunVectorContent::SteerReceipt {
                 steer_id,
                 conversation,
-                node_instance,
                 ..
             } => {
                 self.receipts
-                    .insert((conversation.clone(), steer_id.clone()));
-                self.previous.insert(*node_instance, conversation.clone());
+                    .entry((conversation.clone(), steer_id.clone()))
+                    .or_default()
+                    .insert(vector.id, vector.run_id);
             }
             _ => {}
         }
     }
+    fn received(&self, conversation: &Conversation, steer: &VectorId) -> bool {
+        self.receipts
+            .get(&(conversation.key.clone(), steer.clone()))
+            .is_some_and(|receipts| {
+                receipts
+                    .iter()
+                    .any(|(id, run)| conversation.includes(id, run))
+            })
+    }
     fn due<'a>(&'a self, conversation: &'a Conversation) -> impl Iterator<Item = &'a RunVector> {
         self.steers.iter().filter(|v| {
-            !self
-                .receipts
-                .contains(&(conversation.key.clone(), v.id.clone()))
-                && !conversation.offered.contains(&v.id)
+            !self.received(conversation, &v.id) && !conversation.offered.contains(&v.id)
         })
     }
 }
@@ -143,16 +148,12 @@ struct Conversation {
     key: String,
     reference: crate::native_v2_contract::ExecutionRef,
     offered: Vec<VectorId>,
-    continued: bool,
+    run: RunId,
+    inherited: Arc<BTreeSet<VectorId>>,
 }
 impl Conversation {
-    fn restore_key(&mut self, index: &Index) {
-        if self.continued
-            && let Some(previous) = index.previous.get(&self.reference.node_instance.get())
-        {
-            self.key = previous.clone();
-            self.continued = false;
-        }
+    fn includes(&self, receipt: &VectorId, run: &RunId) -> bool {
+        run == &self.run || self.inherited.contains(receipt)
     }
 }
 
@@ -161,6 +162,7 @@ pub(super) struct DeliverySource {
     record: Mutex<Option<Record>>,
     conversations: Mutex<BTreeMap<u64, Conversation>>,
     publication: tokio::sync::Mutex<()>,
+    restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
 }
 const DEADLINE: Duration = Duration::from_millis(250);
 const PREAMBLE: &str = "<steer>\nDirection from the person running this run, given while it is in progress. It takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
@@ -187,6 +189,7 @@ impl DeliverySource {
             memory,
             record: Mutex::new(None),
             conversations: Mutex::default(),
+            restored: Mutex::default(),
             publication: tokio::sync::Mutex::new(()),
         }
     }
@@ -199,6 +202,44 @@ impl DeliverySource {
                 index: Arc::default(),
             });
         }
+    }
+    pub(super) fn restore(&self, instance: u64, receipts: SteeringReceipts) {
+        if let Ok(mut restored) = self.restored.lock() {
+            restored.insert(instance, receipts);
+        }
+    }
+    pub(super) fn capture(
+        &self,
+    ) -> BTreeMap<crate::native_v2_contract::NodeInstanceId, SteeringReceipts> {
+        let Some(record) = self.record() else {
+            return BTreeMap::new();
+        };
+        let Ok(index) = record.index.data.lock() else {
+            return BTreeMap::new();
+        };
+        let Ok(conversations) = self.conversations.lock() else {
+            return BTreeMap::new();
+        };
+        conversations
+            .values()
+            .map(|conversation| {
+                let receipts = index
+                    .receipts
+                    .iter()
+                    .filter(|((key, _), _)| key == &conversation.key)
+                    .flat_map(|(_, receipts)| receipts.iter())
+                    .filter(|(id, run)| conversation.includes(id, run))
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                (
+                    conversation.reference.node_instance,
+                    SteeringReceipts {
+                        conversation: conversation.key.clone(),
+                        receipts,
+                    },
+                )
+            })
+            .collect()
     }
     fn record(&self) -> Option<Record> {
         self.record.lock().ok()?.clone()
@@ -233,12 +274,27 @@ impl DeliverySource {
                             c
                         })
                 })
-                .unwrap_or(Conversation {
-                    key: session.clone(),
-                    session,
-                    continued,
-                    reference,
-                    offered: Vec::new(),
+                .unwrap_or_else(|| {
+                    // A readable snapshot alone proves nothing: adapters confirm native restoration.
+                    let saved = continued
+                        .then(|| {
+                            self.restored
+                                .lock()
+                                .ok()?
+                                .get(&reference.node_instance.get())
+                                .cloned()
+                        })
+                        .flatten();
+                    Conversation {
+                        key: saved
+                            .as_ref()
+                            .map_or_else(|| session.clone(), |s| s.conversation.clone()),
+                        inherited: Arc::new(saved.map(|s| s.receipts).unwrap_or_default()),
+                        run: record.run.clone(),
+                        session,
+                        reference,
+                        offered: Vec::new(),
+                    }
                 });
             conversations.insert(execution, conversation.clone());
             conversation
@@ -247,7 +303,6 @@ impl DeliverySource {
         // large valid records may take several pages, without discarding completed work.
         record.refresh().await.ok()?;
         let index = record.index.data.lock().ok()?;
-        conversation.restore_key(&index);
         let due: Vec<_> = index.due(&conversation).collect();
         let context = frame(due.iter().copied());
         let ids: Vec<_> = due.iter().map(|v| v.id.clone()).collect();
@@ -293,7 +348,7 @@ impl DeliverySource {
             .lock()
             .ok()
             .and_then(|c| c.get(&query.execution_id).cloned());
-        let Some(mut conversation) = conversation else {
+        let Some(conversation) = conversation else {
             return delivery;
         };
         // Leave time within the carrier's existing deadline for framing and transport. A busy
@@ -305,10 +360,6 @@ impl DeliverySource {
         // Read all inherited receipts before deciding whether a continued conversation is due.
         if !index.initialized {
             return delivery;
-        }
-        conversation.restore_key(&index);
-        if let Ok(mut conversations) = self.conversations.lock() {
-            conversations.insert(query.execution_id, conversation.clone());
         }
         let mut selected = Vec::new();
         let mut bytes = PREAMBLE.len()
@@ -364,11 +415,7 @@ impl DeliverySource {
                     .lock()
                     .map_err(|_| RunLedgerError::Corrupt)?;
                 ids.iter()
-                    .filter(|id| {
-                        !index
-                            .receipts
-                            .contains(&(conversation.key.clone(), (*id).clone()))
-                    })
+                    .filter(|id| !index.received(&conversation, id))
                     .map(|id| {
                         vector_event(
                             &record.run,

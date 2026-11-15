@@ -153,6 +153,7 @@ impl Broker {
             .scopes
             .lock()
             .map_err(|_| io::Error::other("memory scope lock unavailable"))?;
+        scopes.retain(|_, scope| scope.execution_id != invocation.node.reference.execution.get());
         if scopes.len() >= MAX_SCOPES {
             return Err(io::Error::other("memory scope budget exhausted"));
         }
@@ -161,6 +162,12 @@ impl Broker {
             endpoint: self.endpoint,
             token,
         })
+    }
+
+    pub(super) fn retire(&self, execution: u64) {
+        if let Ok(mut scopes) = self.scopes.lock() {
+            scopes.retain(|_, scope| scope.execution_id != execution);
+        }
     }
 }
 

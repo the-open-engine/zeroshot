@@ -49,9 +49,80 @@ impl ActiveMemorySource for Source {
 
 struct BrokerFixture {
     source: Arc<Source>,
-    // The hooks own the listener; retaining them keeps every issued capability live.
+    // The hooks own the listener and this fixture's unsettled execution capability.
     _hooks: ActiveMemoryHooks,
     capability: super::broker::Capability,
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_carrier_capabilities_retire_across_65536_launches_without_affecting_live_executions()
+{
+    use crate::native_v2_contract::{ExecutionId, NodeInstanceId};
+    let (ledger, run) = steer_record().await;
+    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut held = invocation();
+    held.node.reference.execution = ExecutionId::new(1).assert_value();
+    held.provider_home_slot = NodeInstanceId::new(1).assert_value();
+    hooks.prepare_steers(&mut held, false).await.assert_value();
+    let held_cap = hooks
+        .broker
+        .capability(&held, Path::new("/workspace"))
+        .assert_value();
+    let mut retired = None;
+    for execution in 2..65536 {
+        let mut turn = held.clone();
+        turn.node.reference.execution = ExecutionId::new(execution).assert_value();
+        let cap = hooks
+            .broker
+            .capability(&turn, Path::new("/workspace"))
+            .assert_value();
+        if retired.is_none() {
+            retired = Some(cap);
+        }
+        hooks.finish_steers(execution, execution % 2 == 0).await;
+    }
+    let mut last = held.clone();
+    last.node.reference.execution = ExecutionId::new(65536).assert_value();
+    last.provider_home_slot = NodeInstanceId::new(65536).assert_value();
+    hooks.prepare_steers(&mut last, false).await.assert_value();
+    let replaced = hooks
+        .broker
+        .capability(&last, Path::new("/workspace"))
+        .assert_value();
+    let current = hooks
+        .broker
+        .capability(&last, Path::new("/workspace"))
+        .assert_value();
+    crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: run.clone(),
+            text: "Direction after many launches".into(),
+        },
+    )
+    .await
+    .assert_value();
+    tokio::task::spawn_blocking(move || {
+        for cap in [retired.assert_value(), replaced] {
+            assert!(callback(&cap, &cap.token, json!({"tool_name":"Read"})).is_empty());
+        }
+        for cap in [current, held_cap] {
+            assert!(
+                callback(&cap, &cap.token, json!({"tool_name":"Read"}))
+                    .contains("Direction after many launches")
+            );
+            assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+        }
+    })
+    .await
+    .assert_value();
+    hooks.finish_steers(65536, true).await;
+    hooks.finish_steers(1, false).await;
+    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert_eq!(status.steers[0].received_executions, 2);
 }
 
 impl BrokerFixture {
@@ -747,7 +818,13 @@ async fn steer_maximum_callback_batches_whole_entries_before_memory_in_record_or
         .assert_value();
     tokio::task::spawn_blocking(move || {
         let mut received = String::new();
-        for _ in 0..3 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // A bounded callback may return no steers; observe retries within one overall deadline.
+        while expected.iter().any(|entry| !received.contains(entry)) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "not all steers arrived before the observation deadline"
+            );
             let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
             assert!(context.len() <= super::native::MAX_CONTEXT_BYTES);
             if context.contains("<steer>") {
@@ -755,9 +832,20 @@ async fn steer_maximum_callback_batches_whole_entries_before_memory_in_record_or
                     context.find("</steer>").assert_value()
                         < context.find("[lesson@1]").assert_value()
                 );
+                for entry in context
+                    .lines()
+                    .skip(2)
+                    .take_while(|line| *line != "</steer>")
+                {
+                    assert!(
+                        expected.iter().any(|expected| expected == entry),
+                        "callback contained a partial or unexpected steer"
+                    );
+                }
             }
             received.push_str(&context);
         }
+        assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
         let mut prior = 0;
         for entry in expected {
             assert_eq!(received.matches(&entry).count(), 1);

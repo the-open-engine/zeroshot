@@ -27,6 +27,7 @@ struct FakeRun {
     stored: StoredRun,
     events: Vec<StoredRunEvent>,
     vector_cursors: BTreeMap<openengine_cluster_protocol::VectorId, Cursor>,
+    steering_indices: Vec<usize>,
 }
 
 impl FakeRunLedger {
@@ -81,6 +82,7 @@ impl RunLedger for FakeRunLedger {
                 stored: stored.clone(),
                 events: Vec::new(),
                 vector_cursors: BTreeMap::new(),
+                steering_indices: Vec::new(),
             },
         );
         Ok(CreateRunOutcome::Created(stored))
@@ -167,6 +169,36 @@ impl RunLedger for FakeRunLedger {
             .ok_or(RunLedgerError::VectorNotFound)
     }
 
+    async fn steering_events(
+        &self,
+        run_id: &RunId,
+        after: Option<&Cursor>,
+    ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+        let state = self.state();
+        let run = state.runs.get(run_id).ok_or(RunLedgerError::RunNotFound)?;
+        let after = after.map_or(Ok(0), cursor_sequence)?;
+        if after > cursor_sequence(&run.stored.snapshot.cursor)? {
+            return Err(RunLedgerError::CursorAhead);
+        }
+        let first = run
+            .steering_indices
+            .partition_point(|index| (*index as u64) < after);
+        let mut result = Vec::new();
+        let mut bytes = 0;
+        for index in run.steering_indices[first..].iter().take(MAX_REPLAY_EVENTS) {
+            let event = &run.events[*index];
+            let size = serde_json::to_vec(&event.event)
+                .map_err(|_| RunLedgerError::Corrupt)?
+                .len();
+            if bytes + size > MAX_REPLAY_BYTES {
+                break;
+            }
+            bytes += size;
+            result.push(event.clone());
+        }
+        Ok(result)
+    }
+
     async fn snapshot_and_tail(
         &self,
         run_id: &RunId,
@@ -223,8 +255,15 @@ fn append_locked(run: &mut FakeRun, events: Vec<RunEvent>) -> Result<AppendResul
         });
     }
     // The fake commits only after the whole batch validates, matching the durable adapter.
-    for stored in &stored_events {
+    for (offset, stored) in stored_events.iter().enumerate() {
         if let RunEvent::Vector { vector } = &stored.event {
+            if matches!(
+                vector.content,
+                openengine_cluster_protocol::RunVectorContent::Steer { .. }
+                    | openengine_cluster_protocol::RunVectorContent::SteerReceipt { .. }
+            ) {
+                run.steering_indices.push(run.events.len() + offset);
+            }
             run.vector_cursors
                 .entry(vector.id.clone())
                 .or_insert_with(|| stored.cursor.clone());

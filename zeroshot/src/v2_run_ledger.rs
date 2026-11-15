@@ -535,6 +535,16 @@ pub trait RunLedger: Send + Sync {
         id: &openengine_cluster_protocol::VectorId,
     ) -> Result<Cursor, RunLedgerError>;
 
+    /// Bounded steering-record reads. Storage adapters should seek their steering index;
+    /// the default preserves compatibility with existing ledger implementations.
+    async fn steering_events(
+        &self,
+        run_id: &RunId,
+        after: Option<&Cursor>,
+    ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+        Ok(self.snapshot_and_tail(run_id, after).await?.events)
+    }
+
     /// Reads the current projection and a bounded reconnect page under the same store snapshot.
     /// Pages contain at most `MAX_REPLAY_EVENTS` events and `MAX_REPLAY_BYTES` encoded event bytes.
     async fn snapshot_and_tail(

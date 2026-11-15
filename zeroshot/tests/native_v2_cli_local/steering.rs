@@ -16,11 +16,21 @@ if node == 'worker' and iteration == '1':
     while not (root/'steer-release').exists(): time.sleep(.02)
 if node == 'check' and iteration == '1' and attempt == '1' and os.environ['FAKE_CODEX_MODE'] == 'steer-retry':
     sys.exit(19)
+if node == 'worker' and iteration == '2' and os.environ['FAKE_CODEX_MODE'] == 'steer-old':
+    (root/'steer-held-2').touch()
+    while not (root/'steer-release-2').exists(): time.sleep(.02)
+if node == 'check' and iteration == '2' and os.environ['FAKE_CODEX_MODE'] == 'steer-old':
+    sys.exit(19)
 settings = next(arg for arg in sys.argv[1:] if arg.startswith('hooks.PreToolUse='))
 handler = tomllib.loads(settings)['hooks']['PreToolUse'][0]['hooks'][0]
 for call in range(2):
     result = subprocess.run(handler['command'], shell=True, input=json.dumps({'tool_name':'Read','tool_input':{'file_path':'README.md'}}), text=True, capture_output=True, check=True)
-    (root/('steer-tool-'+identity+'-'+str(call))).write_text(result.stdout)
+    path = root/('steer-tool-'+identity+'-'+str(call))
+    # Retain the first callback when the adapter retries a failed native turn.
+    if os.environ['FAKE_CODEX_MODE'] != 'steer-old' or not path.exists():
+        path.write_text(result.stdout)
+if node == 'worker' and iteration == '2' and os.environ['FAKE_CODEX_MODE'] == 'steer-old':
+    sys.exit(19)
 "#,
     );
     openengine_cluster_testkit::fixture::write_executable(&helper, source.as_bytes(), 0o755)
@@ -312,4 +322,78 @@ async fn steer_request_answer_continues_conversation_with_only_new_direction() {
         serde_json::from_str(&steer_read(&fixture, "steer-launch-worker-2-1")).assert_value();
     assert!(args.iter().any(|arg| arg == "resume"));
     fixture.json(&["force-stop", next], "steer").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_conversation() {
+    let mut fixture = steer_fixture();
+    let run = fixture.submit_detached("steer-old").await;
+    steer_held(&fixture).await;
+    fixture
+        .json(&["steer", &run, "direction-before-snapshot"], "steer-old")
+        .await;
+    steer_release(&fixture);
+    let deadline = Instant::now() + CLI_TIMEOUT;
+    while !fixture.repository.join("steer-held-2").exists() {
+        assert!(Instant::now() < deadline, "second worker never held");
+        sleep(Duration::from_millis(20)).await;
+    }
+    fixture
+        .json(&["steer", &run, "direction-after-snapshot"], "steer-old")
+        .await;
+    fs::write(fixture.repository.join("steer-release-2"), "go").assert_value();
+    wait_for_exit(fixture.ready_pid(&run)).await;
+    let status = fixture.json(&["status", &run], "steer-old").await;
+    assert_eq!(
+        status["status"]["terminalResult"]["status"], "failed",
+        "{status}"
+    );
+    assert!(steer_read(&fixture, "steer-tool-worker-2-1-0").contains("direction-after-snapshot"));
+    assert_eq!(status["steers"][1]["receivedExecutions"], 1);
+    let checkpoints = fixture.json(&["checkpoints", &run], "steer").await;
+    let checkpoint = checkpoints["checkpoints"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .find(|entry| entry["node"] == "worker" && entry["loopIterations"] == json!([2]))
+        .assert_value()["checkpointId"]
+        .as_str()
+        .assert_value();
+    conversations::new_provider_home(&mut fixture);
+    let next = fixture
+        .json(
+            &[
+                "resume",
+                &run,
+                "--from-checkpoint",
+                checkpoint,
+                "--discard-workspace-changes",
+            ],
+            "steer",
+        )
+        .await;
+    let next = next["runId"].as_str().assert_value();
+    fixture.wait_succeeded(next, "steer").await;
+    let prompt = steer_read(&fixture, "steer-prompt-worker-2-1");
+    assert!(!prompt.contains("direction-before-snapshot"));
+    assert_eq!(prompt.matches("direction-after-snapshot").count(), 1);
+    let args: Vec<String> =
+        serde_json::from_str(&steer_read(&fixture, "steer-launch-worker-2-1")).assert_value();
+    assert!(args.iter().any(|arg| arg == "resume"));
+    for call in 0..2 {
+        assert!(
+            !steer_read(&fixture, &format!("steer-tool-worker-2-1-{call}")).contains("<steer>")
+        );
+    }
+    let vectors = fixture.json(&["vectors", next], "steer").await;
+    let after = status["steers"][1]["id"].as_str().assert_value();
+    assert_eq!(
+        vectors["vectors"]
+            .as_array()
+            .assert_value()
+            .iter()
+            .filter(|v| v["kind"] == "steer_receipt" && v["steerId"] == after)
+            .count(),
+        3
+    );
 }

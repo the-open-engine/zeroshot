@@ -105,7 +105,7 @@ impl<'a> HermesConnection<'a> {
                 }
                 None => response.prompt().to_owned(),
             };
-            send(process, &json!({"type":"prompt","text":prompt})).await?;
+            send_prompt(process, &prompt).await?;
             let message = self.turn(invocation).await?;
             let answer =
                 resolve_agent_response_with_schema(&invocation.response, &message, dialect)?;
@@ -381,6 +381,24 @@ impl<'a> HermesConnection<'a> {
         self.output.finish(&mut emissions);
         self.publish(emissions, true).await
     }
+}
+
+async fn send_prompt(process: &ProviderProcess, mut prompt: &str) -> Result<(), NodeRunnerError> {
+    // Keep each private JSON frame bounded while the complete owned prompt may contain
+    // arbitrarily many standing steers. Leave UTF-8 characters intact between frames.
+    while prompt.len() > MAX_PROCESS_MESSAGE_BYTES {
+        let mut end = MAX_PROCESS_MESSAGE_BYTES;
+        while !prompt.is_char_boundary(end) {
+            end -= 1;
+        }
+        send(
+            process,
+            &json!({"type":"prompt_chunk","text":&prompt[..end]}),
+        )
+        .await?;
+        prompt = &prompt[end..];
+    }
+    send(process, &json!({"type":"prompt","text":prompt})).await
 }
 
 async fn send(process: &ProviderProcess, value: &Value) -> Result<(), NodeRunnerError> {

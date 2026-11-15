@@ -657,7 +657,14 @@ impl NodeRunner for NativeNodeRunner {
         if !self.activity.capture(run_id, &operation).await {
             return conversations::ConversationCapture::default();
         }
-        self.sessions.capture_conversations(run_id, operation).await
+        let receipts = self
+            .driver
+            .delivery_hooks()
+            .map(|hooks| hooks.capture_steers())
+            .unwrap_or_default();
+        self.sessions
+            .capture_conversations(run_id, operation, receipts)
+            .await
     }
 
     async fn restore_conversations(
@@ -665,7 +672,12 @@ impl NodeRunner for NativeNodeRunner {
         history: &[crate::full_v1_reducer::DurableExecution],
         files: Option<conversations::ConversationFiles>,
     ) {
-        self.sessions.restore_conversations(history, files).await;
+        let receipts = self.sessions.restore_conversations(history, files).await;
+        if let Some(hooks) = self.driver.delivery_hooks() {
+            for (instance, receipts) in receipts {
+                hooks.restore_steers(instance.get(), receipts);
+            }
+        }
     }
 
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {

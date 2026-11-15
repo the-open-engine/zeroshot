@@ -1,12 +1,12 @@
 //! Private provider files carried beside a checkpoint's workspace, never in its execution seed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use openengine_cluster_protocol::NodeName;
+use openengine_cluster_protocol::{NodeName, VectorId};
 use serde::{Deserialize, Serialize};
 
 use crate::native_v2_contract::{NodeInstanceId, TokenUsageDelta};
@@ -84,6 +84,7 @@ impl ConversationFiles {
         validate_files(&directory.join("files"), &files, &ConversationIo::default())?;
         Ok(ConversationSource {
             metadata: manifest.metadata,
+            steering: manifest.steering,
             storage: directory.join("files"),
             files,
             _retained: Some(self.clone()),
@@ -103,6 +104,7 @@ pub struct ConversationMetadata {
 /// Adapter-selected names relative to its conversation storage. Adapters never pack or edit bytes.
 #[derive(Clone)]
 pub struct ConversationSource {
+    pub(crate) steering: Option<SteeringReceipts>,
     pub metadata: ConversationMetadata,
     pub storage: PathBuf,
     pub files: Vec<PathBuf>,
@@ -115,6 +117,7 @@ impl ConversationSource {
     pub fn new(metadata: ConversationMetadata, storage: PathBuf, files: Vec<PathBuf>) -> Self {
         Self {
             metadata,
+            steering: None,
             storage,
             files,
             _retained: None,
@@ -123,9 +126,19 @@ impl ConversationSource {
     }
 }
 
+/// References to canonical vector receipts present in this conversation's saved transcript.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct SteeringReceipts {
+    pub conversation: String,
+    pub receipts: BTreeSet<VectorId>,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    steering: Option<SteeringReceipts>,
     format: u32,
     node: NodeName,
     metadata: ConversationMetadata,
@@ -183,6 +196,7 @@ fn capture_in(
                 format: 1,
                 node: node.clone(),
                 metadata: source.metadata,
+                steering: source.steering,
                 files: source
                     .files
                     .iter()

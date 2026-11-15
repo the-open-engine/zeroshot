@@ -468,9 +468,9 @@ async fn initialization_reports_one_corrupt_history_without_losing_other_runs() 
         .join(corrupt.snapshot.run_id.as_str())
         .join("runs.sqlite3");
     let connection = rusqlite::Connection::open(path).assert_value();
-    // Bypass the vector index's JSON expressions to simulate existing on-disk corruption.
+    // Bypass both vector indexes' JSON expressions to simulate existing on-disk corruption.
     connection
-        .execute("DROP INDEX v2_run_vector_ids", [])
+        .execute_batch("DROP INDEX v2_run_vector_ids; DROP INDEX v2_run_steering;")
         .assert_value();
     connection
         .execute(

@@ -1,8 +1,7 @@
 //! Steering projections and publication share the run's sole vector record.
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use openengine_cluster_protocol::{
-    RunId, RunSteer, RunSteerParams, RunSteerResult, RunSteeringStatus, RunVector,
-    RunVectorContent, RunVectorsParams,
+    RunId, RunSteer, RunSteerParams, RunSteerResult, RunSteeringStatus, RunVector, RunVectorContent,
 };
 use super::{RunEvent, RunLedger, RunLedgerError, vector_event};
 
@@ -27,31 +26,40 @@ pub(crate) async fn record(
     })
 }
 
+#[cfg(test)]
 pub(crate) async fn all(
     ledger: &dyn RunLedger,
     run: &RunId,
 ) -> Result<Vec<RunVector>, RunLedgerError> {
     let mut result = Vec::new();
+    visit(ledger, run, |vector| {
+        if matches!(
+            vector.content,
+            RunVectorContent::Steer { .. } | RunVectorContent::SteerReceipt { .. }
+        ) {
+            result.push(vector.clone());
+        }
+    })
+    .await?;
+    Ok(result)
+}
+
+async fn visit(
+    ledger: &dyn RunLedger,
+    run: &RunId,
+    mut visitor: impl FnMut(&RunVector),
+) -> Result<(), RunLedgerError> {
     let mut after = None;
     loop {
-        let page = super::vectors::list_full(
-            ledger,
-            RunVectorsParams {
-                run_id: run.clone(),
-                after,
-                limit: Some(100),
-            },
-        )
-        .await?;
-        result.extend(page.vectors.into_iter().filter(|v| {
-            matches!(
-                v.content,
-                RunVectorContent::Steer { .. } | RunVectorContent::SteerReceipt { .. }
-            )
-        }));
-        after = page.next_after;
-        if after.is_none() {
-            return Ok(result);
+        let events = ledger.steering_events(run, after.as_ref()).await?;
+        if events.is_empty() {
+            return Ok(());
+        }
+        for stored in events {
+            after = Some(stored.cursor);
+            if let RunEvent::Vector { vector } = stored.event {
+                visitor(&vector);
+            }
         }
     }
 }
@@ -79,34 +87,43 @@ pub(crate) async fn status(
     ledger: &dyn RunLedger,
     run: &RunId,
 ) -> Result<RunSteeringStatus, RunLedgerError> {
-    // At most 64 summaries with 64 opaque execution references fit comfortably in one frame.
-    let vectors = all(ledger, run).await?;
-    let total = vectors
-        .iter()
-        .filter(|v| matches!(v.content, RunVectorContent::Steer { .. }))
-        .count();
-    let mut steers: Vec<_> = vectors.iter().filter_map(summary).rev().take(64).collect();
-    steers.reverse();
-    let mut seen = BTreeSet::new();
-    for vector in &vectors {
-        if let RunVectorContent::SteerReceipt {
-            steer_id,
-            execution,
-            ..
-        } = &vector.content
-            && seen.insert((steer_id, execution))
-            && let Some(steer) = steers.iter_mut().find(|s| &s.id == steer_id)
-        {
-            steer.received_executions += 1;
-            if steer.executions.len() == 64 {
-                steer.executions.remove(0);
-                steer.executions_omitted = true;
+    // Discard full texts as each bounded page is read. Only the last 64 excerpts survive.
+    let mut total = 0_u64;
+    let mut retained = VecDeque::new();
+    visit(ledger, run, |vector| {
+        if let Some(steer) = summary(vector) {
+            total += 1;
+            if retained.len() == 64 {
+                retained.pop_front();
             }
-            steer.executions.push(execution.clone());
+            retained.push_back(steer);
         }
+    })
+    .await?;
+    let mut steers: Vec<_> = retained.into_iter().collect();
+    if !steers.is_empty() {
+        let mut seen = BTreeSet::new();
+        visit(ledger, run, |vector| {
+            if let RunVectorContent::SteerReceipt {
+                steer_id,
+                execution,
+                ..
+            } = &vector.content
+                && let Some(steer) = steers.iter_mut().find(|s| &s.id == steer_id)
+                && seen.insert((steer_id.clone(), execution.clone()))
+            {
+                steer.received_executions += 1;
+                if steer.executions.len() == 64 {
+                    steer.executions.remove(0);
+                    steer.executions_omitted = true;
+                }
+                steer.executions.push(execution.clone());
+            }
+        })
+        .await?;
     }
     Ok(RunSteeringStatus {
-        omitted_steers: total.saturating_sub(steers.len()) as u64,
+        omitted_steers: total.saturating_sub(steers.len() as u64),
         steers,
     })
 }

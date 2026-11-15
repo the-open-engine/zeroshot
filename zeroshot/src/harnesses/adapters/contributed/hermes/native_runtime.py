@@ -403,13 +403,20 @@ class Runtime:
         threading.Thread(target=self.interrupt, daemon=True).start()
 
     def controls(self, stream):
+        parts = []
         try:
             while (frame := read_frame(stream)) is not None:
                 if frame.get("type") == "stop":
+                    parts.clear()
                     break
-                if frame.get("type") != "prompt" or not isinstance(frame.get("text"), str):
+                if frame.get("type") not in ("prompt", "prompt_chunk") or not isinstance(frame.get("text"), str):
                     raise BridgeError("Hermes bridge expected a prompt or stop frame.")
-                self.commands.put_nowait(frame["text"])
+                parts.append(frame["text"])
+                if frame["type"] == "prompt":
+                    self.commands.put_nowait("".join(parts))
+                    parts.clear()
+            if parts:
+                raise BridgeError("Hermes bridge received an incomplete prompt.")
         except Exception:
             self.control_failed = True
         finally:
