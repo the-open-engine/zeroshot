@@ -634,15 +634,6 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
     [p.document, collapsed]
   );
   const groups = useGroupToggles(projection, p.document.graph.root, setCollapsed);
-  // A click on empty canvas shows the workflow's details, but not when it starts a double-click
-  // zoom, which would otherwise replace what is being inspected.
-  const emptyClickTimer = useRef<number>(undefined);
-  useEffect(() => () => window.clearTimeout(emptyClickTimer.current), []);
-  function emptyClick(event: { detail: number }) {
-    window.clearTimeout(emptyClickTimer.current);
-    if (!p.deselect || event.detail > 1) return;
-    emptyClickTimer.current = window.setTimeout(() => p.deselect?.(), 250);
-  }
   const allGroups = useMemo(
     () => collapsedWorkflowGroups(p.document.graph.root),
     [p.document.graph.root]
@@ -869,11 +860,19 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          onPaneClick={emptyClick}
+          // A click on empty canvas shows the workflow's details at once. Double-click zoom is off
+          // so a click always means selection; the zoom controls, scroll and pinch still zoom.
+          zoomOnDoubleClick={false}
+          onPaneClick={p.deselect}
           onNodeClick={(event, node) => {
             if (node.type === 'activity') p.select((node.data as ActivityData).item.owner);
-            // A group's box is drawn space, not a target of its own: treat it as the canvas.
-            else if (node.type === 'region') emptyClick(event);
+            // A group's box is drawn space, not a target of its own: treat it as the canvas,
+            // except its header, whose buttons select or fold the group.
+            else if (
+              node.type === 'region' &&
+              !(event.target as Element).closest('.workflow-region-header')
+            )
+              p.deselect?.();
           }}
           onNodeDragStop={(_, node) => {
             if (readOnly) return;
