@@ -84,9 +84,12 @@ export function projectStory(
     if (!group.length) return;
     const steps = group.map(({ start, round, together, ...step }) => step);
     const container = group[0].together?.node;
-    const id = group.map((execution) => execution.invocation).join('+');
+    // Keyed by where the group began, so a live group keeps its rows (and open transcripts) as
+    // members join or retry.
+    const start = Math.min(...group.map((execution) => execution.start));
+    const id = `work:${start}`;
     const items = new Set(group.map((execution) => execution.together?.lane)).size;
-    placed.set(id, { start: Math.min(...group.map((execution) => execution.start)), round });
+    placed.set(id, { start, round });
     entries.push({
       kind: 'work',
       id,

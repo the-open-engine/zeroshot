@@ -191,6 +191,12 @@ export function RunHistoryView({
     setInspector(true);
     setCursorIndex(target.index);
   }
+  /** Steps has no inspector: a run-wide log opens the run's Started section instead. */
+  function storyDiagnostic(cursor: string) {
+    const target = failureView.diagnostic(cursor, events, projection);
+    if (target && !target.invocation) setRevealStart(Date.now());
+    else inspectDiagnostic(cursor);
+  }
   function reveal(name: string) {
     inspect(name);
     setFocus({ name, tick: Date.now() });
@@ -280,11 +286,7 @@ export function RunHistoryView({
                 revealStart={revealStart}
                 revealStep={revealStep}
                 failureDetails={(context) => (
-                  <RunFailureDetails
-                    context={context}
-                    openLog={inspectDiagnostic}
-                    hasLog={hasLog}
-                  />
+                  <RunFailureDetails context={context} openLog={storyDiagnostic} hasLog={hasLog} />
                 )}
               />
             ) : (
@@ -297,7 +299,11 @@ export function RunHistoryView({
                   workers={workers}
                   select={inspect}
                   focus={focus}
-                  observation={observed(run.runId, projection.nodes, isLiveRun && following)}
+                  observation={observed(
+                    run.runId,
+                    projection.nodes,
+                    history.isLiveRun && following
+                  )}
                   view={canvas}
                   onViewChange={setCanvas}
                   inspectorHidden={!inspector}

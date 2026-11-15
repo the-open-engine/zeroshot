@@ -731,3 +731,12 @@ test('an inner loop counts its rounds afresh in each outer round', () => {
     '  Draft',
   ]);
 });
+
+test('a live group keeps its key as members join, so open rows stay mounted', () => {
+  const doc = document(seq('run', map('suites', step('investigate'))));
+  const items = [0, 1].map((index) => ref('investigate', `k${index}`, `k${index}`));
+  const first = story(doc, [start(items[0], 1, [0])]).entries;
+  const both = story(doc, [start(items[0], 1, [0]), start(items[1], 1, [1])]).entries;
+  assert.equal(both.length, 1);
+  assert.equal(first[0].id, both[0].id);
+});

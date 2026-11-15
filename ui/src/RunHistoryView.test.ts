@@ -730,6 +730,52 @@ for (const durable of [true, false])
     }
   });
 
+test('in Steps, a run-wide failure log opens the run start, where the run log is', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const { detail, source: fixture } = failureHistoryFixture(true);
+  detail.terminal.context.recorded = [{ message: 'Run setup failed', cursor: 'v2:3' }] as never;
+  // The failing line is the run's own, written by no step.
+  const source: RunHistoryReader = {
+    ...fixture,
+    page: async (...args) => {
+      const page = await fixture.page(...args);
+      return {
+        ...page,
+        events: page.events.map((entry) =>
+          entry.cursor === 'v2:3'
+            ? { ...entry, event: { kind: 'safe_log', stream: 'error', line: 'Run setup failed' } }
+            : entry
+        ),
+      };
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(createElement(RunHistoryView, { runId: detail.runId, source, workers: [] }))
+    );
+    await flushEffects();
+    const startOpen = () =>
+      container.querySelector('.run-boundary .story-step-head')?.getAttribute('aria-expanded');
+    assert.equal(startOpen(), 'false');
+    const log = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('View log · v2:3')
+    );
+    assert.ok(log);
+    await act(async () => log.click());
+    assert.equal(startOpen(), 'true');
+    assert.ok(container.querySelector('.run-steps-view'), 'the log opens in Steps');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 const incompleteHistoryError = () =>
   new ApiError(503, 'history_incomplete', 'The remaining archive could not be retained.');
 

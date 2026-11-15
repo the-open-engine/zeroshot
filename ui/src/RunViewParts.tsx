@@ -4,6 +4,7 @@ import type { ControlVisit } from './control-history';
 import type { Document } from './domain';
 import { PersonRequestView } from './PersonRequestView';
 import { RecordedValue } from './RecordedValue';
+import { RECORDED_PAGE_SIZE } from './recorded-value';
 import { Transcript } from './Transcript';
 import { humanize, type Invocation, type RunHandoff, type RunTerminal } from './run-history';
 import { projectOutcome } from './run-story';
@@ -266,7 +267,13 @@ const identifier = (value: string) => value.length <= 80 && !/\s/.test(value);
 
 /** A flat record as framed rows: a name column beside each value (Platform's framed rows). */
 function Facts({ value }: { value: unknown }) {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
+  // A record too large for one page goes to the recorded-value view, which pages its fields.
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).length > RECORDED_PAGE_SIZE
+  )
     return (
       <div className="step-frame">
         <div className="step-row step-row-wide">
