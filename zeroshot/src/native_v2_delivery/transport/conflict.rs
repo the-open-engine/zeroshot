@@ -51,11 +51,11 @@ async fn require_clean_review_head(
 ) -> Result<(), SourceDeliveryError> {
     let head = workspace_head(context).await?;
     let status = bounded_git_output(
-        context.transport.command(&context.request.workspace).args([
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-        ]),
+        context
+            .transport
+            .workspace_command(&context.request.workspace)
+            .await?
+            .args(["status", "--porcelain=v1", "--untracked-files=all"]),
         context.transport.config().deadline,
         1,
     )
@@ -69,7 +69,10 @@ async fn require_commit(
     context: ConflictContext<'_>,
     target_revision: &str,
 ) -> Result<(), SourceDeliveryError> {
-    let mut command = context.transport.command(&context.request.workspace);
+    let mut command = context
+        .transport
+        .workspace_command(&context.request.workspace)
+        .await?;
     command.args(["cat-file", "-e", &format!("{target_revision}^{{commit}}")]);
     bounded_status(command, context.transport.config().deadline).await
 }
@@ -80,7 +83,10 @@ async fn merge_target(
 ) -> Result<i32, SourceDeliveryError> {
     super::target::configure_delivery_identity(context.transport).await?;
     let [name, email] = identity_configuration(context.transport.commit_identity());
-    let mut command = context.transport.command(&context.request.workspace);
+    let mut command = context
+        .transport
+        .workspace_command(&context.request.workspace)
+        .await?;
     command.args([
         "-c",
         "rerere.enabled=false",
@@ -101,12 +107,11 @@ async fn conflicted_paths(
     context: ConflictContext<'_>,
 ) -> Result<Vec<String>, SourceDeliveryError> {
     let output = bounded_git_output(
-        context.transport.command(&context.request.workspace).args([
-            "diff",
-            "--name-only",
-            "--diff-filter=U",
-            "-z",
-        ]),
+        context
+            .transport
+            .workspace_command(&context.request.workspace)
+            .await?
+            .args(["diff", "--name-only", "--diff-filter=U", "-z"]),
         context.transport.config().deadline,
         MAX_CONFLICT_PATH_OUTPUT_BYTES,
     )
@@ -172,7 +177,10 @@ async fn restore_clean_review_head(
     context: ConflictContext<'_>,
 ) -> Result<(), SourceDeliveryError> {
     if merge_in_progress(context).await? {
-        let mut command = context.transport.command(&context.request.workspace);
+        let mut command = context
+            .transport
+            .workspace_command(&context.request.workspace)
+            .await?;
         command.args(["merge", "--abort"]);
         bounded_status(command, context.transport.config().deadline).await?;
     }
@@ -180,7 +188,10 @@ async fn restore_clean_review_head(
 }
 
 async fn merge_in_progress(context: ConflictContext<'_>) -> Result<bool, SourceDeliveryError> {
-    let mut command = context.transport.command(&context.request.workspace);
+    let mut command = context
+        .transport
+        .workspace_command(&context.request.workspace)
+        .await?;
     command.args(["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
     match bounded_exit_code(command, context.transport.config().deadline).await? {
         0 => Ok(true),
@@ -194,12 +205,11 @@ async fn require_merge_head(
     target_revision: &str,
 ) -> Result<(), SourceDeliveryError> {
     let merge_head = bounded_git_output(
-        context.transport.command(&context.request.workspace).args([
-            "rev-parse",
-            "-q",
-            "--verify",
-            "MERGE_HEAD",
-        ]),
+        context
+            .transport
+            .workspace_command(&context.request.workspace)
+            .await?
+            .args(["rev-parse", "-q", "--verify", "MERGE_HEAD"]),
         context.transport.config().deadline,
         128,
     )
@@ -219,7 +229,8 @@ async fn workspace_head(context: ConflictContext<'_>) -> Result<String, SourceDe
     bounded_git_output(
         context
             .transport
-            .command(&context.request.workspace)
+            .workspace_command(&context.request.workspace)
+            .await?
             .args(["rev-parse", "HEAD"]),
         context.transport.config().deadline,
         128,

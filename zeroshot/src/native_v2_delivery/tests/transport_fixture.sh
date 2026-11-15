@@ -1,6 +1,7 @@
 #!/bin/sh
 # Test-only immutable launcher: real Git HTTP transport plus bare-repository API metadata.
-# Per-test state lives in the workspace config and HOME, never in this executable.
+# Per-test state lives in the workspace Git directory and HOME, never in this executable. Not in
+# the workspace config: contained delivery removes entries it does not keep.
 if [ "$1" = "api" ]; then
     for git_fixture_argument in "$@"; do
         case "$git_fixture_argument" in
@@ -37,8 +38,7 @@ if [ -n "$GIT_CONFIG_COUNT" ]; then
         git_fixture_previous=$git_fixture_argument
     done
     test -n "$git_fixture_workspace" || exit 2
-    git_fixture_origin=$(/usr/bin/git -C "$git_fixture_workspace" \
-        config --local --get zeroshotTest.httpOrigin) || exit 2
+    git_fixture_origin=$(/bin/cat "$git_fixture_workspace/.git/zeroshot-test-http-origin") || exit 2
     git_fixture_count=$GIT_CONFIG_COUNT
     git_fixture_index=0
     while [ "$git_fixture_index" -lt "$git_fixture_count" ]; do

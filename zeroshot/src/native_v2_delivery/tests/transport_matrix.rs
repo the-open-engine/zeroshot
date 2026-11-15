@@ -432,7 +432,9 @@ async fn execute(
                 as Arc<dyn crate::native_v2_runner::RuntimeEnvironmentRefresh>
         }),
     };
-    tokio::time::timeout(Duration::from_secs(20), run_with_adapter(request, adapter))
+    // A progress bound, not a timing assertion: contained delivery confines the workspace's
+    // Git configuration before each command, which adds processes under parallel test load.
+    tokio::time::timeout(Duration::from_secs(60), run_with_adapter(request, adapter))
         .await
         .assert_value_with("transport delivery must make bounded progress")
 }

@@ -808,30 +808,47 @@ fn clean_command(
     command
 }
 
-fn git_command(
+/// Workspace Git that carries the forge token; the workspace configuration is confined first.
+async fn git_command(
     authority: &GhCliDeliveryAuthority,
     workspace: &std::path::Path,
     credential: SourceDeliveryCredential<'_>,
-) -> Command {
-    let mut command = local_git_command(authority, workspace);
+) -> Result<Command, crate::source_code_provider::GitCommandFailure> {
+    let mut command = local_git_command(authority, workspace).await?;
     command
         .env("GH_HOST", "github.com")
         .env("GH_TOKEN", credential.expose());
-    command
+    Ok(command)
 }
 
-fn local_git_command(authority: &GhCliDeliveryAuthority, workspace: &std::path::Path) -> Command {
+async fn local_git_command(
+    authority: &GhCliDeliveryAuthority,
+    workspace: &std::path::Path,
+) -> Result<Command, crate::source_code_provider::GitCommandFailure> {
     if let Some(transport) = &authority.transport {
-        return transport.command(workspace);
+        return transport.workspace_command(workspace).await;
     }
+    // Every delivery authority, local or hosted, carries its run's transport. Only a contained
+    // authority without one reaches this isolated Git, so its workspace is never a user checkout.
     let config = &authority.config;
+    crate::native_v2_delivery::command::confine_repository_configuration(
+        &config.git_program,
+        workspace,
+        crate::native_v2_delivery::command::GitCommandContext {
+            identity: config.git_identity,
+            local_environment: None,
+            commit_identity: None,
+        },
+        crate::native_v2_delivery::command::ConfinementBudget::within(config.api_deadline),
+    )
+    .await?;
     let mut command = crate::native_v2_delivery::command::local_git_command_with_identity(
         &config.git_program,
         workspace,
         config.git_identity,
     );
     command.env("HOME", &config.home_directory);
-    command
+    Ok(command)
 }
 
 async fn bounded_status(

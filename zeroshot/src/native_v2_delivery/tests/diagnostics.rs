@@ -313,23 +313,7 @@ async fn exhausted_delivery_loops_retain_latest_verifier_evidence() {
     for repair in [false, true] {
         let repo = TempRepo::delivery();
         if repair {
-            git(
-                &repo.workspace,
-                &[
-                    "config",
-                    "filter.failure.clean",
-                    "printf 'repair test-token\\n' >&2; exit 1",
-                ],
-            );
-            git(
-                &repo.workspace,
-                &["config", "filter.failure.required", "true"],
-            );
-            fs::write(
-                repo.workspace.join(".gitattributes"),
-                "*.guard filter=failure\n",
-            )
-            .assert_value();
+            super::unstageable_embedded_repository(&repo, "test-token");
             fs::write(repo.workspace.join("candidate.guard"), "candidate work\n").assert_value();
         }
         let mode = DeliveryMode::Merge;

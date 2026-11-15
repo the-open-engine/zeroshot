@@ -156,17 +156,14 @@ async fn require_local_head(
     expected: &str,
 ) -> Result<(), SourceDeliveryError> {
     let head = git_output(
-        git_command(context.authority, context.workspace, context.credential)
-            .args(["rev-parse", "HEAD"]),
+        head_command(context).await?.args(["rev-parse", "HEAD"]),
         context.authority.config.api_deadline,
     )
     .await?;
     let status = git_output(
-        git_command(context.authority, context.workspace, context.credential).args([
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-        ]),
+        head_command(context)
+            .await?
+            .args(["status", "--porcelain=v1", "--untracked-files=all"]),
         context.authority.config.api_deadline,
     )
     .await?;
@@ -218,7 +215,7 @@ async fn adopt_fetched_head(
     if !local_transition_required(context, previous, updated).await? {
         return Ok(());
     }
-    let mut ancestor = head_command(context);
+    let mut ancestor = head_command(context).await?;
     ancestor.args([
         "merge-base",
         "--is-ancestor",
@@ -226,7 +223,7 @@ async fn adopt_fetched_head(
         &updated.head_revision,
     ]);
     bounded_status(ancestor, context.authority.config.api_deadline).await?;
-    let mut fast_forward = head_command(context);
+    let mut fast_forward = head_command(context).await?;
     fast_forward.args(["merge", "--ff-only", &updated.head_revision]);
     bounded_status(fast_forward, context.authority.config.api_deadline).await?;
     require_local_head(context, &updated.head_revision).await
@@ -258,6 +255,8 @@ async fn git_output(
 #[path = "head/tests.rs"]
 mod tests;
 
-fn head_command(context: HeadUpdateContext<'_>) -> Command {
-    git_command(context.authority, context.workspace, context.credential)
+async fn head_command(
+    context: HeadUpdateContext<'_>,
+) -> Result<Command, crate::source_code_provider::GitCommandFailure> {
+    git_command(context.authority, context.workspace, context.credential).await
 }

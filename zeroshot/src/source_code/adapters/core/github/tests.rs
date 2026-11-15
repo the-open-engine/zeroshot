@@ -59,11 +59,10 @@ async fn configured_transport_owns_workspace_git_context_and_hosted_isolation() 
             (revision.clone(), false)
         );
         let output = bounded_git_output(
-            local_git_command(&authority, &fixture.workspace).args([
-                "config",
-                "--get",
-                "core.autocrlf",
-            ]),
+            local_git_command(&authority, &fixture.workspace)
+                .await
+                .assert_value()
+                .args(["config", "--get", "core.autocrlf"]),
             Duration::from_secs(20),
             128,
         )
@@ -71,11 +70,10 @@ async fn configured_transport_owns_workspace_git_context_and_hosted_isolation() 
         if local {
             assert_eq!(output.assert_value().stdout(), "true\n");
             let output = bounded_git_output(
-                local_git_command(&authority, &fixture.workspace).args([
-                    "config",
-                    "--get",
-                    "core.autocrlf",
-                ]),
+                local_git_command(&authority, &fixture.workspace)
+                    .await
+                    .assert_value()
+                    .args(["config", "--get", "core.autocrlf"]),
                 Duration::from_secs(20),
                 1,
             )

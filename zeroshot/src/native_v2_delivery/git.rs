@@ -390,25 +390,29 @@ impl SystemGit {
         workspace: &Path,
         arguments: &[&str],
     ) -> Result<command::GitCommandOutput, GitError> {
-        command::capture_sensitive(
-            &mut self.command(workspace, arguments),
-            Duration::from_secs(10 * 60),
-            &[],
+        let deadline = Duration::from_secs(10 * 60);
+        command::confine_repository_configuration(
+            &self.program,
+            workspace,
+            self.context(),
+            command::ConfinementBudget::within(deadline),
         )
-        .await
-        .map_err(Into::into)
+        .await?;
+        command::capture_sensitive(&mut self.command(workspace, arguments), deadline, &[])
+            .await
+            .map_err(Into::into)
+    }
+
+    fn context(&self) -> command::GitCommandContext<'_> {
+        command::GitCommandContext {
+            identity: self.identity,
+            local_environment: self.local_environment.as_ref(),
+            commit_identity: self.commit_identity.as_ref(),
+        }
     }
 
     fn command(&self, workspace: &Path, arguments: &[&str]) -> Command {
-        let mut command = command::git_command(
-            &self.program,
-            workspace,
-            command::GitCommandContext {
-                identity: self.identity,
-                local_environment: self.local_environment.as_ref(),
-                commit_identity: self.commit_identity.as_ref(),
-            },
-        );
+        let mut command = command::git_command(&self.program, workspace, self.context());
         command.args(arguments);
         command
     }

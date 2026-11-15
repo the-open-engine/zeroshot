@@ -73,8 +73,16 @@ use routing::assert_ci_failure_routes_an_authored_worker_loop;
 
 type TempRepo = TestGitRepository;
 
+/// Makes `git add --all` fail with Git naming `name` in its error output.
+fn unstageable_embedded_repository(repo: &TempRepo, name: &str) {
+    let embedded = repo.workspace.join(name);
+    fs::create_dir(&embedded).assert_value();
+    git(&embedded, &["init", "--quiet"]);
+    fs::write(embedded.join("work"), "uncommitted\n").assert_value();
+}
+
 #[tokio::test]
-async fn repository_filter_failures_redact_source_credentials_before_repair_and_logs() {
+async fn repository_staging_failures_redact_source_credentials_before_repair_and_logs() {
     use openengine_cluster_protocol::GitTransportCredentials;
     for credential in [
         GitTransportCredentials::Https {
@@ -92,23 +100,9 @@ async fn repository_filter_failures_redact_source_credentials_before_repair_and_
         },
     ] {
         let repo = TempRepo::candidate();
-        git(
-            &repo.workspace,
-            &[
-                "config",
-                "filter.source-secret.clean",
-                "printf 'transport-user-private-secret\\n' >&2; exit 1",
-            ],
-        );
-        git(
-            &repo.workspace,
-            &["config", "filter.source-secret.required", "true"],
-        );
-        fs::write(
-            repo.workspace.join(".gitattributes"),
-            "*.guard filter=source-secret\n",
-        )
-        .assert_value();
+        // Staging fails on an embedded repository without a commit, and Git names its path.
+        // Contained delivery never runs workspace-configured filters, so none can fail instead.
+        unstageable_embedded_repository(&repo, "transport-user-private-secret");
         fs::write(repo.workspace.join("candidate.guard"), "candidate work\n").assert_value();
         let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
         let adapter = retained_adapter(

@@ -1242,6 +1242,25 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Allocation retains cleanup authority before checkout starts, including through startup errors and
   cancellation. Controllers confirm destruction before recording an allocation failure as terminal.
   Local Git retains the caller's OS identity, separately from delivery commit authorship.
+- Contained delivery Git uses only repository configuration that names no program. Before every
+  contained delivery Git command, including the GitHub adapter's workspace Git, `confine_repository_configuration`
+  reduces the repository config to an allowlist of entries that name no program and load no file:
+  the `git init` layout, end-of-line and sparse-checkout settings, remote, branch and submodule
+  locations, and `user.name`/`email`. `extensions.worktreeConfig` (which adds `config.worktree`)
+  and `extensions.partialClone` (on-demand fetches) are removed. `git add` and worktree status start Git inside every populated
+  submodule, so it confines each index gitlink with a `.git` recursively (at most 64 repositories,
+  depth 8), skipping symlinked submodule paths, which Git never enters. It runs through Git as the
+  workspace owner, never discovers a parent repository, shares the caller's deadline and stop
+  request, and refuses more than 256 removals or unreadable output. The confined configuration is
+  intentionally permanent: workspace configuration is untrusted, anything re-added is confined again
+  before the next delivery command, and Git cannot be pointed at a different repository config
+  file. Removed filters (including LFS) and URL rewrites therefore do not return in later turns.
+  Command-line pins (`core.fsmonitor=false`, `core.untrackedCache=false` everywhere; credential
+  helper, askpass, editor, pager, signing, `protocol.ext`, submodule recursion and auto-gc in
+  contained mode) stay as defence in depth. Attributes stay as declared; without configured
+  drivers they select only built-ins. Production code reaches transport Git only through
+  `GitTransport::workspace_command`. Local runs with a native environment keep the user's
+  configuration. Checkpoint Git (`native_v2_checkpoints`) is not yet confined.
 - Delivery commits default to `Zeroshot <delivery@zeroshot.invalid>`. A hosted
   `TargetRunRequest.commitIdentity`, or `RunResumeParams.commitIdentity` for a successor, replaces
   that author and committer for every commit the attempt's delivery creates: prepared revisions,
@@ -1260,9 +1279,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `ifexists=addIfDifferent`, `ifmissing=add` and separator are pinned with `-c`, so Git ends the
   trailer block with the credit once despite workspace trailer defaults. No pin sets a `key`: Git
   would rename existing trailers whose names prefix it. The run's own trailers keep their names and
-  values; Git only normalises the spacing around their separators. Workspace settings for the
-  `Co-authored-by` trailer itself, such as a `key` or `cmd`, still apply, as other workspace Git
-  configuration affects delivery Git. A message the pinned cleanup empties (only blank or
+  values; Git only normalises the spacing around their separators. In local runs, workspace
+  settings for the `Co-authored-by` trailer itself, such as a `key` or `cmd`, still apply, as
+  other workspace Git configuration affects local delivery Git; contained delivery removes them. A message the pinned cleanup empties (only blank or
   `Signed-off-by: ` lines) gets no trailer, so Git refuses it instead of committing the credit as
   the whole message; without a co-author the commit command is unchanged. A conflicted merge that
   `prepare_revision` concludes after repair carries the run's resolution and is credited; merges

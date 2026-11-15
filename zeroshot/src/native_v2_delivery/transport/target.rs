@@ -78,12 +78,13 @@ pub(crate) async fn integrate_review_target(
     }
     transport.fetch_exact(target_revision, credential).await?;
     let deadline = transport.config().deadline;
-    let mut provenance = transport.command(&request.workspace);
+    let mut provenance = transport.workspace_command(&request.workspace).await?;
     provenance.args(["merge-base", "--is-ancestor", review_head, "HEAD"]);
     bounded_status(provenance, deadline).await?;
     let fork_point = bounded_git_output(
         transport
-            .command(&request.workspace)
+            .workspace_command(&request.workspace)
+            .await?
             .args(["merge-base", review_head, target_revision]),
         deadline,
         128,
@@ -113,7 +114,7 @@ async fn integrate(
         .await
         .map_err(git_error)?;
     let source_revision = &context.request.target.base_revision;
-    let mut provenance = local_command(context);
+    let mut provenance = local_command(context).await?;
     provenance.args(["merge-base", "--is-ancestor", source_revision, &head]);
     bounded_status(provenance, context.transport.config().deadline).await?;
     if is_ancestor(context, target_revision, &head).await? {
@@ -145,7 +146,7 @@ async fn merge_target(
     target_revision: &str,
     candidate: &str,
 ) -> Result<SourceReconciliationOutcome, SourceDeliveryError> {
-    let mut command = local_command(context);
+    let mut command = local_command(context).await?;
     let [name, email] = identity_configuration(context.transport.commit_identity());
     command.args([
         "-c",
@@ -203,7 +204,9 @@ async fn has_exact_conflict(
 ) -> Result<bool, SourceDeliveryError> {
     for (reference, expected) in [("HEAD", candidate), ("MERGE_HEAD", target_revision)] {
         let value = bounded_git_output(
-            local_command(context).args(["rev-parse", "--verify", reference]),
+            local_command(context)
+                .await?
+                .args(["rev-parse", "--verify", reference]),
             context.transport.config().deadline,
             128,
         )
@@ -213,7 +216,9 @@ async fn has_exact_conflict(
         }
     }
     let output = capture_sensitive(
-        local_command(context).args(["ls-files", "--unmerged", "-z"]),
+        local_command(context)
+            .await?
+            .args(["ls-files", "--unmerged", "-z"]),
         context.transport.config().deadline,
         &[],
     )
@@ -228,7 +233,9 @@ async fn is_ancestor(
     descendant: &str,
 ) -> Result<bool, SourceDeliveryError> {
     let output = capture(
-        local_command(context).args(["merge-base", "--is-ancestor", ancestor, descendant]),
+        local_command(context)
+            .await?
+            .args(["merge-base", "--is-ancestor", ancestor, descendant]),
         context.transport.config().deadline,
     )
     .await?;
@@ -239,8 +246,11 @@ async fn is_ancestor(
     Ok(true)
 }
 
-fn local_command(context: TargetContext<'_>) -> Command {
-    context.transport.command(context.request.workspace)
+async fn local_command(context: TargetContext<'_>) -> Result<Command, GitCommandFailure> {
+    context
+        .transport
+        .workspace_command(context.request.workspace)
+        .await
 }
 
 pub(super) async fn configure_delivery_identity(
@@ -254,7 +264,9 @@ pub(super) async fn configure_delivery_identity(
     }
     let (name, email) = delivery_identity(transport.commit_identity());
     for (key, value) in [("user.name", name), ("user.email", email)] {
-        let mut command = transport.command(&transport.config().workspace);
+        let mut command = transport
+            .workspace_command(&transport.config().workspace)
+            .await?;
         command.args(["config", "--local", "--replace-all", key, value]);
         bounded_status(command, transport.config().deadline).await?;
     }

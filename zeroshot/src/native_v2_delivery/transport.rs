@@ -463,7 +463,12 @@ impl GitTransport {
         credential: SourceDeliveryCredential<'_>,
         deadline: Duration,
     ) -> Result<GitCommandOutput, GitCommandFailure> {
-        let mut command = self.command(&self.config.workspace);
+        // Confinement and the command share the caller's budget, such as a checkout's remainder.
+        let started = tokio::time::Instant::now();
+        let mut command = self
+            .workspace_command_within(&self.config.workspace, deadline)
+            .await?;
+        let deadline = deadline.saturating_sub(started.elapsed());
         let authentication = GitAuthentication::prepare(&self.config, &self.remote, credential)
             .map_err(|error| super::command::preparation_failure(&command, error))?;
         if arguments.first().is_some_and(|operation| {
@@ -489,16 +494,52 @@ impl GitTransport {
             .with_commit_co_author(self.commit_co_author.clone())
     }
 
-    pub(crate) fn command(&self, workspace: &Path) -> Command {
-        let mut command = git_command(
+    /// Builds a workspace Git command after confining the workspace's repository configuration,
+    /// so delivery Git uses only configuration that names no program.
+    pub(crate) async fn workspace_command(
+        &self,
+        workspace: &Path,
+    ) -> Result<Command, GitCommandFailure> {
+        self.workspace_command_within(workspace, self.config.deadline)
+            .await
+    }
+
+    /// Like [`Self::workspace_command`], with confinement bounded by the caller's remaining
+    /// `deadline` and interrupted by this transport's stop request.
+    async fn workspace_command_within(
+        &self,
+        workspace: &Path,
+        deadline: Duration,
+    ) -> Result<Command, GitCommandFailure> {
+        super::command::confine_repository_configuration(
             &self.config.git_program,
             workspace,
-            GitCommandContext {
-                identity: self.config.identity,
-                local_environment: self.config.local_environment.as_ref(),
-                commit_identity: self.commit_identity.as_ref(),
+            self.git_context(),
+            super::command::ConfinementBudget {
+                deadline,
+                stopping: self.stopping.clone(),
             },
-        );
+        )
+        .await?;
+        Ok(self.unconfined_command(workspace))
+    }
+
+    /// The workspace command without configuration confinement, for inspecting its setup.
+    #[cfg(test)]
+    pub(crate) fn command(&self, workspace: &Path) -> Command {
+        self.unconfined_command(workspace)
+    }
+
+    fn git_context(&self) -> GitCommandContext<'_> {
+        GitCommandContext {
+            identity: self.config.identity,
+            local_environment: self.config.local_environment.as_ref(),
+            commit_identity: self.commit_identity.as_ref(),
+        }
+    }
+
+    fn unconfined_command(&self, workspace: &Path) -> Command {
+        let mut command = git_command(&self.config.git_program, workspace, self.git_context());
         if self.config.local_environment.is_none() {
             command
                 .env("HOME", &self.config.home_directory)

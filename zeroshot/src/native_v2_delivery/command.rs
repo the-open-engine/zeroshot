@@ -1,5 +1,5 @@
 //! Bounded command capture shared by trusted delivery Git operations.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use crate::execution::process::platform::{
     self, ProcessContainment, ProcessTreeHandle, terminate_process_tree,
@@ -203,6 +203,9 @@ struct CaptureOptions<'a> {
     input: Option<&'a [u8]>,
     stdout_limit: Option<usize>,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    /// Retains only the NUL-terminated stdout records this accepts, so a long listing can be
+    /// filtered without holding all of it.
+    stdout_records: Option<fn(&[u8]) -> bool>,
 }
 
 async fn capture_exchange(
@@ -241,7 +244,12 @@ async fn capture_exchange(
         let completion = wait_and_cleanup(&mut child, &process_group, &mut diagnostic);
         let (status, (), (), sent) = tokio::join!(
             completion,
-            drain(stdout, &mut captured_stdout, stdout_retain),
+            drain_stdout(
+                stdout,
+                &mut captured_stdout,
+                stdout_retain,
+                options.stdout_records
+            ),
             drain(stderr, &mut captured_stderr, retain),
             send_input(stdin, input),
         );
@@ -407,6 +415,65 @@ fn command_secrets(command: &Command) -> Vec<String> {
         .collect()
 }
 
+async fn drain_stdout(
+    reader: impl AsyncRead + Unpin,
+    captured: &mut CapturedBytes,
+    retain: usize,
+    records: Option<fn(&[u8]) -> bool>,
+) {
+    match records {
+        Some(keep) => drain_records(reader, captured, retain, keep).await,
+        None => drain(reader, captured, retain).await,
+    }
+}
+
+/// Keeps accepted NUL-terminated records, each with its terminator, and drains the rest.
+/// An oversized, unterminated or unretainable record marks the capture truncated.
+async fn drain_records(
+    mut reader: impl AsyncRead + Unpin,
+    captured: &mut CapturedBytes,
+    retain: usize,
+    keep: fn(&[u8]) -> bool,
+) {
+    const MAX_RECORD_BYTES: usize = 64 * 1024;
+    let mut buffer = vec![0_u8; 8 * 1024];
+    let mut record = Vec::new();
+    let mut oversized = false;
+    loop {
+        let read = match reader.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(_) => {
+                captured.truncated = true;
+                break;
+            }
+        };
+        for &byte in &buffer[..read] {
+            if byte != 0 {
+                if record.len() < MAX_RECORD_BYTES {
+                    record.push(byte);
+                } else {
+                    oversized = true;
+                }
+                continue;
+            }
+            if oversized {
+                captured.truncated = true;
+            } else if keep(&record) {
+                if captured.bytes.len() + record.len() < retain {
+                    captured.bytes.extend_from_slice(&record);
+                    captured.bytes.push(0);
+                } else {
+                    captured.truncated = true;
+                }
+            }
+            record.clear();
+            oversized = false;
+        }
+    }
+    captured.truncated |= oversized || !record.is_empty();
+}
+
 async fn drain(mut reader: impl AsyncRead + Unpin, captured: &mut CapturedBytes, retain: usize) {
     // Keep pipe storage out of the nested admission and delivery futures.
     let mut buffer = vec![0_u8; 8 * 1024];
@@ -476,7 +543,40 @@ pub(crate) fn redact(value: &str, secrets: &[String]) -> String {
     redacted
 }
 
+/// Command-line pins for every delivery Git command. Neither feature changes repository content;
+/// both would otherwise run a configured program or daemon on index refresh.
+const UNIVERSAL_PINS: [&str; 2] = ["core.fsmonitor=false", "core.untrackedCache=false"];
+
+/// Command-line pins for contained delivery, whose workspace configuration it does not author.
+/// They outrank repository configuration and reach Git's own child processes. Each keeps a
+/// configured program from running, or a feature that starts one from being enabled.
+/// [`confine_repository_configuration`] removes the rest, so these remain defence in depth.
+/// Later `-c` values still win, so a delivery step can deliberately enable one of them.
+const CONTAINED_PINS: [&str; 17] = [
+    "credential.helper=",
+    "core.askPass=",
+    "core.editor=:",
+    "sequence.editor=:",
+    "core.pager=cat",
+    "commit.gpgSign=false",
+    "tag.gpgSign=false",
+    "push.gpgSign=false",
+    "merge.verifySignatures=false",
+    "log.showSignature=false",
+    "protocol.ext.allow=never",
+    "submodule.recurse=false",
+    "fetch.recurseSubmodules=false",
+    "push.recurseSubmodules=no",
+    "diff.trustExitCode=false",
+    "gc.auto=0",
+    "maintenance.auto=false",
+];
+
 pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
+    git_base_command(program, workspace, true)
+}
+
+fn git_base_command(program: &Path, workspace: &Path, contained: bool) -> Command {
     let mut command = Command::new(program);
     command
         .kill_on_drop(true)
@@ -492,15 +592,341 @@ pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
         .arg("-c")
         .arg("gc.autoDetach=false")
         .arg("-c")
-        .arg(format!("safe.directory={}", workspace.display()))
-        .arg("-C")
-        .arg(workspace)
-        .stdin(Stdio::null());
+        .arg(format!("safe.directory={}", workspace.display()));
+    for pin in UNIVERSAL_PINS
+        .iter()
+        .chain(if contained { &CONTAINED_PINS[..] } else { &[] })
+    {
+        command.arg("-c").arg(pin);
+    }
+    command.arg("-C").arg(workspace).stdin(Stdio::null());
     let mut environment = std::collections::BTreeMap::new();
     crate::execution::platform::process_environment(&mut environment);
     command.envs(environment);
     pin_delivery_identity(&mut command, None);
     command
+}
+
+/// Most repository configuration entries contained delivery keeps: the layout `git init`
+/// writes, settings that shape the worktree and committed content, and the delivery identity.
+/// None of them names a program or loads another file. `extensions.worktreeConfig` is removed
+/// because it makes Git read `config.worktree` as well, and `extensions.partialClone` because it
+/// makes Git fetch missing objects on demand.
+const RETAINED_REPOSITORY_KEYS: [&str; 16] = [
+    "core.repositoryformatversion",
+    "core.filemode",
+    "core.bare",
+    "core.logallrefupdates",
+    "core.ignorecase",
+    "core.precomposeunicode",
+    "core.symlinks",
+    "core.autocrlf",
+    "core.eol",
+    "core.safecrlf",
+    "core.sparsecheckout",
+    "core.sparsecheckoutcone",
+    "extensions.objectformat",
+    "extensions.refstorage",
+    "user.name",
+    "user.email",
+];
+
+/// More removals than this refuse delivery rather than spend one Git process per entry.
+const MAX_CONFINED_REMOVALS: usize = 256;
+/// Populated repositories delivery confines in one workspace, the workspace included.
+const MAX_CONFINED_REPOSITORIES: usize = 64;
+/// Submodule nesting delivery confines below the workspace.
+const MAX_CONFINED_SUBMODULE_DEPTH: usize = 8;
+
+/// Whether contained delivery keeps one repository configuration entry, by Git's canonical
+/// name (lowercase section and key, verbatim subsection). Remote, branch and submodule
+/// locations are kept; delivery's own transport uses explicit URLs.
+pub(crate) fn retained_repository_key(name: &str) -> bool {
+    if RETAINED_REPOSITORY_KEYS.contains(&name) {
+        return true;
+    }
+    let Some((section, rest)) = name.split_once('.') else {
+        return false;
+    };
+    let Some((subsection, key)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    !subsection.is_empty()
+        && matches!(
+            (section, key),
+            ("remote", "url" | "fetch")
+                | ("branch", "remote" | "merge")
+                | ("submodule", "url" | "active" | "ignore")
+        )
+}
+
+/// Reduces a contained workspace's repository configuration to [`retained_repository_key`]
+/// entries before a delivery Git command runs.
+///
+/// Git takes filter, merge and diff drivers, fsmonitor hooks, credential helpers, SSH, proxy and
+/// pack programs, URL rewrites and `include` files from repository configuration, and in-tree or
+/// `info/attributes` select which drivers apply to which paths. Command-line pins cannot remove a
+/// driver delivery does not know the name of, or a URL rewrite. Removing every other entry can,
+/// so attributes then select only Git's built-in drivers. Attributes stay as the repository
+/// declares them: end-of-line and merge attributes still shape the delivered content.
+///
+/// The edit runs as the workspace owner, through Git, and touches only the repositories' own
+/// configuration files. It is permanent: later turns see the confined configuration, and anything
+/// added again is confined again before the next delivery command. Git has no way to read a
+/// different repository configuration file instead.
+/// `budget` bounds the whole confinement and can interrupt it. Local runs that use the invoking
+/// user's Git keep their configuration.
+pub(crate) async fn confine_repository_configuration(
+    program: &Path,
+    workspace: &Path,
+    context: GitCommandContext<'_>,
+    budget: ConfinementBudget,
+) -> Result<(), GitCommandFailure> {
+    if context.local_environment.is_some() {
+        return Ok(());
+    }
+    let ConfinementBudget { deadline, stopping } = budget;
+    let confinement = Confinement {
+        program,
+        workspace,
+        context,
+        end: tokio::time::Instant::now() + deadline,
+        stopping,
+    };
+    // `git add` and worktree status start Git inside every populated submodule, which then
+    // reads that repository's own configuration, so each one is confined as well.
+    let mut pending = vec![(workspace.to_path_buf(), 0_usize)];
+    let mut confined = 0_usize;
+    while let Some((repository, depth)) = pending.pop() {
+        if !has_git_entry(&repository) {
+            // Nothing to confine before `git init`, and Git starts nothing in an unpopulated
+            // submodule. Discovery never reaches a parent repository.
+            continue;
+        }
+        confined += 1;
+        if confined > MAX_CONFINED_REPOSITORIES || depth > MAX_CONFINED_SUBMODULE_DEPTH {
+            return Err(confinement.failure(format!(
+                "workspace has more than {MAX_CONFINED_REPOSITORIES} populated repositories or \
+                 submodules nested deeper than {MAX_CONFINED_SUBMODULE_DEPTH}"
+            )));
+        }
+        confinement.confine_repository(&repository).await?;
+        for path in confinement.populated_gitlinks(&repository).await? {
+            // Git starts nothing behind a symlinked submodule path; it reports a type change.
+            // Following one could edit a repository outside the workspace.
+            if !has_symlinked_component(&repository, &path) {
+                pending.push((repository.join(path), depth + 1));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Distinct entry names contained delivery removes.
+fn unretained(names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .filter(|name| !retained_repository_key(name))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// The time and stop request one confinement may use.
+pub(crate) struct ConfinementBudget {
+    pub(crate) deadline: Duration,
+    pub(crate) stopping: Option<tokio::sync::watch::Receiver<bool>>,
+}
+
+impl ConfinementBudget {
+    pub(crate) const fn within(deadline: Duration) -> Self {
+        Self {
+            deadline,
+            stopping: None,
+        }
+    }
+}
+
+fn has_git_entry(repository: &Path) -> bool {
+    !std::fs::symlink_metadata(repository.join(".git"))
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn has_symlinked_component(repository: &Path, path: &Path) -> bool {
+    let mut current = repository.to_path_buf();
+    path.components().any(|component| {
+        current.push(component);
+        std::fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    })
+}
+
+/// One bounded, stoppable confinement of a workspace and its populated submodules.
+struct Confinement<'a> {
+    program: &'a Path,
+    workspace: &'a Path,
+    context: GitCommandContext<'a>,
+    end: tokio::time::Instant,
+    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+}
+
+impl Confinement<'_> {
+    async fn confine_repository(&self, repository: &Path) -> Result<(), GitCommandFailure> {
+        let removed = unretained(&self.names(repository).await?);
+        if removed.is_empty() {
+            return Ok(());
+        }
+        if removed.len() > MAX_CONFINED_REMOVALS {
+            return Err(self.failure(format!(
+                "workspace Git configuration has {} entries delivery does not keep; at most \
+                 {MAX_CONFINED_REMOVALS} are removed",
+                removed.len()
+            )));
+        }
+        for name in &removed {
+            let mut command = self.command(repository);
+            command.args(["config", "--local", "--unset-all", name]);
+            self.capture(&mut command, CaptureOptions::default())
+                .await?
+                .require_success()
+                .map_err(|failure| {
+                    failure.with_context(
+                        "could not remove workspace Git configuration before delivery",
+                    )
+                })?;
+        }
+        if let Some(name) = unretained(&self.names(repository).await?).first() {
+            return Err(self.failure(format!(
+                "workspace Git configuration still sets `{name}` after confinement"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Every entry name in the repository configuration file, without following includes.
+    async fn names(&self, repository: &Path) -> Result<Vec<String>, GitCommandFailure> {
+        let mut command = self.command(repository);
+        command.args([
+            "config",
+            "--local",
+            "--no-includes",
+            "--list",
+            "--name-only",
+            "-z",
+        ]);
+        let output = self
+            .capture(
+                &mut command,
+                CaptureOptions {
+                    stdout_limit: Some(8 * 1024 * 1024),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let output = output.require_success().map_err(|failure| {
+            failure.with_context("could not read workspace Git configuration before delivery")
+        })?;
+        if output.stdout_truncated() || !output.stdout_valid_utf8() {
+            return Err(output
+                .into_diagnostic()
+                .with_context("workspace Git configuration names are unreadable"));
+        }
+        Ok(output
+            .stdout()
+            .split_terminator('\0')
+            .map(str::to_owned)
+            .collect())
+    }
+
+    /// The index's submodule paths. Git validates index paths; anything else fails closed.
+    async fn populated_gitlinks(
+        &self,
+        repository: &Path,
+    ) -> Result<Vec<PathBuf>, GitCommandFailure> {
+        let mut command = self.command(repository);
+        command.args(["ls-files", "--stage", "-z"]);
+        let output = self
+            .capture(
+                &mut command,
+                CaptureOptions {
+                    stdout_limit: Some(1024 * 1024),
+                    stdout_records: Some(|record| record.starts_with(b"160000 ")),
+                    ..Default::default()
+                },
+            )
+            .await?
+            .require_success()
+            .map_err(|failure| {
+                failure.with_context("could not list workspace submodules before delivery")
+            })?;
+        let unreadable = || {
+            command_diagnostic(&command, &[])
+                .with_context("workspace submodule paths are unreadable or exceed delivery's bound")
+        };
+        if output.stdout_truncated() || !output.stdout_valid_utf8() {
+            return Err(unreadable());
+        }
+        let mut paths = std::collections::BTreeSet::new();
+        for record in output.stdout().split_terminator('\0') {
+            let path = record
+                .split_once('\t')
+                .map(|(_, path)| Path::new(path))
+                .filter(|path| {
+                    path.components()
+                        .all(|component| matches!(component, std::path::Component::Normal(_)))
+                        && path.components().next().is_some()
+                })
+                .ok_or_else(unreadable)?;
+            paths.insert(path.to_path_buf());
+        }
+        Ok(paths.into_iter().collect())
+    }
+
+    /// Captures one confinement command within the remaining overall budget.
+    async fn capture(
+        &self,
+        command: &mut Command,
+        options: CaptureOptions<'_>,
+    ) -> Result<GitCommandOutput, GitCommandFailure> {
+        let remaining = self
+            .end
+            .saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            let mut failure = command_diagnostic(command, &[]);
+            failure.timed_out = true;
+            failure.context =
+                "workspace Git configuration confinement exceeded its deadline".into();
+            return Err(failure);
+        }
+        capture_exchange(
+            command,
+            remaining,
+            &[],
+            CaptureOptions {
+                stopping: self.stopping.clone(),
+                ..options
+            },
+        )
+        .await
+    }
+
+    fn command(&self, repository: &Path) -> Command {
+        let mut command = git_command(self.program, repository, self.context);
+        // The repository is the given directory; discovery never continues into a parent.
+        if let Some(parent) = repository
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            command.env("GIT_CEILING_DIRECTORIES", parent);
+        }
+        command
+    }
+
+    fn failure(&self, message: String) -> GitCommandFailure {
+        let mut failure = command_diagnostic(&self.command(self.workspace), &[]);
+        failure.context = message.into_boxed_str();
+        failure
+    }
 }
 
 /// Delivery commits use the host-selected identity, or the fixed product identity without one.
@@ -565,7 +991,10 @@ pub(crate) fn git_command(
         local_environment,
         commit_identity,
     } = context;
-    let mut command = local_git_command_with_identity(program, workspace, identity);
+    let mut command = with_hosted_identity(
+        git_base_command(program, workspace, local_environment.is_none()),
+        identity,
+    );
     if let Some(environment) = local_environment {
         command.envs(environment);
         if identity.is_none() {
@@ -600,7 +1029,13 @@ pub(crate) fn local_git_command_with_identity(
     workspace: &Path,
     identity: Option<crate::execution::process::HostedProcessIdentity>,
 ) -> Command {
-    let mut command = local_git_command(program, workspace);
+    with_hosted_identity(local_git_command(program, workspace), identity)
+}
+
+fn with_hosted_identity(
+    mut command: Command,
+    identity: Option<crate::execution::process::HostedProcessIdentity>,
+) -> Command {
     if let Some(identity) = identity {
         // The launcher may be in a root-only directory. The existing containment clears
         // supplementary groups/capabilities and prevents helpers from regaining privilege.
