@@ -1759,6 +1759,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Run.steer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;steer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Run.vectors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2840,6 +2851,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Run.steer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;steer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Run.vectors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3903,7 +3925,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0)
 
   
       dataclass
@@ -3978,7 +4000,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None)
+              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0)
 
   
       dataclass
@@ -4178,7 +4200,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0)
 
   
       dataclass
@@ -4309,6 +4331,83 @@ completes before local controller startup or direct-target contact.</p>
           –
           <div class="doc-md-description">
             <p>The successor run handle. Invalid, repeated and late answers raise the CLI error.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Run.steer" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">steer</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RunSteer</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Run.steer" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Record standing direction without continuing a suspended run.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>text</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Nonblank UTF-8 direction, at most 262,144 bytes. Do not include secrets.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunSteer(*, id: str, created_at: int, text_bytes: int, excerpt: str, received_executions: int, executions: tuple[str, ...], executions_omitted: bool = False)
+
+  
+      dataclass
+   (zeroshot.runs.RunSteer)" href="../results/#zeroshot.RunSteer">RunSteer</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The recorded steer, including its vector identity and receipt summary.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunNotFoundError(message: str, *, exit_code: int | None = None) (zeroshot.run_errors.RunNotFoundError)" href="../errors/#zeroshot.RunNotFoundError">RunNotFoundError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the run is no longer retained.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              TargetError(message: str, *, exit_code: int | None = None) (zeroshot.errors.TargetError)" href="../errors/#zeroshot.TargetError">TargetError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the run refuses steering or transport fails.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="            ProtocolError (zeroshot.errors.ProtocolError)" href="../errors/#zeroshot.ProtocolError">ProtocolError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If native output is malformed.</p>
           </div>
         </li>
     </ul>
@@ -4728,7 +4827,9 @@ during review are not restacked, so rebase the pull requests above it by hand.</
 
     </div>
 
-</div>
+</div><p><code>await run.steer(text)</code> returns a <code>RunSteer</code> receipt for standing direction. It follows the handle's
+local or named-target route, leaves suspended runs suspended and uses the existing typed errors.
+Read complete text through <code>Run.vector(receipt.id)</code>.</p>
 
 
 

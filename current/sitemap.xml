@@ -6,7 +6,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/zeroshot-cli/</loc>
-         <lastmod>2026-11-14</lastmod>
+         <lastmod>2026-11-15</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/zeroshot-distribution/</loc>
@@ -42,7 +42,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/active-memory/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-15</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/ask-a-person/</loc>
@@ -58,7 +58,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/observe-and-control/</loc>
-         <lastmod>2026-11-14</lastmod>
+         <lastmod>2026-11-15</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/planning/</loc>
@@ -94,7 +94,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/project/harness-adapters/</loc>
-         <lastmod>2026-11-14</lastmod>
+         <lastmod>2026-11-15</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/project/source-code-adapters/</loc>
@@ -106,7 +106,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/active-memory/</loc>
-         <lastmod>2026-11-10</lastmod>
+         <lastmod>2026-11-15</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/execution/</loc>
@@ -134,7 +134,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/api/</loc>
-         <lastmod>2026-11-14</lastmod>
+         <lastmod>2026-11-15</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/data-plane/</loc>
@@ -142,7 +142,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/graph/</loc>
-         <lastmod>2026-11-14</lastmod>
+         <lastmod>2026-11-15</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/lifecycle/</loc>

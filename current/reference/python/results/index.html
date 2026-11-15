@@ -1671,6 +1671,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.RunSteer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;RunSteer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.RunSummary" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2590,6 +2601,17 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;RunStatus
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.RunSteer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;RunSteer
       
     </span>
   </a>
@@ -3613,7 +3635,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunStatus" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">steers</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">RunSteer</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">omitted_steers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3797,6 +3819,142 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
           –
           <div class="doc-md-description">
             <p>Human request contract when suspended for a request.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>steers</code></b>
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              RunSteer(*, id: str, created_at: int, text_bytes: int, excerpt: str, received_executions: int, executions: tuple[str, ...], executions_omitted: bool = False)
+
+  
+      dataclass
+   (zeroshot.runs.RunSteer)" href="#zeroshot.RunSteer">RunSteer</a>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Standing directions with confirmed receiving executions.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>omitted_steers</code></b>
+              (<code><span title="int">int</span></code>, default:
+                  <code>0</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Older directions omitted by the bounded status listing.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.RunSteer" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSteer</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">text_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">excerpt</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">received_executions</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">executions_omitted</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.RunSteer" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A recorded direction and its confirmed receiving executions.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>id</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Vector entry identity, usable with Run.vector().</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>created_at</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Recording time in Unix epoch milliseconds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>text_bytes</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Full UTF-8 text length.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>excerpt</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>First 1,024 bytes, cut at a character boundary.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>received_executions</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Total confirmed receiving executions.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>executions</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Up to 64 most recent execution references.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>executions_omitted</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether earlier receiving executions were omitted.</p>
           </div>
         </li>
     </ul>
@@ -4998,7 +5156,9 @@ and seven days after readiness.</p>
 
     </div>
 
-</div>
+</div><p><code>RunStatus.steers</code> contains recorded directions and their confirmed receiving execution references.
+Each <code>RunSteer</code> includes a vector ID, recording time, UTF-8 byte length, excerpt, total receiving
+executions and the 64 most recent references. <code>RunStatus.omitted_steers</code> reports omitted older steers.</p>
 
 
 

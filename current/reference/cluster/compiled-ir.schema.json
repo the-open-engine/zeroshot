@@ -866,7 +866,7 @@
       ]
     },
     "NodeInstructions": {
-      "maxLength": 16384,
+      "maxLength": 262144,
       "minLength": 1,
       "pattern": "^[^\\u0000]*[^\\s\\u0000][^\\u0000]*$",
       "type": "string"

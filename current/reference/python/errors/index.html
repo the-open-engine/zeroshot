@@ -2975,7 +2975,7 @@
         </li>
         <li class="doc-section-item field-body">
             <b><code>status</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None)
+              (<code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0)
 
   
       dataclass

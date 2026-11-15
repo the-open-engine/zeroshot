@@ -1190,6 +1190,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#steer-a-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steer a run
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2493,6 +2504,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#steer-a-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steer a run
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2862,6 +2884,33 @@ The answer starts one successor on the retained workspace. Ordinary <code>resume
 Deadlines default to 7 days and accept at most 30 days. A late answer starts the author's <code>timeout</code>
 route and exits 1 naming its successor. Reads never apply expiry. Add <code>--target NAME</code> for a target
 that advertises <code>openengine.request-ask/v1</code>. See <a href="../ask-a-person/">Ask a person</a>.</p>
+<h2 id="steer-a-run">Steer a run<a class="headerlink" href="#steer-a-run" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="go">zeroshot steer RUN_ID "Prioritize the parser regression."</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">zeroshot steer RUN_ID --text-file direction.txt --target NAME</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin</span>
+</code></pre></div>
+<p>Supply exactly one text source. An admitted, running or suspended run accepts standing direction.
+Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
+steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.</p>
+<p>Every agent conversation, including reviewers, receives each steer once: at its next tool call or
+in its next prompt, whichever comes first. It cannot revise a tool call already issued. Direction
+takes precedence over authored instructions as guidance; permissions, output contracts, routing,
+runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
+Steers stand for the rest of the run and its successors. Continued conversations keep receipts;
+new conversations receive the standing direction. A lost acknowledgement can cause repeat delivery.</p>
+<p>Text must be nonblank UTF-8, at most 262,144 bytes, with no NUL or control characters except tab,
+newline and carriage return. Text is stored and shown as given: <strong>do not put secrets in a steer</strong>.</p>
+<p>Reading steering status requires a client from this release or newer.
+The command prints one JSON receipt. <code>zeroshot status RUN_ID</code> lists steers with recording times,
+byte lengths, character-safe excerpts and confirmed receiving execution references. Prompt receipts
+appear after a successful provider turn; tool-call receipts appear after the carrier acknowledges.
+The bounded listing reports omitted directions or older execution references. Read the complete
+record and full text with:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="go">zeroshot vectors RUN_ID</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">zeroshot vectors show RUN_ID STEER_ID</span>
+</code></pre></div>
+<p>The record includes <code>steer</code> and <code>steer_receipt</code> entries in event order. Add <code>--target NAME</code> to these
+commands for a direct target advertising steering and run vectors.</p>
 
 
 
@@ -2882,7 +2931,7 @@ that advertises <code>openengine.request-ask/v1</code>. See <a href="../ask-a-pe
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-14">14 November 2026</time>
+    Last updated <time datetime="2026-11-15">15 November 2026</time>
   </span>
 
     
