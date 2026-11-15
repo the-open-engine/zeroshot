@@ -784,6 +784,7 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
     groups.forget();
   }, [contextKey, readOnly]);
   // Live history arrives after the canvas mounts: unfold work as it becomes current, never refold.
+  // Scrubbing and replay move through recorded work and keep the reader's folds.
   const currentWork = readOnly
     ? currentRunWork(p.document.graph.root, p.observation?.nodes).join('\n')
     : '';
@@ -791,7 +792,7 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
   useEffect(() => {
     if (currentWork === revealedWork.current) return;
     revealedWork.current = currentWork;
-    if (currentWork)
+    if (currentWork && p.observation?.following)
       setCollapsed((value) => revealRunWork(value, p.document.graph.root, currentWork.split('\n')));
   }, [currentWork]);
   useEffect(() => {

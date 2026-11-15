@@ -13,6 +13,8 @@ export type WorkflowObservation = {
   /** Stable run identity. Changing the cursor must not change this key. */
   key: string;
   nodes: Readonly<Record<string, WorkflowNodeObservation>>;
+  /** The view follows a live run's latest events; only then does new work unfold its groups. */
+  following?: boolean;
 };
 
 /** Sequences remain invisible wiring, just as in the editor; fold semantic groups only. */

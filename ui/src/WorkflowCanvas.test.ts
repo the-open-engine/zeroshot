@@ -11,6 +11,7 @@ import {
 import { JSDOM } from 'jsdom';
 import type { GraphNode, Runtime } from './domain';
 import type { CanvasView } from './run-view-state';
+import type { WorkflowObservation } from './workflow-observation';
 import { createViteTestServer, installTestGlobals, runDetailFixture } from './test-support';
 
 type ElkMessage = { data: unknown };
@@ -152,6 +153,8 @@ type CanvasOptions = {
   observer?: typeof MeasuringObserver;
   toolbarStart?: ReturnType<typeof createElement>;
   deselect?: () => void;
+  /** Receives a way to render the canvas again with another observation. */
+  observe?: (render: (observation: WorkflowObservation) => Promise<void>) => void;
 };
 
 /** A page where React Flow measures its nodes and ELK lays them out. */
@@ -236,28 +239,31 @@ async function mountRunGraph(
     graph: { ...detail.graph, root: options.root ?? root },
     runtime: options.runtime ?? detail.runtime,
   };
-  await act(async () =>
-    reactRoot.render(
-      createElement(
-        ReactFlowProvider,
-        null,
-        createElement(WorkflowCanvas, {
-          document,
-          selected: '',
-          positions: {},
-          setPositions: () => {},
-          workers: [],
-          select: () => {},
-          observation: options.readOnly === false ? undefined : { key: detail.runId, nodes: {} },
-          view,
-          inspectorHidden: false,
-          showInspector: () => {},
-          toolbarStart: options.toolbarStart,
-          deselect: options.deselect,
-        })
+  const render = (observation: WorkflowObservation | undefined) =>
+    act(async () =>
+      reactRoot.render(
+        createElement(
+          ReactFlowProvider,
+          null,
+          createElement(WorkflowCanvas, {
+            document,
+            selected: '',
+            positions: {},
+            setPositions: () => {},
+            workers: [],
+            select: () => {},
+            observation,
+            view,
+            inspectorHidden: false,
+            showInspector: () => {},
+            toolbarStart: options.toolbarStart,
+            deselect: options.deselect,
+          })
+        )
       )
-    )
-  );
+    );
+  await render(options.readOnly === false ? undefined : { key: detail.runId, nodes: {} });
+  options.observe?.(render);
   await settle(container, () =>
     matchesViewport(container, view.viewport ?? fitted(container, options.size ?? canvas))
   );
@@ -403,6 +409,25 @@ test('Expand all and Collapse all are unavailable when they would do nothing, ke
   // An unavailable toggle does nothing.
   await click(container, 'Expand all groups');
   assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'false');
+});
+
+test('only a followed live run unfolds groups for new work; scrubbing keeps the folds', async (t) => {
+  let render: ((observation: WorkflowObservation) => Promise<void>) | undefined;
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    observe: (next) => (render = next),
+  });
+  const folded = () =>
+    container.querySelector('[aria-label="Collapse all groups"]')?.getAttribute('aria-disabled') ===
+    'true';
+  // The saved view folds the loop; scrubbing to where its work runs keeps it folded.
+  assert.ok(folded());
+  const writing = { write: { state: 'running' as const } };
+  await render!({ key: 'run', nodes: writing });
+  await settle(container);
+  assert.ok(folded(), 'scrubbing keeps the fold');
+  await render!({ key: 'run', nodes: { review: { state: 'running' } }, following: true });
+  await settle(container);
+  assert.ok(!folded(), 'new live work unfolds its group');
 });
 
 test('a folded error route is no group to expand or collapse', async (t) => {

@@ -23,6 +23,7 @@ import { WorkflowCanvas } from './WorkflowCanvas';
 import { findNode, labels, type Document, type GraphNode, type Positions } from './domain';
 import type { WorkerOption } from './workers';
 import { nodeTitle } from './workflow-projection';
+import type { WorkflowObservation } from './workflow-observation';
 import { appendHistory, type RunHistoryReader } from './run-history-source';
 import {
   currentInvocation,
@@ -66,6 +67,15 @@ type RunHistoryViewProps = {
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
 };
+/** What the graph shows of the run, and whether it follows a live run's latest events. */
+function observed(
+  key: string,
+  nodes: WorkflowObservation['nodes'],
+  following: boolean
+): WorkflowObservation {
+  return { key, nodes, following };
+}
+
 /** Where a node replay starts: its first event, unless the view is already part-way through it. */
 function replayStart(replay: readonly number[], position: number, restart: boolean): number {
   const first = replay[0],
@@ -286,7 +296,7 @@ export function RunHistoryView({
                 workers={workers}
                 select={inspect}
                 focus={focus}
-                observation={{ key: run.runId, nodes: projection.nodes }}
+                observation={observed(run.runId, projection.nodes, isLiveRun && following)}
                 view={canvas}
                 onViewChange={setCanvas}
                 inspectorHidden={!inspector}
