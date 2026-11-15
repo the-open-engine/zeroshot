@@ -174,6 +174,70 @@ fn native_shared_lock_blocks_database_writes_and_detects_reserved_writers() {
 }
 
 #[test]
+fn steer_queries_supply_nullable_recorded_time_for_the_shared_replay_decoder() {
+    use crate::v2_run_ledger::{
+        cursor_for,
+        sqlite::{SCHEMA, readonly, steering},
+        vector_event,
+    };
+    use openengine_cluster_protocol::{RunId, RunVectorContent};
+    use openengine_cluster_testkit::assertions::AssertValue;
+    use rusqlite::params;
+
+    let root = tempfile::tempdir().assert_value();
+    let path = root.path().join("steering.sqlite");
+    let run = RunId::new("steer-row");
+    let event = vector_event(
+        &run,
+        RunVectorContent::Steer {
+            text: "keep going".into(),
+        },
+    )
+    .assert_value();
+    let connection = Connection::open(&path).assert_value();
+    connection.execute_batch(SCHEMA).assert_value();
+    connection
+        .execute(
+            "INSERT INTO v2_runs VALUES (?1, ?1, 'digest', 1, '{}')",
+            [run.as_str()],
+        )
+        .assert_value();
+    connection
+        .execute(
+            "INSERT INTO v2_run_events (run_id, sequence, event_json) VALUES (?1, 1, ?2)",
+            params![run.as_str(), serde_json::to_string(&event).assert_value()],
+        )
+        .assert_value();
+    drop(connection);
+
+    for legacy in [false, true] {
+        if legacy {
+            Connection::open(&path)
+                .assert_value()
+                .execute_batch("DROP INDEX v2_run_steering")
+                .assert_value();
+        }
+        let before = std::fs::read(&path).assert_value();
+        let reader = readonly::open(&path).assert_value();
+        let connection = &reader.connection;
+        let query = steering::query(connection).assert_value().assert_value();
+        // The recorded-time decoder reads column 2 even for retained ledgers without it.
+        let recorded_at = connection
+            .query_row(query, params![run.as_str(), 0, 256], |row| {
+                row.get::<_, Option<i64>>(2)
+            })
+            .assert_value();
+        assert_eq!(recorded_at, None);
+        let events = steering::read(connection, &run, None).assert_value();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].cursor, cursor_for(1));
+        assert_eq!(events[0].event, event);
+        drop(reader);
+        assert_eq!(std::fs::read(&path).assert_value(), before);
+    }
+}
+
+#[test]
 fn steer_legacy_read_only_status_seeks_vector_index_without_scanning_logs() {
     use crate::v2_run_ledger::sqlite::{SCHEMA, readonly, steering};
     use openengine_cluster_protocol::RunId;
@@ -189,7 +253,8 @@ fn steer_legacy_read_only_status_seeks_vector_index_without_scanning_logs() {
          INSERT INTO v2_runs VALUES ('legacy', 'legacy', 'digest', 20000, '{}');
          WITH RECURSIVE entries(sequence) AS (
              SELECT 1 UNION ALL SELECT sequence + 1 FROM entries WHERE sequence < 20000
-         ) INSERT INTO v2_run_events SELECT 'legacy', sequence, '{\"kind\":\"log\"}' FROM entries;",
+         ) INSERT INTO v2_run_events (run_id, sequence, event_json)
+           SELECT 'legacy', sequence, '{\"kind\":\"log\"}' FROM entries;",
         )
         .assert_value();
     drop(connection);

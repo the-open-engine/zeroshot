@@ -1,13 +1,14 @@
 //! Seek only steering entries in the sole event record, including on read-only connections.
 use super::*;
 
-pub(super) const QUERY: &str = "SELECT sequence, event_json FROM v2_run_events
+// Keep the nullable recorded-time slot expected by newer shared replay decoders.
+pub(super) const QUERY: &str = "SELECT sequence, event_json, NULL FROM v2_run_events
     WHERE run_id = ?1 AND sequence > ?2
       AND json_extract(event_json, '$.kind') = 'vector'
       AND json_extract(event_json, '$.vector.kind') IN ('steer', 'steer_receipt')
     ORDER BY sequence LIMIT ?3";
 
-const LEGACY_QUERY: &str = "SELECT sequence, event_json FROM v2_run_events
+const LEGACY_QUERY: &str = "SELECT sequence, event_json, NULL FROM v2_run_events
     INDEXED BY v2_run_vector_ids
     WHERE run_id = ?1 AND sequence > ?2
       AND json_extract(event_json, '$.kind') = 'vector'
