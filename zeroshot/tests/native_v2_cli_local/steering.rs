@@ -23,12 +23,17 @@ if node == 'check' and iteration == '2' and os.environ['FAKE_CODEX_MODE'] == 'st
     sys.exit(19)
 settings = next(arg for arg in sys.argv[1:] if arg.startswith('hooks.PreToolUse='))
 handler = tomllib.loads(settings)['hooks']['PreToolUse'][0]['hooks'][0]
+if node == 'check' and iteration == '1' and os.environ['FAKE_CODEX_MODE'] == 'steer-replace':
+    (root/'steer-check-held').touch()
+    while not (root/'steer-check-release').exists(): time.sleep(.02)
 for call in range(2):
     result = subprocess.run(handler['command'], shell=True, input=json.dumps({'tool_name':'Read','tool_input':{'file_path':'README.md'}}), text=True, capture_output=True, check=True)
     path = root/('steer-tool-'+identity+'-'+str(call))
     # Retain the first callback when the adapter retries a failed native turn.
     if os.environ['FAKE_CODEX_MODE'] != 'steer-old' or not path.exists():
         path.write_text(result.stdout)
+if node == 'worker' and iteration == '1' and os.environ['FAKE_CODEX_MODE'] == 'steer-replace':
+    while not (root/'steer-worker-finish').exists(): time.sleep(.02)
 if node == 'worker' and iteration == '2' and os.environ['FAKE_CODEX_MODE'] == 'steer-old':
     sys.exit(19)
 "#,
@@ -59,11 +64,14 @@ if node == 'worker' and iteration == '2' and os.environ['FAKE_CODEX_MODE'] == 's
     fixture
 }
 async fn steer_held(fixture: &LocalFixture) {
+    steer_observed(fixture, "steer-held").await;
+}
+async fn steer_observed(fixture: &LocalFixture, marker: &str) {
     let deadline = Instant::now() + CLI_TIMEOUT;
-    while !fixture.repository.join("steer-held").exists() {
+    while !fixture.repository.join(marker).exists() {
         assert!(
             Instant::now() < deadline,
-            "steer provider never held its turn"
+            "steer provider never wrote {marker}"
         );
         sleep(Duration::from_millis(20)).await;
     }
@@ -73,6 +81,60 @@ fn steer_read(fixture: &LocalFixture, name: &str) -> String {
 }
 fn steer_release(fixture: &LocalFixture) {
     fs::write(fixture.repository.join("steer-release"), "go").assert_value();
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_live_controller_keeps_delivering_after_atomic_executable_replacement() {
+    let mut fixture = steer_fixture();
+    let mut runtime: Value =
+        serde_json::from_slice(&fs::read(&fixture.runtime).assert_value()).assert_value();
+    runtime["workspaceCheckpoints"] = json!(false);
+    write_json(&fixture.runtime, &runtime);
+    // Replace only this fixture's installation, leaving the shared candidate untouched.
+    fixture.executable = fixture.root.path("installed-zeroshot");
+    fs::copy(env!("CARGO_BIN_EXE_zeroshot"), &fixture.executable).assert_value();
+    let run = fixture.submit_detached("steer-replace").await;
+    steer_held(&fixture).await;
+    let controller = fixture.ready_pid(&run);
+    fixture
+        .json(&["steer", &run, "before replacement"], "steer-replace")
+        .await;
+    steer_release(&fixture);
+    steer_observed(&fixture, "steer-tool-worker-1-1-1").await;
+    assert!(steer_read(&fixture, "steer-tool-worker-1-1-0").contains("before replacement"));
+    assert!(!steer_read(&fixture, "steer-tool-worker-1-1-1").contains("<steer>"));
+
+    let staged = fixture.root.path("replacement-zeroshot");
+    fs::copy(env!("CARGO_BIN_EXE_zeroshot"), &staged).assert_value();
+    fs::rename(staged, &fixture.executable).assert_value();
+    let mut deleted = fixture.executable.as_os_str().to_owned();
+    deleted.push(" (deleted)");
+    assert_eq!(
+        fs::read_link(format!("/proc/{controller}/exe")).assert_value(),
+        PathBuf::from(deleted)
+    );
+    fs::write(fixture.repository.join("steer-worker-finish"), "go").assert_value();
+    steer_observed(&fixture, "steer-check-held").await;
+    assert_eq!(fixture.ready_pid(&run), controller);
+    let receipt = fixture
+        .json(&["steer", &run, "after replacement"], "steer-replace")
+        .await;
+    assert_eq!(receipt["steer"]["receivedExecutions"], 0);
+    fs::write(fixture.repository.join("steer-check-release"), "go").assert_value();
+    fixture.wait_succeeded(&run, "steer-replace").await;
+    wait_for_exit(controller).await;
+    assert!(steer_read(&fixture, "steer-tool-check-1-1-0").contains("after replacement"));
+    assert!(!steer_read(&fixture, "steer-tool-check-1-1-1").contains("<steer>"));
+    let status = fixture.json(&["status", &run], "steer-replace").await;
+    let steer = status["steers"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .find(|steer| steer["id"] == receipt["steer"]["id"])
+        .assert_value();
+    // The verifier's tool call, the continued worker's prompt and the new verifier's prompt.
+    assert_eq!(steer["receivedExecutions"], 3);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

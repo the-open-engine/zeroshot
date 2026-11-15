@@ -29,6 +29,7 @@ fn hook_executable() -> io::Result<std::path::PathBuf> {
     #[cfg(not(test))]
     {
         std::env::current_exe()
+            .map(|executable| crate::execution::platform::installed_path(&executable))
     }
 }
 

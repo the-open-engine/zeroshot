@@ -143,6 +143,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
   transport failure makes maintenance evidence unknown; a steer has no receipt and is offered again.
+  Native callback installation shares the updater's installed-executable path normalization, so
+  Linux controllers keep delivering after an atomic executable replacement.
   Callback frames have absolute I/O deadlines
   so a stalled child cannot keep the resident broker or run cleanup alive indefinitely.
   Interrupted auxiliary work marks run usage incomplete. Discovery includes authentic main-run
