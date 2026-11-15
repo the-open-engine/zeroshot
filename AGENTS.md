@@ -1081,6 +1081,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   admission. Acceptance checks both durable result events, reserving the maximum identity and
   timestamp widths until allocation.
   Their opaque accepted resolution survives restoration without another deadline decision.
+- Every stored ledger event carries an optional envelope `recordedAt` (`StoredRunEvent::recorded_at`,
+  SQLite `v2_run_events.recorded_at_ms`) beside `cursor`, never inside `RunEvent`, so replay and the
+  reducer stay time-independent. Each append transaction stamps one ledger wall-clock reading on
+  every event in the batch, clamped to the run's previous recorded time. Cursor alone defines order.
+  Writable opens add the nullable column in place; read-only opens never migrate, and rows from
+  before the column read as unknown rather than estimated. Imported prerequisites and inherited
+  vectors carry their import time in the successor, since checkpoint snapshots keep no original
+  timing; vectors retain their own `createdAt`. `SafeLog.timestamp` keeps its producer meaning.
 - Durable observation replay reads bounded ledger pages that fit every accepted event, including
   combined request text and contracts, and retains its scan cursor across pages.
   NDJSON and WebSocket run inventories bound each typed status separately from the response

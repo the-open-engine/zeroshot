@@ -86,6 +86,12 @@ export type Outcome = {
 };
 export type HistoryEvent = {
   cursor: string;
+  /**
+   * Unix milliseconds when the ledger recorded this event; one value per append batch and never
+   * decreasing within a run. Absent when unknown: older servers and ledgers, or rows recorded
+   * before the ledger kept times. Order is defined by `cursor` alone.
+   */
+  recordedAt?: number;
   event: {
     kind: string;
     reference?: Reference;

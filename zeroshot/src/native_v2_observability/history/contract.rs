@@ -3,7 +3,8 @@
 
 use std::collections::BTreeMap;
 
-use openengine_cluster_protocol::{Cursor, FailureContext, RunId, TerminalResult};
+use openengine_cluster_protocol::{Cursor, FailureContext, RunId, TerminalResult, UnixTimestampMillis};
+use serde::Deserialize;
 
 use super::{HistoryPage, RunDefinition, RuntimeFailure};
 use crate::v2_run_ledger::{cursor_for, cursor_sequence, RunPhase, MAX_REPLAY_EVENTS};
@@ -128,6 +129,7 @@ fn validate_events(
 ) -> Result<BTreeMap<u64, usize>, RunHistoryContractError> {
     let mut sequence = requested;
     let mut positions = BTreeMap::new();
+    let mut latest_recorded_at = None;
     for (position, event) in events.iter().enumerate() {
         sequence = sequence.checked_add(1).ok_or_else(contract_error)?;
         let cursor = event
@@ -138,12 +140,30 @@ fn validate_events(
         if canonical_sequence(&cursor)? != sequence {
             return invalid();
         }
+        latest_recorded_at = validate_recorded_at(event.get("recordedAt"), latest_recorded_at)?;
         positions.insert(sequence, position);
     }
     if sequence != next {
         return invalid();
     }
     Ok(positions)
+}
+
+/// A ledger-recorded time is optional; when present it is positive safe Unix milliseconds, the
+/// same values the ledger writes and browsers accept, and never earlier than a previous one.
+/// Returns the latest recorded time seen so far.
+fn validate_recorded_at(
+    value: Option<&serde_json::Value>,
+    latest: Option<UnixTimestampMillis>,
+) -> Result<Option<UnixTimestampMillis>, RunHistoryContractError> {
+    let Some(value) = value else {
+        return Ok(latest);
+    };
+    let time = UnixTimestampMillis::deserialize(value).map_err(|_| contract_error())?;
+    if latest.is_some_and(|latest| time < latest) {
+        return invalid();
+    }
+    Ok(Some(time))
 }
 
 fn validate_control(

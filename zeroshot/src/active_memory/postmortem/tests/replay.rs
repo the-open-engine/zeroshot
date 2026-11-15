@@ -97,6 +97,7 @@ async fn replay(cancel: Option<watch::Sender<bool>>) -> (PostmortemRequest, Arc<
     request.snapshot.cursor = cursor_for(6000);
     let events = (1..=6001)
         .map(|sequence| StoredRunEvent {
+            recorded_at: None,
             cursor: cursor_for(sequence),
             event: RunEvent::SafeLog {
                 execution: Some(if sequence == 1 { first } else { second }),

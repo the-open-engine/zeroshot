@@ -408,7 +408,31 @@ impl<'de> Deserialize<'de> for SafeLogLine {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct StoredRunEvent {
     pub cursor: Cursor,
+    /// When this ledger durably recorded the event: one value per append transaction from the
+    /// ledger's wall clock, never earlier than the run's previous recorded time. Order is still
+    /// defined only by `cursor`; this time is informational. Absent for events recorded before
+    /// ledgers kept it, which stay unknown rather than estimated. Imported history
+    /// (`PriorExecution`, inherited vectors) carries the time it was imported into this run,
+    /// because checkpoint snapshots do not retain when the original work happened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_at: Option<UnixTimestampMillis>,
     pub event: RunEvent,
+}
+
+/// Wall clock a ledger uses to stamp `StoredRunEvent::recorded_at`.
+pub type LedgerClock = std::sync::Arc<dyn Fn() -> UnixTimestampMillis + Send + Sync>;
+
+pub(crate) fn system_clock() -> LedgerClock {
+    std::sync::Arc::new(crate::native_v2_runner::current_timestamp)
+}
+
+/// One batch time: the clock reading, clamped so a run's recorded times never decrease.
+pub(crate) fn batch_recorded_at(
+    clock: &LedgerClock,
+    previous: Option<UnixTimestampMillis>,
+) -> UnixTimestampMillis {
+    let now = clock();
+    previous.map_or(now, |previous| now.max(previous))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

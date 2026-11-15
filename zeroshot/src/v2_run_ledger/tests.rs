@@ -23,6 +23,8 @@ use crate::native_v2_contract::{
 
 #[path = "tests/primary_restart.rs"]
 mod primary_restart;
+#[path = "tests/recorded_at.rs"]
+mod recorded_at;
 
 fn admitted_run() -> AdmittedRun {
     let graph: CompiledGraphIr = serde_json::from_str(include_str!(
