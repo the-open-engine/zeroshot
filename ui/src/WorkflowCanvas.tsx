@@ -61,7 +61,7 @@ import { nodeOutputFields } from './node-data';
 import { nodePresentation, nodeIcons } from './node-presentation';
 import type { WorkerOption } from './workers';
 import {
-  drawnOwners,
+  drawableGroups,
   projectWorkflow,
   type WorkflowNode,
   type WorkflowEdge,
@@ -668,21 +668,9 @@ function clickNode(
   else if (node.type === 'region' && !target.closest('.workflow-region-header')) p.deselect?.();
 }
 
-/**
- * Groups the canvas draws, expanded or folded. A decision that shares its verifier's card when
- * expanded still has a card of its own when folded; a folded error route has neither.
- */
+/** Groups Expand and Collapse all can change: those the canvas draws, expanded or folded. */
 function useDrawnGroups(document: Document) {
-  return useMemo(() => {
-    const drawn = drawnOwners(document);
-    const foldedCard = (name: string) =>
-      projectWorkflow(document, new Set([name])).nodes.some((node) => node.owner === name);
-    return new Set(
-      [...collapsedWorkflowGroups(document.graph.root)].filter(
-        (name) => drawn.has(name) || foldedCard(name)
-      )
-    );
-  }, [document]);
+  return useMemo(() => drawableGroups(document), [document]);
 }
 
 export function WorkflowCanvas(p: WorkflowCanvasProps) {
