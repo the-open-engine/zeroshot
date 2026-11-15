@@ -51,6 +51,18 @@ export type InspectorProps = {
   selectNode: (name: string) => void;
   addOtherwise: (name: string) => void;
 };
+/** What the inspector calls the selected node: the run itself, a delivery, or its kind of work. */
+function inspectorTitle(doc: Document, node: GraphNode | undefined, bindingKind?: string): string {
+  if (!node) return 'Nothing selected';
+  if (isDeliveryKind(bindingKind))
+    return bindingKind === 'comment_delivery' ? 'Comment delivery' : 'Git delivery';
+  if (node.name === doc.graph.root.name) return 'Run settings';
+  if (node.kind === 'choice') return 'Decision';
+  if (node.kind === 'succeed') return 'Run result';
+  if (node.kind === 'fail') return 'Stop outcome';
+  return activityLabel(node.kind, bindingKind, node.worker);
+}
+
 export function Inspector(p: InspectorProps) {
   const numericDrafts = useNumericDrafts();
   const { document: doc, node } = p;
@@ -81,23 +93,7 @@ export function Inspector(p: InspectorProps) {
             />
           )
         }
-        title={
-          !node
-            ? 'Nothing selected'
-            : delivery
-              ? binding?.kind === 'comment_delivery'
-                ? 'Comment delivery'
-                : 'Git delivery'
-              : node.name === doc.graph.root.name
-                ? 'Run settings'
-                : node.kind === 'choice'
-                  ? 'Decision'
-                  : node.kind === 'succeed'
-                    ? 'Run result'
-                    : node.kind === 'fail'
-                      ? 'Stop outcome'
-                      : activityLabel(node.kind, binding?.kind, node.worker)
-        }
+        title={inspectorTitle(doc, node, binding?.kind)}
         close={p.close}
       />
       <div className="inspector-scroll" ref={scroll}>

@@ -74,6 +74,13 @@ type RunHistoryViewProps = {
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
 };
+/** Where a node replay starts: its first event, unless the view is already part-way through it. */
+function replayStart(replay: readonly number[], position: number, restart: boolean): number {
+  const first = replay[0],
+    last = replay.at(-1)!;
+  return restart || position < first || position >= last ? first : position;
+}
+
 export function RunHistoryView({
   runId,
   source,
@@ -217,9 +224,7 @@ export function RunHistoryView({
       setPlaying(false);
       return;
     }
-    const first = selectedReplay[0],
-      last = selectedReplay.at(-1)!;
-    const start = restart || safePosition < first || safePosition >= last ? first : safePosition;
+    const start = replayStart(selectedReplay, safePosition, restart);
     setCursorIndex(moments[start].index);
     setExecution('');
     setReadingExecution('');

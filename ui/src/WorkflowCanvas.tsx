@@ -619,6 +619,21 @@ type WorkflowCanvasProps = {
   toolbarStart?: ReactNode;
 };
 
+/**
+ * An activity selects its node. A group's box is drawn space, not a target of its own, so its
+ * blank inside acts as the canvas (the workflow's details), except its header, whose buttons select
+ * or fold the group. Double-click zoom is off on the canvas so a click always means selection; the
+ * zoom controls, scroll and pinch still zoom.
+ */
+function clickNode(
+  p: WorkflowCanvasProps,
+  target: Element,
+  node: { type?: string; data: unknown }
+) {
+  if (node.type === 'activity') p.select((node.data as ActivityData).item.owner);
+  else if (node.type === 'region' && !target.closest('.workflow-region-header')) p.deselect?.();
+}
+
 export function WorkflowCanvas(p: WorkflowCanvasProps) {
   const { fitView, setCenter, setViewport } = useReactFlow();
   const fitGraph = () => void fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 });
@@ -860,20 +875,9 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          // A click on empty canvas shows the workflow's details at once. Double-click zoom is off
-          // so a click always means selection; the zoom controls, scroll and pinch still zoom.
           zoomOnDoubleClick={false}
           onPaneClick={p.deselect}
-          onNodeClick={(event, node) => {
-            if (node.type === 'activity') p.select((node.data as ActivityData).item.owner);
-            // A group's box is drawn space, not a target of its own: treat it as the canvas,
-            // except its header, whose buttons select or fold the group.
-            else if (
-              node.type === 'region' &&
-              !(event.target as Element).closest('.workflow-region-header')
-            )
-              p.deselect?.();
-          }}
+          onNodeClick={(event, node) => clickNode(p, event.target as Element, node)}
           onNodeDragStop={(_, node) => {
             if (readOnly) return;
             p.setPositions({ ...positionsRef.current, [layoutKey + node.id]: node.position });
