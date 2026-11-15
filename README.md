@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**A multi-agent orchestration engine that keeps coding agents from grading their own work.**
+**A multi-agent orchestration engine that keeps coding agents from grading their own work. Runs locally on top of your agent subscription.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Docs](https://zeroshot.sh/docs/) · [Research blog](https://zeroshot.sh/blog/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord)
 
