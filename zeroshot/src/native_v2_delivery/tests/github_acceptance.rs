@@ -142,6 +142,61 @@ fn assert_production_github_capture(gh_capture: &str, home: &Path) {
 }
 
 #[tokio::test]
+async fn plan_unavailable_branch_rules_allow_readiness_and_exact_head_merge_submission() {
+    let repo = TempRepo::delivery();
+    let source = GH_SCRIPT.replace(
+        "/usr/bin/printf '%s\\n' '[[]]'",
+        concat!(
+            "/usr/bin/printf '%s\\n' '[{\"message\":\"Upgrade to GitHub Pro or make this repository public to enable this feature.\",",
+            "\"documentation_url\":\"https://docs.github.com/rest/repos/rules#get-rules-for-a-branch\",\"status\":\"403\"}]'\n",
+            "/usr/bin/printf '%s\\n' 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' >&2\n",
+            "exit 1",
+        ),
+    );
+    assert_ne!(source, GH_SCRIPT);
+    let program = write_executable(repo.root.path(), "gh-plan-unavailable", &source);
+    let authority = github_authority(
+        repo.root.path(),
+        PathBuf::from("/usr/bin/git"),
+        program.clone(),
+    );
+    let credential = SourceDeliveryCredential::token("test-token");
+    let review = authority
+        .open_or_update_review(&review_request(Some(208)), credential)
+        .await
+        .assert_value();
+    let observation = authority
+        .inspect_review(&review, credential)
+        .await
+        .assert_value();
+    assert!(!observation.head_update_required);
+    assert_eq!(
+        observation.state,
+        SourceReviewState::Open {
+            checks: SourceChecks::NotRequired
+        }
+    );
+    assert_eq!(
+        authority
+            .request_merge(&review, credential, &TestReviewCheckpoint)
+            .await
+            .assert_value(),
+        SourceMergeRequestOutcome::Accepted,
+    );
+    // Submission alone is not authoritative evidence that GitHub merged the reviewed head.
+    assert_eq!(
+        authority
+            .inspect_review(&review, credential)
+            .await
+            .assert_value()
+            .state,
+        observation.state
+    );
+    let capture = fs::read_to_string(format!("{}.capture", program.display())).assert_value();
+    assert_production_github_capture(&capture, repo.root.path());
+}
+
+#[tokio::test]
 async fn production_gh_transport_preserves_safe_api_failure_detail() {
     let repo = TempRepo::delivery();
     let gh_program = write_executable(

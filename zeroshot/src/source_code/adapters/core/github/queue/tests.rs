@@ -58,7 +58,10 @@ set -eu
 case "$2" in
 'repos/acme/project/rules/branches/main?per_page=100')
     printf '%s\n' "$@" >> "$HOME/rules-reads"
-    if [ -f "$HOME/branch-rules-error" ]; then /bin/cat "$HOME/branch-rules-error" >&2; exit 1; fi
+    if [ -f "$HOME/branch-rules-error" ]; then
+        if [ -f "$HOME/branch-rules.json" ]; then /bin/cat "$HOME/branch-rules.json"; fi
+        /bin/cat "$HOME/branch-rules-error" >&2; exit 1
+    fi
     if [ -f "$HOME/branch-rules.json" ]; then /bin/cat "$HOME/branch-rules.json"; else printf '[[]]\n'; fi ;;
 repos/acme/project/actions/jobs/*/logs) /bin/cat "$HOME/job-log" ;;
 graphql)
