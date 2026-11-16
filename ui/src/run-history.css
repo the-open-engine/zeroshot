@@ -357,25 +357,6 @@
   position: relative;
   --inspector-default-width: 370px;
 }
-.run-inspector-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 22px 20px 17px;
-  border-bottom: 1px solid var(--hairline);
-  gap: 12px;
-}
-.run-inspector-header h2 {
-  font-size: 20px;
-  font-weight: 600;
-  margin-top: 7px;
-  overflow-wrap: anywhere;
-}
-.inspector-kind {
-  margin-top: 2px;
-  font-size: 13px;
-  color: var(--ink-muted);
-}
 .run-inspector-content {
   padding: 20px;
   overflow-y: auto;

@@ -1,5 +1,5 @@
 import { mapSourceLabel } from './node-data';
-import type { Document, GraphNode } from './domain';
+import { pathTo, type Document, type GraphNode } from './domain';
 import { isObject, isStringList } from './guards';
 import { analyzeWorkflowOutcomes } from './workflow-outcomes';
 
@@ -60,7 +60,8 @@ const nodeLike = (value: unknown): value is GraphNode =>
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 const positive = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
-const title = (name: string) => {
+/** A node's name as its card shows it. */
+export const nodeTitle = (name: string) => {
   const words = name.replace(/[_-]+/g, ' ');
   return words ? words[0].toUpperCase() + words.slice(1) : 'Unnamed activity';
 };
@@ -71,7 +72,7 @@ const encodedName = (name: string) => encodeURIComponent(JSON.stringify(name));
 
 function controlLabel(value: any): string {
   if (!isObject(value) || typeof value.name !== 'string') return 'Unspecified result';
-  const name = title(value.name);
+  const name = nodeTitle(value.name);
   if (value.source === 'error') return `${name} error`;
   if ((value.source === 'signal' || value.source === 'group') && typeof value.field === 'string')
     return `${name} · ${value.field}`;
@@ -146,7 +147,7 @@ export function compactGuardLabel(guard: unknown): string | undefined {
       : undefined;
   }
   const single = errorSource(guard);
-  if (single) return bounded(`${title(single)} has an error`);
+  if (single) return bounded(`${nodeTitle(single)} has an error`);
   if (
     !isObject(guard) ||
     !onlyKeys(guard, ['kind', 'guards']) ||
@@ -278,6 +279,31 @@ function decisionReadsVerifier(
 }
 
 /** Project the authored tree into workflow structure; never normalize or mutate it. */
+/**
+ * The graph nodes the canvas gives a card or a region of their own when everything is expanded.
+ * Sequences only order their children, folded error routes draw their fallback in place, and a
+ * decision that reads the verifier before it shares that verifier's card, so none of them appear.
+ */
+export function drawnOwners(document: Document): Set<string> {
+  const projection = projectWorkflow(document);
+  return new Set([
+    ...projection.nodes.map((node) => node.owner),
+    ...projection.regions.map((region) => region.owner),
+  ]);
+}
+
+/** The groups enclosing `name` that the canvas draws, outermost first, always starting at the root. */
+export function drawnAncestors(
+  document: Document,
+  name: string,
+  drawn: ReadonlySet<string> = drawnOwners(document)
+): GraphNode[] {
+  const root = document.graph.root;
+  return pathTo(root, name)
+    .slice(0, -1)
+    .filter((ancestor) => ancestor === root || drawn.has(ancestor.name));
+}
+
 export function projectWorkflow(
   document: Document,
   collapsed: Set<string> = new Set()
@@ -407,7 +433,12 @@ class WorkflowProjectionBuilder {
             : node.kind === 'choice'
               ? 'Ordered decision'
               : 'Subprocess';
-      const id = this.addNode(node, 'collapsed', title(node.name), `${description} · collapsed`);
+      const id = this.addNode(
+        node,
+        'collapsed',
+        nodeTitle(node.name),
+        `${description} · collapsed`
+      );
       return {
         entry: id,
         exits: structurallyContinues(node)
@@ -474,7 +505,7 @@ class WorkflowProjectionBuilder {
       : this.addNode(
           node,
           'decision',
-          title(node.name),
+          nodeTitle(node.name),
           'First matching outcome wins · evaluate top to bottom'
         );
     const ids = attached ? [] : [decision],
@@ -514,7 +545,7 @@ class WorkflowProjectionBuilder {
     const fork = this.addNode(
       node,
       'fork',
-      title(node.name),
+      nodeTitle(node.name),
       `Parallel branches · ${joinLabel(node)}`
     );
     const fragments = branches.map((branch, index) => {
@@ -549,7 +580,7 @@ class WorkflowProjectionBuilder {
       ids.push(join);
       exits = [{ source: join }];
     }
-    this.region(node, 'par', `${title(node.name)} · ${joinLabel(node)}`, ids);
+    this.region(node, 'par', `${nodeTitle(node.name)} · ${joinLabel(node)}`, ids);
     return { entry: fork, exits, ids };
   }
 
@@ -589,7 +620,7 @@ class WorkflowProjectionBuilder {
     const start = this.addNode(
       node,
       'loop-start',
-      title(node.name),
+      nodeTitle(node.name),
       `${bounds}${until ? ` · Stop when ${until}` : ''}`
     );
     const body = nodeLike(node.body)
@@ -623,7 +654,7 @@ class WorkflowProjectionBuilder {
         },
       ];
     }
-    this.region(node, 'loop', `${title(node.name)} · ${bounds}`, ids);
+    this.region(node, 'loop', `${nodeTitle(node.name)} · ${bounds}`, ids);
     return { entry: start, exits, ids };
   }
 
@@ -632,7 +663,7 @@ class WorkflowProjectionBuilder {
     const start = this.addNode(
       node,
       'map-start',
-      title(node.name),
+      nodeTitle(node.name),
       `${mapSourceLabel(this.document, node)}${limit ? ` · ${limit} ${limit === 1 ? 'item' : 'items'} at a time` : ''}`
     );
     const body = nodeLike(node.body)
@@ -654,7 +685,7 @@ class WorkflowProjectionBuilder {
         label: 'Repeat for remaining items',
       });
     const ids = [start, ...body.ids, end];
-    this.region(node, 'map', `${title(node.name)} · For each item`, ids);
+    this.region(node, 'map', `${nodeTitle(node.name)} · For each item`, ids);
     return {
       entry: start,
       exits: [{ source: end, owner: node.name, label: 'Items processed' }],
@@ -687,7 +718,7 @@ class WorkflowProjectionBuilder {
           : this.finalCompletions.has(node.name)
             ? 'Complete'
             : 'Finish run early'
-        : title(node.name);
+        : nodeTitle(node.name);
     const id = this.addNode(node, terminal ? 'completion' : 'activity', label, detail);
     return {
       entry: id,
