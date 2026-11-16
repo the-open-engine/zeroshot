@@ -105,9 +105,9 @@ impl LocalCliBackend {
                 params.from.as_ref(),
                 discard_workspace_changes,
             )?;
-            let recovery =
-                self.claimable_recovery_document(
-                    &params.run_id,
+            let recovery = self
+                .claimable_recovery_document(
+                    &status,
                     status.workspace_recovery.recoverable
                         || matches!(
                             (&status.status, &params.from),
@@ -120,7 +120,8 @@ impl LocalCliBackend {
                                 Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
                             )
                         ),
-                )?;
+                )
+                .await?;
             let claim = self.claim_recovery_workspace(&params.run_id)?;
             self.retain_predecessor_delivery(&params.run_id, &recovery)
                 .await?;
@@ -157,17 +158,31 @@ impl LocalCliBackend {
         Ok(())
     }
 
-    fn claimable_recovery_document(
+    async fn claimable_recovery_document(
         &self,
-        run_id: &RunId,
+        status: &RunStatusResult,
         recoverable: bool,
     ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
+        // An unavailable recovery record is an eligibility refusal at this boundary.
+        let recovery =
+            self.read_recovery_document(&status.run_id)
+                .map_err(|error| match error {
+                    NativeV2CliError::Local(message) => NativeV2CliError::Usage(message),
+                    error => error,
+                })?;
         if !recoverable {
-            return Err(local_message("run does not have a recoverable workspace"));
+            let reason = self
+                .recovery_workspace_refusal(status, &recovery)
+                .await?
+                .unwrap_or_else(|| "its recovery availability changed; retry resume".to_owned());
+            return Err(NativeV2CliError::Usage(format!(
+                "run cannot be resumed: {reason}"
+            )));
         }
-        let recovery = self.read_recovery_document(run_id)?;
         if recovery.successor_run_id.is_some() {
-            return Err(local_message("retained workspace was already claimed"));
+            return Err(NativeV2CliError::Usage(
+                "retained workspace was already claimed".to_owned(),
+            ));
         }
         Ok(recovery)
     }
@@ -558,7 +573,22 @@ impl NativeV2CliBackend for LocalCliBackend {
     ) -> Result<CliRunStatusResult, NativeV2CliError> {
         require_local(target)?;
         self.confirm_loss_for_resume(&params.run_id).await?;
-        self.status_local(params).await.map(Into::into)
+        let status = self.status_local(params).await?;
+        // Preserve successor and request handling in the shared CLI. Only local refusals are
+        // expanded here, before it falls back to the remote backend's generic diagnostic.
+        if !status.workspace_recovery.recoverable
+            && status.workspace_recovery.successor_run_id.is_none()
+            && !matches!(
+                &status.status,
+                openengine_cluster_protocol::RunStatus::Suspended {
+                    suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
+                    ..
+                }
+            )
+        {
+            self.claimable_recovery_document(&status, false).await?;
+        }
+        Ok(status.into())
     }
 
     async fn run_watch(

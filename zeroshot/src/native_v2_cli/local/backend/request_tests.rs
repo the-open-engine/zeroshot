@@ -206,6 +206,62 @@ async fn suspended_run(
 }
 
 #[tokio::test]
+async fn force_stopped_suspension_explains_why_resume_is_unavailable() {
+    let root = TestDirectory::new("stopped-resume");
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let backend = LocalCliBackend::new(
+        root.child("state"),
+        "unused".into(),
+        workspace,
+        "git".into(),
+    );
+    let (_, ledger) = suspended_run(&backend, false).await;
+    let run = resume(None).run_id;
+    ledger
+        .append(
+            &run,
+            vec![
+                RunEvent::ForceStopRequested,
+                RunEvent::Terminal {
+                    result: openengine_cluster_protocol::TerminalResult::Failed {
+                        reason: openengine_cluster_protocol::EnumLabel::new("force_stopped")
+                            .assert_value(),
+                        context: None,
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    let before = backend
+        .status_local(RunStatusParams {
+            run_id: run.clone(),
+        })
+        .await
+        .assert_value();
+    assert!(!before.workspace_recovery.recoverable);
+    let error = backend
+        .run_resume_status(
+            None,
+            RunStatusParams {
+                run_id: run.clone(),
+            },
+        )
+        .await
+        .assert_error()
+        .to_string();
+    assert!(error.contains("suspension was force-stopped"), "{error}");
+    assert_eq!(
+        backend
+            .status_local(RunStatusParams { run_id: run })
+            .await
+            .assert_value(),
+        before
+    );
+}
+
+#[tokio::test]
 async fn answer_preflight_errors_leave_no_successor_or_recovery_mutation() {
     let root = TestDirectory::new("local-answer-preflight");
     let workspace = root.child("workspace");

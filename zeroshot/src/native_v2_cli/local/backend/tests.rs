@@ -10,7 +10,7 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
-use super::super::local_contract_tests::{contract_submission, create_contract_run};
+use super::super::local_contract_tests::{contract_status, contract_submission, create_contract_run};
 use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, success_node};
 
 fn run_id(value: &str) -> RunId {
@@ -559,8 +559,15 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
         .assert_error();
 
     assert!(matches!(error, NativeV2CliError::Local(_)));
+    let status = backend
+        .status_local(RunStatusParams {
+            run_id: original.clone(),
+        })
+        .await
+        .assert_value();
     let restored = backend
-        .claimable_recovery_document(&original, true)
+        .claimable_recovery_document(&status, true)
+        .await
         .assert_value();
     assert_eq!(
         restored.delivery_run_id,
@@ -569,16 +576,25 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
     );
 }
 
-#[test]
-fn local_resume_claimability_fails_closed_before_controller_effects() {
+#[tokio::test]
+async fn local_resume_claimability_fails_closed_before_controller_effects() {
     let root = tempfile::tempdir().assert_value();
-    let backend = local_backend(root.path());
+    let backend = local_backend(&root.path().join("state"));
     let original_run_id = run_id("0199f33f-3b44-7d21-9000-000000000052");
+    let status = contract_status(
+        &contract_submission("claimability"),
+        original_run_id.clone(),
+        true,
+    );
     let unavailable = backend
-        .claimable_recovery_document(&original_run_id, false)
+        .claimable_recovery_document(&status, false)
+        .await
         .assert_error()
         .to_string();
-    assert!(unavailable.contains("does not have a recoverable workspace"));
+    assert!(
+        unavailable.contains("recovery record") && unavailable.contains("is missing"),
+        "{unavailable}"
+    );
 
     backend.create_run_storage(&original_run_id).assert_value();
     let workspace = root.path().join("workspace");
@@ -600,7 +616,8 @@ fn local_resume_claimability_fails_closed_before_controller_effects() {
         .write_recovery_document(&original_run_id, &recovery)
         .assert_value();
     let claimed = backend
-        .claimable_recovery_document(&original_run_id, true)
+        .claimable_recovery_document(&status, true)
+        .await
         .assert_error()
         .to_string();
     assert!(claimed.contains("already claimed"));
@@ -610,9 +627,77 @@ fn local_resume_claimability_fails_closed_before_controller_effects() {
         .write_recovery_document(&original_run_id, &recovery)
         .assert_value();
     let available = backend
-        .claimable_recovery_document(&original_run_id, true)
+        .claimable_recovery_document(&status, true)
+        .await
         .assert_value();
     assert_eq!(available.delivery_run_id, Some(original_run_id));
+
+    let before = std::fs::read(backend.recovery_path(&status.run_id).assert_value()).assert_value();
+    for (state, reason) in [
+        (json!({"phase":"admitted"}), "has not started"),
+        (
+            json!({"phase":"running","activeExecutions":[]}),
+            "still running",
+        ),
+        (
+            json!({"phase":"stopping","activeExecutions":[]}),
+            "still stopping",
+        ),
+        (
+            json!({"phase":"finished","terminalResult":{"status":"succeeded","output":null}}),
+            "succeeded",
+        ),
+        (
+            json!({"phase":"suspended","reason":"wait","node":"approval","createdAt":1000,
+            "wait":{"dueAt":openengine_cluster_protocol::MAX_SAFE_GENERATION}}),
+            "wait is due at",
+        ),
+    ] {
+        let mut ineligible = status.clone();
+        ineligible.status = serde_json::from_value(state).assert_value();
+        let projection = backend.workspace_recovery(&ineligible).await.assert_value();
+        assert!(!projection.recoverable);
+        let message = backend
+            .claimable_recovery_document(&ineligible, false)
+            .await
+            .assert_error()
+            .to_string();
+        assert!(message.contains(reason), "{message}");
+        assert_eq!(
+            backend.workspace_recovery(&ineligible).await.assert_value(),
+            projection
+        );
+    }
+    std::fs::remove_dir(&recovery.workspace).assert_value();
+    std::fs::write(&recovery.workspace, b"a file replaced the folder").assert_value();
+    let message = backend
+        .claimable_recovery_document(&status, false)
+        .await
+        .assert_error()
+        .to_string();
+    assert!(
+        message.contains("is not a folder")
+            && message.contains(&*recovery.workspace.to_string_lossy()),
+        "{message}"
+    );
+    assert_eq!(
+        std::fs::read(backend.recovery_path(&status.run_id).assert_value()).assert_value(),
+        before
+    );
+    std::fs::remove_file(&recovery.workspace).assert_value();
+    recovery.submission.runtime.workspace_checkpoints = false;
+    backend
+        .write_recovery_document(&status.run_id, &recovery)
+        .assert_value();
+    let message = backend
+        .claimable_recovery_document(&status, false)
+        .await
+        .assert_error()
+        .to_string();
+    assert!(
+        message.contains("no longer exists") && !message.contains("--from-checkpoint"),
+        "{message}"
+    );
 }
 
 #[tokio::test]

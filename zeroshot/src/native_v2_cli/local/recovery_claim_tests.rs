@@ -68,16 +68,18 @@ fn interrupted_resume_releases_the_workspace_claim_for_retry() {
 
     let interrupted_process_claim = backend.claim_recovery_workspace(&run_id).assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&run_id)
+        backend
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_some()
     );
 
     drop(interrupted_process_claim);
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 }
 

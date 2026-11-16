@@ -286,16 +286,30 @@ impl LocalCliBackend {
             return Ok(());
         }
         let paths = self.existing_run_paths(id)?;
-        if matches!(check_controller_with_timeout(&paths, id, DEFAULT_READY_TIMEOUT).await,
-            ControllerAvailability::Unavailable { observation: observed, .. }
-                if observed.state == openengine_cluster_protocol::ControllerState::Lost)
-        {
-            // Recovery acquires and verifies the existing lease before any ledger write.
-            let controller = PortableRunController::confirm_loss(paths, id.clone())
-                .await
-                .map_err(local_error)?;
-            drop(controller);
-            return Ok(());
+        match check_controller_with_timeout(&paths, id, DEFAULT_READY_TIMEOUT).await {
+            ControllerAvailability::Responding(_, status) => {
+                let reason = match status.status {
+                    RunStatus::Admitted {} => "it has not started",
+                    RunStatus::Running { .. } => "it is still running",
+                    RunStatus::Stopping { .. } => "it is still stopping",
+                    _ => "its controller has not durably settled",
+                };
+                return Err(NativeV2CliError::Usage(format!(
+                    "run cannot be resumed: {reason}"
+                )));
+            }
+            ControllerAvailability::Unavailable {
+                observation: observed,
+                ..
+            } if observed.state == openengine_cluster_protocol::ControllerState::Lost => {
+                // Recovery acquires and verifies the existing lease before any ledger write.
+                let controller = PortableRunController::confirm_loss(paths, id.clone())
+                    .await
+                    .map_err(local_error)?;
+                drop(controller);
+                return Ok(());
+            }
+            _ => {}
         }
         Err(local_message(format!(
             "controller availability is unknown; run {} is still owned or unreachable",

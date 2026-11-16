@@ -852,29 +852,55 @@ impl LocalCliBackend {
         &self,
         run_id: &RunId,
     ) -> Result<LocalRecoveryClaim, NativeV2CliError> {
+        let path = self.recovery_claim_path(run_id)?;
         let claim = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(self.recovery_claim_path(run_id)?)
-            .map_err(local_io)?;
+            .open(&path)
+            .map_err(|error| {
+                local_message(format!(
+                    "workspace claim {} could not be opened: {error}",
+                    path.display()
+                ))
+            })?;
         claim.try_lock_exclusive().map_err(|error| {
             if error.kind() == fs2::lock_contended_error().kind() {
-                local_message("retained workspace is already being resumed")
+                local_message(format!(
+                    "retained workspace is already being resumed (claim {})",
+                    path.display()
+                ))
             } else {
-                local_io(error)
+                local_message(format!(
+                    "workspace claim {} could not be acquired: {error}",
+                    path.display()
+                ))
             }
         })?;
         Ok(LocalRecoveryClaim(claim))
     }
 
-    fn recovery_workspace_is_unclaimed(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
+    fn recovery_workspace_claim_refusal(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<String>, NativeV2CliError> {
         let path = self.recovery_claim_path(run_id)?;
         match std::fs::symlink_metadata(&path) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-            _ => Ok(ControllerLease::probe(&path).is_ok_and(|probe| !probe.held)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            _ => {}
         }
+        Ok(match ControllerLease::probe(&path) {
+            Ok(probe) if !probe.held => None,
+            Ok(_) => Some(format!(
+                "its retained workspace is already being resumed (claim {})",
+                path.display()
+            )),
+            Err(error) => Some(format!(
+                "its workspace claim {} could not be checked: {error}",
+                path.display()
+            )),
+        })
     }
 
     /// Releases a successor claim whose controller never admitted the run. `handoff` bounds the
@@ -983,9 +1009,23 @@ impl LocalCliBackend {
 
 impl LocalRecoveryDocument {
     fn read(path: &Path) -> Result<Self, NativeV2CliError> {
-        let bytes = std::fs::read(path).map_err(local_io)?;
-        openengine_cluster_protocol::bounded_json_from_slice(&bytes)
-            .map_err(|_| local_message("workspace recovery metadata is invalid"))
+        let bytes = std::fs::read(path).map_err(|error| {
+            let reason = if error.kind() == std::io::ErrorKind::NotFound {
+                "is missing"
+            } else {
+                "could not be read"
+            };
+            local_message(format!(
+                "workspace recovery record {} {reason}: {error}",
+                path.display()
+            ))
+        })?;
+        openengine_cluster_protocol::bounded_json_from_slice(&bytes).map_err(|_| {
+            local_message(format!(
+                "workspace recovery record {} is invalid",
+                path.display()
+            ))
+        })
     }
 
     fn write(&self, path: &Path) -> Result<(), NativeV2CliError> {
@@ -1040,6 +1080,43 @@ impl LocalCliBackend {
             Ok(document) => document,
             Err(_) => return Ok(WorkspaceRecovery::default()),
         };
+        let unclaimed = self
+            .recovery_workspace_refusal(status, &document)
+            .await?
+            .is_none();
+        let request = matches!(
+            &status.status,
+            openengine_cluster_protocol::RunStatus::Suspended {
+                suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
+                ..
+            }
+        );
+        // With the recovery claim released, a successor that neither runs nor was admitted is
+        // an interrupted launch, such as a crash during its restore. The next resume reconciles
+        // it before claiming the workspace, so it does not block recovery.
+        let successor_run_id = match document.successor_run_id {
+            Some(successor) if unclaimed && self.interrupted_launch(&successor).await => None,
+            successor => successor,
+        };
+        Ok(WorkspaceRecovery {
+            recoverable: !request && unclaimed && successor_run_id.is_none(),
+            connection_requirements: document
+                .submission
+                .connection_requirements()
+                .into_iter()
+                .map(|(key, fields)| (key, fields.into_iter().collect()))
+                .collect(),
+            resumed_from: document.resumed_from,
+            successor_run_id,
+        })
+    }
+
+    /// Shared eligibility checks keep inspection's boolean and resume's diagnostic in agreement.
+    async fn recovery_workspace_refusal(
+        &self,
+        status: &RunStatusResult,
+        document: &LocalRecoveryDocument,
+    ) -> Result<Option<String>, NativeV2CliError> {
         let failed = matches!(
             status.status,
             openengine_cluster_protocol::RunStatus::Finished {
@@ -1050,13 +1127,6 @@ impl LocalCliBackend {
         let loss_observed = status.controller.as_ref().is_some_and(|observation| {
             observation.state == openengine_cluster_protocol::ControllerState::Lost
         });
-        let request = matches!(
-            &status.status,
-            openengine_cluster_protocol::RunStatus::Suspended {
-                suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
-                ..
-            }
-        );
         let suspended = match &status.status {
             openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } => suspension
                 .due_at()
@@ -1080,28 +1150,52 @@ impl LocalCliBackend {
         } else {
             false
         };
-        let unclaimed = !stopped_suspension
-            && (failed || suspended || loss_observed)
-            && document.workspace.is_dir()
-            && self.recovery_workspace_is_unclaimed(&status.run_id)?;
-        // With the recovery claim released, a successor that neither runs nor was admitted is
-        // an interrupted launch, such as a crash during its restore. The next resume reconciles
-        // it before claiming the workspace, so it does not block recovery.
-        let successor_run_id = match document.successor_run_id {
-            Some(successor) if unclaimed && self.interrupted_launch(&successor).await => None,
-            successor => successor,
-        };
-        Ok(WorkspaceRecovery {
-            recoverable: !request && unclaimed && successor_run_id.is_none(),
-            connection_requirements: document
-                .submission
-                .connection_requirements()
-                .into_iter()
-                .map(|(key, fields)| (key, fields.into_iter().collect()))
-                .collect(),
-            resumed_from: document.resumed_from,
-            successor_run_id,
-        })
+        if stopped_suspension {
+            return Ok(Some("its suspension was force-stopped".to_owned()));
+        }
+        if !(failed || suspended || loss_observed) {
+            use openengine_cluster_protocol::RunStatus;
+            return Ok(Some(match &status.status {
+                RunStatus::Admitted {} => "it has not started".to_owned(),
+                RunStatus::Running { .. } => "it is still running".to_owned(),
+                RunStatus::Stopping { .. } => "it is still stopping".to_owned(),
+                RunStatus::Finished { .. } => "it succeeded".to_owned(),
+                RunStatus::Suspended { suspension, .. } => match suspension.due_at() {
+                    Some(due) => format!("its wait is due at {}", due.get()),
+                    None => "it is not ready to continue".to_owned(),
+                },
+            }));
+        }
+        let workspace = document.workspace.display();
+        match std::fs::metadata(&document.workspace) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return Ok(Some(format!(
+                    "its workspace path {workspace} is not a folder"
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let hint = if document.submission.runtime.workspace_checkpoints {
+                    format!(
+                        "; to restore a checkpoint, \
+                     create a new empty folder at that path, then run `zeroshot resume {} \
+                     --from-checkpoint CHECKPOINT_ID --discard-workspace-changes`",
+                        status.run_id.as_str()
+                    )
+                } else {
+                    String::new()
+                };
+                return Ok(Some(format!(
+                    "its workspace folder {workspace} no longer exists{hint}"
+                )));
+            }
+            Err(error) => {
+                return Ok(Some(format!(
+                    "its workspace folder {workspace} could not be accessed: {error}"
+                )));
+            }
+        }
+        self.recovery_workspace_claim_refusal(&status.run_id)
     }
 
     async fn interrupted_launch(&self, successor_run_id: &RunId) -> bool {

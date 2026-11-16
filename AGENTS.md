@@ -979,6 +979,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and whose controller neither runs nor admitted the run as recoverable, so a crash cannot strand
   the workspace. Local force-stop holds the same per-run recovery claim before reading status or
   successor ownership and through the controller reply, including when the run is still running.
+  Local resume diagnoses failed eligibility checks at the control boundary, naming filesystem
+  paths when relevant and retaining `invalid_request` / `request.invalid` diagnostics. Inspection
+  keeps its existing recovery projection; protocol and recovery documents carry no refusal reason.
+  Named targets and Platform retain their existing diagnostics.
   Direct-target retained-workspace handoff records both sides before moving the tree
   and reconciles incomplete handoffs at startup. Resume reserves this durable handoff before
   acknowledging the successor; asynchronous credential resolution and preparation reuse that claim.
