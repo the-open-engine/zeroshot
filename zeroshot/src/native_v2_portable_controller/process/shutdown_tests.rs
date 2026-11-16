@@ -193,26 +193,32 @@ async fn shutdown_leaves_a_suspended_run_suspended() {
             .await
             .assert_value(),
     );
-    let server = controller.clone().bind().await.assert_value();
-    let (stop, stopping) = tokio::sync::watch::channel(false);
-    let serving = tokio::spawn(server.serve_until_terminal(stopping));
-    // The stop arrives once the loop has seen the suspension, while it still waits out its
-    // grace for a submitter that never connects.
-    tokio::time::sleep(UNOBSERVED_TERMINAL_GRACE / 2).await;
-    stop.send_replace(true);
-    tokio::time::timeout(Duration::from_secs(10), serving)
-        .await
-        .assert_value_with("shutdown of a suspended run returns")
-        .assert_value()
-        .assert_value();
-    let status = controller
-        .inner
-        .status(openengine_cluster_protocol::RunStatusParams { run_id })
-        .await
-        .assert_value();
-    assert!(
-        matches!(status.status, RunStatus::Suspended { .. }),
-        "a stop signal force-stopped a suspended run: {:?}",
-        status.status
-    );
+    // The stop arrives either before the loop has seen the suspension or while it waits out
+    // its grace for a submitter that never connects.
+    for stop_at_start in [true, false] {
+        let server = controller.clone().bind().await.assert_value();
+        let (stop, stopping) = tokio::sync::watch::channel(stop_at_start);
+        let serving = tokio::spawn(server.serve_until_terminal(stopping));
+        if !stop_at_start {
+            tokio::time::sleep(UNOBSERVED_TERMINAL_GRACE / 2).await;
+            stop.send_replace(true);
+        }
+        tokio::time::timeout(Duration::from_secs(10), serving)
+            .await
+            .assert_value_with("shutdown of a suspended run returns")
+            .assert_value()
+            .assert_value();
+        let status = controller
+            .inner
+            .status(openengine_cluster_protocol::RunStatusParams {
+                run_id: run_id.clone(),
+            })
+            .await
+            .assert_value();
+        assert!(
+            matches!(status.status, RunStatus::Suspended { .. }),
+            "a stop signal force-stopped a suspended run: {:?}",
+            status.status
+        );
+    }
 }

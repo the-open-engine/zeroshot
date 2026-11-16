@@ -8,8 +8,12 @@ function useDeadlineClock(deadline: number | undefined) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (deadline === undefined || deadline <= now) return;
+    // `now` may be as old as the page: measure from the real time, and catch up at once when
+    // the deadline has already passed.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return setNow(Date.now());
     // Timers hold at most about 24.8 days; a later deadline renews the clock and waits again.
-    const timer = setTimeout(() => setNow(Date.now()), Math.min(deadline - now, 2 ** 31 - 1));
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(remaining, 2 ** 31 - 1));
     return () => clearTimeout(timer);
   }, [deadline, now]);
   return now;
