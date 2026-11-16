@@ -41,6 +41,10 @@ struct Scan {
 struct Index {
     steers: Vec<RunVector>,
     receipts: BTreeMap<(String, VectorId), BTreeMap<VectorId, RunId>>,
+    // Acknowledged deliveries whose receipt is still being written, by conversation: steer to
+    // its receipt. The conversation already holds these steers; a failed or expired write
+    // releases them so they are offered again.
+    publishing: BTreeMap<String, BTreeMap<VectorId, VectorId>>,
     initialized: bool,
 }
 impl Index {
@@ -69,10 +73,16 @@ impl Index {
                     .any(|(id, run)| conversation.includes(id, run))
             })
     }
+    fn held(&self, conversation: &Conversation, steer: &VectorId) -> bool {
+        self.publishing
+            .get(&conversation.key)
+            .is_some_and(|publishing| publishing.contains_key(steer))
+            || self.received(conversation, steer)
+    }
     fn due<'a>(&'a self, conversation: &'a Conversation) -> impl Iterator<Item = &'a RunVector> {
-        self.steers.iter().filter(|v| {
-            !self.received(conversation, &v.id) && !conversation.offered.contains(&v.id)
-        })
+        self.steers
+            .iter()
+            .filter(|v| !self.held(conversation, &v.id) && !conversation.offered.contains(&v.id))
     }
 }
 impl Record {
@@ -161,10 +171,12 @@ pub(super) struct DeliverySource {
     memory: Arc<dyn ActiveMemorySource>,
     record: Mutex<Option<Record>>,
     conversations: Mutex<BTreeMap<u64, Conversation>>,
-    publication: tokio::sync::Mutex<()>,
     restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
 }
 const DEADLINE: Duration = Duration::from_millis(250);
+// A receipt write may outlast its callback, but not indefinitely: a stalled ledger releases the
+// steer to be offered again rather than withholding it for the rest of the execution.
+const PUBLICATION_DEADLINE: Duration = Duration::from_secs(5);
 const PREAMBLE: &str = "<steer>\nDirection from the person running this run, given while it is in progress. It takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
 
 pub(crate) fn frame<'a>(vectors: impl IntoIterator<Item = &'a RunVector>) -> String {
@@ -190,7 +202,6 @@ impl DeliverySource {
             record: Mutex::new(None),
             conversations: Mutex::default(),
             restored: Mutex::default(),
-            publication: tokio::sync::Mutex::new(()),
         }
     }
     pub(super) fn bind(&self, run: RunId, ledger: Arc<dyn RunLedger>) {
@@ -230,6 +241,16 @@ impl DeliverySource {
                     .flat_map(|(_, receipts)| receipts.iter())
                     .filter(|(id, run)| conversation.includes(id, run))
                     .map(|(id, _)| id.clone())
+                    // A receipt still being written is referenced too: a successor finds it only
+                    // if the write committed, and otherwise offers the steer again.
+                    .chain(
+                        index
+                            .publishing
+                            .get(&conversation.key)
+                            .into_iter()
+                            .flat_map(BTreeMap::values)
+                            .cloned(),
+                    )
                     .collect();
                 (
                     conversation.reference.node_instance,
@@ -406,48 +427,101 @@ impl DeliverySource {
         let Some(conversation) = conversation else {
             return;
         };
-        let _ = tokio::time::timeout(DEADLINE, async {
-            let _publication = self.publication.lock().await;
-            let events: Vec<_> = {
-                let index = record
-                    .index
-                    .data
-                    .lock()
-                    .map_err(|_| RunLedgerError::Corrupt)?;
-                ids.iter()
-                    .filter(|id| !index.received(&conversation, id))
-                    .map(|id| {
-                        vector_event(
-                            &record.run,
-                            RunVectorContent::SteerReceipt {
-                                steer_id: id.clone(),
-                                conversation: conversation.key.clone(),
-                                execution: conversation
-                                    .reference
-                                    .public_execution()
-                                    .map_err(RunLedgerError::InvalidEvent)?,
-                                node_instance: conversation.reference.node_instance.get(),
-                            },
-                        )
-                    })
-                    .collect::<Result<_, _>>()?
-            };
-            if !events.is_empty() {
-                record.ledger.append(&record.run, events.clone()).await?;
-                let mut index = record
-                    .index
-                    .data
-                    .lock()
-                    .map_err(|_| RunLedgerError::Corrupt)?;
+        let Some(publication) = record.publish(&conversation, ids) else {
+            return;
+        };
+        // The callback waits only within its deadline. A slower write keeps running so the
+        // same conversation is not offered the steer again while its receipt is in flight.
+        let _ = tokio::time::timeout(DEADLINE, publication).await;
+    }
+}
+impl Record {
+    fn publish(
+        &self,
+        conversation: &Conversation,
+        ids: &[VectorId],
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let execution = conversation.reference.public_execution().ok()?;
+        // Selection and reservation happen without an await, so a cancelled callback either
+        // reserves nothing or hands its reservation to the publication task below.
+        let mut reserved = BTreeMap::new();
+        let mut events = Vec::new();
+        {
+            let mut index = self.index.data.lock().ok()?;
+            for id in ids {
+                if reserved.contains_key(id) || index.held(conversation, id) {
+                    continue;
+                }
+                let event = vector_event(
+                    &self.run,
+                    RunVectorContent::SteerReceipt {
+                        steer_id: id.clone(),
+                        conversation: conversation.key.clone(),
+                        execution: execution.clone(),
+                        node_instance: conversation.reference.node_instance.get(),
+                    },
+                )
+                .ok()?;
+                let RunEvent::Vector { vector } = &event else {
+                    return None;
+                };
+                reserved.insert(id.clone(), vector.id.clone());
+                events.push(event);
+            }
+            if events.is_empty() {
+                return None;
+            }
+            index
+                .publishing
+                .entry(conversation.key.clone())
+                .or_default()
+                .extend(reserved.clone());
+        }
+        // Released however the task ends, including a panic or runtime shutdown.
+        let reservation = Reservation {
+            resident: self.index.clone(),
+            conversation: conversation.key.clone(),
+            steers: reserved.into_keys().collect(),
+        };
+        let ledger = self.ledger.clone();
+        let run = self.run.clone();
+        Some(tokio::spawn(async move {
+            let stored = matches!(
+                tokio::time::timeout(PUBLICATION_DEADLINE, ledger.append(&run, events.clone()))
+                    .await,
+                Ok(Ok(_))
+            );
+            if stored && let Ok(mut index) = reservation.resident.data.lock() {
                 for event in events {
                     if let RunEvent::Vector { vector } = event {
                         index.apply(vector);
                     }
                 }
             }
-            Ok::<_, RunLedgerError>(())
-        })
-        .await;
+            drop(reservation);
+        }))
+    }
+}
+struct Reservation {
+    resident: Arc<ResidentRecord>,
+    conversation: String,
+    steers: Vec<VectorId>,
+}
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        let mut index = self
+            .resident
+            .data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(publishing) = index.publishing.get_mut(&self.conversation) {
+            for steer in &self.steers {
+                publishing.remove(steer);
+            }
+            if publishing.is_empty() {
+                index.publishing.remove(&self.conversation);
+            }
+        }
     }
 }
 impl ActiveMemorySource for DeliverySource {
