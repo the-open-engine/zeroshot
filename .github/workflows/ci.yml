@@ -405,7 +405,7 @@ jobs:
       - name: Run macOS parallel terminal regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test full_v1_reducer --test full_v1_reducer_boundaries
-          cargo test --locked --package zeroshot --features ui --lib -- parallel_branch_terminals_cancel_and_drain_siblings_before_finishing built_in_templates_have_no_terminals_inside_parallel_branches
+          cargo test --locked --package zeroshot --features ui --lib -- parallel_branch_terminals_cancel_and_drain_siblings_before_finishing built_in_templates_have_no_terminals_inside_parallel_branches parallel_terminal_ui_fixture_matches_canonical_control_replay
       - name: Run macOS provider transcript regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --

@@ -318,10 +318,11 @@ test('append cannot bypass a terminal-only decision', () => {
   );
 });
 
-test('parallel terminal branches and unmet joins permit a following group-result checkpoint', () => {
+test('appending after parallel work requires a possible continuing join', () => {
   for (const join of [
     { kind: 'all' },
     { kind: 'any' },
+    { kind: 'quorum', count: 1 },
     { kind: 'quorum', count: 2 },
     { kind: 'first', when: guard },
   ]) {
@@ -340,6 +341,18 @@ test('parallel terminal branches and unmet joins permit a following group-result
       };
       const source = doc(sequence('root', [parallel]));
       const before = structuredClone(source);
+      if (
+        branches[1].kind !== 'step' ||
+        join.kind === 'all' ||
+        (join.kind === 'quorum' && join.count === 2)
+      ) {
+        assert.throws(
+          () => appendActivity(source, 'root', 'choice'),
+          /parallel ends this execution path/
+        );
+        assert.deepEqual(source, before);
+        continue;
+      }
       const next = appendActivity(source, 'root', 'choice');
       assert.deepEqual(
         children(next.document.graph.root).map((node) => node.name),
@@ -353,7 +366,7 @@ test('parallel terminal branches and unmet joins permit a following group-result
   }
 });
 
-test('parallel terminal locality survives nested scopes without allowing work after a branch terminal', () => {
+test('terminal-only parallel paths prevent disconnected appends through enclosing scopes', () => {
   const stopped = sequence('stopped_branch', [terminal('fail')]);
   const parallel: GraphNode = {
     kind: 'par',
@@ -372,11 +385,10 @@ test('parallel terminal locality survives nested scopes without allowing work af
     promotedStatePaths: [],
   };
   const source = doc(sequence('root', [loop]));
+  const before = structuredClone(source);
   for (const owner of ['root', 'repeat', 'iteration']) {
-    const next = appendActivity(source, owner, 'step');
-    assert.equal(findNode(next.document.graph.root, next.name)!.kind, 'step');
-    assert.deepEqual(findNode(next.document.graph.root, 'parallel'), parallel);
-    assert.deepEqual(next.document.runtime.nodes.activity, source.runtime.nodes.activity);
+    assert.throws(() => appendActivity(source, owner, 'step'), /parallel ends this execution path/);
+    assert.deepEqual(source, before);
   }
   assert.throws(
     () => appendActivity(source, stopped.name, 'step'),

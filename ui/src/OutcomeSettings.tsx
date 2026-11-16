@@ -31,9 +31,7 @@ export function OutcomeSettings({
   const [busy, setBusy] = useState(false);
   usePendingText(busy);
   if (node.name !== document.graph.root.name) return null;
-  const completions = analyzeWorkflowOutcomes(document).completions.filter(
-    (value) => value.boundary === 'run'
-  );
+  const completions = analyzeWorkflowOutcomes(document).completions;
   const canComplete =
     node.kind === 'seq' &&
     node.children.length > 0 &&

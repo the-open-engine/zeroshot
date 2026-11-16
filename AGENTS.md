@@ -1920,8 +1920,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
-  A reducer `completed` group visit alone is neutral. The seq, choice, loop and map visits that a
-  succeed/fail node ended at its cursor take its outcome; a par stops that propagation.
+  A reducer `completed` group visit alone is neutral. All enclosing visits that the selected
+  succeed/fail node ended at its cursor, including parallel groups, take its outcome. The canonical
+  trace excludes terminals discarded by an earlier join. Editor terminals describe run outcomes;
+  terminal-only parallel paths never acquire a synthetic unmet-join continuation. The shared
+  `ui/src/fixtures/parallel-terminal.json` is checked by native control replay and browser projection.
 - Profile and run inspectors share `InspectorPanel`, pointer/keyboard resizing, and one client-only
   width preference. Viewport clamping preserves the preferred width when the available space shrinks.
 - Run navigation retains tab-scoped view preferences (node/inspector, execution, cursor, graph
