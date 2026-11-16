@@ -1947,9 +1947,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## Issue triage
 
-- The issue triage workflow adds `triage` to new and reopened issues. Only Maintain/Admin users
-  and the verified support service App may assign or remove other issue labels; ordinary Write
-  and Triage access does not authorize routing decisions.
+- The issue label workflow enforces authorized label decisions without assigning a default stage
+  on creation or reopening. The support service owns stage transitions. Only Maintain/Admin users
+  and the verified support service App may assign or remove issue labels; ordinary Write and
+  Triage access does not authorize routing decisions.
 - `scripts/github-issue-triage.js` derives current label intent from complete issue event history
   and fresh repository role checks. Per-issue workflow serialization may coalesce pending events,
   so reconciliation covers all labels instead of reversing only one webhook. Trigger visibility
@@ -1960,9 +1961,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   uses only repository content read and issue write permissions.
 - The guard's own `github-actions[bot]` corrections are not new label authority. Preserve later
   maintainer/service decisions across stale events and never replace the whole label list.
-- Support-service backlog decisions remain authoritative for scheduling; GitHub labels alone
-  never authorize a code change or merge. Bootstrap `triage`, `auto-fix-0` through `auto-fix-3`,
-  and `plan-0` through `plan-3` before activating this workflow.
+- GitHub issues own current work. Stage labels are `new`, `triage`, `auto-p0` through `auto-p3`,
+  `plan-p0` through `plan-p3`, and `manual-p0` through `manual-p3`; `running` and `needs-attention`
+  are overlays. Stage decisions do not themselves authorize publication or merge.
 
 ## Development conventions
 

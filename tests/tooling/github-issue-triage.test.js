@@ -94,14 +94,59 @@ async function assertVisibilityFailure(f) {
   assert.deepEqual(names(f), before);
 }
 
-it('new issues get triage and cannot retain labels assigned by an ordinary writer', async () => {
+it('new issues cannot retain labels assigned by an ordinary writer', async () => {
   const f = fixture({
     labels: ['auto-fix-0', 'bug'],
     events: [event('labeled', 'auto-fix-0', writer, 1), event('labeled', 'bug', writer, 2)],
   });
   await f.run();
-  assert.deepEqual(names(f), ['triage']);
+  assert.deepEqual(names(f), []);
   assert.equal(f.calls.filter((call) => call.route.includes('/collaborators/')).length, 1);
+});
+
+it('opening or reopening an unlabeled issue leaves stage assignment to the service', async () => {
+  for (const action of ['opened', 'reopened']) {
+    const f = fixture({ action });
+    await f.run();
+    assert.deepEqual(names(f), []);
+    assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
+  }
+});
+
+it('approved stages survive the legacy guard adding triage without creating a conflict', async () => {
+  for (const [stage, actor] of [
+    ['new', service],
+    ['auto-p3', maintainer],
+    ['manual-p1', maintainer],
+    ['triage', service],
+  ]) {
+    const f = fixture({
+      action: 'labeled',
+      roles: managedRoles,
+      events: [event('labeled', stage, actor, 1), event('labeled', 'triage', guard, 2)],
+      labels: [...new Set([stage, 'triage'])],
+    });
+    await f.run();
+    assert.deepEqual(names(f), [stage]);
+    assert.equal(f.calls.filter((call) => call.method === 'POST').length, 0);
+  }
+});
+
+it('reopening preserves a maintainer manual hold and service overlays', async () => {
+  const f = fixture({
+    action: 'reopened',
+    roles: managedRoles,
+    events: [
+      event('labeled', 'manual-p1', maintainer, 1),
+      event('labeled', 'needs-attention', service, 2),
+      event('closed', undefined, maintainer, 3),
+      event('reopened', undefined, writer, 4),
+    ],
+    labels: ['manual-p1', 'needs-attention'],
+  });
+  await f.run();
+  assert.deepEqual(names(f), ['manual-p1', 'needs-attention']);
+  assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
 });
 
 it('Maintain role is accepted even when REST maps its permission to write', async () => {
@@ -127,7 +172,7 @@ it('Write and Triage roles cannot authorize labels', async () => {
       events: [event('labeled', 'plan-0', writer, 1)],
     });
     await f.run();
-    assert.deepEqual(names(f), ['triage']);
+    assert.deepEqual(names(f), []);
   }
 });
 
@@ -152,7 +197,7 @@ it('a matching login without the verified Bot type grants no service authority',
     labels: ['auto-fix-0'],
   });
   await f.run();
-  assert.deepEqual(names(f), ['triage']);
+  assert.deepEqual(names(f), []);
 });
 
 it('unauthorized removal restores the last maintainer label decision', async () => {
@@ -165,7 +210,7 @@ it('unauthorized removal restores the last maintainer label decision', async () 
     labels: ['triage'],
   });
   await f.run();
-  assert.deepEqual(names(f), ['plan-0', 'triage']);
+  assert.deepEqual(names(f), ['plan-0']);
 });
 
 it('a stale webhook cannot undo a later maintainer decision', async () => {
@@ -198,7 +243,7 @@ it('guard corrections never supersede later maintainer intent during a race', as
     labels: ['triage'],
   });
   await f.run();
-  assert.deepEqual(names(f), ['plan-1', 'triage']);
+  assert.deepEqual(names(f), ['plan-1']);
   const second = fixture({
     roles: managedRoles,
     events: [
@@ -206,7 +251,7 @@ it('guard corrections never supersede later maintainer intent during a race', as
       event('unlabeled', 'plan-1', guard, 3),
       event('labeled', 'plan-1', guard, 4),
     ],
-    labels: ['plan-1', 'triage'],
+    labels: ['plan-1'],
   });
   await second.run();
   assert.equal(second.calls.filter((call) => call.method !== 'GET').length, 0);
@@ -221,7 +266,7 @@ it('one coalesced invocation reconciles unauthorized labels from earlier events 
     labels: ['triage', 'auto-fix-0', 'plan-3'],
   });
   await f.run();
-  assert.deepEqual(names(f), ['triage']);
+  assert.deepEqual(names(f), []);
 });
 
 it('all event pages are read before restoring an approved label', async () => {
@@ -229,11 +274,11 @@ it('all event pages are read before restoring an approved label', async () => {
   events.push(event('labeled', 'plan-2', maintainer, 101));
   const f = fixture({ events, roles: managedRoles, labels: ['triage'] });
   await f.run();
-  assert.deepEqual(names(f), ['plan-2', 'triage']);
+  assert.deepEqual(names(f), ['plan-2']);
   assert.equal(f.calls.filter((call) => call.route.includes('/events?')).length, 2);
 });
 
-it('a reopened issue returns to triage unless a later approved decision already cleared it', async () => {
+it('reopening an issue does not assign a stage or undo approved label decisions', async () => {
   const events = [
     event('unlabeled', 'triage', service, 1),
     event('closed', undefined, maintainer, 2),
@@ -241,7 +286,7 @@ it('a reopened issue returns to triage unless a later approved decision already 
   ];
   const f = fixture({ action: 'reopened', events });
   await f.run();
-  assert.deepEqual(names(f), ['triage']);
+  assert.deepEqual(names(f), []);
   const stale = fixture({
     action: 'reopened',
     events: [
@@ -284,7 +329,7 @@ it('the four observed one-second timestamp gaps permit both label actions', asyn
       });
       f.payload.issue.updated_at = updated_at;
       await f.run();
-      assert.deepEqual(names(f), action === 'labeled' ? ['plan-0', 'triage'] : ['triage']);
+      assert.deepEqual(names(f), action === 'labeled' ? ['plan-0'] : []);
       assert.deepEqual(f.pauses, []);
     }
   }
@@ -349,7 +394,7 @@ it('stale skewed webhooks preserve later approved decisions and ignore guard aut
       f.payload.issue.updated_at = timestamp(10);
       await f.run();
       const approved = actor === guard ? action : opposite;
-      assert.deepEqual(names(f), approved === 'labeled' ? ['plan-0', 'triage'] : ['triage']);
+      assert.deepEqual(names(f), approved === 'labeled' ? ['plan-0'] : []);
       assert.deepEqual(f.pauses, []);
     }
   }
