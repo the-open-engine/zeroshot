@@ -66,8 +66,11 @@ import path from 'node:path';
 const selection = AUTH_SELECTION;
 const authHeader = (name) => /^(authorization|proxy-authorization|cookie)$/i.test(name) || /(^|[-_])(api[-_]?key|auth|token|secret)([-_]|$)/i.test(name);
 const within = (url, base) => {
-  const root = base.replace(/\/+$/, '');
-  return url === root || url.startsWith(root + '/') || url.startsWith(root + '?');
+  let request, root;
+  try { request = new URL(url); root = new URL(base); } catch { return false; }
+  if (request.origin !== root.origin) return false;
+  const prefix = root.pathname.replace(/\/+$/, '');
+  return request.pathname === prefix || request.pathname.startsWith(prefix + '/');
 };
 const conflictFile = LOADED_MARKER.replace(/\.loaded$/, '.conflict');
 export default {

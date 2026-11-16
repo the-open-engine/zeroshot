@@ -292,6 +292,92 @@ fn verifier_accepts_only_the_declared_authority() {
 }
 
 #[test]
+fn verifier_accepts_normalized_forms_of_the_declared_endpoint() {
+    let requests = json!([
+        {
+            "provider": "openai",
+            "url": "https://proxy.example/v1/chat/completions",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "https://proxy.example/v1",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "https://proxy.example/v1?stream=true",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "https://PROXY.example:443/v1/responses",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "https://proxy.example/v10/chat",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "https://proxy.example:8443/v1/chat",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "http://proxy.example/v1/chat",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "https://proxy.example.evil/v1/chat",
+            "headers": {"authorization": "Bearer declared-key"}
+        },
+        {
+            "provider": "openai",
+            "url": "https://proxy.example/v1/../admin",
+            "headers": {"authorization": "Bearer declared-key"}
+        }
+    ]);
+    let expected = vec![
+        json!({"ok": true}),
+        json!({"ok": true}),
+        json!({"ok": true}),
+        json!({"ok": true}),
+        json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: endpoint"}),
+        json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: endpoint"}),
+        json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: endpoint"}),
+        json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: endpoint"}),
+        json!({"ok": false, "message": "Zeroshot OpenCode declared provider conflict: endpoint"}),
+    ];
+    let results = verify(
+        "openai",
+        &[
+            ("OPENAI_API_KEY", "declared-key"),
+            ("OPENAI_BASE_URL", "https://Proxy.Example:443/v1/"),
+        ],
+        requests,
+    );
+    assert_eq!(results, expected);
+    let unparsable = verify(
+        "openai",
+        &[
+            ("OPENAI_API_KEY", "declared-key"),
+            ("OPENAI_BASE_URL", "not a url"),
+        ],
+        json!([
+            {
+                "provider": "openai",
+                "url": "https://proxy.example/v1/chat",
+                "headers": {"authorization": "Bearer declared-key"}
+            }
+        ]),
+    );
+    assert_eq!(unparsable, expected[4..5]);
+}
+
+#[test]
 fn verifier_checks_the_websocket_handshake() {
     let requests = json!([
         {

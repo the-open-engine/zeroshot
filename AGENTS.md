@@ -261,23 +261,27 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the separate `openengine.runtime-harnesses/v1` discovery extension; older targets without it
   retain legacy core submissions, while contributed lanes require positive advertisement.
   Local adapters preserve native configuration discovery when provider credentials are declared.
-  OpenCode retains its original HOME/XDG paths and native managed, global/project, plugin and MCP
-  resources. A private dependency-free native plugin applies declared authentication or endpoints
-  to the selected provider after native resolution and checks outgoing authentication headers
-  after native header hooks and before the SDK transport. Arbitrary native custom transport code
-  remains trusted executable code and may replace HTTP behavior.
-  Mask only the selected stored login in private process state; preserve unrelated native auth for
-  well-known discovery. The native `auth.set` wrapper supplies its original file or inline authority only within
-  that write's async scope, so concurrent model requests retain selected authentication. OpenCode owns
-  auth-file writes. The GitHub lane seeds private native OAuth state and retains its native provider
-  loader, endpoint metadata and request authentication; declared tokens never replace saved logins.
+  OpenCode 2 keeps the user's HOME, XDG_CONFIG_HOME and native managed, global/project,
+  plugin and MCP resources. Each node session gets private XDG data, state and cache
+  directories under its private home. On local runs without a declared credential, the saved
+  login for the lane's provider is copied once per session with `auth export --standalone`
+  and `auth import --standalone`; only entries of that provider move, nothing is written back,
+  and imported secrets are redacted. Declared keys and endpoints reach OpenCode through the
+  inline configuration. A private dependency-free owned plugin verifies every request of the
+  selected provider in `http.request` and `experimental.ws.handshake` and stops it on another
+  auth-like header, a missing or wrong canonical header, or a URL outside the normalized
+  declared endpoint; the node then fails with a conflict message that names headers, never
+  values. Arbitrary native custom transport code remains trusted executable code and may
+  replace HTTP behavior. Owned plugins write a load marker after registering their hooks; a
+  successful turn whose owned plugin did not load fails. OpenCode 2 has no input for a
+  declared GitHub Copilot token, so a declared `COPILOT_GITHUB_TOKEN` is refused before
+  launch and GitHub lanes use the native Copilot login.
   Local OpenCode keeps native permissions and adds no `--auto`: native configuration inspection
   starts background dependency work, so use the shared unavailable-inspection fallback without a
   probe, custom policy parser or cache-lock management. Contained OpenCode adds `--auto` in its
-  disposable capsule. Active Memory installs a separate native plugin alongside user plugins.
-  Explicit `OPENCODE_PURE=true` conflicts with declared authentication because it disables the
-  required provider overlay. Per-node `--pure` overrides are reserved because they disable
-  runtime-owned authentication and Active Memory plugins.
+  disposable capsule. Active Memory installs a separate owned plugin alongside user plugins.
+  `--standalone`, `--server` and `--worktree`/`-w` are runtime-owned and cannot be overridden
+  per node.
   Hermes uses its installed canonical executable's interpreter and native `AIAgent`/configuration
   factories in a private process, without starting or attaching its shared gateway. A scoped import
   hook preserves native startup; `--version --help` fails closed if that hook is unavailable.
@@ -910,8 +914,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Truncated version output remains available only for classification; omit it from diagnostics so
   credentials crossing the byte limit cannot escape exact-match redaction, including Claude's first-turn check.
   Unknown versions fail closed. Minimums are Claude 2.1.310, Codex 0.155.0, Copilot 1.0.70,
-  Pi 1.4.0 and Hermes 0.22.5. Hermes 0.22.6 is the exclusive upper bound because native agent cleanup
-  is incompatible; all other upper bounds remain open. OpenCode has no range until the version 2 port.
+  Pi 1.4.0, Hermes 0.22.5 and OpenCode 2.2.3. Hermes 0.22.6 is the exclusive upper bound because native agent cleanup
+  is incompatible; all other upper bounds remain open.
   Contained Claude sets `DISABLE_AUTOUPDATER=1` after environment merges to preserve image pins.
 - Claude reads its adapter registration's range before each run's first model turn, running the
   selected executable with `--version` through that turn's launch path and environment. One `--print` process can write several results while background subagents or
