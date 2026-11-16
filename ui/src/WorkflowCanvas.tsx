@@ -61,7 +61,7 @@ import { nodeOutputFields } from './node-data';
 import { nodePresentation, nodeIcons } from './node-presentation';
 import type { WorkerOption } from './workers';
 import {
-  drawnOwners,
+  drawableGroups,
   projectWorkflow,
   type WorkflowNode,
   type WorkflowEdge,
@@ -73,6 +73,7 @@ import {
   withWorkflowDimensions,
   type WorkflowMeasurements,
 } from './workflow-measurements';
+import { MoreMenu } from './MoreMenu';
 import {
   collapsedRunGroups,
   currentRunWork,
@@ -417,6 +418,20 @@ function CanvasToolbar({
   noneCollapsed: boolean;
   arrange: () => void;
 }) {
+  const groupTools = [
+    {
+      label: 'Expand all groups',
+      icon: <UnfoldVertical size={17} />,
+      disabled: noneCollapsed,
+      onSelect: expandAll,
+    },
+    {
+      label: 'Collapse all groups',
+      icon: <FoldVertical size={17} />,
+      disabled: allCollapsed,
+      onSelect: collapseAll,
+    },
+  ];
   const tools = [
     {
       label: 'Runtime settings',
@@ -446,7 +461,7 @@ function CanvasToolbar({
   return (
     <div className="canvas-toolbar">
       <div className="canvas-start">
-        {/* The view's main use leads: adding to the profile, or a host's controls. The workflow's
+        {/* The view's main use leads: a run's view switch, or adding to the profile. The workflow's
             own details open from the inspector button, or, while the inspector is open, from the
             empty canvas or the breadcrumb's first link. */}
         {readOnly ? (
@@ -454,7 +469,9 @@ function CanvasToolbar({
         ) : (
           <>
             <button
-              className="button compact"
+              className="button compact add-activity"
+              aria-label="Add activity"
+              title="Add activity"
               disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
               onClick={() =>
                 p.action?.({
@@ -473,43 +490,55 @@ function CanvasToolbar({
                 })
               }
             >
-              <Plus size={15} /> Add activity
+              <Plus size={15} /> <span className="add-activity-label">Add activity</span>
             </button>
             {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
           </>
         )}
       </div>
       <div className="canvas-actions">
-        <button
-          className="icon-button"
-          title="Expand all groups"
-          aria-label="Expand all groups"
-          aria-disabled={noneCollapsed}
-          onClick={() => !noneCollapsed && expandAll()}
-        >
-          <UnfoldVertical size={17} />
-        </button>
-        <button
-          className="icon-button"
-          title="Collapse all groups"
-          aria-label="Collapse all groups"
-          aria-disabled={allCollapsed}
-          onClick={() => !allCollapsed && collapseAll()}
-        >
-          <FoldVertical size={17} />
-        </button>
-        {!readOnly &&
-          tools.map((tool) => (
+        {/* Kept in read-only views; the editor folds these into "More tools" on a phone. */}
+        <div className={`canvas-group-tools ${readOnly ? '' : 'foldable'}`}>
+          {groupTools.map((tool) => (
             <button
               key={tool.label}
               className="icon-button"
-              title={tool.title}
+              title={tool.label}
               aria-label={tool.label}
-              onClick={tool.onSelect}
+              aria-disabled={tool.disabled}
+              onClick={() => !tool.disabled && tool.onSelect()}
             >
               {tool.icon}
             </button>
           ))}
+        </div>
+        {!readOnly && (
+          <>
+            {/* Shown while the canvas is wide; folded behind "More tools" when it is narrow. */}
+            <div className="canvas-tools">
+              {tools.map((tool) => (
+                <button
+                  key={tool.label}
+                  className="icon-button"
+                  title={tool.title}
+                  aria-label={tool.label}
+                  onClick={tool.onSelect}
+                >
+                  {tool.icon}
+                </button>
+              ))}
+            </div>
+            <div className="canvas-tools-more">
+              <MoreMenu
+                label="More tools"
+                items={[
+                  ...groupTools.map((tool) => ({ ...tool, className: 'canvas-group-tool' })),
+                  ...tools.map(({ label, icon, onSelect }) => ({ label, icon, onSelect })),
+                ]}
+              />
+            </div>
+          </>
+        )}
         {p.inspectorHidden && (
           <button
             className="icon-button"
@@ -639,21 +668,9 @@ function clickNode(
   else if (node.type === 'region' && !target.closest('.workflow-region-header')) p.deselect?.();
 }
 
-/**
- * Groups the canvas draws, expanded or folded. A decision that shares its verifier's card when
- * expanded still has a card of its own when folded; a folded error route has neither.
- */
+/** Groups Expand and Collapse all can change: those the canvas draws, expanded or folded. */
 function useDrawnGroups(document: Document) {
-  return useMemo(() => {
-    const drawn = drawnOwners(document);
-    const foldedCard = (name: string) =>
-      projectWorkflow(document, new Set([name])).nodes.some((node) => node.owner === name);
-    return new Set(
-      [...collapsedWorkflowGroups(document.graph.root)].filter(
-        (name) => drawn.has(name) || foldedCard(name)
-      )
-    );
-  }, [document]);
+  return useMemo(() => drawableGroups(document), [document]);
 }
 
 export function WorkflowCanvas(p: WorkflowCanvasProps) {
@@ -755,6 +772,7 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
     groups.forget();
   }, [contextKey, readOnly]);
   // Live history arrives after the canvas mounts: unfold work as it becomes current, never refold.
+  // Scrubbing and replay move through recorded work and keep the reader's folds.
   const currentWork = readOnly
     ? currentRunWork(p.document.graph.root, p.observation?.nodes).join('\n')
     : '';
@@ -762,7 +780,7 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
   useEffect(() => {
     if (currentWork === revealedWork.current) return;
     revealedWork.current = currentWork;
-    if (currentWork)
+    if (currentWork && p.observation?.following)
       setCollapsed((value) => revealRunWork(value, p.document.graph.root, currentWork.split('\n')));
   }, [currentWork]);
   useEffect(() => {

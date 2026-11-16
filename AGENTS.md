@@ -1931,6 +1931,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
   Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
   remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
+- Canvas toolbars keep one row and fold by their own width, as ui/DESIGN.md sets out. Folded tools
+  go through the shared `MoreMenu` (`ui/src/MoreMenu.tsx`), which owns keyboard movement, focus and
+  dismissal; do not add another overflow menu or let a toolbar wrap or scroll.
 - [ui/DESIGN.md](ui/DESIGN.md) is the UI's visual source of truth; tokens and fonts live in
   `ui/src/styles.css` and `ui/src/theme.ts`. Bundle all runtime assets, including the paper textures.
   `embed.html` mounts the same editor/viewer without standalone menus. Its version-1 bridge

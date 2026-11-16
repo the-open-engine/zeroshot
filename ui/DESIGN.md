@@ -43,10 +43,11 @@ Components use these semantic tokens, never raw values.
 The remaining tokens in `styles.css` (hover, grid, card border, edge, shadows) are editor surfaces
 derived from these; add one there rather than a raw value in a component.
 
-- **Ink is the action colour.** The primary button (Save profile, Save, play) is ink with paper text,
-  and a screen has at most one. Secondary buttons are a hairline outline on the surface. Text buttons
-  are the third tier. The focus ring, selection (a chosen node, a selected edge, the chosen option)
-  and native checkboxes and ranges are ink too.
+- **Ink is the action colour.** The primary button (Save profile, Save) is ink with paper text, and
+  a screen has at most one. Secondary buttons are a hairline outline on the surface. Text buttons
+  are the third tier. Replay controls are a tool to reach for, not the page's focus: play and the
+  step buttons stay plain icon buttons. The focus ring, selection (a chosen node, a selected edge,
+  the chosen option), checkboxes and the filled part of a range are ink too.
 - **Rust marks state, not actions:** errors, invalid or missing values, failed runs and nodes, the
   current tab's underline, and remove controls on hover. Keep it small.
 - **Green** marks success. **Amber** marks work in progress (running) and things to watch (an
@@ -88,6 +89,30 @@ wordmark: the host owns that chrome.
 - Empty states are a short heading and one or two sentences. A spinner may lead while loading;
   otherwise no decorative icon.
 - Shadows are rare and shallow; elevation comes from hairlines and surface contrast.
+
+## Layout
+
+Every page uses the same three layouts, and only these two page widths (`max-width: 1150px` and
+`max-width: 720px`):
+
+- **Wide** (above 1150px): sidebar, canvas or list, and the inspector side by side.
+- **Medium** (721–1150px): the sidebar goes behind its menu button; the inspector stays docked.
+- **Narrow** (720px and below): the profile editor's title header wraps its actions onto a second
+  row (the run header stays one row), the wordmark keeps only its crow beside the workspace kind,
+  and the inspector slides over the canvas below its toolbar.
+
+Moving to a narrower page layout only folds the page away; nothing it hides at one width comes back
+at a narrower one. The top bar (the app header, and the Defaults page's bar) keeps one height
+(`--app-header-height`) and logo size at every width. Sidebars share `--sidebar-width`, docked or
+popped out; Escape closes a popped-out sidebar. Both inspectors overlay at one default width,
+starting below the canvas toolbar (`--canvas-toolbar-height`).
+
+Toolbars inside a page follow their own width instead (container queries), since the sidebar and
+the resizable inspector change it as well as the window, so a tool folded away can return when the
+sidebar or inspector stops docking. Canvas toolbars keep one row: at 600px or less the editor's
+quieter tools fold into a **More tools** menu, at 440px or less Expand and Collapse all join
+them, and at 340px or less Add activity keeps only its icon. The replay timeline moves its event and extras to a second row at 760px or less. Pages work
+down to a 360px-wide phone without clipping.
 
 ## Interaction
 

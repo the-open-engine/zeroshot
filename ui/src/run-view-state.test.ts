@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { readRunView, writeRunView, type RunViewState } from './run-view-state';
+import { preferredLayoutKey, readRunView, writeRunView, type RunViewState } from './run-view-state';
 import { workspaceStorageKeys } from './workspace-storage';
 
 test('run view preferences isolate workspace, source and run, and ignore damaged or unavailable storage', (t) => {
@@ -50,4 +50,15 @@ test('run view preferences isolate workspace, source and run, and ignore damaged
   });
   assert.equal(readRunView(key), undefined);
   assert.doesNotThrow(() => writeRunView(key, view));
+});
+
+test('the preferred run view is shared by runs of one workspace, never across workspaces', () => {
+  const mount = new URL('https://example.test/ui/');
+  const first = workspaceStorageKeys(mount, { kind: 'target', id: 'target-a' });
+  const second = workspaceStorageKeys(mount, { kind: 'target', id: 'target-b' });
+  const preference = preferredLayoutKey(first.runView('history', 'run-a'));
+  assert.ok(preference);
+  assert.equal(preferredLayoutKey(first.runView('example', 'run-b')), preference);
+  assert.notEqual(preferredLayoutKey(second.runView('history', 'run-a')), preference);
+  assert.equal(preferredLayoutKey(undefined), undefined);
 });

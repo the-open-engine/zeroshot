@@ -1,5 +1,8 @@
 /* Workspace visual tokens and colour roles: see ui/DESIGN.md. */
 :root {
+  --sidebar-width: 248px;
+  --app-header-height: 62px;
+  --canvas-toolbar-height: 59px;
   --canvas: #faf7f1;
   --surface: #ffffff;
   --panel: rgb(255 255 255 / 0.5);
@@ -254,7 +257,7 @@ h2 {
   flex-direction: column;
 }
 .app-header {
-  height: 62px;
+  height: var(--app-header-height);
   flex-shrink: 0;
   border-bottom: 1px solid var(--hairline);
   display: flex;
@@ -320,12 +323,26 @@ h2 {
   border-color: var(--ink);
   background: var(--selected);
 }
-.theme-control + .sidebar-toggle {
-  margin-left: 0;
-}
 .local-label {
   font-size: 13px;
   color: var(--ink-muted);
+  white-space: nowrap;
+}
+.app-sections {
+  display: flex;
+  align-self: stretch;
+  gap: 22px;
+  margin-left: 15px;
+}
+.app-sections button {
+  color: var(--ink-muted);
+  padding: 0 2px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+}
+.app-sections button[aria-current='page'] {
+  color: var(--ink);
+  border-bottom-color: var(--rust);
 }
 .sidebar-title {
   font-size: 13px;
@@ -337,13 +354,14 @@ h2 {
   flex: 1;
   min-height: 0;
 }
-.profile-sidebar {
-  width: 213px;
+/* Profiles and runs share one sidebar width and padding, docked or popped out. */
+.page-sidebar {
+  width: var(--sidebar-width);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--hairline);
-  padding: 23px 13px 17px;
+  padding: 22px 12px 12px;
 }
 .sidebar-heading {
   display: flex;
@@ -631,19 +649,23 @@ h2 {
   flex: 1;
   min-width: 0;
   position: relative;
+  container: canvas / inline-size;
 }
-/* Wraps instead of overlapping when its groups no longer fit beside each other. */
+/* Always one row. It answers to the canvas's own width, which the inspector changes as well as the
+   window: when that is narrow, the editor's quieter tools fold into "More tools". */
 .canvas-toolbar {
-  min-height: 59px;
+  height: var(--canvas-toolbar-height);
+  flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   padding: 8px 21px;
   gap: 10px;
   border-bottom: 1px solid var(--hairline);
   background: transparent;
-  z-index: 5;
+  /* Above the inspector where it overlays the canvas, so the More tools menu opens over it. */
+  z-index: 11;
 }
 .canvas-actions {
   display: flex;
@@ -658,12 +680,97 @@ h2 {
   gap: 12px;
   flex-shrink: 0;
 }
+.canvas-tools {
+  display: flex;
+  gap: 7px;
+}
+.canvas-tools-more {
+  display: none;
+}
+.canvas-group-tools {
+  display: contents;
+}
+.more-menu-list .canvas-group-tool {
+  display: none;
+}
+@container canvas (max-width: 600px) {
+  .canvas-tools {
+    display: none;
+  }
+  .canvas-tools-more {
+    display: block;
+  }
+  .canvas-toolbar,
+  .canvas-actions,
+  .canvas-start {
+    gap: 4px;
+  }
+}
+/* A phone-width canvas: Expand and Collapse all join them, so an embedded editor's history
+   controls still fit on the one row at 360px. */
+@container canvas (max-width: 440px) {
+  .canvas-group-tools.foldable {
+    display: none;
+  }
+  .more-menu-list .canvas-group-tool {
+    display: flex;
+  }
+}
+/* The narrowest canvas, beside an inspector widened to its limit (240px): Add activity keeps only
+   its icon, so an embedded editor's history controls and More tools still fit on the row. */
+@container canvas (max-width: 340px) {
+  .add-activity-label {
+    display: none;
+  }
+}
+.more-menu {
+  position: relative;
+}
+.more-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px var(--shadow-popover);
+}
+.more-menu-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+  color: var(--ink);
+  text-align: left;
+}
+.more-menu-list button svg {
+  color: var(--ink-secondary);
+}
+.more-menu-list button[aria-disabled='true'] {
+  cursor: default;
+  color: var(--disabled-text);
+}
+.more-menu-list button:hover:not([aria-disabled='true']),
+.more-menu-list button:focus-visible {
+  background: var(--subtle-hover);
+}
 .canvas-host-actions {
   display: flex;
   align-items: center;
   gap: 7px;
   padding-left: 12px;
   border-left: 1px solid var(--hairline);
+}
+/* The divider separates host controls from Add activity; leading the toolbar, they need none. */
+.canvas-host-actions:first-child {
+  padding-left: 0;
+  border-left: 0;
 }
 .flow {
   flex: 1;
@@ -794,13 +901,13 @@ h2 {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
+.inspector-header .node-trail + h2 {
+  margin-top: 0;
+}
 .inspector-header .inspector-kind {
   margin-top: 2px;
   font-size: 13px;
   color: var(--ink-muted);
-}
-.inspector-header .node-trail + h2 {
-  margin-top: 0;
 }
 .inspector-scroll {
   overflow: auto;
@@ -1117,9 +1224,10 @@ h2 {
   cursor: pointer;
   width: 100%;
 }
+/* The menu button leads the header, on the side its sidebar opens; its glyph lines up with the edge. */
 .sidebar-toggle {
   display: none;
-  margin-left: auto;
+  margin: 0 -10px 0 -7px;
 }
 .canvas-error {
   position: absolute;
@@ -1145,32 +1253,38 @@ h2 {
   flex-direction: column;
   gap: 20px;
 }
-@media (min-width: 1600px) {
-  .inspector {
-    --inspector-default-width: 350px;
-  }
-  .inspector-scroll {
-    padding: 28px;
-  }
-  .profile-sidebar {
-    width: 230px;
-  }
-}
+/* Three layouts, shared by every page (ui/DESIGN.md, Layout): wide above 1150px, medium down to
+   721px, narrow at 720px and below. Each step only folds the page away; nothing it hides comes back
+   at a narrower one. Toolbars inside follow their own width instead (container queries). */
+
+/* Medium: the page list goes behind its menu button; the inspector stays beside the canvas. */
 @media (max-width: 1150px) {
-  .profile-sidebar {
-    width: 175px;
+  .page-sidebar {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: var(--app-header-height);
+    bottom: 0;
+    z-index: 30;
+    background: var(--canvas);
+    width: var(--sidebar-width);
+    box-shadow: 5px 0 20px var(--shadow-panel);
+  }
+  .page-sidebar.visible {
+    display: flex;
+  }
+  .sidebar-toggle {
+    display: inline-flex;
+  }
+  .app-header {
+    padding: 0 18px;
+  }
+  .app-sections {
+    margin-left: 0;
+    gap: 13px;
   }
   .workspace-header {
     padding: 0 18px;
-  }
-  .inspector {
-    --inspector-default-width: 295px;
-  }
-  .inspector-scroll {
-    padding: 22px 18px;
-  }
-  .save-copy {
-    display: none;
   }
   .header-actions {
     gap: 5px;
@@ -1178,57 +1292,40 @@ h2 {
   .canvas-toolbar {
     padding: 8px 13px;
   }
-  .profile-title h1 {
-    font-size: 24px;
-  }
-  .unsaved {
-    display: none;
+  .inspector-scroll {
+    padding: 22px 18px;
   }
 }
-@media (max-width: 900px) {
-  .profile-sidebar {
-    display: none;
-    position: absolute;
-    left: 0;
-    top: 62px;
-    bottom: 0;
-    z-index: 30;
-    background: var(--canvas);
-    width: 230px;
-    box-shadow: 8px 0 25px var(--shadow-popover);
-  }
-  .profile-sidebar.visible {
-    display: flex;
-  }
-  .sidebar-toggle {
-    display: flex;
-  }
-  .app-header {
-    padding: 0 18px;
-  }
-  .inspector {
-    --inspector-default-width: 300px;
-  }
-}
-@media (max-width: 650px) {
+
+/* Narrow: the profile header takes two rows and the inspector slides over the canvas. */
+@media (max-width: 720px) {
   /* 44px touch targets on phones (ui/DESIGN.md); the line stays visually quiet. */
   .node-trail button {
     min-width: 44px;
     min-height: 44px;
     padding: 0 4px;
   }
+  .more-menu > .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+  .more-menu-list button {
+    min-height: 44px;
+  }
+  /* The glyph keeps its place at the header's edge. */
+  .sidebar-toggle {
+    width: 44px;
+    height: 44px;
+    margin: 0 -16px 0 -13px;
+  }
+  /* The top bar keeps its height and logo size; only its horizontal spacing tightens. The
+     wordmark's text goes, the crow and the workspace kind stay. */
   .app-header {
-    height: 54px;
+    gap: 14px;
+    padding: 0 15px;
   }
-  .profile-sidebar {
-    top: 54px;
-  }
-  .brand {
-    font-size: 30px;
-  }
-  .brand img {
-    height: 25px;
-    width: 24px;
+  .app-header .brand > span:last-child {
+    display: none;
   }
   .workspace-header {
     height: auto;
@@ -1241,45 +1338,33 @@ h2 {
     width: 100%;
   }
   .profile-title h1 {
-    font-size: 24px;
     max-width: 100%;
   }
   .header-actions {
     width: 100%;
     justify-content: flex-end;
   }
+  .header-actions .button {
+    padding-inline: 12px;
+  }
   .history-actions {
     margin-right: auto;
-  }
-  .save-copy {
-    display: inline-flex;
-  }
-  .unsaved {
-    display: inline;
   }
   .editor-body {
     position: relative;
   }
-  .inspector {
+  /* Profile and run inspectors overlay the canvas below its toolbar, at one default width. */
+  .editor-body > .inspector-panel {
     position: absolute;
     right: 0;
-    top: 59px;
+    top: var(--canvas-toolbar-height);
     bottom: 0;
     z-index: 10;
     --inspector-default-width: 310px;
     box-shadow: -5px 0 24px var(--shadow-panel);
   }
-  /* The inspector overlays the canvas below a fixed-height toolbar here, so the toolbar keeps one
-     row and scrolls sideways rather than wrapping under it. */
   .canvas-toolbar {
-    height: 54px;
-    min-height: 54px;
-    flex-wrap: nowrap;
-    overflow-x: auto;
     padding: 0 10px;
-  }
-  .canvas-actions {
-    gap: 2px;
   }
   .status-bar {
     padding: 0 13px;
@@ -1287,6 +1372,9 @@ h2 {
   }
   .status-message {
     max-width: 150px;
+  }
+  .status-count {
+    display: none;
   }
   .modal {
     padding: 22px;
@@ -1296,12 +1384,6 @@ h2 {
   }
   .inspector-scroll {
     padding: 20px;
-  }
-  .local-label {
-    font-size: 12px;
-  }
-  .status-count {
-    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

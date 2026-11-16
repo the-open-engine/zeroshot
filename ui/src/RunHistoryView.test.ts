@@ -43,6 +43,14 @@ async function clickButton(container: HTMLElement, label: string) {
   assert.ok(button, label);
   await act(async () => button.click());
 }
+/** Runs open in Steps; the inspector belongs to the graph. */
+async function showGraph(container: HTMLElement) {
+  const button = [...container.querySelectorAll<HTMLButtonElement>('.view-toggle button')].find(
+    (candidate) => candidate.textContent === 'Graph'
+  );
+  assert.ok(button, 'Graph');
+  await act(async () => button.click());
+}
 async function loadMoreHistory(container: HTMLElement) {
   const button = [...container.querySelectorAll('button')].find(
     (candidate) => candidate.textContent === 'Load more history'
@@ -483,12 +491,23 @@ test('a remounted run restores its paused cursor, inspector and execution withou
   await render();
   await flushEffects();
   assert.equal(watches, 1);
+  await showGraph(container);
   await click('Go to start');
   await click('Show details');
   await click('Next event');
   const position = () =>
     container.querySelector<HTMLInputElement>('[aria-label="History position"]')!.value;
   assert.equal(position(), '1');
+  await click('Next event');
+  await click('Previous event');
+  assert.equal(position(), '1');
+  // Play and pause swap one button; the slim bar keeps every step control.
+  await click('Play replay');
+  assert.ok(container.querySelector('[aria-label="Pause replay"]'));
+  await click('Pause replay');
+  assert.equal(position(), '1');
+  // The event and its extras share one column, so the track keeps its length while scrubbing.
+  assert.ok(container.querySelector('.timeline-info .timeline-caption + .timeline-extras'));
   await act(async () => root.unmount());
   assert.equal(watches, 0);
   assert.equal(lastSignal?.aborted, true);
@@ -698,21 +717,64 @@ for (const durable of [true, false])
       );
       assert.ok(log);
       await act(async () => log.click());
-      assert.equal(details(), null);
       assert.equal(
         container.querySelector<HTMLInputElement>('[aria-label="History position"]')?.value,
         '3'
       );
       assert.match(renderedText(container), /Recorded delivery detail/);
-      assert.match(
-        container.querySelector('[aria-label="Run inspector"]')!.textContent!,
-        /Deliver/
-      );
+      // Steps opens the step that wrote the log line in place.
+      assert.match(container.querySelector('.story-step.open')!.textContent!, /Deliver/);
     } finally {
       await act(async () => root.unmount());
       container.remove();
     }
   });
+
+test('in Steps, a run-wide failure log opens the run start, where the run log is', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const { detail, source: fixture } = failureHistoryFixture(true);
+  detail.terminal.context.recorded = [{ message: 'Run setup failed', cursor: 'v2:3' }] as never;
+  // The failing line is the run's own, written by no step.
+  const source: RunHistoryReader = {
+    ...fixture,
+    page: async (...args) => {
+      const page = await fixture.page(...args);
+      return {
+        ...page,
+        events: page.events.map((entry) =>
+          entry.cursor === 'v2:3'
+            ? { ...entry, event: { kind: 'safe_log', stream: 'error', line: 'Run setup failed' } }
+            : entry
+        ),
+      };
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(createElement(RunHistoryView, { runId: detail.runId, source, workers: [] }))
+    );
+    await flushEffects();
+    const startOpen = () =>
+      container.querySelector('.run-boundary .story-step-head')?.getAttribute('aria-expanded');
+    assert.equal(startOpen(), 'false');
+    const log = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('View log · v2:3')
+    );
+    assert.ok(log);
+    await act(async () => log.click());
+    assert.equal(startOpen(), 'true');
+    assert.ok(container.querySelector('.run-steps-view'), 'the log opens in Steps');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
 
 const incompleteHistoryError = () =>
   new ApiError(503, 'history_incomplete', 'The remaining archive could not be retained.');
@@ -989,6 +1051,124 @@ test('a request suspension shows its text, deadline and successor without an ans
     assert.equal(container.querySelector('a')?.getAttribute('href'), '/host/runs/continued-run');
     assert.equal(watched, false);
     assert.doesNotMatch(renderedText(container), /Answer request/);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('opening steps keeps a live run followed; Show node and a node picked in Graph open it in Steps', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const base = runDetailFixture('live-run');
+  const detail: RunDetail = {
+    ...base,
+    graph: {
+      ...base.graph,
+      root: {
+        kind: 'seq',
+        name: 'run',
+        children: [
+          { kind: 'step', name: 'plan' },
+          { kind: 'step', name: 'build' },
+        ],
+      },
+    },
+    observation: { state: 'active' },
+  };
+  const reference = (node: string, execution: string) => ({
+    node,
+    execution,
+    nodeInstance: execution,
+    runId: detail.runId,
+  });
+  const events: HistoryPage['events'] = [
+    { cursor: 'v2:1', event: { kind: 'run_started' } },
+    { cursor: 'v2:2', event: { kind: 'node_started', reference: reference('plan', '1') } },
+    {
+      cursor: 'v2:3',
+      event: { kind: 'safe_log', execution: '1', stream: 'output', line: 'Planning the change' },
+    },
+  ];
+  let observer: Parameters<NonNullable<RunHistoryReader['watch']>>[2] | undefined;
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => ({ ...completePage(), events, nextCursor: 'v2:3', headCursor: 'v2:3' }),
+    watch(_id, _after, next) {
+      observer = next;
+      return () => {};
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const following = () => container.querySelector('.history-live')?.getAttribute('title');
+  try {
+    await act(async () =>
+      root.render(createElement(RunHistoryView, { runId: detail.runId, source, workers: [] }))
+    );
+    await flushEffects();
+    assert.ok(observer);
+    await act(async () => observer!.status('connected'));
+    assert.equal(following(), 'Following latest events');
+    const plan = [...container.querySelectorAll<HTMLButtonElement>('.story-step-head')].find(
+      (head) => head.textContent?.includes('Plan')
+    );
+    assert.ok(plan);
+    await act(async () => plan.click());
+    assert.match(container.querySelector('.story-step.open')!.textContent!, /Planning the change/);
+    assert.equal(following(), 'Following latest events', 'opening a step is not a seek');
+
+    await act(async () =>
+      observer!.page({
+        ...completePage(),
+        events: [
+          { cursor: 'v2:4', event: { kind: 'node_started', reference: reference('build', '2') } },
+        ],
+        nextCursor: 'v2:4',
+        headCursor: 'v2:4',
+      })
+    );
+    assert.match(
+      container.querySelector('.timeline-caption strong')!.textContent!,
+      /Build/,
+      'the live run is still followed after a step was opened'
+    );
+
+    // A node picked in Graph is still picked after switching back to Steps.
+    await showGraph(container);
+    const graphShowNode = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Show node'
+    );
+    assert.ok(graphShowNode);
+    await act(async () => graphShowNode.click());
+    const steps = [...container.querySelectorAll<HTMLButtonElement>('.view-toggle button')].find(
+      (button) => button.textContent === 'Steps'
+    );
+    assert.ok(steps);
+    await act(async () => steps.click());
+    const reopened = [...container.querySelectorAll('.story-step.open')].map(
+      (row) => row.textContent
+    );
+    assert.ok(
+      reopened.some((text) => text?.includes('Build')),
+      reopened.join(' | ')
+    );
+
+    const showNode = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Show node'
+    );
+    assert.ok(showNode);
+    await act(async () => showNode.click());
+    const open = [...container.querySelectorAll('.story-step.open')].map((row) => row.textContent);
+    assert.ok(
+      open.some((text) => text?.includes('Build')),
+      open.join(' | ')
+    );
+    assert.ok(container.querySelector('.run-steps-view'), 'Show node stays in Steps');
+    assert.equal(following(), 'Following latest events');
   } finally {
     await act(async () => root.unmount());
     container.remove();
