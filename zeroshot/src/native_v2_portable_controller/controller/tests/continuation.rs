@@ -32,7 +32,9 @@ async fn successor_preparation_inherits_every_vector_and_only_suspended_executio
         let reference = test_support::request(predecessor.as_str(), "worker", (1, 1))
             .invocation
             .reference;
+        let floor = 11;
         let mut events = vec![
+            RunEvent::NodeInstancesReserved { through: floor },
             RunEvent::RunStarted,
             test_support::node_started(&reference, serde_json::Value::Null),
         ];
@@ -105,6 +107,7 @@ async fn successor_preparation_inherits_every_vector_and_only_suspended_executio
         .await
         .assert_value();
         let runtime = prepared_runtime.runtime.assert_value();
+        assert_eq!(runtime.node_instance_floor, floor);
         assert_eq!(&runtime.vector_seed[..vectors.len()], vectors);
         assert_eq!(runtime.vector_seed.len(), vectors.len() + 1);
         let continuation = runtime.vector_seed.last().assert_value();

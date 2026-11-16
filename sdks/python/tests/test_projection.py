@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zeroshot._projection import _log_event, _stack_status, _status, _summary
+from zeroshot._projection import _log_event, _stack_status, _status, _steer, _summary
 from zeroshot.errors import ProtocolError
 
 
@@ -420,6 +420,8 @@ def test_steer_status_projects_receiving_executions_and_omissions() -> None:
     assert status.steers[0].executions == ("execution-2",)
     assert status.steers[0].received_executions == 65
     assert status.steers[0].executions_omitted
+    assert status.steers[0].mode == "standing"
+    assert status.steers[0].network is None
     assert _status(local_status()).steers == ()
 
 
@@ -429,3 +431,46 @@ def test_steer_status_rejects_malformed_counts(count: object) -> None:
     value["omittedSteers"] = count
     with pytest.raises(ProtocolError):
         _status(value)
+
+
+def steer_value() -> dict[str, object]:
+    return {
+        "id": "steer-1",
+        "createdAt": 1000,
+        "textBytes": 8,
+        "excerpt": "message",
+        "receivedExecutions": 0,
+        "executions": [],
+    }
+
+
+@pytest.mark.parametrize("mode", ["once", "standing"])
+def test_steer_preserves_network_metadata(mode: str) -> None:
+    value = steer_value()
+    network = {
+        "networks": ["team", "review"],
+        "origin": {"node": "sender", "nodeInstance": 7, "execution": "execution-7"},
+    }
+    value.update(mode=mode, network=network)
+    steer = _steer(value)
+    assert steer.mode == mode
+    assert steer.network == network
+    status = local_status()
+    status["steers"] = [value]
+    assert _status(status).steers == (steer,)
+
+
+@pytest.mark.parametrize("mode", [None, "unknown", "ONCE", 1, ["once"]])
+def test_steer_rejects_invalid_mode_metadata(mode: object) -> None:
+    value = steer_value()
+    value["mode"] = mode
+    with pytest.raises(ProtocolError, match=r"steer\.mode"):
+        _steer(value)
+
+
+@pytest.mark.parametrize("network", ["team", [], 1])
+def test_steer_rejects_nonobject_network_metadata(network: object) -> None:
+    value = steer_value()
+    value["network"] = network
+    with pytest.raises(ProtocolError, match=r"steer\.network"):
+        _steer(value)

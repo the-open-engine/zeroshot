@@ -199,6 +199,9 @@ pub(super) fn prepare(
         invocation,
     )?;
     let memory = memory_capability(adapter, invocation, files);
+    if let Some(hooks) = &adapter.active_memory {
+        hooks.configure_network_environment(&mut environment, invocation, memory.as_deref());
+    }
     let options = crate::harnesses::native_config::invocation_options(
         invocation,
         "hermes",

@@ -23,6 +23,11 @@ use crate::{
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CompiledGraphIr {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        schema_with = "crate::value::identifier_keyed_map_schema::<NodeName, crate::SteeringNetwork>"
+    )]
+    pub networks: BTreeMap<NodeName, crate::SteeringNetwork>,
     pub profile: GraphProfile,
     pub initial_input: PayloadType,
     pub policy: PolicyBinding,

@@ -180,7 +180,8 @@ elif args and args[0] == "steer":
     text = entry["text"]
     print(json.dumps({"runId":args[1],"steer":{"id":"steer-1","createdAt":1000,
         "textBytes":len(text.encode()),"excerpt":text.encode()[:1024].decode("utf-8", "ignore"),
-        "receivedExecutions":0,"executions":[]}}))
+        "receivedExecutions":0,"executions":[],
+        "mode":args[args.index("--mode")+1] if "--mode" in args else "standing"}}))
 elif args and args[0] == "suspend":
     status = {"phase":"running","activeExecutions":[],"suspendRequested":True}
     print(json.dumps(projection(args[1], status, "v2:1")))

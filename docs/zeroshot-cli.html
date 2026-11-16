@@ -118,7 +118,7 @@ Commands:
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
-  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+  steer              Send direction to agents or publish guidance to authorized graph networks
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
@@ -1362,7 +1362,7 @@ Options:
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
 <section id="zeroshot-steer"><h3><code>zeroshot steer</code></h3>
-<pre><code>Broadcast standing direction to every agent conversation in a running or suspended run
+<pre><code>Send direction to agents or publish guidance to authorized graph networks
 
 Usage: zeroshot steer [OPTIONS] &lt;TEXT|--text-file &lt;FILE&gt;|--text-stdin&gt; &lt;RUN_ID&gt;
 
@@ -1382,6 +1382,14 @@ Options:
 
       --text-stdin
           Read UTF-8 direction from standard input
+
+      --network &lt;NAME&gt;
+          Broadcast to this authorized graph-local network; repeat for several networks
+
+      --mode &lt;MODE&gt;
+          Once per recipient node instance, or standing across fresh conversations. Defaults to once for network messages and standing for human direction
+
+          [possible values: once, standing]
 
   -h, --help
           Print help</code></pre></section>
@@ -1639,7 +1647,7 @@ Commands:
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
-  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+  steer              Send direction to agents or publish guidance to authorized graph networks
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full

@@ -477,6 +477,8 @@ mod versions;
 mod checkpoint_seed;
 #[path = "tests/checkpoints.rs"]
 mod checkpoint_tests;
+#[path = "tests/identity_floor.rs"]
+mod identity_floor;
 
 #[path = "tests/postmortem.rs"]
 mod postmortem_tests;

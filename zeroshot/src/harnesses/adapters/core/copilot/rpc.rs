@@ -405,21 +405,39 @@ impl<'a> CopilotRpc<'a> {
                 Value::Null,
                 |(_, delivery)| json!({"additionalContext":delivery.context}),
             );
-        let (acknowledged, written) = tokio::sync::oneshot::channel();
         let reply = json!({"jsonrpc":"2.0","id":message["id"],"result":{"output":output}});
+        let handoff = self.write_memory_reply(reply, deadline).await;
+        if let (Some(memory), Some((query, delivery))) = (&self.active_memory, delivery) {
+            // The reply writer must acknowledge handoff before a receipt can consume a message.
+            if matches!(handoff, Ok(true)) {
+                if tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery))
+                    .await
+                    .is_err()
+                {
+                    memory.discard_delivery(&query, &delivery).await;
+                }
+            } else {
+                memory.discard_delivery(&query, &delivery).await;
+            }
+        }
+        handoff.map(|_| ())
+    }
+
+    async fn write_memory_reply(
+        &self,
+        reply: Value,
+        deadline: tokio::time::Instant,
+    ) -> Result<bool, NodeRunnerError> {
+        let (acknowledged, written) = tokio::sync::oneshot::channel();
         self.sender
             .as_ref()
             .ok_or_else(|| failure("Copilot RPC is closed"))?
             .try_send((reply, Some(acknowledged)))
             .map_err(|_| failure("Copilot RPC output queue is full or closed"))?;
-        // Queueing a reply does not establish native delivery. Only the existing RPC writer's
-        // completed handoff can acknowledge a steer, within the callback's shared deadline.
-        if matches!(tokio::time::timeout_at(deadline, written).await, Ok(Ok(())))
-            && let (Some(memory), Some((query, delivery))) = (&self.active_memory, delivery)
-        {
-            let _ = tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery)).await;
-        }
-        Ok(())
+        Ok(matches!(
+            tokio::time::timeout_at(deadline, written).await,
+            Ok(Ok(()))
+        ))
     }
 
     async fn acquire_token(&mut self, message: &Value) -> Result<(), NodeRunnerError> {

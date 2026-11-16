@@ -32,7 +32,7 @@ Commands:
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
-  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+  steer              Send direction to agents or publish guidance to authorized graph networks
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
@@ -1496,7 +1496,7 @@ Options:
 ### `zeroshot steer`
 
 ```text
-Broadcast standing direction to every agent conversation in a running or suspended run
+Send direction to agents or publish guidance to authorized graph networks
 
 Usage: zeroshot steer [OPTIONS] <TEXT|--text-file <FILE>|--text-stdin> <RUN_ID>
 
@@ -1516,6 +1516,14 @@ Options:
 
       --text-stdin
           Read UTF-8 direction from standard input
+
+      --network <NAME>
+          Broadcast to this authorized graph-local network; repeat for several networks
+
+      --mode <MODE>
+          Once per recipient node instance, or standing across fresh conversations. Defaults to once for network messages and standing for human direction
+
+          [possible values: once, standing]
 
   -h, --help
           Print help
@@ -1829,7 +1837,7 @@ Commands:
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
-  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+  steer              Send direction to agents or publish guidance to authorized graph networks
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full

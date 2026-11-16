@@ -1,7 +1,8 @@
 //! Steering projections and publication share the run's sole vector record.
 use std::collections::{BTreeSet, VecDeque};
 use openengine_cluster_protocol::{
-    RunId, RunSteer, RunSteerParams, RunSteerResult, RunSteeringStatus, RunVector, RunVectorContent,
+    NetworkSteer, NetworkSteerParams, RunId, RunSteer, RunSteerParams, RunSteerResult,
+    RunSteeringStatus, RunVector, RunVectorContent, SteerOrigin,
 };
 use super::{RunEvent, RunLedger, RunLedgerError, vector_event};
 
@@ -9,21 +10,59 @@ pub(crate) async fn record(
     ledger: &dyn RunLedger,
     params: RunSteerParams,
 ) -> Result<RunSteerResult, RunLedgerError> {
-    openengine_cluster_protocol::validate_steer(&params.text)
-        .map_err(|_| RunLedgerError::InvalidEvent("invalid steer text"))?;
-    let event = vector_event(
-        &params.run_id,
-        RunVectorContent::Steer { text: params.text },
-    )?;
+    record_content(
+        ledger,
+        params.run_id,
+        RunVectorContent::Steer {
+            text: params.text,
+            mode: params.mode,
+            network: None,
+        },
+    )
+    .await
+}
+
+pub(crate) async fn record_network(
+    ledger: &dyn RunLedger,
+    params: NetworkSteerParams,
+    origin: SteerOrigin,
+) -> Result<RunSteerResult, RunLedgerError> {
+    let networks = params
+        .networks
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    record_content(
+        ledger,
+        params.run_id,
+        RunVectorContent::Steer {
+            text: params.text,
+            mode: params.mode,
+            network: Some(NetworkSteer { networks, origin }),
+        },
+    )
+    .await
+}
+
+async fn record_content(
+    ledger: &dyn RunLedger,
+    run_id: RunId,
+    content: RunVectorContent,
+) -> Result<RunSteerResult, RunLedgerError> {
+    let event = vector_event(&run_id, content)?;
     let RunEvent::Vector { vector } = &event else {
         unreachable!()
     };
+    vector
+        .validate()
+        .map_err(|error| match error.to_string().as_str() {
+            "invalid steer text" => RunLedgerError::InvalidEvent("invalid steer text"),
+            _ => RunLedgerError::InvalidEvent("invalid steer vector"),
+        })?;
     let steer = summary(vector).ok_or(RunLedgerError::InvalidEvent("invalid steer vector"))?;
-    ledger.append(&params.run_id, vec![event]).await?;
-    Ok(RunSteerResult {
-        run_id: params.run_id,
-        steer,
-    })
+    ledger.append(&run_id, vec![event]).await?;
+    Ok(RunSteerResult { run_id, steer })
 }
 
 #[cfg(test)]
@@ -65,7 +104,12 @@ async fn visit(
 }
 
 pub(crate) fn summary(vector: &RunVector) -> Option<RunSteer> {
-    let RunVectorContent::Steer { text } = &vector.content else {
+    let RunVectorContent::Steer {
+        text,
+        mode,
+        network,
+    } = &vector.content
+    else {
         return None;
     };
     let mut end = text.len().min(1024);
@@ -74,6 +118,8 @@ pub(crate) fn summary(vector: &RunVector) -> Option<RunSteer> {
     }
     Some(RunSteer {
         id: vector.id.clone(),
+        mode: *mode,
+        network: network.clone(),
         created_at: vector.created_at,
         text_bytes: text.len(),
         excerpt: text[..end].into(),

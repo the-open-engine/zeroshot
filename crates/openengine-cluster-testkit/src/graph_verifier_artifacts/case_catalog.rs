@@ -1,6 +1,14 @@
 pub(super) fn positive_cases() -> Vec<(&'static str, Value)> {
     vec![
         ("positive/basic.json", basic_graph()),
+        (
+            "positive/networks.json",
+            network_graph(json!({"members":["work"],"publishers":["work"]})),
+        ),
+        (
+            "positive/networks-default-deny.json",
+            network_graph(json!({"members":["work"]})),
+        ),
         ("positive/binding-channels.json", binding_channels_graph()),
         ("positive/guard-in.json", guarded_graph(in_guard())),
         (
@@ -46,6 +54,22 @@ pub(super) fn positive_cases() -> Vec<(&'static str, Value)> {
 pub(super) fn negative_cases() -> Vec<(&'static str, Value)> {
     let mut cases = vec![
         ("negative/duplicate-node.json", duplicate_node_graph()),
+        (
+            "negative/network-empty-members.json",
+            network_graph(json!({"members":[]})),
+        ),
+        (
+            "negative/network-missing-member.json",
+            network_graph(json!({"members":["missing"]})),
+        ),
+        (
+            "negative/network-group-member.json",
+            network_graph(json!({"members":["root"]})),
+        ),
+        (
+            "negative/network-publisher-not-member.json",
+            network_graph(json!({"members":["work"],"publishers":["missing"]})),
+        ),
         ("negative/terminal-fallthrough.json", fallthrough_graph()),
         (
             "negative/illegal-control-selector.json",
@@ -154,3 +178,9 @@ use super::fixture_builders::*;
 use super::fixture_controls::*;
 use super::fixture_negative::*;
 use super::*;
+
+fn network_graph(network: Value) -> Value {
+    let mut value = basic_graph();
+    value["networks"] = json!({"team":network});
+    value
+}

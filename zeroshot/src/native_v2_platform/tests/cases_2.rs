@@ -60,6 +60,7 @@ async fn steer_target_list_omits_direction_while_status_keeps_bounded_summaries(
             &harness.controller,
             &context,
             openengine_cluster_protocol::RunSteerParams {
+                mode: Default::default(),
                 run_id: receipt.run_id.clone(),
                 text: "Standing direction belongs in status and vector reads".into(),
             },

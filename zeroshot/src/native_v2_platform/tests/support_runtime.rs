@@ -34,14 +34,11 @@ impl AllocatorCore {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(loss);
-        Ok(AllocatedCapsule {
-            vector_seed: Vec::new(),
-            checkpoints: None,
-            execution_seed: Vec::new(),
-            runner: Arc::new(runner),
-            loss: receiver,
-            cleanup: self.cleanup.clone(),
-        })
+        Ok(AllocatedCapsule::new(
+            Arc::new(runner),
+            receiver,
+            self.cleanup.clone(),
+        ))
     }
 
     fn allocation_count(&self) -> usize {

@@ -97,6 +97,7 @@ async fn steer_carrier_capabilities_retire_across_65536_launches_without_affecti
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "Direction after many launches".into(),
         },
@@ -172,7 +173,11 @@ fn command(path: &Path) -> ProcessSessionCommand {
     }
 }
 
-fn callback(capability: &super::broker::Capability, token: &str, event: Value) -> String {
+pub(super) fn callback(
+    capability: &super::broker::Capability,
+    token: &str,
+    event: Value,
+) -> String {
     let (context, mut stream) = callback_response(capability, token, event);
     if !context.is_empty() {
         stream.write_all(&[1]).assert_value();
@@ -679,6 +684,23 @@ pub(super) async fn steer_record() -> (
     (ledger, run)
 }
 
+pub(super) async fn record_steer(
+    ledger: &dyn crate::v2_run_ledger::RunLedger,
+    run: &openengine_cluster_protocol::RunId,
+    text: &str,
+) -> openengine_cluster_protocol::RunSteerResult {
+    crate::v2_run_ledger::steering::record(
+        ledger,
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: run.clone(),
+            text: text.into(),
+            mode: Default::default(),
+        },
+    )
+    .await
+    .assert_value()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn steer_callback_requires_carrier_receipt_and_reoffers_without_it() {
     let (ledger, run) = steer_record().await;
@@ -693,6 +715,7 @@ async fn steer_callback_requires_carrier_receipt_and_reoffers_without_it() {
     let receipt = crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "Human direction".into(),
         },
@@ -725,15 +748,7 @@ async fn steer_prompt_preserves_authored_contract_and_retries_worker_errors() {
     let (ledger, run) = steer_record().await;
     let hooks = ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value();
     hooks.bind_ledger(run.clone(), ledger.clone());
-    crate::v2_run_ledger::steering::record(
-        ledger.as_ref(),
-        openengine_cluster_protocol::RunSteerParams {
-            run_id: run.clone(),
-            text: "Standing direction".into(),
-        },
-    )
-    .await
-    .assert_value();
+    record_steer(ledger.as_ref(), &run, "Standing direction").await;
     let original = invocation();
     let mut first = original.clone();
     let delivery = hooks.prepare_steers(&mut first, false).await.assert_value();
@@ -804,6 +819,7 @@ async fn steer_maximum_callback_batches_whole_entries_before_memory_in_record_or
         let steer = crate::v2_run_ledger::steering::record(
             ledger.as_ref(),
             openengine_cluster_protocol::RunSteerParams {
+                mode: Default::default(),
                 run_id: run.clone(),
                 text: text.clone(),
             },
@@ -942,6 +958,7 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "Retry at the next callback".into(),
         },
@@ -966,3 +983,5 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
         1
     );
 }
+
+mod network;

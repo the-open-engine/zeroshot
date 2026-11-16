@@ -1,7 +1,7 @@
 //! Language-neutral graph syntax. These types describe graphs; they do not execute or admit them.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -138,9 +138,24 @@ pub struct PolicyBinding {
     pub default: PolicyDefault,
 }
 
+/// Graph-local participants and explicit publishing authority for a steering network.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SteeringNetwork {
+    #[schemars(length(min = 1))]
+    pub members: BTreeSet<NodeName>,
+    #[serde(default)]
+    pub publishers: BTreeSet<NodeName>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct GraphSpec {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        schema_with = "crate::value::identifier_keyed_map_schema::<NodeName, SteeringNetwork>"
+    )]
+    pub networks: BTreeMap<NodeName, SteeringNetwork>,
     pub profile: GraphProfile,
     pub initial_input: PayloadType,
     pub policy: PolicyBinding,

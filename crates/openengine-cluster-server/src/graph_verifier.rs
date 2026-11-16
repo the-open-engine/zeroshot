@@ -96,6 +96,7 @@ fn finalize_verified_with_invariant_probe(
         ));
     }
     let compiled_ir = CompiledGraphIr {
+        networks: graph.networks.clone(),
         profile: graph.profile,
         initial_input: graph.initial_input.clone(),
         policy: graph.policy.clone(),

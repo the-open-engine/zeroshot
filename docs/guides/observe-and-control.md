@@ -392,15 +392,15 @@ zeroshot steer RUN_ID --text-file direction.txt --target NAME
 printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin
 ```
 
-Supply exactly one text source. An admitted, running or suspended run accepts standing direction.
+Supply exactly one text source. An admitted, running or suspended run accepts direction.
 Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
-Every agent conversation, including reviewers, receives each steer once: at its next tool call or
+With the default standing mode, every agent conversation, including reviewers, receives each steer once: at its next tool call or
 in its next prompt, whichever comes first. It cannot revise a tool call already issued. Direction
 takes precedence over authored instructions as guidance; permissions, output contracts, routing,
 runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
-Steers stand for the rest of the run and its successors. Continued conversations keep receipts;
+Standing steers last for the rest of the run and its successors. Continued conversations keep receipts;
 new conversations receive the standing direction. A lost acknowledgement can cause repeat delivery.
 
 Text must be nonblank UTF-8, at most 262,144 bytes, with no NUL or control characters except tab,
@@ -419,4 +419,42 @@ zeroshot vectors show RUN_ID STEER_ID
 ```
 
 The record includes `steer` and `steer_receipt` entries in event order. Add `--target NAME` to these
-commands for a direct target advertising steering and run vectors.
+commands for a direct target advertising steering and run vectors. A receipt confirms that the
+carrier returned context, or that a provider turn completed successfully; it does not prove that
+the model followed the message.
+
+### Send a peer message
+
+A graph can declare [networks](../reference/cluster/graph.md#peer-networks) for selected agents.
+An authorized publisher sends a message from its own running local execution:
+
+```console
+zeroshot steer "$ZEROSHOT_RUN_ID" --network review "The parser fix is ready for review."
+zeroshot steer "$ZEROSHOT_RUN_ID" --network review --network implementers --mode standing \
+  "Keep the Windows path in scope."
+```
+
+Repeat `--network` to address several networks. The command accepts the same text, file and stdin
+sources as human steering. Each recipient receives the message once even when it belongs to
+several selected networks. All mapped instances of a member node participate, including other
+instances of the publishing node. The originating instance never receives its own message,
+even after a retry, a fresh provider conversation or a resume.
+
+Network messages default to `--mode once`: each recipient node instance receives one confirmed
+delivery, and that receipt survives fresh provider conversations and successors. Use `--mode standing` to deliver once per provider conversation for the rest of the run and its successors.
+Human steering without `--network` keeps its standing default; `--mode once` selects a one-off
+human direction.
+
+Publishers receive their authorized network names and publication instructions in private context.
+The host supplies an execution-scoped capability and records the origin itself; environment labels
+do not grant publication access. Members outside the publisher set can receive messages but cannot
+send them. An agent cannot use the human broadcast form to bypass that restriction, and a caller
+outside the authorized execution cannot publish a network message.
+
+A running recipient receives pending messages at its next native tool callback. A future sequential
+recipient receives them in its first prompt. Publication never starts an agent, restarts a recipient
+or wakes a suspended run. Peer messages carry their source as context;
+they do not override authored instructions or grant permissions. Network destinations, mode and
+origin remain in the vector record alongside the text and delivery receipts. Lost acknowledgements
+can cause repeat delivery before the host confirms receipt. If publication reports an unknown
+outcome, inspect the run vectors before sending the message again.

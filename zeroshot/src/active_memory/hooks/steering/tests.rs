@@ -13,6 +13,12 @@ struct SlowPages {
     reads: Mutex<Vec<Option<Cursor>>>,
     fail_next_read: AtomicBool,
     timeout_next_receipt: AtomicBool,
+    publication: Option<Arc<PublicationGate>>,
+}
+#[derive(Default)]
+struct PublicationGate {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
 }
 #[async_trait::async_trait]
 impl RunLedger for SlowPages {
@@ -49,6 +55,13 @@ impl RunLedger for SlowPages {
             // The production receipt deadline must cancel this first publication. Its
             // offer remains due, independently of scheduling or SQLite write speed.
             std::future::pending::<()>().await;
+        }
+        if let Some(gate) = &self.publication
+            && matches!(events.first(), Some(RunEvent::Vector { vector })
+                if matches!(vector.content, RunVectorContent::Steer { network: Some(_), .. }))
+        {
+            gate.entered.notify_one();
+            gate.release.notified().await;
         }
         self.ledger.append(run, events).await
     }
@@ -97,6 +110,7 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
         reads: Mutex::default(),
         fail_next_read: AtomicBool::new(false),
         timeout_next_receipt: AtomicBool::new(true),
+        publication: None,
     });
     ledger
         .create_or_get(CreateRun {
@@ -120,6 +134,8 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             vector_event(
                 &run,
                 RunVectorContent::Steer {
+                    mode: Default::default(),
+                    network: None,
                     text: format!(
                         "{i:03}{}",
                         "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES - 3)
@@ -303,15 +319,12 @@ async fn steer_restored_conversation_keeps_receipts_until_its_provider_home_is_r
     {
         *session_scope = crate::execution::SessionScope::NodeInstance;
     }
-    let direction = steering::record(
+    let direction = crate::active_memory::hooks::tests::record_steer(
         ledger.as_ref(),
-        openengine_cluster_protocol::RunSteerParams {
-            run_id: run.clone(),
-            text: "Standing direction".into(),
-        },
+        &run,
+        "Standing direction",
     )
-    .await
-    .assert_value();
+    .await;
     ledger
         .append(
             &run,
@@ -406,6 +419,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "before-snapshot".into(),
         },
@@ -418,6 +432,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "after-snapshot".into(),
         },
@@ -464,4 +479,83 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     let context = first.host_context.as_ref().assert_value();
     assert!(context.contains("before-snapshot"));
     assert!(context.contains("after-snapshot"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn network_timeout_keeps_the_started_write_fenced_until_retirement_drains() {
+    use crate::active_memory::hooks::publish_network;
+    let (ledger, run) = steer_record().await;
+    let gate = Arc::new(PublicationGate::default());
+    let ledger = Arc::new(SlowPages {
+        ledger,
+        reads: Mutex::default(),
+        fail_next_read: AtomicBool::new(false),
+        timeout_next_receipt: AtomicBool::new(false),
+        publication: Some(gate.clone()),
+    });
+    let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
+    let worker = NodeName::new("worker").assert_value();
+    let network = NodeName::new("alpha").assert_value();
+    hooks.configure_networks(&BTreeMap::from([(
+        network.clone(),
+        SteeringNetwork {
+            members: BTreeSet::from([worker.clone()]),
+            publishers: BTreeSet::from([worker]),
+        },
+    )]));
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut sender = invocation();
+    hooks
+        .prepare_steers(&mut sender, false)
+        .await
+        .assert_value();
+    let home = tempfile::tempdir().assert_value();
+    let path = hooks
+        .capability_file(&sender, home.path(), home.path())
+        .assert_value()
+        .assert_value();
+    let capability: crate::active_memory::hooks::broker::Capability =
+        serde_json::from_slice(&std::fs::read(&path).assert_value()).assert_value();
+    let params = NetworkSteerParams {
+        run_id: run.clone(),
+        text: "delayed-note".into(),
+        mode: SteeringMode::Once,
+        networks: vec![network],
+    };
+    let publication = tokio::task::spawn_blocking(move || publish_network(&path, params));
+    tokio::time::timeout(Duration::from_secs(2), gate.entered.notified())
+        .await
+        .assert_value();
+    let error = publication.await.assert_value().unwrap_err();
+    assert!(error.to_string().contains("outcome is unknown"));
+    let callback = tokio::task::spawn_blocking(move || {
+        crate::active_memory::hooks::tests::callback(
+            &capability,
+            &capability.token,
+            serde_json::json!({"tool_name":"Read"}),
+        )
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), callback)
+            .await
+            .assert_value()
+            .assert_value()
+            .is_empty()
+    );
+    let finishing_hooks = hooks.clone();
+    let mut finishing = tokio::spawn(async move { finishing_hooks.finish_steers(2, false).await });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), &mut finishing)
+            .await
+            .is_err()
+    );
+    assert!(!finishing.is_finished());
+    gate.release.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), finishing)
+        .await
+        .assert_value()
+        .assert_value();
+    let status = steering::status(ledger.as_ref(), &run).await.assert_value();
+    assert_eq!(status.steers.len(), 1);
+    assert_eq!(status.steers[0].excerpt, "delayed-note");
 }

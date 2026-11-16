@@ -775,6 +775,14 @@
           "schema": {
             "$ref": "schema.json#/$defs/NodeInstructions"
           }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "$ref": "#/$defs/SteeringMode",
+            "default": "standing"
+          }
         }
       ],
       "result": {

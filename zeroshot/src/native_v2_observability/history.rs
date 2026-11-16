@@ -66,6 +66,7 @@ impl RunHistoryService {
         let observation = history_observation(&stored.snapshot, runtime.is_ok());
         let runtime_failure = runtime.ok().flatten();
         let graph = GraphSpec {
+            networks: stored.admitted.graph.networks,
             profile: stored.admitted.graph.profile,
             initial_input: stored.admitted.graph.initial_input,
             policy: stored.admitted.graph.policy,

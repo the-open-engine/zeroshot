@@ -367,7 +367,7 @@ pub(super) fn reduce(
         .reduce(ReductionInput {
             initial_input: &admitted.initial_input,
             executions: &executions,
-            next_node_instance: next_node_instance(&executions)?,
+            next_node_instance: next_node_instance_for(snapshot, &executions)?,
             next_execution: next_execution(&executions)?,
         })?)
 }
@@ -469,6 +469,17 @@ pub(super) fn history_position(
 ) -> Result<HistoryPosition, NativeV2SupervisorError> {
     HistoryPosition::new(cursor_sequence(cursor)?)
         .map_err(|_| NativeV2SupervisorError::InvalidState)
+}
+
+pub(crate) fn next_node_instance_for(
+    snapshot: &RunSnapshot,
+    executions: &[DurableExecution],
+) -> Result<u64, NativeV2SupervisorError> {
+    let next = snapshot
+        .node_instance_floor
+        .checked_add(1)
+        .ok_or(NativeV2SupervisorError::InvalidState)?;
+    Ok(next_node_instance(executions)?.max(next))
 }
 
 pub(crate) fn next_node_instance(

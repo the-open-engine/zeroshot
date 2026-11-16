@@ -401,6 +401,7 @@ This method has no parameters.
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>text</code> | Yes | <a href="../schema.json#/$defs/NodeInstructions"><code>schema.json#/$defs/NodeInstructions</code></a> |
+| <code>mode</code> | No | <a href="#/$defs/SteeringMode"><code>#/$defs/SteeringMode</code></a> |
 
 #### Result
 

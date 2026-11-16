@@ -21,6 +21,8 @@ use crate::native_v2_contract::{
     AdmittedRun, ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId, TokenUsageDelta,
 };
 
+#[path = "tests/identities.rs"]
+mod identities;
 #[path = "tests/primary_restart.rs"]
 mod primary_restart;
 #[path = "tests/recorded_at.rs"]

@@ -32,6 +32,7 @@ pub fn compiled_from_graph_fixture(graph: &GraphSpec) -> CompiledGraphIr {
         profile: graph.profile,
         initial_input: graph.initial_input.clone(),
         policy: graph.policy.clone(),
+        networks: graph.networks.clone(),
         root: graph.root.clone(),
         bounds: StructuralBounds {
             termination: TerminationWitness::Acyclic {

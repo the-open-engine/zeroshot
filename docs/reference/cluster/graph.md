@@ -26,7 +26,8 @@ separate from verification.
 ## Graph wire format
 
 `GraphSpec` has the required camel-case fields `profile`, `initialInput`, `policy`, and `root`.
-Every graph node is tagged by `kind`. Node payloads reject unknown fields.
+Every graph node is tagged by `kind`. Node payloads reject unknown fields. The optional `networks`
+object declares peer communication permissions; omission or `{}` grants none.
 
 | `kind`     | Contract                                                                                                                                                   |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -127,6 +128,40 @@ and loops retain control of recovery; there is no global abort, cooldown, waitin
 automatic resumption. After usage becomes available,
 [resume the failed run](../../guides/observe-and-control.md#restart-or-resume-a-failed-run) using its
 retained workspace or an available checkpoint.
+
+## Peer networks
+
+`GraphSpec.networks` maps network names to `members` and `publishers` sets. Names use the same
+bounded identifier type as node names. A network must have at least one member. Every publisher
+must also be a member, and every listed
+node must name an executable graph node with an agent runtime binding. A network declaration
+applies to all instances of that logical node, including mapped instances. Omitted `publishers`
+defaults to an empty set, granting receive-only access.
+
+```json
+{
+  "networks": {
+    "review": {
+      "members": ["builder", "reviewer"],
+      "publishers": ["builder"]
+    }
+  }
+}
+```
+
+This fragment belongs beside `profile`, `initialInput`, `policy` and `root` in the graph. Admission
+rejects unknown node references and publishers outside their network's member set. The default is
+deny: undeclared networks grant no publication or message-delivery access. Only authorized
+publishers receive publication instructions and a host-owned execution capability. Other members
+receive attributed peer messages; nodes outside the member set receive neither those messages
+nor publication context.
+
+A publisher may address several networks in one message. Membership overlap yields one delivery
+per recipient, and the originating node instance stays excluded across provider sessions and
+successors. Other mapped instances of the same logical node can receive it. The message's `once`
+mode consumes one receipt per recipient node instance; `standing` consumes one receipt per
+provider conversation. Message publication supplements private agent context without changing
+authored instructions, routing, bindings or scheduling. See [Send a peer message](../../guides/observe-and-control.md#send-a-peer-message).
 
 ## Data and control separation
 

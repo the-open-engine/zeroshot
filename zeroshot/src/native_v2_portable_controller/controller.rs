@@ -475,6 +475,9 @@ async fn seed_predecessor_history(
         .get(predecessor)
         .await?
         .ok_or(PortableControllerError::DurableIdentity)?;
+    runtime.node_instance_floor = runtime
+        .node_instance_floor
+        .max(stored.snapshot.reserved_node_instance());
     let conversation_restore = if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
     {
         if bootstrap.checkpoint.is_some() {
@@ -743,6 +746,7 @@ impl CapsuleAllocator for SingleRunAllocator {
             .take()
             .ok_or(CapsuleAllocationUnavailable::Runtime)?;
         Ok(AllocatedCapsule {
+            node_instance_floor: runtime.node_instance_floor,
             checkpoints: runtime.checkpoints,
             execution_seed: runtime.execution_seed,
             vector_seed: runtime.vector_seed,

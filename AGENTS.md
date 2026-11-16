@@ -109,6 +109,19 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
   restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
   standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  GraphSpec.networks owns default-deny peer communication: members name every participating logical
+  agent node and publishers are a subset. All mapped copies participate. Only publishers receive
+  network publication context and an execution-scoped broker capability; labels never authorize it.
+  Local `steer --network` uses that capability without controller discovery, stamps its origin at
+  the host and refuses foreign runs or human-broadcast escalation. Repeated destinations and
+  overlapping memberships deduplicate delivery. Per-message once mode defaults for networks and
+  consumes receipts per recipient node instance across fresh conversations and successors; standing
+  tracks provider conversations. Human broadcast retains its standing default and precedence.
+  Both modes permanently exclude the originating node instance, including across retries, fresh
+  sessions and resume. Successors reserve fresh node-instance IDs above full predecessor history
+  independently of selected checkpoint prerequisites; retained instances keep their IDs. Publication
+  uses the existing vector record and native carrier, delivering
+  to active hooks or future prompts without waking, restarting or scheduling recipients.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.

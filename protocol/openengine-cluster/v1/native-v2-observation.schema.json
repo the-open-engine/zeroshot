@@ -936,6 +936,29 @@
       ],
       "type": "object"
     },
+    "NetworkSteer": {
+      "additionalProperties": false,
+      "properties": {
+        "networks": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "origin": {
+          "$ref": "#/$defs/SteerOrigin"
+        }
+      },
+      "required": [
+        "networks",
+        "origin"
+      ],
+      "type": "object"
+    },
     "NodeInstructions": {
       "maxLength": 262144,
       "minLength": 1,
@@ -1893,6 +1916,20 @@
         "id": {
           "$ref": "#/$defs/VectorId"
         },
+        "mode": {
+          "$ref": "#/$defs/SteeringMode",
+          "default": "standing"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkSteer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "receivedExecutions": {
           "format": "uint64",
           "minimum": 0,
@@ -1921,6 +1958,20 @@
             "kind": {
               "const": "steer",
               "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/SteeringMode",
+              "default": "standing"
+            },
+            "network": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkSteer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "text": {
               "$ref": "#/$defs/NodeInstructions"
@@ -2174,6 +2225,20 @@
             "kind": {
               "const": "steer",
               "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/SteeringMode",
+              "default": "standing"
+            },
+            "network": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkSteer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "textBytes": {
               "format": "uint",
@@ -2560,6 +2625,41 @@
         "repository"
       ],
       "type": "object"
+    },
+    "SteerOrigin": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "nodeInstance": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "nodeInstance",
+        "execution"
+      ],
+      "type": "object"
+    },
+    "SteeringMode": {
+      "enum": [
+        "once",
+        "standing"
+      ],
+      "type": "string"
     },
     "TerminalResult": {
       "description": "Authoritative terminal value for backends that can durably reconstruct a completed graph.\n\nThis is additive to [`GetResult`]: backends that do not yet expose terminal values leave the\noptional field absent, including when their status is already `finished`.",

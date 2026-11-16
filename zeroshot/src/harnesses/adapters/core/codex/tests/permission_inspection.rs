@@ -365,3 +365,64 @@ async fn cancelled_codex_permission_inspection_never_reports_a_fallback() {
     }
     assert!(!directory.child("workspace").join("turn-arguments").exists());
 }
+
+#[tokio::test]
+async fn publisher_capability_survives_final_native_permission_setup() {
+    use crate::active_memory::hooks::ActiveMemoryHooks;
+    use crate::native_v2_capsule::provider_process::PermissionPolicy;
+    use crate::native_v2_runner::test_support;
+
+    for policy in [PermissionPolicy::Unset, PermissionPolicy::Configured] {
+        let directory = TestDirectory::new("codex-network-permissions");
+        let script = r#"#!/bin/sh
+set -eu
+cat > prompt
+test -n "${ZEROSHOT_STEERING_CAPABILITY-}"
+test -r "$ZEROSHOT_STEERING_CAPABILITY"
+printf '%s\n' "$@" > arguments
+printf '%s\n' "$ZEROSHOT_STEERING_CAPABILITY" > network-capability
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":null}"}}' '{"type":"turn.completed"}'
+"#;
+        let mut adapter =
+            scripted_adapter_with(&directory, CodexProvider::OpenAi, "codex-network", script);
+        let config = Arc::get_mut(&mut adapter).assert_value();
+        config.test_permission_policy = Some(policy);
+        config.config.local_user = Some(NativeV2CodexUser {
+            home: directory.path().to_owned(),
+            codex_home: directory.path().to_owned(),
+        });
+        let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
+        hooks.configure_networks(
+            &serde_json::from_value(json!({
+                "team":{"members":["worker"],"publishers":["worker"]}
+            }))
+            .assert_value(),
+        );
+        config.active_memory = Some(hooks);
+        let workspace = config.config.workspace.clone();
+        let runtime = runner(&test_support::admitted(), adapter);
+        runtime
+            .start(test_support::request(
+                "network-permissions",
+                "worker",
+                (1, 1),
+            ))
+            .await
+            .assert_value()
+            .completion()
+            .await
+            .assert_value();
+        let capability = fs::read_to_string(workspace.join("network-capability")).assert_value();
+        assert!(capability.trim().ends_with("active-memory-capability.json"));
+        let arguments = fs::read_to_string(workspace.join("arguments")).assert_value();
+        assert_eq!(
+            arguments.contains(BYPASS),
+            policy == PermissionPolicy::Unset
+        );
+        runtime
+            .close_run(&openengine_cluster_protocol::RunId::new(
+                "network-permissions",
+            ))
+            .await;
+    }
+}

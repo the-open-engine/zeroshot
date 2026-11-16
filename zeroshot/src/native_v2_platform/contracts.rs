@@ -82,6 +82,7 @@ pub struct AllocatedCapsule {
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     pub runner: Arc<dyn NodeRunner>,
     pub loss: watch::Receiver<bool>,
+    pub node_instance_floor: u64,
     pub cleanup: Arc<dyn CapsuleCleanup>,
 }
 
@@ -98,6 +99,7 @@ impl AllocatedCapsule {
             cleanup,
             checkpoints: None,
             execution_seed: Vec::new(),
+            node_instance_floor: Default::default(),
             vector_seed: Vec::new(),
         }
     }

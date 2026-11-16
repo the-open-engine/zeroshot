@@ -727,6 +727,7 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: Default::default(),
             run_id: run,
             text: text.clone(),
         },

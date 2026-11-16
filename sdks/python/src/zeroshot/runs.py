@@ -277,6 +277,9 @@ class RunSteer:
         received_executions: Total confirmed receiving executions.
         executions: Up to 64 most recent execution references.
         executions_omitted: Whether earlier receiving executions were omitted.
+        mode: Once per node instance or standing once per provider conversation.
+        network: Network names and originating node, instance and execution.
+            None for human direction.
     """
 
     id: str
@@ -286,6 +289,8 @@ class RunSteer:
     received_executions: int
     executions: tuple[str, ...]
     executions_omitted: bool = False
+    mode: Literal["once", "standing"] = "standing"
+    network: dict[str, JsonValue] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

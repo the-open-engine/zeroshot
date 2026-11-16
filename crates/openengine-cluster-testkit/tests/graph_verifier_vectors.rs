@@ -31,6 +31,12 @@ async fn assert_rejection_messages(graph: Value, expected: &[&str]) {
 fn assert_required_paths(paths: &std::collections::BTreeSet<&str>) {
     for required in [
         "/positive/binding-channels.json",
+        "/positive/networks.json",
+        "/positive/networks-default-deny.json",
+        "/negative/network-empty-members.json",
+        "/negative/network-missing-member.json",
+        "/negative/network-group-member.json",
+        "/negative/network-publisher-not-member.json",
         "/positive/guard-in.json",
         "/positive/guard-all.json",
         "/positive/guard-any.json",

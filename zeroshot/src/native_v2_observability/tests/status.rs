@@ -238,6 +238,7 @@ async fn steer_retained_runtime_failure_reads_directions_when_the_ledger_is_avai
     let recorded = crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            mode: Default::default(),
             run_id: worker.run_id.clone(),
             text: "Keep the observed failure evidence.".into(),
         },

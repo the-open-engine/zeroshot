@@ -23,6 +23,7 @@ pub(super) fn graph(
     root: GraphNode,
 ) -> Result<GraphSpec, BuiltinTemplateError> {
     Ok(GraphSpec {
+        networks: BTreeMap::new(),
         profile: GraphProfile::Full,
         initial_input,
         policy: PolicyBinding {

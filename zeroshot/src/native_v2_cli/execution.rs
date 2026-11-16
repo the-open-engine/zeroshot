@@ -36,6 +36,8 @@ mod sizes;
 mod stacks;
 #[path = "execution/status.rs"]
 mod status;
+#[path = "execution/steering.rs"]
+mod steering;
 #[path = "execution/submission.rs"]
 mod submission;
 use attach::{RoutedAttach, follow_attach};
@@ -154,21 +156,8 @@ where
 {
     let backend = context.backend;
     let command = match command {
-        NativeV2CliCommand::Steer { run, text } => {
-            let text = read_steer_text(text)?;
-            write_json(
-                output,
-                &backend
-                    .run_steer(
-                        run.target.as_deref(),
-                        openengine_cluster_protocol::RunSteerParams {
-                            run_id: run.run_id,
-                            text,
-                        },
-                    )
-                    .await?,
-            )?;
-            return Ok(CliOutcome::Completed);
+        command @ NativeV2CliCommand::Steer { .. } => {
+            return steering::execute(command, context, output).await;
         }
         NativeV2CliCommand::Suspend(run) => {
             write_json(

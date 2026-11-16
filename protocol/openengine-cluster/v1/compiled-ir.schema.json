@@ -1147,6 +1147,38 @@
       ],
       "type": "object"
     },
+    "SteeringNetwork": {
+      "additionalProperties": false,
+      "description": "Graph-local participants and explicit publishing authority for a steering network.",
+      "properties": {
+        "members": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "publishers": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "members"
+      ],
+      "type": "object"
+    },
     "StructuralBounds": {
       "additionalProperties": false,
       "properties": {
@@ -1266,6 +1298,18 @@
     },
     "initialInput": {
       "$ref": "#/$defs/PayloadType"
+    },
+    "networks": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SteeringNetwork"
+      },
+      "propertyNames": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+        "type": "string"
+      },
+      "type": "object"
     },
     "policy": {
       "$ref": "#/$defs/PolicyBinding"

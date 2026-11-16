@@ -546,4 +546,13 @@ def _steer(value: object) -> RunSteer:
         received_executions=_steer_count(entry, "receivedExecutions"),
         executions=_string_list(entry, "executions", "steer"),
         executions_omitted=omitted,
+        mode=cast(
+            Literal["once", "standing"],
+            _enum_string(
+                {"mode": entry.get("mode", "standing")}, "mode", {"once", "standing"}, "steer"
+            ),
+        ),
+        network=None
+        if entry.get("network") is None
+        else cast(dict[str, JsonValue], dict(_mapping(entry["network"], "steer.network"))),
     )

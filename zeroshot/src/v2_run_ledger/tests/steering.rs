@@ -14,6 +14,7 @@ async fn assert_large_status(ledger: &dyn RunLedger, run: &RunId) {
         steering::record(
             ledger,
             RunSteerParams {
+                mode: Default::default(),
                 run_id: run.clone(),
                 text: format!(
                     "{index:03}{}",
@@ -171,4 +172,50 @@ async fn steer_status_preserves_pre_vector_read_only_runs_without_replaying_hist
         Err(RunLedgerError::RunNotFound)
     ));
     assert_eq!(std::fs::read(&path).assert_value(), before);
+}
+
+#[tokio::test]
+async fn network_steer_records_modes_origin_and_canonical_destinations_in_existing_vectors() {
+    use openengine_cluster_protocol::{ExecutionRef, NetworkSteerParams, SteerOrigin, SteeringMode};
+    let ledger = FakeRunLedger::new();
+    let run = RunId::new("network-record");
+    ledger
+        .create_or_get(create(run.as_str(), "network-record", 'a'))
+        .await
+        .assert_value();
+    let origin = SteerOrigin {
+        node: NodeName::new("sender").assert_value(),
+        node_instance: 3,
+        execution: ExecutionRef::new("execution/3").assert_value(),
+    };
+    let message = super::super::steering::record_network(
+        &ledger,
+        NetworkSteerParams {
+            run_id: run.clone(),
+            text: "message to future members".into(),
+            mode: SteeringMode::Once,
+            networks: vec![
+                NodeName::new("team").assert_value(),
+                NodeName::new("team").assert_value(),
+            ],
+        },
+        origin.clone(),
+    )
+    .await
+    .assert_value();
+    assert_eq!(message.steer.mode, SteeringMode::Once);
+    let network = message.steer.network.as_ref().assert_value();
+    assert_eq!(network.origin, origin);
+    assert_eq!(network.networks.len(), 1);
+    let status = super::super::steering::status(&ledger, &run)
+        .await
+        .assert_value();
+    assert_eq!(status.steers, [message.steer]);
+    assert_eq!(
+        super::super::steering::all(&ledger, &run)
+            .await
+            .assert_value()
+            .len(),
+        1
+    );
 }

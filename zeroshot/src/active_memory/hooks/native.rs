@@ -21,7 +21,7 @@ pub(crate) fn hook_command(capability: &Path) -> io::Result<String> {
     ))
 }
 
-fn hook_executable() -> io::Result<std::path::PathBuf> {
+pub(super) fn hook_executable() -> io::Result<std::path::PathBuf> {
     #[cfg(test)]
     {
         test_hook_executable(std::env::var_os("ZEROSHOT_LIVE_CLI_BINARY"))
@@ -51,7 +51,7 @@ pub(super) fn test_hook_executable(
     Ok(executable)
 }
 
-fn shell_quote(path: &Path) -> String {
+pub(crate) fn shell_quote(path: &Path) -> String {
     #[cfg(windows)]
     {
         format!("\"{}\"", path.to_string_lossy().replace('"', "\"\""))

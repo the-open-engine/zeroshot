@@ -190,7 +190,7 @@ enum UtilityCommand {
     /// Its successor continues captured node-instance conversations from that checkpoint.
     Suspend(RunSelectorArgs),
 
-    /// Broadcast standing direction to every agent conversation in a running or suspended run.
+    /// Send direction to agents or publish guidance to authorized graph networks.
     Steer(RunSteerArgs),
 
     /// Answer a suspended request from a JSON file and start its successor.
@@ -885,6 +885,13 @@ struct RunSteerArgs {
     /// Read UTF-8 direction from standard input.
     #[arg(long)]
     text_stdin: bool,
+    /// Broadcast to this authorized graph-local network; repeat for several networks.
+    #[arg(long = "network", value_name = "NAME")]
+    networks: Vec<String>,
+    /// Once per recipient node instance, or standing across fresh conversations.
+    /// Defaults to once for network messages and standing for human direction.
+    #[arg(long, value_parser = ["once", "standing"])]
+    mode: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -461,6 +461,7 @@ impl NativeV2PlatformController {
         } = start;
         let run_id = stored.snapshot.run_id.clone();
         let AllocatedCapsule {
+            node_instance_floor,
             vector_seed,
             checkpoints,
             execution_seed,
@@ -468,10 +469,14 @@ impl NativeV2PlatformController {
             loss,
             cleanup,
         } = capsule;
-        if let Err(error) = self
-            .initialize_allocated(&mut stored, execution_seed, vector_seed)
-            .await
-        {
+        let initialized = async {
+            self.reserve_node_instance_floor(&mut stored, node_instance_floor)
+                .await?;
+            self.initialize_allocated(&mut stored, execution_seed, vector_seed)
+                .await
+        }
+        .await;
+        if let Err(error) = initialized {
             // Runtime-loss cleanup preserves the restored workspace and its recovery lineage.
             cleanup
                 .destroy_or_confirm_absent(RunRuntimeExit::RuntimeLost)
@@ -504,6 +509,25 @@ impl NativeV2PlatformController {
             run_id,
             deduped: false,
         })
+    }
+
+    async fn reserve_node_instance_floor(
+        &self,
+        stored: &mut StoredRun,
+        through: u64,
+    ) -> Result<(), NativeV2PlatformError> {
+        if through <= stored.snapshot.node_instance_floor {
+            return Ok(());
+        }
+        stored.snapshot = self
+            .ledger
+            .append(
+                &stored.snapshot.run_id,
+                vec![RunEvent::NodeInstancesReserved { through }],
+            )
+            .await?
+            .snapshot;
+        Ok(())
     }
 
     async fn initialize_allocated(

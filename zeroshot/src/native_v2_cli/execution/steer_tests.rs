@@ -97,6 +97,8 @@ async fn steer_default_backend_refuses_without_output_and_validation_precedes_di
                 run_id: RunId::new("run"),
             },
             text: SteerText::Text(text.into()),
+            networks: vec![],
+            mode: openengine_cluster_protocol::SteeringMode::Standing,
         };
         let mut output = Vec::new();
         let error = execute_native_v2_cli(command, &backend, &mut NeverDetach, &mut output)

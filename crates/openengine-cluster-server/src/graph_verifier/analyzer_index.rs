@@ -29,6 +29,7 @@ impl<'a> Analyzer<'a> {
         let root_path = vec![field_segment("root"), node_segment(self.graph.root.name())];
         self.index_node(&self.graph.root, root_path.clone(), 1);
         self.validate_global_limits();
+        self.validate_networks();
         if !self.diagnostics.is_empty() {
             return None;
         }
@@ -327,6 +328,45 @@ impl<'a> Analyzer<'a> {
                 path,
                 Vec::new(),
             );
+        }
+    }
+}
+
+impl Analyzer<'_> {
+    pub(super) fn validate_networks(&mut self) {
+        for (name, network) in &self.graph.networks {
+            let path = vec![field_segment("networks"), node_segment(name)];
+            if network.members.is_empty() {
+                emit_diagnostic!(
+                    self,
+                    GraphDiagnosticCode::InvalidGraphShape,
+                    "network members must not be empty",
+                    with_field(&path, "members"),
+                    Vec::new()
+                );
+            }
+            for member in network.members.union(&network.publishers) {
+                if !self.nodes.get(member).is_some_and(|info| {
+                    matches!(info.node, GraphNode::Step(_) | GraphNode::Verifier(_))
+                }) {
+                    emit_diagnostic!(
+                        self,
+                        GraphDiagnosticCode::InvalidGraphShape,
+                        format!("network participant {member} must name an executable node"),
+                        path.clone(),
+                        vec![member.clone()]
+                    );
+                }
+            }
+            for publisher in network.publishers.difference(&network.members) {
+                emit_diagnostic!(
+                    self,
+                    GraphDiagnosticCode::InvalidGraphShape,
+                    format!("network publisher {publisher} must also be a member"),
+                    with_field(&path, "publishers"),
+                    vec![publisher.clone()]
+                );
+            }
         }
     }
 }
