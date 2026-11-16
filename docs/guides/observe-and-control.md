@@ -11,7 +11,9 @@ lifetime.
 
 Run [`zeroshot ui`](../getting-started/install.md#open-the-workspace-ui), then select a run in **Runs**.
 The read-only graph uses that run's admitted definition. Select a node for its inputs, outputs,
-decisions, and transcript; use the timeline to replay its history. Active runs update live.
+decisions, and transcript; with the details panel open, select the empty canvas or the first link
+above a node's name for the run's own details. Use the timeline to replay its history. Active runs
+update live.
 Seeking pauses following; **Go live** returns to the latest event. Scrolling a transcript keeps
 the graph live and follows new output only when you reach the bottom.
 

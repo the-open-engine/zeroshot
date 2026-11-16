@@ -3,10 +3,12 @@ import { DecisionControls } from './DecisionControls';
 import { useEffect, useRef, useState } from 'react';
 import { Field } from './Field';
 import { InspectorPanel } from './InspectorPanel';
+import { InspectorHeader } from './InspectorHeader';
+import { NodeTrail } from './NodeTrail';
 import { NumberField } from './NumberField';
 import { useNumericDrafts } from './numeric-drafts';
 export { Field } from './Field';
-import { ArrowDown, ArrowUp, Braces, ChevronRight, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Braces, ChevronRight, Trash2 } from 'lucide-react';
 import {
   bindingFor,
   children,
@@ -49,6 +51,18 @@ export type InspectorProps = {
   selectNode: (name: string) => void;
   addOtherwise: (name: string) => void;
 };
+/** What the inspector calls the selected node: the run itself, a delivery, or its kind of work. */
+function inspectorTitle(doc: Document, node: GraphNode | undefined, bindingKind?: string): string {
+  if (!node) return 'Nothing selected';
+  if (isDeliveryKind(bindingKind))
+    return bindingKind === 'comment_delivery' ? 'Comment delivery' : 'Git delivery';
+  if (node.name === doc.graph.root.name) return 'Run settings';
+  if (node.kind === 'choice') return 'Decision';
+  if (node.kind === 'succeed') return 'Run result';
+  if (node.kind === 'fail') return 'Stop outcome';
+  return activityLabel(node.kind, bindingKind, node.worker);
+}
+
 export function Inspector(p: InspectorProps) {
   const numericDrafts = useNumericDrafts();
   const { document: doc, node } = p;
@@ -68,37 +82,23 @@ export function Inspector(p: InspectorProps) {
   };
   return (
     <InspectorPanel className="inspector" label="Profile inspector">
-      <div className="inspector-tabs">
-        <span className="inspector-label">Node</span>
-        <button
-          className="icon-button close-inspector"
-          title="Close inspector"
-          aria-label="Close inspector"
-          onClick={p.close}
-        >
-          <X size={17} />
-        </button>
-      </div>
+      <InspectorHeader
+        trail={
+          node && (
+            <NodeTrail
+              document={doc}
+              name={node.name}
+              rootLabel="Run settings"
+              select={p.selectNode}
+            />
+          )
+        }
+        title={inspectorTitle(doc, node, binding?.kind)}
+        close={p.close}
+      />
       <div className="inspector-scroll" ref={scroll}>
         {node ? (
           <>
-            <div className="inspector-heading">
-              <h2>
-                {delivery
-                  ? binding?.kind === 'comment_delivery'
-                    ? 'Comment delivery'
-                    : 'Git delivery'
-                  : node.name === doc.graph.root.name
-                    ? 'Run settings'
-                    : node.kind === 'choice'
-                      ? 'Decision'
-                      : node.kind === 'succeed'
-                        ? 'Run result'
-                        : node.kind === 'fail'
-                          ? 'Stop outcome'
-                          : activityLabel(node.kind, binding?.kind, node.worker)}
-              </h2>
-            </div>
             <NameField
               key={node.name}
               name={node.name}
@@ -130,19 +130,6 @@ export function Inspector(p: InspectorProps) {
                   />
                 </details>
               )}
-            {p.parent && (
-              <button
-                className="group-open"
-                aria-label={`Containing group: ${p.parent.name}`}
-                onClick={() => p.selectNode(p.parent!.name)}
-              >
-                In{' '}
-                <span>
-                  {p.parent.name}
-                  <ChevronRight size={16} />
-                </span>
-              </button>
-            )}
             {node.kind === 'choice' && (
               <div className="choice-branches">
                 {node.branches.map((branch: any, i: number) =>
