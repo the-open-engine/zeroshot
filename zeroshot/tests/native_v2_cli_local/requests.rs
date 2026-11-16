@@ -644,3 +644,49 @@ async fn lost_and_failed_answer_successors_restart_after_the_answer() {
     fixture.wait_succeeded(&last, "finish").await;
     assert_eq!(worker_calls("finish"), 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_answer_successor_restarts_with_the_conversation_it_started_with() {
+    let mut fixture = request_conversation_fixture();
+    let run = fixture.submit_detached("finish").await;
+    fixture.wait_suspended(&run).await;
+    wait_for_exit(fixture.ready_pid(&run)).await;
+    conversations::new_provider_home(&mut fixture);
+
+    // The answer's successor continues the worker's conversation and is lost in that turn.
+    let answer = fixture.answer_file(&json!({"signals":{"done":"no"},"output":{}}));
+    let answered = fixture
+        .json(
+            &["answer", &run, "--input", answer.to_str().assert_value()],
+            "suspend",
+        )
+        .await;
+    let lost = answered["runId"].as_str().assert_value();
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+    while !fixture.repository.join("held-2").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the answer's successor did not reach its worker"
+        );
+        sleep(Duration::from_millis(30)).await;
+    }
+    let controller = fixture.ready_pid(lost);
+    signal(controller, libc::SIGKILL).assert_value();
+    wait_for_exit(controller).await;
+    fs::write(fixture.repository.join("release-conversation-2"), "").assert_value();
+    conversations::new_provider_home(&mut fixture);
+
+    // Its restart begins after the answer with the conversation the lost run started with.
+    let restarted = fixture.json(&["resume", lost], "finish").await;
+    let restarted = restarted["runId"].as_str().assert_value();
+    fixture.wait_suspended(restarted).await;
+    assert_eq!(
+        conversations::worker_calls(&fixture),
+        [
+            "fresh local-thread",
+            "resume local-thread",
+            "resume local-thread"
+        ]
+    );
+    fixture.json(&["force-stop", restarted], "finish").await;
+}

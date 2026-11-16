@@ -984,27 +984,6 @@ async fn unrestorable_conversations_are_distinct_from_checkpoints_without_conver
         directory: fixture.directory.clone(),
         selection: CheckpointRestoreSelection::Continue,
     };
-    // A restart selects no conversations and says why, here and through the store.
-    let restart = CheckpointRestore {
-        directory: fixture.directory.clone(),
-        selection: CheckpointRestoreSelection::Latest,
-    };
-    let restarted = fake_checkpoint_store(
-        fixture._root.path(),
-        fixture.directory.clone(),
-        fixture.workspace.clone(),
-        BTreeSet::new(),
-    )
-    .with_conversation_restore(Some(restart.clone()));
-    for files in [
-        restore_checkpoint_conversations(&restart, None).await,
-        restarted.restored_conversations().await,
-    ] {
-        assert_eq!(
-            reason(files),
-            Some("a restarted run starts new conversations")
-        );
-    }
     // Before the first checkpoint there is no latest pointer, and so no conversation.
     assert_eq!(
         reason(restore_checkpoint_conversations(&continued, None).await),
@@ -1032,4 +1011,38 @@ async fn unrestorable_conversations_are_distinct_from_checkpoints_without_conver
             Some("checkpoint conversation could not be restored")
         );
     }
+}
+
+#[test]
+fn a_restart_starts_with_the_conversations_its_source_started_with() {
+    use CheckpointRestoreSelection::{Continue, Latest};
+    let root = tempfile::tempdir().assert_value();
+    let restore = |run: &str, selection| CheckpointRestore {
+        directory: root.path().join(run),
+        selection,
+    };
+    let conversations = |source: &str, selection, own: &str| {
+        successor_conversations(restore(source, selection), &root.path().join(own))
+            .map(|restore| (restore.directory, restore.selection))
+    };
+    // A submitted run recorded no origin: its restart selects no conversations.
+    assert_eq!(
+        conversations("asked", Latest, "restarted").assert_value(),
+        (root.path().join("asked"), Latest)
+    );
+    // A continuation names its source. Its restart, and that restart's restart, start with the
+    // same conversations.
+    for (source, selection, own) in [
+        ("asked", Continue, "answered"),
+        ("answered", Latest, "second"),
+        ("second", Latest, "third"),
+    ] {
+        assert_eq!(
+            conversations(source, selection, own).assert_value(),
+            (root.path().join("asked"), Continue)
+        );
+    }
+    // A record that cannot be read is not taken for a missing one.
+    fs::write(root.path().join("third/conversation-origin.json"), "{").assert_value();
+    assert!(conversations("third", Latest, "fourth").is_err());
 }

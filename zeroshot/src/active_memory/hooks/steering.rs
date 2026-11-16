@@ -74,8 +74,8 @@ impl Index {
             !self.received(conversation, &v.id) && !conversation.offered.contains(&v.id)
         })
     }
-    /// What a prompt carries: the steers that are `due`, and those the conversation has only been
-    /// shown at a tool call after which they do not stand.
+    /// What a prompt carries: the steers that are `due`, and those in `shown_only` (received,
+    /// not yet kept).
     fn due_in_prompt<'a>(
         &'a self,
         conversation: &'a Conversation,
@@ -175,9 +175,10 @@ pub(super) struct DeliverySource {
     conversations: Mutex<BTreeMap<u64, Conversation>>,
     publication: tokio::sync::Mutex<()>,
     restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
-    /// Conversation and steer pairs delivered only at a tool call of a carrier on which a steer
-    /// does not stand (`HookQuery::standing`). They stay due for that conversation's next
-    /// prompt, and a successor does not inherit their receipts before it.
+    /// Conversation and steer pairs that are received but not yet kept: delivered at a tool call
+    /// of a carrier on which a steer does not stand (`HookQuery::standing`), or carried by a
+    /// prompt whose execution has not ended successfully. They stay due for that conversation's
+    /// next prompt, and a successor does not inherit their receipts before it.
     shown_only: Mutex<BTreeSet<(String, VectorId)>>,
 }
 const DEADLINE: Duration = Duration::from_millis(250);
@@ -330,11 +331,19 @@ impl DeliverySource {
             .filter(|(key, _)| key == &conversation.key)
             .map(|(_, id)| id.clone())
             .collect();
-        let index = record.index.data.lock().ok()?;
-        let due: Vec<_> = index.due_in_prompt(&conversation, &shown_only).collect();
-        let context = frame(due.iter().copied());
-        let ids: Vec<_> = due.iter().map(|v| v.id.clone()).collect();
-        conversation.offered.extend(ids);
+        // The index guard must be gone before the receipt write awaits.
+        let (context, ids) = {
+            let index = record.index.data.lock().ok()?;
+            let due: Vec<_> = index.due_in_prompt(&conversation, &shown_only).collect();
+            let ids: Vec<_> = due.iter().map(|v| v.id.clone()).collect();
+            (frame(due.iter().copied()), ids)
+        };
+        conversation.offered.extend(ids.iter().cloned());
+        // Marked before the receipt is written, as in `receipt`.
+        self.shown_only
+            .lock()
+            .ok()?
+            .extend(ids.iter().map(|id| (conversation.key.clone(), id.clone())));
         if !context.is_empty() {
             invocation.host_context = Some(match invocation.host_context.take() {
                 Some(host) if !host.is_empty() => format!("{context}\n\n{host}"),
@@ -345,6 +354,7 @@ impl DeliverySource {
             .lock()
             .ok()?
             .insert(execution, conversation);
+        self.receipt_ids(execution, &ids).await;
         Some(execution)
     }
     pub(super) async fn finish(&self, execution: u64, success: bool) {

@@ -116,7 +116,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   context is not written to its session, or on Pi and OpenCode, whose tool result a model may
   refuse to follow (`HookQuery::standing`): the delivery is receipted, the steer stays due for
   that conversation's next prompt, and the snapshot omits the receipt until an execution whose
-  prompt carried it ends successfully.
+  prompt carried it ends successfully. Prompt-carried steers are receipted when the prompt is
+  prepared and follow the same rule.
   The carrier retains incremental vector-record read progress across callback deadlines.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
@@ -1022,7 +1023,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retained workspace: a submitted run at the graph root, a successor at the boundary it began at;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Checkpoint
   continuations, including request and other suspended successors, restore captured `node_instance`
-  provider conversations; failed-run restarts and `execution` sessions start new conversations.
+  provider conversations. Each such successor writes `conversation-origin.json` (the source
+  checkpoint directory and selection) to its checkpoint directory before preparation can fail. A
+  restart copies its source's record and restores those conversations; a source without one (a
+  submitted run) restarts with new conversations, as do `execution` sessions. An unreadable
+  record fails the start.
   Credentials are resolved again and successor token usage starts at zero. Suspended command/wait
   runs accept only default resume,
   continuing at the held-back node, or after a due wait. Request suspensions require answer and

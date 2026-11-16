@@ -761,15 +761,20 @@ async fn steer_prompt_preserves_authored_contract_and_retries_worker_errors() {
         )
         .await;
     assert!(!tool.context.contains("Standing direction"));
-    hooks.finish_steers(delivery, false).await;
-    assert_eq!(
+    // The prompt was handed over, so the steer counts as received while the turn still runs.
+    let received = || async {
         crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
             .await
             .assert_value()
             .steers[0]
-            .received_executions,
-        0
-    );
+            .received_executions
+    };
+    assert_eq!(received().await, 1);
+    // The turn failed: a successor does not inherit the receipt, and the retry carries the steer
+    // again.
+    hooks.finish_steers(delivery, false).await;
+    let instance = original.node.reference.node_instance;
+    assert!(hooks.capture_steers()[&instance].receipts.is_empty());
     let mut retry = original.clone();
     retry.node.reference.execution = crate::native_v2_contract::ExecutionId::new(3).assert_value();
     let delivery = hooks.prepare_steers(&mut retry, false).await.assert_value();
@@ -781,14 +786,8 @@ async fn steer_prompt_preserves_authored_contract_and_retries_worker_errors() {
             .contains("Standing direction")
     );
     hooks.finish_steers(delivery, true).await;
-    assert_eq!(
-        crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
-            .await
-            .assert_value()
-            .steers[0]
-            .received_executions,
-        1
-    );
+    assert_eq!(received().await, 1);
+    assert_eq!(hooks.capture_steers()[&instance].receipts.len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

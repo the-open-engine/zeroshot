@@ -229,7 +229,8 @@ enum UtilityCommand {
     /// then startup runs before the graph. Startup must tolerate existing workspace files.
     /// Checkpoint continuations and suspended successors restore captured node-instance agent
     /// conversations. Missing or unsupported conversations start new with a system log explanation.
-    /// Restarts and execution-scoped agents start new conversations. Token usage starts at zero.
+    /// Restarting a successor restores the conversations it started with; restarting a submitted
+    /// run, and execution-scoped agents, start new ones. Token usage starts at zero.
     /// Services and Docker state are not restored.
     Resume(RunResumeArgs),
 

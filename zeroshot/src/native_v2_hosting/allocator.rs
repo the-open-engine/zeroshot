@@ -292,6 +292,18 @@ impl ProductionCapsuleAllocator {
         request: &CapsuleBuildRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let paths = CapsuleBuildPaths::new(&self.config.storage_root, pending.run_id);
+        if let Some((source, selection)) = &request.retained_restore {
+            // Recorded before preparation can fail, so that a restart of this run finds it.
+            let root = &self.config.storage_root;
+            let source = CheckpointRestore {
+                directory: checkpoint_directory(root, source),
+                selection: selection.clone(),
+            };
+            let own = checkpoint_directory(root, pending.run_id);
+            let conversations = checkpoints::successor_conversations(source, &own)
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+            let _ = pending.state.conversation_restore.set(conversations);
+        }
         let filesystem = self.prepare_capsule_workspace(&pending, request, &paths)?;
         let PendingCapsule {
             run_id,
@@ -310,11 +322,6 @@ impl ProductionCapsuleAllocator {
         )
         .await?;
         let restored_seed = if let Some((source_run_id, selection)) = &request.retained_restore {
-            // A restart selects no conversations; the selection still tells its nodes why.
-            let _ = state.conversation_restore.set(CheckpointRestore {
-                directory: checkpoint_directory(&self.config.storage_root, source_run_id),
-                selection: selection.clone(),
-            });
             let seed = self
                 .restore_retained_workspace(source_run_id, selection.clone(), &filesystem.workspace)
                 .await?;

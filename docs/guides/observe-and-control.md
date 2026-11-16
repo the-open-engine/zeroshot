@@ -289,9 +289,9 @@ writers do not have separate snapshots. Read-only boundaries can share the same 
 Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
 resolve credentials again. A selected checkpoint or the continuation of a suspended run restores each supported
 `node_instance` agent's provider conversation as it was at the checkpoint, even on another machine
-or without restoring workspace files. A failed-run restart and every `execution`-scoped agent start
-new conversations; a `node_instance` agent that ran before a restart's boundary and runs again
-after it says so in the run log. Successor token usage starts at zero.
+or without restoring workspace files. Restarting such a successor restores the same conversations
+again, without the turns it added before it failed. A restarted run you submitted and every
+`execution`-scoped agent start new conversations. Successor token usage starts at zero.
 
 Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
 They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
@@ -431,8 +431,9 @@ newline and carriage return. Text is stored and shown as given: **do not put sec
 
 Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
-byte lengths, character-safe excerpts and confirmed receiving execution references. Prompt receipts
-appear after a successful provider turn; tool-call receipts appear after the carrier acknowledges.
+byte lengths, character-safe excerpts and receiving execution references. A prompt receipt appears
+when the turn carrying the steer starts, a tool-call receipt once the carrier acknowledges. If that
+turn fails, the conversation's next prompt carries the steer again, also in a successor.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:
 

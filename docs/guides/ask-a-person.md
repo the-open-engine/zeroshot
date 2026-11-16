@@ -433,8 +433,9 @@ are refused as `invalid_request`, naming the path, without consuming the request
 names the accepted successor. `resume`, including checkpoint selection, refuses requests and names
 `answer` before resolving credentials; after an answer it names the successor instead. If that
 successor fails or is lost, `resume` on it starts again right after the answer: the request stays
-answered and the question is not asked again. Only a successor lost in the instant it starts,
-before its starting point is recorded, restarts at the root and asks again.
+answered, the question is not asked again, and `node_instance` agents continue their conversations
+from when the question was asked. Only a successor lost in the instant it starts, before its
+starting point is recorded, restarts at the root with new conversations and asks again.
 
 Every request has a deadline: `timeoutMs` from creation, 7 days when omitted, at most 30 days.
 Acceptance is strictly before the deadline. At or after it, `answer` checks expiry before content,

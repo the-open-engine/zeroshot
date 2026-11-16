@@ -49,16 +49,7 @@ async fn turn(
     } else {
         None
     };
-    // The reason a successor's node gives for a new conversation, when it starts one.
-    let fallback = match &restored {
-        None => successor.then_some("checkpoint has no conversation"),
-        Some(files) => files
-            .conversation(
-                NodeInstanceId::new(1).assert_value(),
-                &NodeName::new("work").assert_value(),
-            )
-            .err(),
-    };
+    let expect_fallback = successor && restored.is_none();
     if successor {
         runner.restore_conversations(&history(), restored).await;
     }
@@ -96,10 +87,10 @@ async fn turn(
     assert_eq!(
         messages
             .iter()
-            .filter(|line| line.contains("node work starts a new conversation: "))
-            .map(|line| line.rsplit(": ").next().assert_value())
-            .collect::<Vec<_>>(),
-        fallback.into_iter().collect::<Vec<_>>()
+            .filter(|line| line
+                .contains("node work starts a new conversation: checkpoint has no conversation"))
+            .count(),
+        usize::from(expect_fallback)
     );
     if !successor {
         let capture = runner.capture_conversations(run).await;
@@ -136,7 +127,8 @@ async fn direct(selection: bool) {
     direct_successor(Some(selection)).await;
 }
 
-/// `None` restarts: the allocator restores the latest snapshot and selects no conversation.
+/// `None` restarts a submitted run, which selects no conversation; `Some(false)` also restarts
+/// the lost continuation.
 async fn direct_successor(selection: Option<bool>) {
     let fixture = fixture().await;
     let capsule = fixture.allocate().await.assert_value();
@@ -170,6 +162,7 @@ async fn direct_successor(selection: Option<bool>) {
         .assert_value();
     store.suspend(&history(), &[]).await.assert_value();
     let restart = selection.is_none();
+    let continued = selection == Some(false);
     let selection = match selection {
         Some(true) => {
             let listed = fixture.checkpoints(&fixture.run_id).await;
@@ -212,7 +205,46 @@ async fn direct_successor(selection: Option<bool>) {
             [(ID.to_owned(), next_home, CONTENT.to_owned())]
         );
     }
+    let exit = if continued {
+        RunRuntimeExit::RuntimeLost
+    } else {
+        RunRuntimeExit::ForceStopped
+    };
     resumed
+        .cleanup
+        .destroy_or_confirm_absent(exit)
+        .await
+        .assert_value();
+    if !continued {
+        return;
+    }
+    // The lost continuation's restart starts with the conversation the continuation started with.
+    let restarted = RunId::new("conversation-restart");
+    let again = fixture
+        .allocator
+        .allocate_from_retained(fixture.retained_request(
+            &successor,
+            &restarted,
+            CheckpointRestoreSelection::Latest,
+        ))
+        .await
+        .assert_value();
+    let home = fixture
+        .allocator
+        .run_path(&restarted)
+        .join("runtime/provider-home");
+    let provider = turn(
+        &fixture,
+        &restarted,
+        home.clone(),
+        again.checkpoints.as_ref().assert_value().as_ref(),
+    )
+    .await;
+    assert_eq!(
+        *provider.restored.lock().await,
+        [(ID.to_owned(), home, CONTENT.to_owned())]
+    );
+    again
         .cleanup
         .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
         .await

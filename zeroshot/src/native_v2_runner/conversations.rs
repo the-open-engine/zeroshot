@@ -24,7 +24,7 @@ const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 pub struct ConversationFiles {
     directory: PathBuf,
     _stage: Option<Arc<tempfile::TempDir>>,
-    unavailable: Option<&'static str>,
+    unrestorable: bool,
 }
 
 impl ConversationFiles {
@@ -33,7 +33,7 @@ impl ConversationFiles {
         Self {
             directory: directory.canonicalize().unwrap_or(directory),
             _stage: None,
-            unavailable: None,
+            unrestorable: false,
         }
     }
 
@@ -42,16 +42,7 @@ impl ConversationFiles {
         Self {
             directory: PathBuf::new(),
             _stage: None,
-            unavailable: Some("checkpoint conversation could not be restored"),
-        }
-    }
-
-    /// The restart of a failed run: its nodes start new conversations by design.
-    pub(crate) fn restarted() -> Self {
-        Self {
-            directory: PathBuf::new(),
-            _stage: None,
-            unavailable: Some("a restarted run starts new conversations"),
+            unrestorable: true,
         }
     }
 
@@ -72,7 +63,7 @@ impl ConversationFiles {
                 .canonicalize()
                 .unwrap_or_else(|_| stage.path().to_owned()),
             _stage: Some(Arc::new(stage)),
-            unavailable: None,
+            unrestorable: false,
         }
     }
 
@@ -81,8 +72,8 @@ impl ConversationFiles {
         instance: NodeInstanceId,
         node: &NodeName,
     ) -> Result<ConversationSource, &'static str> {
-        if let Some(reason) = self.unavailable {
-            return Err(reason);
+        if self.unrestorable {
+            return Err("checkpoint conversation could not be restored");
         }
         let directory = self.directory.join(instance.to_string());
         let file = fs::File::open(directory.join("conversation.json"))
