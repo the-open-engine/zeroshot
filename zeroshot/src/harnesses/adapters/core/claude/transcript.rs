@@ -66,9 +66,25 @@ pub(super) struct ClaudeTranscript {
     oversized_records: usize,
     permission_denials: PermissionDenials,
     pending: ProviderText,
+    /// Tells the turn's stdin side what stdout shows of it; closed when stdout ends.
+    input: Option<tokio::sync::mpsc::UnboundedSender<super::input::TurnSignal>>,
 }
 
 impl ClaudeTranscript {
+    pub(super) fn reporting_input(
+        mut self,
+        input: tokio::sync::mpsc::UnboundedSender<super::input::TurnSignal>,
+    ) -> Self {
+        self.input = Some(input);
+        self
+    }
+
+    fn signal(&self, signal: super::input::TurnSignal) {
+        if let Some(input) = &self.input {
+            let _ = input.send(signal);
+        }
+    }
+
     pub(super) fn new(redactions: Vec<String>) -> Self {
         Self {
             lines: ProviderJsonLines::new(),
@@ -87,6 +103,7 @@ impl ClaudeTranscript {
             oversized_records: 0,
             permission_denials: PermissionDenials::default(),
             pending: ProviderText::new(&redactions),
+            input: None,
         }
     }
 }
@@ -103,6 +120,8 @@ impl ProviderTranscript for ClaudeTranscript {
             .finish()
             .map_or_else(Vec::new, |record| self.accept_records([record]));
         self.pending.finish(&mut emissions);
+        // Stdout has ended, so nothing more can be reported: let stdin close.
+        self.input = None;
         emissions
     }
 
@@ -256,6 +275,15 @@ impl ClaudeTranscript {
             self.malformed_records = self.malformed_records.saturating_add(1);
             return;
         };
+        if event_type == "user" {
+            // A replayed record is a user message from stdin entering the conversation.
+            if object.get("isReplay").and_then(Value::as_bool) == Some(true)
+                && let Some(text) = object.get("message").and_then(replayed_text)
+            {
+                self.signal(super::input::TurnSignal::Replayed(text));
+            }
+            return;
+        }
         if !matches!(
             event_type,
             "system" | "stream_event" | "assistant" | "rate_limit_event" | "result"
@@ -286,7 +314,10 @@ impl ClaudeTranscript {
             "stream_event" => self.parse_stream_event(object, emissions),
             "assistant" => self.parse_assistant(object, emissions),
             "rate_limit_event" => self.parse_rate_limit_event(object, emissions),
-            "result" => self.parse_result(object, emissions),
+            "result" => {
+                self.parse_result(object, emissions);
+                self.signal(super::input::TurnSignal::Result);
+            }
             _ => {}
         }
     }
@@ -675,6 +706,21 @@ fn format_resets_at(value: &Value) -> Option<String> {
             })
             .unwrap_or_else(|_| value.to_string()),
     )
+}
+
+/// The text of a user message as it was written to stdin.
+fn replayed_text(message: &Value) -> Option<String> {
+    match message.get("content")? {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => Some(
+            blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect(),
+        ),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

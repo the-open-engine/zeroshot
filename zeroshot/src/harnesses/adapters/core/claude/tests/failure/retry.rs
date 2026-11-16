@@ -3,7 +3,7 @@ use super::*;
 const RETRY_SCRIPT: &str = r#"
 set -eu
 if [ -e retry.state ]; then attempt=2; else attempt=1; : > retry.state; fi
-prompt=$(cat)
+prompt=$(head -n 1)
 for argument in "$@"; do
   printf '%s\n' "$argument" >> "attempt-$attempt.args"
 done
@@ -94,7 +94,7 @@ async fn api_retry_signal_continues_once_in_the_same_claude_session() {
     let (logs, completion) = tokio::join!(collect_logs(&mut durable), handle.completion());
 
     assert_verified_completion(completion, json!("done"));
-    assert_eq!(workspace.read("attempt-2.prompt"), "Continue");
+    assert_eq!(prompt_text(&workspace.read("attempt-2.prompt")), "Continue");
     let rendered = logs.join("\n");
     assert!(rendered.contains("Claude API retry 1/3: overloaded [REDACTED]"));
     assert!(rendered.contains("Claude provider failure: provider lost [REDACTED]"));
@@ -119,8 +119,8 @@ async fn claude_without_a_session_retries_the_original_prompt_once() {
 
     assert!(matches!(completion.outcome, WorkerOutcome::Verified { .. }));
     assert_eq!(
-        workspace.read("attempt-1.prompt"),
-        workspace.read("attempt-2.prompt")
+        prompt_text(&workspace.read("attempt-1.prompt")),
+        prompt_text(&workspace.read("attempt-2.prompt"))
     );
     assert!(!workspace.read("attempt-2.args").contains("--resume"));
 }
@@ -153,5 +153,5 @@ async fn api_retry_signal_survives_a_missing_terminal_result() {
     let completion = handle.completion().await.assert_value();
 
     assert!(matches!(completion.outcome, WorkerOutcome::Verified { .. }));
-    assert_eq!(workspace.read("attempt-2.prompt"), "Continue");
+    assert_eq!(prompt_text(&workspace.read("attempt-2.prompt")), "Continue");
 }

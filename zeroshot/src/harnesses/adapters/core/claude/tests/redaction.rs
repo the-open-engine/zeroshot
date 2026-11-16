@@ -121,7 +121,7 @@ async fn durable_output_records(label: &str, events: Vec<Value>) -> Vec<String> 
     write_claude_script(
         &workspace,
         &format!(
-            "set -eu\ncat >/dev/null\ntest \"${{ANTHROPIC_API_KEY-}}\" = '{CREDENTIAL}'\n\
+            "set -eu\nhead -n 1 >/dev/null\ntest \"${{ANTHROPIC_API_KEY-}}\" = '{CREDENTIAL}'\n\
              exec /bin/cat provider-output.ndjson\n"
         ),
     );

@@ -103,21 +103,30 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   run's vector record, are not ranked, and go first. Separate per-injection ceilings for memory default
   to 16000 approximate tokens for node graph guidance and 8000 for repository hooks; each accepts
   1..=64000 and converts one token to four UTF-8 bytes, including framing. A steer is delivered whole
-  and does not count against them. Claude Code shows at most 10,000 characters of hook context
-  inline, so a Claude Code tool call adds steers only while its whole context, memory included,
-  stays within 9,000 bytes: a steer that does not fit waits, with every later steer, for the
-  conversation's next prompt. A tool call made by a Claude Code subagent never carries or
-  receipts a steer. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
+  and does not count against them. A steer is the operator's own words and is never placed
+  inside a tool result, which a model may refuse to follow. At a tool call it travels as a user
+  message through the harness's message channel where one exists (`SteerCarrier`): Claude Code's
+  stream-json stdin, Copilot's `session.send` in `immediate` mode, Pi's steering queue and a stored
+  OpenCode session message; Codex and Hermes take it inside hook context. A message is receipted
+  when the harness shows it in the conversation (OpenCode: when it is stored), not when a hook
+  returned. A message that is never shown carries no receipt, and its steers are due again in
+  that conversation's next prompt. A message that was shown is part of the conversation: its
+  steers are not delivered to that conversation again, whether or not the model followed them,
+  and the snapshot keeps the receipt. One tool call hands over at most 1 MiB of steers; later ones
+  wait for the next tool call or prompt. A native subagent's tool call never carries or receipts a
+  steer inside hook context; a message reaches the node's own conversation whichever tool call
+  asked. Claude Code's stdin stays open until a turn's result arrives with no steer outstanding.
+  A tool-call memory lesson is a session entry on Pi and a stored message on OpenCode, and hook
+  context elsewhere. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
   including compaction; new conversations and conversations continued in a successor receive fresh
-  memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
+  memory delivery sets. Copilot writes no hook context to its session, so there a tool-call
+  lesson is deduplicated per execution and a later execution is given it again
+  (`HookQuery::context_kept`). Steers use the same conversation keys; a conversation continued in a successor
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
   restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
-  standing steers again. A steer does not stand after a tool-call delivery on Copilot, whose hook
-  context is not written to its session, or on Pi and OpenCode, whose tool result a model may
-  refuse to follow (`HookQuery::standing`): the delivery is receipted, the steer stays due for
-  that conversation's next prompt, and the snapshot omits the receipt until an execution whose
-  prompt carried it ends successfully. Prompt-carried steers are receipted when the prompt is
-  prepared and follow the same rule.
+  standing steers again. A prompt-carried steer is receipted when the prompt is prepared; the
+  snapshot omits that receipt too until the execution ends successfully, and a failed execution
+  leaves the steer due for that conversation's next prompt.
   The carrier retains incremental vector-record read progress across callback deadlines.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log

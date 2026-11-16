@@ -250,9 +250,9 @@ impl PiAdapter {
                 crate::active_memory::hooks::HookInstallation {
                     invocation,
                     home: files.home(),
-                    context_budget: None,
-                    // Pi shows the text inside a tool result, which a model may refuse to follow.
-                    standing: false,
+                    // The extension queues the steer as a user message; the transcript reports
+                    // it once Pi has put it into the conversation.
+                    steers: crate::active_memory::hooks::SteerRoute::Extension { stored: false },
                 },
                 memory::install,
             );
@@ -506,13 +506,26 @@ impl PiAdapter {
                 .entry(name)
                 .or_insert_with(|| value.clone());
         }
-        let transcript = PiTranscript::new(self.redactions(&turn.invocation.environment));
+        let (shown, mut user_messages) = tokio::sync::mpsc::unbounded_channel();
+        let transcript = PiTranscript::new(self.redactions(&turn.invocation.environment))
+            .reporting_user_messages(shown);
         let mut process = match turn_process::open(files, command, turn.control).await? {
             PiProcessStart::Ready(process) => process,
             PiProcessStart::Failed(attempt) => return Ok(attempt),
         };
-        turn_process::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
-            .await
+        // A steer sent at a tool call is handed over once Pi shows it as a user message. The
+        // transcript closes the channel when the turn's output has been read.
+        let execution = turn.invocation.node.reference.execution.get();
+        let confirm = async {
+            while let Some(text) = user_messages.recv().await {
+                if let Some(hooks) = &self.active_memory {
+                    hooks.steer_shown(execution, &text).await;
+                }
+            }
+        };
+        let finish =
+            turn_process::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control);
+        tokio::join!(finish, confirm).0
     }
 }
 

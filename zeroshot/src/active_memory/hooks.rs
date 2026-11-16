@@ -31,22 +31,37 @@ pub struct HookQuery {
     pub tool_name: String,
     pub tool_input: Value,
     pub cwd: PathBuf,
-    /// A native subagent's tool call; its returned context never reaches this conversation.
+    /// A native subagent's tool call; context returned to it never reaches this conversation.
     pub subagent: bool,
-    /// Steers join this tool call's context only while the whole of it stays within this bound.
-    pub context_budget: usize,
-    /// Whether a steer delivered at this tool call stands in the conversation afterwards. It does
-    /// not where the provider writes no hook context to its session (Copilot) or shows the text
-    /// inside a tool result, which a model may refuse as untrusted (Pi, OpenCode). Such a steer
-    /// also goes into the conversation's next prompt.
-    pub standing: bool,
+    pub steers: SteerCarrier,
+    /// Whether memory context returned at a tool call stays in the conversation. Copilot applies
+    /// it to the turn in progress and writes none of it to its session, so a later execution of
+    /// the same conversation is given a matching lesson again.
+    pub context_kept: bool,
 }
 
-/// Complete callback context and the steers awaiting a carrier acknowledgement.
+/// How a steer reaches a conversation at a tool call. A steer is the operator's own words: where
+/// the harness has a channel for user messages it travels there, never inside a tool result.
+/// A conversation that was handed a steer either way is not given it again.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SteerCarrier {
+    /// Inside the tool call's hook context. The carrier's acknowledgement is the hand-over.
+    #[default]
+    HookContext,
+    /// As a user message the carrier stores in the conversation before it acknowledges (OpenCode).
+    StoredMessage,
+    /// As a user message whose arrival in the conversation the harness reports in its event
+    /// stream; the adapter confirms the hand-over then (Claude Code, Copilot, Pi).
+    ShownMessage,
+}
+
+/// What one tool call hands over: memory context, and the steers selected for it. `steer` holds
+/// their framed text when they travel as a message of their own instead of inside `context`.
 #[derive(Default)]
 pub struct HookDelivery {
     pub context: String,
     pub steers: Vec<openengine_cluster_protocol::VectorId>,
+    pub steer: String,
 }
 
 /// The host owns the immutable index, relevance budget, session deduplication and supplied receipts.
@@ -55,7 +70,7 @@ pub trait ActiveMemorySource: Send + Sync {
     fn tool_delivery(&self, query: &HookQuery) -> HookDelivery {
         HookDelivery {
             context: self.tool_context(query),
-            steers: Vec::new(),
+            ..HookDelivery::default()
         }
     }
     fn acknowledged(&self, _query: &HookQuery, _delivery: &HookDelivery) {}
@@ -74,10 +89,60 @@ pub struct ActiveMemoryHooks {
 pub(crate) struct HookInstallation<'a> {
     pub invocation: &'a DriverInvocation,
     pub home: &'a Path,
-    /// A carrier that shows less than the shared maximum inline; `None` keeps that maximum.
-    pub context_budget: Option<usize>,
-    /// See `HookQuery::standing`.
-    pub standing: bool,
+    pub steers: SteerRoute,
+}
+
+/// Where the broker sends the steers a tool call selects.
+#[derive(Clone, Default)]
+pub(crate) enum SteerRoute {
+    /// Inside the hook context it returns.
+    #[default]
+    HookContext,
+    /// Beside the memory context, to the adapter's extension, which sends each as a message of
+    /// its own. `stored` says its acknowledgement follows the harness storing the steer;
+    /// otherwise the adapter confirms the steer with `ActiveMemoryHooks::steer_shown`.
+    Extension { stored: bool },
+    /// To the adapter, which writes them into the conversation and confirms each with
+    /// `ActiveMemoryHooks::steer_shown`.
+    Adapter(tokio::sync::mpsc::UnboundedSender<String>),
+}
+
+impl SteerRoute {
+    pub(super) fn carrier(&self) -> SteerCarrier {
+        match self {
+            Self::HookContext => SteerCarrier::HookContext,
+            Self::Extension { stored: true } => SteerCarrier::StoredMessage,
+            Self::Extension { stored: false } | Self::Adapter(_) => SteerCarrier::ShownMessage,
+        }
+    }
+}
+
+#[cfg(test)]
+impl<'a> ToolCall<'a> {
+    /// A tool call of a carrier that takes everything as hook context and keeps it.
+    pub(crate) fn hook(
+        invocation: &'a DriverInvocation,
+        input: &'a Value,
+        workspace: &'a Path,
+    ) -> Self {
+        Self {
+            invocation,
+            input,
+            workspace,
+            steers: SteerCarrier::HookContext,
+            context_kept: true,
+        }
+    }
+}
+
+/// A tool call an adapter observes in process, with what its harness does with the answer.
+pub(crate) struct ToolCall<'a> {
+    pub invocation: &'a DriverInvocation,
+    pub input: &'a Value,
+    pub workspace: &'a Path,
+    pub steers: SteerCarrier,
+    /// See `HookQuery::context_kept`.
+    pub context_kept: bool,
 }
 
 impl ActiveMemoryHooks {
@@ -181,12 +246,8 @@ impl ActiveMemoryHooks {
             )
             .and_then(|capability| match capability {
                 Some(path) => {
-                    if let Some(budget) = installation.context_budget {
-                        self.broker.bound(installation.invocation, budget);
-                    }
-                    if !installation.standing {
-                        self.broker.shown_only(installation.invocation);
-                    }
+                    self.broker
+                        .route(installation.invocation, installation.steers);
                     install(command, &path)
                 }
                 None => Ok(()),
@@ -240,31 +301,26 @@ impl ActiveMemoryHooks {
         native::bounded_context(self.source.tool_context(&query))
     }
 
-    pub(crate) async fn tool_delivery(
-        &self,
-        invocation: &DriverInvocation,
-        input: &Value,
-        workspace: &Path,
-    ) -> (HookQuery, HookDelivery) {
-        let query = broker::HookScope::new(invocation, workspace).query(input);
-        let delivery = if auxiliary_invocation(invocation) {
+    pub(crate) async fn tool_delivery(&self, call: ToolCall<'_>) -> (HookQuery, HookDelivery) {
+        let mut query = broker::HookScope::new(call.invocation, call.workspace).query(call.input);
+        query.steers = call.steers;
+        query.context_kept = call.context_kept;
+        let delivery = if auxiliary_invocation(call.invocation) {
             HookDelivery::default()
         } else {
             self.source.delivery(&query).await
         };
         (query, delivery)
     }
-    /// Acknowledges a delivery made in process. `standing` is `HookQuery::standing` for the
-    /// carrier that made it.
-    pub(crate) async fn acknowledge(
-        &self,
-        query: &HookQuery,
-        delivery: &HookDelivery,
-        standing: bool,
-    ) {
-        let mut query = query.clone();
-        query.standing = standing;
-        self.source.receipt(&query, delivery).await;
+    /// Acknowledges a delivery made in process, as the broker does once its carrier answered.
+    #[cfg(test)]
+    pub(crate) async fn acknowledge(&self, query: &HookQuery, delivery: &HookDelivery) {
+        self.source.receipt(query, delivery).await;
+    }
+    /// Confirms a steer message sent at a tool call: the harness showed `text` in the
+    /// conversation of `execution`. Text that is no such message is ignored.
+    pub(crate) async fn steer_shown(&self, execution: u64, text: &str) {
+        self.source.shown(execution, text).await;
     }
 }
 

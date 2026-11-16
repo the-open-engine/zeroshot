@@ -73,9 +73,11 @@ transfer automatically across graph versions.
 
 Each run reads a snapshot of memory. New lessons become available to future runs. Matching makes
 no model calls. An ID/revision is supplied once per provider conversation; compaction does not reset
-this deduplication. Each matching injection gets its own context limit.
+this deduplication. Copilot does not keep tool-call context in its session, so there a repository
+lesson is supplied once per execution. Each matching injection gets its own context limit.
 
-Repository lessons arrive through harness hooks. Disabled hooks can prevent delivery; scripts that
+Repository lessons arrive at matching tool calls through harness hooks, never inside a tool
+result. Disabled hooks can prevent delivery; scripts that
 hide their file paths can miss matches. Advice cannot change a tool call already issued, and receipt
 of a lesson does not prove the model followed it. See the
 [matching and delivery rules](../reference/active-memory.md#indexing-and-retrieval) for details.
@@ -137,6 +139,7 @@ contracts.
 
 The native tool-call carrier is installed for every agent conversation, including when Active
 Memory is off, so it can deliver standing [steers](../guides/observe-and-control.md#steer-a-run).
-Memory off still leaves its database unopened. Steers come from the run vector record and precede
-memory cards. They are delivered whole and do not count against `nodeInjectionTokens` or
-`hookInjectionTokens`; memory card selection keeps its own limits.
+Memory off still leaves its database unopened. Steers come from the run vector record. At a tool
+call they travel as a user message where the harness has a channel for one, and ahead of the
+memory cards in hook context on Codex. They are delivered whole and do not count against
+`nodeInjectionTokens` or `hookInjectionTokens`; memory card selection keeps its own limits.

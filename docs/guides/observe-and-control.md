@@ -410,19 +410,19 @@ Steering keeps a suspended run suspended. A run with a successor refuses and nam
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
 Every agent conversation, including reviewers, receives each steer at its next tool call or in its
-next prompt, whichever comes first, and once only except on Copilot, Pi and OpenCode as described
-below. It cannot revise a tool call already issued. On Claude
-Code, a tool call carries steers only while the returned context, Active Memory included, stays
-within 9,000 bytes, because Claude Code passes at most 10,000 characters inline; a larger steer, and
-any steer recorded after it, waits for that conversation's next prompt, where it arrives whole, so
-it may not arrive during the current turn. Tool
-calls made by Claude Code subagents never receive steers; the node's own conversation gets them at
-its next tool call or prompt. On Copilot, Pi and OpenCode a steer shown at a tool call does not
-stand in the conversation: Copilot applies it to the turn in progress without keeping it, and Pi
-and OpenCode show it inside a tool result, which a model may refuse to follow. Such a conversation
-receives the steer once more, with its next prompt. Direction
-takes precedence over authored instructions as guidance; permissions, output contracts, routing,
-runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
+next prompt, whichever comes first. It cannot revise a tool call already issued. At a tool
+call the steer arrives as a user message of its own on Claude Code, Copilot, Pi and OpenCode: the
+harness hands it to the model after the tool call in progress and keeps it in the conversation.
+It is never placed inside a tool result, which a model may refuse to follow. Codex has no such
+channel and receives the steer with the tool call's hook context, which it keeps. A steer of any
+permitted size arrives whole either way. Subagents do not receive steers: on Claude Code a message
+sent while a subagent works reaches the node's own conversation when the subagent returns. A
+message the harness never shows in the conversation is not counted as received, and the steer is
+delivered with that conversation's next prompt instead. A steer that reached a conversation is not
+delivered to it a second time. A small model can take a large message that arrives while it works
+for tool output and ignore it; steer again if a direction was not followed. Direction takes
+precedence over authored instructions as guidance; permissions, output contracts, routing, runtime
+bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
 Steers stand for the rest of the run and its successors. Continued conversations keep receipts;
 new conversations receive the standing direction. A lost acknowledgement can cause repeat delivery.
 
@@ -432,8 +432,10 @@ newline and carriage return. Text is stored and shown as given: **do not put sec
 Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
 byte lengths, character-safe excerpts and receiving execution references. A prompt receipt appears
-when the turn carrying the steer starts, a tool-call receipt once the carrier acknowledges. If that
-turn fails, the conversation's next prompt carries the steer again, also in a successor.
+when the turn carrying the steer starts. A tool-call receipt appears when the harness shows the
+message in the conversation, or on Codex when its hook has returned. If a turn whose prompt carried
+the steer fails, the conversation's next prompt carries it again, also in a successor. A receipt
+records that the conversation holds the steer, not that the model followed it.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:
 

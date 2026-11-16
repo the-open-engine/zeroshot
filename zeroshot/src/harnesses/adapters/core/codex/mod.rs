@@ -196,8 +196,9 @@ impl NativeV2CodexAdapter {
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: input.files.home(),
-                context_budget: None,
-                standing: true,
+                // Codex runs in exec mode with no channel for a further user message; its hook
+                // context arrives as a developer message and stays in the thread.
+                steers: crate::active_memory::hooks::SteerRoute::HookContext,
             },
         );
         Ok(command)

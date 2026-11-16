@@ -101,15 +101,17 @@ fn project_test_harness(harness: &str) -> String {
         shell_literal(executable),
         shell_literal(&test)
     );
-    let answer = match harness {
-        "codex" => CODEX_ANSWER,
-        "claude" => CLAUDE_ANSWER,
+    // Codex reads its prompt to the end of stdin; Claude Code reads one stream-json line and
+    // leaves stdin open while the turn runs.
+    let (read_prompt, answer) = match harness {
+        "codex" => ("cat >/dev/null", CODEX_ANSWER),
+        "claude" => ("head -n 1 >/dev/null", CLAUDE_ANSWER),
         _ => unreachable!(),
     };
     format!(
         r#"#!/bin/sh
 set -eu
-cat >/dev/null
+{read_prompt}
 printf 'TMPDIR=%s\n' "${{TMPDIR-}}" >> {PROJECT_TEST_LOG}
 if {run_project_test} >> {PROJECT_TEST_LOG} 2>&1; then
   printf 'exit=0\n' >> {PROJECT_TEST_LOG}

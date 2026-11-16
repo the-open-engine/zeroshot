@@ -160,7 +160,7 @@ for argument in "$@"; do
   previous=$argument
 done
 printf '%s\n' "$@" > "$target.args"
-cat > "$target.prompt"
+head -n 1 > "$target.prompt"
 printf '%s\n' "$target" >> turns.log
 printf '%s\n' '{{"type":"system","subtype":"init","session_id":"session-1","claude_code_version":"{version}","model":"{MODEL}"}}'
 case "$target" in
@@ -403,7 +403,7 @@ async fn missing_final_structured_output_is_corrected_in_the_same_session() {
     finished.assert_answer("final");
     assert_eq!(turns(&workspace), ["initial", "resumed"]);
     assert_resumed_session(&workspace.read("resumed.args"));
-    assert!(workspace.read("resumed.prompt").contains(CORRECTION_PROMPT));
+    assert!(prompt_text(&workspace.read("resumed.prompt")).contains(CORRECTION_PROMPT));
     assert_eq!(
         finished.usages,
         [Some([60, 15, 250, 30]), Some([7, 3, 5, 1])]

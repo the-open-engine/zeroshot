@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::native_v2_runner::DriverInvocation;
 
-use super::{ActiveMemorySource, HookQuery, native};
+use super::{ActiveMemorySource, HookQuery, SteerRoute, native};
 
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_CAPABILITY_BYTES: u64 = 16 * 1024;
@@ -25,8 +25,7 @@ pub(super) struct HookScope {
     session_key: String,
     execution_id: u64,
     workspace: PathBuf,
-    context_budget: usize,
-    standing: bool,
+    steers: SteerRoute,
 }
 
 impl HookScope {
@@ -36,8 +35,7 @@ impl HookScope {
             session_key: super::provider_session_key(invocation),
             execution_id: invocation.node.reference.execution.get(),
             workspace: workspace.to_path_buf(),
-            context_budget: native::MAX_CONTEXT_BYTES,
-            standing: true,
+            steers: SteerRoute::HookContext,
         }
     }
 
@@ -73,8 +71,8 @@ impl HookScope {
                 .unwrap_or(Value::Null),
             cwd,
             subagent: event["agent_id"].as_str().is_some_and(|id| !id.is_empty()),
-            context_budget: self.context_budget,
-            standing: self.standing,
+            steers: self.steers.carrier(),
+            context_kept: true,
         }
     }
 }
@@ -126,10 +124,10 @@ impl Broker {
                         let _ = error;
                         continue;
                     }
-                    if let Ok((query, delivery)) =
+                    if let Ok((query, delivery, reply)) =
                         response(&mut stream, &thread_scopes, source.as_ref())
                     {
-                        if return_context(&mut stream, &delivery.context, source.as_ref())
+                        if return_context(&mut stream, &reply, source.as_ref())
                             && let Some(query) = query
                         {
                             source.acknowledged(&query, &delivery);
@@ -171,23 +169,13 @@ impl Broker {
         })
     }
 
-    /// Applies a carrier's inline budget to the scope just issued for this execution.
-    pub(super) fn bound(&self, invocation: &DriverInvocation, budget: usize) {
+    /// Sets where the scope just issued for this execution sends the steers a tool call selects.
+    pub(super) fn route(&self, invocation: &DriverInvocation, steers: SteerRoute) {
         if let Ok(mut scopes) = self.scopes.lock() {
             scopes
                 .values_mut()
                 .filter(|scope| scope.execution_id == invocation.node.reference.execution.get())
-                .for_each(|scope| scope.context_budget = budget);
-        }
-    }
-
-    /// Marks the scope just issued for this execution as a carrier on which a steer does not stand.
-    pub(super) fn shown_only(&self, invocation: &DriverInvocation) {
-        if let Ok(mut scopes) = self.scopes.lock() {
-            scopes
-                .values_mut()
-                .filter(|scope| scope.execution_id == invocation.node.reference.execution.get())
-                .for_each(|scope| scope.standing = false);
+                .for_each(|scope| scope.steers = steers.clone());
         }
     }
 
@@ -212,7 +200,7 @@ fn response(
     stream: &mut TcpStream,
     scopes: &Mutex<BTreeMap<String, HookScope>>,
     source: &dyn ActiveMemorySource,
-) -> io::Result<(Option<HookQuery>, super::HookDelivery)> {
+) -> io::Result<(Option<HookQuery>, super::HookDelivery, String)> {
     let request: Request = serde_json::from_slice(&read_frame(stream, MAX_EVENT_BYTES)?)?;
     let scope = scopes
         .lock()
@@ -220,15 +208,34 @@ fn response(
         .get(&request.token)
         .cloned();
     let Some(scope) = scope else {
-        return Ok((None, super::HookDelivery::default()));
+        return Ok((None, super::HookDelivery::default(), String::new()));
     };
     let query = scope.query(&request.event);
     if query.tool_name.is_empty() {
-        return Ok((None, super::HookDelivery::default()));
+        return Ok((None, super::HookDelivery::default(), String::new()));
     }
     let mut delivery = source.tool_delivery(&query);
     delivery.context = native::bounded_context(delivery.context);
-    Ok((Some(query), delivery))
+    let reply = match &scope.steers {
+        SteerRoute::HookContext => delivery.context.clone(),
+        // The adapter writes the steer into the conversation; its hook returns memory only.
+        SteerRoute::Adapter(adapter) => {
+            if !delivery.steer.is_empty() {
+                let _ = adapter.send(delivery.steer.clone());
+            }
+            delivery.context.clone()
+        }
+        // The extension sends each part as a message of its own, so it needs them apart.
+        SteerRoute::Extension { .. }
+            if delivery.context.is_empty() && delivery.steer.is_empty() =>
+        {
+            String::new()
+        }
+        SteerRoute::Extension { .. } => {
+            json!({"context":delivery.context,"steer":delivery.steer}).to_string()
+        }
+    };
+    Ok((Some(query), delivery, reply))
 }
 
 pub(super) fn run_helper(path: &Path) -> io::Result<()> {

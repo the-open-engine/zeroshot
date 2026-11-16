@@ -20,7 +20,7 @@ for argument in "$@"; do
     exit 0
   fi
 done
-cat > /dev/null
+head -n 1 >/dev/null
 printf '%s\n' "$@" > turn-arguments
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-1"}'
 printf '%s%s%s\n' \

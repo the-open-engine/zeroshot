@@ -6,7 +6,7 @@ set -eu
 for argument in "$@"; do /usr/bin/printf '%s\n' "$argument" >> initial.args; done
 /usr/bin/head -c 5242880 /dev/zero | /usr/bin/tr '\000' x
 /usr/bin/printf '\n'
-/usr/bin/cat > initial.prompt
+/usr/bin/head -n 1 > initial.prompt
 /usr/bin/printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-1"}'
 /usr/bin/printf '%s%s\n' \
   '{"type":"result","subtype":"success","is_error":false,' \
@@ -19,7 +19,7 @@ async fn long_transcript_crossing_all_legacy_parser_caps_completes() {
     let workspace = TestDirectory::new("claude-long-transcript");
     write_claude_script(
         &workspace,
-        "set -eu\ncat >/dev/null\nexec /bin/cat provider-output.ndjson\n",
+        "set -eu\nhead -n 1 >/dev/null\nexec /bin/cat provider-output.ndjson\n",
     );
     let mut provider_output = String::new();
     provider_output.push('\n');
@@ -98,7 +98,7 @@ async fn stdout_is_drained_while_a_multiframe_prompt_is_delivered_in_full() {
         .assert_value();
 
     assert!(matches!(completion.outcome, WorkerOutcome::Verified { .. }));
-    let prompt = workspace.read("initial.prompt");
+    let prompt = prompt_text(&workspace.read("initial.prompt"));
     assert!(prompt.len() > 8 * 1024 * 1024);
     assert!(prompt.contains(&payload));
     assert!(!workspace.read("initial.args").contains(&payload));

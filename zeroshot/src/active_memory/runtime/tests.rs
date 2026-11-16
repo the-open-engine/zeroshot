@@ -59,8 +59,8 @@ fn query(session: &str) -> HookQuery {
         tool_input: json!({"cmd":"cat guard.rs", "workdir":workspace().join("src")}),
         cwd: workspace(),
         subagent: false,
-        context_budget: crate::active_memory::hooks::native::MAX_CONTEXT_BYTES,
-        standing: true,
+        steers: crate::active_memory::hooks::SteerCarrier::HookContext,
+        context_kept: true,
     }
 }
 
@@ -78,6 +78,44 @@ fn carrier_reuses_workdir_and_deduplicates_within_each_provider_session() {
             .tool_context(&query("two"))
             .contains("Preserve sibling guards")
     );
+    assert_eq!(source.manifest().unwrap().lessons.len(), 1);
+}
+
+// Copilot applies hook context to the turn in progress and writes none of it to its session: a
+// later execution of the same conversation no longer holds the lesson and is given it again.
+#[test]
+fn carrier_that_does_not_keep_context_is_given_a_lesson_again_in_a_later_execution() {
+    let source = source(2048);
+    let unkept = |execution| HookQuery {
+        execution_id: execution,
+        context_kept: false,
+        ..query("one")
+    };
+    assert!(
+        source
+            .tool_context(&unkept(1))
+            .contains("Preserve sibling guards")
+    );
+    assert!(
+        source.tool_context(&unkept(1)).is_empty(),
+        "once per execution"
+    );
+    assert!(
+        source
+            .tool_context(&unkept(2))
+            .contains("Preserve sibling guards")
+    );
+    assert!(source.tool_context(&unkept(2)).is_empty());
+    // A carrier that keeps its context still receives the lesson once per conversation.
+    assert!(
+        source
+            .tool_context(&query("one"))
+            .contains("Preserve sibling guards")
+    );
+    assert!(source.tool_context(&query("one")).is_empty());
+    let mut later = query("one");
+    later.execution_id = 2;
+    assert!(source.tool_context(&later).is_empty());
     assert_eq!(source.manifest().unwrap().lessons.len(), 1);
 }
 
@@ -741,7 +779,11 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
     let expected = baseline.tool_context(&original, &tool, &source.workspace);
     assert!(expected.contains("Preserve sibling guards"));
     let (_, delivered) = hooks
-        .tool_delivery(&started, &tool, &source.workspace)
+        .tool_delivery(crate::active_memory::hooks::ToolCall::hook(
+            &started,
+            &tool,
+            &source.workspace,
+        ))
         .await;
     assert!(delivered.context.contains(&text));
     assert!(delivered.context.ends_with(&expected));

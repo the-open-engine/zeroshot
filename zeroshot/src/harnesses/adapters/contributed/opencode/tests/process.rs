@@ -511,7 +511,10 @@ fn memory_callback_receipts(
             assert_eq!(request["token"], capability["token"]);
             assert_eq!(request["event"]["toolName"], tool);
             assert_eq!(request["event"]["cwd"], json!(workspace));
-            assert_eq!(request["event"]["sessionId"], "ses_fixture");
+            assert!(matches!(
+                request["event"]["sessionId"].as_str(),
+                Some("ses_fixture" | "ses_refused")
+            ));
             assert_eq!(
                 request["event"]["input"],
                 if tool == "read" {
@@ -541,19 +544,22 @@ fn memory_callback_receipts(
 }
 
 #[test]
-fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachments() {
-    exercise_steer_native_plugin_context(" recalled-marker".into());
+fn native_plugin_stores_recall_as_a_message_and_leaves_tool_results_unchanged() {
+    exercise_native_plugin_messages(" recalled-marker", "");
 }
 
 #[test]
-fn steer_opencode_carrier_preserves_maximum_text_whole_with_native_attachments() {
-    exercise_steer_native_plugin_context(format!(
+fn steer_opencode_carrier_stores_maximum_text_whole_as_a_message_before_the_recall() {
+    let steer = format!(
         "<steer>\n[id] {}\n</steer>",
         "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES)
-    ));
+    );
+    exercise_native_plugin_messages(" recalled-marker", &steer);
 }
 
-fn exercise_steer_native_plugin_context(context: String) {
+/// The plugin against a broker that hands `context` and `steer` to each of three tool calls, and
+/// a session client that refuses to store anything for the third.
+fn exercise_native_plugin_messages(context: &str, steer: &str) {
     let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(RecallMemory)).assert_value());
     let directory = TestDirectory::new("opencode-native-memory-plugin");
     let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n").with_active_memory(Some(hooks));
@@ -584,10 +590,18 @@ fn exercise_steer_native_plugin_context(context: String) {
         .assert_value();
     // Check the carrier's bytes directly. The production broker's 250 ms receipt deadline may
     // correctly mark an otherwise returned result unavailable when a loaded CI host delays it.
-    let receipts = memory_callback_receipts(&files, context.clone());
+    let reply = json!({"context":context,"steer":steer}).to_string();
+    let receipts = memory_callback_receipts(&files, reply);
+    // Like OpenCode's client, `session.prompt` resolves to data or to an error; it does not throw.
     let source_code = r#"const {default:create}=await import(process.argv[1]);
-const plugin=await create({directory:process.argv[2]});
+const stored=[];
+const client={session:{prompt:async (request)=>{
+  if (request.path.id==='ses_refused') return {error:{name:'NotFoundError'}};
+  stored.push(request); return {data:{info:{id:'msg_'+stored.length}}};
+}}};
+const plugin=await create({directory:process.argv[2],client});
 const output={title:'read',output:'original',metadata:{}};
+const builtin=structuredClone(output);
 await plugin['tool.execute.after']({tool:'read',sessionID:'ses_fixture',callID:'call1',args:{filePath:'README.md'}},output);
 const mcp={content:[
   {type:'text',text:'original MCP text',annotations:{priority:0.5}},
@@ -597,8 +611,8 @@ const mcp={content:[
 ],output:'MCP extension output',structuredContent:{result:{count:2}},metadata:{native:true},_meta:{native:'unchanged'},isError:false};
 const before=structuredClone(mcp);
 await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fixture',callID:'call2',args:{marker:'mcp-fixture'}},mcp);
-await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fixture',callID:'call3',args:{marker:'mcp-fixture'}},null);
-console.log(JSON.stringify({output,mcp,before}));"#;
+await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_refused',callID:'call3',args:{marker:'mcp-fixture'}},null);
+console.log(JSON.stringify({output,builtin,mcp,before,stored}));"#;
     let output = node_command()
         .args(["--input-type=module", "-e", source_code, plugin_url])
         .arg(&files.workspace)
@@ -611,28 +625,25 @@ console.log(JSON.stringify({output,mcp,before}));"#;
         String::from_utf8_lossy(&output.stderr)
     );
     let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
-    assert_eq!(returned["output"]["output"], format!("original{context}"));
-    let before = &returned["before"];
-    let contents = returned["mcp"]["content"].as_array().assert_value();
-    assert_eq!(&contents[..4], before["content"].as_array().assert_value());
-    assert_eq!(
-        contents[4],
-        serde_json::json!({"type":"text","text":context})
-    );
-    for field in [
-        "output",
-        "structuredContent",
-        "metadata",
-        "_meta",
-        "isError",
-    ] {
-        assert_eq!(returned["mcp"][field], before[field]);
-    }
+    // Nothing is placed inside a tool result, which a model may refuse to follow.
+    assert_eq!(returned["output"], returned["builtin"]);
+    assert_eq!(returned["mcp"], returned["before"]);
+    // Each text is a message of its own, stored without starting a model turn, the steer first.
+    let message = |text: &str| json!({"path":{"id":"ses_fixture"},"body":{"noReply":true,"parts":[{"type":"text","text":text}]}});
+    let expected: Vec<Value> = [steer, context]
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .map(message)
+        .collect();
+    let stored = returned["stored"].as_array().assert_value();
+    assert_eq!(stored.len(), 2 * expected.len());
+    assert_eq!(&stored[..expected.len()], expected.as_slice());
+    assert_eq!(&stored[expected.len()..], expected.as_slice());
     drop(adapter);
     assert_eq!(
         receipts,
         vec![Some(1), Some(1), None],
-        "builtin and MCP results must acknowledge context; unsupported null output must not"
+        "stored messages are acknowledged; a session that stores nothing acknowledges nothing"
     );
 }
 

@@ -121,12 +121,18 @@ workspace root, with component-aware folder matching. Shell arguments provide ad
 simple `cd folder && ...` commands are recognized. An opaque script that never exposes its file
 paths can miss relevant cards. The matcher does not trace arbitrary program filesystem access.
 
-Repository cards arrive through native harness hooks:
+Repository cards arrive at a matching tool call through the harness's own mechanism:
 
 - Codex and Claude use `PreToolUse` additional context through a small native callback helper.
-- Copilot uses its private RPC `preToolUse` callback.
-- Pi uses a product-owned extension that appends cards to the tool result, including in contained
-  mode where automatic project extensions remain disabled.
+- Copilot uses its private RPC `preToolUse` callback. Copilot applies that context to the turn in
+  progress and writes none of it to its session, so a later execution of the same conversation
+  receives a matching card again.
+- Pi uses a product-owned extension that adds cards to the session as an entry of their own after
+  the tool calls of one model response, including in contained mode where automatic project
+  extensions remain disabled.
+- OpenCode uses a product-owned plugin that stores cards as a session message.
+
+Cards are never placed inside a tool result, which a model may refuse to follow.
 
 Context guides subsequent model decisions. It cannot revise a tool call already issued, so reads
 and searches provide the most useful early triggers. Managed policy or disabled native hooks can
@@ -248,6 +254,7 @@ failed or partial reads must never masquerade as an empty lesson set.
 
 The native tool-call carrier is installed for every agent conversation, including when Active
 Memory is off, so it can deliver standing [steers](../guides/observe-and-control.md#steer-a-run).
-Memory off still leaves its database unopened. Steers come from the run vector record and precede
-memory cards. They are delivered whole and do not count against `nodeInjectionTokens` or
-`hookInjectionTokens`; memory card selection keeps its own limits.
+Memory off still leaves its database unopened. Steers come from the run vector record. At a tool
+call they travel as a user message where the harness has a channel for one, and ahead of the
+memory cards in hook context on Codex. They are delivered whole and do not count against
+`nodeInjectionTokens` or `hookInjectionTokens`; memory card selection keeps its own limits.

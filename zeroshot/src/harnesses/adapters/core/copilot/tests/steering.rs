@@ -43,8 +43,27 @@ async fn steer_copilot_streams_aggregate_prompts_across_the_inbound_rpc_bound() 
     }
 }
 
+// The steer goes into the running turn as a user message of its own, never as hook context, and
+// is received once Copilot shows it in the conversation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steer_copilot_acknowledges_after_native_rpc_handoff_once() {
+async fn steer_copilot_sends_the_steer_into_the_running_turn_and_receipts_it_once_shown() {
+    let (steer, receipts) = steered_turn("steer").await;
+    let prompt = steer["params"]["prompt"].as_str().assert_value();
+    assert!(prompt.starts_with("<steer>\n") && prompt.ends_with("</steer>"));
+    assert!(prompt.contains(&"x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES)));
+    assert_eq!(receipts, 1);
+}
+
+// A CLI that refuses the message never shows it: the turn goes on and the steer stays due.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_copilot_refused_by_the_cli_is_not_receipted_and_does_not_fail_the_turn() {
+    let (_, receipts) = steered_turn("steer_refused").await;
+    assert_eq!(receipts, 0);
+}
+
+/// One turn of the fake CLI that calls a tool twice after a steer was recorded. Returns the
+/// request that carried the steer and the number of receipts the run recorded.
+async fn steered_turn(mode: &str) -> (Value, usize) {
     use crate::active_memory::hooks::ActiveMemoryHooks;
     use crate::harnesses::{HarnessBuildContext, HarnessHost, HarnessRegistry};
     use crate::native_v2_candidate::{NativeV2CandidateConfig, build_local_native_v2_candidate};
@@ -53,7 +72,7 @@ async fn steer_copilot_acknowledges_after_native_rpc_handoff_once() {
     use openengine_cluster_protocol::{RunId, RunSteerParams, RunVectorContent, Sha256Digest};
     let directory = TestDirectory::new("copilot-steer");
     let executable = directory.write_executable("copilot", &script());
-    let mut values = fixture_values(&directory, "steer");
+    let mut values = fixture_values(&directory, mode);
     values.insert(auth::TOKEN.to_owned(), "gho_fake-secret".into());
     let binding = binding(values.keys().cloned());
     let admitted = admitted(binding.clone(), INSTRUCTIONS).await;
@@ -132,23 +151,16 @@ async fn steer_copilot_acknowledges_after_native_rpc_handoff_once() {
     .await
     .assert_value();
     std::fs::write(directory.child("capture.steer-release"), "").assert_value();
-    let _ = complete(handle).await;
+    let (_, outcome) = complete(handle).await;
+    verified(outcome);
     let replies: Value =
         serde_json::from_str(&directory.read("capture.steer-replies")).assert_value();
-    assert!(
-        replies[0]["result"]["output"]["additionalContext"]
-            .as_str()
-            .assert_value()
-            .contains(&"x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES))
-    );
-    assert_eq!(
-        crate::v2_run_ledger::steering::all(ledger.as_ref(), &run)
-            .await
-            .assert_value()
-            .iter()
-            .filter(|v| matches!(v.content, RunVectorContent::SteerReceipt { .. }))
-            .count(),
-        1
-    );
+    let receipts = crate::v2_run_ledger::steering::all(ledger.as_ref(), &run)
+        .await
+        .assert_value()
+        .iter()
+        .filter(|v| matches!(v.content, RunVectorContent::SteerReceipt { .. }))
+        .count();
     runner.close_run(&run).await;
+    (replies[0].clone(), receipts)
 }

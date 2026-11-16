@@ -4,6 +4,9 @@ use std::io;
 use std::path::Path;
 
 pub(crate) const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
+/// An extension's reply carries memory context and steers apart, as JSON: two bounded texts,
+/// each at most doubled by string escaping, and the framing around them.
+pub(crate) const MAX_REPLY_BYTES: usize = 4 * MAX_CONTEXT_BYTES + 64;
 
 pub(super) fn bounded_context(context: String) -> String {
     if context.len() > MAX_CONTEXT_BYTES || context.contains('\0') {

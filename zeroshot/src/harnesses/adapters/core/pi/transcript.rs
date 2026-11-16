@@ -42,6 +42,9 @@ pub(crate) struct PiTranscript {
     /// Malformed counts or overflow make the turn total permanently incomplete.
     usage_invalid: bool,
     output: ProviderText,
+    /// Receives the text of each user message Pi puts into the conversation: the prompt, and
+    /// any message an extension sent while the turn ran.
+    user_messages: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 impl PiTranscript {
@@ -54,7 +57,16 @@ impl PiTranscript {
             current_usage: None,
             usage_invalid: false,
             output: ProviderText::new(&redactions),
+            user_messages: None,
         }
+    }
+
+    pub(super) fn reporting_user_messages(
+        mut self,
+        user_messages: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Self {
+        self.user_messages = Some(user_messages);
+        self
     }
 }
 
@@ -193,19 +205,24 @@ impl PiTranscript {
                 }
             }
             "message_start" => {
+                let role = value
+                    .get("message")
+                    .and_then(|message| message.get("role"))
+                    .and_then(Value::as_str);
                 // A new assistant message is a new model request whose usage starts over, so the
                 // previous message's latest usage becomes part of the turn total. A `message_end`
                 // normally commits it already; this also covers a stream that omitted one.
-                if value
-                    .get("message")
-                    .and_then(|message| message.get("role"))
-                    .and_then(Value::as_str)
-                    == Some("assistant")
-                {
+                if role == Some("assistant") {
                     self.commit_usage();
                     // The last assistant message is the node's answer, so a message that starts
                     // after one already settled must not leave that earlier text in place.
                     self.terminal = None;
+                }
+                if role == Some("user")
+                    && let Some(user_messages) = &self.user_messages
+                    && let Some(text) = value.get("message").and_then(message_text)
+                {
+                    let _ = user_messages.send(text);
                 }
             }
             "message_update" => {
@@ -341,6 +358,11 @@ fn parse_usage(value: &Value) -> Option<TokenUsageDelta> {
 
 /// Live assistant text of one message, concatenated in content order.
 fn assistant_text(message: &Value) -> Option<String> {
+    message_text(message)
+}
+
+/// The text of one message, concatenated in content order.
+fn message_text(message: &Value) -> Option<String> {
     let content = message.get("content")?;
     let blocks = match content {
         Value::Array(blocks) => blocks,

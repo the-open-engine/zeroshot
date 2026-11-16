@@ -893,7 +893,9 @@ if '--version' in sys.argv:
 if '--help' in sys.argv or '--safe-mode' in sys.argv or 'app-server' in sys.argv: sys.exit(1)
 name = os.environ['ZEROSHOT_NODE_NAME']
 pathlib.Path(name + '.launch').write_text(json.dumps(sys.argv[1:]))
-pathlib.Path(name + '.prompt').write_text(sys.stdin.read())
+# Claude Code reads its prompt as one stream-json line; its stdin stays open while the turn runs.
+claude = pathlib.Path(sys.argv[0]).name == 'claude'
+pathlib.Path(name + '.prompt').write_text(sys.stdin.readline() if claude else sys.stdin.read())
 sys.exit(17)
 "#;
     for program in ["codex", "claude"] {

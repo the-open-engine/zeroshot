@@ -307,8 +307,7 @@ fn harness_configuration_preserves_arguments_and_uses_private_capabilities() {
             HookInstallation {
                 invocation: &invocation,
                 home: directory.path(),
-                context_budget: None,
-                standing: true,
+                steers: super::SteerRoute::HookContext,
             },
             install,
         );
@@ -333,8 +332,11 @@ fn harness_configuration_preserves_arguments_and_uses_private_capabilities() {
     }
     let extension = std::fs::read_to_string(directory.path().join("active-memory-extension.mjs"))
         .assert_value();
-    assert!(extension.contains("tool_result"));
-    assert!(extension.contains("event.structuredContent"));
+    // A steer becomes a user message and a lesson a session entry: the tool result is untouched.
+    assert!(extension.contains("pi.on('tool_result'"));
+    assert!(extension.contains("pi.sendUserMessage(steer,{deliverAs:'steer'})"));
+    assert!(extension.contains("type:'custom_message'"));
+    assert!(!extension.contains("event.content"));
 }
 
 #[test]
@@ -431,8 +433,7 @@ fn auxiliary_roles_never_recall_even_when_a_main_node_has_the_same_name() {
                 HookInstallation {
                     invocation: &auxiliary,
                     home: home.path(),
-                    context_budget: None,
-                    standing: true,
+                    steers: super::SteerRoute::HookContext,
                 },
                 install,
             );
@@ -552,8 +553,7 @@ fn full_authored_instructions_and_failed_hook_setup_preserve_the_primary_invocat
             HookInstallation {
                 invocation: &original,
                 home: invalid_home.path(),
-                context_budget: None,
-                standing: true,
+                steers: super::SteerRoute::HookContext,
             },
             install,
         );
@@ -754,11 +754,11 @@ async fn steer_prompt_preserves_authored_contract_and_retries_worker_errors() {
             .contains("Standing direction")
     );
     let (_, tool) = hooks
-        .tool_delivery(
+        .tool_delivery(super::ToolCall::hook(
             &first,
             &json!({"tool_name":"Read"}),
             Path::new("/workspace"),
-        )
+        ))
         .await;
     assert!(!tool.context.contains("Standing direction"));
     // The prompt was handed over, so the steer counts as received while the turn still runs.
@@ -883,8 +883,7 @@ fn steer_empty_memory_installs_claude_codex_pi_carriers_and_helper_preserves_max
             HookInstallation {
                 invocation: &invocation(),
                 home: directory.path(),
-                context_budget: None,
-                standing: true,
+                steers: super::SteerRoute::HookContext,
             },
             install,
         );
@@ -956,14 +955,14 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
     .await
     .assert_value();
     let (query, delivery) = hooks
-        .tool_delivery(
+        .tool_delivery(super::ToolCall::hook(
             &invocation,
             &json!({"tool_name":"Read"}),
             Path::new("/workspace"),
-        )
+        ))
         .await;
     assert!(delivery.context.contains("Retry at the next callback"));
-    hooks.acknowledge(&query, &delivery, true).await;
+    hooks.acknowledge(&query, &delivery).await;
     assert_eq!(
         crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
             .await
@@ -995,11 +994,11 @@ async fn await_steer(hooks: &ActiveMemoryHooks, invocation: &DriverInvocation, t
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let (_, delivery) = hooks
-                .tool_delivery(
+                .tool_delivery(super::ToolCall::hook(
                     invocation,
                     &json!({"tool_name":"Read"}),
                     Path::new("/workspace"),
-                )
+                ))
                 .await;
             if delivery.context.contains(text) {
                 break;
@@ -1068,92 +1067,220 @@ async fn steer_is_not_receipted_at_a_subagent_tool_call_and_reaches_the_conversa
     assert_eq!(status.steers[0].received_executions, 1);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steer_beyond_the_claude_inline_budget_waits_with_later_steers_for_the_next_prompt() {
-    use crate::harnesses::adapters::core::claude::memory::{INLINE_CONTEXT_BYTES, install};
+const MEMORY: &str = "[lesson@1] Keep the generated schema synchronized.";
+
+/// A conversation with a prepared prompt, and a steer record the delivery source has read.
+async fn steered_conversation(
+    steers: &[&str],
+) -> (
+    Arc<ActiveMemoryHooks>,
+    Arc<dyn crate::v2_run_ledger::RunLedger>,
+    openengine_cluster_protocol::RunId,
+    DriverInvocation,
+) {
     let (ledger, run) = steer_record().await;
     let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
     hooks.bind_ledger(run.clone(), ledger.clone());
-    let directory = tempfile::tempdir().assert_value();
     let mut invocation = invocation();
-    let execution = hooks
+    if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { session_scope, .. } =
+        &mut invocation.node.binding
+    {
+        *session_scope = crate::execution::SessionScope::NodeInstance;
+    }
+    hooks
         .prepare_steers(&mut invocation, false)
         .await
         .assert_value();
-    let large = "x".repeat(INLINE_CONTEXT_BYTES);
-    record_steer(ledger.as_ref(), &run, large.clone()).await;
-    record_steer(ledger.as_ref(), &run, "Queued small direction".into()).await;
-    await_steer(&hooks, &invocation, "Queued small direction").await;
+    for steer in steers {
+        record_steer(ledger.as_ref(), &run, (*steer).to_owned()).await;
+    }
+    if let Some(last) = steers.last() {
+        await_steer(&hooks, &invocation, last).await;
+    }
+    (hooks, ledger, run, invocation)
+}
+
+async fn received(
+    ledger: &dyn crate::v2_run_ledger::RunLedger,
+    run: &openengine_cluster_protocol::RunId,
+) -> Vec<u64> {
+    let status = crate::v2_run_ledger::steering::status(ledger, run)
+        .await
+        .assert_value();
+    status
+        .steers
+        .iter()
+        .map(|steer| steer.received_executions)
+        .collect()
+}
+
+// Claude Code: the hook returns memory only and the adapter writes the steer to stdin, whatever
+// its size and whichever tool call asked, a subagent's included.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_steer_at_a_tool_call_goes_to_the_adapter_whole_and_is_delivered_once() {
+    use crate::harnesses::adapters::core::claude::memory::install;
+    let large = "x".repeat(40_000);
+    let (hooks, ledger, run, invocation) = steered_conversation(&[&large, "Small direction"]).await;
+    let execution = invocation.node.reference.execution.get();
+    let directory = tempfile::tempdir().assert_value();
+    let (adapter, mut messages) = tokio::sync::mpsc::unbounded_channel();
     let installation = HookInstallation {
         invocation: &invocation,
         home: directory.path(),
-        context_budget: Some(INLINE_CONTEXT_BYTES),
-        standing: true,
+        steers: SteerRoute::Adapter(adapter),
     };
     let cap = Arc::new(installed_capability(&hooks, installation, install));
     let tool = cap.clone();
     tokio::task::spawn_blocking(move || {
+        let subagent = json!({"tool_name":"Read","agent_id":"a456838012fb65c82"});
+        assert_eq!(callback(&tool, &tool.token, subagent), MEMORY);
+        // The message is on its way: the next tool call does not offer the steers again.
+        assert_eq!(
+            callback(&tool, &tool.token, json!({"tool_name":"Read"})),
+            MEMORY
+        );
+    })
+    .await
+    .assert_value();
+    let message = messages.recv().await.assert_value();
+    assert!(message.starts_with("<steer>\n") && message.ends_with("</steer>"));
+    assert!(message.contains(&large));
+    assert!(message.find(&large) < message.find("Small direction"));
+    assert!(messages.try_recv().is_err());
+    assert_eq!(received(ledger.as_ref(), &run).await, [0, 0]);
+    assert!(
+        hooks
+            .capture_steers()
+            .values()
+            .all(|saved| saved.receipts.is_empty())
+    );
+
+    hooks
+        .steer_shown(execution, "some other user message")
+        .await;
+    assert_eq!(received(ledger.as_ref(), &run).await, [0, 0]);
+    hooks.steer_shown(execution, &message).await;
+    assert_eq!(received(ledger.as_ref(), &run).await, [1, 1]);
+    let inherited = |hooks: &ActiveMemoryHooks| {
+        hooks
+            .capture_steers()
+            .values()
+            .map(|saved| saved.receipts.len())
+            .sum::<usize>()
+    };
+    // The message is part of the conversation now: a successor inherits the receipts, and
+    // neither a later tool call nor the next prompt carries the steers again.
+    assert_eq!(inherited(&hooks), 2);
+    hooks.finish_steers(execution, true).await;
+    let mut revisit = invocation.clone();
+    revisit.host_context = None;
+    revisit.node.reference.execution =
+        crate::native_v2_contract::ExecutionId::new(3).assert_value();
+    let next = hooks
+        .prepare_steers(&mut revisit, false)
+        .await
+        .assert_value();
+    assert!(revisit.host_context.is_none(), "once is the bound");
+    hooks.finish_steers(next, true).await;
+    assert_eq!(inherited(&hooks), 2);
+    assert_eq!(received(ledger.as_ref(), &run).await, [1, 1]);
+}
+
+// A message the harness never showed carries no receipt, so the steer returns with the
+// conversation's next prompt; nothing is lost and nothing repeats without bound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_steer_message_that_is_never_shown_returns_with_the_next_prompt() {
+    use crate::harnesses::adapters::core::claude::memory::install;
+    let (hooks, ledger, run, invocation) = steered_conversation(&["Direction"]).await;
+    let execution = invocation.node.reference.execution.get();
+    let directory = tempfile::tempdir().assert_value();
+    let (adapter, messages) = tokio::sync::mpsc::unbounded_channel();
+    // The adapter is gone, as after the turn's stdin has closed.
+    drop(messages);
+    let installation = HookInstallation {
+        invocation: &invocation,
+        home: directory.path(),
+        steers: SteerRoute::Adapter(adapter),
+    };
+    let cap = installed_capability(&hooks, installation, install);
+    tokio::task::spawn_blocking(move || {
         for _ in 0..2 {
-            let context = callback(&tool, &tool.token, json!({"tool_name":"Read"}));
             assert_eq!(
-                context,
-                "[lesson@1] Keep the generated schema synchronized."
+                callback(&cap, &cap.token, json!({"tool_name":"Read"})),
+                MEMORY
             );
         }
     })
     .await
     .assert_value();
-    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
-        .await
-        .assert_value();
-    assert!(status.steers.iter().all(|s| s.received_executions == 0));
-    invocation.host_context = None;
-    hooks
-        .prepare_steers(&mut invocation, false)
-        .await
-        .assert_value();
-    let prompt = invocation.host_context.as_ref().assert_value();
-    assert!(prompt.contains(&large));
-    assert!(prompt.find(&large) < prompt.find("Queued small direction"));
-    record_steer(ledger.as_ref(), &run, "Fits inline".into()).await;
-    await_steer(&hooks, &invocation, "Fits inline").await;
-    let context = tokio::task::spawn_blocking(move || {
-        let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
-        assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
-        context
-    })
-    .await
-    .assert_value();
-    assert!(context.contains("Fits inline"));
-    assert!(!context.contains("Queued small direction"));
-    assert!(context.len() <= INLINE_CONTEXT_BYTES);
     hooks.finish_steers(execution, true).await;
-    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+    assert_eq!(received(ledger.as_ref(), &run).await, [0]);
+    let mut revisit = invocation.clone();
+    revisit.host_context = None;
+    revisit.node.reference.execution =
+        crate::native_v2_contract::ExecutionId::new(3).assert_value();
+    let next = hooks
+        .prepare_steers(&mut revisit, false)
         .await
         .assert_value();
-    assert!(status.steers.iter().all(|s| s.received_executions == 1));
+    assert!(revisit.host_context.assert_value().contains("Direction"));
+    hooks.finish_steers(next, true).await;
+    assert_eq!(received(ledger.as_ref(), &run).await, [1]);
+}
+
+// Pi and OpenCode: the extension is handed memory and steers apart, because it sends each as a
+// message of its own. OpenCode stores the steer before it acknowledges; Pi's adapter confirms it
+// when Pi shows the message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_extension_is_handed_memory_and_steers_apart_and_never_inside_one_text() {
+    use crate::harnesses::adapters::core::pi;
+    for stored in [false, true] {
+        let (hooks, ledger, run, invocation) =
+            steered_conversation(&["Direction with \"quotes\"\nand a second line"]).await;
+        let execution = invocation.node.reference.execution.get();
+        let directory = tempfile::tempdir().assert_value();
+        let installation = HookInstallation {
+            invocation: &invocation,
+            home: directory.path(),
+            steers: SteerRoute::Extension { stored },
+        };
+        let cap = installed_capability(&hooks, installation, pi::memory::install);
+        let reply = tokio::task::spawn_blocking(move || {
+            let reply = callback(&cap, &cap.token, json!({"toolName":"read"}));
+            // The broker serves one callback at a time, so an acknowledged receipt is written.
+            let again: Value =
+                serde_json::from_str(&callback(&cap, &cap.token, json!({"toolName":"read"})))
+                    .assert_value();
+            assert_eq!(again["steer"], "");
+            reply
+        })
+        .await
+        .assert_value();
+        let reply: Value = serde_json::from_str(&reply).assert_value();
+        assert_eq!(reply["context"], MEMORY);
+        let steer = reply["steer"].as_str().assert_value();
+        assert!(steer.starts_with("<steer>\n") && steer.ends_with("</steer>"));
+        assert!(steer.contains("Direction with \"quotes\"\nand a second line"));
+        assert_eq!(
+            received(ledger.as_ref(), &run).await,
+            [u64::from(stored)],
+            "the acknowledgement is the hand-over only where the steer is stored first"
+        );
+        hooks.steer_shown(execution, steer).await;
+        assert_eq!(received(ledger.as_ref(), &run).await, [1]);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steer_beyond_the_claude_inline_budget_still_reaches_other_carriers_at_a_tool_call() {
-    use crate::harnesses::adapters::core::{claude::memory::INLINE_CONTEXT_BYTES, codex};
-    let (ledger, run) = steer_record().await;
-    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
-    hooks.bind_ledger(run.clone(), ledger.clone());
+async fn a_large_steer_reaches_a_hook_context_carrier_whole_at_a_tool_call() {
+    use crate::harnesses::adapters::core::codex;
+    let large = "x".repeat(40_000);
+    let (hooks, ledger, run, invocation) = steered_conversation(&[&large]).await;
     let directory = tempfile::tempdir().assert_value();
-    let mut invocation = invocation();
-    let execution = hooks
-        .prepare_steers(&mut invocation, false)
-        .await
-        .assert_value();
-    let large = "x".repeat(INLINE_CONTEXT_BYTES);
-    record_steer(ledger.as_ref(), &run, large.clone()).await;
-    await_steer(&hooks, &invocation, &large).await;
     let installation = HookInstallation {
         invocation: &invocation,
         home: directory.path(),
-        context_budget: None,
-        standing: true,
+        steers: SteerRoute::HookContext,
     };
     let cap = installed_capability(&hooks, installation, codex::memory::install);
     let context = tokio::task::spawn_blocking(move || {
@@ -1164,71 +1291,6 @@ async fn steer_beyond_the_claude_inline_budget_still_reaches_other_carriers_at_a
     .await
     .assert_value();
     assert!(context.contains(&large));
-    hooks.finish_steers(execution, true).await;
-    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
-        .await
-        .assert_value();
-    assert_eq!(status.steers[0].received_executions, 1);
-}
-
-// The same callback path serves a carrier on which a steer stands (Codex) and one on which it
-// does not (Pi): only the installation differs.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steer_at_a_tool_call_returns_in_the_next_prompt_only_where_it_does_not_stand() {
-    use crate::harnesses::adapters::core::{codex, pi};
-    let carriers: [(NativeInstaller, bool); 2] =
-        [(codex::memory::install, true), (pi::memory::install, false)];
-    for (install, standing) in carriers {
-        let (ledger, run) = steer_record().await;
-        let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
-        hooks.bind_ledger(run.clone(), ledger.clone());
-        let directory = tempfile::tempdir().assert_value();
-        let mut invocation = invocation();
-        if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { session_scope, .. } =
-            &mut invocation.node.binding
-        {
-            *session_scope = crate::execution::SessionScope::NodeInstance;
-        }
-        let instance = invocation.node.reference.node_instance;
-        let execution = hooks
-            .prepare_steers(&mut invocation, false)
-            .await
-            .assert_value();
-        record_steer(ledger.as_ref(), &run, "Standing direction".into()).await;
-        await_steer(&hooks, &invocation, "Standing direction").await;
-        let installation = HookInstallation {
-            invocation: &invocation,
-            home: directory.path(),
-            context_budget: None,
-            standing,
-        };
-        let cap = installed_capability(&hooks, installation, install);
-        let context = tokio::task::spawn_blocking(move || {
-            let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
-            // The broker serves one callback at a time, so the first receipt is written by now.
-            assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
-            context
-        })
-        .await
-        .assert_value();
-        assert!(context.contains("Standing direction"));
-        let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
-            .await
-            .assert_value();
-        assert_eq!(status.steers[0].received_executions, 1);
-        assert_eq!(
-            hooks.capture_steers()[&instance].receipts.len(),
-            usize::from(standing)
-        );
-        hooks.finish_steers(execution, true).await;
-        let mut revisit = invocation.clone();
-        revisit.host_context = None;
-        revisit.node.reference.execution =
-            crate::native_v2_contract::ExecutionId::new(3).assert_value();
-        hooks
-            .prepare_steers(&mut revisit, false)
-            .await
-            .assert_value();
-        assert_eq!(revisit.host_context.is_some(), !standing);
-    }
+    assert!(context.ends_with(MEMORY));
+    assert_eq!(received(ledger.as_ref(), &run).await, [1]);
 }

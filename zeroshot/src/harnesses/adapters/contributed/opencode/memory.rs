@@ -1,4 +1,8 @@
-//! Native OpenCode tool-result carrier for the host-owned memory broker.
+//! Native OpenCode carrier for the host-owned memory broker.
+//!
+//! Nothing is placed inside a tool result, which a model may refuse to follow. A steer and a
+//! memory lesson each become a message of their own in the session, which OpenCode's running
+//! loop reads at its next step.
 
 use std::io;
 use std::path::Path;
@@ -13,19 +17,22 @@ pub(super) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
     let source = PLUGIN
         .replace("CAPABILITY_PATH", &serde_json::to_string(capability)?)
         .replace(
-            "MAX_CONTEXT_BYTES",
-            &crate::active_memory::hooks::native::MAX_CONTEXT_BYTES.to_string(),
+            "MAX_REPLY_BYTES",
+            &crate::active_memory::hooks::native::MAX_REPLY_BYTES.to_string(),
         );
     let plugin = write_provider_file(home, "active-memory-opencode.mjs", source.as_bytes())?;
     super::plugin::append(command, &plugin)
 }
 
 // This plugin imports only native modules; installing memory never installs an npm dependency.
-// An absolute timer bounds the whole callback, including peers that keep sending partial frames.
+// An absolute timer bounds the broker callback, including peers that keep sending partial frames.
+//
+// `noReply` stores a message without starting a model turn of its own (OpenCode 1.19.5). The
+// acknowledgement follows the stored steer, so it is the hand-over.
 const PLUGIN: &str = r#"import fs from 'node:fs';
 import net from 'node:net';
 const capabilityPath = CAPABILITY_PATH;
-const maxContextBytes = MAX_CONTEXT_BYTES;
+const maxContextBytes = MAX_REPLY_BYTES;
 function retrieve(event) {
   return new Promise((resolve) => {
     let socket, timer;
@@ -58,18 +65,24 @@ function retrieve(event) {
         if (!context) return fail();
         if (settled) return;
         settled = true;
-        resolve({context,returned:() => {clearTimeout(timer);socket.end(Buffer.from([1]));}});
+        clearTimeout(timer);
+        resolve({context,returned:() => socket.end(Buffer.from([1])),dropped:close});
       });
     } catch { fail(); }
   });
 }
-export default async ({directory}) => ({
-  'tool.execute.after': async (input, output) => {
+export default async ({directory,client}) => ({
+  'tool.execute.after': async (input) => {
     const delivery = await retrieve({toolName:input.tool,input:input.args,cwd:directory,sessionId:input.sessionID});
     if (!delivery) return;
-    if (Array.isArray(output?.content)) output.content.push({type:'text',text:delivery.context});
-    else if (typeof output?.output === 'string') output.output += delivery.context;
-    else return;
+    try {
+      const {context,steer} = JSON.parse(delivery.context);
+      for (const text of [steer,context]) {
+        if (!text) continue;
+        const stored = await client.session.prompt({path:{id:input.sessionID},body:{noReply:true,parts:[{type:'text',text}]}});
+        if (stored?.error) return delivery.dropped();
+      }
+    } catch { return delivery.dropped(); }
     delivery.returned();
   }
 });

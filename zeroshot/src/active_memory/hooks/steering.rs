@@ -5,7 +5,7 @@ use std::time::Duration;
 use openengine_cluster_protocol::{Cursor, RunId, RunVector, RunVectorContent, VectorId};
 use crate::native_v2_runner::{DriverInvocation, conversations::SteeringReceipts};
 use crate::v2_run_ledger::{RunEvent, RunLedger, RunLedgerError, SnapshotAndTail, vector_event};
-use super::{ActiveMemorySource, HookDelivery, HookQuery};
+use super::{ActiveMemorySource, HookDelivery, HookQuery, SteerCarrier};
 
 pub(super) struct EmptySource;
 impl ActiveMemorySource for EmptySource {
@@ -71,7 +71,9 @@ impl Index {
     }
     fn due<'a>(&'a self, conversation: &'a Conversation) -> impl Iterator<Item = &'a RunVector> {
         self.steers.iter().filter(|v| {
-            !self.received(conversation, &v.id) && !conversation.offered.contains(&v.id)
+            !self.received(conversation, &v.id)
+                && !conversation.offered.contains(&v.id)
+                && !conversation.sent.iter().any(|(_, ids)| ids.contains(&v.id))
         })
     }
     /// What a prompt carries: the steers that are `due`, and those in `shown_only` (received,
@@ -159,7 +161,10 @@ struct Conversation {
     session: String,
     key: String,
     reference: crate::native_v2_contract::ExecutionRef,
+    /// Steers this execution's prompt carries; kept once the execution ends successfully.
     offered: Vec<VectorId>,
+    /// Steer messages sent at this execution's tool calls and not yet confirmed, by their text.
+    sent: Vec<(String, Vec<VectorId>)>,
     run: RunId,
     inherited: Arc<BTreeSet<VectorId>>,
 }
@@ -175,10 +180,9 @@ pub(super) struct DeliverySource {
     conversations: Mutex<BTreeMap<u64, Conversation>>,
     publication: tokio::sync::Mutex<()>,
     restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
-    /// Conversation and steer pairs that are received but not yet kept: delivered at a tool call
-    /// of a carrier on which a steer does not stand (`HookQuery::standing`), or carried by a
-    /// prompt whose execution has not ended successfully. They stay due for that conversation's
-    /// next prompt, and a successor does not inherit their receipts before it.
+    /// Conversation and steer pairs that are received but not yet kept: carried by a prompt
+    /// whose execution has not ended successfully. They stay due for that conversation's next
+    /// prompt, and a successor does not inherit their receipts before it.
     shown_only: Mutex<BTreeSet<(String, VectorId)>>,
 }
 const DEADLINE: Duration = Duration::from_millis(250);
@@ -295,6 +299,12 @@ impl DeliverySource {
                             c
                         })
                 })
+                .map(|mut c| {
+                    // A message an earlier native launch never showed is void: its steers are due
+                    // again, in this prompt.
+                    c.sent.clear();
+                    c
+                })
                 .unwrap_or_else(|| {
                     // A readable snapshot alone proves nothing: adapters confirm native restoration.
                     let saved = continued
@@ -315,6 +325,7 @@ impl DeliverySource {
                         session,
                         reference,
                         offered: Vec::new(),
+                        sent: Vec::new(),
                     }
                 });
             conversations.insert(execution, conversation.clone());
@@ -377,26 +388,20 @@ impl DeliverySource {
                 }
             }
             conversation.offered.clear();
-        }
-    }
-    /// Notes a tool-call delivery after which the steers do not stand in the conversation.
-    pub(super) fn shown_only(&self, query: &HookQuery, delivery: &HookDelivery) {
-        let key = self
-            .conversations
-            .lock()
-            .ok()
-            .and_then(|c| c.get(&query.execution_id).map(|c| c.key.clone()));
-        if let (Some(key), Ok(mut shown_only)) = (key, self.shown_only.lock()) {
-            shown_only.extend(delivery.steers.iter().map(|id| (key.clone(), id.clone())));
+            // A message the harness never showed carries no receipt: its steers stay due.
+            conversation.sent.clear();
         }
     }
     pub(super) async fn delivery(&self, query: &HookQuery) -> HookDelivery {
         let mut delivery = HookDelivery {
             context: self.memory.tool_context(query),
-            steers: Vec::new(),
+            ..HookDelivery::default()
         };
-        // A steer returned to a subagent would be receipted for a conversation that never saw it.
-        if query.subagent {
+        let in_context = query.steers == SteerCarrier::HookContext;
+        // Hook context returned to a subagent never reaches this conversation, and its steers
+        // would be receipted unseen. A message goes to the node's own conversation whichever
+        // tool call asked for it.
+        if query.subagent && in_context {
             return delivery;
         }
         let Some(record) = self.record() else {
@@ -420,40 +425,77 @@ impl DeliverySource {
         if !index.initialized {
             return delivery;
         }
+        // One hand-over stays within the carriers' shared frame bound. A steer that does not
+        // fit waits, with every later one, for the next tool call or prompt.
         let mut selected = Vec::new();
-        let mut bytes = PREAMBLE.len()
-            + "</steer>".len()
-            + delivery.context.len()
-            + if delivery.context.is_empty() { 0 } else { 2 };
+        let mut bytes = PREAMBLE.len() + "</steer>".len();
+        if in_context && !delivery.context.is_empty() {
+            bytes += delivery.context.len() + 2;
+        }
         for vector in index.due(&conversation) {
             let RunVectorContent::Steer { text } = &vector.content else {
                 continue;
             };
             let added = vector.id.as_str().len() + text.len() + 4;
-            if bytes + added > query.context_budget {
+            if bytes + added > super::native::MAX_CONTEXT_BYTES {
                 break;
             }
             bytes += added;
             delivery.steers.push(vector.id.clone());
             selected.push(vector);
         }
-        let context = frame(selected);
-        if !context.is_empty() {
-            delivery.context = if delivery.context.is_empty() {
-                context
-            } else {
-                format!("{context}\n\n{}", delivery.context)
-            };
+        let text = frame(selected);
+        drop(index);
+        if text.is_empty() {
+            return delivery;
+        }
+        if !in_context {
+            // Not offered again while the message is on its way into the conversation.
+            if let Ok(mut conversations) = self.conversations.lock()
+                && let Some(conversation) = conversations.get_mut(&query.execution_id)
+            {
+                conversation
+                    .sent
+                    .push((text.clone(), delivery.steers.clone()));
+            }
+            delivery.steer = text;
+        } else if delivery.context.is_empty() {
+            delivery.context = text;
+        } else {
+            delivery.context = format!("{text}\n\n{}", delivery.context);
         }
         delivery
     }
+    /// The carrier took the answer. That is the hand-over of steers inside hook context and of
+    /// a message the carrier stores first; a message the harness has yet to show is confirmed
+    /// by `shown`.
     pub(super) async fn receipt(&self, query: &HookQuery, delivery: &HookDelivery) {
-        // Marked first: a caller's deadline may drop this future while the receipt still commits,
-        // and a receipt without the mark would count as a steer that stands.
-        if !query.standing {
-            self.shown_only(query, delivery);
+        match query.steers {
+            SteerCarrier::HookContext => {
+                self.receipt_ids(query.execution_id, &delivery.steers).await;
+            }
+            SteerCarrier::StoredMessage => self.shown(query.execution_id, &delivery.steer).await,
+            SteerCarrier::ShownMessage => {}
         }
-        self.receipt_ids(query.execution_id, &delivery.steers).await;
+    }
+    /// The harness showed a steer message in the conversation: receipt its steers. The message
+    /// is part of the conversation from then on, so they are not delivered to it again.
+    pub(super) async fn shown(&self, execution: u64, text: &str) {
+        let sent = |conversations: &BTreeMap<u64, Conversation>| {
+            let sent = &conversations.get(&execution)?.sent;
+            sent.iter().find(|(message, _)| message == text).cloned()
+        };
+        let Some((_, ids)) = self.conversations.lock().ok().and_then(|c| sent(&c)) else {
+            return;
+        };
+        // The message stays marked as sent until its receipts are recorded, so that no tool call
+        // in between offers the same steers again.
+        self.receipt_ids(execution, &ids).await;
+        if let Ok(mut conversations) = self.conversations.lock()
+            && let Some(conversation) = conversations.get_mut(&execution)
+        {
+            conversation.sent.retain(|(message, _)| message != text);
+        }
     }
     async fn receipt_ids(&self, execution: u64, ids: &[VectorId]) {
         if ids.is_empty() {

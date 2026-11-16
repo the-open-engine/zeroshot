@@ -187,7 +187,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         let arguments = workspace.read("initial.args");
         let expected_prefix = format!(
             concat!(
-                "--print\n--input-format\ntext\n--output-format\nstream-json\n",
+                "--print\n--input-format\nstream-json\n--replay-user-messages\n--output-format\nstream-json\n",
                 "--verbose\n--include-partial-messages\n--model\n{}\n--json-schema\n",
             ),
             model
@@ -206,7 +206,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         assert!(arguments.contains("--effort\nmax\n--dangerously-skip-permissions\n"));
         assert!(!arguments.contains("--setting-sources"));
         assert!(!arguments.contains("perform the node task"));
-        let prompt = workspace.read("initial.prompt");
+        let prompt = prompt_text(&workspace.read("initial.prompt"));
         assert_tool_delivery(&prompt);
         assert!(prompt.contains("Authored instructions:\nExercise the Claude adapter."));
         assert!(prompt.contains("Input JSON:\n\"perform the node task\""));
@@ -294,8 +294,8 @@ async fn native_tool_selection_survives_correction_and_reused_session() {
         assert!(args.contains("--tools\nRead,Grep,Glob\n"), "{args}");
         assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
     }
-    assert_tool_delivery(&workspace.read("initial.prompt"));
-    assert_tool_delivery(&workspace.read("resumed.prompt"));
+    assert_tool_delivery(&prompt_text(&workspace.read("initial.prompt")));
+    assert_tool_delivery(&prompt_text(&workspace.read("resumed.prompt")));
     let NodeRuntimeBinding::Agent {
         harness_config,
         session_scope,

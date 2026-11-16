@@ -197,6 +197,9 @@ while (message := read()) is not None:
         result = {"sessionId": "wrong" if mode == "identity" else session}
     elif method == "session.send":
         turn += 1
+        if mode in ("steer", "steer_refused"):
+            # Copilot reports every user message that enters the conversation, the prompt included.
+            event("user.message", {"content": params["prompt"], "delivery": "idle"})
         rate_limit_attempt = None
         if mode in ("refresh", "refresh_error", "refresh_auth_error", "refresh_auth_rpc_error"):
             send({"id": "auth-refresh", "method": "gitHubToken.getToken", "params": {
@@ -246,19 +249,30 @@ while (message := read()) is not None:
         if mode == "permission":
             usage.update({"cacheReadTokens": 2, "cacheWriteTokens": 1})
         event("assistant.usage", usage)
-        if mode == "steer":
+        if mode in ("steer", "steer_refused"):
             from pathlib import Path
             capture = os.environ["CAPTURE_PATH"]
             Path(capture + ".steer-held").touch()
             while not Path(capture + ".steer-release").exists(): time.sleep(.01)
-            replies = []
-            for identifier in (9002, 9003):
-                send({"method":"hooks.invoke", "id":identifier, "params":{
-                    "sessionId":session, "hookType":"preToolUse", "input":{"toolName":"Read"}}})
-                replies.append(read())
-            assert "<steer>" in replies[0]["result"]["output"]["additionalContext"]
-            assert replies[1]["result"]["output"] is None
-            Path(capture + ".steer-replies").write_text(json.dumps(replies))
+            # Like Copilot 1.0.103: a message sent with mode "immediate" while a turn runs is
+            # accepted at once and shown as a user message after the tool call in progress.
+            send({"method":"hooks.invoke", "id":9002, "params":{
+                "sessionId":session, "hookType":"preToolUse", "input":{"toolName":"Read"}}})
+            steer, first = read(), read()
+            assert steer["method"] == "session.send" and steer["params"]["mode"] == "immediate"
+            assert steer["params"]["sessionId"] == session and "wait" not in steer["params"]
+            assert first["id"] == 9002 and first["result"]["output"] is None
+            if mode == "steer":
+                send({"id": steer["id"], "result": {"messageId": "steer-message"}})
+                event("user.message", {"content": steer["params"]["prompt"],
+                                       "delivery": "steering", "messageId": "steer-message"})
+            else:
+                send({"id": steer["id"], "error": {"code": -32602, "message": "unknown mode"}})
+            send({"method":"hooks.invoke", "id":9003, "params":{
+                "sessionId":session, "hookType":"preToolUse", "input":{"toolName":"Read"}}})
+            second = read()
+            assert second["id"] == 9003 and second["result"]["output"] is None
+            Path(capture + ".steer-replies").write_text(json.dumps([steer, first, second]))
         if mode == "dispatch":
             send({"method": "future.notification", "params": {}})
             send({"method": "future.request", "id": 9001, "params": {}})

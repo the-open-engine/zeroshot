@@ -48,7 +48,8 @@ elif harness == 'claude':
             data={'effective':{},'sources':[]} if subtype=='get_settings' else {'current_permission_mode':'default'}
             emit({'type':'control_response','response':{'subtype':'success','request_id':request['request_id'],'response':data}})
         sys.exit(0)
-    sys.stdin.read()
+    # Like the real CLI with stream-json input: the prompt is one line and stdin stays open.
+    sys.stdin.readline()
     identifier=option('--resume','checkpoint-session')
     home=pathlib.Path(os.environ.get('CLAUDE_CONFIG_DIR',str(pathlib.Path(os.environ['HOME'])/'.claude')))
     project=re.sub('[^a-zA-Z0-9]','-',os.getcwd())

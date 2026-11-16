@@ -77,13 +77,11 @@ impl RpcReply {
     }
 }
 
-type Outbound = (Value, Option<tokio::sync::oneshot::Sender<()>>);
-
 pub(super) async fn write_messages(
     process: &ProviderProcess,
-    mut receiver: mpsc::Receiver<Outbound>,
+    mut receiver: mpsc::Receiver<Value>,
 ) -> Result<(), NodeRunnerError> {
-    while let Some((message, acknowledged)) = receiver.recv().await {
+    while let Some(message) = receiver.recv().await {
         let body = serde_json::to_vec(&message)
             .map_err(|_| failure("Copilot RPC serialization failed"))?;
         // Owned prompts can contain arbitrarily many standing steers. Stream them through
@@ -96,9 +94,6 @@ pub(super) async fn write_messages(
                 return Ok(());
             }
             result => result.map_err(process_error)?,
-        }
-        if let Some(acknowledged) = acknowledged {
-            let _ = acknowledged.send(());
         }
     }
     Ok(())
@@ -120,9 +115,11 @@ pub(super) struct CopilotRpc<'a> {
     frames: Frames,
     pub(super) invocation: &'a DriverInvocation,
     pub(super) control: &'a DriverControl,
-    sender: Option<mpsc::Sender<Outbound>>,
+    sender: Option<mpsc::Sender<Value>>,
     next_id: u64,
     pending: BTreeSet<u64>,
+    /// Requests that sent a steer into the turn in progress; their replies settle nothing.
+    steer_requests: BTreeSet<u64>,
     pub(super) session_id: String,
     pub(super) response: Option<String>,
     pub(super) initialized: bool,
@@ -168,6 +165,7 @@ impl<'a> CopilotRpc<'a> {
             sender: None,
             next_id: 0,
             pending: BTreeSet::new(),
+            steer_requests: BTreeSet::new(),
             session_id: String::new(),
             response: None,
             initialized: false,
@@ -191,7 +189,7 @@ impl<'a> CopilotRpc<'a> {
 
     pub(super) async fn run(
         &mut self,
-        sender: mpsc::Sender<Outbound>,
+        sender: mpsc::Sender<Value>,
         turn: CopilotRpcTurn<'_>,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         self.sender = Some(sender);
@@ -332,7 +330,7 @@ impl<'a> CopilotRpc<'a> {
         self.sender
             .as_ref()
             .ok_or_else(|| failure("Copilot RPC is closed"))?
-            .try_send((value, None))
+            .try_send(value)
             .map_err(|_| failure("Copilot RPC output queue is full or closed"))
     }
 
@@ -360,6 +358,9 @@ impl<'a> CopilotRpc<'a> {
         while let Some(message) = self.next().await? {
             if message.get("method").is_some() {
                 self.dispatch(&message).await?;
+            } else if self.steer_reply(&message) {
+                // Copilot reports the steer itself when it enters the conversation. A refused
+                // one is never reported, so it stays due for the next prompt.
             } else if let Some(reply) =
                 resolve_response_message(&mut self.pending, &message, expected)?
             {
@@ -380,49 +381,64 @@ impl<'a> CopilotRpc<'a> {
         }
     }
 
-    async fn memory_hook(&self, message: &Value) -> Result<(), NodeRunnerError> {
+    /// Copilot applies hook context to the turn in progress and writes none of it to its
+    /// session. A memory lesson still travels there, and is given again in a later execution;
+    /// a steer is sent into the running turn as a user message, which Copilot stores.
+    async fn memory_hook(&mut self, message: &Value) -> Result<(), NodeRunnerError> {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
         let params = &message["params"];
         let delivery = if params["sessionId"].as_str() == Some(&self.session_id)
             && params["hookType"].as_str() == Some("preToolUse")
         {
+            let call = crate::active_memory::hooks::ToolCall {
+                invocation: self.invocation,
+                input: &params["input"],
+                workspace: &self.workspace,
+                steers: crate::active_memory::hooks::SteerCarrier::ShownMessage,
+                context_kept: false,
+            };
             match &self.active_memory {
-                Some(memory) => tokio::time::timeout_at(
-                    deadline,
-                    memory.tool_delivery(self.invocation, &params["input"], &self.workspace),
-                )
-                .await
-                .ok(),
+                Some(memory) => tokio::time::timeout_at(deadline, memory.tool_delivery(call))
+                    .await
+                    .ok()
+                    .map(|(_, delivery)| delivery),
                 None => None,
             }
         } else {
             None
         };
-        let output = delivery
-            .as_ref()
-            .filter(|(_, delivery)| !delivery.context.is_empty())
-            .map_or(
-                Value::Null,
-                |(_, delivery)| json!({"additionalContext":delivery.context}),
-            );
-        let (acknowledged, written) = tokio::sync::oneshot::channel();
-        let reply = json!({"jsonrpc":"2.0","id":message["id"],"result":{"output":output}});
-        self.sender
-            .as_ref()
-            .ok_or_else(|| failure("Copilot RPC is closed"))?
-            .try_send((reply, Some(acknowledged)))
-            .map_err(|_| failure("Copilot RPC output queue is full or closed"))?;
-        // Queueing a reply does not establish native delivery. Only the existing RPC writer's
-        // completed handoff can acknowledge a steer, within the callback's shared deadline.
-        if matches!(tokio::time::timeout_at(deadline, written).await, Ok(Ok(())))
-            && let (Some(memory), Some((query, delivery))) = (&self.active_memory, delivery)
-        {
-            // Copilot applies hook context to the turn in progress and writes none of it to its
-            // session, so a steer does not stand there.
-            let _ = tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery, false))
+        let delivery = delivery.unwrap_or_default();
+        if !delivery.steer.is_empty() {
+            // Sent before the hook is answered, so that it is queued before the tool runs:
+            // Copilot hands an immediate message over after the tool call in progress.
+            let request = self.send_request(
+                "session.send",
+                json!({"sessionId":self.session_id, "prompt":delivery.steer, "mode":"immediate"}),
+            )?;
+            self.steer_requests.insert(request);
+        }
+        let output = if delivery.context.is_empty() {
+            Value::Null
+        } else {
+            json!({"additionalContext":delivery.context})
+        };
+        self.queue(json!({"jsonrpc":"2.0","id":message["id"],"result":{"output":output}}))
+    }
+
+    fn steer_reply(&mut self, message: &Value) -> bool {
+        message["id"]
+            .as_u64()
+            .is_some_and(|id| self.steer_requests.remove(&id) && self.pending.remove(&id))
+    }
+
+    /// Copilot reports a user message when it enters the conversation. For a steer sent at a
+    /// tool call that is the hand-over.
+    pub(super) async fn user_message_shown(&self, text: &str) {
+        if let Some(memory) = &self.active_memory {
+            memory
+                .steer_shown(self.invocation.node.reference.execution.get(), text)
                 .await;
         }
-        Ok(())
     }
 
     async fn acquire_token(&mut self, message: &Value) -> Result<(), NodeRunnerError> {

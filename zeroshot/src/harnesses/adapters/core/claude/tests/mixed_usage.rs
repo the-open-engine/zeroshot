@@ -25,7 +25,7 @@ async fn claude_and_codex_invocations_sum_disjoint_token_buckets() {
     write_claude_script(
         &workspace,
         r#"
-cat > claude.prompt
+head -n 1 > claude.prompt
 printf '%s\n' '{"type":"result","subtype":"success","result":"{\"response\":\"done\"}","model_usage_since_last_result":{"model":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":5,"cacheCreationInputTokens":7}}}'
 "#,
     );
@@ -72,7 +72,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
     }));
     let codex = NativeNodeRunner::new(&admitted, adapter.clone(), adapter).assert_value();
     let codex_usage = invocation_usage(&codex, codex_binding, "OPENAI_API_KEY").await;
-    assert_tool_delivery(&workspace.read("claude.prompt"));
+    assert_tool_delivery(&prompt_text(&workspace.read("claude.prompt")));
     let codex_prompt = workspace.read("codex.prompt");
     assert!(codex_prompt.contains("Return only JSON with no Markdown or commentary."));
     assert!(!codex_prompt.contains("StructuredOutput"));

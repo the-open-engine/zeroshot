@@ -133,10 +133,41 @@ pub(crate) async fn send_process_input(
     process: &mut ProcessSession,
     bytes: &[u8],
 ) -> Result<(), ProcessRunnerError> {
+    write_process_input(process, bytes).await?;
+    process.close_stdin().await
+}
+
+async fn write_process_input(
+    process: &ProcessSession,
+    bytes: &[u8],
+) -> Result<(), ProcessRunnerError> {
     for chunk in bytes.chunks(MAX_PROCESS_MESSAGE_BYTES) {
         process.send(ProcessFrame::new(chunk.to_vec())?).await?;
     }
-    process.close_stdin().await
+    Ok(())
+}
+
+/// Messages a harness reads on stdin after its prompt, while the turn runs. Stdin stays open
+/// until the stream ends.
+pub(crate) type LiveInput<'a> = futures_util::stream::BoxStream<'a, Vec<u8>>;
+
+async fn send_live_process_input(
+    process: &mut ProcessSession,
+    bytes: &[u8],
+    mut live: LiveInput<'_>,
+) -> Result<(), ProcessRunnerError> {
+    write_process_input(process, bytes).await?;
+    while let Some(message) = futures_util::StreamExt::next(&mut live).await {
+        // A message that can no longer be written was not handed over; the turn itself is
+        // judged by its output and exit, not by this.
+        if write_process_input(process, &message).await.is_err() {
+            break;
+        }
+    }
+    // The stream ends once the turn's output has been read. A harness that has exited by then
+    // has closed its stdin already, which is no input failure.
+    let _ = process.close_stdin().await;
+    Ok(())
 }
 
 pub(crate) enum ProcessExchange<T> {
@@ -156,6 +187,7 @@ pub(crate) struct ProcessInputFailure<T> {
 pub(crate) async fn exchange_process_io<T>(
     process: &mut ProviderProcess,
     bytes: &[u8],
+    live: Option<LiveInput<'_>>,
     output: impl Future<Output = T>,
 ) -> ProcessExchange<T> {
     enum First<T> {
@@ -163,7 +195,10 @@ pub(crate) async fn exchange_process_io<T>(
         Output(T),
     }
 
-    let mut input = Box::pin(send_process_input(process, bytes));
+    let mut input: std::pin::Pin<Box<dyn Future<Output = _> + Send + '_>> = match live {
+        Some(live) => Box::pin(send_live_process_input(process, bytes, live)),
+        None => Box::pin(send_process_input(process, bytes)),
+    };
     let mut output = Box::pin(output);
     let first = tokio::select! {
         result = &mut input => First::Input(result),

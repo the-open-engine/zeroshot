@@ -32,7 +32,7 @@ if [ ! -e duplex.state ]; then
   exec 0<&-
   /usr/bin/sleep 30
 fi
-cat > retry.prompt
+head -n 1 > retry.prompt
 for argument in "$@"; do printf '%s\n' "$argument" >> retry.args; done
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"duplex-session"}'
 printf '%s%s\n' \
@@ -73,7 +73,7 @@ async fn completed_output_cannot_mask_input_failure_and_retry_metadata() {
     assert_eq!(captured.usages.len(), 2);
     assert_token_usage(captured.usages.first().copied().flatten(), [23, 9, 17, 5]);
     assert_eq!(captured.usages.get(1).copied().flatten(), None);
-    assert_eq!(workspace.read("retry.prompt"), "Continue");
+    assert_eq!(prompt_text(&workspace.read("retry.prompt")), "Continue");
     let arguments = workspace.read("retry.args");
     assert!(arguments.lines().any(|argument| argument == "--resume"));
     assert!(
