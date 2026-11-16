@@ -432,8 +432,9 @@ provide every declared signal and every required output field. Unknown fields, s
 are refused as `invalid_request`, naming the path, without consuming the request. A second answer
 names the accepted successor. `resume`, including checkpoint selection, refuses requests and names
 `answer` before resolving credentials; after an answer it names the successor instead. If that
-successor is lost before its first node finishes, `resume` on it restarts the graph at its root
-and the question is asked again.
+successor fails or is lost, `resume` on it starts again right after the answer: the request stays
+answered and the question is not asked again. Only a successor lost in the instant it starts,
+before its starting point is recorded, restarts at the root and asks again.
 
 Every request has a deadline: `timeoutMs` from creation, 7 days when omitted, at most 30 days.
 Acceptance is strictly before the deadline. At or after it, `answer` checks expiry before content,
@@ -457,9 +458,8 @@ Request nodes use `builtin.request.ask@1` with `{"kind":"request"}`. They must b
 exactly one required string input `text`, a flat record output of boolean, integer, number, string
 or enum fields, the fixed message diagnostic, no instructions and one attempt. They may appear
 in sequences, choices and loops, including repeated nodes, but never below parallel or map groups.
-All request nodes in one graph must declare the same signals and output, or validation refuses the
-graph as reusing `builtin.request.ask@1` with inconsistent declarations; share one shape, for
-example an enum signal with every decision and optional output fields.
+Request nodes in one graph may declare different signals and outputs. Each answer is checked
+against the node that asked.
 Workspace checkpoints must be enabled. Stack profiles cannot contain requests.
 
 Add `--target NAME` to `answer` and either inbox command for a named target. Discovery must advertise

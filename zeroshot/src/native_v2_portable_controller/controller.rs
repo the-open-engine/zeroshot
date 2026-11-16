@@ -456,6 +456,14 @@ where
             .runner
             .restore_conversations(&runtime.execution_seed, restored)
             .await;
+    } else if !runtime.execution_seed.is_empty() {
+        // A restart at the boundary where its predecessor began: the nodes start new
+        // conversations, and their log lines say so.
+        let restarted = crate::native_v2_runner::conversations::ConversationFiles::restarted();
+        runtime
+            .runner
+            .restore_conversations(&runtime.execution_seed, Some(restarted))
+            .await;
     }
     Ok(PreparedRuntime {
         runtime: Some(runtime),
@@ -505,6 +513,15 @@ async fn seed_predecessor_history(
             selection: CheckpointRestoreSelection::Continue,
         })
     } else {
+        if !matches!(
+            &bootstrap.checkpoint,
+            Some(CheckpointRestore {
+                selection: CheckpointRestoreSelection::Checkpoint { .. },
+                ..
+            })
+        ) {
+            runtime.execution_seed = crate::native_v2_supervisor::restart_history(&stored.snapshot);
+        }
         None
     };
     let mut after = None;

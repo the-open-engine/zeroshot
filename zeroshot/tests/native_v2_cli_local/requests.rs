@@ -519,3 +519,128 @@ fn request_conversation_fixture() -> LocalFixture {
     write_json(&fixture.runtime, &runtime);
     fixture
 }
+
+fn two_request_fixture() -> LocalFixture {
+    let fixture = LocalFixture::new();
+    let state =
+        json!({"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}});
+    let ask = |name: &str, signals: Value, output: Value| {
+        json!({
+            "kind":"verifier","name":name,"worker":"builtin.request.ask@1",
+            "input":state,"output":{"kind":"record","fields":output},"signals":signals,
+            "diagnostic":{"kind":"record","fields":{"message":{"required":true,"type":{"kind":"string"}}}},
+            "inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],
+            "writeBindings":[],"attempts":1
+        })
+    };
+    let mut graph: Value =
+        serde_json::from_slice(&fs::read(&fixture.graph).assert_value()).assert_value();
+    graph["initialInput"] = state.clone();
+    graph["root"]["state"] = state.clone();
+    let mut route = graph["root"]["children"][1].clone();
+    route["state"] = state.clone();
+    route["otherwise"] = ask(
+        "rating",
+        json!({"score":["high","low"]}),
+        json!({"count":{"required":true,"type":{"kind":"integer"}}}),
+    );
+    let children = vec![
+        ask(
+            "approval",
+            json!({"decision":["approved","rejected"]}),
+            json!({"feedback":{"required":true,"type":{"kind":"string"}}}),
+        ),
+        graph["root"]["children"][0].clone(),
+        route,
+        json!({"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}),
+    ];
+    graph["root"]["children"] = json!(children);
+    write_json(&fixture.graph, &graph);
+    write_json(&fixture.input, &json!({"text":"Approve?"}));
+    let mut runtime = local_runtime();
+    runtime["nodes"]["approval"] = json!({"kind":"request"});
+    runtime["nodes"]["rating"] = json!({"kind":"request"});
+    write_json(&fixture.runtime, &runtime);
+    fixture
+}
+
+fn kinds(vectors: &Value, kind: &str) -> usize {
+    vectors["vectors"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .filter(|entry| entry["kind"] == kind)
+        .count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lost_and_failed_answer_successors_restart_after_the_answer() {
+    let fixture = two_request_fixture();
+    let rating = json!({"signals":{"score":"high"},"output":{"count":3}});
+    let run = fixture.submit_detached("finish").await;
+    let status = fixture.wait_suspended(&run).await;
+    assert_eq!(status["status"]["node"], "approval");
+    let refused = fixture.answer(&run, &rating).await;
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid_request"));
+
+    // The successor of the answer is lost while its first node runs.
+    let path = fixture.answer_file(&approve());
+    let answer = ["answer", &run, "--input", path.to_str().assert_value()];
+    let lost = successor(&fixture.output(&answer, "block").await);
+    let calls = fixture.repository.join("local-session.args");
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+    while !fs::read_to_string(&calls).is_ok_and(|text| text.contains("mode=block")) {
+        assert!(
+            Instant::now() < deadline,
+            "the answer's successor did not reach its worker"
+        );
+        sleep(Duration::from_millis(30)).await;
+    }
+    let controller = fixture.ready_pid(&lost);
+    signal(controller, libc::SIGKILL).assert_value();
+    wait_for_exit(controller).await;
+
+    // Its restart begins after the answer, and the worker then fails the run.
+    let failed = fixture.json(&["resume", &lost], "fail").await;
+    let failed = failed["runId"].as_str().assert_value();
+    fixture
+        .wait_terminal(failed, "finish", "worker_failed")
+        .await;
+    let worker_calls = |mode: &str| {
+        fs::read_to_string(&calls)
+            .assert_value()
+            .lines()
+            .filter(|line| line.strip_prefix("mode=") == Some(mode))
+            .count()
+    };
+    assert_eq!(worker_calls("block"), 1);
+    assert!(worker_calls("fail") >= 1);
+    assert_eq!(worker_calls("finish"), 0);
+
+    // The restart of that failed restart begins after the answer as well.
+    let restarted = fixture.json(&["resume", failed], "finish").await;
+    let restarted = restarted["runId"].as_str().assert_value();
+    let status = fixture.wait_suspended(restarted).await;
+    assert_eq!(status["status"]["node"], "rating");
+    assert_eq!(
+        status["status"]["request"]["signals"],
+        json!({"score":["high","low"]})
+    );
+    assert_eq!(worker_calls("finish"), 1);
+    let vectors = fixture.json(&["vectors", restarted], "finish").await;
+    assert_eq!(kinds(&vectors, "request"), 2, "{vectors}");
+    assert_eq!(kinds(&vectors, "answer"), 1, "{vectors}");
+    assert_eq!(kinds(&vectors, "continuation"), 3, "{vectors}");
+    let page = fixture.json(&["inbox", "list"], "finish").await;
+    assert_eq!(page["requests"].as_array().assert_value().len(), 1);
+    assert_eq!(page["requests"][0]["runId"], restarted);
+
+    // Each request accepts only its own shape.
+    let refused = fixture.answer(restarted, &approve()).await;
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid_request"));
+    let last = successor(&fixture.answer(restarted, &rating).await);
+    fixture.wait_succeeded(&last, "finish").await;
+    assert_eq!(worker_calls("finish"), 1);
+}

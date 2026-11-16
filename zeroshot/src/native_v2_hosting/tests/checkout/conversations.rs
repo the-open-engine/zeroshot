@@ -49,7 +49,16 @@ async fn turn(
     } else {
         None
     };
-    let expect_fallback = successor && restored.is_none();
+    // The reason a successor's node gives for a new conversation, when it starts one.
+    let fallback = match &restored {
+        None => successor.then_some("checkpoint has no conversation"),
+        Some(files) => files
+            .conversation(
+                NodeInstanceId::new(1).assert_value(),
+                &NodeName::new("work").assert_value(),
+            )
+            .err(),
+    };
     if successor {
         runner.restore_conversations(&history(), restored).await;
     }
@@ -87,10 +96,10 @@ async fn turn(
     assert_eq!(
         messages
             .iter()
-            .filter(|line| line
-                .contains("node work starts a new conversation: checkpoint has no conversation"))
-            .count(),
-        usize::from(expect_fallback)
+            .filter(|line| line.contains("node work starts a new conversation: "))
+            .map(|line| line.rsplit(": ").next().assert_value())
+            .collect::<Vec<_>>(),
+        fallback.into_iter().collect::<Vec<_>>()
     );
     if !successor {
         let capture = runner.capture_conversations(run).await;
@@ -124,6 +133,11 @@ async fn fixture() -> CheckoutFixture {
 }
 
 async fn direct(selection: bool) {
+    direct_successor(Some(selection)).await;
+}
+
+/// `None` restarts: the allocator restores the latest snapshot and selects no conversation.
+async fn direct_successor(selection: Option<bool>) {
     let fixture = fixture().await;
     let capsule = fixture.allocate().await.assert_value();
     let first_home = fixture
@@ -155,13 +169,16 @@ async fn direct(selection: bool) {
         .await
         .assert_value();
     store.suspend(&history(), &[]).await.assert_value();
-    let selection = if selection {
-        let listed = fixture.checkpoints(&fixture.run_id).await;
-        CheckpointRestoreSelection::Checkpoint {
-            checkpoint_id: listed.checkpoints[0].checkpoint_id.clone(),
+    let restart = selection.is_none();
+    let selection = match selection {
+        Some(true) => {
+            let listed = fixture.checkpoints(&fixture.run_id).await;
+            CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: listed.checkpoints[0].checkpoint_id.clone(),
+            }
         }
-    } else {
-        CheckpointRestoreSelection::Continue
+        Some(false) => CheckpointRestoreSelection::Continue,
+        None => CheckpointRestoreSelection::Latest,
     };
     capsule
         .cleanup
@@ -187,10 +204,14 @@ async fn direct(selection: bool) {
         resumed.checkpoints.as_ref().assert_value().as_ref(),
     )
     .await;
-    assert_eq!(
-        *provider.restored.lock().await,
-        [(ID.to_owned(), next_home, CONTENT.to_owned())]
-    );
+    if restart {
+        assert!(provider.restored.lock().await.is_empty());
+    } else {
+        assert_eq!(
+            *provider.restored.lock().await,
+            [(ID.to_owned(), next_home, CONTENT.to_owned())]
+        );
+    }
     resumed
         .cleanup
         .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
@@ -206,6 +227,11 @@ async fn direct_suspended_successor_restores_conversation_without_workspace_rest
 #[tokio::test]
 async fn direct_selected_checkpoint_restores_conversation_after_session_cleanup() {
     direct(true).await;
+}
+
+#[tokio::test]
+async fn direct_restart_starts_a_new_conversation_and_says_why() {
+    direct_successor(None).await;
 }
 
 // This host implements only the original storage contract. Its implementation deliberately does

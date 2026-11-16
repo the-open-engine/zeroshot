@@ -310,12 +310,11 @@ impl ProductionCapsuleAllocator {
         )
         .await?;
         let restored_seed = if let Some((source_run_id, selection)) = &request.retained_restore {
-            if *selection != CheckpointRestoreSelection::Latest {
-                let _ = state.conversation_restore.set(CheckpointRestore {
-                    directory: checkpoint_directory(&self.config.storage_root, source_run_id),
-                    selection: selection.clone(),
-                });
-            }
+            // A restart selects no conversations; the selection still tells its nodes why.
+            let _ = state.conversation_restore.set(CheckpointRestore {
+                directory: checkpoint_directory(&self.config.storage_root, source_run_id),
+                selection: selection.clone(),
+            });
             let seed = self
                 .restore_retained_workspace(source_run_id, selection.clone(), &filesystem.workspace)
                 .await?;

@@ -833,7 +833,7 @@ async fn workspace_checkpoint_restores_owned_delivery_receipts_independently_of_
     fixture.store.finish(&history).await.assert_value();
     assert!(
         fixture.restore_latest().await.is_empty(),
-        "restart keeps its fresh graph semantics"
+        "a restart imports no checkpoint seed"
     );
     let recovered = ResticCheckpointStore::with_program(ResticCheckpointStoreTestConfig {
         directory: fixture.directory.join("successor"),
@@ -984,6 +984,27 @@ async fn unrestorable_conversations_are_distinct_from_checkpoints_without_conver
         directory: fixture.directory.clone(),
         selection: CheckpointRestoreSelection::Continue,
     };
+    // A restart selects no conversations and says why, here and through the store.
+    let restart = CheckpointRestore {
+        directory: fixture.directory.clone(),
+        selection: CheckpointRestoreSelection::Latest,
+    };
+    let restarted = fake_checkpoint_store(
+        fixture._root.path(),
+        fixture.directory.clone(),
+        fixture.workspace.clone(),
+        BTreeSet::new(),
+    )
+    .with_conversation_restore(Some(restart.clone()));
+    for files in [
+        restore_checkpoint_conversations(&restart, None).await,
+        restarted.restored_conversations().await,
+    ] {
+        assert_eq!(
+            reason(files),
+            Some("a restarted run starts new conversations")
+        );
+    }
     // Before the first checkpoint there is no latest pointer, and so no conversation.
     assert_eq!(
         reason(restore_checkpoint_conversations(&continued, None).await),

@@ -700,7 +700,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Discovery uses separate strict `{kind}` markers: `request_wait` (`openengine.request-wait/v1`),
   `run_suspension` (`openengine.run-suspension/v1`), and `run_vectors` (`openengine.run-vectors/v1`).
   `builtin.request.ask@1` uses the same host-owned binding with required string input `text`,
-  authored signals and a flat scalar-record output. It always suspends with reason `request`,
+  authored signals and a flat scalar-record output. Request nodes in one graph may declare
+  different signals and outputs: admission resolves this worker per node, and every other worker
+  reference keeps one contract per graph. It always suspends with reason `request`,
   carrying its question, contract, identity and deadline, and permits the same placements and no
   stack profiles. It requires workspace checkpoints, no instructions and one attempt. Ordinary
   resume refuses it before credential resolution and reports recovery unavailable. Interrupted
@@ -1016,7 +1018,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
   not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
-  retained workspace recovery. Default resume of a failed run starts a fresh graph on the retained workspace;
+  retained workspace recovery. Default resume of a failed run restarts it where it started on the
+  retained workspace: a submitted run at the graph root, a successor at the boundary it began at;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Checkpoint
   continuations, including request and other suspended successors, restore captured `node_instance`
   provider conversations; failed-run restarts and `execution` sessions start new conversations.
@@ -1077,9 +1080,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   deletion can finish, including deletion of private conversation files.
   ACP owner sessions and Active Memory delivery sets are not carried between runs.
   Versioned execution seeds live in separate files and are read only for selected continuation.
-  Target restart restores the latest published snapshot without importing a seed. Local restart
-  restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
-  after a failure enters the successor. A selected local checkpoint is an explicit rollback that
+  Target restart restores the latest published snapshot without importing a checkpoint's seed.
+  Local restart restores nothing: the user-owned checkout keeps its files, index, HEAD and branch,
+  so work done after a failure enters the successor. Either restart begins where the failed run
+  began: it imports that run's own starting seed, which is empty for a submitted run and holds the
+  settled executions, an accepted answer included, for a successor. A selected local checkpoint is an explicit rollback that
   requires the CLI-only `--discard-workspace-changes` (rejected with `--target`); without it resume
   fails before credential resolution, successor claim or workspace change and names the opt-in
   command. Rollback keeps the shared-Git restore contract below. Restore staging is a
@@ -1514,7 +1519,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   workspace and graph rollback. Disabling workspace snapshots keeps the metadata-only delivery
   store, without initializing Restic or copying the workspace. Receipts contain stable identities,
   approved revisions and response/reply hashes, never full response bodies; both adapters reserve
-  serialized aggregate capacity before posting another reply, including earlier repair rounds. Restart keeps fresh graph history while restoring those owned facts;
+  serialized aggregate capacity before posting another reply, including earlier repair rounds. Restart imports no checkpoint history while restoring those owned facts;
   an older checkpoint cannot replace them, and conflicting generations fail closed. Custom checkpoint
   backends own the same lineage-retention contract through `RunCheckpointStore::delivery_state`
   and its receipt-only `retain_delivery_state` operation. Runtime failure retains acknowledged

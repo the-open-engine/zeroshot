@@ -211,7 +211,9 @@ enum UtilityCommand {
     /// A suspended run continues at its saved boundary without restoring files. A suspended wait
     /// continues after its wait node, from the due time onward. Suspended runs accept no checkpoint
     /// selection or --discard-workspace-changes. Every successor takes over the vector record.
-    /// By default, a failed run restarts the original graph on its retained workspace. A local run keeps its
+    /// By default, a failed run restarts where it started, on its retained workspace: a submitted
+    /// run at the root of its graph, a successor at the boundary it began at, so an answered
+    /// request stays answered. A local run keeps its
     /// checkout as it is now, including files and Git state changed after the failure; a named
     /// target restarts on the latest snapshot of its retained copy.
     /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a

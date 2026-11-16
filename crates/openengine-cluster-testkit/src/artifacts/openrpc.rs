@@ -461,8 +461,9 @@ fn run_resume_method() -> Value {
         .assert_value_with("run resume parameter JSON Schema serialization must succeed");
     json!({
         "summary": "Admit a successor from a retained workspace or entry checkpoint",
-        "description": "Omitting from or selecting restart starts the graph at its root on the latest \
-            retained workspace. Selecting checkpoint restores the matching workspace and predecessor \
+        "description": "Omitting from or selecting restart restarts a failed run where it started, on \
+            the latest retained workspace: a submitted run at its graph root, a successor at the \
+            boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor \
             outputs and reruns the named node or atomic concurrent group. Original admission and \
             delivery metadata remain fixed. Credentials are resolved again for the successor. Checkpoint \
             continuations and suspended successors restore captured node-instance provider conversations; \

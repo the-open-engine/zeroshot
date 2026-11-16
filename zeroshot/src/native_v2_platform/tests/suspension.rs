@@ -21,6 +21,9 @@ mod request_bounds;
 #[derive(Default)]
 struct SuspensionStore {
     published: StdMutex<Vec<RunVector>>,
+    /// Set when the next retained allocation restarts a failed run instead of continuing a
+    /// suspended one.
+    restart: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -108,10 +111,14 @@ impl CapsuleAllocator for SuspensionAllocator {
         &self,
         request: RetainedAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
-        assert!(matches!(
+        assert_eq!(
             request.selection,
-            CheckpointRestoreSelection::Continue
-        ));
+            if self.store.restart.load(Ordering::SeqCst) {
+                CheckpointRestoreSelection::Latest
+            } else {
+                CheckpointRestoreSelection::Continue
+            }
+        );
         assert_eq!(
             self.successor.lock().assert_value().as_ref(),
             Some(request.run_id)

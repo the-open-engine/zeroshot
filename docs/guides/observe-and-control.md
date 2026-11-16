@@ -239,12 +239,18 @@ output and fail the command. The archive is never extracted and its contents are
 
 ## Restart or resume a failed run
 
-Failed local runs and direct targets retain their workspace. Restart the original graph at its root
+Failed local runs and direct targets retain their workspace. Restart a failed run where it started
 with:
 
 ```console
 zeroshot resume RUN_ID
 ```
+
+A run you submitted restarts at the root of its graph. A successor restarts at the point it began
+at: after the answer for the successor of an answered request, after the held node for the
+successor of a suspended run, and at the selected node for a checkpoint successor. An answered
+request therefore stays answered, also when several successors fail in a row. To run the whole
+graph from its root again, submit a new run.
 
 Confirmed Claude account/session quota exhaustion fails promptly as `refusal`, with the affected
 node, available reset information and manual-resume guidance in `status` and terminal failure
@@ -284,7 +290,8 @@ Both modes create a new run ID, keep the original graph, input, source, and deli
 resolve credentials again. A selected checkpoint or the continuation of a suspended run restores each supported
 `node_instance` agent's provider conversation as it was at the checkpoint, even on another machine
 or without restoring workspace files. A failed-run restart and every `execution`-scoped agent start
-new conversations. Successor token usage starts at zero.
+new conversations; a `node_instance` agent that ran before a restart's boundary and runs again
+after it says so in the run log. Successor token usage starts at zero.
 
 Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
 They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included

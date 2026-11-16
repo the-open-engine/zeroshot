@@ -571,7 +571,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
     async fn restored_conversations(&self) -> Option<ConversationFiles> {
         let selection = self.conversation_restore.as_ref()?;
         if selection.selection == CheckpointRestoreSelection::Latest {
-            return None;
+            return Some(ConversationFiles::restarted());
         }
         restore_conversations(selection, self.stopping.clone())
             .await
@@ -1010,7 +1010,7 @@ pub(crate) async fn restore_checkpoint_conversations(
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Option<ConversationFiles> {
     if selection.selection == CheckpointRestoreSelection::Latest {
-        return None;
+        return Some(ConversationFiles::restarted());
     }
     restore_conversations(selection, stopping)
         .await

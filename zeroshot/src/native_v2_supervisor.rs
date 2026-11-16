@@ -781,6 +781,7 @@ mod runtime;
 // Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
 pub(crate) use runtime::{
     request_history, continuation_history, durable_history, next_execution, next_node_instance,
+    restart_history,
 };
 pub use environment::{RunEnvironment, RunEnvironmentError};
 pub(crate) use environment::{ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver};
