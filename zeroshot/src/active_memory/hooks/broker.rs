@@ -26,6 +26,7 @@ pub(super) struct HookScope {
     execution_id: u64,
     workspace: PathBuf,
     context_budget: usize,
+    standing: bool,
 }
 
 impl HookScope {
@@ -36,6 +37,7 @@ impl HookScope {
             execution_id: invocation.node.reference.execution.get(),
             workspace: workspace.to_path_buf(),
             context_budget: native::MAX_CONTEXT_BYTES,
+            standing: true,
         }
     }
 
@@ -72,6 +74,7 @@ impl HookScope {
             cwd,
             subagent: event["agent_id"].as_str().is_some_and(|id| !id.is_empty()),
             context_budget: self.context_budget,
+            standing: self.standing,
         }
     }
 }
@@ -175,6 +178,16 @@ impl Broker {
                 .values_mut()
                 .filter(|scope| scope.execution_id == invocation.node.reference.execution.get())
                 .for_each(|scope| scope.context_budget = budget);
+        }
+    }
+
+    /// Marks the scope just issued for this execution as a carrier on which a steer does not stand.
+    pub(super) fn shown_only(&self, invocation: &DriverInvocation) {
+        if let Ok(mut scopes) = self.scopes.lock() {
+            scopes
+                .values_mut()
+                .filter(|scope| scope.execution_id == invocation.node.reference.execution.get())
+                .for_each(|scope| scope.standing = false);
         }
     }
 

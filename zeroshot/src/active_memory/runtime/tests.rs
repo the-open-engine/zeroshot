@@ -60,6 +60,7 @@ fn query(session: &str) -> HookQuery {
         cwd: workspace(),
         subagent: false,
         context_budget: crate::active_memory::hooks::native::MAX_CONTEXT_BYTES,
+        standing: true,
     }
 }
 

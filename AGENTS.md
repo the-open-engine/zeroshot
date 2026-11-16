@@ -112,7 +112,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
   restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
-  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  standing steers again. A steer does not stand after a tool-call delivery on Copilot, whose hook
+  context is not written to its session, or on Pi and OpenCode, whose tool result a model may
+  refuse to follow (`HookQuery::standing`): the delivery is receipted, the steer stays due for
+  that conversation's next prompt, and the snapshot omits the receipt until an execution whose
+  prompt carried it ends successfully.
+  The carrier retains incremental vector-record read progress across callback deadlines.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.
@@ -1052,6 +1057,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   at 1 GiB; capture/restore failures use a new conversation and a node-naming system log. Pending
   restored conversations survive checkpoints before their next turn. Adapters own filename selection
   and relocation; shared code bounds copies, rejects unsafe names and restores only those files.
+  Pi's relocation writes a restored session's header line again with the successor workspace,
+  inside the private stage, because Pi finds a session ID only among the sessions of its working
+  directory; a first line that is no such header fails the restore.
   Contained capture rechecks storage ancestors from the trusted private home at selection and
   file reads; provider-owned symbolic links cannot redirect supervisor reads outside that home.
   Conversation copies observe execution/controller cancellation between bounded reads. Blocking

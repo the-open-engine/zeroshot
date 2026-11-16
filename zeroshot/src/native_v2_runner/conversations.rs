@@ -404,6 +404,38 @@ pub(crate) struct ConversationLayout {
     pub(crate) harness: &'static str,
     pub(crate) storage: PathBuf,
     pub(crate) select: fn(&Path, &str) -> io::Result<Vec<PathBuf>>,
+    /// Set by an adapter whose provider records the working directory inside its files.
+    pub(crate) relocate: Option<ConversationRelocation>,
+}
+
+/// The workspace a restored conversation continues in, and the adapter's step that makes one
+/// staged file belong to it. The step runs in the private stage, before the provider owns the file.
+#[derive(Clone)]
+pub(crate) struct ConversationRelocation {
+    pub(crate) workspace: PathBuf,
+    pub(crate) apply: Relocate,
+}
+
+/// Fails once the restore is cancelled; a relocation calls it between bounded reads.
+pub(crate) type RelocationCheck<'a> = dyn FnMut() -> io::Result<()> + 'a;
+
+/// Receives the staged file, the workspace and the cancellation check. An error restores nothing.
+pub(crate) type Relocate = fn(&Path, &Path, &mut RelocationCheck<'_>) -> io::Result<()>;
+
+/// The working directory a provider process reports for `workspace`: symbolic links resolved and,
+/// on Windows, without the filesystem-only prefix that canonicalization adds.
+pub(crate) fn process_cwd(workspace: &Path) -> String {
+    let workspace = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_owned());
+    let cwd = workspace.to_string_lossy();
+    #[cfg(windows)]
+    let cwd = if let Some(unc) = cwd.strip_prefix(r"\\?\UNC\") {
+        std::borrow::Cow::Owned(format!(r"\\{unc}"))
+    } else {
+        std::borrow::Cow::Borrowed(cwd.strip_prefix(r"\\?\").unwrap_or(&cwd))
+    };
+    cwd.into_owned()
 }
 
 #[derive(Clone)]
@@ -514,6 +546,40 @@ impl ConversationLayout {
         }
         provider_directory(&self.storage)
             .map_err(|_| "provider conversation storage is unavailable")?;
+        let installed = self.install(
+            ConversationRestore {
+                source,
+                private_home,
+                operation,
+            },
+            &mut assign_owner,
+        );
+        if installed.is_err()
+            && let Some(home) = private_home
+        {
+            // The node now starts a new conversation, so the provider must be able to write into
+            // storage that this restore may have created.
+            for path in self
+                .storage
+                .ancestors()
+                .take_while(|path| path.starts_with(home))
+            {
+                let _ = assign_owner(path);
+            }
+        }
+        installed
+    }
+
+    fn install(
+        &self,
+        request: ConversationRestore<'_>,
+        assign_owner: &mut impl FnMut(&Path) -> io::Result<()>,
+    ) -> Result<(), &'static str> {
+        let ConversationRestore {
+            source,
+            private_home,
+            operation,
+        } = request;
         // Discover existing files before staging under the storage root: the provider's filename
         // selector must never mistake the staged replacement for an old conversation file.
         let old = (self.select)(&self.storage, &source.metadata.id)
@@ -524,6 +590,15 @@ impl ConversationLayout {
         )
         .map_err(|_| "provider conversation storage is unavailable")?;
         copy_files(source, stage.path(), operation)?;
+        if let Some(relocation) = &self.relocate {
+            for name in &source.files {
+                operation.check()?;
+                (relocation.apply)(&stage.path().join(name), &relocation.workspace, &mut || {
+                    operation.check().map_err(io::Error::other)
+                })
+                .map_err(|_| "provider conversation could not be moved to this workspace")?;
+            }
+        }
         operation.check()?;
         for name in old.iter().chain(&source.files) {
             checked_path(&self.storage, name)?;

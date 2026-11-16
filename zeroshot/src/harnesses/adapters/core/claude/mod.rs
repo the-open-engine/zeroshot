@@ -221,6 +221,7 @@ impl ClaudeAdapter {
                     invocation,
                     home: input.files.home(),
                     context_budget: Some(memory::INLINE_CONTEXT_BYTES),
+                    standing: true,
                 },
                 memory::install,
             );

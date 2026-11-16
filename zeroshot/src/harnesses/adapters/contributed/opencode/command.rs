@@ -208,6 +208,8 @@ pub(super) fn install_memory(
                 invocation,
                 home: files.home(),
                 context_budget: None,
+                // As with Pi, the text is appended to a tool result.
+                standing: false,
             },
             super::memory::install,
         );

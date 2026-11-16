@@ -197,6 +197,7 @@ impl NativeV2CodexAdapter {
                 invocation,
                 home: input.files.home(),
                 context_budget: None,
+                standing: true,
             },
         );
         Ok(command)

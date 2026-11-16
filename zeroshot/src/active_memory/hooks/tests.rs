@@ -308,6 +308,7 @@ fn harness_configuration_preserves_arguments_and_uses_private_capabilities() {
                 invocation: &invocation,
                 home: directory.path(),
                 context_budget: None,
+                standing: true,
             },
             install,
         );
@@ -431,6 +432,7 @@ fn auxiliary_roles_never_recall_even_when_a_main_node_has_the_same_name() {
                     invocation: &auxiliary,
                     home: home.path(),
                     context_budget: None,
+                    standing: true,
                 },
                 install,
             );
@@ -551,6 +553,7 @@ fn full_authored_instructions_and_failed_hook_setup_preserve_the_primary_invocat
                 invocation: &original,
                 home: invalid_home.path(),
                 context_budget: None,
+                standing: true,
             },
             install,
         );
@@ -882,6 +885,7 @@ fn steer_empty_memory_installs_claude_codex_pi_carriers_and_helper_preserves_max
                 invocation: &invocation(),
                 home: directory.path(),
                 context_budget: None,
+                standing: true,
             },
             install,
         );
@@ -960,7 +964,7 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
         )
         .await;
     assert!(delivery.context.contains("Retry at the next callback"));
-    hooks.acknowledge(&query, &delivery).await;
+    hooks.acknowledge(&query, &delivery, true).await;
     assert_eq!(
         crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
             .await
@@ -1085,6 +1089,7 @@ async fn steer_beyond_the_claude_inline_budget_waits_with_later_steers_for_the_n
         invocation: &invocation,
         home: directory.path(),
         context_budget: Some(INLINE_CONTEXT_BYTES),
+        standing: true,
     };
     let cap = Arc::new(installed_capability(&hooks, installation, install));
     let tool = cap.clone();
@@ -1149,6 +1154,7 @@ async fn steer_beyond_the_claude_inline_budget_still_reaches_other_carriers_at_a
         invocation: &invocation,
         home: directory.path(),
         context_budget: None,
+        standing: true,
     };
     let cap = installed_capability(&hooks, installation, codex::memory::install);
     let context = tokio::task::spawn_blocking(move || {
@@ -1164,4 +1170,66 @@ async fn steer_beyond_the_claude_inline_budget_still_reaches_other_carriers_at_a
         .await
         .assert_value();
     assert_eq!(status.steers[0].received_executions, 1);
+}
+
+// The same callback path serves a carrier on which a steer stands (Codex) and one on which it
+// does not (Pi): only the installation differs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_at_a_tool_call_returns_in_the_next_prompt_only_where_it_does_not_stand() {
+    use crate::harnesses::adapters::core::{codex, pi};
+    let carriers: [(NativeInstaller, bool); 2] =
+        [(codex::memory::install, true), (pi::memory::install, false)];
+    for (install, standing) in carriers {
+        let (ledger, run) = steer_record().await;
+        let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+        hooks.bind_ledger(run.clone(), ledger.clone());
+        let directory = tempfile::tempdir().assert_value();
+        let mut invocation = invocation();
+        if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { session_scope, .. } =
+            &mut invocation.node.binding
+        {
+            *session_scope = crate::execution::SessionScope::NodeInstance;
+        }
+        let instance = invocation.node.reference.node_instance;
+        let execution = hooks
+            .prepare_steers(&mut invocation, false)
+            .await
+            .assert_value();
+        record_steer(ledger.as_ref(), &run, "Standing direction".into()).await;
+        await_steer(&hooks, &invocation, "Standing direction").await;
+        let installation = HookInstallation {
+            invocation: &invocation,
+            home: directory.path(),
+            context_budget: None,
+            standing,
+        };
+        let cap = installed_capability(&hooks, installation, install);
+        let context = tokio::task::spawn_blocking(move || {
+            let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+            // The broker serves one callback at a time, so the first receipt is written by now.
+            assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+            context
+        })
+        .await
+        .assert_value();
+        assert!(context.contains("Standing direction"));
+        let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value();
+        assert_eq!(status.steers[0].received_executions, 1);
+        assert_eq!(
+            hooks.capture_steers()[&instance].receipts.len(),
+            usize::from(standing)
+        );
+        hooks.finish_steers(execution, true).await;
+        let mut revisit = invocation.clone();
+        revisit.host_context = None;
+        revisit.node.reference.execution =
+            crate::native_v2_contract::ExecutionId::new(3).assert_value();
+        hooks
+            .prepare_steers(&mut revisit, false)
+            .await
+            .assert_value();
+        assert_eq!(revisit.host_context.is_some(), !standing);
+    }
 }

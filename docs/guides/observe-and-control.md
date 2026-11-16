@@ -402,14 +402,18 @@ Supply exactly one text source. An admitted, running or suspended run accepts st
 Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
-Every agent conversation, including reviewers, receives each steer once: at its next tool call or
-in its next prompt, whichever comes first. It cannot revise a tool call already issued. On Claude
+Every agent conversation, including reviewers, receives each steer at its next tool call or in its
+next prompt, whichever comes first, and once only except on Copilot, Pi and OpenCode as described
+below. It cannot revise a tool call already issued. On Claude
 Code, a tool call carries steers only while the returned context, Active Memory included, stays
 within 9,000 bytes, because Claude Code passes at most 10,000 characters inline; a larger steer, and
 any steer recorded after it, waits for that conversation's next prompt, where it arrives whole, so
 it may not arrive during the current turn. Tool
 calls made by Claude Code subagents never receive steers; the node's own conversation gets them at
-its next tool call or prompt. Direction
+its next tool call or prompt. On Copilot, Pi and OpenCode a steer shown at a tool call does not
+stand in the conversation: Copilot applies it to the turn in progress without keeping it, and Pi
+and OpenCode show it inside a tool result, which a model may refuse to follow. Such a conversation
+receives the steer once more, with its next prompt. Direction
 takes precedence over authored instructions as guidance; permissions, output contracts, routing,
 runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
 Steers stand for the rest of the run and its successors. Continued conversations keep receipts;

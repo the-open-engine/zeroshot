@@ -7,6 +7,7 @@ pub(super) fn layout(home: &Path) -> ConversationLayout {
         harness: "opencode",
         storage: home.join(".local/share/opencode"),
         select,
+        relocate: None,
     }
 }
 fn select(root: &Path, _id: &str) -> io::Result<Vec<PathBuf>> {
