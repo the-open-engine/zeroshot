@@ -456,6 +456,8 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
         }
     }).await.assert_value();
     assert_eq!(driver.starts.load(Ordering::SeqCst), 0);
+    // A stop signal may stop live work; it must leave a suspension alone.
+    assert!(!controller.holds_suspension(&run).await);
     controller
         .suspend(RunSuspendParams {
             run_id: run.clone(),
@@ -486,6 +488,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
     .assert_value();
     controller.wait_runtime_settled(&run).await;
     assert_eq!(cleanup.exits(), vec![RunRuntimeExit::Suspended]);
+    assert!(controller.holds_suspension(&run).await);
     let mut params = resume_params(&run);
     params.connections.clear();
     assert!(

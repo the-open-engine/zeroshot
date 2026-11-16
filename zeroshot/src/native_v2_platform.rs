@@ -877,6 +877,22 @@ impl NativeV2PlatformController {
     /// Waits until the run's live runtime, if any, has settled its observed outcome, including
     /// the terminal append attempt that follows a published runtime failure. A preparation hands
     /// off to its engine before it finishes, so the engine that replaced it is awaited too.
+    /// Whether a stop signal must leave the run alone. A live engine answers from memory once it
+    /// disposed its runtime for a suspension, so stopping live work never waits for the ledger;
+    /// the ledger is read only when no engine is live.
+    pub(crate) async fn holds_suspension(&self, run_id: &RunId) -> bool {
+        let runtime = self.runtimes.lock().await.get(run_id).cloned();
+        match runtime {
+            Some(RuntimeSlot::Running(engine)) => engine.suspending(),
+            Some(RuntimeSlot::Preparing(_)) => false,
+            None => matches!(
+                self.ledger.get(run_id).await,
+                Ok(Some(stored))
+                    if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            ),
+        }
+    }
+
     pub(crate) async fn wait_runtime_settled(&self, run_id: &RunId) {
         loop {
             // Read the slot and its preparation state under one lock: a finished preparation

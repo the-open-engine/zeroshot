@@ -949,8 +949,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ledger work in its place. The local controller's serving loop drops its terminal wait before
   it runs a requested stop. Once the run ended or suspended it waits at most five seconds for a
   first connection, so an interrupted launcher cannot keep the controller and its workspace
-  lease. A stop signal leaves a suspended run suspended; the status read that decides this is
-  bounded, so a busy ledger cannot hold back the stop of live work.
+  lease. A stop signal leaves a suspended run suspended: a live engine says so from memory once
+  it disposed its runtime for the suspension, and the ledger is read only when no engine is
+  live, so stopping live work never waits for persistence.
 - Live force-stop signals owned work before waiting for persistence. Local stop intent prevents
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;

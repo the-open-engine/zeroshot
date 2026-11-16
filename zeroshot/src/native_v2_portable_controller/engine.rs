@@ -156,6 +156,10 @@ impl PortableRunEngine {
         self.supervisor.suspend().await
     }
 
+    pub(crate) fn suspending(&self) -> bool {
+        self.supervisor.suspending()
+    }
+
     pub async fn force_stop(
         &self,
     ) -> Result<(), crate::native_v2_supervisor::NativeV2SupervisorError> {

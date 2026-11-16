@@ -39,7 +39,6 @@ const WORKSPACE_MONITOR_INTERVAL: Duration = Duration::from_millis(100);
 /// Covers SQLite's 5 s busy timeout for both the failure append's snapshot read and its write.
 /// A hung ledger cannot keep the controller alive; explicit recovery then owns the run.
 const RUNTIME_FAILURE_SETTLEMENT_LIMIT: Duration = Duration::from_secs(15);
-const SUSPENSION_CHECK_LIMIT: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub struct PortableRunController {
@@ -283,16 +282,8 @@ impl PortableRunController {
     /// tells local checkpoint cleanup to retain recovery data, unlike explicit force-stop.
     pub(super) async fn stop_for_shutdown(&self) -> Result<(), PortableControllerError> {
         // A suspended attempt has no work left to stop, and forcing it would discard what it
-        // retains. The read is bounded: a busy ledger must not hold back the stop of live work.
-        let status = tokio::time::timeout(
-            SUSPENSION_CHECK_LIMIT,
-            self.inner.status(RunStatusParams {
-                run_id: self.run_id.clone(),
-            }),
-        )
-        .await;
-        if matches!(status, Ok(Ok(status)) if matches!(status.status, RunStatus::Suspended { .. }))
-        {
+        // retains.
+        if self.inner.holds_suspension(&self.run_id).await {
             self.inner.wait_runtime_settled(&self.run_id).await;
             return Ok(());
         }
