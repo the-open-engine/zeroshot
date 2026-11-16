@@ -667,14 +667,18 @@ impl LocalCliBackend {
         submission_digest: &Sha256Digest,
     ) -> Result<Option<RunId>, NativeV2CliError> {
         let ledger_path = self.run_storage(&run_id)?.join("runs.sqlite3");
-        if !require_existing_ledger(&ledger_path)? {
-            return Ok(None);
+        match require_existing_ledger(&ledger_path) {
+            Ok(true) => {}
+            Ok(false) => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
+            Err(error) => return Err(local_path_error(&ledger_path, error)),
         }
-        let ledger = SqliteRunLedger::open(&ledger_path).map_err(local_error)?;
+        let ledger = SqliteRunLedger::open(&ledger_path)
+            .map_err(|error| local_path_error(&ledger_path, error))?;
         let Some(stored) = ledger
             .get_by_submission_key(submission_key)
             .await
-            .map_err(local_error)?
+            .map_err(|error| local_path_error(&ledger_path, error))?
         else {
             return Ok(None);
         };
@@ -692,17 +696,30 @@ impl LocalCliBackend {
     }
 
     fn local_run_ids(&self) -> Result<Vec<RunId>, NativeV2CliError> {
-        let entries = match std::fs::read_dir(self.state_root.join("runs")) {
+        let path = self.state_root.join("runs");
+        let entries = match std::fs::read_dir(&path) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(local_io(error)),
+            Err(error) => return Err(local_path_error(&path, error)),
         };
-        let mut run_ids = entries
-            .map(|entry| entry.map_err(local_io))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter_map(local_run_id_from_entry)
-            .collect::<Vec<_>>();
+        let mut run_ids = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| local_path_error(&path, error))?;
+            let storage = entry.path();
+            let Some(run_id) = local_run_id_from_entry(entry) else {
+                continue;
+            };
+            // Search permission can expose child metadata without making the directory readable.
+            match std::fs::read_dir(&storage) {
+                Ok(_) => run_ids.push(run_id),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                    ) => {}
+                Err(error) => return Err(local_path_error(&storage, error)),
+            }
+        }
         run_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(run_ids)
     }
@@ -954,7 +971,7 @@ impl LocalCliBackend {
         ledger_path: &Path,
         successor_run_id: &RunId,
     ) -> Result<bool, NativeV2CliError> {
-        if !require_existing_ledger(ledger_path)? {
+        if !require_existing_ledger(ledger_path).map_err(local_io)? {
             return Ok(false);
         }
         let ledger = SqliteRunLedger::open_read_only(ledger_path).map_err(local_error)?;
@@ -983,7 +1000,7 @@ impl LocalCliBackend {
 
 impl LocalRecoveryDocument {
     fn read(path: &Path) -> Result<Self, NativeV2CliError> {
-        let bytes = std::fs::read(path).map_err(local_io)?;
+        let bytes = std::fs::read(path).map_err(|error| local_path_error(path, error))?;
         openengine_cluster_protocol::bounded_json_from_slice(&bytes)
             .map_err(|_| local_message("workspace recovery metadata is invalid"))
     }
@@ -1244,12 +1261,15 @@ fn controller_request_timeout(run_id: &RunId, operation: &str) -> NativeV2CliErr
 fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), NativeV2CliError> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) => {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return Ok(());
-            }
-            return Err(local_io(error));
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            return Ok(());
         }
+        Err(error) => return Err(local_path_error(path, error)),
     };
     let stale = metadata.is_file()
         && !metadata.file_type().is_symlink()
@@ -1258,8 +1278,14 @@ fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), Nati
             .ok()
             .and_then(|modified| modified.elapsed().ok())
             .is_some_and(|age| age >= minimum_age);
-    if stale {
-        std::fs::remove_file(path).map_err(local_io)?;
+    if stale
+        && let Err(error) = std::fs::remove_file(path)
+        && !matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+        )
+    {
+        return Err(local_path_error(path, error));
     }
     Ok(())
 }
@@ -1350,6 +1376,10 @@ fn local_error(error: impl std::fmt::Display) -> NativeV2CliError {
 
 fn local_io(error: std::io::Error) -> NativeV2CliError {
     local_message(error.to_string())
+}
+
+fn local_path_error(path: &Path, error: impl std::fmt::Display) -> NativeV2CliError {
+    local_message(format!("{}: {error}", path.display()))
 }
 
 fn local_message(message: impl Into<String>) -> NativeV2CliError {

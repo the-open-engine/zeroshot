@@ -8,6 +8,9 @@ mod inspection;
 #[cfg(windows)]
 #[path = "native_v2_cli_portable/restic_resume_tests.rs"]
 mod restic_resume_tests;
+#[cfg(unix)]
+#[path = "native_v2_cli_portable/submission_scan_tests.rs"]
+mod submission_scan_tests;
 use fixture::{Fixture, success};
 
 #[cfg(unix)]

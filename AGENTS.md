@@ -436,7 +436,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
   their separate short bound.
   A later local submission or resume scavenges orphaned bootstrap files after the bounded controller handoff
-  window without removing other run state.
+  window without removing other run state. Scavenging and submission-key lookup skip permission-denied
+  run storage, checking directory readability even when child metadata is accessible; readable runs
+  retain ordinary duplicate/conflict checks. Reported scan I/O errors name the failed path. Keep
+  filesystem error kinds until the scan applies its skip policy.
   The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
   provider variables; provider children still start from an empty environment. Snapshot values
   never enter profiles, ledgers, observation, or hosted adapters. Relative harness home overrides

@@ -104,12 +104,14 @@ pub(super) fn prepare_private_directory(path: &Path) -> Result<(), NativeV2CliEr
     crate::execution::platform::private_directory(path).map_err(local_io)
 }
 
-pub(super) fn require_existing_ledger(path: &Path) -> Result<bool, NativeV2CliError> {
+pub(super) fn require_existing_ledger(path: &Path) -> std::io::Result<bool> {
     match std::fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
-        Ok(_) => Err(local_message("run ledger path is not a regular file")),
+        Ok(_) => Err(std::io::Error::other(
+            "run ledger path is not a regular file",
+        )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(local_io(error)),
+        Err(error) => Err(error),
     }
 }
 

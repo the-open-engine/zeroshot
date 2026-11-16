@@ -100,6 +100,126 @@ fn stale_private_bootstraps_are_scavenged_without_touching_other_state() {
     assert!(retained.exists());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn submission_scans_skip_unreadable_runs_and_keep_readable_matches() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = resume_claim_fixture("scan-permissions", "readable-submission");
+    let ledger = SqliteRunLedger::open(
+        fixture
+            .backend
+            .paths(&fixture.run_id)
+            .assert_value()
+            .ledger(),
+    )
+    .assert_value();
+    ledger
+        .create_or_get(CreateRun {
+            run_id: fixture.run_id.clone(),
+            submission_key: fixture.submission.submission_key.clone(),
+            submission_digest: submission_digest(&fixture.submission).assert_value(),
+            admitted: NativeV2Admission
+                .admit(fixture.submission.clone())
+                .await
+                .assert_value(),
+        })
+        .await
+        .assert_value();
+    drop(ledger);
+    let unreadable = RunId::new("0199f33f-3b44-7d21-9000-000000000000");
+    let denied = fixture
+        .backend
+        .create_run_storage(&unreadable)
+        .assert_value();
+    let denied_bootstrap = denied.join(BOOTSTRAP_FILE);
+    std::fs::write(&denied_bootstrap, b"keep").assert_value();
+    let denied_ledger = denied.join("runs.sqlite3");
+    let denied_recovery = denied.join(RECOVERY_FILE);
+    for path in [&denied_ledger, &denied_recovery] {
+        std::fs::write(path, b"unreadable").assert_value();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).assert_value();
+    }
+    let bootstrap = fixture
+        .backend
+        .run_storage(&fixture.run_id)
+        .assert_value()
+        .join(BOOTSTRAP_FILE);
+    let permissions = std::fs::metadata(&denied).assert_value().permissions();
+    let digest = submission_digest(&fixture.submission).assert_value();
+    for mode in [0o000, 0o111] {
+        std::fs::write(&bootstrap, b"stale").assert_value();
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(mode)).assert_value();
+        let inaccessible = std::fs::read_dir(&denied)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
+        let metadata_accessible = std::fs::symlink_metadata(&denied_ledger).is_ok();
+        if !inaccessible {
+            std::fs::set_permissions(&denied, permissions.clone()).assert_value();
+            eprintln!("skipping: directory permissions are not enforced for this user");
+            return;
+        }
+
+        // Restore permissions before assertions, including when either scan returns an error.
+        let cleanup = fixture.backend.remove_stale_bootstraps(Duration::ZERO);
+        let matching = fixture
+            .backend
+            .existing_submission(
+                &fixture.submission.submission_key,
+                &digest,
+                &fixture._root.child("workspace"),
+            )
+            .await;
+        std::fs::set_permissions(&denied, permissions.clone()).assert_value();
+
+        assert_eq!(metadata_accessible, mode == 0o111);
+        cleanup.expect("cleanup skips unreadable run storage");
+        assert!(!bootstrap.exists());
+        assert_eq!(std::fs::read(&denied_bootstrap).assert_value(), b"keep");
+        assert_eq!(matching.unwrap(), Some(fixture.run_id.clone()));
+    }
+}
+
+#[tokio::test]
+async fn submission_scan_errors_name_the_failed_path() {
+    let root = TestDirectory::new("scan-errors");
+    let invalid_root = root.child("invalid\0");
+    let invalid_backend = backend(&invalid_root);
+    let backend = backend(root.path());
+    let bootstrap = invalid_root.join(BOOTSTRAP_FILE);
+    assert!(
+        remove_stale_bootstrap(&bootstrap, Duration::ZERO)
+            .unwrap_err()
+            .to_string()
+            .contains(&bootstrap.display().to_string())
+    );
+
+    let runs = invalid_root.join("runs");
+    assert!(
+        invalid_backend
+            .remove_stale_bootstraps(Duration::ZERO)
+            .unwrap_err()
+            .to_string()
+            .contains(&runs.display().to_string())
+    );
+    let id = RunId::new("0199f33f-3b44-7d21-9000-000000000001");
+    let ledger = backend
+        .create_run_storage(&id)
+        .assert_value()
+        .join("runs.sqlite3");
+    let submission = contract_submission("scan-error");
+    let digest = submission_digest(&submission).assert_value();
+    // A corrupt ledger is still an error, rather than an unreadable run to skip.
+    std::fs::write(&ledger, b"not sqlite").assert_value();
+    assert!(
+        backend
+            .existing_submission(&submission.submission_key, &digest, root.path())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains(&ledger.display().to_string())
+    );
+}
+
 #[tokio::test]
 async fn interrupted_resume_with_empty_ledger_clears_the_successor_claim() {
     let fixture = resume_claim_fixture("lre", "interrupted-resume");

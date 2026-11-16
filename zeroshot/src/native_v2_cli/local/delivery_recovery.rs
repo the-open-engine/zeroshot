@@ -121,7 +121,7 @@ impl LocalCliBackend {
                 return Ok(Some(receipt.clone()));
             }
             let path = self.paths(&run_id)?.ledger();
-            if require_existing_ledger(&path)? {
+            if require_existing_ledger(&path).map_err(local_io)? {
                 let ledger = SqliteRunLedger::open_read_only(&path).map_err(local_error)?;
                 let stored = ledger
                     .get(&run_id)
