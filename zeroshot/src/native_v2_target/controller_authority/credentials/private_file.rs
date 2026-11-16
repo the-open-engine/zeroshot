@@ -66,7 +66,7 @@ impl PrivateFileTargetCredentialStore {
         target_id: &str,
         backend: &str,
     ) -> Result<(), TargetAuthorityError> {
-        if !matches!(backend, "system\n" | "file\n") {
+        if !matches!(backend, "system\n" | "file\n" | "file-only\n") {
             return Err(authority_error(
                 "target credential store selection is invalid",
             ));

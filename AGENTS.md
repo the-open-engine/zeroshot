@@ -1629,6 +1629,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   under the registry lock before taking the recovery lock. Late receipts retain their run result
   without restoring a removed target's permissions. Python `Client.list_targets()` and
   `Client.remove_target()` use that same local registry independently of the client's run target.
+  Linux credential selection retains keyring cleanup after switching to file storage. Legacy
+  `file` selections may have used both stores; only `file-only` selections skip keyring cleanup.
+  Record cleanup obligations before credential writes and retain them until removal succeeds.
   These commands do not change MCP tools, protocol source types, shared skills or remote plugins.
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
 - Hosted suspend and vector POST routes use the separate `hosted_run_controls` discovery extension

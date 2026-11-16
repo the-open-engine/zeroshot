@@ -31,6 +31,8 @@ Removal deletes the local registration, its stored login and saved resume permis
 contact the target or stop its runs. You can then register that name again with `target add`.
 The built-in `platform` target and unknown names are refused. `target remove NAME --json` returns
 a removal receipt. If cleanup fails, the registration remains so you can retry.
+On Linux, removal clears both credential stores after a store switch. Older file-store selections
+may also require access to Secret Service to finish cleanup.
 
 ## Run locally { #local-controller }
 

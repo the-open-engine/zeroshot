@@ -20,6 +20,9 @@ use super::{
 
 const TARGET_ID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[path = "tests/removal.rs"]
+mod removal;
+
 #[tokio::test]
 async fn target_removal_deletes_private_login_backend_and_resume_permissions() {
     use crate::native_v2_target::{
@@ -663,7 +666,7 @@ async fn private_file_store_rejects_malformed_tokens_metadata_and_backend_select
             .to_string(),
         "target credential store selection is invalid"
     );
-    for backend in ["system\n", "file\n"] {
+    for backend in ["system\n", "file\n", "file-only\n"] {
         store.write_backend(TARGET_ID, backend).await.assert_value();
         assert_eq!(
             store
