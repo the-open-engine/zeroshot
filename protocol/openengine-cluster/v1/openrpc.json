@@ -780,7 +780,7 @@
           "name": "mode",
           "required": false,
           "schema": {
-            "$ref": "#/$defs/SteeringMode",
+            "$ref": "schema.json#/$defs/SteeringMode",
             "default": "standing"
           }
         }

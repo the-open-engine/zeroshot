@@ -127,10 +127,12 @@ fn native_v2_method(name: &str) -> Option<Value> {
             let schema =
                 serde_json::to_value(schema_for!(openengine_cluster_protocol::RunSteerParams))
                     .assert_value();
+            let mut mode = property_schema(&schema, "mode");
+            mode["$ref"] = json!("schema.json#/$defs/SteeringMode");
             json!({"paramStructure":"by-name", "params":[
                 {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
                 {"name":"text","required":true,"schema":{"$ref":"schema.json#/$defs/NodeInstructions"}},
-                {"name":"mode","required":false,"schema":property_schema(&schema,"mode")}
+                {"name":"mode","required":false,"schema":mode}
             ], "result":{"name":"runSteerResult","schema":{"$ref":"schema.json#/$defs/RunSteerResult"}}})
         }
         openengine_cluster_protocol::RUN_SUSPEND_METHOD => {

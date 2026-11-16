@@ -201,7 +201,7 @@ async fn openrpc_vector_parameters_resolve_in_the_generated_schema() {
 }
 
 #[tokio::test]
-async fn openrpc_steer_text_reference_resolves_and_enforces_instruction_bounds() {
+async fn openrpc_steer_parameter_references_resolve_and_enforce_their_contracts() {
     let artifacts = generate_artifacts().await;
     let openrpc = generated_json(&artifacts, "/openrpc.json");
     let schema = generated_json(&artifacts, "/schema.json");
@@ -220,7 +220,17 @@ async fn openrpc_steer_text_reference_resolves_and_enforces_instruction_bounds()
         .iter()
         .position(|parameter| parameter.assert_key("name") == "text")
         .assert_value();
-    let validator = jsonschema::options()
+    let mode_index = method
+        .assert_key("params")
+        .as_array()
+        .assert_value()
+        .iter()
+        .position(|parameter| parameter.assert_key("name") == "mode")
+        .assert_value();
+    let mode = &method.assert_key("params")[mode_index];
+    assert_eq!(mode.assert_key("required"), false);
+    assert_eq!(mode.assert_key("schema").assert_key("default"), "standing");
+    let options = jsonschema::options()
         .with_resource(
             "https://protocol.test/openrpc.json",
             jsonschema::Resource::from_contents(openrpc).assert_value(),
@@ -228,7 +238,8 @@ async fn openrpc_steer_text_reference_resolves_and_enforces_instruction_bounds()
         .with_resource(
             "https://protocol.test/schema.json",
             jsonschema::Resource::from_contents(schema).assert_value(),
-        )
+        );
+    let validator = options
         .build(&serde_json::json!({
             "$ref": format!("https://protocol.test/openrpc.json#/methods/{method_index}/params/{parameter_index}/schema")
         }))
@@ -238,6 +249,24 @@ async fn openrpc_steer_text_reference_resolves_and_enforces_instruction_bounds()
     text.push('x');
     assert!(!validator.is_valid(&serde_json::json!(text)));
     for invalid in [serde_json::json!(""), serde_json::json!(42)] {
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    let validator = options
+        .build(&serde_json::json!({
+            "$ref": format!("https://protocol.test/openrpc.json#/methods/{method_index}/params/{mode_index}/schema")
+        }))
+        .assert_value();
+    for valid in ["once", "standing"] {
+        assert!(validator.is_valid(&serde_json::json!(valid)));
+    }
+    for invalid in [
+        serde_json::json!(""),
+        serde_json::json!("ONCE"),
+        serde_json::json!("persistent"),
+        serde_json::json!(42),
+        serde_json::json!(null),
+    ] {
         assert!(!validator.is_valid(&invalid));
     }
 }
