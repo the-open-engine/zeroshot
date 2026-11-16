@@ -35,7 +35,6 @@ import {
   humanize,
   observedRoutes,
   projectHistory,
-  requestStanding,
   stateLabel,
   suspensionStatus,
   type HistoryEvent,
@@ -45,6 +44,7 @@ import {
   type RunTerminal,
 } from './run-history';
 import { canFollowHistory, observationEnded } from './history-contract';
+import { useProjection } from './use-run-projection';
 import { readHistoryWhenReady } from './history-readiness';
 import './run-history.css';
 
@@ -180,25 +180,7 @@ export function RunHistoryView({
       moments.findIndex((moment) => moment.index === Math.min(cursorIndex, events.length - 1))
     ),
     moment = moments[safePosition];
-  const projection = useMemo(
-    () => document && projectHistory(document, events, moment.index, control),
-    [document, events, moment.index, control]
-  );
-  const successorRunId = run?.workspaceRecovery?.successorRunId ?? listedSuccessor;
-  const now = useDeadlineClock(
-    run?.phase === 'suspended' && !successorRunId ? run.suspension?.request?.expiresAt : undefined
-  );
-  const observedNodes = useMemo(
-    () =>
-      projection &&
-      requestStanding(
-        projection.nodes,
-        run?.phase === 'suspended' ? run.suspension : undefined,
-        !!successorRunId,
-        now
-      ),
-    [projection, run, successorRunId, now]
-  );
+  const projection = useProjection(document, events, moment.index, control, run, listedSuccessor);
   useEffect(() => {
     window.document.title = `${run?.title ?? 'Runs'} · Zeroshot`;
   }, [run?.title]);
@@ -308,7 +290,7 @@ export function RunHistoryView({
             retry={() => void loadHistory(run.runId, source, false)}
             embedded={embedded}
             runHref={runHref}
-            successorRunId={successorRunId}
+            successorRunId={projection.successorRunId}
           />
           <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
             <ReactFlowProvider>
@@ -320,11 +302,7 @@ export function RunHistoryView({
                 workers={workers}
                 select={inspect}
                 focus={focus}
-                observation={observed(
-                  run.runId,
-                  observedNodes ?? projection.nodes,
-                  isLiveRun && following
-                )}
+                observation={observed(run.runId, projection.nodes, isLiveRun && following)}
                 view={canvas}
                 onViewChange={setCanvas}
                 inspectorHidden={!inspector}
@@ -486,18 +464,6 @@ function currentHistoryState(
   if (preparing) return 'Preparing environment';
   if (atStart) return 'Before run';
   return run.phase === 'finished' ? 'Recorded history' : 'In progress';
-}
-
-/** The current time, renewed once when `deadline` passes so what waits on it can say so. */
-function useDeadlineClock(deadline: number | undefined) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (deadline === undefined || deadline <= now) return;
-    // Timers hold at most about 24.8 days; a later deadline renews the clock and waits again.
-    const timer = setTimeout(() => setNow(Date.now()), Math.min(deadline - now, 2 ** 31 - 1));
-    return () => clearTimeout(timer);
-  }, [deadline, now]);
-  return now;
 }
 
 /** Steps a playing replay one moment at a time and stops at the end of its scope. */
