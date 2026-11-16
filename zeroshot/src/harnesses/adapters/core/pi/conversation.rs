@@ -47,10 +47,16 @@ fn relocate(file: &Path, workspace: &Path, check: &mut RelocationCheck<'_>) -> i
     let Ok(Value::Object(mut fields)) = serde_json::from_slice::<Value>(&header) else {
         return Err(io::ErrorKind::InvalidData.into());
     };
+    // Pi resolves a session by the ID in this line: without one the file names no session.
+    let names_a_session = fields.get("type").and_then(Value::as_str) == Some("session")
+        && fields
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| !id.is_empty());
     let cwd = process_cwd(workspace);
     match fields.get("cwd") {
-        Some(Value::String(stored)) if *stored == cwd => return Ok(()),
-        Some(Value::String(_)) => {}
+        Some(Value::String(stored)) if names_a_session && *stored == cwd => return Ok(()),
+        Some(Value::String(_)) if names_a_session => {}
         _ => return Err(io::ErrorKind::InvalidData.into()),
     }
     fields.insert("cwd".to_owned(), Value::String(cwd));

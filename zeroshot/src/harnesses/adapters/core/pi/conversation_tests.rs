@@ -75,6 +75,10 @@ fn a_first_line_that_is_no_session_header_fails_and_leaves_the_file_as_it_is() {
         "[\"cwd\"]\n",
         "{\"type\":\"session\"}\nturn\n",
         "{\"cwd\":7}\nturn\n",
+        "{\"cwd\":\"/predecessor\"}\nturn\n",
+        "{\"type\":\"session\",\"cwd\":\"/predecessor\"}\nturn\n",
+        "{\"type\":\"session\",\"id\":\"\",\"cwd\":\"/predecessor\"}\nturn\n",
+        "{\"type\":\"message\",\"id\":\"zs-id\",\"cwd\":\"/predecessor\"}\nturn\n",
         "",
     ] {
         let file = root.path().join("session.jsonl");
