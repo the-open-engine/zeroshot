@@ -451,8 +451,9 @@ do not grant publication access. Members outside the publisher set can receive m
 send them. An agent cannot use the human broadcast form to bypass that restriction, and a caller
 outside the authorized execution cannot publish a network message.
 
-A running recipient receives pending messages at its next native tool callback. A future sequential
-recipient receives them in its first prompt. Publication never starts an agent, restarts a recipient
+Pending messages enter a recipient's next prompt or native tool callback. Sequential recipients
+receive them once they start. A failed record read leaves the message pending for the next delivery
+point. Publication never starts an agent, restarts a recipient
 or wakes a suspended run. Peer messages carry their source as context;
 they do not override authored instructions or grant permissions. Network destinations, mode and
 origin remain in the vector record alongside the text and delivery receipts. Lost acknowledgements

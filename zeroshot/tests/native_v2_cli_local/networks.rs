@@ -470,9 +470,11 @@ async fn networks_suspended_successor_keeps_once_consumption_and_sender_exclusio
     fixture.wait_succeeded(next, "networks").await;
     wait_for_exit(fixture.ready_pid(next)).await;
     network_no_messages(&fixture, next, "sender", 2);
-    let receiver = network_capture(&fixture, next, ("receiver", 2), "prompt");
-    assert!(!receiver.contains(ONCE));
-    assert_eq!(receiver.matches(STANDING).count(), 1);
+    let receiver = ["prompt", "tool-0", "tool-1"]
+        .map(|kind| network_capture(&fixture, next, ("receiver", 2), kind))
+        .join("\n");
+    assert!(!receiver.contains(ONCE), "{receiver}");
+    assert_eq!(receiver.matches(STANDING).count(), 1, "{receiver}");
     let launch: Vec<String> =
         serde_json::from_str(&network_capture(&fixture, next, ("receiver", 2), "launch"))
             .assert_value();

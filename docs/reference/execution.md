@@ -41,8 +41,8 @@ checks its publisher permission and assigns the origin. Public execution labels 
 a message. Receivers need membership in a selected network; repeated destinations or overlapping
 memberships do not multiply delivery.
 
-A peer message reaches an active recipient through the existing native tool carrier or a future
-recipient in its next prompt. Publication creates no execution and does not interrupt, restart or
+A peer message reaches a recipient through its next prompt or native tool callback. Future recipients
+receive it once they start. Publication creates no execution and does not interrupt, restart or
 wake a recipient. It also keeps suspended runs suspended. The originating node instance never
 receives that message, while other mapped copies of its logical node remain eligible members.
 
