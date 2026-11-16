@@ -12,7 +12,9 @@ use crate::active_memory::hooks::{
 enum Receipt {
     Fail,
     Slow,
-    SlowFail,
+    // Fails only once the test releases it, so it stays in flight for as long as needed.
+    HeldFail,
+    Never,
 }
 
 // Each page is legal and timely, but the complete record takes longer than a callback.
@@ -21,6 +23,7 @@ struct SlowPages {
     reads: Mutex<Vec<Option<Cursor>>>,
     fail_next_read: AtomicBool,
     next_receipt: Mutex<Option<Receipt>>,
+    release_receipt: tokio::sync::Notify,
 }
 #[async_trait::async_trait]
 impl RunLedger for SlowPages {
@@ -54,11 +57,14 @@ impl RunLedger for SlowPages {
             if matches!(vector.content, RunVectorContent::SteerReceipt { .. }))
         .then(|| self.next_receipt.lock().assert_value().take())
         .flatten();
-        if matches!(receipt, Some(Receipt::Slow | Receipt::SlowFail)) {
+        match receipt {
             // Outlast the callback deadline, as a busy or instrumented runner's write can.
-            tokio::time::sleep(DEADLINE * 3).await;
+            Some(Receipt::Slow) => tokio::time::sleep(DEADLINE * 3).await,
+            Some(Receipt::HeldFail) => self.release_receipt.notified().await,
+            Some(Receipt::Never) => std::future::pending().await,
+            _ => {}
         }
-        if matches!(receipt, Some(Receipt::Fail | Receipt::SlowFail)) {
+        if matches!(receipt, Some(Receipt::Fail | Receipt::HeldFail)) {
             return Err(RunLedgerError::Storage);
         }
         self.ledger.append(run, events).await
@@ -109,6 +115,7 @@ async fn slow_ledger(
         reads: Mutex::default(),
         fail_next_read: AtomicBool::new(false),
         next_receipt: Mutex::new(next_receipt),
+        release_receipt: tokio::sync::Notify::new(),
     });
     ledger
         .create_or_get(CreateRun {
@@ -160,36 +167,60 @@ async fn steer_slow_receipt_is_not_offered_again_and_failed_receipt_is() {
     assert_eq!(delivery.steers, [slow]);
     // The acknowledgement returned before its receipt was durable. The conversation still
     // holds the steer, so the next tool call in the same execution must not repeat it.
-    assert!(ledger.next_receipt.lock().assert_value().is_none());
     let delivery = steer_tool_call(&hooks, &first).await;
     assert!(delivery.steers.is_empty());
     assert!(!delivery.context.contains("<steer>"));
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while steering::status(ledger.as_ref(), &run)
-            .await
-            .assert_value()
-            .steers[0]
-            .received_executions
-            != 1
-        {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .assert_value();
+    steer_received_once(ledger.as_ref(), &run, 1).await;
+    assert!(ledger.next_receipt.lock().assert_value().is_none());
     assert!(steer_tool_call(&hooks, &first).await.steers.is_empty());
 
     // A write that outlasts the callback and then fails leaves no receipt: offer it again.
-    *ledger.next_receipt.lock().assert_value() = Some(Receipt::SlowFail);
+    // It cannot fail before release, so the in-flight checks do not depend on timing.
+    *ledger.next_receipt.lock().assert_value() = Some(Receipt::HeldFail);
     let failed = record("failed receipt").await.assert_value().steer.id;
     assert_eq!(
         steer_tool_call(&hooks, &first).await.steers,
         std::slice::from_ref(&failed)
     );
     assert!(steer_tool_call(&hooks, &first).await.steers.is_empty());
-    let delivery = tokio::time::timeout(Duration::from_secs(30), async {
+    assert!(steer_tool_call(&hooks, &first).await.steers.is_empty());
+    // A snapshot taken now references the in-flight receipt as well as the durable one.
+    let captured = hooks.capture_steers();
+    assert_eq!(
+        captured
+            .values()
+            .map(|r| r.receipts.len())
+            .collect::<Vec<_>>(),
+        [2]
+    );
+    ledger.release_receipt.notify_one();
+    let delivery = steer_offered_again(&hooks, &first).await;
+    assert_eq!(delivery.steers, [failed]);
+    assert!(delivery.context.contains("failed receipt"));
+    assert!(!delivery.context.contains("slow receipt"));
+    steer_received_once(ledger.as_ref(), &run, 2).await;
+
+    // A write that never completes is abandoned at its bound and offered again.
+    *ledger.next_receipt.lock().assert_value() = Some(Receipt::Never);
+    let stalled = record("stalled receipt").await.assert_value().steer.id;
+    assert_eq!(
+        steer_tool_call(&hooks, &first).await.steers,
+        std::slice::from_ref(&stalled)
+    );
+    assert!(steer_tool_call(&hooks, &first).await.steers.is_empty());
+    let delivery = steer_offered_again(&hooks, &first).await;
+    assert_eq!(delivery.steers, [stalled]);
+    steer_received_once(ledger.as_ref(), &run, 3).await;
+}
+
+// Polls tool calls until one offers a steer, acknowledging each.
+async fn steer_offered_again(
+    hooks: &ActiveMemoryHooks,
+    invocation: &DriverInvocation,
+) -> HookDelivery {
+    tokio::time::timeout(PUBLICATION_DEADLINE * 6, async {
         loop {
-            let delivery = steer_tool_call(&hooks, &first).await;
+            let delivery = steer_tool_call(hooks, invocation).await;
             if !delivery.steers.is_empty() {
                 break delivery;
             }
@@ -197,19 +228,32 @@ async fn steer_slow_receipt_is_not_offered_again_and_failed_receipt_is() {
         }
     })
     .await
+    .assert_value()
+}
+
+// Waits until each of the first `count` steers has exactly one durable receipt.
+async fn steer_received_once(ledger: &dyn RunLedger, run: &RunId, count: usize) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let received: Vec<_> = steering::status(ledger, run)
+                .await
+                .assert_value()
+                .steers
+                .iter()
+                .map(|steer| steer.received_executions)
+                .collect();
+            if received == vec![1; count] {
+                break;
+            }
+            assert!(
+                received.iter().all(|&n| n <= 1),
+                "duplicate receipt: {received:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
     .assert_value();
-    assert_eq!(delivery.steers, [failed]);
-    assert!(delivery.context.contains("failed receipt"));
-    assert!(!delivery.context.contains("slow receipt"));
-    let status = steering::status(ledger.as_ref(), &run).await.assert_value();
-    assert_eq!(
-        status
-            .steers
-            .iter()
-            .map(|steer| steer.received_executions)
-            .collect::<Vec<_>>(),
-        [1, 1]
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
