@@ -34,6 +34,72 @@ async fn public_errors(harness: &Harness) -> Vec<RunLogEventNotification> {
         .collect()
 }
 
+fn handle_error(name: &str, terminal: Value) -> Value {
+    json!({"kind":"choice","name":"handle_error","state":null_type(),
+        "branches":[{"when":{"kind":"in","value":{"source":"error","name":name},"labels":["crash","timeout","malformed","refusal"]},
+            "node":terminal}],"otherwise":succeed("done"),"promotedStatePaths":[]})
+}
+
+#[tokio::test]
+async fn unhandled_step_and_verifier_errors_retain_the_primary_cause_and_public_evidence() {
+    for node in [step("node", 1_000), verifier("node", 1_000)] {
+        for code in [
+            WorkerErrorCode::Crash,
+            WorkerErrorCode::Timeout,
+            WorkerErrorCode::Malformed,
+            WorkerErrorCode::Refusal,
+        ] {
+            let harness = harness(
+                graph(
+                    sequence(vec![node.clone(), succeed("done")], null_type()),
+                    null_type(),
+                ),
+                Value::Null,
+                FakeDriver::scripted([(
+                    "node",
+                    vec![Behavior::Complete {
+                        delay: Duration::ZERO,
+                        outcome: WorkerOutcome::declared_failure(code),
+                    }],
+                )]),
+            )
+            .await;
+            let result = harness.supervisor.drive().await.assert_value();
+            let TerminalResult::Failed {
+                reason,
+                context: Some(context),
+            } = &result
+            else {
+                panic!("{result:?}")
+            };
+            assert_eq!(reason.as_str(), "unhandled");
+            let cause = context.primary.as_ref().assert_value().message.as_str();
+            assert!(cause.contains("node") && cause.contains(code.as_str()));
+            assert_eq!(context.recorded.len(), 1);
+            assert!(
+                context.recorded[0].execution.is_some() && context.recorded[0].cursor.is_some()
+            );
+            let stored = stored_run(&harness.ledger).await;
+            assert_eq!(stored.snapshot.terminal, Some(result.clone()));
+            let status = NativeV2Observability::new(harness.ledger.clone())
+                .status(openengine_cluster_protocol::RunStatusParams {
+                    run_id: stored.snapshot.run_id,
+                })
+                .await
+                .assert_value();
+            assert!(
+                matches!(status.status,openengine_cluster_protocol::RunStatus::Finished {terminal_result,..} if terminal_result==result)
+            );
+            let errors = public_errors(&harness).await;
+            assert!(errors.iter().any(
+                |record| record.record.message.as_str().contains("unhandled")
+                    && record.record.message.as_str().contains(code.as_str())
+                    && record.record.message.as_str().contains("node")
+            ));
+        }
+    }
+}
+
 #[tokio::test]
 async fn handled_worker_and_verifier_errors_remain_in_public_logs() {
     for node in [step("node", 1_000), verifier("node", 1_000)] {
@@ -71,7 +137,10 @@ async fn handled_worker_and_verifier_errors_remain_in_public_logs() {
         ] {
             let harness = harness(
                 graph(
-                    sequence(vec![node.clone(), succeed("done")], null_type()),
+                    sequence(
+                        vec![node.clone(), handle_error("node", succeed("handled"))],
+                        null_type(),
+                    ),
                     null_type(),
                 ),
                 Value::Null,
@@ -164,7 +233,10 @@ async fn producer_detail_suppresses_only_generic_settlement_diagnostics() {
                 sequence(
                     vec![
                         step("worker", 1_000),
-                        json!({"kind": "fail", "name": "stop", "reason": "worker_failed"}),
+                        handle_error(
+                            "worker",
+                            json!({"kind": "fail", "name": "stop", "reason": "worker_failed"}),
+                        ),
                     ],
                     null_type(),
                 ),
@@ -498,9 +570,11 @@ async fn startup_failure_is_public_before_any_provider_output() {
     );
     harness.supervisor.drive().await.assert_value();
     assert_eq!(harness.driver.starts("worker"), 0);
-    let mut errors = public_errors(&harness).await;
-    let error = errors.pop().assert_value_with("startup error log");
-    assert!(errors.is_empty());
+    let errors = public_errors(&harness).await;
+    assert_eq!(errors.len(), 2);
+    assert!(errors[1].execution.is_none());
+    assert!(errors[1].record.message.as_str().contains("unhandled"));
+    let error = &errors[0];
     assert!(error.execution.is_some());
     assert!(
         error

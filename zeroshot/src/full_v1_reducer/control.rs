@@ -1,5 +1,52 @@
 use super::*;
 
+/// Error handling is authored for a node across the entire graph, independently of runtime routes.
+pub(super) fn collect_error_reads(node: &GraphNode, names: &mut BTreeSet<NodeName>) {
+    match node {
+        GraphNode::Choice(group) => {
+            for branch in group.branches.as_slice() {
+                collect_guard_error_reads(&branch.when, names);
+            }
+        }
+        GraphNode::Loop(group) => {
+            if let Some(until) = &group.until {
+                collect_guard_error_reads(until, names);
+            }
+        }
+        GraphNode::Par(group) => {
+            if let Join::First { when } = &group.join {
+                collect_guard_error_reads(when, names);
+            }
+        }
+        _ => {}
+    }
+    for child in openengine_cluster_server::graph_verifier::graph_node_children(node) {
+        collect_error_reads(child, names);
+    }
+}
+
+fn collect_guard_error_reads(guard: &Guard, names: &mut BTreeSet<NodeName>) {
+    let mut record = |selector: &ControlSelector| {
+        if selector.source == ControlSource::Error {
+            names.insert(selector.name.clone());
+        }
+    };
+    match guard {
+        Guard::In { value, .. } | Guard::KOfMap { value, .. } => record(value),
+        Guard::KOfN { values, .. } => {
+            for value in values.as_slice() {
+                record(value);
+            }
+        }
+        Guard::All { guards } | Guard::Any { guards } => {
+            for guard in guards.as_slice() {
+                collect_guard_error_reads(guard, names);
+            }
+        }
+        Guard::Not { guard } => collect_guard_error_reads(guard, names),
+    }
+}
+
 impl Engine<'_> {
     fn candidate_count(
         &self,

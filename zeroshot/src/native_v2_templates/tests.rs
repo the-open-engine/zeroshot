@@ -21,6 +21,9 @@ use support::*;
 #[path = "tests/continuity.rs"]
 mod continuity;
 
+#[path = "tests/unhandled.rs"]
+mod unhandled;
+
 #[test]
 fn catalog_and_template_inputs_are_closed() {
     assert_eq!(

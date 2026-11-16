@@ -444,6 +444,11 @@ jobs:
           mkdir -p target/debug
           cp "$output_root/$target/restic" target/debug/restic
           target/debug/restic version
+      - name: Run macOS unhandled worker error regressions
+        run: |
+          cargo test --locked --package zeroshot --features ui --test full_v1_reducer unhandled::
+          cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unchecked_worker_error_fails_foreground_status_and_logs
+          cargo test --locked --package zeroshot --features ui --lib -- native_v2_templates::tests::unhandled native_v2_supervisor::tests::failure_logs v2_run_ledger::tests::failure_context
       - name: Run macOS checkpoint forge access regression
         run: >-
           cargo test --locked --package zeroshot --features ui

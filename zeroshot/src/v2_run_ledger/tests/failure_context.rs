@@ -28,6 +28,80 @@ fn ledgers() -> Vec<Box<dyn RunLedger>> {
 }
 
 #[tokio::test]
+async fn reducer_primary_cause_merges_recorded_details_and_freezes_before_auxiliary_work() {
+    for ledger in ledgers() {
+        let request = create("unhandled-context", "unhandled-context-key", 'f');
+        let run_id = request.run_id.clone();
+        ledger.create_or_get(request).await.assert_value();
+        let worker = reference(&run_id, 1);
+        let cause = openengine_cluster_protocol::FailureDiagnostic {
+            message: openengine_cluster_protocol::BoundedLogMessage::new(
+                "Node worker failed with unhandled error: crash",
+            )
+            .assert_value(),
+            execution: None,
+            cursor: None,
+        };
+        let latched = ledger
+            .append(
+                &run_id,
+                vec![
+                    RunEvent::RunStarted,
+                    started(worker.clone()),
+                    diagnostic(
+                        Some(worker.execution),
+                        "worker crash detail",
+                        FailureDiagnosticKind::Failure,
+                    ),
+                    RunEvent::NodeCompleted {
+                        completion: NodeCompletion {
+                            reference: worker,
+                            outcome: WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+                        },
+                    },
+                    RunEvent::PrimaryGraphCompleted {
+                        result: TerminalResult::Failed {
+                            reason: "unhandled".parse().assert_value(),
+                            context: Some(Box::new(openengine_cluster_protocol::FailureContext {
+                                primary: Some(cause.clone()),
+                                ..Default::default()
+                            })),
+                        },
+                        auxiliary_pending: true,
+                        delivery_execution: None,
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        let result = latched.snapshot.primary_graph.assert_value().result;
+        let TerminalResult::Failed {
+            context: Some(context),
+            ..
+        } = &result
+        else {
+            panic!("{result:?}")
+        };
+        assert_eq!(context.primary, Some(cause));
+        assert_eq!(context.recorded.len(), 1);
+        assert!(context.recorded[0].cursor.is_some());
+        let finished = ledger
+            .append(
+                &run_id,
+                vec![
+                    diagnostic(None, "auxiliary failure", FailureDiagnosticKind::Failure),
+                    RunEvent::Terminal {
+                        result: result.clone(),
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        assert_eq!(finished.snapshot.terminal, Some(result));
+    }
+}
+
+#[tokio::test]
 async fn terminal_event_and_status_keep_same_evidence_even_when_the_worker_is_voided() {
     for ledger in ledgers() {
         let request = create("failure-context", "failure-key", 'd');

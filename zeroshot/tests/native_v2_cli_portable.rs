@@ -15,6 +15,39 @@ use fixture::{Fixture, success};
 mod unix_controller;
 
 #[test]
+fn unchecked_worker_error_fails_foreground_status_and_logs() {
+    let fixture = Fixture::new();
+    let mut graph: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+    graph["root"]["children"] = serde_json::json!([
+        graph["root"]["children"][0].clone(),
+        {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+    ]);
+    fixture.write("graph.json", &graph);
+    let result = fixture.run("fail", false);
+    assert!(!result.status.success());
+    let receipt: serde_json::Value =
+        serde_json::from_slice(result.stdout.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let status = fixture.json(&["status", id]);
+    let terminal = &status["status"]["terminalResult"];
+    assert_eq!(terminal["status"], "failed");
+    assert_eq!(terminal["reason"], "unhandled");
+    let cause = terminal["context"]["primary"]["message"].as_str().unwrap();
+    assert!(
+        cause.contains("worker") && cause.contains("crash"),
+        "{terminal}"
+    );
+    let logs = fixture.command(&["logs", id]).output().unwrap();
+    success(&logs);
+    let text = String::from_utf8(logs.stdout).unwrap();
+    assert!(
+        text.contains("unhandled") && text.contains("worker") && text.contains("crash"),
+        "{text}"
+    );
+}
+
+#[test]
 fn native_local_run_handles_unicode_paths_correction_and_large_output() {
     for mode in ["finish", "correction", "volume"] {
         let fixture = Fixture::new();

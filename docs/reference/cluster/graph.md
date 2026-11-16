@@ -38,7 +38,7 @@ Every graph node is tagged by `kind`. Node payloads reject unknown fields.
 | `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
 | `map`      | Declared state, body, structured array selector `over`, positive concurrent-item limit `maxItems`, promoted paths                                          |
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
-| `fail`     | Finite-enum reason; `unhandled` is reserved for a future compiler's implicit sink                                                                          |
+| `fail`     | Finite-enum reason; `unhandled` is reserved for runtime handling of unchecked worker errors                                                                |
 
 Parallel joins are `all`, `any`, `quorum { count }`, or `first { when }`. The closed worker error
 channel is `timeout`, `crash`, `malformed`, and `refusal`. Choice reachability/exhaustiveness, loop
@@ -49,6 +49,16 @@ request deadline from creation: omission means 7 days, with a maximum of 30 days
 node deadlines accept the `PositiveInteger` wire range.
 Built-in graphs omit deadlines for every node; provider processes have no separate execution
 deadline. Custom graphs may still declare a node deadline.
+
+After a step or verifier uses its crash retry attempts, a final worker error ends its path as a
+`fail` with reason `unhandled` unless a guard anywhere in the graph reads that node's `error`
+selector. The failure context names the node and error code. Error reads in a choice condition,
+loop `until`, or `first` join `when` count, including selectors inside `all`, `any`, `not`,
+`k_of_n`, and `k_of_map`. This is a graph-wide rule: the guard need not execute or match the
+particular error label. A node with an error read retains authored routing, and an optional step
+can use such a guard to continue after errors. There is no additional graph field or validation
+requirement. Like an authored `fail`, propagation follows the enclosing group's terminal semantics.
+
 Normal-success continuation requires every branch for `all`, one branch for `any`/`first`, and
 `count` branches for `quorum`. Quorum flow and promotion guarantees range over every valid
 size-`count` completing branch set. A set is valid only when its branch-completion predicates are

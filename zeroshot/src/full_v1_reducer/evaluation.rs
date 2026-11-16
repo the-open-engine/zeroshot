@@ -388,6 +388,30 @@ impl<'history> Engine<'history> {
                 input,
             });
         }
+        if let WorkerOutcome::Error { code, .. } = outcome
+            && !self.error_reads.contains(spec.name)
+        {
+            return Ok(Status::Terminal {
+                position: *position,
+                projection: TerminalProjection::Failed {
+                    reason: EnumLabel::new("unhandled")
+                        .map_err(|_| ReducerError::InconsistentHistory)?,
+                    context: Some(Box::new(openengine_cluster_protocol::FailureContext {
+                        primary: Some(openengine_cluster_protocol::FailureDiagnostic {
+                            message: openengine_cluster_protocol::BoundedLogMessage::new(format!(
+                                "Node {} failed with unhandled error: {}",
+                                spec.name,
+                                code.as_str(),
+                            ))
+                            .map_err(|_| ReducerError::Encoding)?,
+                            execution: None,
+                            cursor: None,
+                        }),
+                        ..Default::default()
+                    })),
+                },
+            });
+        }
         let writes_applied = self.apply_outcome(OutcomeApplication {
             spec: &spec,
             context: &mut *context,

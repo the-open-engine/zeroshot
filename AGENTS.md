@@ -188,6 +188,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
+- The reducer inventories error selectors across all choice, loop and first-join guards once per
+  reduction, including nested and aggregate guards. A final step/verifier error without any such
+  read becomes the reserved `unhandled` failure after crash retries, with node/code as the primary
+  diagnostic. Reads are graph-wide rather than path- or label-dependent; enclosing groups retain
+  their authored-terminal semantics. Keep reducer primary causes alongside retained ledger evidence.
 - Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`
   while running or stopping, including postmortem/finalization. Finished status carries only
   `terminalResult`. Graph-result logging and its watch event publish with `PrimaryGraphCompleted`;
