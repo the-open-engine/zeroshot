@@ -405,6 +405,10 @@ mod github;
 #[path = "tests/store.rs"]
 mod store;
 
+#[cfg(unix)]
+#[path = "tests/plugin.rs"]
+mod plugin;
+
 #[test]
 fn native_authentication_and_model_errors_preserve_machine_classification() {
     for (error, model_text) in [

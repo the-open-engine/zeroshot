@@ -16,7 +16,8 @@ pub(super) fn install(
 ) -> io::Result<()> {
     let root = home.join("zeroshot-plugins");
     let plugin_dir = root.join(id);
-    std::fs::create_dir_all(&plugin_dir)?;
+    owned_directory(&root, home)?;
+    owned_directory(&plugin_dir, home)?;
     let scratch = command
         .environment
         .get("TMPDIR")
@@ -28,8 +29,15 @@ pub(super) fn install(
     write_provider_file(&plugin_dir, "package.json", br#"{"type":"module"}"#)?;
     write_provider_file(&plugin_dir, "index.js", source.as_bytes())?;
     let expected = root.join("expected");
-    std::fs::create_dir_all(&expected)?;
-    std::fs::File::create(expected.join(id))?;
+    owned_directory(&expected, home)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    options.open(expected.join(id))?;
     let plugin = url::Url::from_directory_path(&plugin_dir)
         .map_err(|_| io::Error::other("OpenCode plugin path is invalid"))?;
     let mut config: Value = serde_json::from_str(
@@ -52,6 +60,32 @@ pub(super) fn install(
         "OPENCODE_CONFIG_CONTENT".to_owned(),
         serde_json::to_string(&config)?,
     );
+    Ok(())
+}
+
+/// Creates one directory below the worker-owned home, refuses links, and gives it the home's owner.
+fn owned_directory(path: &Path, home: &Path) -> io::Result<()> {
+    match crate::execution::platform::create_private_directory(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::other(
+            "OpenCode plugin directory is not a directory",
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let owner = std::fs::metadata(home)?;
+        if metadata.uid() != owner.uid() || metadata.gid() != owner.gid() {
+            std::os::unix::fs::lchown(path, Some(owner.uid()), Some(owner.gid()))?;
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = home;
     Ok(())
 }
 
