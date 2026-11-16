@@ -1,19 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import {
-  ArrowLeft,
-  ArrowRight,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Loader2,
-  Pause,
-  Play,
-} from 'lucide-react';
+import { ChevronRight, Loader2 } from 'lucide-react';
 import { InspectorPanel } from './InspectorPanel';
 import { InspectorHeader } from './InspectorHeader';
 import { NodeTrail } from './NodeTrail';
 import { RunFailureDetails } from './RunFailureDetails';
+import { RunTimeline } from './RunTimeline';
 import {
   useRunView,
   historyViewCursor,
@@ -31,6 +23,7 @@ import { WorkflowCanvas } from './WorkflowCanvas';
 import { findNode, labels, type Document, type GraphNode, type Positions } from './domain';
 import type { WorkerOption } from './workers';
 import { nodeTitle } from './workflow-projection';
+import type { WorkflowObservation } from './workflow-observation';
 import { appendHistory, type RunHistoryReader } from './run-history-source';
 import {
   currentInvocation,
@@ -74,6 +67,15 @@ type RunHistoryViewProps = {
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
 };
+/** What the graph shows of the run, and whether it follows a live run's latest events. */
+function observed(
+  key: string,
+  nodes: WorkflowObservation['nodes'],
+  following: boolean
+): WorkflowObservation {
+  return { key, nodes, following };
+}
+
 /** Where a node replay starts: its first event, unless the view is already part-way through it. */
 function replayStart(replay: readonly number[], position: number, restart: boolean): number {
   const first = replay[0],
@@ -294,7 +296,7 @@ export function RunHistoryView({
                 workers={workers}
                 select={inspect}
                 focus={focus}
-                observation={{ key: run.runId, nodes: projection.nodes }}
+                observation={observed(run.runId, projection.nodes, isLiveRun && following)}
                 view={canvas}
                 onViewChange={setCanvas}
                 inspectorHidden={!inspector}
@@ -975,182 +977,6 @@ function useHistoryFeed(
     follow,
     loadHistory,
   };
-}
-
-type RunTimelineProps = {
-  moment: ReturnType<typeof historyMoments>[number];
-  moments: ReturnType<typeof historyMoments>;
-  safePosition: number;
-  isLiveRun: boolean;
-  following: boolean;
-  connection: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'limited' | 'error';
-  loading: boolean;
-  loadedHead: boolean;
-  playing: boolean;
-  historyPending: boolean;
-  restorePending: boolean;
-  eventsCount: number;
-  showNode: () => void;
-  goLatest: () => void;
-  scrub: (index: number) => void;
-  togglePlay: () => void;
-  loadMore: () => void;
-};
-
-function liveStatusLabel(
-  connection: RunTimelineProps['connection'],
-  loading: boolean,
-  loadedHead: boolean,
-  following: boolean
-): string {
-  return connection === 'reconnecting'
-    ? 'Reconnecting'
-    : connection === 'connecting'
-      ? 'Connecting'
-      : connection === 'limited' || (!loading && !loadedHead)
-        ? 'Load more'
-        : connection === 'error'
-          ? 'Reconnect'
-          : loading || connection === 'idle'
-            ? 'Connecting'
-            : following
-              ? 'Live'
-              : 'Go live';
-}
-
-function RunTimeline({
-  moment,
-  moments,
-  safePosition,
-  isLiveRun,
-  following,
-  connection,
-  loading,
-  loadedHead,
-  playing,
-  historyPending,
-  restorePending,
-  eventsCount,
-  showNode,
-  goLatest,
-  scrub,
-  togglePlay,
-  loadMore,
-}: RunTimelineProps) {
-  return (
-    <footer className="history-timeline" aria-label="Run timeline">
-      <div className="timeline-caption">
-        <div>
-          {!(isLiveRun && following) && (
-            <span className="timeline-mode">
-              {safePosition === 0
-                ? 'Start'
-                : safePosition === moments.length - 1 && loadedHead
-                  ? 'Latest'
-                  : 'Replay'}
-            </span>
-          )}
-          <strong>{moment.label}</strong>
-          {moment.node && (
-            <button className="text-button" onClick={showNode}>
-              Show node
-            </button>
-          )}
-        </div>
-        <div className="timeline-progress">
-          {isLiveRun && (
-            <button
-              className={`history-live ${following && connection === 'connected' ? 'following' : ''}`}
-              disabled={loading || (following && connection === 'connected')}
-              title={following ? 'Following latest events' : 'Follow latest events'}
-              onClick={goLatest}
-            >
-              <span className="live-dot" />
-              {liveStatusLabel(connection, loading, loadedHead, following)}
-            </button>
-          )}
-          <span className="timeline-counter">
-            {safePosition} / {moments.length - 1}
-          </span>
-        </div>
-      </div>
-      <div className="timeline-controls">
-        <button
-          className="icon-button"
-          title="Go to start"
-          aria-label="Go to start"
-          disabled={!safePosition}
-          onClick={() => scrub(0)}
-        >
-          <ChevronsLeft size={18} />
-        </button>
-        <button
-          className="icon-button"
-          title="Previous event"
-          aria-label="Previous event"
-          disabled={!safePosition}
-          onClick={() => scrub(safePosition - 1)}
-        >
-          <ArrowLeft size={17} />
-        </button>
-        <button
-          className="timeline-play"
-          title={playing ? 'Pause replay' : 'Play replay'}
-          aria-label={playing ? 'Pause replay' : 'Play replay'}
-          disabled={moments.length < 2 || loading}
-          onClick={togglePlay}
-        >
-          {playing ? <Pause size={17} /> : <Play size={17} />}
-        </button>
-        <input
-          type="range"
-          aria-label="History position"
-          aria-valuetext={moment.label}
-          min={0}
-          max={moments.length - 1}
-          step={1}
-          value={safePosition}
-          onChange={(event) => scrub(Number(event.target.value))}
-        />
-        <button
-          className="icon-button"
-          title="Next event"
-          aria-label="Next event"
-          disabled={safePosition === moments.length - 1}
-          onClick={() => scrub(safePosition + 1)}
-        >
-          <ArrowRight size={17} />
-        </button>
-        <button
-          className="icon-button"
-          title="Go to latest"
-          aria-label="Go to latest"
-          disabled={safePosition === moments.length - 1 && loadedHead && (!isLiveRun || following)}
-          onClick={goLatest}
-        >
-          <ChevronsRight size={18} />
-        </button>
-      </div>
-      {historyPending ? (
-        <div className="history-load-state" role="status">
-          <Loader2 size={13} className="spin" /> Run history is still setting up
-        </div>
-      ) : loading ? (
-        <div className="history-load-state">
-          <Loader2 size={13} className="spin" /> Loading history · {eventsCount} events
-        </div>
-      ) : !loadedHead || connection === 'limited' ? (
-        <div className="history-load-state">
-          {restorePending
-            ? 'Load more history to restore your saved position.'
-            : `${eventsCount} events loaded`}{' '}
-          <button className="text-button" onClick={loadMore}>
-            Load more history
-          </button>
-        </div>
-      ) : null}
-    </footer>
-  );
 }
 
 type RunInspectorProps = {

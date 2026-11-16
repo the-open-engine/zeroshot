@@ -8,7 +8,6 @@ import {
   Download,
   FilePlus2,
   Loader2,
-  Menu,
   Plus,
   Redo2,
   Undo2,
@@ -90,16 +89,13 @@ export function AppView({ model }: { model: AppModel }) {
               navigate={(section) => {
                 if (section === 'runs') window.location.hash = lastRun.current;
               }}
-            >
-              <button
-                className="icon-button sidebar-toggle"
-                title="Profiles"
-                aria-label="Profiles"
-                onClick={() => setSidebar(!sidebar)}
-              >
-                <Menu size={19} />
-              </button>
-            </AppHeader>
+              sidebar={{
+                label: 'Profiles',
+                id: 'profiles-sidebar',
+                open: sidebar,
+                setOpen: setSidebar,
+              }}
+            />
           )}
           <div className="app-body">
             {!host && <ProfileSidebar model={model} />}
@@ -985,7 +981,11 @@ function ProfileSidebar({ model }: { model: AppModel }) {
     setJson,
   } = model;
   return (
-    <nav className={`profile-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Profiles">
+    <nav
+      id="profiles-sidebar"
+      className={`page-sidebar profile-sidebar ${sidebar ? 'visible' : ''}`}
+      aria-label="Profiles"
+    >
       <div className="sidebar-heading">
         <span className="sidebar-title">Profiles</span>
         <button
