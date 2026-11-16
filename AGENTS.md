@@ -143,6 +143,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
   transport failure makes maintenance evidence unknown; a steer has no receipt and is offered again.
+  A receipt write that outlasts the callback deadline keeps running, and its conversation is not
+  offered that steer again while it is in flight; a failed write leaves no receipt.
   Native callback installation shares the updater's installed-executable path normalization, so
   Linux controllers keep delivering after an atomic executable replacement.
   Callback frames have absolute I/O deadlines
