@@ -129,6 +129,16 @@ impl LinuxTargetCredentialStore {
 
 #[async_trait]
 impl TargetCredentialStore for LinuxTargetCredentialStore {
+    async fn remove(&self, target_id: &str) -> Result<(), TargetAuthorityError> {
+        // A later environment override must not redirect deletion away from the saved login.
+        let selected = match self.stored_backend(target_id).await?.or(self.forced) {
+            Some(selected) => selected,
+            None => self.initial_backend(target_id).await,
+        };
+        self.backend(selected).remove(target_id).await?;
+        self.file.remove_credential(target_id).await?;
+        self.file.remove_backend(target_id).await
+    }
     async fn prepare_for_login(
         &self,
         target_id: &str,

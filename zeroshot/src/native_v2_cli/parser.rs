@@ -312,6 +312,12 @@ enum StackCommand {
 
 #[derive(Debug, Subcommand)]
 enum TargetCommand {
+    /// List local target names, origins and access kinds without login data.
+    List(TargetListArgs),
+
+    /// Remove a local target, its stored login and resume permissions.
+    Remove(TargetRemoveArgs),
+
     /// Register a named target.
     Add(TargetAddArgs),
 
@@ -451,6 +457,24 @@ struct TargetNameArgs {
     /// Local target name.
     #[arg(value_name = "NAME")]
     name: String,
+}
+
+#[derive(Debug, Args)]
+struct TargetListArgs {
+    /// Emit the target inventory as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct TargetRemoveArgs {
+    /// Local target name. The built-in platform target cannot be removed.
+    #[arg(value_name = "NAME")]
+    name: String,
+
+    /// Emit the removal receipt as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]

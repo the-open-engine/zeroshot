@@ -12,6 +12,7 @@ description: "Python API reference for run results, summaries, statuses, stack s
         - FailureContext
         - FailureDiagnostic
         - LogEvent
+        - NamedTarget
         - ResolvedGitRemote
         - ResolvedSource
         - RunResult
@@ -27,6 +28,7 @@ description: "Python API reference for run results, summaries, statuses, stack s
         - SourceForgeIdentity
         - StackRunStatus
         - StackStatus
+        - TargetRemoveResult
       show_if_no_docstring: false
 
 `RunStatus.steers` contains recorded directions and their confirmed receiving execution references.

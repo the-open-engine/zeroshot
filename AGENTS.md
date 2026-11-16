@@ -1621,6 +1621,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## CLI and target contracts
 
+- `target list` and `target remove` manage local named-target state, including the built-in
+  `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses
+  `platform`, holds the registry lock through stored-login and resume-authorization cleanup, and
+  retains the record on cleanup failure for retry. Login revalidates the selected record under
+  that lock and holds it through persistence; recovery writes validate the registered target ID
+  under the registry lock before taking the recovery lock. Late receipts retain their run result
+  without restoring a removed target's permissions. Python `Client.list_targets()` and
+  `Client.remove_target()` use that same local registry independently of the client's run target.
+  These commands do not change MCP tools, protocol source types, shared skills or remote plugins.
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
 - Hosted suspend and vector POST routes use the separate `hosted_run_controls` discovery extension
   (`openengine.hosted-run-controls/v1`), relative to `hosted_runs.base_url`. Its strict

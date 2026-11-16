@@ -79,6 +79,14 @@ impl PrivateFileTargetCredentialStore {
             .map_err(|_| authority_error("target credential store metadata write failed"))
     }
 
+    pub(super) async fn remove_backend(&self, target_id: &str) -> Result<(), TargetAuthorityError> {
+        let path = self.backend_path(target_id)?;
+        tokio::task::spawn_blocking(move || remove_private_file(&path))
+            .await
+            .map_err(|_| authority_error("target credential store task failed"))?
+            .map_err(|_| authority_error("target credential store metadata cleanup failed"))
+    }
+
     fn credential_path(&self, target_id: &str) -> Result<PathBuf, TargetAuthorityError> {
         credential_service(target_id)?;
         Ok(self.directory.join(format!("{target_id}.json")))
@@ -92,6 +100,9 @@ impl PrivateFileTargetCredentialStore {
 
 #[async_trait]
 impl TargetCredentialStore for PrivateFileTargetCredentialStore {
+    async fn remove(&self, target_id: &str) -> Result<(), TargetAuthorityError> {
+        self.remove_credential(target_id).await
+    }
     async fn prepare_for_login(
         &self,
         target_id: &str,
