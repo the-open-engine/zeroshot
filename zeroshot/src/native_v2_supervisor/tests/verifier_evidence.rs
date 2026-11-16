@@ -177,7 +177,7 @@ async fn verifier_evidence_does_not_suppress_a_later_cleanup_timeout() {
 }
 
 #[tokio::test]
-async fn unreachable_parallel_reviews_retain_exhausted_loops_in_status_and_history() {
+async fn terminal_parallel_reviews_retain_selected_loop_evidence_in_status_and_history() {
     for join in [json!({"kind":"all"}), json!({"kind":"any"})] {
         let branches = ["left", "right"].map(|side| {
             let name = format!("{side}_assessor");
@@ -207,7 +207,7 @@ async fn unreachable_parallel_reviews_retain_exhausted_loops_in_status_and_histo
         let terminal = harness.supervisor.drive().await.assert_value();
         let TerminalResult::Failed {
             context: Some(context),
-            ..
+            reason,
         } = &terminal
         else {
             panic!("missing loop evidence")
@@ -218,19 +218,14 @@ async fn unreachable_parallel_reviews_retain_exhausted_loops_in_status_and_histo
             .map(|entry| (entry.node.as_str(), entry.completed_iterations.get()))
             .collect::<Vec<_>>();
         loops.sort_unstable();
-        if join["kind"] == "any" {
-            assert_eq!(loops, [("left_rounds", 2), ("right_rounds", 2)]);
-        } else {
-            assert!(!loops.is_empty());
-            assert!(loops.iter().all(
-                |(name, count)| ["left_rounds", "right_rounds"].contains(name) && *count == 2
-            ));
-        }
-        if join["kind"] == "any" {
-            assert_eq!(context.verifiers.len(), 2);
-        } else {
-            assert!((1..=2).contains(&context.verifiers.len()));
-        }
+        assert_eq!(reason.as_str(), "unfinished");
+        assert_eq!(loops.len(), 1);
+        assert!(
+            loops
+                .iter()
+                .all(|(name, count)| ["left_rounds", "right_rounds"].contains(name) && *count == 2)
+        );
+        assert!((1..=2).contains(&context.verifiers.len()));
         assert!(!context.incomplete);
         let tail = harness
             .ledger
@@ -252,11 +247,7 @@ async fn unreachable_parallel_reviews_retain_exhausted_loops_in_status_and_histo
                 )
             })
             .count();
-        if join["kind"] == "any" {
-            assert_eq!(receipts, 4);
-        } else {
-            assert!((2..=4).contains(&receipts));
-        }
+        assert!((2..=4).contains(&receipts));
         assert!(
             matches!(&tail.events.last().assert_value().event, RunEvent::Terminal { result } if result == &terminal)
         );

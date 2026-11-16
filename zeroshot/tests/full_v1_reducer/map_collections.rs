@@ -263,7 +263,7 @@ async fn nested_terminal_maps_keep_one_selected_trace() {
 }
 
 #[tokio::test]
-async fn terminal_map_releases_queued_siblings_before_other_parallel_work() {
+async fn terminal_map_ends_enclosing_parallel_without_starting_queued_work() {
     let state = required_array_record(&[("items", "null")]);
     let mapped = terminal_map("mapped", terminal_item(&state, "map_worker"), &state, 2);
     let live = json!({"kind":"seq","name":"live","state":state,"promotedStatePaths":[],
@@ -277,12 +277,12 @@ async fn terminal_map_releases_queued_siblings_before_other_parallel_work() {
             SettledSpec::new(1, 1, "map_worker")
                 .map_indices(vec![0])
                 .dispatched(1)
-                .position(2),
+                .position(3),
             success(1),
         ),
         settled(
             SettledSpec::new(2, 2, "prior_worker")
-                .dispatched(3)
+                .dispatched(2)
                 .position(4),
             success(1),
         ),
@@ -296,15 +296,16 @@ async fn terminal_map_releases_queued_siblings_before_other_parallel_work() {
             next_execution: 3,
         })
         .assert_value();
-    assert!(reduced.terminal.is_none());
-    assert!(reduced.decisions.iter().any(|decision| matches!(decision,
-        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "next_worker")));
+    assert!(
+        matches!(reduced.terminal, Some(TerminalProjection::Failed { reason, .. })
+        if reason.as_str() == "ended")
+    );
     assert_eq!(
         reduced
             .decisions
             .iter()
             .filter(|decision| matches!(decision, Decision::Dispatch { .. }))
             .count(),
-        1
+        0
     );
 }

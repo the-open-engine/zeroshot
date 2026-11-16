@@ -208,6 +208,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
+  A parallel branch terminal propagates its result when reached no later than join satisfaction;
+  recorded history orders competing terminals, with canonical branch order breaking ties.
+  Terminal replay retains only that branch's evidence, validates started siblings within the
+  selected history window without charging unstarted branches, and cancels siblings through the
+  existing parallel-loser cleanup. Non-first joins continue only when reached; their legacy
+  `quorum_unreachable` label remains in the contract but is no longer emitted.
   Shared short-circuiting three-valued guard evaluation preserves candidate-local first-join eligibility.
   Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
   branches on join settlement, consuming only executions owned by that visit window and preserving

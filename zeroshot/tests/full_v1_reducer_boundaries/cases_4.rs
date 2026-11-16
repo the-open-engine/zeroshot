@@ -1,12 +1,12 @@
 use super::*;
 
 #[tokio::test]
-async fn unreachable_quorum_and_first_no_satisfier_expose_failure_controls() {
-    assert_unreachable_quorum_control().await;
+async fn quorum_propagates_terminal_and_first_no_satisfier_exposes_control() {
+    assert_quorum_terminal().await;
     assert_no_satisfier_control().await;
 }
 
-async fn assert_unreachable_quorum_control() {
+async fn assert_quorum_terminal() {
     let conditional_failure = json!({
         "kind":"seq","name":"conditional_failure","state":{"kind":"record","fields":{}},
         "children":[
@@ -68,7 +68,7 @@ async fn assert_unreachable_quorum_control() {
             .reduce(input(&json!({}), &available))
             .assert_value()
             .terminal,
-        Some(TerminalProjection::Succeeded { .. })
+        Some(TerminalProjection::Failed { reason, .. }) if reason.as_str() == "left_failed"
     ));
 }
 
@@ -117,7 +117,7 @@ async fn assert_no_satisfier_control() {
 }
 
 #[tokio::test]
-async fn statically_impossible_joins_reach_the_parent_terminal_without_dispatch() {
+async fn terminal_branches_end_the_run_without_dispatch_or_join_controls() {
     for (join, branches) in impossible_joins::impossible_joins() {
         let parallel = json!({"kind":"par","name":"parallel","state":boundary_state(),
             "branches":branches,"join":join,"promotedStatePaths":[]});
@@ -125,26 +125,20 @@ async fn statically_impossible_joins_reach_the_parent_terminal_without_dispatch(
             succeed("handled"),
             json!({"kind":"fail","name":"handled","reason":"join_failed"}),
         ] {
-            let succeeds = terminal["kind"] == "succeed";
             let graph = verified(seq(vec![parallel.clone(), terminal]), json!({})).await;
             let traced = FullV1Reducer::native_v2(&graph)
                 .reduce_with_trace(input(&json!({"items":[]}), &[]))
                 .assert_value();
             assert!(
-                traced
+                !traced
                     .trace
                     .iter()
                     .any(|record| record.node.as_str() == "parallel"
                         && record.detail.as_deref() == Some("quorum_unreachable"))
             );
             let terminal = traced.reduction.terminal.assert_value();
-            if succeeds {
-                assert!(matches!(terminal, TerminalProjection::Succeeded { .. }));
-            } else {
-                assert!(
-                    matches!(terminal,TerminalProjection::Failed{reason,..} if reason.as_str()=="join_failed")
-                );
-            }
+            assert!(matches!(terminal, TerminalProjection::Failed { reason, .. }
+                if reason.as_str() == "branch_failed"));
             assert!(
                 !traced
                     .reduction
