@@ -9,8 +9,9 @@ A host-run request verifier records a question and ends its attempt `suspended` 
 settles the held request, and continues without rerunning earlier nodes or restoring local/direct
 workspace files. Agents remain non-interactive.
 
-This graph asks for approval after each worker pass. Rejection sends feedback to the next pass;
-approval ends successfully. The graph routes the request's existing `timeout` error to a failure.
+This graph asks for approval after each worker pass; a failed worker pass ends the run as
+`worker_failed` without asking. Rejection sends feedback to the next pass; approval ends
+successfully. The graph routes the request's existing `timeout` error to a failure.
 The example is an ordinary custom graph; there is no built-in approval template.
 
 ```json title="graph.json"
@@ -168,23 +169,23 @@ The example is an ordinary custom graph; there is no built-in approval template.
               "attempts": 1
             },
             {
-              "kind": "verifier",
-              "name": "approval",
-              "worker": "builtin.request.ask@1",
-              "input": {
+              "kind": "choice",
+              "name": "worker_result",
+              "state": {
                 "kind": "record",
                 "fields": {
+                  "task": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  },
                   "text": {
                     "required": true,
                     "type": {
                       "kind": "string"
                     }
-                  }
-                }
-              },
-              "output": {
-                "kind": "record",
-                "fields": {
+                  },
                   "feedback": {
                     "required": true,
                     "type": {
@@ -193,40 +194,86 @@ The example is an ordinary custom graph; there is no built-in approval template.
                   }
                 }
               },
-              "signals": {
-                "decision": ["approved", "rejected"]
-              },
-              "diagnostic": {
-                "kind": "record",
-                "fields": {
-                  "message": {
-                    "required": true,
-                    "type": {
-                      "kind": "string"
+              "branches": [
+                {
+                  "when": {
+                    "kind": "in",
+                    "value": {
+                      "name": "worker",
+                      "source": "error",
+                      "field": null
+                    },
+                    "labels": ["crash", "malformed", "refusal", "timeout"]
+                  },
+                  "node": {
+                    "kind": "fail",
+                    "name": "worker_failed",
+                    "reason": "worker_failed"
+                  }
+                }
+              ],
+              "otherwise": {
+                "kind": "verifier",
+                "name": "approval",
+                "worker": "builtin.request.ask@1",
+                "input": {
+                  "kind": "record",
+                  "fields": {
+                    "text": {
+                      "required": true,
+                      "type": {
+                        "kind": "string"
+                      }
                     }
                   }
-                }
-              },
-              "inputBindings": [
-                {
-                  "target": ["text"],
-                  "value": {
-                    "source": "state",
-                    "path": ["text"]
+                },
+                "output": {
+                  "kind": "record",
+                  "fields": {
+                    "feedback": {
+                      "required": true,
+                      "type": {
+                        "kind": "string"
+                      }
+                    }
                   }
-                }
-              ],
-              "writeBindings": [
-                {
-                  "value": {
-                    "node": "approval",
-                    "channel": "out",
-                    "path": ["feedback"]
-                  },
-                  "target": ["feedback"]
-                }
-              ],
-              "attempts": 1
+                },
+                "signals": {
+                  "decision": ["approved", "rejected"]
+                },
+                "diagnostic": {
+                  "kind": "record",
+                  "fields": {
+                    "message": {
+                      "required": true,
+                      "type": {
+                        "kind": "string"
+                      }
+                    }
+                  }
+                },
+                "inputBindings": [
+                  {
+                    "target": ["text"],
+                    "value": {
+                      "source": "state",
+                      "path": ["text"]
+                    }
+                  }
+                ],
+                "writeBindings": [
+                  {
+                    "value": {
+                      "node": "approval",
+                      "channel": "out",
+                      "path": ["feedback"]
+                    },
+                    "target": ["feedback"]
+                  }
+                ],
+                "attempts": 1
+              },
+              "promotedStatePaths": [["feedback"]]
             }
           ],
           "promotedStatePaths": [["feedback"]]
@@ -384,18 +431,23 @@ For approval, change the answer's decision to `approved` and give empty feedback
 provide every declared signal and every required output field. Unknown fields, signals and labels
 are refused as `invalid_request`, naming the path, without consuming the request. A second answer
 names the accepted successor. `resume`, including checkpoint selection, refuses requests and names
-`answer` before resolving credentials.
+`answer` before resolving credentials; after an answer it names the successor instead. If that
+successor is lost before its first node finishes, `resume` on it restarts the graph at its root
+and the question is asked again.
 
 Every request has a deadline: `timeoutMs` from creation, 7 days when omitted, at most 30 days.
 Acceptance is strictly before the deadline. At or after it, `answer` checks expiry before content,
-records an `expiry` vector and starts the `timeout` successor, then exits 1 naming it. Local and
-direct targets have no request timer. Inbox reads report overdue requests as `expired` without
+records an `expiry` vector and starts the `timeout` successor, then exits 1 naming it. Without a
+guard on the request node's `timeout` error, an expiry continues with the next node like any other
+unrouted node error; a graph in which a late answer must not proceed routes it, as the
+example does. Local and direct targets have no request timer. Inbox reads report overdue requests as `expired` without
 changing the suspended run or starting anything.
 
 `inbox list` returns `requests` and optional `nextAfter` in run ID order. Pass that cursor with
-`--after`; `--limit` accepts 1 through 100, default 50. Answered and force-stopped requests drop
-from the list. `inbox show` retains their `answered`, `expired` or `stopped` disposition and the
-successor link. It shows only the question that run made, never an inherited question.
+`--after`, which locally must be a run ID; `--limit` accepts 1 through 100, default 50. Answered
+and force-stopped requests drop from the list. `inbox show` retains their `answered`, `expired` or
+`stopped` disposition and the successor link. It shows only the question that run made, never an
+inherited question.
 
 Use `vectors RUN_ID` for bounded summaries and `vectors show RUN_ID ID` for full requests and
 answers. Successors inherit the ordered record. `checkpoints` includes entry to the request node.
@@ -405,6 +457,9 @@ Request nodes use `builtin.request.ask@1` with `{"kind":"request"}`. They must b
 exactly one required string input `text`, a flat record output of boolean, integer, number, string
 or enum fields, the fixed message diagnostic, no instructions and one attempt. They may appear
 in sequences, choices and loops, including repeated nodes, but never below parallel or map groups.
+All request nodes in one graph must declare the same signals and output, or validation refuses the
+graph as reusing `builtin.request.ask@1` with inconsistent declarations; share one shape, for
+example an enum signal with every decision and optional output fields.
 Workspace checkpoints must be enabled. Stack profiles cannot contain requests.
 
 Add `--target NAME` to `answer` and either inbox command for a named target. Discovery must advertise

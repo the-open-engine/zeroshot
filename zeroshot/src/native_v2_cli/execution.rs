@@ -295,6 +295,12 @@ where
                 | openengine_cluster_protocol::RunResumeFrom::Expiry {}
         )
     );
+    if let Some(successor) = &status.workspace_recovery.successor_run_id {
+        return Err(NativeV2CliError::Usage(format!(
+            "run already has successor {}",
+            successor.as_str()
+        )));
+    }
     if let CliRunStatus::Target(RunStatus::Suspended {
         suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
         ..
@@ -321,12 +327,6 @@ where
                 due.get()
             )));
         }
-    }
-    if let Some(successor) = &status.workspace_recovery.successor_run_id {
-        return Err(NativeV2CliError::Usage(format!(
-            "run already has successor {}",
-            successor.as_str()
-        )));
     }
     if !status.workspace_recovery.recoverable && !answering {
         return Err(NativeV2CliError::Usage(
@@ -992,9 +992,14 @@ async fn execute_answer<B: NativeV2CliBackend, W: Write>(
     if let (Some(input_error), Err(NativeV2CliError::Remote { message, .. })) =
         (input_error, &mut result)
     {
-        // Keep the controller's refusal (in particular expiry and its successor) first.
-        message.push_str("; answer file: ");
-        message.push_str(&input_error);
+        // A path names only the placeholder's shape; any other refusal (in particular expiry and
+        // its successor) stays first.
+        if message.starts_with('$') {
+            *message = format!("answer file: {input_error}");
+        } else {
+            message.push_str("; answer file: ");
+            message.push_str(&input_error);
+        }
     }
     result
 }

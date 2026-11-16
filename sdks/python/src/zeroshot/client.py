@@ -985,6 +985,8 @@ class Run:
             The existing terminal result, or a failed result whose reason is force_stopped.
 
         Raises:
+            RunSuspendedError: If the run is suspended and already has a successor, which a
+                force-stop leaves unchanged.
             RunNotFoundError: If the target no longer retains this run.
             TargetError: If mutation or observation fails.
             ProtocolError: If native output is malformed.

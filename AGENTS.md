@@ -103,7 +103,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   run's vector record, are not ranked, and go first. Separate per-injection ceilings for memory default
   to 16000 approximate tokens for node graph guidance and 8000 for repository hooks; each accepts
   1..=64000 and converts one token to four UTF-8 bytes, including framing. A steer is delivered whole
-  and does not count against them. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
+  and does not count against them. Claude Code shows at most 10,000 characters of hook context
+  inline, so a Claude Code tool call adds steers only while its whole context, memory included,
+  stays within 9,000 bytes: a steer that does not fit waits, with every later steer, for the
+  conversation's next prompt. A tool call made by a Claude Code subagent never carries or
+  receipts a steer. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
   including compaction; new conversations and conversations continued in a successor receive fresh
   memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
@@ -699,8 +703,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   validates its complete verifier result before successor admission and continues on the retained
   workspace; a late answer admits the existing timeout outcome and reports that successor as an
   invalid_request refusal. The owning controller's clock checks expiry before shape; clients send
-  valid answers unchanged and defer file errors until that check, retaining the controller's
-  refusal and the file diagnostic. A second answer names the existing
+  valid answers unchanged and defer file errors until that check, retaining the file diagnostic
+  and any controller refusal other than that of the placeholder's shape. A second answer names the existing
   successor. Request, answer and expiry vectors retain full content through show and inheritance;
   bounded list summaries omit text, schemas and answers. Inbox reads project only each run's own
   request vectors, never apply expiry, and exclude continued or stopped runs from pending pages.
@@ -943,7 +947,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   The connection is granted in request order, also to a pending request that is no longer
   polled, which then blocks every later operation: drop such a request before awaiting other
   ledger work in its place. The local controller's serving loop drops its terminal wait before
-  it runs a requested stop.
+  it runs a requested stop. Once the run ended or suspended it waits at most five seconds for a
+  first connection, so an interrupted launcher cannot keep the controller and its workspace
+  lease, and a stop requested from then on stops nothing: a suspended run stays suspended.
 - Live force-stop signals owned work before waiting for persistence. Local stop intent prevents
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;
@@ -974,11 +980,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   recursively transfer them to the successor's newly leased writer identity before admission. They
   advertise `openengine.workspace-recovery/v1`. Local resume persists predecessor/successor
   lineage before controller launch, uses a process-held file lock during admission, and reconciles
-  an interrupted launch before permitting another successor. A launch whose controller is confirmed
+  an interrupted launch before permitting another successor. It first waits, bounded, for an
+  ended or suspended predecessor's controller to release its lease. A launch whose controller is confirmed
   stopped is reconciled without a handoff wait. Status reports a claim whose launcher released it
   and whose controller neither runs nor admitted the run as recoverable, so a crash cannot strand
   the workspace. Local force-stop holds the same per-run recovery claim before reading status or
   successor ownership and through the controller reply, including when the run is still running.
+  Steers share that claim among themselves while they read status and record on a suspended run;
+  resume and force-stop take it alone and wait out steers briefly. Steer and suspend need a live
+  controller and never confirm its loss.
   Direct-target retained-workspace handoff records both sides before moving the tree
   and reconciles incomplete handoffs at startup. Resume reserves this durable handoff before
   acknowledging the successor; asynchronous credential resolution and preparation reuse that claim.

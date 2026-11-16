@@ -31,6 +31,10 @@ pub struct HookQuery {
     pub tool_name: String,
     pub tool_input: Value,
     pub cwd: PathBuf,
+    /// A native subagent's tool call; its returned context never reaches this conversation.
+    pub subagent: bool,
+    /// Steers join this tool call's context only while the whole of it stays within this bound.
+    pub context_budget: usize,
 }
 
 /// Complete callback context and the steers awaiting a carrier acknowledgement.
@@ -65,6 +69,8 @@ pub struct ActiveMemoryHooks {
 pub(crate) struct HookInstallation<'a> {
     pub invocation: &'a DriverInvocation,
     pub home: &'a Path,
+    /// A carrier that shows less than the shared maximum inline; `None` keeps that maximum.
+    pub context_budget: Option<usize>,
 }
 
 impl ActiveMemoryHooks {
@@ -167,7 +173,12 @@ impl ActiveMemoryHooks {
                 installation.home,
             )
             .and_then(|capability| match capability {
-                Some(path) => install(command, &path),
+                Some(path) => {
+                    if let Some(budget) = installation.context_budget {
+                        self.broker.bound(installation.invocation, budget);
+                    }
+                    install(command, &path)
+                }
                 None => Ok(()),
             });
         if result.is_err() {

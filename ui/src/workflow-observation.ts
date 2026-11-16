@@ -7,6 +7,11 @@ export type WorkflowNodeObservation = {
   count?: number;
   countUnit?: 'execution' | 'visit';
   detail?: string;
+  /**
+   * For a suspended request step, how its question stands now: still awaiting an answer, the run
+   * continued in a successor, or the deadline passed unanswered. Absent when the observer cannot say.
+   */
+  request?: 'pending' | 'continued' | 'expired';
 };
 
 export type WorkflowObservation = {

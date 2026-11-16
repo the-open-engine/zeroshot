@@ -46,10 +46,12 @@ test('thirteen explicitly simulated histories retain renderable immutable defini
         assert.equal(view.terminal, undefined, `${detail.title} leaked its terminal`);
     }
     // Paused runs record no terminal; their detail says so with null.
-    assert.deepEqual(
-      projectHistory(document, events, events.length - 1).terminal ?? null,
-      detail.terminal ?? null
-    );
+    const final = projectHistory(document, events, events.length - 1);
+    assert.deepEqual(final.terminal ?? null, detail.terminal ?? null);
+    // A run that ended suspended runs nothing and queues nothing.
+    if (detail.phase === 'suspended')
+      for (const [name, node] of Object.entries(final.nodes))
+        assert.ok(!['running', 'queued'].includes(node.state), `${detail.title}: ${name}`);
   }
 });
 

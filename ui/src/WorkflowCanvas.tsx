@@ -251,8 +251,10 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
           <ActivityDetail
             detail={presentation.detail}
             readOnly={data.readOnly}
-            waitingForPerson={
+            request={
               data.observation?.state === 'suspended' && node.worker === REQUEST_WORKER
+                ? (data.observation.request ?? 'pending')
+                : undefined
             }
           />
         )}
@@ -283,18 +285,24 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   );
 }
 
-/** The card's one-line worker detail; a request step waiting on a person says so instead. */
+const requestStandingLabels = {
+  pending: 'Waiting for an answer',
+  continued: 'Continued in a successor run',
+  expired: 'Expired without an answer',
+} as const;
+
+/** The card's one-line worker detail; a suspended request step says how its question stands. */
 function ActivityDetail({
   detail,
   readOnly,
-  waitingForPerson,
+  request,
 }: {
   detail?: string;
   readOnly?: boolean;
-  waitingForPerson: boolean;
+  request?: keyof typeof requestStandingLabels;
 }) {
   // Same one-line slot as the worker detail, so the measured layout is unchanged.
-  if (waitingForPerson) return <small className="workflow-waiting">Waiting for an answer</small>;
+  if (request) return <small className="workflow-waiting">{requestStandingLabels[request]}</small>;
   return (
     <small className={detail ? '' : 'needs-value'}>
       {detail || (readOnly ? 'Agent' : 'Choose model')}

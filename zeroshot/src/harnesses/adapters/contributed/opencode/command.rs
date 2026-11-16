@@ -207,6 +207,7 @@ pub(super) fn install_memory(
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: files.home(),
+                context_budget: None,
             },
             super::memory::install,
         );

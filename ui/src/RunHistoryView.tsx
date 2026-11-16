@@ -35,7 +35,9 @@ import {
   humanize,
   observedRoutes,
   projectHistory,
+  requestStanding,
   stateLabel,
+  suspensionStatus,
   type HistoryEvent,
   type HistoryPage,
   type Invocation,
@@ -66,6 +68,11 @@ type RunHistoryViewProps = {
   runHref?: (runId: string) => string;
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
+  /**
+   * The successor the host's own run list reports for this run. A suspended run gains one after
+   * this view read its detail; the host's existing refresh brings it without a reload.
+   */
+  successorRunId?: string;
 };
 /** What the graph shows of the run, and whether it follows a live run's latest events. */
 function observed(
@@ -91,6 +98,7 @@ export function RunHistoryView({
   viewKey,
   runHref,
   embedded = false,
+  successorRunId: listedSuccessor,
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
@@ -175,6 +183,21 @@ export function RunHistoryView({
   const projection = useMemo(
     () => document && projectHistory(document, events, moment.index, control),
     [document, events, moment.index, control]
+  );
+  const successorRunId = run?.workspaceRecovery?.successorRunId ?? listedSuccessor;
+  const now = useDeadlineClock(
+    run?.phase === 'suspended' && !successorRunId ? run.suspension?.request?.expiresAt : undefined
+  );
+  const observedNodes = useMemo(
+    () =>
+      projection &&
+      requestStanding(
+        projection.nodes,
+        run?.phase === 'suspended' ? run.suspension : undefined,
+        !!successorRunId,
+        now
+      ),
+    [projection, run, successorRunId, now]
   );
   useEffect(() => {
     window.document.title = `${run?.title ?? 'Runs'} · Zeroshot`;
@@ -285,6 +308,7 @@ export function RunHistoryView({
             retry={() => void loadHistory(run.runId, source, false)}
             embedded={embedded}
             runHref={runHref}
+            successorRunId={successorRunId}
           />
           <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
             <ReactFlowProvider>
@@ -296,7 +320,11 @@ export function RunHistoryView({
                 workers={workers}
                 select={inspect}
                 focus={focus}
-                observation={observed(run.runId, projection.nodes, isLiveRun && following)}
+                observation={observed(
+                  run.runId,
+                  observedNodes ?? projection.nodes,
+                  isLiveRun && following
+                )}
                 view={canvas}
                 onViewChange={setCanvas}
                 inspectorHidden={!inspector}
@@ -451,14 +479,25 @@ function currentHistoryState(
   preparing: boolean,
   atStart: boolean
 ) {
-  if (run.phase === 'suspended')
-    return `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}${run.suspension?.request ? `: ${run.suspension.request.text} (deadline ${new Date(run.suspension.request.expiresAt).toISOString()})` : ''}`;
+  if (run.phase === 'suspended') return suspensionStatus(run.suspension);
   if (run.phase === 'running' && run.suspendRequested) return 'Suspension requested';
   if (terminal) return terminal.status;
   if (run.runtimeFailure) return 'failed';
   if (preparing) return 'Preparing environment';
   if (atStart) return 'Before run';
   return run.phase === 'finished' ? 'Recorded history' : 'In progress';
+}
+
+/** The current time, renewed once when `deadline` passes so what waits on it can say so. */
+function useDeadlineClock(deadline: number | undefined) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (deadline === undefined || deadline <= now) return;
+    // Timers hold at most about 24.8 days; a later deadline renews the clock and waits again.
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(deadline - now, 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [deadline, now]);
+  return now;
 }
 
 /** Steps a playing replay one moment at a time and stops at the end of its scope. */
@@ -499,6 +538,7 @@ function RunHistoryHeader({
   retry,
   embedded,
   runHref,
+  successorRunId,
 }: {
   run: RunDetail;
   terminal: RunTerminal | undefined;
@@ -509,6 +549,7 @@ function RunHistoryHeader({
   retry: () => void;
   embedded: boolean;
   runHref?: (runId: string) => string;
+  successorRunId?: string;
 }) {
   const preparing = isPreparingEnvironment(run, history.events);
   const shownStatus =
@@ -521,8 +562,8 @@ function RunHistoryHeader({
         <div className="workspace-header history-header">
           <div className="profile-title">
             <h1 title={run.title}>{run.title}</h1>
-            {run.workspaceRecovery?.successorRunId && runHref && (
-              <a href={runHref(run.workspaceRecovery.successorRunId)}>Continue to successor</a>
+            {successorRunId && runHref && (
+              <a href={runHref(successorRunId)}>Continue to successor</a>
             )}
             <span
               className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}

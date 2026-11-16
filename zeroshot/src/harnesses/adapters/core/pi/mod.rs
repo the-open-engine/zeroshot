@@ -250,6 +250,7 @@ impl PiAdapter {
                 crate::active_memory::hooks::HookInstallation {
                     invocation,
                     home: files.home(),
+                    context_budget: None,
                 },
                 memory::install,
             );

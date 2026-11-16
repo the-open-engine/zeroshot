@@ -340,6 +340,10 @@ impl DeliverySource {
             context: self.memory.tool_context(query),
             steers: Vec::new(),
         };
+        // A steer returned to a subagent would be receipted for a conversation that never saw it.
+        if query.subagent {
+            return delivery;
+        }
         let Some(record) = self.record() else {
             return delivery;
         };
@@ -371,7 +375,7 @@ impl DeliverySource {
                 continue;
             };
             let added = vector.id.as_str().len() + text.len() + 4;
-            if bytes + added > super::native::MAX_CONTEXT_BYTES {
+            if bytes + added > query.context_budget {
                 break;
             }
             bytes += added;

@@ -787,7 +787,15 @@ impl NativeV2PlatformController {
                 successor.as_str()
             )));
         }
-        Ok(crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params).await?)
+        crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params)
+            .await
+            .map_err(|error| match error {
+                // The ledger refuses a steer by run state: the caller's to correct.
+                RunLedgerError::InvalidEvent(message) => {
+                    NativeV2PlatformError::InvalidRequest(message.to_owned())
+                }
+                error => error.into(),
+            })
     }
 
     pub async fn suspend(
@@ -838,8 +846,22 @@ impl NativeV2PlatformController {
         &self,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, NativeV2PlatformError> {
-        if self.ledger.get(&params.run_id).await?.is_none() {
+        let Some(stored) = self.ledger.get(&params.run_id).await? else {
             return Err(RunLedgerError::RunNotFound.into());
+        };
+        // Without its workspace a suspended attempt could never continue or be answered, yet
+        // would stay suspended. Force-stop ends it and removes what it retains.
+        if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            && self
+                .allocator
+                .workspace_recovery(&params.run_id)
+                .await
+                .successor_run_id
+                .is_none()
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "run is suspended; force-stop it before discarding its workspace".to_owned(),
+            ));
         }
         let discarded = self
             .allocator

@@ -11,7 +11,7 @@ import {
 import { JSDOM } from 'jsdom';
 import type { GraphNode, Runtime } from './domain';
 import type { CanvasView } from './run-view-state';
-import type { WorkflowObservation } from './workflow-observation';
+import type { WorkflowNodeObservation, WorkflowObservation } from './workflow-observation';
 import { createViteTestServer, installTestGlobals, runDetailFixture } from './test-support';
 
 type ElkMessage = { data: unknown };
@@ -155,6 +155,7 @@ type CanvasOptions = {
   deselect?: () => void;
   /** Receives a way to render the canvas again with another observation. */
   observe?: (render: (observation: WorkflowObservation) => Promise<void>) => void;
+  observed?: Record<string, WorkflowNodeObservation>;
 };
 
 /** A page where React Flow measures its nodes and ELK lays them out. */
@@ -262,7 +263,9 @@ async function mountRunGraph(
         )
       )
     );
-  await render(options.readOnly === false ? undefined : { key: detail.runId, nodes: {} });
+  await render(
+    options.readOnly === false ? undefined : { key: detail.runId, nodes: options.observed ?? {} }
+  );
   options.observe?.(render);
   await settle(container, () =>
     matchesViewport(container, view.viewport ?? fitted(container, options.size ?? canvas))
@@ -355,6 +358,29 @@ async function expandInPlace(container: HTMLElement) {
   const after = viewport(container);
   assert.equal(after.zoom, before.zoom);
   assert.deepEqual(onScreen(box(nodeWith(container, 'Collapse rounds')), after), card);
+}
+
+for (const [request, label] of [
+  [undefined, 'Waiting for an answer'],
+  ['pending', 'Waiting for an answer'],
+  ['continued', 'Continued in a successor run'],
+  ['expired', 'Expired without an answer'],
+] as const) {
+  test(`a suspended request card says "${label}" when its question is ${request ?? 'unknown'}`, async (t) => {
+    const container = await mountRunGraph(t, layoutWorker(), undefined, {
+      root: { kind: 'verifier', name: 'approval', worker: 'builtin.request.ask@1' },
+      runtime: {
+        harness: 'codex',
+        provider: 'openai',
+        size: 'small',
+        nodes: { approval: { kind: 'request' } },
+      },
+      view: { collapsed: [] },
+      observed: { approval: { state: 'suspended', request } },
+    });
+    const card = container.querySelector('.workflow-card.role-activity');
+    assert.equal(card?.querySelector('small')?.textContent, label);
+  });
 }
 
 for (const readOnly of [false, true]) {

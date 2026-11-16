@@ -24,6 +24,7 @@ const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 pub struct ConversationFiles {
     directory: PathBuf,
     _stage: Option<Arc<tempfile::TempDir>>,
+    unrestorable: bool,
 }
 
 impl ConversationFiles {
@@ -32,6 +33,16 @@ impl ConversationFiles {
         Self {
             directory: directory.canonicalize().unwrap_or(directory),
             _stage: None,
+            unrestorable: false,
+        }
+    }
+
+    /// A checkpoint whose conversations exist but could not be read back from its storage.
+    pub(crate) fn unrestorable() -> Self {
+        Self {
+            directory: PathBuf::new(),
+            _stage: None,
+            unrestorable: true,
         }
     }
 
@@ -52,6 +63,7 @@ impl ConversationFiles {
                 .canonicalize()
                 .unwrap_or_else(|_| stage.path().to_owned()),
             _stage: Some(Arc::new(stage)),
+            unrestorable: false,
         }
     }
 
@@ -60,6 +72,9 @@ impl ConversationFiles {
         instance: NodeInstanceId,
         node: &NodeName,
     ) -> Result<ConversationSource, &'static str> {
+        if self.unrestorable {
+            return Err("checkpoint conversation could not be restored");
+        }
         let directory = self.directory.join(instance.to_string());
         let file = fs::File::open(directory.join("conversation.json"))
             .map_err(|_| "checkpoint has no conversation")?;
@@ -587,16 +602,20 @@ pub(crate) fn select_files(
             Err(error) => return Err(error),
         };
         for entry in entries {
+            let entry = entry?;
+            let name = relative.join(entry.file_name());
+            let kind = entry.file_type()?;
+            // A provider store holds every session; other sessions' files are not this one's.
+            if !kind.is_dir() && !include(&name) {
+                continue;
+            }
             selection.budget = selection
                 .budget
                 .checked_sub(1)
                 .ok_or_else(|| io::Error::other("conversation directory is too large"))?;
-            let entry = entry?;
-            let name = relative.join(entry.file_name());
-            let kind = entry.file_type()?;
             if kind.is_dir() {
                 visit(root, &name, include, selection)?;
-            } else if include(&name) {
+            } else {
                 if !kind.is_file() {
                     return Err(io::Error::other("conversation contains a non-file entry"));
                 }

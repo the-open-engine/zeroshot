@@ -6,6 +6,10 @@ use std::path::Path;
 use crate::active_memory::hooks::command_handler;
 use crate::execution::process::ProcessSessionCommand;
 
+/// Claude Code 2.1.317 shows at most 10,000 characters of hook context inline and replaces
+/// larger output with a file preview. Steers that do not fit wait for the next prompt.
+pub(crate) const INLINE_CONTEXT_BYTES: usize = 9_000;
+
 pub(crate) fn install(command: &mut ProcessSessionCommand, capability: &Path) -> io::Result<()> {
     let mut settings = serde_json::json!({
         "hooks":{"PreToolUse":[{"hooks":[command_handler(capability)?]}]}

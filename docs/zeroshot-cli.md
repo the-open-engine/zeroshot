@@ -1498,7 +1498,7 @@ Options:
 ```text
 Broadcast standing direction to every agent conversation in a running or suspended run
 
-Usage: zeroshot steer [OPTIONS] <TEXT|--text-file <FILE>|--text-stdin> <RUN_ID>
+Usage: zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>
 
 Arguments:
   <RUN_ID>

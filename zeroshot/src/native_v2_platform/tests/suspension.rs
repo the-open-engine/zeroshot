@@ -496,14 +496,42 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
             .to_string()
             .contains("due at")
     );
+    // Without its workspace the attempt could never continue, yet would stay suspended.
+    assert!(matches!(
+        controller
+            .discard_workspace(RunDiscardWorkspaceParams { run_id: run.clone() })
+            .await,
+        Err(NativeV2PlatformError::InvalidRequest(message)) if message.contains("force-stop")
+    ));
     let forced = controller
-        .force(RunForceParams { run_id: run })
+        .force(RunForceParams {
+            run_id: run.clone(),
+        })
         .await
         .assert_value();
     assert!(
         matches!(forced.status, RunStatus::Finished {terminal_result:TerminalResult::Failed {ref reason, ..}, ..} if reason.as_str() == "force_stopped")
     );
     assert!(controller.resume(params).await.is_err());
+    controller
+        .discard_workspace(RunDiscardWorkspaceParams {
+            run_id: run.clone(),
+        })
+        .await
+        .assert_value();
+    let late = controller
+        .steer(openengine_cluster_protocol::RunSteerParams {
+            run_id: run,
+            text: "late".to_owned(),
+        })
+        .await;
+    // The ledger's refusal by run state is the caller's to correct, not an internal error.
+    assert!(
+        matches!(&late, Err(NativeV2PlatformError::InvalidRequest(message))
+            if message.contains("already terminal")),
+        "{:?}",
+        late.map(|_| ()).map_err(|error| error.to_string())
+    );
 }
 
 #[tokio::test]

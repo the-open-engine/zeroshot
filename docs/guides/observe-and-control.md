@@ -102,6 +102,8 @@ local controller is unavailable. Their error names `zeroshot resume RUN_ID` and 
 does not record a terminal result: an unclaimed lost run keeps its recorded status on every read.
 Only these explicit controls confirm loss under the controller lease before recording `runtime_lost`;
 they refuse to take over a controller that still owns its lease or whose loss cannot be confirmed.
+`steer` and `suspend` never take over: on a lost run they exit non-zero, name the two commands and
+leave the recorded state unchanged.
 
 ## Token usage
 
@@ -188,15 +190,18 @@ Use `code` to distinguish a failed run or a request that needs correction from a
 | Local registry has no workspace-recovery authorization           | `invalid_request` | `request.invalid`    | `{}`                             |
 | Workspace-recovery authorization does not match the original run | `invalid_request` | `request.invalid`    | `{}`                             |
 | Local workspace-recovery authorization is malformed              | `invalid_request` | `request.invalid`    | `{}`                             |
+| Refusal relayed from the run's controller or a target            | `target`          | `invalid_request`    | Target's details, else `{}`      |
 | Target transport failed                                          | `target`          | `target.unavailable` | `target` and `origin` when known |
 
 `run.failed` reports a terminal outcome; retrying observation does not restart that run. Inspect its
 status and logs before selecting a recovery action. Correct the request or local registry state
-for the listed `request.invalid` refusals. Transport failures remain `target.unavailable`.
+for the listed `request.invalid` refusals. A relayed `invalid_request` refusal says what to correct;
+do not retry it unchanged. Transport failures remain `target.unavailable`.
 
 The Python SDK maps `request.invalid` to `InvalidRequestError` and transport failures to
-`TargetError`. A failed run ends `Run.watch()` normally; `Run.wait()` returns its `RunResult`.
-Call `RunResult.raise_for_failure()` to opt into `RunFailedError`.
+`TargetError`; relayed `invalid_request` refusals also arrive as `TargetError`, carrying the
+controller's message. A failed run ends `Run.watch()` normally; `Run.wait()` returns its
+`RunResult`. Call `RunResult.raise_for_failure()` to opt into `RunFailedError`.
 
 ## Attach to an active execution
 
@@ -352,7 +357,8 @@ A suspended wait can continue only from its reported `wait.dueAt`, and continues
 No timer starts successors locally or on a direct target. Selected checkpoint resume and
 `--discard-workspace-changes` are refused for suspended runs. The predecessor stays suspended and
 `workspaceRecovery.successorRunId` links to its sole successor. `force-stop` can finish an unclaimed
-suspended attempt as `force_stopped` and removes its retained checkpoints.
+suspended attempt as `force_stopped` and removes its retained checkpoints. A direct target refuses
+`discard-workspace` for a suspended run that has no successor; force-stop it first.
 
 Foreground `run` and `watch` end with exit 0 at suspension. `logs` and read-only status commands
 continue to work after the controller exits. Add `--target NAME` for the same controls on a direct
@@ -397,7 +403,13 @@ Steering keeps a suspended run suspended. A run with a successor refuses and nam
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
 Every agent conversation, including reviewers, receives each steer once: at its next tool call or
-in its next prompt, whichever comes first. It cannot revise a tool call already issued. Direction
+in its next prompt, whichever comes first. It cannot revise a tool call already issued. On Claude
+Code, a tool call carries steers only while the returned context, Active Memory included, stays
+within 9,000 bytes, because Claude Code passes at most 10,000 characters inline; a larger steer, and
+any steer recorded after it, waits for that conversation's next prompt, where it arrives whole, so
+it may not arrive during the current turn. Tool
+calls made by Claude Code subagents never receive steers; the node's own conversation gets them at
+its next tool call or prompt. Direction
 takes precedence over authored instructions as guidance; permissions, output contracts, routing,
 runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
 Steers stand for the rest of the run and its successors. Continued conversations keep receipts;

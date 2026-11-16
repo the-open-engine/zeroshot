@@ -575,7 +575,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
         }
         restore_conversations(selection, self.stopping.clone())
             .await
-            .ok()
+            .unwrap_or_else(|_| Some(ConversationFiles::unrestorable()))
     }
 
     async fn suspend(
@@ -973,8 +973,14 @@ fn snapshot_path(directory: &Path, snapshot: &SnapshotId) -> PathBuf {
 async fn restore_conversations(
     selection: &CheckpointRestore,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
-) -> Result<ConversationFiles, CheckpointError> {
-    let snapshot = selected_snapshot(selection)?;
+) -> Result<Option<ConversationFiles>, CheckpointError> {
+    let snapshot = match selected_snapshot(selection) {
+        // No pointer or catalog entry means no such checkpoint, so no conversation either.
+        Err(CheckpointError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        snapshot => snapshot?,
+    };
     let (configuration, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)?;
     let repository = restic::Repository::new(
         configuration.program.for_restore()?,
@@ -990,13 +996,13 @@ async fn restore_conversations(
         .await?;
     let directory = stage.path().join("conversations");
     if !directory.is_dir() {
-        return Err(catalog::invalid("checkpoint has no conversations"));
+        return Ok(None);
     }
     // Drop the independently extracted workspace immediately; it is never installed.
     let workspace = stage.path().join("workspace");
     let _ = filesystem::remove_disposable_tree(&workspace);
     let retained = ConversationFiles::staged(stage);
-    Ok(ConversationFiles::nested(retained, directory))
+    Ok(Some(ConversationFiles::nested(retained, directory)))
 }
 
 pub(crate) async fn restore_checkpoint_conversations(
@@ -1006,5 +1012,7 @@ pub(crate) async fn restore_checkpoint_conversations(
     if selection.selection == CheckpointRestoreSelection::Latest {
         return None;
     }
-    restore_conversations(selection, stopping).await.ok()
+    restore_conversations(selection, stopping)
+        .await
+        .unwrap_or_else(|_| Some(ConversationFiles::unrestorable()))
 }

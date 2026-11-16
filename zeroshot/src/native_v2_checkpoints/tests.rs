@@ -967,3 +967,48 @@ async fn stopped_snapshot_operations_preserve_acknowledged_delivery_generation()
         assert!(!fixture.directory.join("index.json").exists());
     }
 }
+
+#[tokio::test]
+async fn unrestorable_conversations_are_distinct_from_checkpoints_without_conversations() {
+    let fixture = Fixture::new();
+    let node = NodeName::new("writer").assert_value();
+    let reason = |files: Option<ConversationFiles>| {
+        files.map(|files| {
+            files
+                .conversation(NodeInstanceId::new(1).assert_value(), &node)
+                .err()
+                .assert_value()
+        })
+    };
+    let continued = CheckpointRestore {
+        directory: fixture.directory.clone(),
+        selection: CheckpointRestoreSelection::Continue,
+    };
+    // Before the first checkpoint there is no latest pointer, and so no conversation.
+    assert_eq!(
+        reason(restore_checkpoint_conversations(&continued, None).await),
+        None
+    );
+    fixture.input_checkpoint("writer").await;
+    assert_eq!(
+        reason(restore_checkpoint_conversations(&continued, None).await),
+        None
+    );
+    fs::write(fixture.restic_control("fail-restore"), "fail").assert_value();
+    let store = fake_checkpoint_store(
+        fixture._root.path(),
+        fixture.directory.clone(),
+        fixture.workspace.clone(),
+        BTreeSet::new(),
+    )
+    .with_conversation_restore(Some(continued.clone()));
+    for files in [
+        restore_checkpoint_conversations(&continued, None).await,
+        store.restored_conversations().await,
+    ] {
+        assert_eq!(
+            reason(files),
+            Some("checkpoint conversation could not be restored")
+        );
+    }
+}

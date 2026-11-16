@@ -873,6 +873,10 @@ struct RunExportWorkspaceArgs {
 
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("text_source").required(true).args(["text", "text_file", "text_stdin"])))]
+// Clap lists required groups before positionals, but the run ID comes first.
+#[command(
+    override_usage = "zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>"
+)]
 struct RunSteerArgs {
     #[command(flatten)]
     run: RunSelectorArgs,
