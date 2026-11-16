@@ -336,7 +336,11 @@ impl LocalCliBackend {
                 )));
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let hint = if document.submission.runtime.workspace_checkpoints {
+                let hint = if matches!(status.status, RunStatus::Suspended { .. }) {
+                    "; restore the original workspace at that path before resuming; \
+                     suspended runs do not support checkpoint restoration"
+                        .to_owned()
+                } else if document.submission.runtime.workspace_checkpoints {
                     format!(
                         "; to restore a checkpoint, \
                      create a new empty folder at that path, then run `zeroshot resume {} \

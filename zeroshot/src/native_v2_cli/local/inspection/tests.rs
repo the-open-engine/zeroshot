@@ -22,6 +22,89 @@ async fn inbox_reads_pending_and_expired_requests_without_continuing_them() {
     super::super::backend::request_tests::assert_local_inbox_reads_do_not_continue_requests().await;
 }
 
+#[tokio::test]
+async fn missing_suspended_workspace_does_not_suggest_checkpoint_resume() {
+    use super::super::local_contract_tests::{contract_submission, create_contract_run};
+    use serde_json::json;
+
+    for suspension in [
+        json!({"reason":"command","node":"worker","createdAt":1000}),
+        json!({"reason":"wait","node":"worker","createdAt":1000,"wait":{"dueAt":1}}),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let backend = LocalCliBackend::new(
+            root.path().join("state"),
+            "unused".into(),
+            root.path().to_owned(),
+            "git".into(),
+        );
+        let id = RunId::new(uuid::Uuid::now_v7().to_string());
+        let submission = contract_submission("missing-suspended-workspace");
+        let ledger = create_contract_run(&backend, &id, &submission).await;
+        ledger
+            .append(
+                &id,
+                vec![
+                    RunEvent::RunStarted,
+                    RunEvent::Suspended {
+                        suspension: serde_json::from_value(suspension).unwrap(),
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let document = LocalRecoveryDocument {
+            submission,
+            workspace: root.path().join("retained workspace-é"),
+            delivery_receipt: None,
+            local_branch: None,
+            invoking_workspace: None,
+            request_digest: None,
+            workspace_revision: None,
+            resumed_from: None,
+            delivery_run_id: None,
+            successor_run_id: None,
+            pending_restore: None,
+        };
+        assert!(document.submission.runtime.workspace_checkpoints);
+        std::fs::create_dir(&document.workspace).unwrap();
+        std::fs::write(document.workspace.join("retained.txt"), "original contents").unwrap();
+        let removed_workspace = root.path().join("removed-workspace");
+        std::fs::rename(&document.workspace, &removed_workspace).unwrap();
+        backend.write_recovery_document(&id, &document).unwrap();
+        let params = RunStatusParams { run_id: id };
+        let error = backend
+            .run_resume_status(None, params.clone())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, NativeV2CliError::Usage(_)), "{error}");
+        let message = error.to_string();
+        for expected in [
+            "no longer exists",
+            &*document.workspace.to_string_lossy(),
+            "restore the original workspace",
+        ] {
+            assert!(message.contains(expected), "{message}");
+        }
+        for unsupported in [
+            "--from-checkpoint",
+            "--discard-workspace-changes",
+            "empty folder",
+        ] {
+            assert!(!message.contains(unsupported), "{message}");
+        }
+        std::fs::rename(&removed_workspace, &document.workspace).unwrap();
+        assert!(
+            backend
+                .run_resume_status(None, params)
+                .await
+                .unwrap()
+                .workspace_recovery
+                .recoverable
+        );
+    }
+}
+
 struct Fixture {
     root: tempfile::TempDir,
     backend: LocalCliBackend,
