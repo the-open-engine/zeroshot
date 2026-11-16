@@ -468,7 +468,7 @@ async fn steer_live_tool_call_records_carrier_receipt() {
     assert_eq!(entries.iter().filter(|entry| matches!(&entry.content,RunVectorContent::SteerReceipt { execution, .. } if execution == &reference)).count(),1);
 }
 
-#[path = "live_tests/networks.rs"]
+#[path = "live_tests/tests/networks.rs"]
 mod networks;
 
 fn live_submission(
