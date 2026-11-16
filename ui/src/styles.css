@@ -360,8 +360,14 @@ h2 {
   border-radius: 4px;
   flex-shrink: 0;
 }
-.icon-button:hover:not(:disabled) {
+.icon-button:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--hover);
+}
+/* Unavailable but still focusable, so a toggle that just did its work keeps keyboard focus. */
+.icon-button[aria-disabled='true'] {
+  cursor: default;
+  color: var(--disabled-text);
+  opacity: 0.65;
 }
 .profile-list {
   flex: 1;
@@ -770,45 +776,67 @@ h2 {
 .inspector-resize-handle:focus-visible {
   outline-offset: -4px;
 }
-.inspector-tabs {
-  height: 59px;
-  flex-shrink: 0;
+.inspector-header {
   display: flex;
-  align-items: center;
+  flex-shrink: 0;
+  align-items: flex-start;
   justify-content: space-between;
-  padding: 0 17px;
+  gap: 12px;
+  padding: 22px 20px 17px;
   border-bottom: 1px solid var(--hairline);
 }
-.inspector-tabs [role='tablist'] {
-  height: 100%;
-  display: flex;
-  gap: 24px;
+.inspector-header > div {
+  min-width: 0;
 }
-.inspector-tabs [role='tab'] {
-  height: 100%;
-  padding: 0 1px;
-  border-bottom: 2px solid transparent;
+.inspector-header h2 {
+  margin-top: 7px;
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.inspector-header .inspector-kind {
+  margin-top: 2px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
-.inspector-tabs [aria-selected='true'] {
-  border-bottom-color: var(--rust);
-  color: var(--ink);
+.inspector-header .node-trail + h2 {
+  margin-top: 0;
 }
 .inspector-scroll {
   overflow: auto;
   padding: 25px 23px;
   flex: 1;
 }
-.inspector-heading {
+/* Where the inspected node sits: its enclosing groups in one quiet line, flush with the title. */
+.node-trail ol {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 26px;
-  gap: 12px;
+  gap: 2px 3px;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-muted);
 }
-.inspector-heading h2 {
-  font-size: 18px;
-  font-weight: 600;
+.node-trail li {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.node-trail button {
+  max-width: 24ch;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-trail button:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .field {
   display: flex;
@@ -1183,6 +1211,12 @@ h2 {
   }
 }
 @media (max-width: 650px) {
+  /* 44px touch targets on phones (ui/DESIGN.md); the line stays visually quiet. */
+  .node-trail button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 4px;
+  }
   .app-header {
     height: 54px;
   }
@@ -1266,9 +1300,6 @@ h2 {
   .local-label {
     font-size: 12px;
   }
-  .inspector-tabs {
-    height: 47px;
-  }
   .status-count {
     display: none;
   }
@@ -1280,10 +1311,6 @@ h2 {
     animation: none !important;
     transition: none !important;
   }
-}
-.inspector-label {
-  color: var(--ink-secondary);
-  font-size: 13px;
 }
 .runtime-scope {
   color: var(--ink-muted);

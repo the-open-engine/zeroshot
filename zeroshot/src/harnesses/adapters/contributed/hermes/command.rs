@@ -209,7 +209,7 @@ pub(super) fn prepare(
         "type":"init", "provider":adapter.config.provider, "model":model.as_str(),
         "effort":effort.map(effort_token), "sessionId":session_id,
         "dbPath":files.home().join("hermes.sqlite"), "contained":adapter.runners.is_hosted(),
-        "authority":authority, "memoryCapability":memory, "nativeEnvironment":native_environment,
+        "authority":authority, "memoryCapability":memory, "memoryContextBytes":crate::active_memory::hooks::native::MAX_CONTEXT_BYTES, "nativeEnvironment":native_environment,
         "declaredEnvironment":declared_context(invocation, false),
         "providerEnvironment":declared_context(invocation, true),
     });

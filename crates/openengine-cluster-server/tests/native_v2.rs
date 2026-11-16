@@ -54,6 +54,7 @@ fn title() -> RunTitle {
 
 fn status(phase: RunStatus, at: u64) -> RunStatusResult {
     RunStatusResult {
+        steering: Default::default(),
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
@@ -240,6 +241,7 @@ impl ClusterBackend for FakeBackend {
             5,
         );
         Ok(RunForceResult {
+            steering: Default::default(),
             run_id: result.run_id,
             title: result.title,
             source: result.source,

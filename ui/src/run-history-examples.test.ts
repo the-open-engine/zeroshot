@@ -11,9 +11,9 @@ import { appendHistory, readRunDetail } from './run-history-source';
 const examples: { detail: RunDetail; events: HistoryEvent[] }[] = JSON.parse(
   readFileSync(new URL('../public/history-examples.json', import.meta.url), 'utf8')
 );
-test('ten explicitly simulated histories retain renderable immutable definitions', () => {
-  assert.equal(examples.length, 10);
-  assert.equal(new Set(examples.map(({ detail }) => detail.runId)).size, 10);
+test('thirteen explicitly simulated histories retain renderable immutable definitions', () => {
+  assert.equal(examples.length, 13);
+  assert.equal(new Set(examples.map(({ detail }) => detail.runId)).size, 13);
   for (const { detail, events } of examples) {
     assert.equal(readRunDetail(detail, detail.runId), detail);
     assert.equal(detail.example, true);
@@ -45,8 +45,42 @@ test('ten explicitly simulated histories retain renderable immutable definitions
       if (moment.index < events.length - 1)
         assert.equal(view.terminal, undefined, `${detail.title} leaked its terminal`);
     }
-    assert.deepEqual(projectHistory(document, events, events.length - 1).terminal, detail.terminal);
+    // Paused runs record no terminal; their detail says so with null.
+    assert.deepEqual(
+      projectHistory(document, events, events.length - 1).terminal ?? null,
+      detail.terminal ?? null
+    );
   }
+});
+
+test('a person approval spans three runs: asked, rejected and asked again, then approved', () => {
+  const runs = ['', '-revised', '-merged'].map((suffix) =>
+    examples.find(({ detail }) => detail.runId === `example-security-patch-approval${suffix}`)!
+  );
+  const [asked, revised, merged] = runs;
+  assert.equal(asked.detail.phase, 'suspended');
+  assert.equal(asked.detail.suspension?.reason, 'request');
+  assert.equal(asked.detail.workspaceRecovery?.successorRunId, revised.detail.runId);
+  assert.equal(revised.detail.workspaceRecovery?.successorRunId, merged.detail.runId);
+  assert.equal(merged.detail.terminal?.status, 'succeeded');
+  const view = (run: (typeof runs)[number]) =>
+    projectHistory(
+      { name: run.detail.runId, graph: run.detail.graph, runtime: run.detail.runtime },
+      run.events,
+      run.events.length - 1
+    );
+  const [pending] = view(asked).invocations.filter((invocation) => invocation.request);
+  assert.equal(pending.state, 'suspended');
+  assert.equal(pending.request?.text, asked.detail.suspension?.request?.text);
+  const final = view(merged);
+  const answers = final.invocations
+    .filter((invocation) => invocation.request)
+    .map((invocation) => invocation.request?.resolution);
+  assert.deepEqual(
+    answers.map((answer) => answer?.kind === 'answer' && answer.signals.verdict),
+    ['rejected', 'accepted']
+  );
+  assert.ok(final.invocations.filter((invocation) => invocation.imported).length >= 5);
 });
 
 test('examples exercise maps, retries through a review loop, long output, and an authored failure', () => {

@@ -1,7 +1,15 @@
 import { isDeliveryKind, scriptCommandLabel } from './workers';
 import { DecisionControls } from './DecisionControls';
 import { useState } from 'react';
-import { allNodes, bindingFor, clone, executable, type Document, type Runtime } from './domain';
+import {
+  allNodes,
+  bindingFor,
+  clone,
+  executable,
+  REQUEST_WORKER,
+  type Document,
+  type Runtime,
+} from './domain';
 import { Field } from './Field';
 import { NumberField } from './NumberField';
 import { ModelPicker } from './ModelPicker';
@@ -180,7 +188,7 @@ export function RuntimeEditor(p: {
               {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
             </small>
           ) : kind(n.name) === 'request' ? (
-            <small>{n.worker === 'builtin.request.ask@1' ? 'Ask a person' : 'Wait'}</small>
+            <small>{n.worker === REQUEST_WORKER ? 'Ask a person' : 'Wait'}</small>
           ) : kind(n.name) === 'script' ? (
             <small>Script: {scriptCommandLabel(bindingFor(doc.runtime, n.name)?.command)}</small>
           ) : kind(n.name) === 'decision' ? (

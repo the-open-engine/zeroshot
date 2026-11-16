@@ -233,6 +233,9 @@ impl NativeV2Supervisor {
     /// Drives the attempt until durable terminal completion or suspension.
     pub async fn drive(&self) -> Result<TerminalResult, NativeV2SupervisorError> {
         let _turn = self.drive_turn.lock().await;
+        if let Some(hooks) = self.runner.delivery_hooks() {
+            hooks.bind_ledger(self.run_id.clone(), self.ledger.clone());
+        }
         match self.initialize().await? {
             Initialization::Terminal(terminal) => Ok(terminal),
             Initialization::Program(program) => self.drive_program(program).await,

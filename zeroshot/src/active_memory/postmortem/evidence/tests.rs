@@ -6,6 +6,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 fn record(sequence: u64, execution: ExecutionId, line: &str) -> StoredRunEvent {
     StoredRunEvent {
+        recorded_at: None,
         cursor: cursor_for(sequence),
         event: RunEvent::SafeLog {
             execution: Some(execution),

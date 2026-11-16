@@ -452,3 +452,19 @@ fn omitted_node_deadlines_round_trip_and_match_the_schema() {
             .is_valid(&graph)
     );
 }
+
+#[test]
+fn steer_text_uses_instruction_byte_limit_and_rejects_controls() {
+    use openengine_cluster_protocol::{validate_steer, MAX_NODE_INSTRUCTIONS_BYTES};
+    assert_eq!(MAX_NODE_INSTRUCTIONS_BYTES, 262_144);
+    assert!(validate_steer(&"é".repeat(MAX_NODE_INSTRUCTIONS_BYTES / 2)).is_ok());
+    assert!(
+        validate_steer(&format!("{}x", "é".repeat(MAX_NODE_INSTRUCTIONS_BYTES / 2)))
+            .unwrap_err()
+            .contains("262144")
+    );
+    for text in ["", " \t\n", "a\0b", "a\u{1b}b", "a\u{7f}b", "a\u{85}b"] {
+        assert!(validate_steer(text).is_err(), "accepted {text:?}");
+    }
+    assert!(validate_steer("a\t\n\rb").is_ok());
+}

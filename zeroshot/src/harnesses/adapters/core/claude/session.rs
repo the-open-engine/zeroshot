@@ -102,7 +102,15 @@ impl ClaudeAdapter {
         state: &mut ClaudeRunState,
         control: &DriverControl,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
-        match self.advance_turn(turn, state).await {
+        let advance = self.advance_turn(turn, state).await;
+        if !matches!(&advance, Ok(ClaudeTurnAdvance::Response(_)))
+            && let Some(hooks) = &self.active_memory
+        {
+            hooks
+                .finish_steers(turn.invocation.node.reference.execution.get(), false)
+                .await;
+        }
+        match advance {
             Ok(ClaudeTurnAdvance::Response(response)) => {
                 if requires_session(&turn.invocation.node) && state.resume_id.is_none() {
                     state

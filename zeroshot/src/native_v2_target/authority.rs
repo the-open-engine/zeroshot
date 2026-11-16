@@ -112,6 +112,16 @@ pub trait TargetControlAuthority: Send + Sync {
         ))
     }
 
+    async fn steering_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise steering",
+        ))
+    }
+
     async fn run_suspension_session(
         &self,
         _target: &TargetRecord,

@@ -1,5 +1,5 @@
 //! Safe, bounded publication of provider text across native event boundaries.
-use crate::native_v2_runner::LiveOutputStream;
+use crate::native_v2_runner::{LiveOutputStream, bounded_log_text};
 use super::{ProviderEmission, safe_provider_text};
 
 pub(crate) const LIVE_CHUNK_BYTES: usize = 8 * 1024;
@@ -153,6 +153,15 @@ impl ProviderText {
                 diagnostic: None,
             });
         }
+    }
+
+    /// Redact a provider cause before shortening it, so truncation cannot expose part of a secret.
+    pub(crate) fn emit_progress(&self, emissions: &mut Vec<ProviderEmission>, text: &str) {
+        emissions.push(ProviderEmission {
+            stream: LiveOutputStream::System,
+            text: bounded_log_text(self.redact(text), LIVE_LINE_BYTES),
+            diagnostic: None,
+        });
     }
 }
 

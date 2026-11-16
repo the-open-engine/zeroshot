@@ -235,6 +235,10 @@ impl RunPostmortem for UnavailableMemory {
 
 #[async_trait]
 impl NodeRunner for MemoryNodeRunner {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        self.inner.delivery_hooks()
+    }
+
     async fn capture_conversations(
         &self,
         run_id: &RunId,

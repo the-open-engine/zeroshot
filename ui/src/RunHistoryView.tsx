@@ -9,9 +9,10 @@ import {
   Loader2,
   Pause,
   Play,
-  X,
 } from 'lucide-react';
 import { InspectorPanel } from './InspectorPanel';
+import { InspectorHeader } from './InspectorHeader';
+import { NodeTrail } from './NodeTrail';
 import { RunFailureDetails } from './RunFailureDetails';
 import {
   useRunView,
@@ -29,6 +30,7 @@ import { Transcript } from './Transcript';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { findNode, labels, type Document, type GraphNode, type Positions } from './domain';
 import type { WorkerOption } from './workers';
+import { nodeTitle } from './workflow-projection';
 import { appendHistory, type RunHistoryReader } from './run-history-source';
 import {
   currentInvocation,
@@ -72,6 +74,13 @@ type RunHistoryViewProps = {
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
 };
+/** Where a node replay starts: its first event, unless the view is already part-way through it. */
+function replayStart(replay: readonly number[], position: number, restart: boolean): number {
+  const first = replay[0],
+    last = replay.at(-1)!;
+  return restart || position < first || position >= last ? first : position;
+}
+
 export function RunHistoryView({
   runId,
   source,
@@ -198,13 +207,14 @@ export function RunHistoryView({
     if (run && (connection === 'limited' || connection === 'error' || (!loading && !loadedHead)))
       void loadHistory(run.runId, source, false);
   }
-  function inspect(name: string) {
+  /** Select a node, stopping any node replay; the empty canvas selects without opening the panel. */
+  function inspect(name: string, open = true) {
     setPlaying(false);
     setPlaybackNode(undefined);
     setSelected(name);
     setExecution('');
     setReadingExecution('');
-    setInspector(true);
+    if (open) setInspector(true);
   }
   function playNode(restart = false) {
     if (!selectedReplay.length) return;
@@ -214,9 +224,7 @@ export function RunHistoryView({
       setPlaying(false);
       return;
     }
-    const first = selectedReplay[0],
-      last = selectedReplay.at(-1)!;
-    const start = restart || safePosition < first || safePosition >= last ? first : safePosition;
+    const start = replayStart(selectedReplay, safePosition, restart);
     setCursorIndex(moments[start].index);
     setExecution('');
     setReadingExecution('');
@@ -291,6 +299,7 @@ export function RunHistoryView({
                 onViewChange={setCanvas}
                 inspectorHidden={!inspector}
                 showInspector={() => setInspector(true)}
+                deselect={() => inspect(document.graph.root.name, false)}
               />
             </ReactFlowProvider>
             {inspector && node && (
@@ -1201,22 +1210,14 @@ function RunInspector({
 }: RunInspectorProps) {
   return (
     <InspectorPanel className="run-inspector" label="Run inspector">
-      <header className="run-inspector-header">
-        <div>
-          <h2>{node.name === document.graph.root.name ? 'Run details' : humanize(node.name)}</h2>
-          {node.name !== document.graph.root.name && (
-            <p className="inspector-kind">{labels[node.kind]}</p>
-          )}
-        </div>
-        <button
-          className="icon-button"
-          title="Close inspector"
-          aria-label="Close inspector"
-          onClick={close}
-        >
-          <X size={17} />
-        </button>
-      </header>
+      <InspectorHeader
+        trail={
+          <NodeTrail document={document} name={node.name} rootLabel="Run details" select={reveal} />
+        }
+        title={node.name === document.graph.root.name ? 'Run details' : nodeTitle(node.name)}
+        kind={node.name === document.graph.root.name ? undefined : labels[node.kind]}
+        close={close}
+      />
       <div className="run-inspector-content">
         {node.name === document.graph.root.name && (
           <>

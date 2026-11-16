@@ -13,7 +13,7 @@ fn example_document(name: &str) -> Value {
     serde_json::from_str(text).assert_value()
 }
 impl LocalFixture {
-    fn with_request(self, timeout: Option<u64>) -> Self {
+    pub(super) fn with_request(self, timeout: Option<u64>) -> Self {
         let mut graph = example_document("graph.json");
         if let Some(timeout) = timeout {
             graph["root"]["children"][0]["body"]["children"][1]["timeoutMs"] = json!(timeout);

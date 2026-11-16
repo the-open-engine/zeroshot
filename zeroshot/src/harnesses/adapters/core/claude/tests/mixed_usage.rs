@@ -25,7 +25,7 @@ async fn claude_and_codex_invocations_sum_disjoint_token_buckets() {
     write_claude_script(
         &workspace,
         r#"
-cat >/dev/null
+cat > claude.prompt
 printf '%s\n' '{"type":"result","subtype":"success","result":"{\"response\":\"done\"}","model_usage_since_last_result":{"model":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":5,"cacheCreationInputTokens":7}}}'
 "#,
     );
@@ -55,7 +55,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"{\"response\":\"do
     .await;
     let executable = workspace.write_executable("fake-codex", r#"#!/bin/sh
 if [ "${1-}" = app-server ]; then exit 0; fi
-cat >/dev/null
+cat > codex.prompt
 printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":\"done\"}"}}'
 printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":30,"cache_write_input_tokens":20,"output_tokens":7}}'
 "#);
@@ -72,6 +72,10 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
     }));
     let codex = NativeNodeRunner::new(&admitted, adapter.clone(), adapter).assert_value();
     let codex_usage = invocation_usage(&codex, codex_binding, "OPENAI_API_KEY").await;
+    assert_tool_delivery(&workspace.read("claude.prompt"));
+    let codex_prompt = workspace.read("codex.prompt");
+    assert!(codex_prompt.contains("Return only JSON with no Markdown or commentary."));
+    assert!(!codex_prompt.contains("StructuredOutput"));
 
     assert_eq!(claude_usage.input_tokens.get(), 2);
     assert_eq!(codex_usage.input_tokens.get(), 50);

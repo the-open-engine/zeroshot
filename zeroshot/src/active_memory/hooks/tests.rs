@@ -49,9 +49,80 @@ impl ActiveMemorySource for Source {
 
 struct BrokerFixture {
     source: Arc<Source>,
-    // The hooks own the listener; retaining them keeps every issued capability live.
+    // The hooks own the listener and this fixture's unsettled execution capability.
     _hooks: ActiveMemoryHooks,
     capability: super::broker::Capability,
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_carrier_capabilities_retire_across_65536_launches_without_affecting_live_executions()
+{
+    use crate::native_v2_contract::{ExecutionId, NodeInstanceId};
+    let (ledger, run) = steer_record().await;
+    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut held = invocation();
+    held.node.reference.execution = ExecutionId::new(1).assert_value();
+    held.provider_home_slot = NodeInstanceId::new(1).assert_value();
+    hooks.prepare_steers(&mut held, false).await.assert_value();
+    let held_cap = hooks
+        .broker
+        .capability(&held, Path::new("/workspace"))
+        .assert_value();
+    let mut retired = None;
+    for execution in 2..65536 {
+        let mut turn = held.clone();
+        turn.node.reference.execution = ExecutionId::new(execution).assert_value();
+        let cap = hooks
+            .broker
+            .capability(&turn, Path::new("/workspace"))
+            .assert_value();
+        if retired.is_none() {
+            retired = Some(cap);
+        }
+        hooks.finish_steers(execution, execution % 2 == 0).await;
+    }
+    let mut last = held.clone();
+    last.node.reference.execution = ExecutionId::new(65536).assert_value();
+    last.provider_home_slot = NodeInstanceId::new(65536).assert_value();
+    hooks.prepare_steers(&mut last, false).await.assert_value();
+    let replaced = hooks
+        .broker
+        .capability(&last, Path::new("/workspace"))
+        .assert_value();
+    let current = hooks
+        .broker
+        .capability(&last, Path::new("/workspace"))
+        .assert_value();
+    crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: run.clone(),
+            text: "Direction after many launches".into(),
+        },
+    )
+    .await
+    .assert_value();
+    tokio::task::spawn_blocking(move || {
+        for cap in [retired.assert_value(), replaced] {
+            assert!(callback(&cap, &cap.token, json!({"tool_name":"Read"})).is_empty());
+        }
+        for cap in [current, held_cap] {
+            assert!(
+                callback(&cap, &cap.token, json!({"tool_name":"Read"}))
+                    .contains("Direction after many launches")
+            );
+            assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+        }
+    })
+    .await
+    .assert_value();
+    hooks.finish_steers(65536, true).await;
+    hooks.finish_steers(1, false).await;
+    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert_eq!(status.steers[0].received_executions, 2);
 }
 
 impl BrokerFixture {
@@ -83,7 +154,7 @@ impl NodeSession for Session {
     async fn close(&self) {}
 }
 
-fn invocation() -> DriverInvocation {
+pub(super) fn invocation() -> DriverInvocation {
     let request = crate::native_v2_runner::test_support::request("memory-hooks", "worker", (1, 2));
     crate::native_v2_runner::test_support::null_worker_invocation(request, Arc::new(Session))
 }
@@ -311,11 +382,6 @@ fn supported_large_context_crosses_the_native_callback_without_truncation() {
     let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
     assert_eq!(context.len(), super::native::MAX_CONTEXT_BYTES);
     assert!(context.len() > 32_768);
-    let hermes = include_str!("../../harnesses/adapters/contributed/hermes/native_memory.py");
-    assert!(hermes.contains(&format!(
-        "_MAX_CONTEXT_BYTES = {}",
-        super::native::MAX_CONTEXT_BYTES
-    )));
 }
 
 #[test]
@@ -576,4 +642,327 @@ fn primary_retries_keep_recall_and_fresh_homes_get_fresh_recall_budgets() {
         primary.provider_home_slot = NodeInstanceId::new(3).assert_value();
         assert_ne!(previous, super::provider_session_key(&primary));
     }
+}
+
+pub(super) async fn steer_record() -> (
+    Arc<dyn crate::v2_run_ledger::RunLedger>,
+    openengine_cluster_protocol::RunId,
+) {
+    use crate::v2_run_ledger::{CreateRun, RunLedger};
+    let ledger = Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+    let run = openengine_cluster_protocol::RunId::new("memory-hooks");
+    let graph = serde_json::from_str(include_str!(
+        "../../../../protocol/openengine-cluster/v1/fixtures/graph/canonical/base.json"
+    ))
+    .assert_value();
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run.clone(),
+            submission_key: openengine_cluster_protocol::IdempotencyKey::new("steer-hooks")
+                .assert_value(),
+            submission_digest: openengine_cluster_protocol::Sha256Digest::new("a".repeat(64))
+                .assert_value(),
+            admitted: crate::native_v2_contract::AdmittedRun {
+                title: openengine_cluster_protocol::RunTitle::new("Steer hook").assert_value(),
+                graph,
+                initial_input: Value::Null,
+                environment: None,
+                source: None,
+                runtime: crate::native_v2_candidate::test_support::codex_runtime(
+                    openengine_cluster_testkit::fixture::run_size("medium"),
+                    Default::default(),
+                ),
+            },
+        })
+        .await
+        .assert_value();
+    (ledger, run)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_callback_requires_carrier_receipt_and_reoffers_without_it() {
+    let (ledger, run) = steer_record().await;
+    let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut invocation = invocation();
+    let prompt = hooks
+        .prepare_steers(&mut invocation, false)
+        .await
+        .assert_value();
+    assert!(invocation.host_context.is_none());
+    let receipt = crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: run.clone(),
+            text: "Human direction".into(),
+        },
+    )
+    .await
+    .assert_value();
+    let cap = hooks
+        .broker
+        .capability(&invocation, Path::new("/workspace"))
+        .assert_value();
+    tokio::task::spawn_blocking(move || {
+        let (first, stream) = callback_response(&cap, &cap.token, json!({"tool_name":"Read"}));
+        assert_eq!(first, format!("<steer>\nDirection from the person running this run, given while it is in progress. It takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n[{}] Human direction\n</steer>", receipt.steer.id));
+        drop(stream);
+        let (second, mut stream) = callback_response(&cap, &cap.token, json!({"tool_name":"Read"}));
+        assert_eq!(second, first);
+        stream.write_all(&[1]).assert_value();
+        drop(stream);
+        assert!(callback(&cap, &cap.token, json!({"tool_name":"Read"})).is_empty());
+    }).await.assert_value();
+    hooks.finish_steers(prompt, true).await;
+    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert_eq!(status.steers[0].received_executions, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_prompt_preserves_authored_contract_and_retries_worker_errors() {
+    let (ledger, run) = steer_record().await;
+    let hooks = ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: run.clone(),
+            text: "Standing direction".into(),
+        },
+    )
+    .await
+    .assert_value();
+    let original = invocation();
+    let mut first = original.clone();
+    let delivery = hooks.prepare_steers(&mut first, false).await.assert_value();
+    assert_eq!(first.node, original.node);
+    assert_eq!(first.response, original.response);
+    assert_eq!(first.role, original.role);
+    assert!(
+        first
+            .host_context
+            .as_ref()
+            .assert_value()
+            .contains("Standing direction")
+    );
+    let (_, tool) = hooks
+        .tool_delivery(
+            &first,
+            &json!({"tool_name":"Read"}),
+            Path::new("/workspace"),
+        )
+        .await;
+    assert!(!tool.context.contains("Standing direction"));
+    hooks.finish_steers(delivery, false).await;
+    assert_eq!(
+        crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value()
+            .steers[0]
+            .received_executions,
+        0
+    );
+    let mut retry = original.clone();
+    retry.node.reference.execution = crate::native_v2_contract::ExecutionId::new(3).assert_value();
+    let delivery = hooks.prepare_steers(&mut retry, false).await.assert_value();
+    assert!(
+        retry
+            .host_context
+            .as_ref()
+            .assert_value()
+            .contains("Standing direction")
+    );
+    hooks.finish_steers(delivery, true).await;
+    assert_eq!(
+        crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value()
+            .steers[0]
+            .received_executions,
+        1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_maximum_callback_batches_whole_entries_before_memory_in_record_order() {
+    let (ledger, run) = steer_record().await;
+    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut invocation = invocation();
+    let prompt = hooks
+        .prepare_steers(&mut invocation, false)
+        .await
+        .assert_value();
+    let mut expected = Vec::new();
+    for index in 0..6 {
+        let text = format!(
+            "{index}{}",
+            "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES - 1)
+        );
+        let steer = crate::v2_run_ledger::steering::record(
+            ledger.as_ref(),
+            openengine_cluster_protocol::RunSteerParams {
+                run_id: run.clone(),
+                text: text.clone(),
+            },
+        )
+        .await
+        .assert_value();
+        expected.push(format!("[{}] {text}", steer.steer.id));
+    }
+    let cap = hooks
+        .broker
+        .capability(&invocation, Path::new("/workspace"))
+        .assert_value();
+    tokio::task::spawn_blocking(move || {
+        let mut received = String::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // A bounded callback may return no steers; observe retries within one overall deadline.
+        while expected.iter().any(|entry| !received.contains(entry)) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "not all steers arrived before the observation deadline"
+            );
+            let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+            assert!(context.len() <= super::native::MAX_CONTEXT_BYTES);
+            if context.contains("<steer>") {
+                assert!(
+                    context.find("</steer>").assert_value()
+                        < context.find("[lesson@1]").assert_value()
+                );
+                for entry in context
+                    .lines()
+                    .skip(2)
+                    .take_while(|line| *line != "</steer>")
+                {
+                    assert!(
+                        expected.iter().any(|expected| expected == entry),
+                        "callback contained a partial or unexpected steer"
+                    );
+                }
+            }
+            received.push_str(&context);
+        }
+        assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+        let mut prior = 0;
+        for entry in expected {
+            assert_eq!(received.matches(&entry).count(), 1);
+            let position = received.find(&entry).assert_value();
+            assert!(position >= prior);
+            prior = position;
+        }
+    })
+    .await
+    .assert_value();
+    hooks.finish_steers(prompt, true).await;
+    assert!(
+        crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value()
+            .steers
+            .iter()
+            .all(|s| s.received_executions == 1)
+    );
+}
+
+#[test]
+fn steer_empty_memory_installs_claude_codex_pi_carriers_and_helper_preserves_maximum_text() {
+    let directory = tempfile::tempdir().assert_value();
+    let hooks = ActiveMemoryHooks::empty().assert_value();
+    for install in native_installers() {
+        let mut command = command(directory.path());
+        hooks.configure_with(
+            &mut command,
+            HookInstallation {
+                invocation: &invocation(),
+                home: directory.path(),
+            },
+            install,
+        );
+        assert!(
+            directory
+                .path()
+                .join("active-memory-capability.json")
+                .is_file()
+        );
+    }
+    struct MaximumSteer;
+    impl ActiveMemorySource for MaximumSteer {
+        fn graph_context(&self, _: &str, _: &str) -> String {
+            String::new()
+        }
+        fn tool_context(&self, _: &HookQuery) -> String {
+            format!(
+                "<steer>\n[id] {}\n</steer>",
+                "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES)
+            )
+        }
+    }
+    let hooks = ActiveMemoryHooks::new(Arc::new(MaximumSteer)).assert_value();
+    let cap = hooks
+        .broker
+        .capability(&invocation(), Path::new("/workspace"))
+        .assert_value();
+    let path = directory.path().join("maximum-steer.json");
+    std::fs::write(&path, serde_json::to_vec(&cap).assert_value()).assert_value();
+    let mut output = Vec::new();
+    super::broker::run_helper_io(&path, br#"{"tool_name":"Read"}"#.as_slice(), &mut output)
+        .assert_value();
+    let output: Value = serde_json::from_slice(&output).assert_value();
+    assert!(
+        output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .assert_value()
+            .contains(&"x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
+    use crate::v2_run_ledger::{CreateRun, RunLedger};
+    let (source, run) = steer_record().await;
+    let stored = source.get(&run).await.assert_value().assert_value();
+    let ledger = Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+    let hooks = ActiveMemoryHooks::empty().assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut invocation = invocation();
+    assert!(hooks.prepare_steers(&mut invocation, false).await.is_none());
+    assert!(invocation.host_context.is_none());
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run.clone(),
+            submission_key: stored.submission_key,
+            submission_digest: stored.submission_digest,
+            admitted: stored.admitted,
+        })
+        .await
+        .assert_value();
+    crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: run.clone(),
+            text: "Retry at the next callback".into(),
+        },
+    )
+    .await
+    .assert_value();
+    let (query, delivery) = hooks
+        .tool_delivery(
+            &invocation,
+            &json!({"tool_name":"Read"}),
+            Path::new("/workspace"),
+        )
+        .await;
+    assert!(delivery.context.contains("Retry at the next callback"));
+    hooks.acknowledge(&query, &delivery).await;
+    assert_eq!(
+        crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value()
+            .steers[0]
+            .received_executions,
+        1
+    );
 }

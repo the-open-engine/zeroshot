@@ -262,6 +262,21 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         super::require_session_capability(&descriptor, super::TargetSessionPurpose::RequestAsk)
     }
 
+    async fn steering_session(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        let access = self
+            .controller_access_inner(
+                target,
+                super::TargetSessionPurpose::Steering,
+                super::RequestCapabilities::default(),
+            )
+            .await?;
+        self.issue_oecp_session(target, request, access).await
+    }
+
     async fn run_suspension_session(
         &self,
         target: &TargetRecord,

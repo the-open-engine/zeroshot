@@ -7,14 +7,25 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::{Cursor, IdempotencyKey, RunId};
 
 use super::{
-    AppendResult, CreateRun, CreateRunOutcome, RunEvent, RunLedger, RunLedgerError, RunSummary,
-    SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, cursor_for, cursor_sequence,
-    prepare_event, validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
+    AppendResult, CreateRun, CreateRunOutcome, LedgerClock, RunEvent, RunLedger, RunLedgerError,
+    RunSummary, SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, batch_recorded_at,
+    cursor_for, cursor_sequence, prepare_event, system_clock, validate_create, MAX_REPLAY_BYTES,
+    MAX_REPLAY_EVENTS,
 };
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct FakeRunLedger {
     inner: Arc<Mutex<State>>,
+    clock: LedgerClock,
+}
+
+impl Default for FakeRunLedger {
+    fn default() -> Self {
+        Self {
+            inner: Arc::default(),
+            clock: system_clock(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -27,12 +38,20 @@ struct FakeRun {
     stored: StoredRun,
     events: Vec<StoredRunEvent>,
     vector_cursors: BTreeMap<openengine_cluster_protocol::VectorId, Cursor>,
+    steering_indices: Vec<usize>,
 }
 
 impl FakeRunLedger {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Stamps recorded events from `clock` instead of the system wall clock.
+    #[must_use]
+    pub fn with_wall_clock(mut self, clock: LedgerClock) -> Self {
+        self.clock = clock;
+        self
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -81,6 +100,7 @@ impl RunLedger for FakeRunLedger {
                 stored: stored.clone(),
                 events: Vec::new(),
                 vector_cursors: BTreeMap::new(),
+                steering_indices: Vec::new(),
             },
         );
         Ok(CreateRunOutcome::Created(stored))
@@ -121,7 +141,7 @@ impl RunLedger for FakeRunLedger {
             .runs
             .get_mut(run_id)
             .ok_or(RunLedgerError::RunNotFound)?;
-        append_locked(run, events)
+        append_locked(run, &self.clock, events)
     }
 
     async fn request_force_stop(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
@@ -136,7 +156,7 @@ impl RunLedger for FakeRunLedger {
                 events: Vec::new(),
             });
         }
-        append_locked(run, vec![RunEvent::ForceStopRequested])
+        append_locked(run, &self.clock, vec![RunEvent::ForceStopRequested])
     }
 
     async fn request_suspend(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
@@ -146,7 +166,7 @@ impl RunLedger for FakeRunLedger {
             .get_mut(run_id)
             .ok_or(RunLedgerError::RunNotFound)?;
         match super::suspension_request_events(&run.stored)? {
-            Some(events) => append_locked(run, events),
+            Some(events) => append_locked(run, &self.clock, events),
             None => Ok(AppendResult {
                 snapshot: run.stored.snapshot.clone(),
                 events: Vec::new(),
@@ -165,6 +185,36 @@ impl RunLedger for FakeRunLedger {
             .get(id)
             .cloned()
             .ok_or(RunLedgerError::VectorNotFound)
+    }
+
+    async fn steering_events(
+        &self,
+        run_id: &RunId,
+        after: Option<&Cursor>,
+    ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+        let state = self.state();
+        let run = state.runs.get(run_id).ok_or(RunLedgerError::RunNotFound)?;
+        let after = after.map_or(Ok(0), cursor_sequence)?;
+        if after > cursor_sequence(&run.stored.snapshot.cursor)? {
+            return Err(RunLedgerError::CursorAhead);
+        }
+        let first = run
+            .steering_indices
+            .partition_point(|index| (*index as u64) < after);
+        let mut result = Vec::new();
+        let mut bytes = 0;
+        for index in run.steering_indices[first..].iter().take(MAX_REPLAY_EVENTS) {
+            let event = &run.events[*index];
+            let size = serde_json::to_vec(&event.event)
+                .map_err(|_| RunLedgerError::Corrupt)?
+                .len();
+            if bytes + size > MAX_REPLAY_BYTES {
+                break;
+            }
+            bytes += size;
+            result.push(event.clone());
+        }
+        Ok(result)
     }
 
     async fn snapshot_and_tail(
@@ -206,10 +256,16 @@ fn replay_page(
     Ok(page)
 }
 
-fn append_locked(run: &mut FakeRun, events: Vec<RunEvent>) -> Result<AppendResult, RunLedgerError> {
+fn append_locked(
+    run: &mut FakeRun,
+    clock: &LedgerClock,
+    events: Vec<RunEvent>,
+) -> Result<AppendResult, RunLedgerError> {
     if events.is_empty() {
         return Err(RunLedgerError::InvalidEvent("event batch is empty"));
     }
+    let previous = run.events.last().and_then(|stored| stored.recorded_at);
+    let recorded_at = Some(batch_recorded_at(clock, previous));
     let mut snapshot = run.stored.snapshot.clone();
     let mut sequence = cursor_sequence(&snapshot.cursor)?;
     let mut stored_events = Vec::with_capacity(events.len());
@@ -219,12 +275,20 @@ fn append_locked(run: &mut FakeRun, events: Vec<RunEvent>) -> Result<AppendResul
         apply_event(&mut snapshot, &event, sequence)?;
         stored_events.push(StoredRunEvent {
             cursor: cursor_for(sequence),
+            recorded_at,
             event,
         });
     }
     // The fake commits only after the whole batch validates, matching the durable adapter.
-    for stored in &stored_events {
+    for (offset, stored) in stored_events.iter().enumerate() {
         if let RunEvent::Vector { vector } = &stored.event {
+            if matches!(
+                vector.content,
+                openengine_cluster_protocol::RunVectorContent::Steer { .. }
+                    | openengine_cluster_protocol::RunVectorContent::SteerReceipt { .. }
+            ) {
+                run.steering_indices.push(run.events.len() + offset);
+            }
             run.vector_cursors
                 .entry(vector.id.clone())
                 .or_insert_with(|| stored.cursor.clone());

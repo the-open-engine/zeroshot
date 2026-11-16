@@ -103,7 +103,19 @@ pub(crate) fn apply_event(
     if snapshot.terminal.is_some() {
         return Err(RunLedgerError::InvalidEvent("run is already terminal"));
     }
-    if snapshot.phase == RunPhase::Suspended && !matches!(event, RunEvent::ForceStopRequested) {
+    if snapshot.phase == RunPhase::Suspended
+        && !matches!(
+            event,
+            RunEvent::ForceStopRequested
+                | RunEvent::Vector {
+                    vector: openengine_cluster_protocol::RunVector {
+                        content: openengine_cluster_protocol::RunVectorContent::Steer { .. }
+                            | openengine_cluster_protocol::RunVectorContent::SteerReceipt { .. },
+                        ..
+                    }
+                }
+        )
+    {
         return Err(RunLedgerError::InvalidEvent("run is suspended"));
     }
     validate_event(event)?;
@@ -195,7 +207,23 @@ fn apply_event_kind(
             snapshot.phase = RunPhase::Suspended;
             Ok(())
         }
-        RunEvent::Vector { .. } => Ok(()),
+        RunEvent::Vector { vector } => {
+            if vector.run_id == snapshot.run_id
+                && matches!(
+                    vector.content,
+                    openengine_cluster_protocol::RunVectorContent::Steer { .. }
+                )
+                && (!matches!(
+                    snapshot.phase,
+                    RunPhase::Admitted | RunPhase::Running | RunPhase::Suspended
+                ) || snapshot.primary_graph.is_some())
+            {
+                return Err(RunLedgerError::InvalidEvent(
+                    "steer requires an admitted, running or suspended run before its graph ends",
+                ));
+            }
+            Ok(())
+        }
         RunEvent::ForceStopRequested => apply_force_stop(snapshot),
         RunEvent::Terminal { result } => apply_terminal(snapshot, result),
     }

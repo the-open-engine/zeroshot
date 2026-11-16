@@ -543,6 +543,7 @@ impl ClusterBackend for LiveController {
         }
         let stopped = self.stopped.clone();
         Ok(RunForceResult {
+            steering: Default::default(),
             run_id: stopped.run_id,
             title: stopped.title,
             source: stopped.source,
@@ -646,3 +647,6 @@ async fn an_unreadable_ledger_does_not_hide_a_responding_controller() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].status, unpersisted.status);
 }
+
+#[path = "steer_tests.rs"]
+mod steer_tests;

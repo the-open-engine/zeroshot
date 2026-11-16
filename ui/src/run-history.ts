@@ -86,6 +86,12 @@ export type Outcome = {
 };
 export type HistoryEvent = {
   cursor: string;
+  /**
+   * Unix milliseconds when the ledger recorded this event; one value per append batch and never
+   * decreasing within a run. Absent when unknown: older servers and ledgers, or rows recorded
+   * before the ledger kept times. Order is defined by `cursor` alone.
+   */
+  recordedAt?: number;
   event: {
     kind: string;
     reference?: Reference;
@@ -101,6 +107,7 @@ export type HistoryEvent = {
     suspension?: RunSummary['suspension'];
     result?: RunTerminal;
     usage?: Record<string, number> | null;
+    vector?: VectorRecord;
   };
 };
 export type HistoryPage = {
@@ -175,6 +182,55 @@ export type Invocation = {
   reason?: string;
   logs: { index: number; timestamp?: number; stream: string; text: string }[];
   usage?: Record<string, number> | null;
+  /** Settled or held in an earlier run and carried into this one when it continued. */
+  imported?: boolean;
+  /** The question this execution asked a person, and how it was resolved. */
+  request?: PersonRequest;
+};
+/** A question a request node put to a person, as recorded in the run's vector history. */
+export type PersonRequest = {
+  id: string;
+  node: string;
+  text: string;
+  /** The labels each answer signal allows. */
+  signals: Record<string, string[]>;
+  output: unknown;
+  createdAt?: number;
+  expiresAt: number;
+  /** The run that recorded the question. */
+  runId?: string;
+  resolution?:
+    | {
+        kind: 'answer';
+        signals: Record<string, string>;
+        output: unknown;
+        at?: number;
+        runId?: string;
+      }
+    | { kind: 'expiry'; at?: number; runId?: string };
+};
+type PriorExecution = {
+  execution: string | number;
+  node_instance: string | number;
+  occurrence: { node: string; mapIndices: number[] };
+  attempt?: number;
+  input?: unknown;
+  state: 'Active' | { Settled: { outcome: Outcome } } | { Voided: { reason: string } };
+};
+type VectorRecord = {
+  id: string;
+  runId?: string;
+  createdAt?: number;
+  kind: string;
+  node?: string;
+  text?: string;
+  signals?: Record<string, string[]>;
+  output?: unknown;
+  expiresAt?: number;
+  requestId?: string;
+  answer?: { signals: Record<string, string>; output: unknown };
+  reason?: string;
+  resumedFrom?: string;
 };
 export type Moment = {
   index: number;
@@ -198,7 +254,17 @@ export const stateLabel = (state: NodeState) =>
     skipped: 'Stopped',
   })[state];
 export function eventNode(event: HistoryEvent['event']): string | undefined {
-  return event.reference?.node ?? event.completion?.reference.node;
+  return (
+    event.reference?.node ??
+    event.completion?.reference.node ??
+    priorExecution(event)?.occurrence.node ??
+    (event.kind === 'vector' ? event.vector?.node : undefined)
+  );
+}
+function priorExecution(event: HistoryEvent['event']): PriorExecution | undefined {
+  if (event.kind !== 'prior_execution') return undefined;
+  const value = (event as { execution?: unknown }).execution;
+  return value && typeof value === 'object' ? (value as PriorExecution) : undefined;
 }
 export function eventLabel(event: HistoryEvent['event']): string {
   const node = eventNode(event);
@@ -227,16 +293,44 @@ export function eventLabel(event: HistoryEvent['event']): string {
         : 'Run completed';
     case 'safe_log':
       return 'Recorded output';
+    case 'prior_execution':
+      return `${humanize(node ?? 'Node')} carried over from an earlier run`;
+    case 'vector':
+      return vectorLabel(event.vector);
     default:
       return humanize(event.kind);
   }
 }
 
+function vectorLabel(vector: VectorRecord | undefined): string {
+  switch (vector?.kind) {
+    case 'request':
+      return `${humanize(vector.node ?? 'Request')} asked a person`;
+    case 'answer':
+      return 'A person answered';
+    case 'expiry':
+      return 'The request expired without an answer';
+    case 'suspension':
+      return 'Run paused';
+    case 'continuation':
+      return 'Continued from an earlier run';
+    default:
+      return 'Run record';
+  }
+}
+/** Imported work and bookkeeping records are context, not stops worth replaying one by one. */
+const quietVectors = new Set(['suspend_request', 'wait']);
+
 /** Timeline stops are durable lifecycle facts. Logs between stops belong to the next stop. */
 export function historyMoments(events: readonly HistoryEvent[], pinnedIndex?: number): Moment[] {
   const moments: Moment[] = [{ index: -1, cursor: 'v2:0', label: 'Before the run' }];
   events.forEach(({ event, cursor }, index) => {
-    if (['safe_log', 'token_usage_observed'].includes(event.kind) && index !== pinnedIndex) return;
+    if (
+      (['safe_log', 'token_usage_observed', 'prior_execution'].includes(event.kind) ||
+        (event.kind === 'vector' && quietVectors.has(event.vector?.kind ?? ''))) &&
+      index !== pinnedIndex
+    )
+      return;
     moments.push({
       index,
       cursor,
@@ -329,7 +423,16 @@ export function projectHistory(
   const latestVisit = new Map<string, Invocation>();
   const references = new Map<string, Reference>();
   const systemLogs: Invocation['logs'] = [];
-  const projection = { invocations, byId, latestVisit, references, systemLogs };
+  const requests: PersonRequest[] = [];
+  const projection: HistoryProjection = {
+    invocations,
+    byId,
+    latestVisit,
+    references,
+    systemLogs,
+    requests,
+    unowned: [],
+  };
   let terminal: RunTerminal | undefined;
   for (let index = 0; index <= Math.min(through, events.length - 1); index++) {
     const event = events[index].event;
@@ -352,7 +455,8 @@ export function projectHistory(
     if (executable(node)) {
       nodes[node.name] = leafObservation(
         invocations.filter((invocation) => invocation.node === node.name),
-        visits
+        visits,
+        !terminal
       );
     } else if (visits.length) {
       nodes[node.name] = controlObservation(visits);
@@ -371,7 +475,7 @@ export function projectHistory(
       ...nodes[document.graph.root.name],
       state: terminal.status === 'succeeded' ? 'succeeded' : 'failed',
     };
-  return { invocations, nodes, terminal, systemLogs, controls };
+  return { invocations, nodes, terminal, systemLogs, controls, requests };
 }
 
 type HistoryProjection = {
@@ -380,6 +484,11 @@ type HistoryProjection = {
   latestVisit: Map<string, Invocation>;
   references: Map<string, Reference>;
   systemLogs: Invocation['logs'];
+  requests: PersonRequest[];
+  /** The execution whose request deferral awaits the question it asked. */
+  asking?: Invocation;
+  /** Carried-over questions recorded before the execution that asked them. */
+  unowned: PersonRequest[];
 };
 
 function readHistoryEvent(
@@ -387,62 +496,39 @@ function readHistoryEvent(
   index: number,
   projection: HistoryProjection
 ) {
-  const { invocations, byId, latestVisit, references, systemLogs } = projection;
+  const { byId, systemLogs } = projection;
+  const prior = priorExecution(event);
   if (event.kind === 'node_started' && event.reference) {
-    const id = identity(event.reference.execution);
-    const instance = identity(event.reference.nodeInstance);
-    if (byId.has(id)) return;
-    const node = event.reference.node;
-    const mapIndices = event.occurrence?.mapIndices ?? [];
-    const scope = JSON.stringify([node, mapIndices]);
-    const previous = latestVisit.get(scope);
-    const attempt = event.attempt ?? 1;
-    const retry = attempt > 1 && previous?.instance === instance && attempt > previous.attempt;
-    const visit = retry ? previous.visit : (previous?.visit ?? 0) + 1;
-    const invocation: Invocation = {
-      id,
-      node,
-      instance,
-      attempt,
-      mapIndices: [...mapIndices],
-      visit,
-      start: index,
+    startInvocation(projection, index, {
+      reference: event.reference,
+      mapIndices: event.occurrence?.mapIndices ?? [],
+      attempt: event.attempt ?? 1,
       input: event.input,
-      state: 'running',
-      logs: [],
-    };
-    latestVisit.set(scope, invocation);
-    references.set(id, event.reference);
-    byId.set(id, invocation);
-    invocations.push(invocation);
+    });
+  } else if (prior) {
+    readPriorExecution(prior, index, projection);
+  } else if (event.kind === 'vector' && event.vector) {
+    readVector(event.vector, projection);
+  } else if (event.kind === 'suspended' && event.suspension?.request) {
+    const { request, node, createdAt } = event.suspension;
+    recordRequest(projection, { ...request, node, createdAt });
   } else if (event.kind === 'node_completed' && event.completion) {
-    const reference = event.completion.reference;
-    const invocation = byId.get(identity(reference.execution));
-    if (
-      invocation &&
-      sameReference(references.get(invocation.id), reference) &&
-      invocation.end === undefined
-    ) {
-      invocation.end = index;
-      invocation.outcome = event.completion.outcome;
-      invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
-    }
+    const invocation = openInvocation(projection, event.completion.reference);
+    if (!invocation) return;
+    invocation.end = index;
+    invocation.outcome = event.completion.outcome;
+    invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
   } else if (
     ['execution_voided', 'wait_deferred', 'request_deferred'].includes(event.kind) &&
     event.reference
   ) {
-    const invocation = byId.get(identity(event.reference.execution));
-    if (
-      invocation &&
-      sameReference(references.get(invocation.id), event.reference) &&
-      invocation.end === undefined
-    ) {
-      invocation.end = index;
-      invocation.state = ['wait_deferred', 'request_deferred'].includes(event.kind)
-        ? 'suspended'
-        : 'skipped';
-      invocation.reason = event.reason;
-    }
+    const invocation = openInvocation(projection, event.reference);
+    if (!invocation) return;
+    invocation.end = index;
+    invocation.state = event.kind === 'execution_voided' ? 'skipped' : 'suspended';
+    invocation.reason = event.reason;
+    // The question this execution asked is recorded right after its deferral.
+    if (event.kind === 'request_deferred') projection.asking = invocation;
   } else if (event.kind === 'safe_log') {
     const log = {
       index,
@@ -458,6 +544,152 @@ function readHistoryEvent(
   }
 }
 
+/** The still-open execution a settling event names, when its reference matches how it started. */
+function openInvocation(
+  projection: HistoryProjection,
+  reference: Reference
+): Invocation | undefined {
+  const invocation = projection.byId.get(identity(reference.execution));
+  return invocation &&
+    sameReference(projection.references.get(invocation.id), reference, invocation.imported) &&
+    invocation.end === undefined
+    ? invocation
+    : undefined;
+}
+
+/**
+ * An earlier run's execution, carried into this one. One still active is held from that run (a
+ * request awaiting its answer, or a wait), so it reads as waiting until it settles here.
+ */
+function readPriorExecution(prior: PriorExecution, index: number, projection: HistoryProjection) {
+  const invocation = startInvocation(projection, index, {
+    reference: {
+      node: prior.occurrence.node,
+      execution: prior.execution,
+      nodeInstance: prior.node_instance,
+    },
+    mapIndices: prior.occurrence.mapIndices ?? [],
+    attempt: prior.attempt ?? 1,
+    input: prior.input,
+  });
+  if (!invocation) return;
+  invocation.imported = true;
+  if (prior.state === 'Active') invocation.state = 'suspended';
+  else if ('Settled' in prior.state) {
+    invocation.end = index;
+    invocation.outcome = prior.state.Settled.outcome;
+    invocation.state = prior.state.Settled.outcome.status === 'error' ? 'failed' : 'succeeded';
+  } else if ('Voided' in prior.state) {
+    invocation.end = index;
+    invocation.state = 'skipped';
+    invocation.reason = prior.state.Voided.reason;
+  }
+  // Inherited questions are recorded before the executions they came with.
+  const question = projection.unowned.find((request) => couldHaveAsked(invocation, request));
+  if (question) {
+    invocation.request = question;
+    projection.unowned.splice(projection.unowned.indexOf(question), 1);
+  }
+}
+
+function startInvocation(
+  projection: HistoryProjection,
+  index: number,
+  start: { reference: Reference; mapIndices: number[]; attempt: number; input: unknown }
+): Invocation | undefined {
+  const { invocations, byId, latestVisit, references } = projection;
+  const id = identity(start.reference.execution);
+  const instance = identity(start.reference.nodeInstance);
+  if (byId.has(id)) return undefined;
+  const node = start.reference.node;
+  const scope = JSON.stringify([node, start.mapIndices]);
+  const previous = latestVisit.get(scope);
+  const retry =
+    start.attempt > 1 && previous?.instance === instance && start.attempt > previous.attempt;
+  const visit = retry ? previous.visit : (previous?.visit ?? 0) + 1;
+  const invocation: Invocation = {
+    id,
+    node,
+    instance,
+    attempt: start.attempt,
+    mapIndices: [...start.mapIndices],
+    visit,
+    start: index,
+    input: start.input,
+    state: 'running',
+    logs: [],
+  };
+  latestVisit.set(scope, invocation);
+  references.set(id, start.reference);
+  byId.set(id, invocation);
+  invocations.push(invocation);
+  return invocation;
+}
+
+/** Requests and their answers or expiry, each with the time it was recorded. */
+function readVector(vector: VectorRecord, projection: HistoryProjection) {
+  const { requests } = projection;
+  const at = vector.createdAt;
+  if (
+    vector.kind === 'request' &&
+    vector.node &&
+    vector.text !== undefined &&
+    vector.expiresAt !== undefined
+  ) {
+    recordRequest(projection, {
+      id: vector.id,
+      node: vector.node,
+      text: vector.text,
+      signals: vector.signals ?? {},
+      output: vector.output,
+      createdAt: at,
+      expiresAt: vector.expiresAt,
+      runId: vector.runId,
+    });
+  } else if (vector.kind === 'answer' || vector.kind === 'expiry') {
+    const request = requests.find((known) => known.id === vector.requestId);
+    if (!request) return;
+    request.resolution =
+      vector.kind === 'answer' && vector.answer
+        ? { kind: 'answer', ...vector.answer, at, runId: vector.runId }
+        : { kind: 'expiry', at, runId: vector.runId };
+  }
+}
+
+/**
+ * Keep one record per request and give it to the execution that asked. A question recorded in
+ * this run follows its execution's deferral. One carried over from an earlier run has no deferral
+ * here: it goes, in order, to the carried-over executions of its node that could have asked it,
+ * whichever of the two the ledger records first.
+ */
+function recordRequest(projection: HistoryProjection, recorded: PersonRequest) {
+  const known = projection.requests.find((request) => request.id === recorded.id);
+  if (known) {
+    Object.assign(known, recorded);
+    return;
+  }
+  projection.requests.push(recorded);
+  const asking = projection.asking;
+  projection.asking = undefined;
+  const owner =
+    asking?.node === recorded.node && !asking.request
+      ? asking
+      : projection.invocations.find((invocation) => couldHaveAsked(invocation, recorded));
+  if (owner) owner.request = recorded;
+  else projection.unowned.push(recorded);
+}
+
+/** A carried-over execution of the request's node that has no question yet and was not voided
+ * (voided work never reached its question; settled work, timed out or not, asked one). */
+function couldHaveAsked(invocation: Invocation, request: PersonRequest): boolean {
+  return (
+    !!invocation.imported &&
+    invocation.node === request.node &&
+    !invocation.request &&
+    invocation.state !== 'skipped'
+  );
+}
+
 /** The backend transports native u64 identities as strings; accept only lossless legacy numbers. */
 function identity(value: string | number): string {
   if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 1)) {
@@ -468,13 +700,18 @@ function identity(value: string | number): string {
   return String(value);
 }
 
-function sameReference(expected: Reference | undefined, actual: Reference): boolean {
+function sameReference(
+  expected: Reference | undefined,
+  actual: Reference,
+  imported = false
+): boolean {
   return (
     !!expected &&
     expected.node === actual.node &&
     identity(expected.execution) === identity(actual.execution) &&
     identity(expected.nodeInstance) === identity(actual.nodeInstance) &&
-    expected.runId === actual.runId
+    // Imported executions name no run; the continuing run settles them under its own id.
+    (expected.runId === actual.runId || (imported && expected.runId === undefined))
   );
 }
 
@@ -555,23 +792,34 @@ function controlObservation(visits: readonly ControlVisit[]): WorkflowNodeObserv
 
 function leafObservation(
   executions: readonly Invocation[],
-  controls: readonly ControlVisit[]
+  controls: readonly ControlVisit[],
+  /** False once the run has ended: nothing waits on a question any more. */
+  live = true
 ): WorkflowNodeObservation {
   const latest = new Map<string, { state: WorkflowNodeObservation['state']; start: number }>();
   for (const invocation of executions)
     latest.set(JSON.stringify(invocation.mapIndices), invocation);
   const queued = applyPendingVisits(latest, controls);
   const states = new Set([...latest.values()].map((visit) => visit.state));
-  const state =
+  const current =
     (['running', 'suspended', 'failed', 'queued', 'skipped'] as const).find((next) =>
       states.has(next)
     ) ?? (latest.size ? 'succeeded' : 'idle');
-  const signals = executions.at(-1)?.outcome?.signals;
+  // Once the run has ended nothing waits any more: a step still held when it stopped was stopped.
+  const state = !live && current === 'suspended' ? 'skipped' : current;
+  const last = executions.at(-1);
+  const signals = last?.outcome?.signals;
+  // A pending question is what the step is waiting on; show it while the run still waits.
+  const asking =
+    live && last?.state === 'suspended' && last.request && !last.request.resolution
+      ? `“${last.request.text}”`
+      : undefined;
   return {
     state,
     count: executions.length,
     detail:
       [
+        asking,
         signals &&
           Object.entries(signals)
             .map(([key, value]) => `${humanize(key)}: ${value}`)

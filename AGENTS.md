@@ -73,8 +73,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   database under local state; direct targets use one persistent target-wide database with repository
   scopes. Generic hosting embedders explicitly select a namespace; Platform and ACP integration are
   not enabled implicitly. Runtime `activeMemory` independently controls repository and graph
-  collection/recall; `globalAgents.postmortem` controls the built-in after-run agent and inherits an
-  existing agent node's provider/model/connections. Four isolated verifier specialists separately maintain
+  collection/recall and does not control steering; `globalAgents.postmortem` controls the built-in
+  after-run agent and inherits an existing agent node's provider/model/connections. Four isolated verifier specialists separately maintain
   graph lessons, maintain repository lessons, discover graph procedures, and discover repository
   lessons. Maintenance contexts and mutation authority are partitioned by lesson scope, including
   repository-qualified graph lessons; each scope's opt-out disables its maintenance and discovery.
@@ -97,13 +97,26 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   before runner closure/cleanup, preserves the durably latched primary outcome and its failure
   diagnostics on ordinary failure or controller restart after confirmed cleanup, and
   stays outside reducer/checkpoint history. All usage remains part of the run. Never turn incomplete
-  supplied-memory evidence into an empty manifest. Graph guidance supplements only private provider
-  invocations after plan validation; it never mutates authored instructions or graph hashes. Hooks
-  retrieve complete cards from a frozen resident index with relevance ranking. Separate per-injection
-  ceilings default to 16000 approximate tokens for node graph guidance and 8000 for repository hooks;
-  each accepts 1..=64000 and converts one token to four UTF-8 bytes, including framing. There is no
-  cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
-  including compaction; new conversations and conversations continued in a successor receive fresh delivery sets. Windows memory storage and initialization use shared
+  supplied-memory evidence into an empty manifest. Graph guidance and steers supplement only private
+  provider invocations after plan validation; they never mutate authored instructions or graph hashes. Hooks
+  retrieve complete cards from a frozen resident index with relevance ranking. Steers come from the
+  run's vector record, are not ranked, and go first. Separate per-injection ceilings for memory default
+  to 16000 approximate tokens for node graph guidance and 8000 for repository hooks; each accepts
+  1..=64000 and converts one token to four UTF-8 bytes, including framing. A steer is delivered whole
+  and does not count against them. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
+  including compaction; new conversations and conversations continued in a successor receive fresh
+  memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
+  keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
+  restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
+  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
+  than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
+  history is never replayed to build steering summaries; ledgers predating vectors have no steers.
+  Callback capabilities belong to their execution and are retired when it settles or its native
+  launch is replaced.
+  Aggregate steering prompts stream through adapter-owned transports: Copilot bounds inbound RPC,
+  while Hermes reassembles bounded private prompt frames before starting one native turn.
+  Windows memory storage and initialization use shared
   private-state helpers, including validation of SQLite sidecars. SQLite-created Windows children
   and externally written initialization responses may inherit the token's default owner only with
   an already private ACL and verified private parent; normalize them to explicit current-user
@@ -129,7 +142,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Codex trusts only the exact normalized hash of the product-owned session hook; never bypass trust
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
-  transport failure makes maintenance evidence unknown. Callback frames have absolute I/O deadlines
+  transport failure makes maintenance evidence unknown; a steer has no receipt and is offered again.
+  Native callback installation shares the updater's installed-executable path normalization, so
+  Linux controllers keep delivering after an atomic executable replacement.
+  Callback frames have absolute I/O deadlines
   so a stalled child cannot keep the resident broker or run cleanup alive indefinitely.
   Interrupted auxiliary work marks run usage incomplete. Discovery includes authentic main-run
   agent completions and bounded native tool receipts across all graph shapes, retries and locally
@@ -236,7 +252,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Existing public core module paths remain available for embedders. Core and contributed adapters
   implement the same complete execution and Active Memory contracts. The distinction controls
   distribution and maintenance ownership only.
-  Native memory hook/extension installation belongs to the adapter; shared memory owns the broker,
+  Native memory hook/extension installation belongs to the adapter; the carrier is installed for every
+  agent conversation, with memory off too. Shared memory owns the broker,
   frozen recall budgets, receipts and maintenance. Contributions never acquire a separate runtime
   or reduced feature path. Official local builds enable `contributed-harnesses`; target images and
   Platform dependencies disable default features, and target admission independently uses the
@@ -745,8 +762,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   incomplete input, failed completion, and stderr-only diagnostics. Incomplete input fails that
   attempt and cannot itself authorize continuation; each native transcript retains its documented
   retry policy, event parsing, and final-answer semantics. Shared provider text publication batches deltas, redacts credentials
-  across event/stream boundaries, and emits bounded UTF-8 records. `HarnessProcessEnvironment`
-  owns the minimal nonsecret environment for Claude and Pi in local and hosted composition.
+  across event/stream boundaries, and emits bounded UTF-8 records.
+  Retry/error progress lines for Claude, Codex and Pi include native causes, redact before
+  shortening to `LIVE_LINE_BYTES`, and leave terminal diagnostics and continuation policy intact.
+  `HarnessProcessEnvironment` owns the minimal nonsecret environment for Claude and Pi in local and hosted composition.
   `inputTokens` means uncached input; input, output, cache reads and cache writes are disjoint.
   Adapters normalize native counters before publication: Codex subtracts cache reads and writes
   after its resumed-session delta while retaining native baselines; Copilot subtracts both per call.
@@ -759,10 +778,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   documents use atomic private-file replacement with descriptor-based ownership; Linux pins the
   private home before publication and never follows a worker-created destination link.
 - Structured-output correction runs in the same provider session under the node's existing
-  execution policy; local response validation remains authoritative. Correction turns name a
-  detected envelope fault (empty reply, text before the object, unterminated object, or content
-  after it) and restate the expected response as a one-line skeleton whose placeholders are not
+  execution policy; local response validation remains authoritative. Message-delivery correction
+  turns name a detected envelope fault (empty reply, text before the object, unterminated object,
+  or content after it) and restate the expected response as a one-line skeleton whose placeholders are not
   JSON; parsing stays strict and nothing is repaired or extracted.
+  Claude selects native `StructuredOutput` delivery in its adapter for every provider and placement:
+  initial and correction prompts request one tool submission without a duplicate final text message
+  or brace-delimited reply instruction. It keeps `--json-schema`, the response envelope and local
+  validation; other harnesses retain their existing message-delivery prompts.
 - Provider continuation is bounded: Claude continues once after a retryable `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. A rejected credential or unavailable model with a native machine-readable signal is
@@ -1079,6 +1102,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   admission. Acceptance checks both durable result events, reserving the maximum identity and
   timestamp widths until allocation.
   Their opaque accepted resolution survives restoration without another deadline decision.
+- Every stored ledger event carries an optional envelope `recordedAt` (`StoredRunEvent::recorded_at`,
+  SQLite `v2_run_events.recorded_at_ms`) beside `cursor`, never inside `RunEvent`, so replay and the
+  reducer stay time-independent. Each append transaction stamps one ledger wall-clock reading on
+  every event in the batch, clamped to the run's previous recorded time. Cursor alone defines order.
+  Writable opens add the nullable column in place; read-only opens never migrate, and rows from
+  before the column read as unknown rather than estimated. Imported prerequisites and inherited
+  vectors carry their import time in the successor, since checkpoint snapshots keep no original
+  timing; vectors retain their own `createdAt`. `SafeLog.timestamp` keeps its producer meaning.
 - Durable observation replay reads bounded ledger pages that fit every accepted event, including
   combined request text and contracts, and retains its scan cursor across pages.
   NDJSON and WebSocket run inventories bound each typed status separately from the response
@@ -1376,6 +1407,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   branch-protection and active branch-ruleset contexts remain pending until they appear as required
   on the exact PR head. Supplement otherwise-ready observations with all pages of GitHub's effective
   branch-rules API, so a newly opened PR cannot look ready before its required workflow registers.
+  Only the known HTTP 403 GitHub Free private-repository plan refusal from that endpoint means no
+  additional rules. Recognize its complete standalone slurped response before diagnostic formatting
+  or credential redaction; permission/unknown errors, partial pagination, malformed, oversized and
+  timed-out responses retain their existing error handling.
   Ruleset App bindings require matching check-suite App identity. Legacy status contexts satisfy
   unbound ruleset checks; unresolved App-bound checks remain pending. Missing or stale human
   review may satisfy PR readiness when aggregate ref-update policy positively requires approval,
@@ -1808,8 +1843,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - The structured graph is canonical; React Flow/ELK provide presentation only. Flattening sequences
   or folding standard error routes must preserve scopes, identities, priority, conditions, and
   runtime bindings. Custom/unfamiliar routes stay visible. Layout and themes stay out of profiles.
-- Normal authoring exposes Inputs and Outputs. Run inputs/results and runtime settings belong in
-  the toolbar. Do not restore state, mapping, promotion, join-strategy, or error-policy panels.
+- Normal authoring exposes Inputs and Outputs. Run inputs/results open as the workflow's own
+  details, from the empty canvas, the inspector button, or the breadcrumb's first link; runtime
+  settings belong in the toolbar. Do not restore state, mapping, promotion, join-strategy, or
+  error-policy panels.
   Keep defaults/restriction prose on the info icon's `#defaults` page, preserving the mounted editor.
 - `/ui/api/data` creates typed bindings/promotions; `/ui/api/authoring` creates ordinary
   completion/error nodes. Their existing `profile_ui/data.rs` and `profile_ui/outcomes.rs` helpers

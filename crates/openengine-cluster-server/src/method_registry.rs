@@ -72,6 +72,7 @@ pub static METHOD_REGISTRY: &[MethodDescriptor] = &[
         SubscriptionKind::RunAttach,
     ),
     unary(openengine_cluster_protocol::RUN_FORCE_METHOD),
+    unary(openengine_cluster_protocol::RUN_STEER_METHOD),
     unary(openengine_cluster_protocol::RUN_SUSPEND_METHOD),
     unary(openengine_cluster_protocol::RUN_VECTORS_METHOD),
     unary(openengine_cluster_protocol::INBOX_LIST_METHOD),

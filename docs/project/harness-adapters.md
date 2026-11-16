@@ -204,3 +204,8 @@ same `ZEROSHOT_LIVE_*` settings as the shared live contract. The local CLI's ign
 `live_suspended_conversation` checks recall through the built binary. Before release, run the adapter
 contract with each supported CLI/provider lane; the owner also checks suspended hosted runs after
 installing conversation storage support on that host.
+
+Authored node `instructions` accept up to 262,144 UTF-8 bytes. Steering uses the same bound and the
+existing native tool-call carrier on every agent conversation, whether Active Memory is on or off.
+The host supplies the shared carrier frame bound to each adapter; adapters retain installation and
+acknowledgement ownership.

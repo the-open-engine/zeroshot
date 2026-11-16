@@ -11,7 +11,7 @@ while [ "$index" -lt 9 ]; do
   /usr/bin/printf '%s\n' '"}}'
   index=$((index + 1))
 done
-/usr/bin/printf '%s\n' '{"type":"error","message":"temporary transport retry"}'
+/usr/bin/printf '%s\n' '{"type":"error","message":"temporary transport retry fake-openai-key"}'
 /usr/bin/printf '%s%s\n' \
   '{"type":"item.completed","item":{"type":"command_execution","command":"scan",' \
   '"aggregated_output":"before\u0000after","exit_code":0,"status":"completed"}}'
@@ -55,7 +55,8 @@ async fn large_output_provisional_error_and_nul_log_complete_successfully() {
             .count(),
         9
     );
-    assert!(rendered.contains("Codex stream error"));
+    assert!(rendered.contains("Codex stream error: temporary transport retry [REDACTED]"));
+    assert!(!rendered.contains("fake-openai-key"));
     assert!(rendered.contains("Codex command completed: scan [completed] exit=0\nbefore�after"));
     assert!(!rendered.contains('\0'));
     assert!(!rendered.contains("999"));

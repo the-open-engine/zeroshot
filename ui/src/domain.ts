@@ -87,23 +87,27 @@ export function pathTo(root: GraphNode, name: string): GraphNode[] {
   return [];
 }
 export const executable = (node: GraphNode) => node.kind === 'step' || node.kind === 'verifier';
+/** The built-in worker that asks a person a question and waits for the answer. */
+export const REQUEST_WORKER = 'builtin.request.ask@1';
 export function newDocument(template: Template): Document {
   const graph = clone(template.graph);
   return {
     name: '',
     graph,
-    runtime: template.runtime ? clone(template.runtime) : {
-      harness: '',
-      provider: '',
-      nodes: Object.fromEntries(
-        allNodes(graph.root)
-          .filter(executable)
-          .map((n) => [
-            n.name,
-            clone(template.runtimeBindings?.[n.name] ?? { kind: 'agent', model: '' }),
-          ])
-      ),
-    },
+    runtime: template.runtime
+      ? clone(template.runtime)
+      : {
+          harness: '',
+          provider: '',
+          nodes: Object.fromEntries(
+            allNodes(graph.root)
+              .filter(executable)
+              .map((n) => [
+                n.name,
+                clone(template.runtimeBindings?.[n.name] ?? { kind: 'agent', model: '' }),
+              ])
+          ),
+        },
   };
 }
 export function blankDocument(template: Template): Document {

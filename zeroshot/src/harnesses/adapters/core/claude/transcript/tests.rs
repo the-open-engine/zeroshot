@@ -26,6 +26,71 @@ fn append_event(bytes: &mut Vec<u8>, event: Value) {
     bytes.push(b'\n');
 }
 
+#[test]
+fn retry_progress_names_http_and_incomplete_response_causes() {
+    for (error, status, expected) in [
+        ("overloaded", Some(json!(529)), "overloaded (HTTP 529)"),
+        ("server_error", Some(json!(500)), "server_error (HTTP 500)"),
+        (
+            "unknown",
+            Some(Value::Null),
+            "no complete response from the API",
+        ),
+        ("overloaded", Some(Value::Null), "overloaded"),
+        ("unknown", None, "unknown"),
+        ("unknown", Some(json!("529")), "unknown"),
+    ] {
+        let mut event = json!({
+            "type":"system", "subtype":"api_retry", "attempt":3,
+            "max_retries":10, "error":error
+        });
+        if let Some(status) = status {
+            event["error_status"] = status;
+        }
+        let mut bytes = Vec::new();
+        append_event(&mut bytes, event);
+        let mut transcript = ClaudeTranscript::new(Vec::new());
+        let emissions = transcript.push(&bytes);
+        assert_eq!(
+            emitted(&emissions),
+            [(
+                LiveOutputStream::System,
+                format!("Claude API retry 3/10: {expected}").as_str()
+            )]
+        );
+        assert!(failed_attempt(transcript.finish(None).assert_value()).retryable);
+    }
+}
+
+#[test]
+fn retry_progress_redacts_before_bounding_without_shortening_final_failure() {
+    let secret = "private-provider-token";
+    for message in [
+        format!("overloaded {secret}"),
+        format!("{} {secret} {} {secret}", "é".repeat(232), "界".repeat(600)),
+    ] {
+        let mut transcript = ClaudeTranscript::new(vec![secret.to_owned()]);
+        let mut bytes = Vec::new();
+        append_event(
+            &mut bytes,
+            json!({"type":"system", "subtype":"api_retry",
+            "attempt":3, "max_retries":10, "error":message, "error_status":529}),
+        );
+        append_event(&mut bytes, failure(&message, "session-1"));
+        let emissions = transcript.push(&bytes);
+        assert_eq!(emissions.len(), 1);
+        assert_eq!(emissions[0].stream, LiveOutputStream::System);
+        let line = &emissions[0].text;
+        assert!(line.len() <= LIVE_LINE_BYTES, "{} bytes", line.len());
+        assert!(line.contains("[REDACTED]"));
+        assert!(!line.contains("private"));
+        assert!(line.ends_with("(HTTP 529)"));
+        let failure = failed_attempt(transcript.finish(None).assert_value());
+        assert!(failure.retryable);
+        assert_eq!(failure.diagnostic, message);
+    }
+}
+
 /// Usage that one result states for the calls since the previous result.
 fn since_last_result(input: u64, output: u64) -> Value {
     json!({"model":{

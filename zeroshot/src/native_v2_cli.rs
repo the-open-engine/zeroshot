@@ -309,6 +309,13 @@ pub struct RunSelector {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SteerText {
+    Text(String),
+    File(PathBuf),
+    Stdin,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunResumeCommand {
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
@@ -424,6 +431,10 @@ pub enum NativeV2CliCommand {
         execution: ExecutionRef,
     },
     Suspend(RunSelector),
+    Steer {
+        run: RunSelector,
+        text: SteerText,
+    },
     Answer {
         run: RunSelector,
         input: PathBuf,
@@ -879,6 +890,16 @@ pub trait NativeV2CliBackend: Send + Sync {
             "target does not advertise workspace export".to_owned(),
         ))
     }
+    async fn run_steer(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise steering".into(),
+        ))
+    }
+
     async fn run_suspend(
         &self,
         _target: Option<&str>,

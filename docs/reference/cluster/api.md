@@ -389,6 +389,25 @@ This method has no parameters.
 | --- | --- |
 | <code>runForceResult</code> | <a href="../schema.json#/$defs/RunForceResult"><code>schema.json#/$defs/RunForceResult</code></a> |
 
+### <code>run/steer</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>text</code> | Yes | <a href="../schema.json#/$defs/NodeInstructions"><code>schema.json#/$defs/NodeInstructions</code></a> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runSteerResult</code> | <a href="../schema.json#/$defs/RunSteerResult"><code>schema.json#/$defs/RunSteerResult</code></a> |
+
 ### <code>run/suspend</code>
 
 | Parameter structure | Transport | Server push | Inbound notifications |

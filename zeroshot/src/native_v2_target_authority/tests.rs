@@ -1104,3 +1104,152 @@ fn public_servers_reject_factories_without_a_size_catalog() {
 
 #[path = "tests/requests.rs"]
 mod requests;
+
+#[tokio::test]
+async fn steer_direct_target_routes_running_suspended_and_finished_records() {
+    use crate::v2_run_ledger::{CreateRun, RunEvent, RunLedger};
+    use openengine_cluster_protocol::{
+        RunSteerParams, RunStatusParams, RunVectorParams, RunVectorContent, Sha256Digest,
+        UnixTimestampMillis, NodeName,
+    };
+    struct SteerFactory(Arc<NativeV2PlatformController>);
+    #[async_trait]
+    impl TargetControllerFactory for SteerFactory {
+        fn supports_run_suspension(&self) -> bool {
+            true
+        }
+        fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+            Some(fixture_run_sizes())
+        }
+        async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
+            Ok(self.0.clone())
+        }
+        async fn submit(
+            &self,
+            _: &NativeV2PlatformController,
+            _: TargetRunRequest,
+        ) -> Result<TargetRunReceipt, TargetAuthorityError> {
+            Err(TargetAuthorityError::invalid("steer fixture"))
+        }
+    }
+    let ledger = Arc::new(FakeRunLedger::new());
+    let controller = Arc::new(
+        NativeV2PlatformController::new(ledger.clone(), Arc::new(NoAllocation))
+            .await
+            .assert_value(),
+    );
+    let admitted = crate::native_v2_contract::AdmittedRun {
+        title: RunTitle::new("Steering target").assert_value(),
+        graph: serde_json::from_str(include_str!(
+            "../../../protocol/openengine-cluster/v1/fixtures/graph/canonical/base.json"
+        ))
+        .assert_value(),
+        initial_input: Value::Null,
+        environment: None,
+        source: None,
+        runtime: crate::native_v2_candidate::test_support::codex_runtime(
+            run_size("small"),
+            BTreeMap::new(),
+        ),
+    };
+    for state in ["running", "suspended", "finished"] {
+        let id = RunId::new(state);
+        ledger
+            .create_or_get(CreateRun {
+                run_id: id.clone(),
+                submission_key: IdempotencyKey::new(state).assert_value(),
+                submission_digest: Sha256Digest::new("a".repeat(64)).assert_value(),
+                admitted: admitted.clone(),
+            })
+            .await
+            .assert_value();
+        ledger
+            .append(&id, vec![RunEvent::RunStarted])
+            .await
+            .assert_value();
+        if state == "suspended" {
+            ledger
+                .append(
+                    &id,
+                    vec![RunEvent::Suspended {
+                        suspension: openengine_cluster_protocol::RunSuspension::Command {
+                            node: NodeName::new("next").assert_value(),
+                            created_at: UnixTimestampMillis::new(1).assert_value(),
+                        },
+                    }],
+                )
+                .await
+                .assert_value();
+        }
+        if state == "finished" {
+            ledger
+                .append(
+                    &id,
+                    vec![RunEvent::Terminal {
+                        result: openengine_cluster_protocol::TerminalResult::Failed {
+                            reason: openengine_cluster_protocol::EnumLabel::new("fixture")
+                                .assert_value(),
+                            context: None,
+                        },
+                    }],
+                )
+                .await
+                .assert_value();
+        }
+    }
+    let (address, endpoint, server) = direct_test_server(Arc::new(SteerFactory(controller))).await;
+    assert_eq!(
+        target_discovery(address)
+            .await
+            .extensions
+            .steering
+            .assert_value()
+            .kind,
+        "openengine.steering/v1"
+    );
+    let client = connect_client(&endpoint, None).await;
+    let text = "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES);
+    for state in ["running", "suspended"] {
+        let id = RunId::new(state);
+        let recorded = client
+            .run_steer(RunSteerParams {
+                run_id: id.clone(),
+                text: text.clone(),
+            })
+            .await
+            .assert_value();
+        assert_eq!(recorded.steer.received_executions, 0);
+        let status = client
+            .run_status(RunStatusParams { run_id: id.clone() })
+            .await
+            .assert_value();
+        assert_eq!(status.steering.steers, vec![recorded.steer.clone()]);
+        if state == "suspended" {
+            assert!(matches!(
+                status.status,
+                openengine_cluster_protocol::RunStatus::Suspended { .. }
+            ));
+        }
+        assert_eq!(
+            client
+                .run_vector(RunVectorParams {
+                    run_id: id,
+                    id: recorded.steer.id
+                })
+                .await
+                .assert_value()
+                .content,
+            RunVectorContent::Steer { text: text.clone() }
+        );
+    }
+    assert!(
+        client
+            .run_steer(RunSteerParams {
+                run_id: RunId::new("finished"),
+                text
+            })
+            .await
+            .is_err()
+    );
+    server.abort();
+}

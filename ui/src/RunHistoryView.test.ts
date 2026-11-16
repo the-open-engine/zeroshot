@@ -484,7 +484,7 @@ test('a remounted run restores its paused cursor, inspector and execution withou
   await flushEffects();
   assert.equal(watches, 1);
   await click('Go to start');
-  await click('Open inspector');
+  await click('Show details');
   await click('Next event');
   const position = () =>
     container.querySelector<HTMLInputElement>('[aria-label="History position"]')!.value;

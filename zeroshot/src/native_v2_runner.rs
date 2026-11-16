@@ -41,8 +41,9 @@ use output::{DurableEventSender, durable_event_channel, durable_output_event};
 pub use response::{render_agent_prompt, NodeResponseContract};
 pub(crate) use response::ProviderSchemaDialect;
 pub(crate) use response::{
-    AgentResponse, AgentResponseState, render_agent_prompt_with_schema, resolve_agent_response,
-    resolve_agent_response_with_dialect, resolve_agent_response_with_schema,
+    AgentResponse, AgentResponseState, ResponseDelivery, render_agent_prompt_with_schema,
+    resolve_agent_response_with_delivery, resolve_agent_response_with_dialect,
+    resolve_agent_response_with_schema,
 };
 pub(crate) use remote::{RemoteNodeHandleBridge, remote_node_handle};
 
@@ -238,8 +239,19 @@ pub struct DriverInvocation {
 
 impl DriverInvocation {
     pub(crate) fn agent_prompt(&self) -> Result<String, NodeRunnerError> {
-        let prompt =
-            render_agent_prompt(self.agent_instructions()?, &self.node.input, &self.response)?;
+        self.agent_prompt_with_delivery(ResponseDelivery::Message)
+    }
+
+    pub(crate) fn agent_prompt_with_delivery(
+        &self,
+        delivery: ResponseDelivery,
+    ) -> Result<String, NodeRunnerError> {
+        let prompt = response::render_agent_prompt_with_delivery(
+            self.agent_instructions()?,
+            &self.node.input,
+            &self.response,
+            delivery,
+        )?;
         Ok(self.with_host_context(prompt))
     }
 
@@ -254,6 +266,12 @@ impl DriverInvocation {
             dialect,
         )?;
         Ok(self.with_host_context(prompt))
+    }
+
+    pub(crate) fn prepend_host_context(prompt: String, context: &str) -> String {
+        let prefix = "Runtime-owned execution context:\n";
+        let body = prompt.strip_prefix(prefix).unwrap_or(&prompt);
+        format!("{prefix}{context}\n\n{body}")
     }
 
     fn with_host_context(&self, prompt: String) -> String {
@@ -426,6 +444,10 @@ impl DriverControl {
 /// Returned error details enter user logs; implementations must redact owned credentials.
 #[async_trait]
 pub trait NodeDriver: Send + Sync {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        None
+    }
+
     /// Runs until the provider has completed or consumed cancellation and finished process cleanup.
     async fn run(
         &self,
@@ -440,6 +462,10 @@ pub trait NodeDriver: Send + Sync {
 
 #[async_trait]
 pub trait NodeRunner: Send + Sync {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        None
+    }
+
     async fn capture_conversations(&self, _run_id: &RunId) -> conversations::ConversationCapture {
         conversations::ConversationCapture::default()
     }
@@ -622,6 +648,10 @@ impl NativeNodeRunner {
 
 #[async_trait]
 impl NodeRunner for NativeNodeRunner {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        self.driver.delivery_hooks()
+    }
+
     async fn capture_conversations(&self, run_id: &RunId) -> conversations::ConversationCapture {
         self.capture_conversations_until_stopped(
             run_id,
@@ -639,7 +669,14 @@ impl NodeRunner for NativeNodeRunner {
         if !self.activity.capture(run_id, &operation).await {
             return conversations::ConversationCapture::default();
         }
-        self.sessions.capture_conversations(run_id, operation).await
+        let receipts = self
+            .driver
+            .delivery_hooks()
+            .map(|hooks| hooks.capture_steers())
+            .unwrap_or_default();
+        self.sessions
+            .capture_conversations(run_id, operation, receipts)
+            .await
     }
 
     async fn restore_conversations(
@@ -647,7 +684,12 @@ impl NodeRunner for NativeNodeRunner {
         history: &[crate::full_v1_reducer::DurableExecution],
         files: Option<conversations::ConversationFiles>,
     ) {
-        self.sessions.restore_conversations(history, files).await;
+        let receipts = self.sessions.restore_conversations(history, files).await;
+        if let Some(hooks) = self.driver.delivery_hooks() {
+            for (instance, receipts) in receipts {
+                hooks.restore_steers(instance.get(), receipts);
+            }
+        }
     }
 
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {

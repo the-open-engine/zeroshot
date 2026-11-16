@@ -163,6 +163,32 @@ test('retried and overlapping replay pages do not duplicate events or mutate the
   assert.deepEqual(appendHistory(next, incoming), next);
 });
 
+test('ledger-recorded times are optional and must be positive safe Unix milliseconds', () => {
+  const timed = { ...record('v2:1'), recordedAt: 1_725_000_000_123 };
+  const untimed = record('v2:2');
+  const next = appendHistory([], page(timed, untimed));
+  assert.equal(next[0].recordedAt, 1_725_000_000_123);
+  assert.equal(next[1].recordedAt, undefined);
+  for (const recordedAt of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1', null]) {
+    const invalid = { ...record('v2:1'), recordedAt } as unknown as HistoryEvent;
+    assert.throws(() => appendHistory([], page(invalid)));
+  }
+});
+
+test('ledger-recorded times never go backwards and do not affect resent copies', () => {
+  const at = (cursor: string, recordedAt?: number): HistoryEvent =>
+    recordedAt === undefined ? record(cursor) : { ...record(cursor), recordedAt };
+  const previous = appendHistory([], page(at('v2:1', 2_000), at('v2:2')));
+  // An unknown time between known ones and an equal time are accepted.
+  assert.equal(appendHistory(previous, page(at('v2:3', 2_000))).length, 3);
+  assert.throws(() => appendHistory(previous, page(at('v2:3', 1_999))));
+  assert.throws(() => appendHistory([], page(at('v2:1', 2_000), at('v2:2', 1_999))));
+  // A resent event may gain or lose its time, as during a mixed-version upgrade.
+  const resent = appendHistory(previous, page(at('v2:2', 3_000), at('v2:3', 3_000)));
+  assert.equal(resent[1].recordedAt, undefined);
+  assert.equal(resent[2].recordedAt, 3_000);
+});
+
 test('empty caught-up page preserves retained output', () => {
   const previous = [record('v2:1')];
   assert.deepEqual(

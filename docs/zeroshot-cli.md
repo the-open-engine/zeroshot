@@ -32,6 +32,7 @@ Commands:
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
+  steer              Broadcast standing direction to every agent conversation in a running or suspended run
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
@@ -1492,6 +1493,34 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+### `zeroshot steer`
+
+```text
+Broadcast standing direction to every agent conversation in a running or suspended run
+
+Usage: zeroshot steer [OPTIONS] <TEXT|--text-file <FILE>|--text-stdin> <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+          Public run ID
+
+  [TEXT]
+          Direction, as given. Do not put secrets in a steer
+
+Options:
+      --target <NAME>
+          Use this named target. If omitted, use the local controller
+
+      --text-file <FILE>
+          Read UTF-8 direction from this file
+
+      --text-stdin
+          Read UTF-8 direction from standard input
+
+  -h, --help
+          Print help
+```
+
 ### `zeroshot answer`
 
 ```text
@@ -1800,6 +1829,7 @@ Commands:
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
+  steer              Broadcast standing direction to every agent conversation in a running or suspended run
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full

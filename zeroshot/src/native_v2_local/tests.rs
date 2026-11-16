@@ -875,3 +875,104 @@ fn local_git_metadata_rejects_invalid_records_and_bounds_untrusted_output() {
 
 #[path = "tests/comments.rs"]
 mod comments;
+
+#[cfg(unix)]
+#[tokio::test]
+async fn steer_memory_off_local_composition_installs_both_lanes_without_added_prompt_or_store() {
+    use crate::native_v2_candidate::test_support::NodeRequestFixture;
+    let root = TestDirectory::new("local-steer-carriers");
+    let bin = root.child("bin");
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&bin).assert_value();
+    std::fs::create_dir(&workspace).assert_value();
+    let script = r#"#!/usr/bin/env python3
+import json, os, pathlib, sys
+if '--version' in sys.argv:
+    print('2.1.318 (Claude Code)' if pathlib.Path(sys.argv[0]).name == 'claude' else 'codex-cli 0.225.0')
+    sys.exit(0)
+if '--help' in sys.argv or '--safe-mode' in sys.argv or 'app-server' in sys.argv: sys.exit(1)
+name = os.environ['ZEROSHOT_NODE_NAME']
+pathlib.Path(name + '.launch').write_text(json.dumps(sys.argv[1:]))
+pathlib.Path(name + '.prompt').write_text(sys.stdin.read())
+sys.exit(17)
+"#;
+    for program in ["codex", "claude"] {
+        openengine_cluster_testkit::fixture::write_executable(
+            &bin.join(program),
+            openengine_cluster_testkit::fixture::python3_script(script),
+            0o700,
+        )
+        .assert_value();
+    }
+    let admitted = admitted_with(json!({
+        "harness":"codex","provider":"openai","size":"small",
+        "activeMemory":{"repository":false,"graph":false},
+        "nodes":{"worker":{"kind":"agent","model":"fixture"},"reviewer":{"kind":"agent","lane":{"harness":"claude","provider":"anthropic"},"model":"fixture"}}
+    }),vec![worker_step(),reviewer_step()]).await;
+    let environment = BTreeMap::from([
+        ("PATH".into(), format!("{}:/usr/bin:/bin", bin.display())),
+        (
+            "HOME".into(),
+            root.child("home").to_string_lossy().into_owned(),
+        ),
+    ]);
+    let storage = root.child("storage");
+    let memory = root.child("memory");
+    let run = RunId::new("local-steer-carriers");
+    let runner = build_local_process_candidate(LocalProcessCandidateRequest {
+        delivery_receipt: None,
+        admitted: &admitted,
+        delivery_run_id: run.clone(),
+        adopt_existing_delivery: false,
+        workspace: &workspace,
+        local_branch: None,
+        storage: &storage,
+        memory_storage: Some(&memory),
+        github_token: None,
+        github_token_file: None,
+        delivery_validator: None,
+        git_credentials: None,
+        native_environment: &environment,
+    })
+    .assert_value();
+    for (node, execution, instructions) in [
+        ("worker", 1, "Implement the worker node."),
+        ("reviewer", 2, "Review the worker node."),
+    ] {
+        let binding = admitted.runtime.nodes()
+            [&openengine_cluster_protocol::NodeName::new(node).assert_value()]
+            .clone();
+        let mut handle = runner
+            .start(
+                NodeRequestFixture {
+                    run_id: run.as_str(),
+                    node,
+                    node_instance: execution,
+                    execution,
+                    worker: &format!("agent.{node}@1"),
+                    instructions,
+                    input: Value::Null,
+                    binding,
+                    environment: BTreeMap::new(),
+                }
+                .into_request(),
+            )
+            .await
+            .assert_value();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), handle.completion())
+            .await
+            .assert_value();
+        let prompt =
+            std::fs::read_to_string(workspace.join(format!("{node}.prompt"))).assert_value();
+        assert!(
+            prompt.contains(instructions),
+            "{node} did not receive authored instructions"
+        );
+        assert!(!prompt.contains("<steer>") && !prompt.contains("<active_memory>"));
+        let launch =
+            std::fs::read_to_string(workspace.join(format!("{node}.launch"))).assert_value();
+        assert!(launch.contains("PreToolUse"));
+    }
+    assert!(!memory.exists());
+    runner.close_run(&run).await;
+}

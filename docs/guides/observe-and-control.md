@@ -11,7 +11,9 @@ lifetime.
 
 Run [`zeroshot ui`](../getting-started/install.md#open-the-workspace-ui), then select a run in **Runs**.
 The read-only graph uses that run's admitted definition. Select a node for its inputs, outputs,
-decisions, and transcript; use the timeline to replay its history. Active runs update live.
+decisions, and transcript; with the details panel open, select the empty canvas or the first link
+above a node's name for the run's own details. Use the timeline to replay its history. Active runs
+update live.
 Seeking pauses following; **Go live** returns to the latest event. Scrolling a transcript keeps
 the graph live and follows new output only when you reach the bottom.
 
@@ -381,3 +383,40 @@ The answer starts one successor on the retained workspace. Ordinary `resume` ref
 Deadlines default to 7 days and accept at most 30 days. A late answer starts the author's `timeout`
 route and exits 1 naming its successor. Reads never apply expiry. Add `--target NAME` for a target
 that advertises `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md).
+
+## Steer a run
+
+```console
+zeroshot steer RUN_ID "Prioritize the parser regression."
+zeroshot steer RUN_ID --text-file direction.txt --target NAME
+printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin
+```
+
+Supply exactly one text source. An admitted, running or suspended run accepts standing direction.
+Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
+steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
+
+Every agent conversation, including reviewers, receives each steer once: at its next tool call or
+in its next prompt, whichever comes first. It cannot revise a tool call already issued. Direction
+takes precedence over authored instructions as guidance; permissions, output contracts, routing,
+runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
+Steers stand for the rest of the run and its successors. Continued conversations keep receipts;
+new conversations receive the standing direction. A lost acknowledgement can cause repeat delivery.
+
+Text must be nonblank UTF-8, at most 262,144 bytes, with no NUL or control characters except tab,
+newline and carriage return. Text is stored and shown as given: **do not put secrets in a steer**.
+
+Reading steering status requires a client from this release or newer.
+The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
+byte lengths, character-safe excerpts and confirmed receiving execution references. Prompt receipts
+appear after a successful provider turn; tool-call receipts appear after the carrier acknowledges.
+The bounded listing reports omitted directions or older execution references. Read the complete
+record and full text with:
+
+```console
+zeroshot vectors RUN_ID
+zeroshot vectors show RUN_ID STEER_ID
+```
+
+The record includes `steer` and `steer_receipt` entries in event order. Add `--target NAME` to these
+commands for a direct target advertising steering and run vectors.

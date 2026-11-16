@@ -12,7 +12,7 @@ _scope = ContextVar("zeroshot_hermes_tool", default=None)
 _installed = False
 _capability_path = None
 _emit_tool = None
-_MAX_CONTEXT_BYTES = 256000  # Shared Active Memory transport bound (64,000 tokens * 4).
+_MAX_CONTEXT_BYTES = 0  # Supplied by the shared Rust carrier bound at initialization.
 
 
 def _remaining(deadline):
@@ -128,9 +128,10 @@ def _tool_receipt(name):
             pass
 
 
-def install(capability_path, emit_tool):
+def install(capability_path, emit_tool, max_context_bytes):
     """Install once for all native agents, including delegates; never touch native config."""
-    global _installed, _capability_path, _emit_tool
+    global _installed, _capability_path, _emit_tool, _MAX_CONTEXT_BYTES
+    _MAX_CONTEXT_BYTES = max_context_bytes
     _capability_path, _emit_tool = capability_path, emit_tool
     if _installed:
         return

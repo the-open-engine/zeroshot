@@ -13,7 +13,7 @@ pub(super) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
         .replace("CAPABILITY_PATH", &serde_json::to_string(capability)?)
         .replace(
             "MAX_CONTEXT_BYTES",
-            &crate::active_memory::MAX_INJECTION_BYTES.to_string(),
+            &crate::active_memory::hooks::native::MAX_CONTEXT_BYTES.to_string(),
         );
     super::plugin::install(command, home, "zeroshot-active-memory", &source)
 }

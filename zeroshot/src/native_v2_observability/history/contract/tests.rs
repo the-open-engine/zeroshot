@@ -170,6 +170,36 @@ fn page_validation_rejects_noncanonical_gapped_oversized_and_stalled_pages() {
 }
 
 #[test]
+fn page_validation_admits_only_positive_safe_recorded_times() {
+    let mut timed = page(&["v2:1"], "v2:1", "v2:1", true);
+    timed.events[0]["recordedAt"] = json!(1_725_000_000_123_u64);
+    assert!(validate_history_page(&timed, &Cursor::new("v2:0")).is_ok());
+    for invalid in [
+        json!(0),
+        json!(-1),
+        json!(1.5),
+        json!("1725000000123"),
+        json!(null),
+        json!(9_007_199_254_740_992_u64),
+    ] {
+        let mut changed = timed.clone();
+        changed.events[0]["recordedAt"] = invalid;
+        assert!(validate_history_page(&changed, &Cursor::new("v2:0")).is_err());
+    }
+}
+
+#[test]
+fn page_validation_rejects_recorded_times_that_go_backwards() {
+    let mut timed = page(&["v2:1", "v2:2", "v2:3"], "v2:3", "v2:3", true);
+    timed.events[0]["recordedAt"] = json!(2_000);
+    timed.events[2]["recordedAt"] = json!(2_000);
+    // Equal times and an unknown time between known ones are valid.
+    assert!(validate_history_page(&timed, &Cursor::new("v2:0")).is_ok());
+    timed.events[2]["recordedAt"] = json!(1_999);
+    assert!(validate_history_page(&timed, &Cursor::new("v2:0")).is_err());
+}
+
+#[test]
 fn page_validation_anchors_ordered_control_and_coherent_runtime_failure() {
     let mut valid = page(&["v2:1", "v2:2"], "v2:2", "v2:2", true);
     valid.control = vec![control("v2:1"), control("v2:2")];

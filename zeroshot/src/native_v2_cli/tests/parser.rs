@@ -1174,3 +1174,35 @@ fn suspension_and_vector_commands_parse() {
         );
     }
 }
+
+#[test]
+fn steer_parser_requires_exactly_one_text_source() {
+    for (source, expected) in [
+        (vec!["direction"], SteerText::Text("direction".into())),
+        (
+            vec!["--text-file", "direction.txt"],
+            SteerText::File("direction.txt".into()),
+        ),
+        (vec!["--text-stdin"], SteerText::Stdin),
+    ] {
+        let mut argv = vec!["steer", "run-1", "--target", "prod"];
+        argv.extend(source);
+        assert_eq!(
+            parse_native_v2_args(args(&argv)).assert_value(),
+            NativeV2CliCommand::Steer {
+                run: RunSelector {
+                    run_id: RunId::new("run-1"),
+                    target: Some("prod".into())
+                },
+                text: expected,
+            }
+        );
+    }
+    for argv in [
+        vec!["steer", "run-1"],
+        vec!["steer", "run-1", "text", "--text-stdin"],
+        vec!["steer", "run-1", "--text-file", "a", "--text-stdin"],
+    ] {
+        assert!(parse_native_v2_args(args(&argv)).is_err());
+    }
+}

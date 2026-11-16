@@ -50,6 +50,15 @@ impl ClusterBackend for PortableRunController {
         ClusterBackend::run_list(self.inner.as_ref(), context, params).await
     }
 
+    async fn run_steer(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
+        self.require_run(&params.run_id)?;
+        ClusterBackend::run_steer(self.inner.as_ref(), context, params).await
+    }
+
     async fn run_suspend(
         &self,
         context: &ConnectionContext,

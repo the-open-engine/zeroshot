@@ -176,7 +176,15 @@ impl OpenCodeAdapter {
         );
         let mut response = AgentResponseState::new(initial);
         loop {
-            let (result, redactions) = self.execute_turn(&turn, response.prompt()).await?;
+            let prompt = match &self.active_memory {
+                Some(hooks) => {
+                    hooks
+                        .steer_prompt(invocation, turn.control, response.prompt().to_owned())
+                        .await
+                }
+                None => response.prompt().to_owned(),
+            };
+            let (result, redactions) = self.execute_turn(&turn, &prompt).await?;
             feedback.extend_redactions(&redactions);
             let answer = resolve_agent_response_with_schema(
                 &invocation.response,

@@ -355,7 +355,7 @@ class Runtime:
         register_worker_hooks(self.policy)
         from hermes_cli.plugins import get_plugin_manager
         self.usage = Usage(get_plugin_manager(), self.emit)
-        sibling("native_memory").install(frame.get("memoryCapability"), self.tool)
+        sibling("native_memory").install(frame.get("memoryCapability"), self.tool, frame["memoryContextBytes"])
         self.db = SessionDB(db_path=Path(frame["dbPath"]))
         session_id = self.db.resolve_resume_session_id(frame["sessionId"])
         from gateway.session_policy import policy_scope
@@ -403,13 +403,20 @@ class Runtime:
         threading.Thread(target=self.interrupt, daemon=True).start()
 
     def controls(self, stream):
+        parts = []
         try:
             while (frame := read_frame(stream)) is not None:
                 if frame.get("type") == "stop":
+                    parts.clear()
                     break
-                if frame.get("type") != "prompt" or not isinstance(frame.get("text"), str):
+                if frame.get("type") not in ("prompt", "prompt_chunk") or not isinstance(frame.get("text"), str):
                     raise BridgeError("Hermes bridge expected a prompt or stop frame.")
-                self.commands.put_nowait(frame["text"])
+                parts.append(frame["text"])
+                if frame["type"] == "prompt":
+                    self.commands.put_nowait("".join(parts))
+                    parts.clear()
+            if parts:
+                raise BridgeError("Hermes bridge received an incomplete prompt.")
         except Exception:
             self.control_failed = True
         finally:

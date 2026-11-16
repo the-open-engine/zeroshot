@@ -10,6 +10,7 @@ use crate::native_v2_candidate::test_support::TestDirectory;
 use crate::native_v2_runner::test_support::control;
 
 mod command_tests;
+mod steering;
 
 fn adapter(directory: &TestDirectory, fixture: &str) -> HermesAdapter {
     let source = openengine_cluster_testkit::fixture::python3_script(fixture);
