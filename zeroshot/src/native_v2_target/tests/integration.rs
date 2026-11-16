@@ -118,7 +118,7 @@ fn file_registry_rejects_malformed_records_and_noncanonical_recovery_authority()
         std::fs::write(&path, serde_json::to_vec(&state).assert_value()).assert_value();
         assert!(matches!(
             FileTargetRegistry::new(path).get("platform"),
-            Err(TargetConnectorError::RegistryJson(_))
+            Err(TargetConnectorError::RegistryJson(_, _))
         ));
     }
 
@@ -127,14 +127,14 @@ fn file_registry_rejects_malformed_records_and_noncanonical_recovery_authority()
     std::fs::write(&oversized, vec![b' '; 1024 * 1024 + 1]).assert_value();
     assert!(matches!(
         FileTargetRegistry::new(oversized).get("platform"),
-        Err(TargetConnectorError::RegistryTooLarge)
+        Err(TargetConnectorError::RegistryTooLarge(_))
     ));
 
     let directory = root.path("directory/targets.json");
     std::fs::create_dir_all(&directory).assert_value();
     assert!(matches!(
         FileTargetRegistry::new(directory).get("platform"),
-        Err(TargetConnectorError::RegistryIo(_))
+        Err(TargetConnectorError::RegistryIo(_, _))
     ));
 
     let registry = FileTargetRegistry::new(root.path("recovery/targets.json"));
