@@ -137,7 +137,7 @@ async fn command_failure(label: &str, command: TestProviderCommand) -> String {
         TestRunnerConfig {
             provider: ClaudeProvider::Anthropic,
             binding: binding.clone(),
-            verifier: false,
+            graph: graph(false),
             command,
         },
     )

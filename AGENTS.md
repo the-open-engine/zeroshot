@@ -778,10 +778,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   documents use atomic private-file replacement with descriptor-based ownership; Linux pins the
   private home before publication and never follows a worker-created destination link.
 - Structured-output correction runs in the same provider session under the node's existing
-  execution policy; local response validation remains authoritative. Correction turns name a
-  detected envelope fault (empty reply, text before the object, unterminated object, or content
-  after it) and restate the expected response as a one-line skeleton whose placeholders are not
+  execution policy; local response validation remains authoritative. Message-delivery correction
+  turns name a detected envelope fault (empty reply, text before the object, unterminated object,
+  or content after it) and restate the expected response as a one-line skeleton whose placeholders are not
   JSON; parsing stays strict and nothing is repaired or extracted.
+  Claude selects native `StructuredOutput` delivery in its adapter for every provider and placement:
+  initial and correction prompts request one tool submission without a duplicate final text message
+  or brace-delimited reply instruction. It keeps `--json-schema`, the response envelope and local
+  validation; other harnesses retain their existing message-delivery prompts.
 - Provider continuation is bounded: Claude continues once after a retryable `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. A rejected credential or unavailable model with a native machine-readable signal is
