@@ -55,6 +55,22 @@ impl Run {
         assert_eq!(unsafe { libc::kill(self.controller, signal) }, 0);
     }
 
+    /// Stops the controller while it holds no write lock on the ledger. The provider reports a
+    /// turn every 50 ms and each report is a ledger write, so a stop at an arbitrary instant can
+    /// land inside a commit. The stopped controller then keeps the ledger locked: every command
+    /// waits out SQLite's five-second busy timeout before it asks the controller, and `status`
+    /// fails instead of reporting the recorded state. An outside write transaction rules that
+    /// out, because the controller's next write waits for it without holding a lock.
+    fn freeze_between_ledger_writes(&self) {
+        let ledger = rusqlite::Connection::open(self.storage.join("runs.sqlite3")).unwrap();
+        ledger.execute_batch("BEGIN IMMEDIATE").unwrap();
+        self.signal(libc::SIGSTOP);
+        // The signal call returns before every controller thread has stopped. Keep the ledger
+        // until they have, so none of them starts a write after the transaction ends.
+        std::thread::sleep(Duration::from_millis(100));
+        ledger.execute_batch("ROLLBACK").unwrap();
+    }
+
     fn wait_closed(&self, limit: Duration) {
         let lock = File::open(self.storage.join("controller.lock")).unwrap();
         let end = Instant::now() + limit;
@@ -107,7 +123,7 @@ fn unix_controller_stalled_requests_return_without_killing_the_controller() {
     let execution = status["status"]["activeExecutions"][0]["execution"]
         .as_str()
         .unwrap();
-    run.signal(libc::SIGSTOP);
+    run.freeze_between_ledger_writes();
     let mut commands = Vec::new();
     for name in [
         "status",
