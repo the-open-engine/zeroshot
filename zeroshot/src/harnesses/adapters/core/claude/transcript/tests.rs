@@ -1013,3 +1013,108 @@ fn transcripts_without_rate_limit_events_keep_their_existing_output_behavior() {
     assert!(decoded.emissions.is_empty());
     assert_eq!(completed_response(decoded.attempt), json!("done"));
 }
+
+#[tokio::test]
+async fn owned_native_hook_failure_is_redacted_bounded_and_deduplicated() {
+    for helper_named in [false, true] {
+        use std::sync::Arc;
+        use crate::active_memory::hooks::ActiveMemoryHooks;
+        use crate::v2_run_ledger::{RunLedger, RunEvent, SafeLogStream};
+        let admitted = crate::native_v2_runner::test_support::admitted();
+        let run = openengine_cluster_protocol::RunId::new("hook-failure");
+        let ledger = Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+        ledger
+            .create_or_get(crate::v2_run_ledger::CreateRun {
+                run_id: run.clone(),
+                submission_key: openengine_cluster_protocol::IdempotencyKey::new("hook-failure")
+                    .assert_value(),
+                submission_digest: openengine_cluster_protocol::Sha256Digest::new("a".repeat(64))
+                    .assert_value(),
+                admitted,
+            })
+            .await
+            .assert_value();
+        struct Memory;
+        impl crate::active_memory::hooks::ActiveMemorySource for Memory {
+            fn tool_context(&self, _: &crate::active_memory::hooks::HookQuery) -> String {
+                String::new()
+            }
+            fn graph_context(&self, _: &str, _: &str) -> String {
+                String::new()
+            }
+        }
+        let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Memory)).assert_value());
+        hooks.bind_ledger(run, ledger.clone());
+        let reference =
+            crate::native_v2_runner::test_support::request("hook-failure", "worker", (1, 2))
+                .invocation
+                .reference;
+        let mut transcript = ClaudeTranscript::new(vec!["private-hook-token".into()]);
+        let directory = tempfile::tempdir().assert_value();
+        let installed = directory.path().join("zeroshot-original");
+        std::fs::write(&installed, b"installed executable").assert_value();
+        transcript.memory = Some((hooks.clone(), reference.clone(), installed.clone()));
+        std::fs::rename(&installed, directory.path().join("zeroshot-moved")).assert_value();
+        // A failed user-owned hook cannot establish an Active Memory failure.
+        let mut event = json!({"type":"system","subtype":"hook_response","hook_event":"PreToolUse",
+        "outcome":"error","exit_code":127,"stderr":"some user hook failed"});
+        let mut bytes = Vec::new();
+        append_event(&mut bytes, event.clone());
+        transcript.push(&bytes);
+        hooks.finish_steers(reference.execution.get(), true).await;
+        assert!(
+            ledger
+                .snapshot_and_tail(&reference.run_id, None)
+                .await
+                .assert_value()
+                .events
+                .is_empty()
+        );
+        event["stderr"] = if helper_named {
+            json!(format!(
+                "__active-memory-hook failed private-hook-token {}",
+                "界".repeat(8000)
+            ))
+        } else {
+            // Shell startup failures name only the installed path, which no longer exists.
+            json!(format!("sh: 1: {}: not found", installed.display()))
+        };
+        for _ in 0..2 {
+            let mut bytes = Vec::new();
+            append_event(&mut bytes, event.clone());
+            transcript.push(&bytes);
+        }
+        hooks.finish_steers(reference.execution.get(), true).await;
+        let tail = ledger
+            .snapshot_and_tail(&reference.run_id, None)
+            .await
+            .assert_value();
+        let errors: Vec<_> = tail
+            .events
+            .iter()
+            .filter_map(|event| match &event.event {
+                RunEvent::SafeLog {
+                    stream: SafeLogStream::Error,
+                    line,
+                    diagnostic,
+                    ..
+                } => {
+                    assert!(diagnostic.is_none());
+                    Some(line.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("exit 127"));
+        if helper_named {
+            assert!(errors[0].contains("[REDACTED]"));
+        } else {
+            assert!(errors[0].contains(installed.to_string_lossy().as_ref()));
+            assert!(!errors[0].contains("__active-memory-hook"));
+        }
+        assert!(!errors[0].contains("private-hook-token"));
+        assert!(errors[0].len() <= crate::v2_run_ledger::MAX_SAFE_LOG_BYTES);
+        assert!(tail.snapshot.failure_context.is_none());
+    }
+}

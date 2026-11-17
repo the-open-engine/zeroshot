@@ -249,6 +249,21 @@ while (message := read()) is not None:
         if mode == "permission":
             usage.update({"cacheReadTokens": 2, "cacheWriteTokens": 1})
         event("assistant.usage", usage)
+        if mode.startswith("memory_handoff"):
+            import fcntl
+            fcntl.fcntl(0, fcntl.F_SETPIPE_SZ, 4096)
+            replies = []
+            for identifier in (9002, 9003):
+                send({"method": "hooks.invoke", "id": identifier, "params": {
+                    "sessionId": session, "hookType": "preToolUse",
+                    "input": {"toolName": "Read", "toolArgs": {"filePath": "proof.txt"}}}})
+                if mode == "memory_handoff_delayed":
+                    time.sleep(.8)  # Delay a successful reply; there is no writer-acknowledgement timeout.
+                reply = read()
+                assert reply["id"] == identifier
+                replies.append(reply)
+            with open(os.environ["CAPTURE_PATH"] + ".memory-replies", "w") as capture:
+                json.dump(replies, capture)
         if mode in ("steer", "steer_refused"):
             from pathlib import Path
             capture = os.environ["CAPTURE_PATH"]

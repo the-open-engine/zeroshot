@@ -268,8 +268,11 @@ fn memory_capability(
     adapter.active_memory.as_ref().and_then(|memory| {
         match memory.capability_file(invocation, &files.workspace, files.home()) {
             Ok(path) => path,
-            Err(_) => {
-                memory.execution_failed();
+            Err(error) => {
+                memory.carrier_failed(
+                    &invocation.node.reference,
+                    &format!("hook configuration failed: {error}"),
+                );
                 None
             }
         }

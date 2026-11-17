@@ -229,6 +229,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   capability, and runner lifecycle contracts are exposed only through their owning modules.
   Capsule allocation reuses the resolved
   `ProductionHostingConfig`; instantiated diagnostic storage remains separate from configuration.
+  Failed memory preparation retains its bounded safe cause on the unavailable postmortem wrapper;
+  supervisor startup logs it independently of the postmortem opt-out. Role failures and confirmed
+  hook/carrier failures use existing error logs with no primary failure diagnostic. Hook errors
+  deduplicate per execution and flush after callback retirement drains bounded in-flight receipt work.
+  Foreground observation and resume
+  reuse bounded log reads to print memory errors without changing the graph result or wire types.
+  Claude requests native hook events and attributes failures only when they name the owned helper
+  or the executable path frozen at hook installation, including after that executable moves;
+  missing callbacks and unrelated native hook errors do not establish failure.
 
 - Run storage bounds stay ledger-owned: 2 MiB for the serialized admitted definition and 1 MiB
   for a node start record, including input and bookkeeping. Local submissions apply the same

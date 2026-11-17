@@ -214,22 +214,36 @@ pub fn attach_postmortem(
     })
 }
 
-pub fn unavailable_memory(inner: Arc<dyn NodeRunner>) -> Arc<dyn NodeRunner> {
-    attach_postmortem(inner, Some(Arc::new(UnavailableMemory)))
+pub fn unavailable_memory(inner: Arc<dyn NodeRunner>, reason: String) -> Arc<dyn NodeRunner> {
+    attach_postmortem(inner, Some(Arc::new(UnavailableMemory(reason))))
 }
 
-struct UnavailableMemory;
+pub(crate) fn initialization_diagnostic(path: Option<&Path>, error: &ActiveMemoryError) -> String {
+    use std::error::Error;
+    let location = path.map_or_else(String::new, |path| format!(" for {}", path.display()));
+    let mut message = format!("Active Memory recall and postmortem unavailable{location}: {error}");
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    crate::native_v2_runner::bounded_log_text(message, crate::v2_run_ledger::MAX_SAFE_LOG_BYTES)
+}
+
+struct UnavailableMemory(String);
 
 #[async_trait]
 impl RunPostmortem for UnavailableMemory {
+    fn initialization_error(&self) -> Option<&str> {
+        Some(&self.0)
+    }
+
     async fn run(
         &self,
         _request: PostmortemRequest,
         _cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> Result<PostmortemReport, PostmortemError> {
-        Err(PostmortemError::Unavailable(
-            "Active Memory storage or hook initialization was unavailable",
-        ))
+        Err(PostmortemError::Detail(self.0.clone()))
     }
 }
 

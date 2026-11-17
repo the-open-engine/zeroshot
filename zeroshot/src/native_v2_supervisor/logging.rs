@@ -213,7 +213,7 @@ pub(crate) fn terminal_failure_events(
     Ok(events)
 }
 
-fn error_log(
+pub(super) fn error_log(
     execution: Option<crate::full_v1_reducer::ExecutionId>,
     message: String,
     diagnostic: Option<FailureDiagnosticKind>,

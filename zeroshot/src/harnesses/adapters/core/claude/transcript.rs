@@ -68,6 +68,11 @@ pub(super) struct ClaudeTranscript {
     pending: ProviderText,
     /// Tells the turn's stdin side what stdout shows of it; closed when stdout ends.
     input: Option<tokio::sync::mpsc::UnboundedSender<super::input::TurnSignal>>,
+    memory: Option<(
+        std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>,
+        crate::native_v2_contract::ExecutionRef,
+        std::path::PathBuf,
+    )>,
 }
 
 impl ClaudeTranscript {
@@ -104,7 +109,20 @@ impl ClaudeTranscript {
             permission_denials: PermissionDenials::default(),
             pending: ProviderText::new(&redactions),
             input: None,
+            memory: None,
         }
+    }
+
+    pub(super) fn set_memory(
+        &mut self,
+        hooks: Option<std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
+        invocation: &crate::native_v2_runner::DriverInvocation,
+        executable: Option<std::path::PathBuf>,
+    ) {
+        self.memory = hooks
+            .filter(|_| !invocation.auxiliary)
+            .zip(executable)
+            .map(|(hooks, executable)| (hooks, invocation.node.reference.clone(), executable));
     }
 }
 
@@ -327,6 +345,7 @@ impl ClaudeTranscript {
         event: &serde_json::Map<String, Value>,
         emissions: &mut Vec<ClaudeEmission>,
     ) {
+        self.observe_memory_hook(event);
         if event.get("subtype").and_then(Value::as_str) != Some("api_retry") {
             return;
         }
@@ -355,6 +374,38 @@ impl ClaudeTranscript {
             emissions,
             &format!("Claude API retry {attempt}/{maximum}: {error}"),
         );
+    }
+
+    fn observe_memory_hook(&self, event: &serde_json::Map<String, Value>) {
+        let Some((hooks, reference, executable)) = &self.memory else {
+            return;
+        };
+        if event.get("subtype").and_then(Value::as_str) != Some("hook_response")
+            || event.get("hook_event").and_then(Value::as_str) != Some("PreToolUse")
+            || event.get("outcome").and_then(Value::as_str) != Some("error")
+        {
+            return;
+        }
+        let detail = ["stderr", "output"]
+            .into_iter()
+            .filter_map(|key| event.get(key).and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("; ");
+        // Other native hooks remain user-owned. Require evidence naming our executable/helper,
+        // rather than attributing every PreToolUse failure or absent callback to Active Memory.
+        let owned = detail.contains("__active-memory-hook")
+            || detail.contains(executable.to_string_lossy().as_ref());
+        if owned {
+            hooks.carrier_failed(
+                reference,
+                &self.pending.redact(&format!(
+                    "native hook failed (exit {}): {detail}",
+                    event
+                        .get("exit_code")
+                        .map_or_else(|| "unknown".into(), Value::to_string)
+                )),
+            );
+        }
     }
 
     fn parse_rate_limit_event(

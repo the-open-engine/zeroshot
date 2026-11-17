@@ -25,6 +25,9 @@ mod authentication;
 mod framing;
 mod hosted;
 mod lanes;
+// The backpressure peer uses Linux's F_SETPIPE_SZ to force a small pipe.
+#[cfg(target_os = "linux")]
+mod memory;
 mod steering;
 
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";

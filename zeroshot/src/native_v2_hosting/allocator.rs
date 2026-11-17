@@ -429,7 +429,16 @@ impl ProductionCapsuleAllocator {
         let candidate: Arc<dyn crate::native_v2_runner::NodeRunner> = match memory {
             Ok(Some(memory)) => memory.wrap(request.admitted, candidate),
             Ok(None) => Arc::new(candidate),
-            Err(_) => crate::active_memory::runtime::unavailable_memory(Arc::new(candidate)),
+            Err(error) => crate::active_memory::runtime::unavailable_memory(
+                Arc::new(candidate),
+                crate::active_memory::runtime::initialization_diagnostic(
+                    self.config
+                        .memory_storage
+                        .as_deref()
+                        .filter(|_| self.config.memory_backend.is_none()),
+                    &error,
+                ),
+            ),
         };
         let postmortem = candidate.postmortem();
         let workspace_identity = WorkspaceIdentity::capture(&filesystem.workspace)

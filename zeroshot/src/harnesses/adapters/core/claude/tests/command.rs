@@ -188,7 +188,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         let expected_prefix = format!(
             concat!(
                 "--print\n--input-format\nstream-json\n--replay-user-messages\n--output-format\nstream-json\n",
-                "--verbose\n--include-partial-messages\n--model\n{}\n--json-schema\n",
+                "--verbose\n--include-partial-messages\n--include-hook-events\n--model\n{}\n--json-schema\n",
             ),
             model
         );
@@ -413,7 +413,9 @@ fn native_settings_and_owned_memory_hook_share_one_inline_layer() {
         },
         deadline: None,
     };
-    super::super::memory::install(&mut command, Path::new("/owned/capability")).assert_value();
+    let capability = Path::new("/owned/capability");
+    let installed_executable =
+        super::super::memory::install(&mut command, capability).assert_value();
     assert_eq!(
         command
             .argv
@@ -426,6 +428,10 @@ fn native_settings_and_owned_memory_hook_share_one_inline_layer() {
     assert_eq!(settings["permissions"]["deny"], json!(["Write"]));
     assert_eq!(settings["unknownNativeKey"], true);
     assert!(settings["hooks"]["PreToolUse"].is_array());
+    assert_eq!(
+        settings["hooks"]["PreToolUse"][0]["hooks"][0],
+        crate::active_memory::hooks::native::command_handler_at(capability, &installed_executable)
+    );
 }
 
 #[test]

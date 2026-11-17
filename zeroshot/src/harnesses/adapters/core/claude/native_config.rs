@@ -24,6 +24,7 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
             "--json-schema",
             "--verbose",
             "--include-partial-messages",
+            "--include-hook-events",
             "--resume",
             "-r",
             "--continue",

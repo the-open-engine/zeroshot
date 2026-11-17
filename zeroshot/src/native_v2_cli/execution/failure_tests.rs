@@ -175,6 +175,25 @@ fn error_log(cursor: &str, level: &str, message: &str) -> RunLogEventNotificatio
 }
 
 #[test]
+fn auxiliary_memory_errors_stay_separate_from_similarly_named_primary_errors() {
+    let mut failure = RunFailure::read_for_test(RunId::new("run-local"), None);
+    failure
+        .log_event(error_log(
+            "v2:1",
+            "error",
+            "Active Memory postmortem failed",
+        ))
+        .expect("auxiliary error");
+    let mut primary = error_log("v2:2", "error", "Active Memory worker input is invalid");
+    primary.execution =
+        Some(openengine_cluster_protocol::ExecutionRef::new("opaque").expect("primary execution"));
+    failure.log_event(primary).expect("primary error");
+    let report = failure.to_string();
+    assert!(report.contains("Active Memory worker input is invalid"));
+    assert!(!report.contains("postmortem failed"));
+}
+
+#[test]
 fn failure_report_keeps_only_the_latest_bounded_error_records() {
     let mut failure = RunFailure::read_for_test(RunId::new("run-local"), None);
     for index in 0..7 {

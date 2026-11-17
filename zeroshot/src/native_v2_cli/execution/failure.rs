@@ -32,6 +32,7 @@ pub struct RunFailure {
     run_id: RunId,
     target: Option<String>,
     errors: VecDeque<BoundedLogMessage>,
+    memory_errors: VecDeque<BoundedLogMessage>,
     omitted: usize,
     complete: bool,
     context: Option<(EnumLabel, Box<FailureContext>)>,
@@ -93,6 +94,7 @@ impl RunFailure {
             complete: !context.1.incomplete,
             context: Some(context),
             errors: VecDeque::new(),
+            memory_errors: VecDeque::new(),
             omitted: 0,
         }
     }
@@ -103,6 +105,7 @@ impl RunFailure {
             run_id,
             target: target.map(str::to_owned),
             errors: VecDeque::new(),
+            memory_errors: VecDeque::new(),
             omitted: 0,
             complete: false,
             context: None,
@@ -123,6 +126,7 @@ impl RunFailure {
             run_id: run_id.clone(),
             target: target.map(str::to_owned),
             errors: VecDeque::new(),
+            memory_errors: VecDeque::new(),
             omitted: 0,
             complete: false,
             context: None,
@@ -140,6 +144,12 @@ impl RunFailure {
         failure.complete = matches!(read, Ok(Ok(CliOutcome::Completed)));
         failure
     }
+
+    pub(super) fn report_memory(&self) {
+        for error in &self.memory_errors {
+            eprintln!("{}", error.as_str());
+        }
+    }
 }
 
 impl DurableOutput for RunFailure {
@@ -152,6 +162,16 @@ impl DurableOutput for RunFailure {
 
     fn log_event(&mut self, event: RunLogEventNotification) -> Result<(), NativeV2CliError> {
         if event.record.level == LogLevel::Error {
+            if event.execution.is_none()
+                && (event.record.message.as_str().starts_with("Active Memory ")
+                    || event.record.message.as_str().starts_with("[active_memory_"))
+            {
+                if self.memory_errors.len() == MAX_REPORTED_ERRORS {
+                    self.memory_errors.pop_front();
+                }
+                self.memory_errors.push_back(event.record.message);
+                return Ok(());
+            }
             if self.errors.len() == MAX_REPORTED_ERRORS {
                 self.errors.pop_front();
                 self.omitted += 1;

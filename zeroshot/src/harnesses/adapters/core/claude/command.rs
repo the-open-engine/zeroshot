@@ -68,6 +68,7 @@ pub(super) fn claude_arguments(
         "stream-json".to_owned(),
         "--verbose".to_owned(),
         "--include-partial-messages".to_owned(),
+        "--include-hook-events".to_owned(),
         "--model".to_owned(),
         turn.model.to_owned(),
         "--json-schema".to_owned(),

@@ -667,7 +667,7 @@ async fn wrappers_preserve_runner_admission_and_postmortem_opt_out_without_model
             wrapped.start(request.clone()).await,
             Err(NodeRunnerError::InvalidRole)
         ));
-        let unavailable = unavailable_memory(wrapped);
+        let unavailable = unavailable_memory(wrapped, "test memory initialization failed".into());
         let postmortem = unavailable.postmortem().unwrap();
         let (_, cancellation) = tokio::sync::watch::channel(false);
         let run_id = request.invocation.reference.run_id;
@@ -696,7 +696,7 @@ async fn wrappers_preserve_runner_admission_and_postmortem_opt_out_without_model
                 cancellation,
             )
             .await;
-        assert!(matches!(result, Err(PostmortemError::Unavailable(_))));
+        assert!(matches!(result, Err(PostmortemError::Detail(_))));
         unavailable.close_run(&run_id).await;
     }
 }
