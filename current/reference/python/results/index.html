@@ -2873,7 +2873,7 @@
 
 
 <h2 id="zeroshot.ActiveExecution" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">ActiveExecution</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">execution</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">map_indices</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">())</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">ActiveExecution</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">execution</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">map_indices</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">started_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -2915,6 +2915,17 @@
           –
           <div class="doc-md-description">
             <p>Zero-based map path, outermost first; empty outside maps.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>started_at</code></b>
+              (<code><span title="int">int</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Ledger recording time of NodeStarted in Unix milliseconds, or None when
+unknown. This is not a precise provider start measurement.</p>
           </div>
         </li>
     </ul>
@@ -3183,7 +3194,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>execution</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str, map_indices: tuple[int, ...] = ())
+              (<code><a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str, map_indices: tuple[int, ...] = (), started_at: int | None = None)
 
   
       dataclass
@@ -3757,7 +3768,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunStatus" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">steers</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">RunSteer</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">omitted_steers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">steers</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">RunSteer</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">omitted_steers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">recorded_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3829,7 +3840,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>active_executions</code></b>
-              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str, map_indices: tuple[int, ...] = ())
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str, map_indices: tuple[int, ...] = (), started_at: int | None = None)
 
   
       dataclass
@@ -3965,6 +3976,18 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
           –
           <div class="doc-md-description">
             <p>Older directions omitted by the bounded status listing.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>recorded_at</code></b>
+              (<code><span title="int">int</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Ledger recording time of the event producing a watch notification, in Unix
+milliseconds. None for status responses and old events without timing. Imported
+history carries its import time, not the original execution time. Cursor defines order.</p>
           </div>
         </li>
     </ul>

@@ -2508,6 +2508,11 @@ chosen worktree explicitly with <code>git worktree remove PATH</code>.</p>
 </code></pre></div>
 <p>A <code>RunWaitTimeout</code> carries the still-active run handle, and cancelling the Python task detaches in
 the same way. Neither action stops native work; only <code>await run.force_stop()</code> changes run lifetime.</p>
+<p><code>status.active_executions</code> entries expose optional <code>started_at</code> ledger recording times. Statuses
+yielded by <code>run.watch()</code> also expose optional <code>recorded_at</code> for the event producing that notification.
+Both use Unix milliseconds, remain <code>None</code> when unknown, and are not precise provider measurements.
+Imported history reports its import time rather than its original execution time. Use <code>cursor</code> for
+ordering and resumption, and <code>execution</code> to distinguish retries and simultaneous mapped executions.</p>
 <h2 id="run-on-a-direct-target">Run on a direct target<a class="headerlink" href="#run-on-a-direct-target" title="Permanent link">&para;</a></h2>
 <p>Local execution uses <code>LocalTarget</code>. Docker/direct and hosted targets require a committed Git
 source, selected from the client workspace or per-run <code>repository=</code>, <code>branch=</code>, and <code>revision=</code>.

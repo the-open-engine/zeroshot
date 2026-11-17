@@ -2623,6 +2623,15 @@ cleanup failure during finalization can instead prevent completion or end the ru
 <p>Local inspection (<code>status</code>, <code>list</code>, <code>checkpoints</code>, <code>vectors</code>, <code>watch</code>, <code>logs</code> and <code>attach</code>) reads
 retained history without taking recovery ownership or writing to the run directory. Finished and
 suspended runs need no controller and retain their usual exit codes.</p>
+<p>Each <code>status.activeExecutions</code> entry can include <code>startedAt</code>, the ledger recording time of that
+execution's <code>NodeStarted</code>. Watch notifications also include optional <code>recordedAt</code> for the event
+that produced the notification. Match the opaque <code>execution</code> selector across active sets to identify
+starts and settlements, including retries and simultaneous map items. Status remains a summary;
+completed execution timing is available through watch replay and the history API.</p>
+<p>These times are Unix milliseconds recorded by the ledger, not precise provider start/stop
+measurements. Events in one append transaction share a time, and <code>cursor</code> alone defines ordering
+and reconnection boundaries. Missing times in older ledgers stay omitted. Imported history carries
+its import time, not the time the original work ran. Log <code>timestamp</code> retains its producer meaning.</p>
 <p>For an unfinished local run whose controller does not answer, <code>status</code> and each <code>list</code> entry keep
 the recorded status and add an optional entry beside it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"controller"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lost"</span><span class="p">,</span><span class="w"> </span><span class="nt">"observedAt"</span><span class="p">:</span><span class="w"> </span><span class="mi">1794470707000</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>

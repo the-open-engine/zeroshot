@@ -4069,7 +4069,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
 
   
       dataclass
@@ -4144,7 +4144,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0)
+              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
 
   
       dataclass
@@ -4344,7 +4344,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
 
   
       dataclass
