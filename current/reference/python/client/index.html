@@ -1621,6 +1621,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Client.list_targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;list_targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Client.remove_target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;remove_target
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Client.get_preset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2713,6 +2735,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Client.list_targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;list_targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Client.remove_target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;remove_target
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Client.get_preset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3676,6 +3720,106 @@ completes before local controller startup or direct-target contact.</p>
     <div class="doc doc-contents ">
 
         <p>Return built-in preset names read dynamically from the bundled executable.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Client.list_targets" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">list_targets</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">NamedTarget</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Client.list_targets" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>List local registrations, including platform, without contacting any target.</p>
+<p>This reads the user's registry independently of this client's run target.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Client.remove_target" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">remove_target</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TargetRemoveResult</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Client.remove_target" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Remove a local registration, its stored login and resume permissions.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>name</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Exact local target name.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              TargetRemoveResult(name: str, removed: bool)
+
+  
+      dataclass
+   (zeroshot.targets.TargetRemoveResult)" href="../results/#zeroshot.TargetRemoveResult">TargetRemoveResult</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The native removal receipt.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              InvalidRequestError(message: str, *, code: str = 'request.invalid', path: tuple[str | int, ...] | None = None, node: str | None = None, details: Mapping[str, JsonValue] | None = None) (zeroshot.errors.InvalidRequestError)" href="../errors/#zeroshot.InvalidRequestError">InvalidRequestError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the name is unknown or is the built-in platform target.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              TargetError(message: str, *, exit_code: int | None = None) (zeroshot.errors.TargetError)" href="../errors/#zeroshot.TargetError">TargetError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If local storage cleanup fails.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="            ProtocolError (zeroshot.errors.ProtocolError)" href="../errors/#zeroshot.ProtocolError">ProtocolError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the native receipt is malformed.</p>
+          </div>
+        </li>
+    </ul>
 
 
     </div>
@@ -4850,7 +4994,7 @@ Read complete text through <code>Run.vector(receipt.id)</code>.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-15">15 November 2026</time>
+    Last updated <time datetime="2026-11-17">17 November 2026</time>
   </span>
 
     

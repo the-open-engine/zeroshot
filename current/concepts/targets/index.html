@@ -614,6 +614,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#manage-named-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage named targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#local-controller" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2314,6 +2325,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#manage-named-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage named targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#local-controller" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2492,6 +2514,19 @@ graph and models.</p>
 </table>
 <p>The model provider still receives the code and context its agent needs. Self-hosting the target
 does not make model processing local.</p>
+<h2 id="manage-named-targets">Manage named targets<a class="headerlink" href="#manage-named-targets" title="Permanent link">&para;</a></h2>
+<p>Use <code>zeroshot target list</code> to see each registered name, origin and hosted/direct kind, including
+the built-in <code>platform</code> target. Add <code>--json</code> for machine-readable output. Listing reads local
+configuration and prints no stored login data or device token.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">zeroshot target list</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">zeroshot target remove old-target</span>
+</code></pre></div>
+<p>Removal deletes the local registration, its stored login and saved resume permissions. It does not
+contact the target or stop its runs. You can then register that name again with <code>target add</code>.
+The built-in <code>platform</code> target and unknown names are refused. <code>target remove NAME --json</code> returns
+a removal receipt. If cleanup fails, the registration remains so you can retry.
+On Linux, removal clears both credential stores after a store switch. Older file-store selections
+may also require access to Secret Service to finish cleanup.</p>
 <h2 id="local-controller">Run locally<a class="headerlink" href="#local-controller" title="Permanent link">&para;</a></h2>
 <p>Omit <code>--target</code> for a local run. Add <code>--cwd FOLDER</code> to choose the workspace; otherwise zeroshot uses
 the invoking folder. A folder inside a Git checkout resolves to its root. Input and configuration
@@ -2517,14 +2552,14 @@ child output. A failed backup leaves the previous published checkpoint available
 <h2 id="direct-target">Run a Docker target<a class="headerlink" href="#direct-target" title="Permanent link">&para;</a></h2>
 <p>The Docker image includes zeroshot and its core agent CLIs. It is published for <code>linux/amd64</code>.
 Start a persistent target and register it with your CLI:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">docker run --detach --restart unless-stopped --name zeroshot-target \</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">  -p 127.0.0.1:8080:8080 \</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">  -v zeroshot-data:/var/lib/zeroshot \</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">  ghcr.io/the-open-engine/zeroshot-target:latest</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">zeroshot target add local-target \</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">  --url http://127.0.0.1:8080 \</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">  --direct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">docker run --detach --restart unless-stopped --name zeroshot-target \</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">  -p 127.0.0.1:8080:8080 \</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">  -v zeroshot-data:/var/lib/zeroshot \</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">  ghcr.io/the-open-engine/zeroshot-target:latest</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">zeroshot target add local-target \</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">  --url http://127.0.0.1:8080 \</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="go">  --direct</span>
 </code></pre></div>
 <div class="admonition danger">
 <p class="admonition-title">Direct targets have no authentication</p>
@@ -2550,8 +2585,8 @@ confirm the result, check <code>zeroshot list --target NAME</code> or rerun with
 <p>Pin <code>ghcr.io/the-open-engine/zeroshot-target:X.Y.Z</code> or an image digest for a stable deployment.
 <code>latest</code> advances with releases; <code>sha-COMMIT</code> tags identify their source.</p>
 <p>For a remote machine, keep its port on loopback and open an SSH tunnel:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">ssh -N -L 8080:127.0.0.1:8080 USER@HOST</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot target add remote-target --url http://127.0.0.1:8080 --direct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">ssh -N -L 8080:127.0.0.1:8080 USER@HOST</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot target add remote-target --url http://127.0.0.1:8080 --direct</span>
 </code></pre></div>
 <p>Keep the tunnel open. If port 8080 is taken locally, forward another port and set the target's
 <code>--public-origin</code> to that origin, such as <code>http://127.0.0.1:18080</code>.
@@ -2560,30 +2595,30 @@ covers proxies, Docker access and image builds.</p>
 <h2 id="hosted-target">Use a hosted target<a class="headerlink" href="#hosted-target" title="Permanent link">&para;</a></h2>
 <p>For zeroshot Platform, run <code>zeroshot target login platform</code>, then use <code>--target platform</code>.
 To register another hosting service:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot target login production</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot target login production</span>
 </code></pre></div>
 <p>The service manages login, source access, organization connections, queues and capacity.
 See the <a href="https://app.zeroshot.sh/docs">Platform docs</a> for its setup.</p>
 <h3 id="api-keys">API keys<a class="headerlink" href="#api-keys" title="Permanent link">&para;</a></h3>
 <p>For CI, sign in as a human and create a delegation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target login platform</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot delegation create ci</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot target login platform</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot delegation create ci</span>
 </code></pre></div>
 <p>Store the one-time <code>api_key</code> as <code>ZEROSHOT_API_KEY</code> in your CI secret store. It carries your current
 permissions. Keys expire after 90 days by default; <code>--expires-in-days</code> accepts 1–365.
 Set <code>ZEROSHOT_ORGANIZATION</code> to the organization UUID when a user key needs organization selection.</p>
 <p>Organization owners and admins can create an organization delegation instead:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
 </code></pre></div>
 <p>Organization keys stay in their organization. Omitted profile and connection scopes follow the
 owner's scope. Keep provider and source credentials in their usual connections.</p>
 <p>Unset <code>ZEROSHOT_API_KEY</code> and use human login to manage delegations. Create a replacement key before
 revoking the old one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot delegation list</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot delegation list</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
 </code></pre></div>
 <p>Revocation blocks further calls; already accepted runs continue.</p>
 <h3 id="workspace-export-protocol">Workspace export protocol<a class="headerlink" href="#workspace-export-protocol" title="Permanent link">&para;</a></h3>
@@ -2659,7 +2694,7 @@ See <a href="../../guides/ask-a-person/">Ask a person</a>.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-14">14 November 2026</time>
+    Last updated <time datetime="2026-11-17">17 November 2026</time>
   </span>
 
     

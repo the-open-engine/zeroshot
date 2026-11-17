@@ -1104,6 +1104,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#manage-named-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage named targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#use-a-local-git-worktree" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2285,6 +2296,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#manage-named-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage named targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#use-a-local-git-worktree" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2425,23 +2447,42 @@ Use <code>Preset("software-change", delivery="none")</code> for local changes wi
 Per-run <code>cwd=</code> paths resolve from that captured folder, or <code>LocalTarget.workspace</code> when supplied.
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 <code>run()</code> submits once and waits; <code>submit()</code> returns a durable <code>Run</code> handle immediately.</p>
+<h2 id="manage-named-targets">Manage named targets<a class="headerlink" href="#manage-named-targets" title="Permanent link">&para;</a></h2>
+<p><code>Client.list_targets()</code> returns a tuple of typed <code>NamedTarget</code> records with <code>name</code>, <code>origin</code> and
+<code>kind</code> (<code>hosted</code> or <code>direct</code>), including the built-in <code>platform</code> target. It shares the local
+registry used by <code>zeroshot target list</code> and returns no login data. These operations use the user's
+local registry independently of the client's selected run target, and do not contact a target.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">remove_old_target</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">()</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="k">for</span> <span class="n">target</span> <span class="ow">in</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">list_targets</span><span class="p">():</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>            <span class="nb">print</span><span class="p">(</span><span class="n">target</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">target</span><span class="o">.</span><span class="n">origin</span><span class="p">,</span> <span class="n">target</span><span class="o">.</span><span class="n">kind</span><span class="p">)</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="n">receipt</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">remove_target</span><span class="p">(</span><span class="s2">"old-target"</span><span class="p">)</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        <span class="nb">print</span><span class="p">(</span><span class="n">receipt</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">receipt</span><span class="o">.</span><span class="n">removed</span><span class="p">)</span>
+</code></pre></div>
+<p><code>remove_target()</code> returns <code>TargetRemoveResult</code> after deleting the registration, stored login and
+saved resume permissions. It raises <code>InvalidRequestError</code> for <code>platform</code> or an unknown name.
+Removal does not stop remote runs. Configure replacements with <code>zeroshot target add</code> and, for hosted
+targets, <code>zeroshot target login</code>.</p>
 <h2 id="use-a-local-git-worktree">Use a local Git worktree<a class="headerlink" href="#use-a-local-git-worktree" title="Permanent link">&para;</a></h2>
 <p>Pass <code>worktree=True</code> to <code>run()</code> or <code>submit()</code> to create a retained Git worktree on a managed run
 branch, leaving the invoking checkout in place. The default is <code>worktree=False</code>.
 An omitted <code>worktree_base</code>, or <code>worktree_base="local"</code>, starts at the invoking checkout's exact HEAD.
 Use <code>worktree_base="remote"</code> to fetch and start at that branch's upstream; an upstream is required:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">UniformRuntime</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit_isolated</span><span class="p">(</span><span class="n">runtime</span><span class="p">:</span> <span class="n">UniformRuntime</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="n">run</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>            <span class="s2">"Update the parser."</span><span class="p">,</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>            <span class="n">cwd</span><span class="o">=</span><span class="s2">"/path/to/repository"</span><span class="p">,</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>            <span class="n">worktree</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>            <span class="n">worktree_base</span><span class="o">=</span><span class="s2">"remote"</span><span class="p">,</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>        <span class="p">)</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>        <span class="nb">print</span><span class="p">(</span><span class="n">run</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">UniformRuntime</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit_isolated</span><span class="p">(</span><span class="n">runtime</span><span class="p">:</span> <span class="n">UniformRuntime</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="n">run</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>            <span class="s2">"Update the parser."</span><span class="p">,</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>            <span class="n">cwd</span><span class="o">=</span><span class="s2">"/path/to/repository"</span><span class="p">,</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>            <span class="n">worktree</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>            <span class="n">worktree_base</span><span class="o">=</span><span class="s2">"remote"</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>        <span class="p">)</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>        <span class="nb">print</span><span class="p">(</span><span class="n">run</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
 </code></pre></div>
 <p>Only committed files from the selected base are included. Uncommitted changes, untracked files,
 and installed dependencies are not copied, and Zeroshot performs no dependency setup.
@@ -2451,15 +2492,15 @@ chosen worktree explicitly with <code>git worktree remove PATH</code>.</p>
 <code>DirectTarget</code> or <code>HostedTarget</code>, a base without <code>worktree=True</code>, and bases other than <code>local</code> or
 <code>remote</code>, before target contact or controller startup.</p>
 <h2 id="watch-a-submitted-run">Watch a submitted run<a class="headerlink" href="#watch-a-submitted-run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">UniformRuntime</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">observe</span><span class="p">(</span><span class="n">runtime</span><span class="p">:</span> <span class="n">UniformRuntime</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="n">run</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="s2">"Update the parser."</span><span class="p">)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>        <span class="n">status</span> <span class="o">=</span> <span class="k">await</span> <span class="n">run</span><span class="o">.</span><span class="n">status</span><span class="p">()</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>        <span class="k">async</span> <span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="n">run</span><span class="o">.</span><span class="n">watch</span><span class="p">(</span><span class="n">after</span><span class="o">=</span><span class="n">status</span><span class="o">.</span><span class="n">cursor</span><span class="p">):</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>            <span class="nb">print</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">UniformRuntime</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">observe</span><span class="p">(</span><span class="n">runtime</span><span class="p">:</span> <span class="n">UniformRuntime</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="n">run</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="s2">"Update the parser."</span><span class="p">)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="n">status</span> <span class="o">=</span> <span class="k">await</span> <span class="n">run</span><span class="o">.</span><span class="n">status</span><span class="p">()</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="k">async</span> <span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="n">run</span><span class="o">.</span><span class="n">watch</span><span class="p">(</span><span class="n">after</span><span class="o">=</span><span class="n">status</span><span class="o">.</span><span class="n">cursor</span><span class="p">):</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>            <span class="nb">print</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 </code></pre></div>
 <p>A <code>RunWaitTimeout</code> carries the still-active run handle, and cancelling the Python task detaches in
 the same way. Neither action stops native work; only <code>await run.force_stop()</code> changes run lifetime.</p>
@@ -2468,16 +2509,16 @@ the same way. Neither action stops native work; only <code>await run.force_stop(
 source, selected from the client workspace or per-run <code>repository=</code>, <code>branch=</code>, and <code>revision=</code>.
 <code>repository=</code> accepts a credential-free HTTPS/SSH Git URL or GitHub <code>owner/name</code> shorthand;
 <code>source_connection=</code> selects a named connection used only for Git checkout and delivery:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">DirectTarget</span><span class="p">,</span> <span class="n">UniformRuntime</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run_direct</span><span class="p">(</span><span class="n">runtime</span><span class="p">:</span> <span class="n">UniformRuntime</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">target</span> <span class="o">=</span> <span class="n">DirectTarget</span><span class="p">(</span><span class="s2">"http://127.0.0.1:8080"</span><span class="p">)</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">,</span> <span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">"Update the parser."</span><span class="p">)</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="n">result</span><span class="o">.</span><span class="n">raise_for_failure</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">DirectTarget</span><span class="p">,</span> <span class="n">UniformRuntime</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run_direct</span><span class="p">(</span><span class="n">runtime</span><span class="p">:</span> <span class="n">UniformRuntime</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">target</span> <span class="o">=</span> <span class="n">DirectTarget</span><span class="p">(</span><span class="s2">"http://127.0.0.1:8080"</span><span class="p">)</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">target</span><span class="p">,</span> <span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">"Update the parser."</span><span class="p">)</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="n">result</span><span class="o">.</span><span class="n">raise_for_failure</span><span class="p">()</span>
 </code></pre></div>
 <p>Direct and hosted targets resolve GitHub access from their own stored <code>github</code> connection, and the
 client does not send <code>GH_TOKEN</code> to them. Pass <code>forward_github_token=True</code> to <code>Client</code> to send the
@@ -2497,36 +2538,36 @@ submitted at once. <code>delivery</code> chooses how it lands:</p>
   run's branch, the first against the base branch, and nothing is merged.</li>
 </ul>
 <p>In both modes, agent bindings must not declare <code>GH_TOKEN</code>; only the Git delivery binding may.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">HostedTarget</span><span class="p">,</span> <span class="n">StackRequest</span><span class="p">,</span> <span class="n">StackRun</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit_release_stack</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">request</span> <span class="o">=</span> <span class="n">StackRequest</span><span class="p">(</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>        <span class="n">title</span><span class="o">=</span><span class="s2">"Release checkout update"</span><span class="p">,</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>        <span class="n">repository</span><span class="o">=</span><span class="s2">"the-open-engine/zeroshot"</span><span class="p">,</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>        <span class="n">branch</span><span class="o">=</span><span class="s2">"main"</span><span class="p">,</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>        <span class="n">profile</span><span class="o">=</span><span class="s2">"org:software-change"</span><span class="p">,</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>        <span class="n">delivery</span><span class="o">=</span><span class="s2">"merge"</span><span class="p">,</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>        <span class="n">expires_at</span><span class="o">=</span><span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>        <span class="n">runs</span><span class="o">=</span><span class="p">{</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>            <span class="s2">"backend"</span><span class="p">:</span> <span class="n">StackRun</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="s2">"Update the API."</span><span class="p">}),</span>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>            <span class="s2">"frontend"</span><span class="p">:</span> <span class="n">StackRun</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="s2">"Update the client."</span><span class="p">}),</span>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>            <span class="s2">"integrate"</span><span class="p">:</span> <span class="n">StackRun</span><span class="p">(</span>
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>                <span class="nb">input</span><span class="o">=</span><span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="s2">"Verify the combined changes and run the release tests."</span><span class="p">},</span>
-<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>                <span class="n">needs</span><span class="o">=</span><span class="p">(</span><span class="s2">"backend"</span><span class="p">,</span> <span class="s2">"frontend"</span><span class="p">),</span>
-<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>            <span class="p">),</span>
-<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>        <span class="p">},</span>
-<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>        <span class="n">submission_key</span><span class="o">=</span><span class="s2">"checkout-release-1"</span><span class="p">,</span>
-<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>    <span class="p">)</span>
-<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>
-<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">HostedTarget</span><span class="p">(</span><span class="s2">"platform"</span><span class="p">))</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
-<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>        <span class="n">stack</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">submit_stack</span><span class="p">(</span><span class="n">request</span><span class="p">)</span>
-<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>        <span class="n">status</span> <span class="o">=</span> <span class="k">await</span> <span class="n">stack</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">wait_timeout</span><span class="o">=</span><span class="mi">21_600</span><span class="p">)</span>
-<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>
-<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">status</span><span class="o">.</span><span class="n">succeeded</span><span class="p">:</span>
-<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"stack ended as </span><span class="si">{</span><span class="n">status</span><span class="o">.</span><span class="n">state</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">HostedTarget</span><span class="p">,</span> <span class="n">StackRequest</span><span class="p">,</span> <span class="n">StackRun</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit_release_stack</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">request</span> <span class="o">=</span> <span class="n">StackRequest</span><span class="p">(</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>        <span class="n">title</span><span class="o">=</span><span class="s2">"Release checkout update"</span><span class="p">,</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>        <span class="n">repository</span><span class="o">=</span><span class="s2">"the-open-engine/zeroshot"</span><span class="p">,</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="n">branch</span><span class="o">=</span><span class="s2">"main"</span><span class="p">,</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>        <span class="n">profile</span><span class="o">=</span><span class="s2">"org:software-change"</span><span class="p">,</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>        <span class="n">delivery</span><span class="o">=</span><span class="s2">"merge"</span><span class="p">,</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>        <span class="n">expires_at</span><span class="o">=</span><span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>        <span class="n">runs</span><span class="o">=</span><span class="p">{</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>            <span class="s2">"backend"</span><span class="p">:</span> <span class="n">StackRun</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="s2">"Update the API."</span><span class="p">}),</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>            <span class="s2">"frontend"</span><span class="p">:</span> <span class="n">StackRun</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="s2">"Update the client."</span><span class="p">}),</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>            <span class="s2">"integrate"</span><span class="p">:</span> <span class="n">StackRun</span><span class="p">(</span>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>                <span class="nb">input</span><span class="o">=</span><span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="s2">"Verify the combined changes and run the release tests."</span><span class="p">},</span>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>                <span class="n">needs</span><span class="o">=</span><span class="p">(</span><span class="s2">"backend"</span><span class="p">,</span> <span class="s2">"frontend"</span><span class="p">),</span>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>            <span class="p">),</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>        <span class="p">},</span>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>        <span class="n">submission_key</span><span class="o">=</span><span class="s2">"checkout-release-1"</span><span class="p">,</span>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>    <span class="p">)</span>
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">HostedTarget</span><span class="p">(</span><span class="s2">"platform"</span><span class="p">))</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>        <span class="n">stack</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">submit_stack</span><span class="p">(</span><span class="n">request</span><span class="p">)</span>
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>        <span class="n">status</span> <span class="o">=</span> <span class="k">await</span> <span class="n">stack</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">wait_timeout</span><span class="o">=</span><span class="mi">21_600</span><span class="p">)</span>
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>
+<a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">status</span><span class="o">.</span><span class="n">succeeded</span><span class="p">:</span>
+<a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"stack ended as </span><span class="si">{</span><span class="n">status</span><span class="o">.</span><span class="n">state</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div>
 <p>With a pull-request delivery profile and <code>delivery="stacked_pull_requests"</code>, the same runs become
 the chain <code>backend</code>, <code>frontend</code>, <code>integrate</code>: three pull requests, each targeting the branch of the
@@ -2543,27 +2584,27 @@ pull-request chain.</p>
 <h2 id="pass-exact-protocol-documents">Pass exact protocol documents<a class="headerlink" href="#pass-exact-protocol-documents" title="Permanent link">&para;</a></h2>
 <p><code>GraphSpec</code> and <code>RuntimePlan</code> wrap exact JSON mappings without loss. Python neither copies the Rust
 schemas nor applies its own semantic checks:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Mapping</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">GraphSpec</span><span class="p">,</span> <span class="n">RunRequest</span><span class="p">,</span> <span class="n">RuntimePlan</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit_exact</span><span class="p">(</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="n">client</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="n">graph_document</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="n">runtime_document</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    <span class="n">request</span> <span class="o">=</span> <span class="n">RunRequest</span><span class="p">(</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>        <span class="n">title</span><span class="o">=</span><span class="s2">"Repair checkout"</span><span class="p">,</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>        <span class="n">graph</span><span class="o">=</span><span class="n">GraphSpec</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">graph_document</span><span class="p">),</span>
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>        <span class="n">initial_input</span><span class="o">=</span><span class="p">{</span><span class="s2">"ticket"</span><span class="p">:</span> <span class="s2">"OE-123"</span><span class="p">},</span>
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>        <span class="n">runtime</span><span class="o">=</span><span class="n">RuntimePlan</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">runtime_document</span><span class="p">),</span>
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>        <span class="n">submission_key</span><span class="o">=</span><span class="s2">"oe-123-attempt-1"</span><span class="p">,</span>
-<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>    <span class="p">)</span>
-<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>
-<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">request</span><span class="p">)</span>
-<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>    <span class="n">result</span><span class="o">.</span><span class="n">raise_for_failure</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Mapping</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">GraphSpec</span><span class="p">,</span> <span class="n">RunRequest</span><span class="p">,</span> <span class="n">RuntimePlan</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit_exact</span><span class="p">(</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">client</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">graph_document</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">runtime_document</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">request</span> <span class="o">=</span> <span class="n">RunRequest</span><span class="p">(</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>        <span class="n">title</span><span class="o">=</span><span class="s2">"Repair checkout"</span><span class="p">,</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>        <span class="n">graph</span><span class="o">=</span><span class="n">GraphSpec</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">graph_document</span><span class="p">),</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>        <span class="n">initial_input</span><span class="o">=</span><span class="p">{</span><span class="s2">"ticket"</span><span class="p">:</span> <span class="s2">"OE-123"</span><span class="p">},</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>        <span class="n">runtime</span><span class="o">=</span><span class="n">RuntimePlan</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">runtime_document</span><span class="p">),</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>        <span class="n">submission_key</span><span class="o">=</span><span class="s2">"oe-123-attempt-1"</span><span class="p">,</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="p">)</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">request</span><span class="p">)</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>    <span class="n">result</span><span class="o">.</span><span class="n">raise_for_failure</span><span class="p">()</span>
 </code></pre></div>
 <p>An opaque <code>RuntimePlan</code> may carry <a href="../../reference/runtime-plan/#per-node-lanes">per-node lanes</a> and
 passes through unchanged, while <code>UniformRuntime</code> applies one lane to every agent node.
@@ -2615,7 +2656,7 @@ UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-15">15 November 2026</time>
+    Last updated <time datetime="2026-11-17">17 November 2026</time>
   </span>
 
     
