@@ -204,10 +204,7 @@ impl TargetRegistry for FileTargetRegistry {
         let _lock = self.lock_recovery_authorizations()?;
         if let Err(error) = std::fs::remove_file(&path) {
             if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(TargetConnectorError::RegistryIo(
-                    diagnostic_path(&path),
-                    error,
-                ));
+                return Err(registry_io(&path, error));
             }
         }
         Ok(())
@@ -313,9 +310,7 @@ fn read_recovery_authorization(
     let Some(mut file) = open_registry(path)? else {
         return Ok(None);
     };
-    let metadata = file
-        .metadata()
-        .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))?;
+    let metadata = file.metadata().map_err(|error| registry_io(path, error))?;
     if metadata.len() > MAX_RECOVERY_AUTHORIZATION_BYTES {
         return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
     }
@@ -323,7 +318,7 @@ fn read_recovery_authorization(
         .map_err(|_| TargetConnectorError::RecoveryAuthorizationInvalid)?;
     let mut bytes = Vec::with_capacity(capacity);
     file.read_to_end(&mut bytes)
-        .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))?;
+        .map_err(|error| registry_io(path, error))?;
     serde_json::from_slice(&bytes)
         .map(Some)
         .map_err(|_| TargetConnectorError::RecoveryAuthorizationInvalid)
@@ -372,9 +367,7 @@ pub(super) fn open_lock(path: &Path) -> Result<File, TargetConnectorError> {
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true);
     set_private_file_mode(&mut options);
-    options
-        .open(path)
-        .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))
+    options.open(path).map_err(|error| registry_io(path, error))
 }
 
 pub(super) fn lock_registry(
@@ -384,10 +377,9 @@ pub(super) fn lock_registry(
 ) -> Result<(), TargetConnectorError> {
     if exclusive {
         lock.lock_exclusive()
-            .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))
+            .map_err(|error| registry_io(path, error))
     } else {
-        FileExt::lock_shared(lock)
-            .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))
+        FileExt::lock_shared(lock).map_err(|error| registry_io(path, error))
     }
 }
 
@@ -410,9 +402,7 @@ fn read_registry(path: &Path) -> Result<RegistryState, TargetConnectorError> {
     let Some(mut file) = open_registry(path)? else {
         return Ok(RegistryState::default());
     };
-    let metadata = file
-        .metadata()
-        .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))?;
+    let metadata = file.metadata().map_err(|error| registry_io(path, error))?;
     if metadata.len() > MAX_REGISTRY_BYTES {
         return Err(TargetConnectorError::RegistryTooLarge(diagnostic_path(
             path,
@@ -422,7 +412,7 @@ fn read_registry(path: &Path) -> Result<RegistryState, TargetConnectorError> {
         .map_err(|_| TargetConnectorError::RegistryTooLarge(diagnostic_path(path)))?;
     let mut bytes = Vec::with_capacity(capacity);
     file.read_to_end(&mut bytes)
-        .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))?;
+        .map_err(|error| registry_io(path, error))?;
     let state: RegistryState = serde_json::from_slice(&bytes)
         .map_err(|error| TargetConnectorError::RegistryJson(diagnostic_path(path), error))?;
     validate_registry_state(path, &state)?;
@@ -433,10 +423,7 @@ fn open_registry(path: &Path) -> Result<Option<File>, TargetConnectorError> {
     match File::open(path) {
         Ok(file) => Ok(Some(file)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(TargetConnectorError::RegistryIo(
-            diagnostic_path(path),
-            error,
-        )),
+        Err(error) => Err(registry_io(path, error)),
     }
 }
 
@@ -488,6 +475,24 @@ fn malformed_registry(path: &Path, message: String) -> TargetConnectorError {
     )
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{path}: {source}", path = .path.display())]
+struct RegistryIoContext {
+    path: PathBuf,
+    #[source]
+    source: std::io::Error,
+}
+
+fn registry_io(path: &Path, source: std::io::Error) -> TargetConnectorError {
+    TargetConnectorError::RegistryIo(std::io::Error::new(
+        source.kind(),
+        RegistryIoContext {
+            path: diagnostic_path(path),
+            source,
+        },
+    ))
+}
+
 fn diagnostic_path(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_owned())
 }
@@ -511,11 +516,8 @@ fn remove_abandoned_temporaries(path: &Path) -> Result<(), TargetConnectorError>
     let (Some(parent), Some(prefix)) = (prefix.parent(), prefix.file_name()) else {
         return Ok(());
     };
-    for entry in std::fs::read_dir(parent)
-        .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(parent), error))?
-    {
-        let entry = entry
-            .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(parent), error))?;
+    for entry in std::fs::read_dir(parent).map_err(|error| registry_io(parent, error))? {
+        let entry = entry.map_err(|error| registry_io(parent, error))?;
         let abandoned = entry
             .file_name()
             .as_encoded_bytes()
@@ -529,10 +531,7 @@ fn remove_abandoned_temporaries(path: &Path) -> Result<(), TargetConnectorError>
         if abandoned {
             match std::fs::remove_file(entry.path()) {
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(TargetConnectorError::RegistryIo(
-                        diagnostic_path(&entry.path()),
-                        error,
-                    ));
+                    return Err(registry_io(&entry.path(), error));
                 }
                 _ => {}
             }
@@ -549,17 +548,14 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), TargetConnectorEr
     options.create_new(true).write(true);
     set_private_file_mode(&mut options);
     let result = (|| {
-        let mut file = options.open(&temporary).map_err(|error| {
-            TargetConnectorError::RegistryIo(diagnostic_path(&temporary), error)
-        })?;
-        file.write_all(bytes).map_err(|error| {
-            TargetConnectorError::RegistryIo(diagnostic_path(&temporary), error)
-        })?;
-        file.sync_all().map_err(|error| {
-            TargetConnectorError::RegistryIo(diagnostic_path(&temporary), error)
-        })?;
-        std::fs::rename(&temporary, path)
-            .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))
+        let mut file = options
+            .open(&temporary)
+            .map_err(|error| registry_io(&temporary, error))?;
+        file.write_all(bytes)
+            .map_err(|error| registry_io(&temporary, error))?;
+        file.sync_all()
+            .map_err(|error| registry_io(&temporary, error))?;
+        std::fs::rename(&temporary, path).map_err(|error| registry_io(path, error))
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
@@ -582,7 +578,7 @@ pub(super) fn create_private_directory(path: &Path) -> Result<(), TargetConnecto
     set_private_directory_mode(&mut builder);
     builder
         .create(path)
-        .map_err(|error| TargetConnectorError::RegistryIo(diagnostic_path(path), error))
+        .map_err(|error| registry_io(path, error))
 }
 
 #[cfg(unix)]

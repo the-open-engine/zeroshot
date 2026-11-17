@@ -125,7 +125,17 @@ fn registry_read_errors_name_the_file() {
 
     std::fs::remove_file(&path).assert_value();
     std::fs::create_dir(&path).assert_value();
-    let error = registry.get("platform").assert_error().to_string();
-    assert!(error.contains(&path.display().to_string()), "{error}");
-    assert!(error.contains("I/O failed"), "{error}");
+    let error = registry.get("platform").assert_error();
+    let mut cause = std::error::Error::source(&error);
+    let mut has_os_error = false;
+    while let Some(source) = cause {
+        has_os_error |= source
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.raw_os_error().is_some());
+        cause = source.source();
+    }
+    assert!(has_os_error, "original OS error was lost: {error:?}");
+    let message = error.to_string();
+    assert!(message.contains(&path.display().to_string()), "{message}");
+    assert!(message.contains("I/O failed"), "{message}");
 }

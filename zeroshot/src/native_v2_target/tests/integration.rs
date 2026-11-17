@@ -134,7 +134,7 @@ fn file_registry_rejects_malformed_records_and_noncanonical_recovery_authority()
     std::fs::create_dir_all(&directory).assert_value();
     assert!(matches!(
         FileTargetRegistry::new(directory).get("platform"),
-        Err(TargetConnectorError::RegistryIo(_, _))
+        Err(TargetConnectorError::RegistryIo(_))
     ));
 
     let registry = FileTargetRegistry::new(root.path("recovery/targets.json"));
