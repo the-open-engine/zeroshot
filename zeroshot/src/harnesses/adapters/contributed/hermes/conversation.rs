@@ -7,6 +7,7 @@ pub(super) fn layout(home: &Path) -> ConversationLayout {
         harness: "hermes",
         storage: home.to_owned(),
         select,
+        relocate: None,
     }
 }
 fn select(root: &Path, _id: &str) -> io::Result<Vec<PathBuf>> {

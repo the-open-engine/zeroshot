@@ -36,6 +36,7 @@ import {
   observedRoutes,
   projectHistory,
   stateLabel,
+  suspensionStatus,
   type HistoryEvent,
   type HistoryPage,
   type Invocation,
@@ -43,6 +44,7 @@ import {
   type RunTerminal,
 } from './run-history';
 import { canFollowHistory, observationEnded } from './history-contract';
+import { useProjection } from './use-run-projection';
 import { readHistoryWhenReady } from './history-readiness';
 import './run-history.css';
 
@@ -66,6 +68,11 @@ type RunHistoryViewProps = {
   runHref?: (runId: string) => string;
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
+  /**
+   * The successor the host's own run list reports for this run. A suspended run gains one after
+   * this view read its detail; the host's existing refresh brings it without a reload.
+   */
+  successorRunId?: string;
 };
 /** What the graph shows of the run, and whether it follows a live run's latest events. */
 function observed(
@@ -91,6 +98,7 @@ export function RunHistoryView({
   viewKey,
   runHref,
   embedded = false,
+  successorRunId: listedSuccessor,
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
@@ -172,10 +180,7 @@ export function RunHistoryView({
       moments.findIndex((moment) => moment.index === Math.min(cursorIndex, events.length - 1))
     ),
     moment = moments[safePosition];
-  const projection = useMemo(
-    () => document && projectHistory(document, events, moment.index, control),
-    [document, events, moment.index, control]
-  );
+  const projection = useProjection(document, events, moment.index, control, run, listedSuccessor);
   useEffect(() => {
     window.document.title = `${run?.title ?? 'Runs'} · Zeroshot`;
   }, [run?.title]);
@@ -285,6 +290,7 @@ export function RunHistoryView({
             retry={() => void loadHistory(run.runId, source, false)}
             embedded={embedded}
             runHref={runHref}
+            successorRunId={projection.successorRunId}
           />
           <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
             <ReactFlowProvider>
@@ -451,8 +457,7 @@ function currentHistoryState(
   preparing: boolean,
   atStart: boolean
 ) {
-  if (run.phase === 'suspended')
-    return `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}${run.suspension?.request ? `: ${run.suspension.request.text} (deadline ${new Date(run.suspension.request.expiresAt).toISOString()})` : ''}`;
+  if (run.phase === 'suspended') return suspensionStatus(run.suspension);
   if (run.phase === 'running' && run.suspendRequested) return 'Suspension requested';
   if (terminal) return terminal.status;
   if (run.runtimeFailure) return 'failed';
@@ -499,6 +504,7 @@ function RunHistoryHeader({
   retry,
   embedded,
   runHref,
+  successorRunId,
 }: {
   run: RunDetail;
   terminal: RunTerminal | undefined;
@@ -509,6 +515,7 @@ function RunHistoryHeader({
   retry: () => void;
   embedded: boolean;
   runHref?: (runId: string) => string;
+  successorRunId?: string;
 }) {
   const preparing = isPreparingEnvironment(run, history.events);
   const shownStatus =
@@ -521,8 +528,8 @@ function RunHistoryHeader({
         <div className="workspace-header history-header">
           <div className="profile-title">
             <h1 title={run.title}>{run.title}</h1>
-            {run.workspaceRecovery?.successorRunId && runHref && (
-              <a href={runHref(run.workspaceRecovery.successorRunId)}>Continue to successor</a>
+            {successorRunId && runHref && (
+              <a href={runHref(successorRunId)}>Continue to successor</a>
             )}
             <span
               className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}

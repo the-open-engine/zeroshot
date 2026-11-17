@@ -151,15 +151,51 @@ The built-in `platform` target points to https://api.app.zeroshot.sh. Run `zeros
 Usage: zeroshot target <COMMAND>
 
 Commands:
-  add    Register a named target
-  login  Authenticate with a hosted named target
-  sizes  List the target's offered size identifiers and descriptions
-  serve  Serve an unauthenticated direct target
-  help   Print this message or the help of the given subcommand(s)
+  list    List local target names, origins and access kinds without login data
+  remove  Remove a local target, its stored login and resume permissions
+  add     Register a named target
+  login   Authenticate with a hosted named target
+  sizes   List the target's offered size identifiers and descriptions
+  serve   Serve an unauthenticated direct target
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
           Print help (see a summary with '-h')
+```
+
+#### `zeroshot target list`
+
+```text
+List local target names, origins and access kinds without login data
+
+Usage: zeroshot target list [OPTIONS]
+
+Options:
+      --json
+          Emit the target inventory as JSON
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot target remove`
+
+```text
+Remove a local target, its stored login and resume permissions
+
+Usage: zeroshot target remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Local target name. The built-in platform target cannot be removed
+
+Options:
+      --json
+          Emit the removal receipt as JSON
+
+  -h, --help
+          Print help
 ```
 
 #### `zeroshot target add`
@@ -261,11 +297,13 @@ Print this message or the help of the given subcommand(s)
 Usage: zeroshot target help [COMMAND]
 
 Commands:
-  add    Register a named target
-  login  Authenticate with a hosted named target
-  sizes  List the target's offered size identifiers and descriptions
-  serve  Serve an unauthenticated direct target
-  help   Print this message or the help of the given subcommand(s)
+  list    List local target names, origins and access kinds without login data
+  remove  Remove a local target, its stored login and resume permissions
+  add     Register a named target
+  login   Authenticate with a hosted named target
+  sizes   List the target's offered size identifiers and descriptions
+  serve   Serve an unauthenticated direct target
+  help    Print this message or the help of the given subcommand(s)
 ```
 
 ### `zeroshot delegation`
@@ -1498,7 +1536,7 @@ Options:
 ```text
 Broadcast standing direction to every agent conversation in a running or suspended run
 
-Usage: zeroshot steer [OPTIONS] <TEXT|--text-file <FILE>|--text-stdin> <RUN_ID>
+Usage: zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>
 
 Arguments:
   <RUN_ID>
@@ -1687,9 +1725,9 @@ Commands:
 ```text
 Start a successor from a failed or suspended run's retained workspace.
 
-A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts the original graph on its retained workspace. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
+A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts where it started, on its retained workspace: a submitted run at the root of its graph, a successor at the boundary it began at, so an answered request stays answered. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
 
-Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarts and execution-scoped agents start new conversations. Token usage starts at zero. Services and Docker state are not restored.
+Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarting a successor restores the conversations it started with; restarting a submitted run, and execution-scoped agents, start new ones. Token usage starts at zero. Services and Docker state are not restored.
 
 Usage: zeroshot resume [OPTIONS] <RUN_ID>
 

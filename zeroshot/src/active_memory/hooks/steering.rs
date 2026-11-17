@@ -74,6 +74,18 @@ impl Index {
             !self.received(conversation, &v.id) && !conversation.offered.contains(&v.id)
         })
     }
+    /// What a prompt carries: the steers that are `due`, and those in `shown_only` (received,
+    /// not yet kept).
+    fn due_in_prompt<'a>(
+        &'a self,
+        conversation: &'a Conversation,
+        shown_only: &'a BTreeSet<VectorId>,
+    ) -> impl Iterator<Item = &'a RunVector> {
+        self.steers.iter().filter(move |v| {
+            !conversation.offered.contains(&v.id)
+                && (!self.received(conversation, &v.id) || shown_only.contains(&v.id))
+        })
+    }
 }
 impl Record {
     async fn refresh(&self) -> Result<(), RunLedgerError> {
@@ -163,6 +175,11 @@ pub(super) struct DeliverySource {
     conversations: Mutex<BTreeMap<u64, Conversation>>,
     publication: tokio::sync::Mutex<()>,
     restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
+    /// Conversation and steer pairs that are received but not yet kept: delivered at a tool call
+    /// of a carrier on which a steer does not stand (`HookQuery::standing`), or carried by a
+    /// prompt whose execution has not ended successfully. They stay due for that conversation's
+    /// next prompt, and a successor does not inherit their receipts before it.
+    shown_only: Mutex<BTreeSet<(String, VectorId)>>,
 }
 const DEADLINE: Duration = Duration::from_millis(250);
 const PREAMBLE: &str = "<steer>\nDirection from the person running this run, given while it is in progress. It takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
@@ -191,6 +208,7 @@ impl DeliverySource {
             conversations: Mutex::default(),
             restored: Mutex::default(),
             publication: tokio::sync::Mutex::new(()),
+            shown_only: Mutex::default(),
         }
     }
     pub(super) fn bind(&self, run: RunId, ledger: Arc<dyn RunLedger>) {
@@ -220,13 +238,16 @@ impl DeliverySource {
         let Ok(conversations) = self.conversations.lock() else {
             return BTreeMap::new();
         };
+        let Ok(shown_only) = self.shown_only.lock() else {
+            return BTreeMap::new();
+        };
         conversations
             .values()
             .map(|conversation| {
                 let receipts = index
                     .receipts
                     .iter()
-                    .filter(|((key, _), _)| key == &conversation.key)
+                    .filter(|(pair, _)| pair.0 == conversation.key && !shown_only.contains(pair))
                     .flat_map(|(_, receipts)| receipts.iter())
                     .filter(|(id, run)| conversation.includes(id, run))
                     .map(|(id, _)| id.clone())
@@ -302,11 +323,27 @@ impl DeliverySource {
         // Prompt starts need the complete standing direction. Each page's I/O is bounded;
         // large valid records may take several pages, without discarding completed work.
         record.refresh().await.ok()?;
-        let index = record.index.data.lock().ok()?;
-        let due: Vec<_> = index.due(&conversation).collect();
-        let context = frame(due.iter().copied());
-        let ids: Vec<_> = due.iter().map(|v| v.id.clone()).collect();
-        conversation.offered.extend(ids);
+        let shown_only: BTreeSet<VectorId> = self
+            .shown_only
+            .lock()
+            .ok()?
+            .iter()
+            .filter(|(key, _)| key == &conversation.key)
+            .map(|(_, id)| id.clone())
+            .collect();
+        // The index guard must be gone before the receipt write awaits.
+        let (context, ids) = {
+            let index = record.index.data.lock().ok()?;
+            let due: Vec<_> = index.due_in_prompt(&conversation, &shown_only).collect();
+            let ids: Vec<_> = due.iter().map(|v| v.id.clone()).collect();
+            (frame(due.iter().copied()), ids)
+        };
+        conversation.offered.extend(ids.iter().cloned());
+        // Marked before the receipt is written, as in `receipt`.
+        self.shown_only
+            .lock()
+            .ok()?
+            .extend(ids.iter().map(|id| (conversation.key.clone(), id.clone())));
         if !context.is_empty() {
             invocation.host_context = Some(match invocation.host_context.take() {
                 Some(host) if !host.is_empty() => format!("{context}\n\n{host}"),
@@ -317,6 +354,7 @@ impl DeliverySource {
             .lock()
             .ok()?
             .insert(execution, conversation);
+        self.receipt_ids(execution, &ids).await;
         Some(execution)
     }
     pub(super) async fn finish(&self, execution: u64, success: bool) {
@@ -332,7 +370,24 @@ impl DeliverySource {
         if let Ok(mut conversations) = self.conversations.lock()
             && let Some(conversation) = conversations.get_mut(&execution)
         {
+            // A prompt the provider accepted is part of the conversation from now on.
+            if success && let Ok(mut shown_only) = self.shown_only.lock() {
+                for id in &ids {
+                    shown_only.remove(&(conversation.key.clone(), id.clone()));
+                }
+            }
             conversation.offered.clear();
+        }
+    }
+    /// Notes a tool-call delivery after which the steers do not stand in the conversation.
+    pub(super) fn shown_only(&self, query: &HookQuery, delivery: &HookDelivery) {
+        let key = self
+            .conversations
+            .lock()
+            .ok()
+            .and_then(|c| c.get(&query.execution_id).map(|c| c.key.clone()));
+        if let (Some(key), Ok(mut shown_only)) = (key, self.shown_only.lock()) {
+            shown_only.extend(delivery.steers.iter().map(|id| (key.clone(), id.clone())));
         }
     }
     pub(super) async fn delivery(&self, query: &HookQuery) -> HookDelivery {
@@ -340,6 +395,10 @@ impl DeliverySource {
             context: self.memory.tool_context(query),
             steers: Vec::new(),
         };
+        // A steer returned to a subagent would be receipted for a conversation that never saw it.
+        if query.subagent {
+            return delivery;
+        }
         let Some(record) = self.record() else {
             return delivery;
         };
@@ -371,7 +430,7 @@ impl DeliverySource {
                 continue;
             };
             let added = vector.id.as_str().len() + text.len() + 4;
-            if bytes + added > super::native::MAX_CONTEXT_BYTES {
+            if bytes + added > query.context_budget {
                 break;
             }
             bytes += added;
@@ -389,6 +448,11 @@ impl DeliverySource {
         delivery
     }
     pub(super) async fn receipt(&self, query: &HookQuery, delivery: &HookDelivery) {
+        // Marked first: a caller's deadline may drop this future while the receipt still commits,
+        // and a receipt without the mark would count as a steer that stands.
+        if !query.standing {
+            self.shown_only(query, delivery);
+        }
         self.receipt_ids(query.execution_id, &delivery.steers).await;
     }
     async fn receipt_ids(&self, execution: u64, ids: &[VectorId]) {

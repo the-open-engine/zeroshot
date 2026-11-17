@@ -25,6 +25,8 @@ pub(super) struct HookScope {
     session_key: String,
     execution_id: u64,
     workspace: PathBuf,
+    context_budget: usize,
+    standing: bool,
 }
 
 impl HookScope {
@@ -34,6 +36,8 @@ impl HookScope {
             session_key: super::provider_session_key(invocation),
             execution_id: invocation.node.reference.execution.get(),
             workspace: workspace.to_path_buf(),
+            context_budget: native::MAX_CONTEXT_BYTES,
+            standing: true,
         }
     }
 
@@ -68,6 +72,9 @@ impl HookScope {
                 .cloned()
                 .unwrap_or(Value::Null),
             cwd,
+            subagent: event["agent_id"].as_str().is_some_and(|id| !id.is_empty()),
+            context_budget: self.context_budget,
+            standing: self.standing,
         }
     }
 }
@@ -162,6 +169,26 @@ impl Broker {
             endpoint: self.endpoint,
             token,
         })
+    }
+
+    /// Applies a carrier's inline budget to the scope just issued for this execution.
+    pub(super) fn bound(&self, invocation: &DriverInvocation, budget: usize) {
+        if let Ok(mut scopes) = self.scopes.lock() {
+            scopes
+                .values_mut()
+                .filter(|scope| scope.execution_id == invocation.node.reference.execution.get())
+                .for_each(|scope| scope.context_budget = budget);
+        }
+    }
+
+    /// Marks the scope just issued for this execution as a carrier on which a steer does not stand.
+    pub(super) fn shown_only(&self, invocation: &DriverInvocation) {
+        if let Ok(mut scopes) = self.scopes.lock() {
+            scopes
+                .values_mut()
+                .filter(|scope| scope.execution_id == invocation.node.reference.execution.get())
+                .for_each(|scope| scope.standing = false);
+        }
     }
 
     pub(super) fn retire(&self, execution: u64) {

@@ -7,6 +7,7 @@ pub(super) fn layout(home: PathBuf) -> ConversationLayout {
         harness: "copilot",
         storage: home.join("session-state"),
         select,
+        relocate: None,
     }
 }
 fn select(root: &Path, id: &str) -> io::Result<Vec<PathBuf>> {

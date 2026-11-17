@@ -114,6 +114,19 @@ elif args[:2] == ["template", "show"]:
         "name": args[2],
         "delivery": option("--delivery"),
     }))
+elif args[:2] == ["target", "list"]:
+    print(os.environ.get("FAKE_TARGET_INVENTORY", json.dumps([
+        {"name":"platform", "origin":"https://api.app.zeroshot.sh", "kind":"hosted"},
+        {"name":"vm", "origin":"http://127.0.0.1:8080", "kind":"direct"},
+    ])))
+elif args[:2] == ["target", "remove"]:
+    name = args[-1]
+    if name == "platform":
+        fail("invalid_request", "request.invalid",
+             'built-in target "platform" cannot be removed', {})
+    if name == "missing":
+        fail("invalid_request", "request.invalid", 'target "missing" not found', {})
+    print(os.environ.get("FAKE_TARGET_REMOVAL", json.dumps({"name":name, "removed":True})))
 elif args[:2] == ["target", "add"] or args[:2] == ["target", "setup"]:
     pass
 elif args[:2] == ["stack", "validate"]:

@@ -346,6 +346,76 @@ test('a suspended run shows its deadline and host-owned successor link without f
   }
 });
 
+test('an open suspended run gains the successor its host list reports, without rereading it', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const expiresAt = Date.parse('2026-12-01T08:00:00Z');
+  const detail: RunDetail = {
+    ...runDetailFixture('asking-run'),
+    phase: 'suspended',
+    terminal: undefined,
+    suspension: {
+      reason: 'request',
+      node: 'approval',
+      createdAt: expiresAt - 3600000,
+      request: {
+        id: 'question',
+        text: `Approve? ${'x'.repeat(600_000)}`,
+        signals: { decision: ['approved', 'rejected'] },
+        output: { kind: 'record', fields: {} },
+        expiresAt,
+      },
+    },
+    observation: { state: 'active' },
+  };
+  let detailReads = 0;
+  const source: RunHistoryReader = {
+    detail: async () => {
+      detailReads++;
+      return detail;
+    },
+    page: async () => ({ ...completePage(), finished: true }),
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (successorRunId?: string) =>
+    act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          runId: detail.runId,
+          source,
+          workers: [],
+          runHref: (id: string) => `/host/runs/${id}`,
+          successorRunId,
+        })
+      )
+    );
+  try {
+    await render();
+    await flushEffects();
+    const status = container.querySelector('.history-header .run-status')?.textContent ?? '';
+    assert.ok(status.length < 200, `${status.length} characters`);
+    assert.match(
+      status,
+      /^Suspended \(request\) at approval: Approve\? x+… \(deadline 2026-12-01T08:00:00.000Z\)$/
+    );
+    assert.equal(container.querySelector('.history-header a'), null);
+    await render('continued-run');
+    await flushEffects();
+    assert.equal(
+      container.querySelector('.history-header a')?.getAttribute('href'),
+      '/host/runs/continued-run'
+    );
+    assert.equal(detailReads, 1);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test('preparation logs are visible before the first node and remain readable after setup failure', async (t) => {
   stubWorker(t);
   installBrowser(t);
