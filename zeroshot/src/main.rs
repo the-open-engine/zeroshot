@@ -156,6 +156,7 @@ fn run_operation_is_local(command: &NativeV2CliCommand) -> Option<bool> {
             run.target.is_none()
         }
         NativeV2CliCommand::InboxList { target, .. } => target.is_none(),
+        NativeV2CliCommand::Steer { run, .. } => run.target.is_none(),
         NativeV2CliCommand::Vectors(command) => command.run.target.is_none(),
         NativeV2CliCommand::Vector { run, .. } => run.target.is_none(),
         NativeV2CliCommand::Checkpoints(command) => command.run.target.is_none(),

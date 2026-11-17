@@ -32,12 +32,11 @@ fn workspace_and_verifier_guidance_are_runtime_owned() {
     assert!(prompt.contains("other nodes may run concurrently"));
     assert!(prompt.contains("Do not modify reviewed material"));
     assert!(prompt.contains("create artifacts"));
-    assert!(prompt.contains("installable setup gaps or an incomplete candidate build"));
-    assert!(prompt.contains("actionable rejected feedback for the worker"));
-    assert!(prompt.contains("missing prerequisites and command evidence"));
-    assert!(prompt.contains("Reserve blocked for a demonstrated external limitation"));
-    assert!(!prompt.contains("missing declared dependency is an environment blocker"));
-    assert!(prompt.contains("do not request unrelated code repairs"));
+    assert!(prompt.contains("missing prerequisites, incomplete builds and failed checks"));
+    assert!(prompt.contains("with command evidence"));
+    assert!(prompt.contains("Follow authored instructions when deciding the verdict"));
+    assert!(!prompt.contains("rejected"));
+    assert!(!prompt.contains("blocked"));
     assert!(prompt.contains(&input.to_string()));
     assert!(prompt.contains(&serde_json::to_string(&verifier).assert_value()));
     let worker = render_agent_prompt(&instructions, &input, &worker_contract()).assert_value();
@@ -171,8 +170,8 @@ fn dialect_resolution_keeps_the_contract_correction_for_native_schema_lanes() {
 
 #[test]
 fn native_schema_lanes_keep_the_contract_prompt_byte_for_byte() {
-    // `render_agent_prompt` is the shared renderer for Claude, Codex and Copilot (including the
-    // GitHub lane). The Pi schema renderer is additive, so this captured full prompt must stay
+    // `render_agent_prompt` remains the renderer for Codex and Copilot (including the GitHub
+    // lane). Claude selects native tool delivery; the Pi schema renderer is additive. This prompt stays
     // byte-identical; any drift in the shared renderer fails this exact comparison rather than a
     // substring probe.
     let instructions = NodeInstructions::new("Change the workspace.").assert_value();
@@ -184,8 +183,8 @@ fn native_schema_lanes_keep_the_contract_prompt_byte_for_byte() {
         "Authored instructions:\n",
         "Change the workspace.\n",
         "Runtime-owned workspace setup guidance:\n",
-        "Before returning, follow repository setup and install manifest/lockfile dependencies in ",
-        "the checkout; do not use an ad hoc unpinned list. Wait for setup to finish and check exit ",
+        "Follow repository setup using manifest/lockfile dependencies in the checkout; ",
+        "do not use an ad hoc unpinned list. Wait for setup to finish and check exit ",
         "status. Leave ignored dependencies there. Homes are session-local. Prepare required ",
         "dependencies and candidate binaries in shared paths, and report the paths/settings fresh ",
         "reviewers need. Put standalone tools under an executable user path: use ",
@@ -823,4 +822,99 @@ fn envelope_fault_classifies_known_faults() {
         Some(EnvelopeFault::TrailingContent)
     );
     assert_eq!(envelope_fault("{\"other\":1}"), None);
+}
+
+#[test]
+fn tool_delivery_preserves_worker_null_and_verifier_contracts() {
+    let instructions = NodeInstructions::new("Complete the task.").assert_value();
+    let input = json!({"task":"review"});
+    let cases = [
+        (worker_contract(), json!({"answer":42})),
+        (
+            NodeResponseContract::Worker {
+                output: PayloadType::Null,
+            },
+            Value::Null,
+        ),
+        (
+            verifier_contract(),
+            json!({
+                "output":{"summary":"checked"},
+                "signals":{"verdict":"approved"},
+                "diagnostic":"checked"
+            }),
+        ),
+    ];
+    for (contract, valid) in cases {
+        let message = render_agent_prompt(&instructions, &input, &contract).assert_value();
+        let tool = render_agent_prompt_with_delivery(
+            &instructions,
+            &input,
+            &contract,
+            ResponseDelivery::StructuredOutput,
+        )
+        .assert_value();
+        // Authored instructions, runtime guidance, input and the contract precede delivery wording.
+        let boundary = "The response contract describes the required type;";
+        assert_eq!(
+            message.split_once(boundary).assert_value().0,
+            tool.split_once(boundary).assert_value().0
+        );
+        assert!(tool.contains("using the session-provided StructuredOutput tool"));
+        assert!(tool.contains("exactly once"));
+        assert!(tool.contains("Do not also write the final answer as a text message"));
+        assert!(!tool.contains("Return only JSON"));
+        assert!(tool.contains("one field named response"));
+        assert!(tool.contains("For a verifier, response contains exactly an object with output"));
+        let contract_json = serde_json::to_string(&contract).assert_value();
+        assert!(tool.contains(&contract_json));
+        for invalid in ["", "prefix {}", "{", "{} {}", r#"{"response":false}"#] {
+            let AgentResponse::Correction { prompt, diagnostic } =
+                resolve_agent_response_with_delivery(
+                    &contract,
+                    invalid,
+                    ResponseDelivery::StructuredOutput,
+                )
+                .assert_value()
+            else {
+                panic!("invalid response must be corrected");
+            };
+            let AgentResponse::Correction {
+                diagnostic: original,
+                ..
+            } = resolve_agent_response(&contract, invalid).assert_value()
+            else {
+                panic!("invalid response must be corrected");
+            };
+            assert_eq!(diagnostic.to_string(), original.to_string());
+            assert!(prompt.contains(&contract_json));
+            assert!(prompt.contains("using the session-provided StructuredOutput tool"));
+            assert!(prompt.contains("exactly once"));
+            assert!(prompt.contains("Do not also write the final answer as a text message"));
+            assert!(!prompt.contains("Start the reply"));
+            assert!(!prompt.contains("Return a corrected provider response only"));
+            assert!(!prompt.contains("Expected shape"));
+            assert!(!prompt.contains("The reply began with text"));
+        }
+        let envelope = json!({"response":valid}).to_string();
+        let AgentResponse::Complete(actual) = resolve_agent_response_with_delivery(
+            &contract,
+            &envelope,
+            ResponseDelivery::StructuredOutput,
+        )
+        .assert_value() else {
+            panic!("valid response must complete");
+        };
+        let AgentResponse::Complete(expected) =
+            resolve_agent_response(&contract, &envelope).assert_value()
+        else {
+            panic!("valid response must complete");
+        };
+        assert_eq!(actual, expected);
+        // Selecting Claude's delivery never changes subsequent text-lane invocations.
+        assert_eq!(
+            render_agent_prompt(&instructions, &input, &contract).assert_value(),
+            message
+        );
+    }
 }

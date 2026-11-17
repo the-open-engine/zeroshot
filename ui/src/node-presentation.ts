@@ -19,6 +19,7 @@ import {
   type Binding,
   type Document,
   type GraphNode,
+  REQUEST_WORKER,
 } from './domain';
 import { isDeliveryKind, scriptCommandLabel, workerOption, type WorkerOption } from './workers';
 
@@ -63,7 +64,7 @@ export function nodePresentation(document: Document, node: GraphNode, workers: W
     delivery,
     detail: delivery
       ? deliveryDetail(worker, comment)
-      : node.worker === 'builtin.request.ask@1'
+      : node.worker === REQUEST_WORKER
         ? 'Ask a person'
         : activityDetail(binding),
   };
@@ -83,7 +84,6 @@ function activityDetail(binding: Binding | undefined): string | undefined {
 
 export function activityLabel(nodeKind: string, bindingKind?: string, worker?: string): string {
   if (bindingKind === 'script') return 'Script';
-  if (bindingKind === 'request')
-    return worker === 'builtin.request.ask@1' ? 'Ask a person' : 'Wait';
+  if (bindingKind === 'request') return worker === REQUEST_WORKER ? 'Ask a person' : 'Wait';
   return bindingKind === 'decision' ? 'Decision' : labels[nodeKind];
 }

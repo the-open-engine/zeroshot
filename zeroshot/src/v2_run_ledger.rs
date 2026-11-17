@@ -34,6 +34,8 @@ pub(crate) use state::{
     validate_event,
 };
 
+pub(crate) mod steering;
+
 pub const INITIAL_CURSOR: &str = "v2:0";
 pub const MAX_ADMITTED_RUN_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_EVENT_BYTES: usize = 1024 * 1024;
@@ -118,6 +120,9 @@ pub struct RunSnapshot {
     pub executions: BTreeMap<ExecutionId, NodeSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
+    /// Used node instances stay reserved when checkpoint replay drops their executions.
+    #[serde(default, skip_serializing_if = "no_reserved_instances")]
+    pub node_instance_floor: u64,
     /// The delivery-checked main outcome is durable before optional run-global work starts.
     /// This does not make the run terminal: cleanup and any auxiliary usage still precede that.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -128,7 +133,25 @@ pub struct RunSnapshot {
     pub failure_context: Option<Box<FailureContext>>,
 }
 
+fn no_reserved_instances(value: &u64) -> bool {
+    *value == 0
+}
+
 impl RunSnapshot {
+    pub(crate) fn reserved_node_instance(&self) -> u64 {
+        self.execution_seed
+            .iter()
+            .map(|prior| prior.node_instance.get())
+            .chain(
+                self.executions
+                    .values()
+                    .map(|node| node.reference.node_instance.get()),
+            )
+            .chain([self.node_instance_floor])
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Acknowledged delivery facts include interrupted executions, independently of graph replay.
     pub(crate) fn delivery_checkpoint(
         &self,
@@ -194,6 +217,7 @@ impl RunSnapshot {
             suspension: None,
             executions: BTreeMap::new(),
             execution_seed: Vec::new(),
+            node_instance_floor: 0,
             primary_graph: None,
             terminal: None,
             token_usage: None,
@@ -299,6 +323,10 @@ pub enum NodeState {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunEvent {
+    /// Used node instances imported independently of checkpoint prerequisites.
+    NodeInstancesReserved {
+        through: u64,
+    },
     DeliveryState {
         execution: ExecutionId,
         state: crate::native_v2_contract::DeliveryCheckpoint,
@@ -556,6 +584,16 @@ pub trait RunLedger: Send + Sync {
         run_id: &RunId,
         id: &openengine_cluster_protocol::VectorId,
     ) -> Result<Cursor, RunLedgerError>;
+
+    /// Bounded steering-record reads. Storage adapters should seek their steering index;
+    /// the default preserves compatibility with existing ledger implementations.
+    async fn steering_events(
+        &self,
+        run_id: &RunId,
+        after: Option<&Cursor>,
+    ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+        Ok(self.snapshot_and_tail(run_id, after).await?.events)
+    }
 
     /// Reads the current projection and a bounded reconnect page under the same store snapshot.
     /// Pages contain at most `MAX_REPLAY_EVENTS` events and `MAX_REPLAY_BYTES` encoded event bytes.

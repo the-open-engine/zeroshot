@@ -217,33 +217,10 @@
   color: var(--ink);
   padding: 0;
 }
-.workflow-legend {
-  position: absolute;
-  bottom: 13px;
-  right: 15px;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  pointer-events: none;
-  font-size: 12px;
-  color: var(--ink-muted);
-}
 .workflow-arranging .react-flow__nodes,
 .workflow-arranging .react-flow__edges {
   opacity: 0.4;
 }
-@media (max-width: 900px) {
-  .workflow-legend {
-    display: none;
-  }
-  .workflow-canvas .canvas-toolbar {
-    gap: 8px;
-  }
-  .workflow-canvas .canvas-actions {
-    gap: 3px;
-  }
-}
-
 .workflow-card.is-junction {
   padding: 0;
   border-radius: 50%;
@@ -362,4 +339,9 @@
 .outcome-details .text-button {
   display: block;
   margin-top: 10px;
+}
+
+/* A request node waiting on a person: amber marks what to watch (ui/DESIGN.md). */
+.workflow-card small.workflow-waiting {
+  color: var(--amber);
 }

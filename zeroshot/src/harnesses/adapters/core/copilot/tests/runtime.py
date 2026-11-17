@@ -246,6 +246,19 @@ while (message := read()) is not None:
         if mode == "permission":
             usage.update({"cacheReadTokens": 2, "cacheWriteTokens": 1})
         event("assistant.usage", usage)
+        if mode == "steer":
+            from pathlib import Path
+            capture = os.environ["CAPTURE_PATH"]
+            Path(capture + ".steer-held").touch()
+            while not Path(capture + ".steer-release").exists(): time.sleep(.01)
+            replies = []
+            for identifier in (9002, 9003):
+                send({"method":"hooks.invoke", "id":identifier, "params":{
+                    "sessionId":session, "hookType":"preToolUse", "input":{"toolName":"Read"}}})
+                replies.append(read())
+            assert "<steer>" in replies[0]["result"]["output"]["additionalContext"]
+            assert replies[1]["result"]["output"] is None
+            Path(capture + ".steer-replies").write_text(json.dumps(replies))
         if mode == "dispatch":
             send({"method": "future.notification", "params": {}})
             send({"method": "future.request", "id": 9001, "params": {}})

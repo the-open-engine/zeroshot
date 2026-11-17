@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 mod skill;
 
 use super::{CliOutcome, NativeV2CliError};
+use crate::execution::platform::installed_path;
 use crate::native_v2_runner::bounded_log_text;
 
 const LATEST_RELEASE_URL: &str =
@@ -652,21 +653,6 @@ where
     }
     sidecar.commit();
     Ok(true)
-}
-
-/// The installed path of the executable a process reports as `current`. Once another update has
-/// replaced the executable, Linux reports the former path followed by ` (deleted)`, and the
-/// installation is still at that former path.
-fn installed_path(current: &Path) -> std::path::PathBuf {
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::ffi::OsStrExt as _;
-
-        if let Some(installed) = current.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
-            return std::ffi::OsStr::from_bytes(installed).into();
-        }
-    }
-    current.to_owned()
 }
 
 /// Takes the exclusive update lock of the installation in `parent`, waiting while another update

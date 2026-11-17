@@ -52,7 +52,13 @@ if [ -n "$GIT_CONFIG_COUNT" ]; then
     done
     export "GIT_CONFIG_KEY_$git_fixture_count=url.$git_fixture_origin.insteadOf"
     export "GIT_CONFIG_VALUE_$git_fixture_count=https://github.com/acme/project.git"
-    GIT_CONFIG_COUNT=$((git_fixture_count + 1))
+    git_fixture_count=$((git_fixture_count + 1))
+    if [ -e "$git_fixture_workspace/.git/zeroshot-test-push-follow-tags" ]; then
+        export "GIT_CONFIG_KEY_$git_fixture_count=push.followTags"
+        export "GIT_CONFIG_VALUE_$git_fixture_count=true"
+        git_fixture_count=$((git_fixture_count + 1))
+    fi
+    GIT_CONFIG_COUNT=$git_fixture_count
     export GIT_CONFIG_COUNT
 fi
 

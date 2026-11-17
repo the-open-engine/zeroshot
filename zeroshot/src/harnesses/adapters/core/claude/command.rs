@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::native_v2_contract::ClaudeProvider;
 use crate::native_v2_capsule::{foundry, gateway};
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
-use crate::native_v2_runner::{DriverInvocation, NodeRunnerError};
+use crate::native_v2_runner::{DriverInvocation, NodeRunnerError, ResponseDelivery};
 use crate::worker_catalog::ReasoningEffort;
 
 pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
@@ -186,7 +186,7 @@ pub(super) fn configure_openrouter(
 
 pub(super) fn prompt(invocation: &DriverInvocation) -> Result<String, NodeRunnerError> {
     invocation
-        .agent_prompt()
+        .agent_prompt_with_delivery(ResponseDelivery::StructuredOutput)
         .map_err(|error| with_driver_detail(error, "Claude prompt could not be serialized"))
 }
 

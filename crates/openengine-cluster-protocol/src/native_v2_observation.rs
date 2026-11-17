@@ -263,6 +263,8 @@ macro_rules! define_run_status_projection {
             pub controller: Option<ControllerObservation>,
             #[serde(default, skip_serializing_if = "WorkspaceRecovery::is_empty")]
             pub workspace_recovery: WorkspaceRecovery,
+            #[serde(default, flatten)]
+            pub steering: crate::RunSteeringStatus,
         }
     };
 }
@@ -413,7 +415,7 @@ pub struct RunForceParams {
 define_run_status_projection!(
     /// The durable run status after recording the force request.
     RunForceResult {
-        run_id: #[doc = "Public identity of the run whose force request was recorded."],
+run_id: #[doc = "Public identity of the run whose force request was recorded."],
         title: #[doc = "Immutable title captured when the run was admitted."],
         source: #[doc = "Immutable repository snapshot captured when the run was admitted."],
         size: #[doc = "Immutable execution size selected for the run."],

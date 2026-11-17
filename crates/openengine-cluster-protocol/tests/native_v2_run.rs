@@ -237,6 +237,7 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
 
     let result = RunListResult {
         runs: vec![RunStatusResult {
+            steering: Default::default(),
             run_id,
             title: RunTitle::new("Protocol contract").assert_value(),
             source: Some(openengine_cluster_testkit::native_v2_source_fixture()),

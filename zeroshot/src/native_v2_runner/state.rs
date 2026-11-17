@@ -236,9 +236,9 @@ impl SessionPool {
         &self,
         history: &[crate::full_v1_reducer::DurableExecution],
         files: Option<conversations::ConversationFiles>,
-    ) {
+    ) -> BTreeMap<NodeInstanceId, conversations::SteeringReceipts> {
         if self.boundary != ReusableSessionBoundary::Run {
-            return;
+            return BTreeMap::new();
         }
         let mut restored = self.restored.lock().await;
         for execution in history {
@@ -251,6 +251,12 @@ impl SessionPool {
                 (node, source)
             });
         }
+        restored
+            .iter()
+            .filter_map(|(instance, (_, source))| {
+                Some((*instance, source.as_ref().ok()?.steering.clone()?))
+            })
+            .collect()
     }
 
     pub(super) async fn restore_session(
@@ -282,6 +288,7 @@ impl SessionPool {
         &self,
         run_id: &RunId,
         operation: conversations::ConversationIo,
+        receipts: BTreeMap<NodeInstanceId, conversations::SteeringReceipts>,
     ) -> conversations::ConversationCapture {
         if self.boundary != ReusableSessionBoundary::Run {
             return conversations::ConversationCapture::default();
@@ -316,6 +323,13 @@ impl SessionPool {
                 instance,
                 (session.node.clone(), session.inner.conversation().await),
             );
+        }
+        for (instance, (_, source)) in &mut sources {
+            if let Ok(source) = source
+                && let Some(receipts) = receipts.get(instance)
+            {
+                source.steering = Some(receipts.clone());
+            }
         }
         let copying = operation.clone();
         let captured = tokio::task::spawn_blocking(move || {

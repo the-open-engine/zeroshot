@@ -1,12 +1,12 @@
 //! Private provider files carried beside a checkpoint's workspace, never in its execution seed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use openengine_cluster_protocol::NodeName;
+use openengine_cluster_protocol::{NodeName, VectorId};
 use serde::{Deserialize, Serialize};
 
 use crate::native_v2_contract::{NodeInstanceId, TokenUsageDelta};
@@ -24,6 +24,7 @@ const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 pub struct ConversationFiles {
     directory: PathBuf,
     _stage: Option<Arc<tempfile::TempDir>>,
+    unrestorable: bool,
 }
 
 impl ConversationFiles {
@@ -32,6 +33,16 @@ impl ConversationFiles {
         Self {
             directory: directory.canonicalize().unwrap_or(directory),
             _stage: None,
+            unrestorable: false,
+        }
+    }
+
+    /// A checkpoint whose conversations exist but could not be read back from its storage.
+    pub(crate) fn unrestorable() -> Self {
+        Self {
+            directory: PathBuf::new(),
+            _stage: None,
+            unrestorable: true,
         }
     }
 
@@ -52,6 +63,7 @@ impl ConversationFiles {
                 .canonicalize()
                 .unwrap_or_else(|_| stage.path().to_owned()),
             _stage: Some(Arc::new(stage)),
+            unrestorable: false,
         }
     }
 
@@ -60,6 +72,9 @@ impl ConversationFiles {
         instance: NodeInstanceId,
         node: &NodeName,
     ) -> Result<ConversationSource, &'static str> {
+        if self.unrestorable {
+            return Err("checkpoint conversation could not be restored");
+        }
         let directory = self.directory.join(instance.to_string());
         let file = fs::File::open(directory.join("conversation.json"))
             .map_err(|_| "checkpoint has no conversation")?;
@@ -84,6 +99,7 @@ impl ConversationFiles {
         validate_files(&directory.join("files"), &files, &ConversationIo::default())?;
         Ok(ConversationSource {
             metadata: manifest.metadata,
+            steering: manifest.steering,
             storage: directory.join("files"),
             files,
             _retained: Some(self.clone()),
@@ -103,6 +119,7 @@ pub struct ConversationMetadata {
 /// Adapter-selected names relative to its conversation storage. Adapters never pack or edit bytes.
 #[derive(Clone)]
 pub struct ConversationSource {
+    pub(crate) steering: Option<SteeringReceipts>,
     pub metadata: ConversationMetadata,
     pub storage: PathBuf,
     pub files: Vec<PathBuf>,
@@ -115,6 +132,7 @@ impl ConversationSource {
     pub fn new(metadata: ConversationMetadata, storage: PathBuf, files: Vec<PathBuf>) -> Self {
         Self {
             metadata,
+            steering: None,
             storage,
             files,
             _retained: None,
@@ -123,9 +141,19 @@ impl ConversationSource {
     }
 }
 
+/// References to canonical vector receipts present in this conversation's saved transcript.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct SteeringReceipts {
+    pub conversation: String,
+    pub receipts: BTreeSet<VectorId>,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    steering: Option<SteeringReceipts>,
     format: u32,
     node: NodeName,
     metadata: ConversationMetadata,
@@ -183,6 +211,7 @@ fn capture_in(
                 format: 1,
                 node: node.clone(),
                 metadata: source.metadata,
+                steering: source.steering,
                 files: source
                     .files
                     .iter()
@@ -375,6 +404,38 @@ pub(crate) struct ConversationLayout {
     pub(crate) harness: &'static str,
     pub(crate) storage: PathBuf,
     pub(crate) select: fn(&Path, &str) -> io::Result<Vec<PathBuf>>,
+    /// Set by an adapter whose provider records the working directory inside its files.
+    pub(crate) relocate: Option<ConversationRelocation>,
+}
+
+/// The workspace a restored conversation continues in, and the adapter's step that makes one
+/// staged file belong to it. The step runs in the private stage, before the provider owns the file.
+#[derive(Clone)]
+pub(crate) struct ConversationRelocation {
+    pub(crate) workspace: PathBuf,
+    pub(crate) apply: Relocate,
+}
+
+/// Fails once the restore is cancelled; a relocation calls it between bounded reads.
+pub(crate) type RelocationCheck<'a> = dyn FnMut() -> io::Result<()> + 'a;
+
+/// Receives the staged file, the workspace and the cancellation check. An error restores nothing.
+pub(crate) type Relocate = fn(&Path, &Path, &mut RelocationCheck<'_>) -> io::Result<()>;
+
+/// The working directory a provider process reports for `workspace`: symbolic links resolved and,
+/// on Windows, without the filesystem-only prefix that canonicalization adds.
+pub(crate) fn process_cwd(workspace: &Path) -> String {
+    let workspace = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_owned());
+    let cwd = workspace.to_string_lossy();
+    #[cfg(windows)]
+    let cwd = if let Some(unc) = cwd.strip_prefix(r"\\?\UNC\") {
+        std::borrow::Cow::Owned(format!(r"\\{unc}"))
+    } else {
+        std::borrow::Cow::Borrowed(cwd.strip_prefix(r"\\?\").unwrap_or(&cwd))
+    };
+    cwd.into_owned()
 }
 
 #[derive(Clone)]
@@ -485,6 +546,40 @@ impl ConversationLayout {
         }
         provider_directory(&self.storage)
             .map_err(|_| "provider conversation storage is unavailable")?;
+        let installed = self.install(
+            ConversationRestore {
+                source,
+                private_home,
+                operation,
+            },
+            &mut assign_owner,
+        );
+        if installed.is_err()
+            && let Some(home) = private_home
+        {
+            // The node now starts a new conversation, so the provider must be able to write into
+            // storage that this restore may have created.
+            for path in self
+                .storage
+                .ancestors()
+                .take_while(|path| path.starts_with(home))
+            {
+                let _ = assign_owner(path);
+            }
+        }
+        installed
+    }
+
+    fn install(
+        &self,
+        request: ConversationRestore<'_>,
+        assign_owner: &mut impl FnMut(&Path) -> io::Result<()>,
+    ) -> Result<(), &'static str> {
+        let ConversationRestore {
+            source,
+            private_home,
+            operation,
+        } = request;
         // Discover existing files before staging under the storage root: the provider's filename
         // selector must never mistake the staged replacement for an old conversation file.
         let old = (self.select)(&self.storage, &source.metadata.id)
@@ -495,6 +590,15 @@ impl ConversationLayout {
         )
         .map_err(|_| "provider conversation storage is unavailable")?;
         copy_files(source, stage.path(), operation)?;
+        if let Some(relocation) = &self.relocate {
+            for name in &source.files {
+                operation.check()?;
+                (relocation.apply)(&stage.path().join(name), &relocation.workspace, &mut || {
+                    operation.check().map_err(io::Error::other)
+                })
+                .map_err(|_| "provider conversation could not be moved to this workspace")?;
+            }
+        }
         operation.check()?;
         for name in old.iter().chain(&source.files) {
             checked_path(&self.storage, name)?;
@@ -573,16 +677,20 @@ pub(crate) fn select_files(
             Err(error) => return Err(error),
         };
         for entry in entries {
+            let entry = entry?;
+            let name = relative.join(entry.file_name());
+            let kind = entry.file_type()?;
+            // A provider store holds every session; other sessions' files are not this one's.
+            if !kind.is_dir() && !include(&name) {
+                continue;
+            }
             selection.budget = selection
                 .budget
                 .checked_sub(1)
                 .ok_or_else(|| io::Error::other("conversation directory is too large"))?;
-            let entry = entry?;
-            let name = relative.join(entry.file_name());
-            let kind = entry.file_type()?;
             if kind.is_dir() {
                 visit(root, &name, include, selection)?;
-            } else if include(&name) {
+            } else {
                 if !kind.is_file() {
                     return Err(io::Error::other("conversation contains a non-file entry"));
                 }

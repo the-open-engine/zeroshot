@@ -165,7 +165,8 @@ must cover forwarding, isolation, reuse and rejection for every registered adapt
 ## Conversations in checkpoints
 
 Adapters select only the files belonging to a conversation identifier and name their destination
-under the successor's provider session storage. They never parse, split, redact or pack transcripts.
+under the successor's provider session storage. They never split, redact or pack transcripts, and
+change one only where the provider records its working directory inside it.
 Capture includes the identifier and Codex's cumulative usage baseline as one complete unit, bounded
 at 1 GiB. Shared checkpoint code copies raw files beside `workspace` into the lineage's deduplicating
 repository and rejects absolute, escaping or symlink names. Checkpoint deletion removes this data.
@@ -179,7 +180,10 @@ home, so nested storage stays accessible without changing any directory outside 
 
 Codex captures its named rollout under `sessions`; Claude captures the named transcript and its
 session directory under the cwd-specific project, relocating them for the successor workspace. Pi
-captures the named session JSONL. Copilot captures the named `session-state` directory. Hermes
+captures the named session JSONL. Pi finds a session ID only among the sessions of its working
+directory, which the file's first line names, so restore writes that line again with the successor
+workspace and copies every later line unchanged; a first line that is no such header starts a new
+conversation. Copilot captures the named `session-state` directory. Hermes
 captures the private node's SQLite database and sidecars. Contained OpenCode captures its exclusively
 owned database; **local OpenCode's shared database is not captured** because it contains other
 conversations. Local OpenCode and older OpenCode layouts without the private SQLite database
@@ -197,3 +201,8 @@ same `ZEROSHOT_LIVE_*` settings as the shared live contract. The local CLI's ign
 `live_suspended_conversation` checks recall through the built binary. Before release, run the adapter
 contract with each supported CLI/provider lane; the owner also checks suspended hosted runs after
 installing conversation storage support on that host.
+
+Authored node `instructions` accept up to 262,144 UTF-8 bytes. Steering uses the same bound and the
+existing native tool-call carrier on every agent conversation, whether Active Memory is on or off.
+The host supplies the shared carrier frame bound to each adapter; adapters retain installation and
+acknowledgement ownership.

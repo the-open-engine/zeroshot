@@ -110,6 +110,7 @@ impl RuntimeStatusReader {
                     return None;
                 };
                 Some(RunStatusResult {
+                    steering: Default::default(),
                     run_id: status.run_id,
                     title: status.title,
                     source: status.source,

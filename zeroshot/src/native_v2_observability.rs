@@ -94,7 +94,16 @@ impl NativeV2Observability {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2ObservationError> {
-        if let Some(failure) = self.runtime.failure(&params.run_id) {
+        if let Some(mut failure) = self.runtime.failure(&params.run_id) {
+            // Retained failure status must remain observable while its ledger is stalled.
+            if let Ok(Ok(steering)) = tokio::time::timeout(
+                POLL_INTERVAL,
+                crate::v2_run_ledger::steering::status(self.ledger.as_ref(), &params.run_id),
+            )
+            .await
+            {
+                failure.steering = steering;
+            }
             return Ok(failure);
         }
         let result = match self.ledger.get(&params.run_id).await {
@@ -107,6 +116,8 @@ impl NativeV2Observability {
         if let Some(allocator) = &self.recovery {
             result.workspace_recovery = allocator.workspace_recovery(&params.run_id).await;
         }
+        result.steering =
+            crate::v2_run_ledger::steering::status(self.ledger.as_ref(), &params.run_id).await?;
         Ok(result)
     }
 

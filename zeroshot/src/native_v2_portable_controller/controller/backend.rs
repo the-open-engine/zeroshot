@@ -50,6 +50,27 @@ impl ClusterBackend for PortableRunController {
         ClusterBackend::run_list(self.inner.as_ref(), context, params).await
     }
 
+    async fn run_steer(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
+        if context
+            .identity()
+            .binding_attributes()
+            .get(crate::execution::process::authority::HUMAN_STEERING_ATTRIBUTE)
+            != Some("true")
+        {
+            return Err(BackendError::application(
+                RUN_CONFLICT,
+                crate::execution::process::authority::MANDATE_REQUIRED,
+                None,
+            ));
+        }
+        self.require_run(&params.run_id)?;
+        ClusterBackend::run_steer(self.inner.as_ref(), context, params).await
+    }
+
     async fn run_suspend(
         &self,
         context: &ConnectionContext,

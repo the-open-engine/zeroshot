@@ -696,6 +696,8 @@ pub struct TargetTaskResolutionDiscovery {
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub steering: Option<TargetSteeringDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request_wait: Option<TargetRequestWaitDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_ask: Option<TargetRequestAskDiscovery>,
@@ -781,6 +783,7 @@ impl TargetDiscoveryExtensions {
 
     const fn controller_extensions_empty(&self) -> bool {
         self.run_suspension.is_none()
+            && self.steering.is_none()
             && self.hosted_run_controls.is_none()
             && self.run_vectors.is_none()
             && self.request_wait.is_none()
@@ -852,6 +855,15 @@ impl TargetDiscoveryDocument {
             login_session: None,
             extensions: TargetDiscoveryExtensions::default(),
         }
+    }
+
+    /// Advertises standing direction through the target's existing run connection.
+    #[must_use]
+    pub fn with_steering(mut self) -> Self {
+        self.extensions.steering = Some(TargetSteeringDiscovery {
+            kind: STEERING_KIND.to_owned(),
+        });
+        self
     }
 
     /// Adds checkpoint listing and entry-point resume support for direct and private targets.
@@ -945,6 +957,13 @@ pub fn is_canonical_uuid_v7(run_id: &RunId) -> bool {
 mod tests;
 
 pub const REQUEST_WAIT_KIND: &str = "openengine.request-wait/v1";
+pub const STEERING_KIND: &str = "openengine.steering/v1";
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetSteeringDiscovery {
+    pub kind: String,
+}
+
 pub const RUN_SUSPENSION_KIND: &str = "openengine.run-suspension/v1";
 pub const RUN_VECTORS_KIND: &str = "openengine.run-vectors/v1";
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

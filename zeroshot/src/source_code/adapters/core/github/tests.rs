@@ -560,7 +560,11 @@ fn required_check_failures_win_and_preserve_diagnostics() {
         &mut snapshot,
         &[(
             91,
-            "setup passed\nAssertionError: validation failed".to_owned(),
+            api::check_log_tail(
+                b"setup passed\nAssertionError: validation failed",
+                SourceDeliveryCredential::token(""),
+                &[],
+            ),
         )],
     );
     let diagnostic = match snapshot.state {
@@ -908,7 +912,11 @@ fn large_first_log_cannot_hide_other_failed_job_excerpts() {
         .map(|job| {
             (
                 job,
-                format!("{}\nassertion failed in job {job}", "界".repeat(70_000)),
+                api::check_log_tail(
+                    format!("{}\nassertion failed in job {job}", "界".repeat(70_000)).as_bytes(),
+                    SourceDeliveryCredential::token(""),
+                    &[],
+                ),
             )
         })
         .collect::<Vec<_>>();
@@ -1136,7 +1144,7 @@ async fn failed_check_logs_are_enriched_but_transport_failures_remain_typed() {
         "resource not accessible",
     )))
     .assert_value();
-    assert!(unavailable.contains("GitHub job log unavailable"));
+    assert!(unavailable.text.contains("GitHub job log unavailable"));
 
     for status in [401, 429] {
         let error = job_log_excerpt(Err(SourceDeliveryError::api(

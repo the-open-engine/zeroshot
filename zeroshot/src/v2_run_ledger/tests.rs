@@ -21,6 +21,8 @@ use crate::native_v2_contract::{
     AdmittedRun, ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId, TokenUsageDelta,
 };
 
+#[path = "tests/identities.rs"]
+mod identities;
 #[path = "tests/primary_restart.rs"]
 mod primary_restart;
 #[path = "tests/recorded_at.rs"]
@@ -833,3 +835,6 @@ async fn sqlite_rejects_unresolved_or_inconsistent_persisted_size_without_panick
 
 #[path = "tests/vectors.rs"]
 mod vector_tests;
+
+#[path = "tests/steering.rs"]
+mod steering;

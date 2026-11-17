@@ -88,7 +88,12 @@ async fn fail_terminal_is_reduced_without_dispatch() {
     assert_eq!(harness.driver.state().starts.len(), 0);
 }
 
-async fn assert_cancelling_parallel_join(case: &str, join: Value, branches: Vec<Value>) {
+async fn assert_cancelling_parallel_join(
+    case: &str,
+    join: Value,
+    branches: Vec<Value>,
+    expected: TerminalResult,
+) {
     let driver = FakeDriver::scripted([
         (
             "fast",
@@ -107,10 +112,17 @@ async fn assert_cancelling_parallel_join(case: &str, join: Value, branches: Vec<
         ("slow", vec![Behavior::Hang]),
     ]);
     let harness = harness(parallel(join, branches), Value::Null, driver).await;
-    assert!(matches!(
-        harness.supervisor.drive().await.assert_value_with(case),
-        TerminalResult::Succeeded { .. }
-    ));
+    let actual = harness.supervisor.drive().await.assert_value_with(case);
+    match expected {
+        TerminalResult::Failed {
+            reason: expected, ..
+        } => assert!(
+            matches!(actual,
+            TerminalResult::Failed { reason, .. } if reason == expected),
+            "{case}"
+        ),
+        _ => assert_eq!(actual, expected),
+    }
     assert!(harness.driver.max_active() >= 2, "{case}");
     assert_eq!(harness.driver.cancellations("slow"), 1, "{case}");
     let stored = stored_run(&harness.ledger).await;
@@ -182,7 +194,15 @@ async fn every_parallel_join_observes_completion_order_and_cancels_losers() {
             vec![verifier("fast", 1_000), verifier("slow", 1_000)],
         ),
     ] {
-        assert_cancelling_parallel_join(case, join, branches).await;
+        assert_cancelling_parallel_join(
+            case,
+            join,
+            branches,
+            TerminalResult::Succeeded {
+                output: Value::Null,
+            },
+        )
+        .await;
     }
 
     let all = harness(
@@ -214,6 +234,43 @@ async fn every_parallel_join_observes_completion_order_and_cancels_losers() {
         TerminalResult::Succeeded { .. }
     ));
     assert_eq!(all.driver.cancellations("slow"), 0);
+}
+
+#[tokio::test]
+async fn parallel_branch_terminals_cancel_and_drain_siblings_before_finishing() {
+    for join in [
+        json!({"kind":"all"}),
+        json!({"kind":"any"}),
+        json!({"kind":"quorum","count":2}),
+        json!({"kind":"first","when":signal_guard("slow", "accepted")}),
+    ] {
+        for succeeds in [false, true] {
+            let terminal = if succeeds {
+                succeed("branch_done")
+            } else {
+                json!({"kind":"fail","name":"blocked","reason":"review_rejected"})
+            };
+            let branch = json!({"kind":"seq","name":"gate","state":null_type(),
+                "promotedStatePaths":[],"children":[verifier("fast", 1_000),terminal]});
+            let expected = if succeeds {
+                TerminalResult::Succeeded {
+                    output: Value::Null,
+                }
+            } else {
+                TerminalResult::Failed {
+                    reason: EnumLabel::new("review_rejected").assert_value(),
+                    context: None,
+                }
+            };
+            assert_cancelling_parallel_join(
+                "branch terminal",
+                join.clone(),
+                vec![branch, verifier("slow", 1_000)],
+                expected,
+            )
+            .await;
+        }
+    }
 }
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};

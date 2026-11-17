@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { Document, GraphNode } from './domain';
-import { guardLabel, projectWorkflow, type WorkflowProjection } from './workflow-projection';
+import { readFileSync } from 'node:fs';
+import { allNodes, type Document, type GraphNode } from './domain';
+import {
+  drawableGroups,
+  drawnAncestors,
+  drawnOwners,
+  guardLabel,
+  projectWorkflow,
+  type WorkflowProjection,
+} from './workflow-projection';
 
 const state = {
   kind: 'record',
@@ -230,9 +238,16 @@ test('parallel joins show their actual rule and never connect terminal activitie
     return { kind: 'par', name: 'parallel', branches: [fail('stop'), agent('work')], join };
   }
   const all = projectWorkflow(doc(parallel({ kind: 'all' })));
-  assert.equal(byOwner(all, 'parallel', 'join').label, 'Parallel group ends');
+  assert.match(byOwner(all, 'parallel', 'fork').detail ?? '', /All branches complete/);
+  assert.equal(
+    all.nodes.some((node) => node.role === 'join'),
+    false
+  );
   assert.deepEqual(outgoing(all, byOwner(all, 'stop').id), []);
-  assert.ok(all.edges.some((edge) => edge.secondary && /join not reached/.test(edge.label ?? '')));
+  assert.equal(
+    all.edges.some((edge) => edge.secondary),
+    false
+  );
   const any = projectWorkflow(doc(parallel({ kind: 'any' })));
   assert.match(byOwner(any, 'parallel', 'join').label, /Any one branch/);
   assert.deepEqual(outgoing(any, byOwner(any, 'stop').id), []);
@@ -241,7 +256,11 @@ test('parallel joins show their actual rule and never connect terminal activitie
     1
   );
   const quorum = projectWorkflow(doc(parallel({ kind: 'quorum', count: 2 })));
-  assert.equal(byOwner(quorum, 'parallel', 'join').label, 'Parallel group ends');
+  assert.match(byOwner(quorum, 'parallel', 'fork').detail ?? '', /2 branches complete/);
+  assert.equal(
+    quorum.nodes.some((node) => node.role === 'join'),
+    false
+  );
   const first = projectWorkflow(doc(parallel({ kind: 'first', when: signal('work') })));
   assert.match(byOwner(first, 'parallel', 'join').label, /First matching branch/);
   assert.match(byOwner(first, 'parallel', 'join').detail ?? '', /without a matching branch/);
@@ -435,4 +454,82 @@ test('review-loop continuation says Approved only when other exits fail', () => 
     projectWorkflow(custom).edges.some((edge) => edge.label === 'Approved'),
     false
   );
+});
+
+test('a node trail lists only the root and groups the canvas draws', () => {
+  const examples: {
+    detail: { runId: string; graph: Document['graph']; runtime: Document['runtime'] };
+  }[] = JSON.parse(
+    readFileSync(new URL('../public/history-examples.json', import.meta.url), 'utf8')
+  );
+  let crumbs = 0;
+  for (const { detail } of examples) {
+    const document: Document = { name: detail.runId, graph: detail.graph, runtime: detail.runtime };
+    const drawn = drawnOwners(document);
+    for (const node of allNodes(document.graph.root)) {
+      const trail = drawnAncestors(document, node.name);
+      if (node !== document.graph.root) assert.equal(trail[0], document.graph.root);
+      for (const ancestor of trail.slice(1)) {
+        crumbs++;
+        assert.ok(drawn.has(ancestor.name), `${detail.runId}: ${ancestor.name} has no card`);
+        assert.notEqual(ancestor.kind, 'seq');
+      }
+    }
+  }
+  assert.ok(crumbs > 0);
+  // Folded error routes and decisions that share their verifier's card have no crumb.
+  for (const [runId, hidden] of [
+    ['example-security-patch-merge', ['worker_result', 'delivery_result']],
+    ['example-product-launch-content-kit', ['on_error_1', 'on_error']],
+    ['example-customer-onboarding-plan', ['requirements_route']],
+  ] as const) {
+    const { detail } = examples.find((example) => example.detail.runId === runId)!;
+    const document: Document = { name: runId, graph: detail.graph, runtime: detail.runtime };
+    const crumbsSeen = new Set(
+      allNodes(document.graph.root).flatMap((node) =>
+        drawnAncestors(document, node.name).map((ancestor) => ancestor.name)
+      )
+    );
+    for (const name of hidden) {
+      assert.ok(
+        allNodes(document.graph.root).some((node) => node.name === name),
+        name
+      );
+      assert.equal(crumbsSeen.has(name), false, `${runId}: ${name} is not drawn`);
+    }
+  }
+  // Selecting the root has no trail of its own.
+  const document: Document = {
+    name: 'only',
+    graph: examples[0].detail.graph,
+    runtime: examples[0].detail.runtime,
+  };
+  assert.deepEqual(drawnAncestors(document, document.graph.root.name), []);
+});
+
+test('the groups Expand and Collapse all count are exactly those with a card, expanded or folded', () => {
+  const examples: {
+    detail: { runId: string; graph: Document['graph']; runtime: Document['runtime'] };
+  }[] = JSON.parse(
+    readFileSync(new URL('../public/history-examples.json', import.meta.url), 'utf8')
+  );
+  let excluded = 0;
+  for (const { detail } of examples) {
+    const document: Document = { name: detail.runId, graph: detail.graph, runtime: detail.runtime };
+    const drawn = drawnOwners(document);
+    const expected = allNodes(document.graph.root)
+      .filter((node) => ['choice', 'par', 'loop', 'map'].includes(node.kind))
+      .map((node) => node.name)
+      .filter(
+        (name) =>
+          drawn.has(name) ||
+          projectWorkflow(document, new Set([name])).nodes.some((node) => node.owner === name)
+      );
+    const groups = drawableGroups(document);
+    assert.deepEqual([...groups].sort(), expected.sort(), detail.runId);
+    excluded += allNodes(document.graph.root).filter(
+      (node) => node.kind === 'choice' && !groups.has(node.name)
+    ).length;
+  }
+  assert.ok(excluded > 0, 'the examples include routes that fold away');
 });

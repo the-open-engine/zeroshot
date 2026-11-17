@@ -196,6 +196,8 @@ impl NativeV2CodexAdapter {
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: input.files.home(),
+                context_budget: None,
+                standing: true,
             },
         );
         Ok(command)
@@ -317,6 +319,13 @@ impl NativeV2CodexAdapter {
         state: &mut CodexRunState,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
         let advance = self.advance_turn(turn, state).await;
+        if !matches!(&advance, Ok(CodexTurnAdvance::Response(_)))
+            && let Some(hooks) = &self.active_memory
+        {
+            hooks
+                .finish_steers(turn.invocation.node.reference.execution.get(), false)
+                .await;
+        }
         match advance {
             Ok(CodexTurnAdvance::Response(response)) => state.accept_response(turn, response).await,
             Ok(CodexTurnAdvance::ProviderFailure(detail)) => {
@@ -375,6 +384,14 @@ impl NativeV2CodexAdapter {
             *turn.session.thread_id.lock().await = Some(metadata.id);
             *turn.session.usage.lock().await = metadata.usage;
         }
+        let prompt = match &self.active_memory {
+            Some(hooks) => {
+                hooks
+                    .steer_prompt(turn.invocation, turn.control, prompt)
+                    .await
+            }
+            None => prompt,
+        };
         let resume = turn.session.thread_id.lock().await.clone();
         // A failed or unmetered process may change the transcript. Never checkpoint its prior
         // turn's metadata or usage as if it covered those new bytes.
@@ -466,6 +483,10 @@ impl NativeV2CodexAdapter {
                 schema_path: schema.path(),
             },
         )?;
+        let network_capability = command
+            .environment
+            .get("ZEROSHOT_STEERING_CAPABILITY")
+            .cloned();
         let native_redactions = self
             .apply_permission_default(
                 crate::harnesses::native_config::PermissionInput {
@@ -484,6 +505,13 @@ impl NativeV2CodexAdapter {
             &mut command.environment,
             turn.invocation,
         )?;
+        if let Some(hooks) = &self.active_memory {
+            hooks.configure_network_environment(
+                &mut command.environment,
+                turn.invocation,
+                network_capability.as_deref().map(Path::new),
+            );
+        }
         retry.extend_redactions(&native_redactions);
         let process = match open_process(files, command, turn.control).await? {
             ProcessOpen::Ready(process) => process,

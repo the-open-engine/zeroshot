@@ -58,7 +58,23 @@ elif harness == 'claude':
 elif harness == 'pi':
     sys.stdin.read()
     identifier=option('--session-id')
-    address(identifier,pathlib.Path(option('--session-dir'))/f'2026-11-14_{identifier}.jsonl',expected.exists())
+    directory=pathlib.Path(option('--session-dir'))
+    # Like Pi, find a session ID only among the sessions whose header names the working directory.
+    def header(path):
+        try:return json.loads(path.read_text().split('\n',1)[0])
+        except ValueError:return {}
+    found=[path for path in sorted(directory.glob('*.jsonl')) if header(path).get('id')==identifier and header(path).get('cwd')==os.getcwd()]
+    if expected.exists():
+        assert identifier==expected.read_text() and len(found)==1,(identifier,os.getcwd(),[path.read_text() for path in directory.glob('*.jsonl')])
+        path=found[0]
+    else:
+        assert not found
+        directory.mkdir(parents=True,exist_ok=True)
+        path=directory/f'2026-11-14_{identifier}.jsonl'
+        path.write_text(json.dumps({'type':'session','version':3,'id':identifier,'cwd':os.getcwd()})+'\n'+content)
+    body=path.read_text().split('\n',1)[1]
+    assert body==content,path
+    pathlib.Path('address.json').write_text(json.dumps({'id':identifier,'content':body,'path':str(path)}))
     emit({'type':'session','id':identifier})
     emit({'type':'message_end','message':{'role':'assistant','content':[{'type':'text','text':answer}],'stopReason':'stop','usage':{'input':10,'output':2}}})
 elif harness == 'opencode':

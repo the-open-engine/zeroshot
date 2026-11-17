@@ -195,3 +195,42 @@ fn symbolic_links_cannot_escape_conversation_storage() {
     assert_eq!(capture.notices.len(), 1);
     assert!(!capture.files.assert_value().directory().join("1").exists());
 }
+
+#[test]
+fn steer_checkpoint_manifest_carries_receipt_references_and_reads_legacy_snapshots() {
+    let root = tempfile::tempdir().assert_value();
+    fs::write(root.path().join("rollout-thread.jsonl"), "first turn").assert_value();
+    let mut source = source(root.path(), vec![PathBuf::from("rollout-thread.jsonl")]);
+    let receipts = BTreeSet::from([VectorId::new("receipt-before-snapshot").assert_value()]);
+    source.steering = Some(SteeringReceipts {
+        conversation: "predecessor/node-instance/1".into(),
+        receipts: receipts.clone(),
+    });
+    let files = saved(source).files.assert_value();
+    let instance = NodeInstanceId::new(1).assert_value();
+    let node = NodeName::new("worker").assert_value();
+    let restored = files.conversation(instance, &node).assert_value();
+    assert_eq!(restored.steering.as_ref().assert_value().receipts, receipts);
+    let carried = saved(restored).files.assert_value();
+    assert_eq!(
+        carried
+            .conversation(instance, &node)
+            .assert_value()
+            .steering
+            .assert_value()
+            .receipts,
+        receipts
+    );
+    let path = files.directory().join("1/conversation.json");
+    let mut legacy: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).assert_value()).assert_value();
+    legacy.as_object_mut().assert_value().remove("steering");
+    fs::write(path, serde_json::to_vec(&legacy).assert_value()).assert_value();
+    assert!(
+        files
+            .conversation(instance, &node)
+            .assert_value()
+            .steering
+            .is_none()
+    );
+}

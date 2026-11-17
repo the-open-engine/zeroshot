@@ -60,6 +60,7 @@ async fn relative_storage_has_an_initialized_ledger_before_accepting_connections
         ("request_wait", "openengine.request-wait/v1"),
         ("run_suspension", "openengine.run-suspension/v1"),
         ("run_vectors", "openengine.run-vectors/v1"),
+        ("steering", "openengine.steering/v1"),
     ] {
         assert_eq!(
             discovery["extensions"][key],

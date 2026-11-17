@@ -25,6 +25,7 @@ mod authentication;
 mod framing;
 mod hosted;
 mod lanes;
+mod steering;
 
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 

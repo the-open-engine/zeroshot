@@ -18,6 +18,7 @@ struct RequestBackend {
     resumes: Mutex<Vec<RunResumeParams>>,
     resolution: Mutex<Option<RequestResolution>>,
     refusal: Option<&'static str>,
+    successor: Option<&'static str>,
 }
 
 impl RequestBackend {
@@ -41,6 +42,7 @@ impl RequestBackend {
             resumes: Mutex::default(),
             resolution: Mutex::default(),
             refusal: None,
+            successor: None,
         }
     }
 }
@@ -108,7 +110,9 @@ impl NativeV2CliBackend for RequestBackend {
         assert_eq!(target, Some("remote"));
         let mut status = serde_json::to_value(&self.suspension).expect("suspension JSON");
         status["phase"] = json!("suspended");
-        Ok(serde_json::from_value(json!({"runId":"original", "title":"Request", "size":"host", "atCursor":"v2:1", "status":status})).expect("status"))
+        let mut status: CliRunStatusResult = serde_json::from_value(json!({"runId":"original", "title":"Request", "size":"host", "atCursor":"v2:1", "status":status})).expect("status");
+        status.workspace_recovery.successor_run_id = self.successor.map(RunId::new);
+        Ok(status)
     }
 
     async fn authorize_resume_connection_requirements(
@@ -243,18 +247,31 @@ async fn pending_target_request_refuses_malformed_files_without_admission_and_ke
     let directory = tempfile::tempdir().expect("directory");
     let path = directory.path().join("answer.json");
     for (contents, offending) in [
-        ("{", "$:"),
-        (r#"{"extra":true}"#, "$.extra"),
+        (Some("{"), "answer file: $: EOF while parsing an object"),
         (
-            r#"{"signals":{"decision":1},"output":{}}"#,
-            "$.signals.decision",
+            Some(r#"{"extra":true}"#),
+            "answer file: $.extra is undeclared",
         ),
+        (
+            Some(r#"{"signals":{"decision":1},"output":{}}"#),
+            "answer file: $.signals.decision must be a label string",
+        ),
+        (
+            Some(r#"{"signals":{"decision":"approved"}}"#),
+            "answer file: $.output is required",
+        ),
+        (None, "answer file: $: cannot read answer file: "),
     ] {
-        std::fs::write(&path, contents).expect("answer file");
+        if let Some(contents) = contents {
+            std::fs::write(&path, contents).expect("answer file");
+        } else {
+            std::fs::remove_file(&path).expect("remove answer file");
+        }
         let backend = RequestBackend::new(false, false);
         let (result, output) = answer(&backend, path.clone()).await;
+        // The placeholder's own refusal ($.signals.decision is required) is not printed.
         assert!(
-            matches!(result.expect_err("invalid file"), NativeV2CliError::Remote { code, message, .. } if code == "invalid_request" && message.contains(offending))
+            matches!(result.expect_err("invalid file"), NativeV2CliError::Remote { code, message, .. } if code == "invalid_request" && message.starts_with(offending))
         );
         assert!(backend.resolution.lock().expect("resolution").is_none());
         assert!(output.is_empty());
@@ -269,8 +286,48 @@ async fn named_target_request_preserves_controller_refusals() {
         .expect("answer file");
     let mut backend = RequestBackend::new(true, false);
     backend.refusal = Some("original authorization refuses these connection values");
-    let (result, _) = answer(&backend, path).await;
+    let (result, _) = answer(&backend, path.clone()).await;
     assert!(
         matches!(result.expect_err("refusal"), NativeV2CliError::Remote { message, .. } if Some(message.as_str()) == backend.refusal)
     );
+    std::fs::write(&path, r#"{"extra":true}"#).expect("answer file");
+    backend.refusal = Some("run already has successor next");
+    let (result, _) = answer(&backend, path).await;
+    assert!(
+        matches!(result.expect_err("refusal"), NativeV2CliError::Remote { message, .. } if message == "run already has successor next; answer file: $.extra is undeclared")
+    );
+}
+
+#[tokio::test]
+async fn default_resume_of_a_request_names_the_successor_before_answer() {
+    for (successor, expected) in [
+        (None, "run requires zeroshot answer original --input FILE"),
+        (Some("next"), "run already has successor next"),
+    ] {
+        let mut backend = RequestBackend::new(false, false);
+        backend.successor = successor;
+        let mut output = Vec::new();
+        let error = execute_resume(
+            RunResumeCommand {
+                run: RunSelector {
+                    target: Some("remote".to_owned()),
+                    run_id: RunId::new("original"),
+                },
+                from: None,
+                discard_workspace_changes: false,
+                forward_github_token: false,
+            },
+            &CliExecutionContext::new(&backend, &|_| panic!("credentials resolved")),
+            &mut output,
+        )
+        .await
+        .expect_err("resume refused");
+        let (NativeV2CliError::Usage(message) | NativeV2CliError::Remote { message, .. }) = error
+        else {
+            panic!("unexpected refusal {error}");
+        };
+        assert_eq!(message, expected);
+        assert!(backend.resumes.lock().expect("resumes").is_empty());
+        assert!(output.is_empty());
+    }
 }

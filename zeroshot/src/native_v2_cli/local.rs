@@ -67,8 +67,11 @@ pub(crate) use delivery_recovery::review_binding_recorder;
 
 #[path = "local/native_forge.rs"]
 pub(super) mod native_forge;
+#[path = "local/recovery_claim.rs"]
+mod recovery_claim;
 #[path = "local/submission.rs"]
 mod submission;
+use recovery_claim::{RECOVERY_CLAIM_HANDOFF, RECOVERY_CLAIM_WAIT};
 
 /// Private process mode intercepted by the shipped binary before public CLI parsing.
 #[doc(hidden)]
@@ -229,10 +232,12 @@ impl LocalCliBackend {
         Ok(paths)
     }
 
-    // Control operations alone may recover a controller after confirmed loss.
+    // Force-stop alone may recover a controller here after confirmed loss. Steer and suspend
+    // need a live controller and leave a lost run's recorded state unchanged.
     async fn connect_run(
         &self,
         run_id: &RunId,
+        recover_lost: bool,
     ) -> Result<Arc<PortableControllerTransport>, NativeV2CliError> {
         use crate::native_v2_portable_controller::availability::{
             ControllerAvailability, check_controller, connect_controller,
@@ -254,7 +259,14 @@ impl LocalCliBackend {
             ControllerAvailability::Unavailable {
                 observation: observed,
                 ..
-            } if observed.state == openengine_cluster_protocol::ControllerState::Lost => {}
+            } if observed.state == openengine_cluster_protocol::ControllerState::Lost => {
+                if !recover_lost {
+                    return Err(local_message(format!(
+                        "controller is lost; recorded state is unchanged. Use `zeroshot resume {0}` or `zeroshot force-stop {0}`",
+                        run_id.as_str()
+                    )));
+                }
+            }
             _ => {
                 return Err(local_message(format!(
                     "controller availability is unknown; run {} is still owned or unreachable",
@@ -667,14 +679,18 @@ impl LocalCliBackend {
         submission_digest: &Sha256Digest,
     ) -> Result<Option<RunId>, NativeV2CliError> {
         let ledger_path = self.run_storage(&run_id)?.join("runs.sqlite3");
-        if !require_existing_ledger(&ledger_path)? {
-            return Ok(None);
+        match require_existing_ledger(&ledger_path) {
+            Ok(true) => {}
+            Ok(false) => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
+            Err(error) => return Err(local_path_error(&ledger_path, error)),
         }
-        let ledger = SqliteRunLedger::open(&ledger_path).map_err(local_error)?;
+        let ledger = SqliteRunLedger::open(&ledger_path)
+            .map_err(|error| local_path_error(&ledger_path, error))?;
         let Some(stored) = ledger
             .get_by_submission_key(submission_key)
             .await
-            .map_err(local_error)?
+            .map_err(|error| local_path_error(&ledger_path, error))?
         else {
             return Ok(None);
         };
@@ -692,17 +708,30 @@ impl LocalCliBackend {
     }
 
     fn local_run_ids(&self) -> Result<Vec<RunId>, NativeV2CliError> {
-        let entries = match std::fs::read_dir(self.state_root.join("runs")) {
+        let path = self.state_root.join("runs");
+        let entries = match std::fs::read_dir(&path) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(local_io(error)),
+            Err(error) => return Err(local_path_error(&path, error)),
         };
-        let mut run_ids = entries
-            .map(|entry| entry.map_err(local_io))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter_map(local_run_id_from_entry)
-            .collect::<Vec<_>>();
+        let mut run_ids = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| local_path_error(&path, error))?;
+            let storage = entry.path();
+            let Some(run_id) = local_run_id_from_entry(entry) else {
+                continue;
+            };
+            // Search permission can expose child metadata without making the directory readable.
+            match std::fs::read_dir(&storage) {
+                Ok(_) => run_ids.push(run_id),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                    ) => {}
+                Err(error) => return Err(local_path_error(&storage, error)),
+            }
+        }
         run_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(run_ids)
     }
@@ -797,7 +826,12 @@ impl LocalCliBackend {
         };
         match result {
             Ok(result) => Ok(Some(result)),
-            Err(NativeV2CliError::Local(_) | NativeV2CliError::LocalRequestTimeout(_)) => Ok(None),
+            // A directory without a ledger is no run: a refused or interrupted start leaves one.
+            Err(
+                NativeV2CliError::Local(_)
+                | NativeV2CliError::LocalRequestTimeout(_)
+                | NativeV2CliError::RunNotFound { .. },
+            ) => Ok(None),
             Err(error) => Err(error),
         }
     }
@@ -816,6 +850,7 @@ impl LocalCliBackend {
             )
             .await?;
         result.workspace_recovery = self.workspace_recovery(&result).await?;
+        result.steering = Default::default();
         Ok(RunListResult { runs: vec![result] })
     }
 
@@ -845,27 +880,6 @@ impl LocalCliBackend {
 
     fn recovery_claim_path(&self, run_id: &RunId) -> Result<PathBuf, NativeV2CliError> {
         Ok(self.run_storage(run_id)?.join(RECOVERY_CLAIM_FILE))
-    }
-
-    fn claim_recovery_workspace(
-        &self,
-        run_id: &RunId,
-    ) -> Result<LocalRecoveryClaim, NativeV2CliError> {
-        let claim = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.recovery_claim_path(run_id)?)
-            .map_err(local_io)?;
-        claim.try_lock_exclusive().map_err(|error| {
-            if error.kind() == fs2::lock_contended_error().kind() {
-                local_message("retained workspace is already being resumed")
-            } else {
-                local_io(error)
-            }
-        })?;
-        Ok(LocalRecoveryClaim(claim))
     }
 
     fn recovery_workspace_is_unclaimed(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
@@ -953,7 +967,7 @@ impl LocalCliBackend {
         ledger_path: &Path,
         successor_run_id: &RunId,
     ) -> Result<bool, NativeV2CliError> {
-        if !require_existing_ledger(ledger_path)? {
+        if !require_existing_ledger(ledger_path).map_err(local_io)? {
             return Ok(false);
         }
         let ledger = SqliteRunLedger::open_read_only(ledger_path).map_err(local_error)?;
@@ -982,7 +996,7 @@ impl LocalCliBackend {
 
 impl LocalRecoveryDocument {
     fn read(path: &Path) -> Result<Self, NativeV2CliError> {
-        let bytes = std::fs::read(path).map_err(local_io)?;
+        let bytes = std::fs::read(path).map_err(|error| local_path_error(path, error))?;
         openengine_cluster_protocol::bounded_json_from_slice(&bytes)
             .map_err(|_| local_message("workspace recovery metadata is invalid"))
     }
@@ -1148,6 +1162,7 @@ impl LocalCliBackend {
         };
         let status = self.status_local(RunStatusParams { run_id }).await?;
         Ok(RunForceResult {
+            steering: Default::default(),
             run_id: status.run_id,
             title: status.title,
             source: status.source,
@@ -1167,7 +1182,10 @@ impl LocalCliBackend {
         // reading its phase or successor and through the force reply. Runs without recovery
         // metadata cannot be resumed and need no workspace claim.
         let _claim = if self.recovery_path(&params.run_id)?.is_file() {
-            Some(self.claim_recovery_workspace(&params.run_id)?)
+            Some(
+                self.claim_recovery_workspace_within(&params.run_id, false, RECOVERY_CLAIM_WAIT)
+                    .await?,
+            )
         } else {
             None
         };
@@ -1188,6 +1206,7 @@ impl LocalCliBackend {
                 .is_ok_and(|recovery| recovery.successor_run_id.is_some())))
         {
             return Ok(RunForceResult {
+                steering: Default::default(),
                 run_id: recorded.run_id,
                 title: recorded.title,
                 source: recorded.source,
@@ -1198,7 +1217,7 @@ impl LocalCliBackend {
                 workspace_recovery: recorded.workspace_recovery,
             });
         }
-        let transport = self.connect_run(&params.run_id).await?;
+        let transport = self.connect_run(&params.run_id, true).await?;
         let pid = read_ready(&paths)
             .ok()
             .filter(|ready| ready.run_id == params.run_id)
@@ -1241,12 +1260,15 @@ fn controller_request_timeout(run_id: &RunId, operation: &str) -> NativeV2CliErr
 fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), NativeV2CliError> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) => {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return Ok(());
-            }
-            return Err(local_io(error));
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            return Ok(());
         }
+        Err(error) => return Err(local_path_error(path, error)),
     };
     let stale = metadata.is_file()
         && !metadata.file_type().is_symlink()
@@ -1255,8 +1277,14 @@ fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), Nati
             .ok()
             .and_then(|modified| modified.elapsed().ok())
             .is_some_and(|age| age >= minimum_age);
-    if stale {
-        std::fs::remove_file(path).map_err(local_io)?;
+    if stale
+        && let Err(error) = std::fs::remove_file(path)
+        && !matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+        )
+    {
+        return Err(local_path_error(path, error));
     }
     Ok(())
 }
@@ -1302,6 +1330,11 @@ async fn wait_for_controller(
             }
         }
         if child.try_wait().map_err(local_io)?.is_some() {
+            // A controller that was ready and has exited ended its run before this launcher
+            // connected; its ledger answers from here on.
+            if read_ready(paths).is_ok_and(|ready| &ready.run_id == run_id) {
+                return Ok(ControllerWait::Ready);
+            }
             return Ok(ControllerWait::Exited(take_startup_failure(paths)));
         }
         if Instant::now() >= deadline {
@@ -1347,6 +1380,10 @@ fn local_error(error: impl std::fmt::Display) -> NativeV2CliError {
 
 fn local_io(error: std::io::Error) -> NativeV2CliError {
     local_message(error.to_string())
+}
+
+fn local_path_error(path: &Path, error: impl std::fmt::Display) -> NativeV2CliError {
+    local_message(format!("{}: {error}", path.display()))
 }
 
 fn local_message(message: impl Into<String>) -> NativeV2CliError {

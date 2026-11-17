@@ -193,6 +193,7 @@ impl UtilityCommand {
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
             Self::Suspend(args) => args.into_selector().map(NativeV2CliCommand::Suspend),
+            Self::Steer(args) => args.into_command(),
             Self::Answer(args) => Ok(NativeV2CliCommand::Answer {
                 run: args.run.into_selector()?,
                 input: args.input,
@@ -259,6 +260,51 @@ impl UtilityCommand {
     }
 }
 
+impl super::RunSteerArgs {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        let text = match (self.text, self.text_file, self.text_stdin) {
+            (Some(text), None, false) => crate::native_v2_cli::SteerText::Text(text),
+            (None, Some(path), false) => crate::native_v2_cli::SteerText::File(path),
+            (None, None, true) => crate::native_v2_cli::SteerText::Stdin,
+            _ => {
+                return Err(NativeV2CliError::Usage(
+                    "steer requires exactly one text source".into(),
+                ));
+            }
+        };
+        let networks = self
+            .networks
+            .into_iter()
+            .map(openengine_cluster_protocol::NodeName::new)
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?
+            .into_iter()
+            .collect::<Vec<_>>();
+        let run = self.run.into_selector()?;
+        if !networks.is_empty() && run.target.is_some() {
+            return Err(NativeV2CliError::Usage(
+                "network messages use the node's current run; --target is unsupported".into(),
+            ));
+        }
+        let mode = steer_mode(self.mode.as_deref(), !networks.is_empty());
+        Ok(NativeV2CliCommand::Steer {
+            run,
+            text,
+            networks,
+            mode,
+        })
+    }
+}
+
+fn steer_mode(requested: Option<&str>, network: bool) -> openengine_cluster_protocol::SteeringMode {
+    match requested {
+        Some("once") => openengine_cluster_protocol::SteeringMode::Once,
+        Some("standing") => openengine_cluster_protocol::SteeringMode::Standing,
+        _ if network => openengine_cluster_protocol::SteeringMode::Once,
+        _ => openengine_cluster_protocol::SteeringMode::Standing,
+    }
+}
+
 impl RunResumeArgs {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         let from = self
@@ -322,6 +368,14 @@ impl RunCheckpointsArgs {
 impl TargetCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::List(args) => Ok(NativeV2CliCommand::TargetList { json: args.json }),
+            Self::Remove(args) => {
+                validate_public_id(&args.name, "target name")?;
+                Ok(NativeV2CliCommand::TargetRemove {
+                    name: args.name,
+                    json: args.json,
+                })
+            }
             Self::Add(args) => {
                 validate_public_id(&args.name, "target name")?;
                 Ok(NativeV2CliCommand::TargetAdd(TargetAdd {

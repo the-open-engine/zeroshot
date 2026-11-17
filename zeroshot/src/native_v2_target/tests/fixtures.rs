@@ -65,7 +65,48 @@ pub(super) struct FakeDialer {
     pub(super) requests: Arc<Mutex<Vec<Value>>>,
 }
 
+#[async_trait::async_trait]
 impl TargetRegistry for MemoryRegistry {
+    fn list(&self) -> Result<Vec<TargetRecord>, TargetConnectorError> {
+        Ok(self
+            .targets
+            .lock()
+            .assert_value()
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn login(
+        &self,
+        target: &TargetRecord,
+        authority: &dyn TargetControlAuthority,
+    ) -> Result<(), TargetConnectorError> {
+        if self.get(&target.name)? != *target {
+            return Err(TargetConnectorError::RegistrationChanged);
+        }
+        authority.login(target).await?;
+        Ok(())
+    }
+
+    async fn remove(
+        &self,
+        name: &str,
+        authority: &dyn TargetControlAuthority,
+    ) -> Result<(), TargetConnectorError> {
+        if name == "platform" {
+            return Err(TargetConnectorError::BuiltinTarget);
+        }
+        let target = self.get(name)?;
+        authority.forget(&target).await?;
+        self.recovery_authorizations
+            .lock()
+            .assert_value()
+            .retain(|(id, _), _| id != &target.id);
+        self.targets.lock().assert_value().remove(name);
+        Ok(())
+    }
+
     fn insert(&self, target: TargetRecord) -> Result<(), TargetConnectorError> {
         let mut targets = self.targets.lock().assert_value();
         if targets.contains_key(&target.name) {
@@ -90,6 +131,10 @@ impl TargetRegistry for MemoryRegistry {
         run_id: &RunId,
         requirements: &RunConnectionRequirements,
     ) -> Result<(), TargetConnectorError> {
+        let targets = self.targets.lock().assert_value();
+        if !targets.values().any(|target| target.id == target_id) {
+            return Err(TargetConnectorError::RegistrationChanged);
+        }
         let key = (target_id.to_owned(), run_id.as_str().to_owned());
         let mut authorizations = self.recovery_authorizations.lock().assert_value();
         if let Some(stored) = authorizations.get(&key) {

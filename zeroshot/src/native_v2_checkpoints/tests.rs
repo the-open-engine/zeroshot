@@ -833,7 +833,7 @@ async fn workspace_checkpoint_restores_owned_delivery_receipts_independently_of_
     fixture.store.finish(&history).await.assert_value();
     assert!(
         fixture.restore_latest().await.is_empty(),
-        "restart keeps its fresh graph semantics"
+        "a restart imports no checkpoint seed"
     );
     let recovered = ResticCheckpointStore::with_program(ResticCheckpointStoreTestConfig {
         directory: fixture.directory.join("successor"),
@@ -966,4 +966,83 @@ async fn stopped_snapshot_operations_preserve_acknowledged_delivery_generation()
         assert!(!fixture.directory.join("latest.json").exists());
         assert!(!fixture.directory.join("index.json").exists());
     }
+}
+
+#[tokio::test]
+async fn unrestorable_conversations_are_distinct_from_checkpoints_without_conversations() {
+    let fixture = Fixture::new();
+    let node = NodeName::new("writer").assert_value();
+    let reason = |files: Option<ConversationFiles>| {
+        files.map(|files| {
+            files
+                .conversation(NodeInstanceId::new(1).assert_value(), &node)
+                .err()
+                .assert_value()
+        })
+    };
+    let continued = CheckpointRestore {
+        directory: fixture.directory.clone(),
+        selection: CheckpointRestoreSelection::Continue,
+    };
+    // Before the first checkpoint there is no latest pointer, and so no conversation.
+    assert_eq!(
+        reason(restore_checkpoint_conversations(&continued, None).await),
+        None
+    );
+    fixture.input_checkpoint("writer").await;
+    assert_eq!(
+        reason(restore_checkpoint_conversations(&continued, None).await),
+        None
+    );
+    fs::write(fixture.restic_control("fail-restore"), "fail").assert_value();
+    let store = fake_checkpoint_store(
+        fixture._root.path(),
+        fixture.directory.clone(),
+        fixture.workspace.clone(),
+        BTreeSet::new(),
+    )
+    .with_conversation_restore(Some(continued.clone()));
+    for files in [
+        restore_checkpoint_conversations(&continued, None).await,
+        store.restored_conversations().await,
+    ] {
+        assert_eq!(
+            reason(files),
+            Some("checkpoint conversation could not be restored")
+        );
+    }
+}
+
+#[test]
+fn a_restart_starts_with_the_conversations_its_source_started_with() {
+    use CheckpointRestoreSelection::{Continue, Latest};
+    let root = tempfile::tempdir().assert_value();
+    let restore = |run: &str, selection| CheckpointRestore {
+        directory: root.path().join(run),
+        selection,
+    };
+    let conversations = |source: &str, selection, own: &str| {
+        successor_conversations(restore(source, selection), &root.path().join(own))
+            .map(|restore| (restore.directory, restore.selection))
+    };
+    // A submitted run recorded no origin: its restart selects no conversations.
+    assert_eq!(
+        conversations("asked", Latest, "restarted").assert_value(),
+        (root.path().join("asked"), Latest)
+    );
+    // A continuation names its source. Its restart, and that restart's restart, start with the
+    // same conversations.
+    for (source, selection, own) in [
+        ("asked", Continue, "answered"),
+        ("answered", Latest, "second"),
+        ("second", Latest, "third"),
+    ] {
+        assert_eq!(
+            conversations(source, selection, own).assert_value(),
+            (root.path().join("asked"), Continue)
+        );
+    }
+    // A record that cannot be read is not taken for a missing one.
+    fs::write(root.path().join("third/conversation-origin.json"), "{").assert_value();
+    assert!(conversations("third", Latest, "fourth").is_err());
 }

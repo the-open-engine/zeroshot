@@ -59,7 +59,11 @@ class Broker:
                 time.sleep(0.06)
                 peer.sendall(bytes([byte]))
         else:
-            peer.sendall(frame)
+            try:
+                peer.sendall(frame)
+            except (ConnectionResetError, BrokenPipeError):
+                self.acks.append(b"")
+                return
         try:
             self.acks.append(peer.recv(1))
         except ConnectionResetError:
@@ -95,6 +99,7 @@ class NativeMemoryTest(unittest.TestCase):
         self.memory = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.memory)
         self.agent = SimpleNamespace(session_id="native-session", notices={})
+        self.memory._MAX_CONTEXT_BYTES = 1048576
 
     @staticmethod
     def queue(agent, key, text):
@@ -129,7 +134,7 @@ class NativeMemoryTest(unittest.TestCase):
         return messages[-1]
 
     def install(self, broker=None):
-        self.memory.install(str(broker.path) if broker else None, self.receipts.append)
+        self.memory.install(str(broker.path) if broker else None, self.receipts.append, 1048576)
 
     def test_native_json_and_notices_survive_before_first_flush(self):
         broker = Broker(self.directory.name)
@@ -163,6 +168,15 @@ class NativeMemoryTest(unittest.TestCase):
 
     def test_large_supported_recall_survives_native_bookkeeping(self):
         context = b"r" * self.memory._MAX_CONTEXT_BYTES
+        broker = Broker(self.directory.name, response=context)
+        self.install(broker)
+        message = self.call()
+        broker.finish()
+        self.assertIn(context.decode(), message["content"])
+        self.assertEqual(broker.acks, [b"\x01"])
+
+    def test_steer_maximum_text_survives_native_bookkeeping(self):
+        context = ("<steer>\n[id] " + "x" * 262144 + "\n</steer>").encode()
         broker = Broker(self.directory.name, response=context)
         self.install(broker)
         message = self.call()
@@ -239,7 +253,7 @@ class NativeMemoryTest(unittest.TestCase):
         self.install()
         path = Path(self.directory.name) / "nonlocal.json"
         path.write_text(json.dumps({"endpoint": "example.com:1234", "token": "synthetic"}))
-        self.memory.install(str(path), self.receipts.append)
+        self.memory.install(str(path), self.receipts.append, 1048576)
         with patch.object(socket.socket, "connect", side_effect=AssertionError("must not connect")):
             self.assertEqual(self.call()["content"], "native result")
         path.write_text(json.dumps({"endpoint": "127.0.0.1:1234", "token": "synthetic"}))

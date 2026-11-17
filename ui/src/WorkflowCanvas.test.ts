@@ -11,6 +11,7 @@ import {
 import { JSDOM } from 'jsdom';
 import type { GraphNode, Runtime } from './domain';
 import type { CanvasView } from './run-view-state';
+import type { WorkflowNodeObservation, WorkflowObservation } from './workflow-observation';
 import { createViteTestServer, installTestGlobals, runDetailFixture } from './test-support';
 
 type ElkMessage = { data: unknown };
@@ -151,6 +152,10 @@ type CanvasOptions = {
   size?: typeof canvas;
   observer?: typeof MeasuringObserver;
   toolbarStart?: ReturnType<typeof createElement>;
+  deselect?: () => void;
+  /** Receives a way to render the canvas again with another observation. */
+  observe?: (render: (observation: WorkflowObservation) => Promise<void>) => void;
+  observed?: Record<string, WorkflowNodeObservation>;
 };
 
 /** A page where React Flow measures its nodes and ELK lays them out. */
@@ -235,27 +240,33 @@ async function mountRunGraph(
     graph: { ...detail.graph, root: options.root ?? root },
     runtime: options.runtime ?? detail.runtime,
   };
-  await act(async () =>
-    reactRoot.render(
-      createElement(
-        ReactFlowProvider,
-        null,
-        createElement(WorkflowCanvas, {
-          document,
-          selected: '',
-          positions: {},
-          setPositions: () => {},
-          workers: [],
-          select: () => {},
-          observation: options.readOnly === false ? undefined : { key: detail.runId, nodes: {} },
-          view,
-          inspectorHidden: false,
-          showInspector: () => {},
-          toolbarStart: options.toolbarStart,
-        })
+  const render = (observation: WorkflowObservation | undefined) =>
+    act(async () =>
+      reactRoot.render(
+        createElement(
+          ReactFlowProvider,
+          null,
+          createElement(WorkflowCanvas, {
+            document,
+            selected: '',
+            positions: {},
+            setPositions: () => {},
+            workers: [],
+            select: () => {},
+            observation,
+            view,
+            inspectorHidden: false,
+            showInspector: () => {},
+            toolbarStart: options.toolbarStart,
+            deselect: options.deselect,
+          })
+        )
       )
-    )
+    );
+  await render(
+    options.readOnly === false ? undefined : { key: detail.runId, nodes: options.observed ?? {} }
   );
+  options.observe?.(render);
   await settle(container, () =>
     matchesViewport(container, view.viewport ?? fitted(container, options.size ?? canvas))
   );
@@ -349,6 +360,29 @@ async function expandInPlace(container: HTMLElement) {
   assert.deepEqual(onScreen(box(nodeWith(container, 'Collapse rounds')), after), card);
 }
 
+for (const [request, label] of [
+  [undefined, 'Waiting for an answer'],
+  ['pending', 'Waiting for an answer'],
+  ['continued', 'Continued in a successor run'],
+  ['expired', 'Expired without an answer'],
+] as const) {
+  test(`a suspended request card says "${label}" when its question is ${request ?? 'unknown'}`, async (t) => {
+    const container = await mountRunGraph(t, layoutWorker(), undefined, {
+      root: { kind: 'verifier', name: 'approval', worker: 'builtin.request.ask@1' },
+      runtime: {
+        harness: 'codex',
+        provider: 'openai',
+        size: 'small',
+        nodes: { approval: { kind: 'request' } },
+      },
+      view: { collapsed: [] },
+      observed: { approval: { state: 'suspended', request } },
+    });
+    const card = container.querySelector('.workflow-card.role-activity');
+    assert.equal(card?.querySelector('small')?.textContent, label);
+  });
+}
+
 for (const readOnly of [false, true]) {
   test(`wait shows its own detail in the ${readOnly ? 'history' : 'editor'} canvas`, async (t) => {
     const container = await mountRunGraph(t, layoutWorker(), undefined, {
@@ -370,15 +404,152 @@ for (const readOnly of [false, true]) {
   });
 }
 
-test('a host without its own header gets its controls beside the settings button', async (t) => {
+test('a host without its own header gets its controls beside Add activity', async (t) => {
   const container = await mountRunGraph(t, layoutWorker(), undefined, {
     readOnly: false,
     toolbarStart: createElement('button', { 'aria-label': 'Undo' }),
   });
   const start = container.querySelector('.canvas-toolbar .canvas-start');
-  assert.match(start?.textContent ?? '', /Run settings/);
+  assert.match(start?.textContent ?? '', /Add activity/);
+  assert.doesNotMatch(
+    container.querySelector('.canvas-toolbar')?.textContent ?? '',
+    /Run settings/
+  );
   assert.ok(start?.querySelector('.canvas-host-actions [aria-label="Undo"]'));
   assert.equal(container.querySelectorAll('.canvas-host-actions').length, 1);
+});
+
+test('Expand all and Collapse all are unavailable when they would do nothing, keeping focus', async (t) => {
+  const container = await mountRunGraph(t, layoutWorker());
+  const toggle = (label: string) =>
+    container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+  // The saved view folds the only group: nothing left to collapse.
+  assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'true');
+  assert.equal(toggle('Expand all groups').getAttribute('aria-disabled'), 'false');
+  toggle('Expand all groups').focus();
+  await click(container, 'Expand all groups');
+  await settle(container);
+  assert.equal(toggle('Expand all groups').getAttribute('aria-disabled'), 'true');
+  assert.equal(container.ownerDocument.activeElement, toggle('Expand all groups'));
+  assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'false');
+  // An unavailable toggle does nothing.
+  await click(container, 'Expand all groups');
+  assert.equal(toggle('Collapse all groups').getAttribute('aria-disabled'), 'false');
+});
+
+test('only a followed live run unfolds groups for new work; scrubbing keeps the folds', async (t) => {
+  let render: ((observation: WorkflowObservation) => Promise<void>) | undefined;
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    observe: (next) => (render = next),
+  });
+  const folded = () =>
+    container.querySelector('[aria-label="Collapse all groups"]')?.getAttribute('aria-disabled') ===
+    'true';
+  // The saved view folds the loop; scrubbing to where its work runs keeps it folded.
+  assert.ok(folded());
+  const writing = { write: { state: 'running' as const } };
+  await render!({ key: 'run', nodes: writing });
+  await settle(container);
+  assert.ok(folded(), 'scrubbing keeps the fold');
+  await render!({ key: 'run', nodes: { review: { state: 'running' } }, following: true });
+  await settle(container);
+  assert.ok(!folded(), 'new live work unfolds its group');
+});
+
+test('a folded error route is no group to expand or collapse', async (t) => {
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    root: {
+      kind: 'seq',
+      name: 'run',
+      children: [
+        { kind: 'step', name: 'work' },
+        {
+          kind: 'choice',
+          name: 'work_route',
+          branches: [
+            {
+              when: {
+                kind: 'in',
+                value: { name: 'work', source: 'error', field: null },
+                labels: ['timeout', 'crash', 'malformed', 'refusal'],
+              },
+              node: { kind: 'fail', name: 'stop', reason: 'failed' },
+            },
+          ],
+          otherwise: { kind: 'succeed', name: 'done', output: { kind: 'null' }, bindings: [] },
+        },
+      ],
+    } as GraphNode,
+    view: { collapsed: [] },
+  });
+  for (const label of ['Collapse all groups', 'Expand all groups'])
+    assert.equal(
+      container.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-disabled'),
+      'true',
+      label
+    );
+});
+
+test('a folded decision that shares its verifier card when open still counts for Expand all', async (t) => {
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    root: {
+      kind: 'seq',
+      name: 'run',
+      children: [
+        { kind: 'verifier', name: 'review', signals: { verdict: ['accepted', 'rejected'] } },
+        {
+          kind: 'choice',
+          name: 'review_route',
+          branches: [
+            {
+              when: {
+                kind: 'in',
+                value: { name: 'review', source: 'signal', field: 'verdict' },
+                labels: ['accepted'],
+              },
+              node: { kind: 'succeed', name: 'done', output: { kind: 'null' }, bindings: [] },
+            },
+          ],
+          otherwise: { kind: 'fail', name: 'rejected', reason: 'failed' },
+        },
+      ],
+    } as GraphNode,
+    view: { collapsed: ['review_route'] },
+  });
+  const disabled = (label: string) =>
+    container.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-disabled');
+  assert.equal(disabled('Expand all groups'), 'false');
+  assert.equal(disabled('Collapse all groups'), 'true');
+});
+
+test('an empty-canvas click shows the workflow details at once; a group header keeps its own', async (t) => {
+  let deselected = 0;
+  const container = await mountRunGraph(t, layoutWorker(), undefined, {
+    deselect: () => deselected++,
+    view: { collapsed: [] },
+  });
+  const window = container.ownerDocument.defaultView!;
+  const press = (target: Element, detail = 1) =>
+    act(async () => {
+      target.dispatchEvent(new window.MouseEvent('click', { bubbles: true, detail }));
+    });
+  await press(container.querySelector('.react-flow__pane')!);
+  assert.equal(deselected, 1);
+  // The blank inside of a group's box is canvas too.
+  await press(container.querySelector('.workflow-region')!);
+  assert.equal(deselected, 2);
+  // Its header selects or folds the group instead.
+  await press(container.querySelector('.workflow-region-header button')!);
+  assert.equal(deselected, 2);
+  // A double-click neither zooms nor needs a delay to tell it apart.
+  const before = viewport(container);
+  await act(async () => {
+    container
+      .querySelector('.react-flow__pane')!
+      .dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+  });
+  await settle(container);
+  assert.deepEqual(viewport(container), before);
 });
 
 test('expanding and collapsing a group keep it where it was on screen, at the same zoom', async (t) => {

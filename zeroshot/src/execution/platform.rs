@@ -16,6 +16,8 @@ use unix as native;
 #[cfg(windows)]
 use windows as native;
 
+#[cfg(unix)]
+pub(crate) use native::retained_descriptor;
 pub(crate) use native::validate_private_file;
 #[cfg(windows)]
 pub(crate) use native::private_inherited_file;
@@ -39,8 +41,45 @@ impl FileAccess {
     }
 }
 
+/// Create one native private directory or validate the existing directory without repairing it.
+pub(crate) fn ensure_private_directory(path: &Path) -> io::Result<()> {
+    match create_private_directory(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    validate_private_file(&open_directory(path)?)
+}
+
+pub(crate) fn lock_is_contended(error: &io::Error) -> bool {
+    if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_IO_PENDING as i32)
+    }
+    #[cfg(not(windows))]
+    false
+}
+
 pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> {
     native::private_file(path, access)
+}
+
+/// The installed path of the executable a process reports as `current`. Once another update has
+/// replaced the executable, Linux reports the former path followed by ` (deleted)`, and the
+/// installation is still at that former path.
+pub(crate) fn installed_path(current: &Path) -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        if let Some(installed) = current.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
+            return std::ffi::OsStr::from_bytes(installed).into();
+        }
+    }
+    current.to_owned()
 }
 
 pub(crate) fn user_home() -> Option<std::path::PathBuf> {

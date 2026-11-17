@@ -187,11 +187,11 @@ pub(super) fn command(
             command: &mut command,
         })?;
     }
-    install_memory(adapter, invocation, files, &mut command);
     crate::native_v2_capsule::provider_process::apply_execution_environment(
         &mut command.environment,
         invocation,
     )?;
+    install_memory(adapter, invocation, files, &mut command);
     Ok(command)
 }
 
@@ -207,6 +207,9 @@ pub(super) fn install_memory(
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: files.home(),
+                context_budget: None,
+                // As with Pi, the text is appended to a tool result.
+                standing: false,
             },
             super::memory::install,
         );

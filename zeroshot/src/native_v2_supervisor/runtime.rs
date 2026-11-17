@@ -367,7 +367,7 @@ pub(super) fn reduce(
         .reduce(ReductionInput {
             initial_input: &admitted.initial_input,
             executions: &executions,
-            next_node_instance: next_node_instance(&executions)?,
+            next_node_instance: next_node_instance_for(snapshot, &executions)?,
             next_execution: next_execution(&executions)?,
         })?)
 }
@@ -425,6 +425,14 @@ pub(crate) fn continuation_history(
     durable_history(&continuation)
 }
 
+/// The seed for restarting a failed run: a failed run restarts where it started. A successor that
+/// began at a held node, after an answer or at a selected checkpoint recorded those results as its
+/// starting point, so its restart begins there and an answered request stays answered. A run that
+/// was submitted has no such record and restarts at the root.
+pub(crate) fn restart_history(snapshot: &RunSnapshot) -> Vec<DurableExecution> {
+    snapshot.execution_seed.clone()
+}
+
 fn offset_position(
     position: HistoryPosition,
     offset: u64,
@@ -469,6 +477,17 @@ pub(super) fn history_position(
 ) -> Result<HistoryPosition, NativeV2SupervisorError> {
     HistoryPosition::new(cursor_sequence(cursor)?)
         .map_err(|_| NativeV2SupervisorError::InvalidState)
+}
+
+pub(crate) fn next_node_instance_for(
+    snapshot: &RunSnapshot,
+    executions: &[DurableExecution],
+) -> Result<u64, NativeV2SupervisorError> {
+    let next = snapshot
+        .node_instance_floor
+        .checked_add(1)
+        .ok_or(NativeV2SupervisorError::InvalidState)?;
+    Ok(next_node_instance(executions)?.max(next))
 }
 
 pub(crate) fn next_node_instance(

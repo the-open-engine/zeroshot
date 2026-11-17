@@ -43,6 +43,25 @@ pub(crate) enum ProviderSchemaDialect {
     OpenAiStrict,
 }
 
+/// Native final-answer delivery, selected by the adapter rather than the model or provider.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ResponseDelivery {
+    Message,
+    StructuredOutput,
+}
+
+impl ResponseDelivery {
+    fn instruction(self) -> &'static str {
+        match self {
+            Self::Message => "Return only JSON with no Markdown or commentary. ",
+            Self::StructuredOutput => {
+                "Submit the final answer exactly once using the session-provided StructuredOutput \
+                 tool. Do not also write the final answer as a text message. "
+            }
+        }
+    }
+}
+
 impl NodeResponseContract {
     pub(crate) fn provider_schema(&self, dialect: ProviderSchemaDialect) -> Value {
         closed_object_schema(
@@ -279,11 +298,25 @@ impl AgentResponseState {
     }
 }
 
-pub(crate) fn resolve_agent_response(
+#[cfg(test)]
+fn resolve_agent_response(
     contract: &NodeResponseContract,
     response: &str,
 ) -> Result<AgentResponse, NodeRunnerError> {
     resolve_agent_response_with_dialect(contract, response, ProviderSchemaDialect::Standard)
+}
+
+pub(crate) fn resolve_agent_response_with_delivery(
+    contract: &NodeResponseContract,
+    response: &str,
+    delivery: ResponseDelivery,
+) -> Result<AgentResponse, NodeRunnerError> {
+    resolve_agent_response_rendering(
+        contract,
+        response,
+        ProviderSchemaDialect::Standard,
+        CorrectionRendering::Contract(delivery),
+    )
 }
 
 pub(crate) fn resolve_agent_response_with_dialect(
@@ -291,7 +324,12 @@ pub(crate) fn resolve_agent_response_with_dialect(
     response: &str,
     dialect: ProviderSchemaDialect,
 ) -> Result<AgentResponse, NodeRunnerError> {
-    resolve_agent_response_rendering(contract, response, dialect, CorrectionRendering::Contract)
+    resolve_agent_response_rendering(
+        contract,
+        response,
+        dialect,
+        CorrectionRendering::Contract(ResponseDelivery::Message),
+    )
 }
 
 /// Resolves a response whose prompt carried the provider schema rather than the ephemeral contract
@@ -313,7 +351,7 @@ pub(crate) fn resolve_agent_response_with_schema(
 /// correction must agree so the provider never sees the contract and the schema together.
 #[derive(Clone, Copy)]
 enum CorrectionRendering {
-    Contract,
+    Contract(ResponseDelivery),
     Schema(ProviderSchemaDialect),
 }
 
@@ -336,7 +374,9 @@ fn resolve_agent_response_rendering(
         Ok(outcome) => AgentResponse::Complete(outcome),
         Err(error) => {
             let prompt = match correction {
-                CorrectionRendering::Contract => render_agent_correction(contract, &error, fault)?,
+                CorrectionRendering::Contract(delivery) => {
+                    render_agent_correction(contract, &error, fault, delivery)?
+                }
                 CorrectionRendering::Schema(dialect) => {
                     render_agent_correction_with_schema(contract, &error, fault, dialect)?
                 }
@@ -688,10 +728,20 @@ pub fn render_agent_prompt(
     input: &Value,
     response: &NodeResponseContract,
 ) -> Result<String, NodeRunnerError> {
+    render_agent_prompt_with_delivery(instructions, input, response, ResponseDelivery::Message)
+}
+
+pub(crate) fn render_agent_prompt_with_delivery(
+    instructions: &NodeInstructions,
+    input: &Value,
+    response: &NodeResponseContract,
+    delivery: ResponseDelivery,
+) -> Result<String, NodeRunnerError> {
     let runtime_guidance = guidance::runtime_guidance(response);
     let instructions = instructions.as_str();
     let input = serde_json::to_string(input).map_err(|_| NodeRunnerError::Driver)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;
+    let delivery = delivery.instruction();
     Ok(format!(
         "Execute this graph node using the shared workspace.\n\
          Authored instructions:\n{instructions}\n\
@@ -699,7 +749,7 @@ pub fn render_agent_prompt(
          Input JSON:\n{input}\n\
          Runtime-owned response contract:\n{response}\n\
          The response contract describes the required type; never return the contract itself. \
-         Return only JSON with no Markdown or commentary. The provider response must be exactly \
+         {delivery}The provider response must be exactly \
          an object with one field named response. For a worker, response contains the output \
          value; an output contract of {{\"kind\":\"null\"}} requires the literal null inside \
          {{\"response\":null}}. For a verifier, response contains exactly an object with output, \
@@ -745,7 +795,19 @@ pub(crate) fn render_agent_correction(
     response: &NodeResponseContract,
     error: &NodeResponseError,
     fault: Option<EnvelopeFault>,
+    delivery: ResponseDelivery,
 ) -> Result<String, NodeRunnerError> {
+    if delivery == ResponseDelivery::StructuredOutput {
+        let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;
+        let delivery = delivery.instruction();
+        return Ok(format!(
+            "Your previous final response was rejected mechanically and was not passed to the graph.\n\
+             Validation error:\n{error}\n\
+             Response contract:\n{response}\n\
+             {delivery}The provider response must be exactly an object with one field named \
+             response whose value satisfies the response contract above."
+        ));
+    }
     let problem = correction_problem(fault);
     let skeleton = response_skeleton(response, ProviderSchemaDialect::Standard)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;

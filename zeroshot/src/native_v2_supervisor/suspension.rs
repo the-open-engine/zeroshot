@@ -99,6 +99,7 @@ impl NativeV2Supervisor {
                 continue;
             }
             self.cleanup_runtime(RunRuntimeExit::Suspended).await?;
+            self.suspending.store(true, Ordering::Release);
             return match self.ledger.append(&self.run_id, events).await {
                 Ok(_) => Err(NativeV2SupervisorError::Suspended),
                 Err(_) if self.force_requested.load(Ordering::Acquire) => Ok(()),

@@ -353,6 +353,18 @@ pub trait ClusterBackend: Send + Sync + 'static {
         ))
     }
 
+    async fn run_steer(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support steering",
+            None,
+        ))
+    }
+
     async fn run_suspend(
         &self,
         _context: &ConnectionContext,

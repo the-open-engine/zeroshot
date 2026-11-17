@@ -386,7 +386,8 @@ name. Structural nodes (`seq`, `choice`, `par`, `loop`, `map`) and terminal node
 - a `git_delivery` binding on a `step`, or on a verifier that does not use a delivery worker;
 - an `agent` binding on a node that uses a delivery worker;
 - an `agent` binding on a node without authored `instructions`;
-- a worker reference reused on several nodes with a different contract or binding kind.
+- a worker reference reused on several nodes with a different contract or binding kind. Request
+  nodes are the exception: each may declare its own signals and output.
 
 ## Connections
 

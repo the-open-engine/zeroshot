@@ -223,15 +223,12 @@ async fn registered_harness_live_memory_sessions_and_verifier_contract() {
     }
     let bindings = runtime_bindings(&settings, &registry);
     let admitted = NativeV2Admission
-        .admit(RunSubmission {
-            title: RunTitle::new("Explicit live harness contract").assert_value(),
-            graph: worker_verifier_graph(&worker, &verifier),
-            initial_input: Value::Null,
-            runtime: RuntimePlan::new(settings.lane.clone(), run_size("medium"), bindings.clone()),
-            environment: None,
-            source: None,
-            submission_key: IdempotencyKey::new(&run).assert_value(),
-        })
+        .admit(live_submission(
+            &settings,
+            &bindings,
+            worker_verifier_graph(&worker, &verifier),
+            ("Explicit live harness contract", &run),
+        ))
         .await
         .assert_value();
     let memory = Arc::new(RecalledMemory {
@@ -373,3 +370,163 @@ mod active_memory_tests;
 
 #[path = "live_tests/tests/conversations.rs"]
 mod conversations;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires ZEROSHOT_LIVE_* lane settings, CLI callback binary, and disposable repository"]
+async fn steer_live_tool_call_records_carrier_receipt() {
+    use crate::v2_run_ledger::RunLedger;
+    use openengine_cluster_protocol::{RunSteerParams, RunVectorContent};
+    struct PendingSteer {
+        ledger: Arc<dyn RunLedger>,
+        run: RunId,
+        runtime: tokio::runtime::Handle,
+        pending: std::sync::atomic::AtomicBool,
+    }
+    impl ActiveMemorySource for PendingSteer {
+        fn tool_context(&self, _: &HookQuery) -> String {
+            if self
+                .pending
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                // Make direction pending at the first native callback, after prompt delivery.
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| {
+                            self.runtime
+                                .block_on(crate::v2_run_ledger::steering::record(
+                                    self.ledger.as_ref(),
+                                    RunSteerParams {
+                                        mode: openengine_cluster_protocol::SteeringMode::Standing,
+                                        run_id: self.run.clone(),
+                                        text: "Keep the requested output contract.".into(),
+                                    },
+                                ))
+                        })
+                        .join()
+                        .assert_value()
+                        .assert_value();
+                });
+            }
+            String::new()
+        }
+        fn graph_context(&self, _: &str, _: &str) -> String {
+            String::new()
+        }
+    }
+    let settings = LiveSettings::read();
+    let registry = HarnessRegistry::local();
+    let directory = TestDirectory::new("live-steer");
+    let run = RunId::new(format!("steer-live-{}", uuid::Uuid::now_v7()));
+    let instructions = "Make one native tool call to read README.md, then return a short string using the output contract. Do not edit files.";
+    let bindings = runtime_bindings(&settings, &registry);
+    let admitted = NativeV2Admission
+        .admit(live_submission(
+            &settings,
+            &bindings,
+            worker_verifier_graph(instructions, instructions),
+            ("Live steering carrier receipt", run.as_str()),
+        ))
+        .await
+        .assert_value();
+    let ledger = create_live_record(&run, &admitted).await;
+    let hooks = Arc::new(
+        ActiveMemoryHooks::new(Arc::new(PendingSteer {
+            ledger: ledger.clone(),
+            run: run.clone(),
+            runtime: tokio::runtime::Handle::current(),
+            pending: std::sync::atomic::AtomicBool::new(true),
+        }))
+        .assert_value(),
+    );
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let runner = live_runner(&settings, &admitted, directory.child("runtime"), hooks);
+    let binding = bindings[&NodeName::new("worker").assert_value()].clone();
+    let values = settings.connection_values(&binding);
+    let request = NodeRequestFixture {
+        run_id: run.as_str(),
+        node: "worker",
+        node_instance: 1,
+        execution: 1,
+        worker: "agent.worker@1",
+        instructions,
+        input: Value::Null,
+        binding,
+        environment: values,
+    }
+    .into_request();
+    let reference = request
+        .invocation
+        .reference
+        .public_execution()
+        .assert_value();
+    let mut handle = runner.start(request).await.assert_value();
+    let _ = completion(&mut handle).await;
+    runner.close_run(&run).await;
+    let entries = crate::v2_run_ledger::steering::all(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert_eq!(entries.iter().filter(|entry| matches!(&entry.content,RunVectorContent::SteerReceipt { execution, .. } if execution == &reference)).count(),1);
+}
+
+#[path = "live_tests/tests/networks.rs"]
+mod networks;
+
+fn live_submission(
+    settings: &LiveSettings,
+    bindings: &BTreeMap<NodeName, NodeRuntimeBinding>,
+    graph: openengine_cluster_protocol::GraphSpec,
+    (title, run): (&str, &str),
+) -> RunSubmission {
+    RunSubmission {
+        title: RunTitle::new(title).assert_value(),
+        graph,
+        initial_input: Value::Null,
+        runtime: RuntimePlan::new(settings.lane.clone(), run_size("medium"), bindings.clone()),
+        environment: None,
+        source: None,
+        submission_key: IdempotencyKey::new(run).assert_value(),
+    }
+}
+
+async fn create_live_record(
+    run: &RunId,
+    admitted: &crate::native_v2_contract::AdmittedRun,
+) -> Arc<dyn crate::v2_run_ledger::RunLedger> {
+    let ledger: Arc<dyn crate::v2_run_ledger::RunLedger> =
+        Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+    ledger
+        .create_or_get(crate::v2_run_ledger::CreateRun {
+            run_id: run.clone(),
+            submission_key: IdempotencyKey::new(run.as_str()).assert_value(),
+            submission_digest: openengine_cluster_protocol::Sha256Digest::new("a".repeat(64))
+                .assert_value(),
+            admitted: admitted.clone(),
+        })
+        .await
+        .assert_value();
+    ledger
+}
+
+fn live_runner(
+    settings: &LiveSettings,
+    admitted: &crate::native_v2_contract::AdmittedRun,
+    runtime_home: PathBuf,
+    hooks: Arc<ActiveMemoryHooks>,
+) -> crate::native_v2_runner::NativeNodeRunner {
+    let registry = HarnessRegistry::local();
+    build_local_native_v2_candidate(
+        admitted,
+        NativeV2CandidateConfig {
+            active_memory: Some(hooks),
+            lanes: vec![
+                registry
+                    .configure(settings.context(&registry, runtime_home))
+                    .assert_value(),
+            ],
+            workspace: settings.workspace.clone(),
+            delivery: None,
+            comment_delivery: None,
+        },
+    )
+    .assert_value()
+}

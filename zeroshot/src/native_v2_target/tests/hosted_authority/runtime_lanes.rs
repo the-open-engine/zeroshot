@@ -956,3 +956,102 @@ async fn wait_suspend_and_vector_capabilities_refuse_before_tokens_or_request_bo
         );
     }
 }
+
+#[tokio::test]
+async fn steer_instruction_limit_profile_set_and_show_read_large_replies() {
+    let root = temp_root();
+    let mut request = profile_request(
+        json!({"kind":"agent", "model":"fixture", "sessionScope":"execution", "connections":{}}),
+    );
+    let mut graph = serde_json::to_value(&request.graph).assert_value();
+    graph["root"]["instructions"] =
+        json!("x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES));
+    request.graph = serde_json::from_value(graph).assert_value();
+    let response = stored_profile(&serde_json::to_string(&request).assert_value());
+    let expected = request.graph.clone();
+    let target = RecordingTarget::spawn(move |incoming, origin, index| {
+        if (incoming.method.as_str(), incoming.path.as_str()) == PROFILE_SET {
+            return ("200 OK", response.clone());
+        }
+        if incoming.path == "/native-v2/profiles/show" {
+            let result: Value = serde_json::from_str(&response).assert_value();
+            return ("200 OK", result["profile"].to_string());
+        }
+        hosted_response(incoming, origin, index, true)
+    })
+    .await;
+    let (record, authority) = authenticated_authority(&root, &target.origin).await;
+    let stored = authority
+        .profile_set(&record, request.clone())
+        .await
+        .assert_value();
+    assert_eq!(stored.profile.graph, expected);
+    let shown = authority
+        .profile_show(
+            &record,
+            openengine_cluster_protocol::RunProfileSelector {
+                name: request.name,
+                scope: request.scope,
+            },
+        )
+        .await
+        .assert_value();
+    assert_eq!(shown.graph, expected);
+    target.stop();
+}
+
+#[tokio::test]
+async fn steer_target_without_marker_refuses_before_authentication_or_run_connection() {
+    let root = temp_root();
+    let target = RecordingTarget::spawn(direct_without_marker).await;
+    let authority = test_http_authority(root.path("refresh-locks"));
+    let error = authority
+        .steering_session(
+            &direct_target(target.origin.clone()),
+            &openengine_cluster_protocol::TargetOecpSessionRequest {
+                run_id: Some(openengine_cluster_protocol::RunId::new("steer-target")),
+            },
+        )
+        .await
+        .assert_error();
+    assert_eq!(error.to_string(), "target does not advertise steering");
+    assert_eq!(routes(&target.stop()), [DISCOVERY]);
+}
+
+#[tokio::test]
+async fn steer_target_with_marker_uses_its_existing_run_connection() {
+    let root = temp_root();
+    let target = RecordingTarget::spawn(|request, origin, _| {
+        match (request.method.as_str(), request.path.as_str()) {
+            DISCOVERY => ("200 OK", serde_json::to_string(
+                &TargetDiscoveryDocument::direct(TargetAuthentication::None).with_steering()
+            ).assert_value()),
+            ("POST", "/native-v2/oecp-session") => {
+                assert_eq!(serde_json::from_str::<Value>(&request.body).assert_value(), json!({"runId":"steer-target"}));
+                ("200 OK", json!({"endpoint":format!("{}/native-v2/oecp", origin.replacen("http:","ws:",1))}).to_string())
+            }
+            _ => unexpected(),
+        }
+    }).await;
+    let authority = test_http_authority(root.path("refresh-locks"));
+    let access = authority
+        .steering_session(
+            &direct_target(target.origin.clone()),
+            &openengine_cluster_protocol::TargetOecpSessionRequest {
+                run_id: Some(openengine_cluster_protocol::RunId::new("steer-target")),
+            },
+        )
+        .await
+        .assert_value();
+    assert_eq!(
+        access.endpoint(),
+        format!(
+            "{}/native-v2/oecp",
+            target.origin.replacen("http:", "ws:", 1)
+        )
+    );
+    assert_eq!(
+        routes(&target.stop()),
+        [DISCOVERY, ("POST", "/native-v2/oecp-session")]
+    );
+}

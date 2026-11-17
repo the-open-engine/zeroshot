@@ -5,6 +5,28 @@ use openengine_cluster_testkit::TemporaryDirectory;
 use super::*;
 
 #[test]
+fn steer_and_update_share_lossless_installed_paths() {
+    let installed = Path::new("installation/zeroshot");
+    assert_eq!(installed_path(installed), installed);
+    let deleted = Path::new("installation/zeroshot (deleted)");
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        assert_eq!(installed_path(deleted), installed);
+        // Executable paths need not be UTF-8; normalization must preserve their bytes.
+        let deleted = Path::new(std::ffi::OsStr::from_bytes(
+            b"/install-\xff/zeroshot (deleted)",
+        ));
+        assert_eq!(
+            installed_path(deleted).as_os_str().as_bytes(),
+            b"/install-\xff/zeroshot"
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    assert_eq!(installed_path(deleted), deleted);
+}
+
+#[test]
 fn private_state_round_trips_and_replaces_an_existing_file() {
     let root = TemporaryDirectory::for_test("private-state");
     let directory = root.path("private");

@@ -722,3 +722,6 @@ mod input_loop_limits;
 
 #[path = "tests/requests.rs"]
 mod requests;
+
+#[path = "tests/networks.rs"]
+mod networks_tests;

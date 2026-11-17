@@ -207,6 +207,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         assert!(!arguments.contains("--setting-sources"));
         assert!(!arguments.contains("perform the node task"));
         let prompt = workspace.read("initial.prompt");
+        assert_tool_delivery(&prompt);
         assert!(prompt.contains("Authored instructions:\nExercise the Claude adapter."));
         assert!(prompt.contains("Input JSON:\n\"perform the node task\""));
         assert!(prompt.contains("Runtime-owned response contract:\n{\"kind\":\"worker\""));
@@ -293,6 +294,8 @@ async fn native_tool_selection_survives_correction_and_reused_session() {
         assert!(args.contains("--tools\nRead,Grep,Glob\n"), "{args}");
         assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
     }
+    assert_tool_delivery(&workspace.read("initial.prompt"));
+    assert_tool_delivery(&workspace.read("resumed.prompt"));
     let NodeRuntimeBinding::Agent {
         harness_config,
         session_scope,

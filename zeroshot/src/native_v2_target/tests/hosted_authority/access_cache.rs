@@ -782,6 +782,12 @@ impl PersistenceBlockingCredentialStore {
 
 #[async_trait]
 impl TargetCredentialStore for PersistenceBlockingCredentialStore {
+    async fn remove(&self, _target_id: &str) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "test store does not support removal",
+        ))
+    }
+
     async fn get(&self, _target_id: &str) -> Result<Option<String>, TargetAuthorityError> {
         Ok(Some(self.value()))
     }
@@ -797,6 +803,12 @@ impl TargetCredentialStore for PersistenceBlockingCredentialStore {
 
 #[async_trait]
 impl TargetCredentialStore for FailingPersistenceStore {
+    async fn remove(&self, _target_id: &str) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "test store does not support removal",
+        ))
+    }
+
     async fn get(&self, _target_id: &str) -> Result<Option<String>, TargetAuthorityError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         Ok(Some("synthetic-refresh".to_owned()))

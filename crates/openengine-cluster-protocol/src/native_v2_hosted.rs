@@ -74,6 +74,8 @@ pub struct HostedRunStatusResult {
     pub controller: Option<crate::ControllerObservation>,
     #[serde(default, skip_serializing_if = "crate::WorkspaceRecovery::is_empty")]
     pub workspace_recovery: crate::WorkspaceRecovery,
+    #[serde(default, flatten)]
+    pub steering: crate::RunSteeringStatus,
 }
 
 impl From<RunStatusResult> for HostedRunStatusResult {
@@ -87,6 +89,7 @@ impl From<RunStatusResult> for HostedRunStatusResult {
             status: result.status.into(),
             controller: result.controller,
             workspace_recovery: result.workspace_recovery,
+            steering: result.steering,
         }
     }
 }
@@ -102,6 +105,7 @@ impl From<RunForceResult> for HostedRunStatusResult {
             status: result.status.into(),
             controller: result.controller,
             workspace_recovery: result.workspace_recovery,
+            steering: result.steering,
         }
     }
 }

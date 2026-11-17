@@ -4,6 +4,7 @@ pub(super) fn status_result(
     snapshot: &RunSnapshot,
 ) -> Result<RunStatusResult, NativeV2ObservationError> {
     Ok(RunStatusResult {
+        steering: Default::default(),
         run_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         source: snapshot.source.clone(),

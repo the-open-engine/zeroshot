@@ -483,3 +483,60 @@ fn active_memory_capability_is_private_and_failed_installation_reports_unknown_d
     assert!(init["memoryCapability"].is_null());
     assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+#[test]
+fn steer_hermes_native_carrier_handles_maximum_text() {
+    let output =
+        std::process::Command::new(openengine_cluster_testkit::fixture::python3_interpreter())
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/harnesses/adapters/contributed/hermes/tests/native_memory_test.py"
+            ))
+            .arg("NativeMemoryTest.test_steer_maximum_text_survives_native_bookkeeping")
+            .output()
+            .assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn network_capability_survives_hermes_private_initialization_and_scrubs_declared_values() {
+    use crate::active_memory::hooks::ActiveMemoryHooks;
+
+    for publisher in [false, true] {
+        let (_directory, mut adapter, files) = setup("openai");
+        let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
+        hooks.configure_networks(&serde_json::from_value(json!({
+            "team":{"members":["agent"],"publishers":if publisher { vec!["agent"] } else { vec![] }}
+        })).assert_value());
+        adapter.active_memory = Some(hooks);
+        let (command, init) = prepare(
+            &adapter,
+            &files,
+            &[("ZEROSHOT_STEERING_CAPABILITY", "stale-declared-capability")],
+        )
+        .assert_value();
+        let capability = init["memoryCapability"].as_str().assert_value();
+        assert!(std::path::Path::new(capability).is_file());
+        assert!(
+            init["declaredEnvironment"]
+                .get("ZEROSHOT_STEERING_CAPABILITY")
+                .is_none()
+        );
+        assert!(
+            init["nativeEnvironment"]
+                .get("ZEROSHOT_STEERING_CAPABILITY")
+                .is_none()
+        );
+        assert_eq!(
+            command
+                .environment
+                .get("ZEROSHOT_STEERING_CAPABILITY")
+                .map(String::as_str),
+            publisher.then_some(capability)
+        );
+    }
+}

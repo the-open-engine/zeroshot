@@ -314,6 +314,15 @@ fn build_candidate(
                 .with_git_credentials(delivery.git_credentials),
         )
     });
+    let active_memory = active_memory.or_else(|| {
+        admitted
+            .runtime
+            .nodes()
+            .values()
+            .any(|binding| matches!(binding, NodeRuntimeBinding::Agent { .. }))
+            .then(|| ActiveMemoryHooks::empty().ok().map(Arc::new))
+            .flatten()
+    });
     let agents = lane_agents(lanes, placement, active_memory)?;
     let comment_delivery = comment_delivery.map(|delivery| {
         Arc::new(
@@ -506,7 +515,12 @@ impl CandidateNodeLane {
         control: DriverControl,
     ) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
         let agents = self.agents_for(&invocation.node.binding)?;
+        let execution = invocation.node.reference.execution.get();
         let result = agents.driver.run(invocation, control).await;
+        if let Some(hooks) = &agents.memory {
+            let successful = matches!(&result, Ok(outcome) if !matches!(outcome, openengine_cluster_protocol::WorkerOutcome::Error { .. }));
+            hooks.finish_steers(execution, successful).await;
+        }
         if result.is_err()
             || matches!(
                 result,
@@ -576,6 +590,10 @@ impl SessionFactory for CandidateNodeLane {
 
 #[async_trait]
 impl NodeDriver for CandidateNodeLane {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        self.agents.values().find_map(|agent| agent.memory.clone())
+    }
+
     async fn close_run(&self, run_id: &RunId) {
         for agents in self.agents.values() {
             agents.driver.close_run(run_id).await;

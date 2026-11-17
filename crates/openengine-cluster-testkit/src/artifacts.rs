@@ -109,6 +109,8 @@ pub struct ImplementedProtocolSchema {
     pub run_attach_event_notification: JsonRpcNotification<RunAttachEventNotification>,
     pub run_force_request: JsonRpcRequest<RunForceParams>,
     pub run_force_response: JsonRpcResponse<RunForceResult>,
+    pub run_steer_request: JsonRpcRequest<openengine_cluster_protocol::RunSteerParams>,
+    pub run_steer_response: JsonRpcResponse<openengine_cluster_protocol::RunSteerResult>,
     pub run_suspend_request: JsonRpcRequest<openengine_cluster_protocol::RunSuspendParams>,
     pub run_suspend_response: JsonRpcResponse<openengine_cluster_protocol::RunSuspendResult>,
     pub inbox_list_request: JsonRpcRequest<openengine_cluster_protocol::InboxListParams>,

@@ -272,7 +272,11 @@ function requiredType(schema: any, path: string[]): Payload | undefined {
   return current;
 }
 
-function loopScopes(document: Document, node: GraphNode, loopName: string): GraphNode[] | undefined {
+function loopScopes(
+  document: Document,
+  node: GraphNode,
+  loopName: string
+): GraphNode[] | undefined {
   const scopes = pathTo(document.graph.root, node.name).slice(0, -1);
   return [...scopes].reverse().find((scope) => scope.kind === 'loop')?.name === loopName &&
     !scopes.some((scope) => scope.kind === 'map')
@@ -764,8 +768,7 @@ function synchronizeConsumers({
     const nextConsumer = findNode(result.graph.root, consumer.name)!;
     const bindings = map ? [{ target: [], value: consumer.over }] : list(consumer[key]);
     for (const binding of bindings) {
-      if (binding?.value?.source !== 'state' || !prefix(write.target, binding.value.path))
-        continue;
+      if (binding?.value?.source !== 'state' || !prefix(write.target, binding.value.path)) continue;
       const origins = inputOrigins(original, consumer, binding.value.path);
       if (
         !origins.length ||
@@ -779,9 +782,16 @@ function synchronizeConsumers({
         continue;
       origins.forEach((origin) => origin.scopes.forEach((scope) => scopes.add(scope)));
       if (map) scopes.add(consumer.name);
-      updateConsumerBinding({ before, after, write, callerOwned, competing }, {
-        binding, map, key, targetSchema, nextConsumer,
-      });
+      updateConsumerBinding(
+        { before, after, write, callerOwned, competing },
+        {
+          binding,
+          map,
+          key,
+          targetSchema,
+          nextConsumer,
+        }
+      );
     }
   }
 }
@@ -906,7 +916,7 @@ function synchronizeOutputRoutes(
 
 export function finalResultNode(document: Document): GraphNode | undefined {
   const finals = analyzeWorkflowOutcomes(document).completions.filter(
-    (entry) => entry.mode === 'final' && entry.boundary === 'run'
+    (entry) => entry.mode === 'final'
   );
   return finals.length === 1 ? findNode(document.graph.root, finals[0].name) : undefined;
 }

@@ -358,6 +358,14 @@ where
         self.call(RUN_FORCE_METHOD, params).await
     }
 
+    pub async fn run_steer(
+        &self,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, ClientError> {
+        self.call(openengine_cluster_protocol::RUN_STEER_METHOD, params)
+            .await
+    }
+
     pub async fn run_suspend(
         &self,
         params: openengine_cluster_protocol::RunSuspendParams,

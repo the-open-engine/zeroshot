@@ -92,6 +92,24 @@ async fn host_context_is_fresh_on_reused_sessions_and_auxiliary_agents() {
             invocation.agent_prompt().assert_value(),
             format!("Runtime-owned execution context:\n{context}\n\n{authored}")
         );
+        for delivery in [
+            ResponseDelivery::StructuredOutput,
+            ResponseDelivery::Message,
+        ] {
+            let authored = response::render_agent_prompt_with_delivery(
+                instructions,
+                &invocation.node.input,
+                &invocation.response,
+                delivery,
+            )
+            .assert_value();
+            assert_eq!(
+                invocation
+                    .agent_prompt_with_delivery(delivery)
+                    .assert_value(),
+                format!("Runtime-owned execution context:\n{context}\n\n{authored}")
+            );
+        }
         for dialect in [
             ProviderSchemaDialect::Standard,
             ProviderSchemaDialect::OpenAiStrict,
@@ -137,6 +155,18 @@ async fn absent_and_empty_host_context_preserve_existing_prompts() {
                 invocation.agent_instructions().assert_value(),
                 &invocation.node.input,
                 &invocation.response,
+            )
+            .assert_value()
+        );
+        assert_eq!(
+            invocation
+                .agent_prompt_with_delivery(ResponseDelivery::StructuredOutput)
+                .assert_value(),
+            response::render_agent_prompt_with_delivery(
+                invocation.agent_instructions().assert_value(),
+                &invocation.node.input,
+                &invocation.response,
+                ResponseDelivery::StructuredOutput,
             )
             .assert_value()
         );

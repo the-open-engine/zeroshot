@@ -463,6 +463,7 @@ impl ActiveMemorySource for RecallMemory {
 
 fn memory_callback_receipts(
     files: &ProviderExecutionFiles,
+    context: String,
 ) -> std::thread::JoinHandle<Vec<Option<u8>>> {
     use std::io::{ErrorKind, Read, Write};
     use std::net::TcpListener;
@@ -519,7 +520,7 @@ fn memory_callback_receipts(
                     json!({"marker":"mcp-fixture"})
                 }
             );
-            let context = b" recalled-marker";
+            let context = context.as_bytes();
             let mut frame = (context.len() as u32).to_be_bytes().to_vec();
             frame.extend_from_slice(context);
             stream.write_all(&frame).assert_value();
@@ -541,6 +542,18 @@ fn memory_callback_receipts(
 
 #[test]
 fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachments() {
+    exercise_steer_native_plugin_context(" recalled-marker".into());
+}
+
+#[test]
+fn steer_opencode_carrier_preserves_maximum_text_whole_with_native_attachments() {
+    exercise_steer_native_plugin_context(format!(
+        "<steer>\n[id] {}\n</steer>",
+        "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES)
+    ));
+}
+
+fn exercise_steer_native_plugin_context(context: String) {
     let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(RecallMemory)).assert_value());
     let directory = TestDirectory::new("opencode-native-memory-plugin");
     let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n").with_active_memory(Some(hooks));
@@ -571,7 +584,7 @@ fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachment
         .assert_value();
     // Check the carrier's bytes directly. The production broker's 250 ms receipt deadline may
     // correctly mark an otherwise returned result unavailable when a loaded CI host delays it.
-    let receipts = memory_callback_receipts(&files);
+    let receipts = memory_callback_receipts(&files, context.clone());
     let source_code = r#"const {default:create}=await import(process.argv[1]);
 const plugin=await create({directory:process.argv[2]});
 const output={title:'read',output:'original',metadata:{}};
@@ -598,13 +611,13 @@ console.log(JSON.stringify({output,mcp,before}));"#;
         String::from_utf8_lossy(&output.stderr)
     );
     let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
-    assert_eq!(returned["output"]["output"], "original recalled-marker");
+    assert_eq!(returned["output"]["output"], format!("original{context}"));
     let before = &returned["before"];
     let contents = returned["mcp"]["content"].as_array().assert_value();
     assert_eq!(&contents[..4], before["content"].as_array().assert_value());
     assert_eq!(
         contents[4],
-        serde_json::json!({"type":"text","text":" recalled-marker"})
+        serde_json::json!({"type":"text","text":context})
     );
     for field in [
         "output",

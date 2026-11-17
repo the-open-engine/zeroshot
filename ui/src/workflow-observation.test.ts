@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { GraphNode } from './domain';
-import { collapsedWorkflowGroups, revealWorkflowNode } from './workflow-observation';
+import {
+  collapsedRunGroups,
+  collapsedWorkflowGroups,
+  currentRunWork,
+  revealRunWork,
+  revealWorkflowNode,
+} from './workflow-observation';
 import { projectWorkflow } from './workflow-projection';
 import type { Document } from './domain';
 
@@ -66,4 +72,31 @@ test('explicit node navigation reveals only ancestors and preserves other manual
   assert.deepEqual([...collapsed], ['review_rounds', 'reviews', 'publish']);
   assert.deepEqual([...revealWorkflowNode(collapsed, graph, 'reviews')], ['reviews', 'publish']);
   assert.deepEqual([...revealWorkflowNode(collapsed, graph, 'missing')], [...collapsed]);
+});
+
+test('a run opens with only the groups holding current or failed work expanded', () => {
+  assert.deepEqual([...collapsedRunGroups(graph)], [...collapsedWorkflowGroups(graph)]);
+  const failed = collapsedRunGroups(graph, { check_api: { state: 'failed' } });
+  assert.equal(failed.has('review_rounds'), false);
+  assert.equal(failed.has('reviews'), false);
+  const writing = collapsedRunGroups(graph, {
+    write: { state: 'running' },
+    check_api: { state: 'succeeded' },
+  });
+  assert.equal(writing.has('review_rounds'), false);
+  assert.equal(writing.has('reviews'), true);
+});
+
+test('work that becomes current later unfolds its groups without refolding others', () => {
+  const folded = collapsedRunGroups(graph);
+  assert.deepEqual(currentRunWork(graph), []);
+  // Nothing current yet: the same set comes back, so the canvas does not lay out again.
+  assert.equal(revealRunWork(folded, graph, currentRunWork(graph)), folded);
+  const later = revealRunWork(
+    folded,
+    graph,
+    currentRunWork(graph, { check_api: { state: 'failed' }, write: { state: 'succeeded' } })
+  );
+  assert.equal(later.has('reviews'), false);
+  assert.equal(revealRunWork(later, graph, ['check_api']), later);
 });

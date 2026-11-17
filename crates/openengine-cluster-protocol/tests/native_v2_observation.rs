@@ -80,6 +80,7 @@ fn graph_result_round_trips_only_in_unfinished_started_phases() {
 #[test]
 fn status_exposes_every_parallel_execution_without_private_identity() {
     let mut result = RunStatusResult {
+        steering: Default::default(),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -324,6 +325,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
     );
 
     let result = RunForceResult {
+        steering: Default::default(),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -361,6 +363,7 @@ fn controller_availability_is_optional_observation_metadata() {
     use openengine_cluster_protocol::{ControllerObservation, ControllerState};
     for state in [ControllerState::Lost, ControllerState::Unknown] {
         let result = RunStatusResult {
+            steering: Default::default(),
             run_id: RunId::new("run-1"),
             title: title(),
             source: None,

@@ -85,7 +85,7 @@ fn window_run(
         })
 }
 #[tokio::test]
-async fn impossible_joins_ignore_later_round_history() {
+async fn terminal_parallel_visit_does_not_reuse_prior_round_settlements() {
     let s = window_empty();
     for join in [json!({"kind":"all"}), json!({"kind":"quorum","count":2})] {
         let route = json!({"kind":"choice","name":"route","state":s,"branches":[{
@@ -102,23 +102,34 @@ async fn impossible_joins_ignore_later_round_history() {
         );
         let graph = repeated_graph(&s, body).await;
         let history = vec![
-            settled(SettledSpec::new(1, 1, "a").position(2), verdict("accepted")),
-            settled(SettledSpec::new(2, 2, "b").position(4), success(1)),
-            settled(SettledSpec::new(3, 1, "a").position(6), verdict("rejected")),
+            settled(
+                SettledSpec::new(1, 1, "a").dispatched(1).position(3),
+                verdict("rejected"),
+            ),
+            settled(
+                SettledSpec::new(2, 2, "b").dispatched(2).position(4),
+                success(1),
+            ),
+            active(3, 2, "b", 5),
+            settled(
+                SettledSpec::new(4, 1, "a").dispatched(6).position(7),
+                verdict("accepted"),
+            ),
         ];
-        let mut active = history.clone();
-        active[1].state = DurableExecutionState::Active;
-        let waiting = window_run(&graph, &json!({"empty":[]}), &active, 1).unwrap();
-        assert!(waiting.terminal.is_none());
-        assert!(!waiting.decisions.iter().any(|decision| matches!(decision,
-            Decision::VoidLoser { execution, .. } if execution.get() == 2)));
-        assert!(!waiting.decisions.iter().any(|decision| matches!(decision,
-            Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "b")));
         let result = window_run(&graph, &json!({"empty":[]}), &history, 1).unwrap();
-        assert!(matches!(
-            result.terminal,
-            Some(TerminalProjection::Succeeded { .. })
-        ));
+        assert!(
+            matches!(result.terminal, Some(TerminalProjection::Failed { reason, .. })
+            if reason.as_str() == "stop")
+        );
+        let voids = result
+            .decisions
+            .iter()
+            .filter_map(|decision| match decision {
+                Decision::VoidLoser { execution, .. } => Some(execution.get()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(voids, [3]);
         assert!(
             !result
                 .decisions
@@ -169,7 +180,7 @@ async fn changing_inputs_belong_to_their_own_round() {
     }
 }
 #[tokio::test]
-async fn terminal_maps_preserve_execution_progress() {
+async fn terminal_maps_end_enclosing_loops_without_reentering_work() {
     let s = required_array_record(&[("items", "null")]);
     let map = json!({"kind":"map","name":"mapped","state":s,"over":{"source":"state","path":["items"]},"maxItems":1,"promotedStatePaths":[],
         "body":window_seq("item",&s,vec![step("work",1),json!({"kind":"fail","name":"end_item","reason":"end_item"})])});
@@ -187,8 +198,16 @@ async fn terminal_maps_preserve_execution_progress() {
         success(1),
     )];
     let result = window_run(&graph, &json!({"items":[null]}), &history, 2).unwrap();
-    assert!(result.terminal.is_none());
-    assert!(result.decisions.iter().any(|d|matches!(d,Decision::Dispatch{occurrence, iteration, ..} if occurrence.node.as_str() == "work" && *iteration == 2)));
+    assert!(
+        matches!(result.terminal, Some(TerminalProjection::Failed { reason, .. })
+        if reason.as_str() == "end_item")
+    );
+    assert!(
+        !result
+            .decisions
+            .iter()
+            .any(|d| matches!(d, Decision::Dispatch { .. }))
+    );
 }
 #[tokio::test]
 async fn item_local_map_guards_qualify_first_joins() {
@@ -258,14 +277,10 @@ async fn incoming_controls_preserve_join_retention() {
             SettledSpec::new(2, 2, "gate").position(4),
             verdict("rejected"),
         ),
-        settled(
-            SettledSpec::new(3, 3, "current").position(6),
-            verdict("accepted"),
-        ),
     ];
     let reduced = window_run(&safe, &json!({"empty":[]}), &history, 1).unwrap();
     assert!(
-        matches!(reduced.terminal, Some(TerminalProjection::Failed { reason, .. }) if reason.as_str() == "no_retained_controls")
+        matches!(reduced.terminal, Some(TerminalProjection::Failed { reason, .. }) if reason.as_str() == "denied")
     );
 }
 #[tokio::test]

@@ -14,7 +14,7 @@ pub(crate) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
         .replace("CAPABILITY_PATH", &serde_json::to_string(capability)?)
         .replace(
             "MAX_CONTEXT_BYTES",
-            &crate::active_memory::MAX_INJECTION_BYTES.to_string(),
+            &crate::active_memory::hooks::native::MAX_CONTEXT_BYTES.to_string(),
         );
     let extension = write_provider_file(home, "active-memory-extension.mjs", source.as_bytes())?;
     command.argv.extend([

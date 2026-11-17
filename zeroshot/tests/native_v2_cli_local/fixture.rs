@@ -17,6 +17,7 @@ const DECLARED_KEY: &str = "local-declared-key";
 
 pub(super) struct LocalFixture {
     root: TemporaryDirectory,
+    executable: PathBuf,
     harness_environment: std::collections::BTreeMap<String, String>,
     pub(super) repository: PathBuf,
     working_directory: PathBuf,
@@ -55,6 +56,7 @@ impl LocalFixture {
         write_json(&runtime, &local_runtime());
         Self {
             root,
+            executable: env!("CARGO_BIN_EXE_zeroshot").into(),
             harness_environment: std::collections::BTreeMap::new(),
             working_directory: repository.clone(),
             cwd: None,
@@ -138,7 +140,7 @@ impl LocalFixture {
     }
 
     fn command_with_inline(&self, args: &[&str], mode: &str, inline: bool) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
+        let mut command = Command::new(&self.executable);
         command
             .args(args)
             .current_dir(&self.working_directory)
@@ -212,10 +214,23 @@ impl LocalFixture {
     }
 
     pub(super) async fn output(&self, args: &[&str], mode: &str) -> Output {
-        timeout(CLI_TIMEOUT, self.command(args, mode).output())
-            .await
-            .assert_value_with(&format!("local CLI deadline: {args:?}"))
-            .assert_value_with("start local CLI")
+        let deadline = Instant::now() + CLI_TIMEOUT;
+        loop {
+            let started = timeout(CLI_TIMEOUT, self.command(args, mode).output())
+                .await
+                .assert_value_with(&format!("local CLI deadline: {args:?}"));
+            match started {
+                // A process another test forked while this fixture's executable was being
+                // written holds it open for writing until that process executes.
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                        && Instant::now() < deadline =>
+                {
+                    sleep(Duration::from_millis(20)).await;
+                }
+                started => return started.assert_value_with("start local CLI"),
+            }
+        }
     }
 
     pub(super) async fn connection_set(&self) -> Value {

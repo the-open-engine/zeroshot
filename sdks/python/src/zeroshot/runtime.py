@@ -45,8 +45,8 @@ class HostedTarget:
     """Use a named hosted target already configured and logged in through the CLI.
 
     Args:
-        name: Exact local target name from ``zeroshot target list``. The SDK reuses that
-            target's stored origin and login.
+        name: Exact local target name from ``Client.list_targets()`` or
+            ``zeroshot target list``. The SDK reuses that target's stored origin and login.
     """
 
     name: str

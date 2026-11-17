@@ -54,6 +54,8 @@ async fn invalid_output_is_corrected_in_the_same_claude_session() {
     ));
     assert_resumed_session(&workspace.read("resumed.args"));
     let prompt = workspace.read("resumed.prompt");
+    assert_tool_delivery(&workspace.read("initial.prompt"));
+    assert_tool_delivery(&prompt);
     assert!(prompt.contains("Your previous final response was rejected mechanically"));
     assert!(prompt.contains("provider response must be exactly an object containing response"));
 }
@@ -130,10 +132,113 @@ async fn gateway_correction_keeps_endpoint_and_key_on_resume() {
         }
     );
     assert_resumed_session(&workspace.read("resumed.args"));
+    assert_tool_delivery(&workspace.read("initial.prompt"));
+    assert_tool_delivery(&workspace.read("resumed.prompt"));
     assert_eq!(
         workspace.read("anthropic-base-url.txt").trim(),
         "https://gateway.example/anthropic"
     );
     assert_eq!(workspace.read("anthropic-key.txt").trim(), "gateway-key");
     assert_eq!(workspace.read("anthropic-token.txt").trim(), "unset");
+}
+
+#[tokio::test]
+async fn object_null_and_verifier_corrections_use_native_tool_delivery_on_stdin() {
+    let object = json!({"kind":"record","fields":{
+        "answer":{"type":{"kind":"integer"},"required":true}
+    }});
+    for (verifier, output_type, value) in [
+        (false, object.clone(), json!({"answer":42})),
+        (false, json!({"kind":"null"}), Value::Null),
+        (
+            true,
+            object,
+            json!({"output":{"answer":42},"signals":{"verdict":"accepted"},"diagnostic":null}),
+        ),
+    ] {
+        let workspace = TestDirectory::new("claude-tool-delivery");
+        write_claude_script(
+            &workspace,
+            r#"
+set -eu
+target=initial
+for arg in "$@"; do
+  if [ "$arg" = "--resume" ]; then target=resumed; fi
+done
+cat > "$target.prompt"
+printf '%s\n' "$@" > "$target.args"
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"tool-session"}'
+if [ "$target" = initial ]; then
+  printf '%s\n' '{"type":"result","subtype":"success","structured_output":{"response":false},"session_id":"tool-session"}'
+else
+  cat answer.json
+fi
+"#,
+        );
+        workspace.write(
+            "answer.json",
+            &json!({
+                "type":"result","subtype":"success","session_id":"tool-session",
+                "result":"ignored","structured_output":{"response":value}
+            })
+            .to_string(),
+        );
+        let mut source_graph = serde_json::to_value(graph(verifier)).assert_value();
+        source_graph["root"]["children"][0]["output"] = output_type;
+        let binding = agent_binding(
+            "opaque-model",
+            None,
+            SessionScope::Execution,
+            &[ANTHROPIC_KEY],
+        );
+        let runtime = runner_with_command(
+            &workspace,
+            TestRunnerConfig {
+                provider: ClaudeProvider::Anthropic,
+                binding: binding.clone(),
+                graph: serde_json::from_value(source_graph).assert_value(),
+                command: TestProviderCommand {
+                    executable: "/bin/sh".to_owned(),
+                    prefix_arguments: vec![
+                        workspace
+                            .child("fake-claude.sh")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                    base_environment: BTreeMap::new(),
+                },
+            },
+        )
+        .await;
+        let completion = runtime
+            .start(request(binding, 1, &[(ANTHROPIC_KEY, "fixture-key")]))
+            .await
+            .assert_value()
+            .completion()
+            .await
+            .assert_value();
+        if verifier {
+            assert!(
+                matches!(completion.outcome,WorkerOutcome::Verifier {output, signals, diagnostic, ..}
+                if output == value["output"] && signals.len() == 1 && diagnostic.is_null())
+            );
+        } else {
+            assert!(
+                matches!(completion.outcome,WorkerOutcome::Verified {output,..} if output == value)
+            );
+        }
+        for turn in ["initial", "resumed"] {
+            assert_tool_delivery(&workspace.read(&format!("{turn}.prompt")));
+            assert!(
+                workspace
+                    .read(&format!("{turn}.args"))
+                    .contains("--json-schema\n")
+            );
+        }
+        assert!(
+            workspace
+                .read("resumed.args")
+                .contains("--resume\ntool-session\n")
+        );
+    }
 }

@@ -204,6 +204,16 @@ impl NativeV2PlatformController {
         .await?;
         if let Some(resume) = &start.resume {
             // Seed before reserving the workspace: a failed copy leaves the source resumable.
+            let source = self
+                .ledger
+                .get(&resume.source_run_id)
+                .await?
+                .ok_or(RunLedgerError::RunNotFound)?;
+            self.reserve_node_instance_floor(
+                &mut start.stored,
+                source.snapshot.reserved_node_instance(),
+            )
+            .await?;
             let run_id = &start.stored.snapshot.run_id;
             crate::v2_run_ledger::vectors::inherit(
                 self.ledger.as_ref(),
@@ -213,11 +223,6 @@ impl NativeV2PlatformController {
             )
             .await?;
             if matches!(resume.selection, CheckpointRestoreSelection::Continue) {
-                let source = self
-                    .ledger
-                    .get(&resume.source_run_id)
-                    .await?
-                    .ok_or(RunLedgerError::RunNotFound)?;
                 let history = match &resume.request_resolution {
                     Some(resolution) => {
                         crate::native_v2_supervisor::request_history(&source.snapshot, resolution)?
@@ -241,13 +246,21 @@ impl NativeV2PlatformController {
                     events.push(RunEvent::PriorExecution { execution });
                     self.ledger.append(run_id, events).await?;
                 }
-            }
-            if let Some(resolution) = &resume.request_resolution {
+            } else if matches!(resume.selection, CheckpointRestoreSelection::Latest) {
                 let source = self
                     .ledger
                     .get(&resume.source_run_id)
                     .await?
                     .ok_or(RunLedgerError::RunNotFound)?;
+                let events: Vec<_> = crate::native_v2_supervisor::restart_history(&source.snapshot)
+                    .into_iter()
+                    .map(|execution| RunEvent::PriorExecution { execution })
+                    .collect();
+                if !events.is_empty() {
+                    self.ledger.append(run_id, events).await?;
+                }
+            }
+            if let Some(resolution) = &resume.request_resolution {
                 let Some(openengine_cluster_protocol::RunSuspension::Request { request, .. }) =
                     &source.snapshot.suspension
                 else {

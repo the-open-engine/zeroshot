@@ -170,6 +170,13 @@ impl CopilotAdapter {
                 )
                 .await;
             let retryable_grammar_rate_limit = result.retryable_grammar_rate_limit;
+            if result.outcome.is_err()
+                && let Some(hooks) = &self.active_memory
+            {
+                hooks
+                    .finish_steers(invocation.node.reference.execution.get(), false)
+                    .await;
+            }
 
             match result.outcome {
                 Err(NodeRunnerError::DriverDetail(_))
@@ -247,8 +254,15 @@ impl CopilotAdapter {
             {
                 *turn.session.id.lock().await = Some(metadata.id);
             }
-            let command =
+            let mut command =
                 command::command(&self.config, invocation, &files, local_provider.as_ref())?;
+            if let Some(memory) = &self.active_memory {
+                memory
+                    .configure_network_command(&mut command, invocation, files.home())
+                    .map_err(|error| {
+                        rpc::failure(format!("network capability installation failed: {error}"))
+                    })?;
+            }
             let mut process = open_provider_process(files.clone(), command, control)
                 .await?
                 .map_err(rpc::process_error)?;

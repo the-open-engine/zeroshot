@@ -402,12 +402,20 @@ jobs:
           npm --prefix ui run build
       - name: Check macOS product and test compilation
         run: cargo check --locked --workspace --all-targets --features ui
+      - name: Run macOS parallel terminal regressions
+        run: |
+          cargo test --locked --package zeroshot --features ui --test full_v1_reducer --test full_v1_reducer_boundaries
+          cargo test --locked --package zeroshot --features ui --lib -- parallel_branch_terminals_cancel_and_drain_siblings_before_finishing built_in_templates_have_no_terminals_inside_parallel_branches parallel_terminal_ui_fixture_matches_canonical_control_replay
       - name: Run macOS provider transcript regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --
           native_v2_claude::transcript::tests
           native_v2_codex::output::tests
           native_v2_pi::transcript::tests
+      - name: Run macOS process provenance regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          execution::process::authority
       - name: Run macOS forge network and access regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --
@@ -416,6 +424,9 @@ jobs:
           source_code_provider::adapters::core::github::api::tests
           source_code_provider::adapters::core::gitlab::tests::network_tests
           native_v2_local::token_file::tests::caller_network_snapshot
+          native_v2_delivery::command::tests
+          native_v2_delivery::transport_http::tests
+          native_v2_delivery::tests::transport_matrix
       - name: Run macOS controller socket and workspace clone regressions
         run: >-
           ZEROSHOT_REQUIRE_APFS_CLONE=1
