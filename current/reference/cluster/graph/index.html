@@ -2805,8 +2805,12 @@ optional descendants.</p>
 <td style="text-align: right;">4,096</td>
 </tr>
 <tr>
-<td>Assignments per finite check</td>
+<td>Count states per map check</td>
 <td style="text-align: right;">65,536</td>
+</tr>
+<tr>
+<td>Search steps per check</td>
+<td style="text-align: right;">1,048,576</td>
 </tr>
 <tr>
 <td>Concurrent map items</td>
@@ -2849,10 +2853,16 @@ maps rely on the same runtime work ceilings. They do not bound map input cardina
 bodies can complete without executable visits, so analysis assumes no cardinality bound from
 concurrency or leaf-work ceilings. The verifier clips
 joint label counts at the largest queried threshold, so common <code>k_of_map(..., 1)</code> checks reach a
-fixed set of states independent of input length. One verification admits at most 65,536 assignment
-states and 8,388,608 count-cell operations. Each assignment transition charges its copied selector
-and count cells before allocation. Excess analysis reports <code>ceiling_exceeded</code> at the relevant
-node/guard; there is no user budget or timeout setting.</p>
+fixed set of states independent of input length.</p>
+<p>The verifier decides each condition by search, not by listing every combination of how the nodes
+it depends on can end. A check reads only the controls that its condition and their join, loop and
+map rules mention. Labels a check cannot tell apart count as one, and controls no rule connects add
+to the work instead of multiplying it, so another reviewer or signal costs its own size. Inside one
+map, a check still lists the joint outcomes of one item that it reads and folds them into saturated
+counts: at most 65,536 distinct count states per map. One check may take 1,048,576 search steps, a
+backstop far above authored graphs that checks do not share. A check that passes either bound
+reports <code>ceiling_exceeded</code> at the choice, join or guard it was deciding; there is no user budget or
+timeout setting.</p>
 <p>Graph-bearing JSON decoding first checks a fixed 512-container envelope for structural arrays,
 payload nesting and transport wrappers. The graph verifier separately checks authored depth 64.</p>
 <p>Nested parallel outcomes use joint retained-branch witnesses during analysis. The required winner
@@ -2869,7 +2879,7 @@ further diagnostics. The path shows field names with their <code>[index]</code> 
 The message is never shortened. The count and then the path only use the bytes the message leaves
 within 1,024 bytes: the count is left out when it does not fit, and <code>.../</code> replaces leading path
 segments that do not fit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis exceeds 65536 states or 8388608 count-cell work units (and 1 more diagnostic)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis of this condition exceeds 65536 count states or 1048576 search steps (and 1 more diagnostic)
 </code></pre></div>
 <p><code>StructuralBounds</code> carries a termination witness, a positive executable-visit upper limit,
 a positive concurrency upper limit, and positive per-node attempt ceilings. Maps rely on runtime
