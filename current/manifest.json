@@ -1,7 +1,7 @@
 {
   "docsVersion": "current",
   "productVersion": null,
-  "publisherCommit": "ec9a75f6885f67f561852bf9eb85fe5a3e593ab4",
+  "publisherCommit": "a1ec12b2efb572fae85967c30d51ee679ba17697",
   "pythonSdkVersion": null,
   "routes": {
     "cli": "zeroshot-cli/",
