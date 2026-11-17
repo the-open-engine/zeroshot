@@ -551,10 +551,9 @@ async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_re
             assert!(matches!(error, NativeV2CliError::Local(_)), "{error}");
             let storage = backend.run_storage(&run_id).assert_value();
             assert!(
-                storage.exists(),
-                "checkpoint resume must reach controller launch"
+                !storage.exists(),
+                "a failed fresh launch removes its storage"
             );
-            assert!(!storage.join(BOOTSTRAP_FILE).exists());
             continue;
         }
         assert!(matches!(error, NativeV2CliError::Usage(_)));
@@ -644,16 +643,10 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
     let original_storage = backend.run_storage(&original).assert_value();
-    assert!(original_storage.is_dir());
-    assert!(!original_storage.join(BOOTSTRAP_FILE).exists());
-    assert_eq!(
-        backend
-            .read_recovery_document(&original)
-            .assert_value()
-            .delivery_run_id,
-        Some(original.clone())
-    );
+    assert!(!original_storage.exists());
 
+    // Resume starts from an admitted predecessor and keeps its recovery state.
+    drop(create_contract_run(&backend, &original, &submission).await);
     let recovery = recovery_document(submission, workspace, None);
     backend
         .write_recovery_document(&original, &recovery)
@@ -686,6 +679,59 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
             .successor_run_id,
         None
     );
+}
+
+#[tokio::test]
+async fn fresh_start_failure_after_storage_creation_keeps_the_original_error() {
+    let root = TestDirectory::new("fresh-setup");
+    let state = root.child("state");
+    crate::execution::platform::create_private_directory(&state).assert_value();
+    let backend = contract_backend(&state);
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    // Directory preparation fails after the recovery document has been written.
+    let obstruction = state.join("workspaces");
+    std::fs::write(&obstruction, b"keep").assert_value();
+    let expected = backend.workspace_lease(&workspace).unwrap_err().to_string();
+    let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000063");
+
+    let error = backend
+        .start_prepared_controller(prepared_local_run(
+            run_id.clone(),
+            contract_submission("fresh-setup"),
+            workspace,
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.to_string(), expected);
+    assert!(!backend.run_storage(&run_id).assert_value().exists());
+    assert_eq!(std::fs::read(obstruction).assert_value(), b"keep");
+}
+
+#[tokio::test]
+async fn fresh_start_never_removes_storage_it_did_not_create() {
+    let root = TestDirectory::new("fresh-existing");
+    let state = root.child("state");
+    crate::execution::platform::create_private_directory(&state).assert_value();
+    let backend = contract_backend(&state);
+    let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000064");
+    let storage = backend.create_run_storage(&run_id).assert_value();
+    let retained = storage.join("retained");
+    std::fs::write(&retained, b"keep").assert_value();
+    let expected = backend.create_run_storage(&run_id).unwrap_err().to_string();
+
+    let error = backend
+        .start_prepared_controller(prepared_local_run(
+            run_id,
+            contract_submission("fresh-existing"),
+            root.path().to_owned(),
+        ))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.to_string(), expected);
+    assert_eq!(std::fs::read(retained).assert_value(), b"keep");
 }
 
 #[tokio::test]

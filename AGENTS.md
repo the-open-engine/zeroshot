@@ -489,6 +489,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot
   state roots must be disjoint, including symlink aliases and missing state suffixes. Recovery
   reuses the stored workspace; local idempotency cannot return a run from a different folder.
+  Failed fresh local launches remove only their newly created run storage after the existing
+  resume lease/ledger check proves the run is neither live nor admitted. Capture startup diagnostics
+  before best-effort cleanup; preserve admitted runs and older leftovers. Resume keeps its own
+  successor reconciliation.
   New local Git-delivery submissions require a clean index and worktree, including unignored
   untracked files, after idempotent-replay lookup and before controller launch. Use the captured
   native Git environment so admission and staging share ignore rules. Pending merges and moved

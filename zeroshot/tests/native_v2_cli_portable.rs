@@ -8,6 +8,8 @@ mod inspection;
 #[cfg(windows)]
 #[path = "native_v2_cli_portable/restic_resume_tests.rs"]
 mod restic_resume_tests;
+#[path = "native_v2_cli_portable/startup.rs"]
+mod startup;
 use fixture::{Fixture, success};
 
 #[cfg(unix)]
