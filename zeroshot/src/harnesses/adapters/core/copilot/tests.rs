@@ -26,6 +26,7 @@ mod framing;
 mod hosted;
 mod lanes;
 mod steering;
+mod tool_activity;
 
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 
@@ -715,10 +716,14 @@ async fn schema_permissions_usage_and_resume_preserve_the_session() {
             DurableNodeEvent::TokenUsage(_) | DurableNodeEvent::DeliveryState(_) => None,
         })
         .collect::<Vec<_>>();
-    assert!(logs.contains(&"Copilot tool: contract-check"));
     assert!(
         logs.iter()
-            .any(|message| message.starts_with("Copilot tool failed: "))
+            .any(|message| message.starts_with("Copilot tool call: contract-check"))
+    );
+    assert!(
+        logs.iter()
+            .any(|message| message.starts_with("Copilot tool completed:")
+                && message.contains("status=error"))
     );
     assert!(
         logs.iter()

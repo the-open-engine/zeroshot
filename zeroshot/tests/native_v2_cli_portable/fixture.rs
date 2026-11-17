@@ -33,7 +33,7 @@ impl Fixture {
             bin.join("harness.cjs"),
         )
         .unwrap();
-        install_shim(&bin, node.trim());
+        install_shim(&bin, node.trim(), "codex", "harness.cjs");
         let mut paths = vec![bin];
         paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
         let fixture = Self {
@@ -90,6 +90,28 @@ impl Fixture {
                 "connections":{"openai":["OPENAI_API_KEY","FIXTURE_MODE"]}}}}),
         );
         fixture
+    }
+
+    pub(super) fn tool_harness(&self, harness: &str) {
+        let bin = self.root.path("bin space-é");
+        let node = Command::new("node")
+            .args(["-p", "process.execPath"])
+            .output()
+            .unwrap();
+        success(&node);
+        let node = String::from_utf8(node.stdout).unwrap();
+        let script = format!("tool-{harness}.cjs");
+        std::fs::write(bin.join(&script), include_str!("tool_activity.cjs")).unwrap();
+        install_shim(&bin, node.trim(), harness, &script);
+        let (provider, key) = match harness {
+            "claude" => ("anthropic", "ANTHROPIC_API_KEY"),
+            _ => ("openai", "OPENAI_API_KEY"),
+        };
+        self.write("runtime.json", &json!({"harness":harness,"provider":provider,"size":"host",
+            "workspaceCheckpoints":false,
+            "activeMemory":{"repository":false,"graph":false},"globalAgents":{"postmortem":{"enabled":false}},
+            "nodes":{"worker":{"kind":"agent","model":"fixture-owned-model",
+                "connections":{provider:[key]}}}}));
     }
 
     pub(super) fn command(&self, args: &[&str]) -> Command {
@@ -214,26 +236,26 @@ pub(super) fn success(output: &Output) {
     );
 }
 
-fn install_shim(bin: &Path, node: &str) {
+fn install_shim(bin: &Path, node: &str, name: &str, script: &str) {
     #[cfg(windows)]
     {
         // npm installs both a POSIX launcher and a Windows command shim.
-        std::fs::write(bin.join("codex"), "#!/bin/sh\nexit 42\n").unwrap();
+        std::fs::write(bin.join(name), "#!/bin/sh\nexit 42\n").unwrap();
         std::fs::write(
-            bin.join("codex.cmd"),
-            format!("@echo off\r\n\"{node}\" \"%~dp0harness.cjs\" %*\r\n"),
+            bin.join(format!("{name}.cmd")),
+            format!("@echo off\r\n\"{node}\" \"%~dp0{script}\" %*\r\n"),
         )
         .unwrap();
     }
     #[cfg(unix)]
     {
-        let shim = bin.join("codex");
+        let shim = bin.join(name);
         openengine_cluster_testkit::fixture::write_executable(
             &shim,
             format!(
                 "#!/bin/sh\nexec '{}' '{}' \"$@\"\n",
                 node.replace('\'', "'\\''"),
-                bin.join("harness.cjs").display()
+                bin.join(script).display()
             ),
             0o700,
         )

@@ -118,7 +118,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and the snapshot keeps the receipt. One tool call hands over at most 1 MiB of steers; later ones
   wait for the next tool call or prompt. A native subagent's tool call never carries or receipts a
   steer inside hook context; a message reaches the node's own conversation whichever tool call
-  asked. Claude Code's stdin stays open until a turn's result arrives with no steer outstanding.
+  asked. Claude Code's stdin normally closes after a turn's result with no steer outstanding.
+  If sent steers remain unacknowledged after a result, stdin closes after a 60-second grace period
+  so a missing replay acknowledgement cannot keep the turn alive indefinitely. Delivery stays
+  unconfirmed: those steers have no receipts and remain due for a later prompt.
   A tool-call memory lesson is a session entry on Pi and a stored message on OpenCode, and hook
   context elsewhere. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
   including compaction; new conversations and conversations continued in a successor receive fresh
@@ -377,6 +380,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Caller-selected remote backends retain native containment guarantees. Native token deltas remain visible; unreported
   auxiliary or child work marks totals incomplete. Active Memory attaches native model-facing
   notices after tool-result bookkeeping, preserving native transforms and durable messages.
+- The four core harnesses publish native tool calls/completions through
+  `harnesses::adapters::core::tool_activity` into existing durable text logs and node transcripts.
+  Each complete entry, including identity/status framing and truncation markers, is at most 8 KiB
+  with head/tail excerpts. Redact decoded strings before JSON rendering and serialized payloads
+  before truncation; deduplicate native IDs per phase and omit cumulative updates. Missing native
+  status stays unknown. These are log-only per-entry bounds, independent of Active Memory and
+  provider response/outcome handling. Claude replayed user records acknowledge prompt delivery;
+  ordinary user records still carry native tool completions.
 - Agent bindings may carry a secret-free `harnessConfig` object (64 KiB encoded), with native
   `args` and/or `options` carriers owned by each adapter. The effective node lane interprets it;
   lane changes retain it without translation. Registration supplies pure reserved-control validation,
