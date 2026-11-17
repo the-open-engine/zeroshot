@@ -78,7 +78,13 @@ async fn canonical_loop_evidence_excludes_settled_inner_race_losers() {
     ]});
     let graph = super::trace::observed_graph(stopped_parallel(
         vec![
-            inner,
+            sequence(
+                "selected",
+                vec![
+                    inner,
+                    json!({"kind":"fail","name":"selected_halt","reason":"unfinished"}),
+                ],
+            ),
             failed_branch("other", rounds("other", 2, &state), &state),
         ],
         &state,
@@ -92,6 +98,23 @@ async fn canonical_loop_evidence_excludes_settled_inner_race_losers() {
         success(1),
     ));
     append_rounds(&mut history, "other", vec![], 2);
+    // Both discarded branches started before the selected terminal at eight, but
+    // their final results arrive later. Only the inner race winner supplies evidence.
+    for (entry, (dispatch, settlement)) in
+        history
+            .iter_mut()
+            .zip([(1, 3), (4, 9), (2, 5), (6, 8), (0, 4), (7, 12)])
+    {
+        entry.dispatch_position = HistoryPosition::new(dispatch).unwrap();
+        let DurableExecutionState::Settled { position, .. } = &mut entry.state else {
+            unreachable!()
+        };
+        *position = HistoryPosition::new(settlement).unwrap();
+    }
+    history.sort_by_key(|entry| entry.dispatch_position);
+    for (index, entry) in history.iter_mut().enumerate() {
+        entry.execution = ExecutionId::new(index as u64 + 1).unwrap();
+    }
     let context = evidence(&graph, &json!({}), &history);
     let mut names = context
         .exhausted_loops
@@ -99,7 +122,7 @@ async fn canonical_loop_evidence_excludes_settled_inner_race_losers() {
         .map(|entry| (entry.node.as_str(), entry.completed_iterations.get()))
         .collect::<Vec<_>>();
     names.sort_unstable();
-    assert_eq!(names, [("other", 2), ("winner", 1)]);
+    assert_eq!(names, [("winner", 1)]);
     assert!(!context.incomplete);
 }
 

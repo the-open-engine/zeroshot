@@ -8,7 +8,7 @@ mod map;
 #[derive(Clone, Copy)]
 enum ParallelControlResult {
     Reached,
-    Unreachable,
+    NoSatisfier,
 }
 
 struct GroupEvaluation<'a, G> {
@@ -70,6 +70,28 @@ impl Engine<'_> {
         let probe_trace = self.take_trace_since(checkpoint);
         let (mut ordered, required) = self.parallel_completions(group, &probes, traversal)?;
         ordered.sort_by_key(|(index, position)| (*position, *index));
+        let join_position = ordered
+            .get(required - 1)
+            .map_or(HistoryPosition::MAX, |(_, position)| *position);
+        let terminal = probes
+            .iter()
+            .enumerate()
+            .filter(|(_, (status, _))| matches!(status, Status::Terminal { .. }))
+            .min_by_key(|(index, (status, _))| (status.position(), *index));
+        if let Some((index, (terminal, _))) = terminal
+            && terminal.position() <= join_position
+        {
+            self.pending_frontier = frontier;
+            return self.finish_parallel_terminal(
+                GroupEvaluation {
+                    group,
+                    context,
+                    traversal,
+                },
+                (index, terminal.clone()),
+                probe_trace,
+            );
+        }
         if let Some(status) = self.unreached_parallel_join(
             GroupMutation {
                 group,
@@ -115,6 +137,63 @@ impl Engine<'_> {
                 winners: winner_set,
             },
         )
+    }
+
+    fn finish_parallel_terminal(
+        &mut self,
+        evaluation: GroupEvaluation<'_, ParNode>,
+        selected: (usize, Status),
+        probe_trace: Vec<StructuralTrace>,
+    ) -> Result<Status, ReducerError> {
+        let GroupEvaluation {
+            group,
+            context,
+            traversal,
+        } = evaluation;
+        let (index, terminal) = selected;
+        if traversal.mode == EvalMode::Probe {
+            let names = descendant_names(&group.branches.as_slice()[index]);
+            self.restore_trace(
+                probe_trace
+                    .into_iter()
+                    .filter(|record| names.contains(&record.node))
+                    .collect(),
+            )?;
+            return Ok(terminal);
+        }
+        // Validate the actual terminal prefix once, retaining only the selected branch's
+        // values and evidence. Sibling work uses the same closed replay as join losers.
+        let position = terminal.position().max(traversal.after);
+        let mut results = self.replay_parallel(
+            GroupEvaluation {
+                group,
+                context,
+                traversal: Traversal {
+                    cutoff: position,
+                    ..traversal
+                },
+            },
+            Some(&[(index, position)]),
+        )?;
+        let (terminal, _) = results.swap_remove(index);
+        if !matches!(terminal, Status::Terminal { .. }) {
+            return Err(ReducerError::InconsistentHistory);
+        }
+        for (sibling, branch) in group.branches.as_slice().iter().enumerate() {
+            if sibling != index {
+                self.void_descendants(
+                    branch,
+                    VoidScope {
+                        excluded_scope: None,
+                        map_indices: traversal.map_indices,
+                        cutoff: position,
+                        reason: ExecutionVoidReason::ParallelJoin,
+                        mode: traversal.mode,
+                    },
+                );
+            }
+        }
+        Ok(terminal)
     }
 
     fn evaluate_parallel_branches(
@@ -196,6 +275,10 @@ impl Engine<'_> {
             })?;
             return Ok(Some(Status::Pending));
         }
+        // Non-first branches either complete or propagate a terminal before this point.
+        if !matches!(group.join, Join::First { .. }) {
+            return Err(ReducerError::InconsistentHistory);
+        }
         let mut rejected = summary
             .probes
             .iter()
@@ -244,7 +327,7 @@ impl Engine<'_> {
                 context,
                 traversal,
             },
-            ParallelControlResult::Unreachable,
+            ParallelControlResult::NoSatisfier,
         );
         self.continue_decision(&group.name, traversal.mode);
         Ok(Some(Status::Continue { position }))
@@ -370,8 +453,21 @@ impl Engine<'_> {
         for index in order {
             let mut local = context.clone();
             local.local_writes.clear();
-            let checkpoint = self.trace_checkpoint();
             let retained = selected(index);
+            // Discarded branches only own starts in this window. Replaying a history-free
+            // branch could charge loop work that the selected decision never admitted.
+            if !retained
+                && winners.is_some()
+                && !self.item_has_history(
+                    &descendant_names(&branches[index]),
+                    traversal.map_indices,
+                    traversal,
+                )
+            {
+                results.push((index, (Status::Pending, local)));
+                continue;
+            }
+            let checkpoint = self.trace_checkpoint();
             let status = self.probe(
                 &branches[index],
                 &mut local,
@@ -455,9 +551,8 @@ impl Engine<'_> {
         let first = matches!(group.join, Join::First { .. });
         let label = match (first, result) {
             (true, ParallelControlResult::Reached) => "satisfied",
-            (true, ParallelControlResult::Unreachable) => "no_satisfier",
             (false, ParallelControlResult::Reached) => "reached",
-            (false, ParallelControlResult::Unreachable) => "quorum_unreachable",
+            (_, ParallelControlResult::NoSatisfier) => "no_satisfier",
         };
         self.set_group_control(
             context,

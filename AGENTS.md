@@ -218,6 +218,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
+  A parallel branch terminal propagates its result when reached no later than join satisfaction;
+  recorded history orders competing terminals, with canonical branch order breaking ties.
+  Terminal replay retains only that branch's evidence, validates started siblings within the
+  selected history window without charging unstarted branches, and cancels siblings through the
+  existing parallel-loser cleanup. Non-first joins continue only when reached; their legacy
+  `quorum_unreachable` label remains in the contract but is no longer emitted.
   Shared short-circuiting three-valued guard evaluation preserves candidate-local first-join eligibility.
   Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
   branches on join settlement, consuming only executions owned by that visit window and preserving
@@ -1959,8 +1965,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
-  A reducer `completed` group visit alone is neutral. The seq, choice, loop and map visits that a
-  succeed/fail node ended at its cursor take its outcome; a par stops that propagation.
+  A reducer `completed` group visit alone is neutral. All enclosing visits that the selected
+  succeed/fail node ended at its cursor, including parallel groups, take its outcome. The canonical
+  trace excludes terminals discarded by an earlier join. Editor terminals describe run outcomes;
+  terminal-only parallel paths never acquire a synthetic unmet-join continuation. The shared
+  `ui/src/fixtures/parallel-terminal.json` is checked by native control replay and browser projection.
 - Profile and run inspectors share `InspectorPanel`, pointer/keyboard resizing, and one client-only
   width preference. Viewport clamping preserves the preferred width when the available space shrinks.
 - Run navigation retains tab-scoped view preferences (node/inspector, execution, cursor, graph

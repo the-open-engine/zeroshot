@@ -12,16 +12,12 @@ export type WorkflowFailurePolicy = {
   guard: GuardValue;
   sources: string[];
   kind: 'worker-error' | 'control-limit' | 'mixed-error';
-  boundary: 'run' | 'parallel-branch';
-  parallelName?: string;
 };
 export type WorkflowCompletion = {
   name: string;
   owner: string;
   scope: string;
   mode: 'final' | 'early';
-  boundary: 'run' | 'parallel-branch';
-  parallelName?: string;
 };
 export type WorkflowOutcomes = {
   policies: WorkflowFailurePolicy[];
@@ -227,10 +223,6 @@ export function analyzeWorkflowOutcomes(document: Document): WorkflowOutcomes {
   for (const location of entries) {
     const { node, ancestors, previous } = location;
     if (locations.get(node.name) !== location) continue;
-    const parallel = [...ancestors].reverse().find((ancestor) => ancestor.kind === 'par');
-    const boundary = parallel
-      ? { boundary: 'parallel-branch' as const, parallelName: parallel.name }
-      : { boundary: 'run' as const };
     if (node.kind === 'choice') {
       list(node.branches).forEach((branch, branchIndex) => {
         if (
@@ -267,7 +259,6 @@ export function analyzeWorkflowOutcomes(document: Document): WorkflowOutcomes {
           guard: branch.when as GuardValue,
           sources: recognized.sources,
           kind: recognized.kinds.size === 1 ? [...recognized.kinds][0] : 'mixed-error',
-          ...boundary,
         });
       });
     }
@@ -284,7 +275,6 @@ export function analyzeWorkflowOutcomes(document: Document): WorkflowOutcomes {
         owner: previous?.name ?? scope,
         scope,
         mode: final ? 'final' : 'early',
-        ...boundary,
       });
     }
   }

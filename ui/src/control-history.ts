@@ -33,9 +33,9 @@ export function controlState(state: ControlRecord['state']): WorkflowNodeObserva
 }
 
 /**
- * A seq, choice, loop or map ends in the same reduction as a succeed or fail node it contains; a
- * par never passes a branch terminal up. Give those enclosing visits the terminal's outcome; every
- * other completed visit stays neutral.
+ * Enclosing groups end in the same reduction as their selected succeed or fail node. Give those
+ * visits the terminal's outcome; every other completed visit stays neutral. The canonical trace
+ * excludes terminals discarded by an earlier parallel join.
  */
 export function settleControlVisits(
   root: GraphNode,
@@ -45,7 +45,6 @@ export function settleControlVisits(
   for (const [position, terminal] of visits.entries()) {
     if (terminal.state !== 'succeeded' && terminal.state !== 'failed') continue;
     for (const group of pathTo(root, terminal.node).slice(0, -1).reverse()) {
-      if (group.kind === 'par') break;
       // Visits are in entry order, so the group's nearest earlier visit in the terminal's map scope
       // holds it, even when later loop rounds below a par end in the same reduction.
       let enclosing: ControlVisit | undefined;
