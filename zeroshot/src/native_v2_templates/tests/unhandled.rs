@@ -28,9 +28,12 @@ fn every_builtin_template_explicitly_handles_each_executable_error() {
             TemplateDelivery::Push,
             TemplateDelivery::PullRequest,
             TemplateDelivery::Merge,
+            TemplateDelivery::Comment,
         ] {
-            let Ok(graph) = template.materialize(delivery) else {
-                continue;
+            let graph = match template.materialize(delivery) {
+                Ok(graph) => graph,
+                Err(BuiltinTemplateError::UnsupportedDelivery { .. }) => continue,
+                Err(error) => panic!("invalid built-in template: {error}"),
             };
             let mut reads = BTreeSet::new();
             error_reads(&serde_json::to_value(&graph).assert_value(), &mut reads);

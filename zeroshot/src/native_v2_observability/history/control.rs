@@ -381,3 +381,7 @@ impl ControlReplay {
 #[cfg(test)]
 #[path = "control/queue_tests.rs"]
 mod queue_tests;
+
+#[cfg(test)]
+#[path = "control/parallel_terminal_tests.rs"]
+mod parallel_terminal_tests;

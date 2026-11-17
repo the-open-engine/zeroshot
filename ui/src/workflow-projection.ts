@@ -206,9 +206,11 @@ function structurallyContinues(node: GraphNode, ancestors = new Set<GraphNode>()
   if (node.kind === 'seq') return children.every((child) => structurallyContinues(child, next));
   if (node.kind === 'choice')
     return !children.length || children.some((child) => structurallyContinues(child, next));
-  // Parallel consumes terminal branches and reports an unmet join as a group
-  // result. A terminal branch never becomes a run terminal by presentation.
-  if (node.kind === 'par') return true;
+  if (node.kind === 'par')
+    return parallelCanReachJoin(
+      node,
+      children.map((child) => structurallyContinues(child, next))
+    );
   if (node.kind === 'loop') return !children.length || structurallyContinues(children[0], next);
   // Empty input bypasses even a terminal-only map body.
   if (node.kind === 'map') return true;
@@ -360,23 +362,12 @@ export function projectWorkflow(
       .filter((completion) => completion.mode === 'final')
       .map((completion) => completion.name)
   );
-  const branchTerminals = new Set<string>();
-  function collectBranchTerminals(node: GraphNode, ancestors: Set<GraphNode>, inParallel = false) {
-    if (ancestors.has(node) || ancestors.size > 64) return;
-    if (inParallel && ['succeed', 'fail'].includes(node.kind)) branchTerminals.add(node.name);
-    const next = new Set(ancestors).add(node);
-    childrenOf(node).forEach((child) =>
-      collectBranchTerminals(child, next, inParallel || node.kind === 'par')
-    );
-  }
-  collectBranchTerminals(document.graph.root, new Set());
   return new WorkflowProjectionBuilder(
     document,
     collapsed,
     outcomes,
     hiddenBranches,
-    finalCompletions,
-    branchTerminals
+    finalCompletions
   ).project();
 }
 
@@ -389,8 +380,7 @@ class WorkflowProjectionBuilder {
     private readonly collapsed: Set<string>,
     private readonly outcomes: ReturnType<typeof analyzeWorkflowOutcomes>,
     private readonly hiddenBranches: Map<string, Set<number>>,
-    private readonly finalCompletions: Set<string>,
-    private readonly branchTerminals: Set<string>
+    private readonly finalCompletions: Set<string>
   ) {}
 
   project(): WorkflowProjection {
@@ -593,24 +583,16 @@ class WorkflowProjectionBuilder {
       fragments.map((fragment) => fragment.exits.length > 0)
     );
     let exits: Exit[] = [];
-    {
+    if (reachableJoin) {
       const join = this.addNode(
         node,
         'join',
-        reachableJoin ? joinLabel(node) : 'Parallel group ends',
-        !reachableJoin
-          ? 'Terminal branches cannot satisfy this join; handle its group result.'
-          : node.join?.kind === 'first'
-            ? 'The rule may finish without a matching branch; handle its group result.'
-            : undefined
+        joinLabel(node),
+        node.join?.kind === 'first'
+          ? 'The rule may finish without a matching branch; handle its group result.'
+          : undefined
       );
       for (const fragment of fragments) this.connect(fragment.exits, join, node);
-      if (!reachableJoin)
-        this.edge(fork, join, {
-          owner: node.name,
-          secondary: true,
-          label: 'Branches settle · join not reached',
-        });
       ids.push(join);
       exits = [{ source: join }];
     }
@@ -730,16 +712,13 @@ class WorkflowProjectionBuilder {
   private visitDefault(node: GraphNode): Fragment {
     const known = ['step', 'verifier', 'succeed', 'fail'].includes(node.kind);
     const terminal = node.kind === 'succeed' || node.kind === 'fail';
-    const branchTerminal = this.branchTerminals.has(node.name);
     const detail =
       node.kind === 'succeed'
-        ? branchTerminal
-          ? 'End this branch; the parallel join determines what follows'
-          : this.finalCompletions.has(node.name)
-            ? 'Return the configured run result'
-            : 'Finish the whole run here'
+        ? this.finalCompletions.has(node.name)
+          ? 'Return the configured run result'
+          : 'Finish the whole run here'
         : node.kind === 'fail'
-          ? `${branchTerminal ? 'Stop this branch' : 'Stop run'}${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
+          ? `Stop run${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
           : node.kind === 'verifier'
             ? 'Verifier'
             : node.kind === 'step'
@@ -747,11 +726,9 @@ class WorkflowProjectionBuilder {
               : 'Advanced node · inspect its contract';
     const label =
       node.kind === 'succeed'
-        ? branchTerminal
-          ? 'End branch'
-          : this.finalCompletions.has(node.name)
-            ? 'Complete'
-            : 'Finish run early'
+        ? this.finalCompletions.has(node.name)
+          ? 'Complete'
+          : 'Finish run early'
         : nodeTitle(node.name);
     const id = this.addNode(node, terminal ? 'completion' : 'activity', label, detail);
     return {

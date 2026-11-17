@@ -37,9 +37,9 @@ impl<'history> Engine<'history> {
             || matches!(
                 &status,
                 Status::Terminal {
-                    projection: TerminalProjection::Failed { .. },
+                    projection: TerminalProjection::Failed { reason, .. },
                     ..
-                }
+                } if reason.as_str() == "unhandled"
             )
         {
             self.trace_terminal(trace, &status)?;

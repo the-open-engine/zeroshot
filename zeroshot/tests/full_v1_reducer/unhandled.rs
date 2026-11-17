@@ -1,5 +1,6 @@
 use super::*;
 use openengine_cluster_protocol::{FailReason, WorkerErrorCode};
+use std::collections::BTreeSet;
 
 fn error_guard(kind: &str) -> Value {
     let selector = json!({"source":"error","name":"work"});
@@ -183,6 +184,141 @@ async fn first_join_when_counts_as_an_error_read() {
         native(&graph, &json!({}), &[failed(WorkerErrorCode::Crash)]).terminal,
         Some(TerminalProjection::Succeeded { .. })
     ));
+}
+
+#[tokio::test]
+async fn unchecked_parallel_errors_propagate_after_retries_and_cancel_siblings() {
+    use zeroshot_engine::full_v1_reducer::StructuralTraceState;
+
+    for join in [
+        json!({"kind":"all"}),
+        json!({"kind":"any"}),
+        json!({"kind":"quorum","count":2}),
+        json!({"kind":"first","when":{"kind":"in",
+            "value":{"source":"signal","name":"docs","field":"verdict"},
+            "labels":["accepted"]}}),
+    ] {
+        for node in [step("work", 2), verifier("work", 2)] {
+            let graph = verified(
+                sequence(
+                    "run",
+                    vec![
+                        json!({"kind":"par","name":"parallel","state":{"kind":"record","fields":{}},
+                    "branches":[sequence("failing",vec![node]),verifier("docs",1)],
+                    "join":join,"promotedStatePaths":[]}),
+                        succeed("done"),
+                    ],
+                ),
+                json!({}),
+            )
+            .await;
+            for code in [
+                WorkerErrorCode::Crash,
+                WorkerErrorCode::Timeout,
+                WorkerErrorCode::Malformed,
+                WorkerErrorCode::Refusal,
+            ] {
+                let mut history = vec![
+                    settled(
+                        SettledSpec::new(1, 1, "work").dispatched(1).position(3),
+                        WorkerOutcome::declared_failure(code),
+                    ),
+                    active(2, 2, "docs", 2),
+                ];
+                if code == WorkerErrorCode::Crash {
+                    let retry = native(&graph, &json!({}), &history);
+                    assert!(retry.terminal.is_none());
+                    assert!(retry.decisions.iter().any(|decision| matches!(decision,
+                        Decision::Dispatch { occurrence, attempt, .. }
+                            if occurrence.node.as_str() == "work" && attempt.get() == 2)));
+                    history.push(settled(
+                        SettledSpec::new(3, 1, "work")
+                            .attempt(2)
+                            .dispatched(4)
+                            .position(5),
+                        WorkerOutcome::declared_failure(code),
+                    ));
+                }
+                let observed = FullV1Reducer::native_v2(&graph)
+                    .reduce_with_trace(ReductionInput {
+                        initial_input: &json!({}),
+                        executions: &history,
+                        next_execution: 10,
+                        next_node_instance: 10,
+                    })
+                    .assert_value();
+                assert_unhandled(&observed.reduction, code);
+                assert!(
+                    observed
+                        .reduction
+                        .decisions
+                        .iter()
+                        .any(|decision| matches!(decision,
+                    Decision::VoidLoser { execution, .. } if execution.get() == 2))
+                );
+                let failed_groups = observed
+                    .trace
+                    .iter()
+                    .filter(|record| record.state == StructuralTraceState::Failed)
+                    .map(|record| {
+                        assert_eq!(record.detail.as_deref(), Some("unhandled"));
+                        record.node.as_str()
+                    })
+                    .collect::<BTreeSet<_>>();
+                assert_eq!(
+                    failed_groups,
+                    BTreeSet::from(["run", "parallel", "failing"])
+                );
+                assert!(
+                    !observed
+                        .trace
+                        .iter()
+                        .any(|record| record.node.as_str() == "done")
+                );
+                history[1].state = DurableExecutionState::Voided {
+                    position: HistoryPosition::new(6).assert_value(),
+                    reason: ExecutionVoidReason::ParallelJoin,
+                };
+                let replayed = native(&graph, &json!({}), &history);
+                assert_eq!(replayed.terminal, observed.reduction.terminal);
+                assert!(!replayed.decisions.iter().any(|decision| matches!(
+                    decision,
+                    Decision::Dispatch { .. } | Decision::VoidLoser { .. }
+                )));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn earlier_parallel_join_discards_a_later_unchecked_error() {
+    for join in [
+        json!({"kind":"any"}),
+        json!({"kind":"quorum","count":1}),
+        json!({"kind":"first","when":{"kind":"in",
+            "value":{"source":"signal","name":"docs","field":"verdict"},
+            "labels":["accepted"]}}),
+    ] {
+        let graph = verified(sequence("run",vec![
+            json!({"kind":"par","name":"parallel","state":{"kind":"record","fields":{}},
+                "branches":[step("work",1),verifier("docs",1)],"join":join,"promotedStatePaths":[]}),
+            step("tail",1),succeed("done"),
+        ]),json!({})).await;
+        let history = [
+            settled(
+                SettledSpec::new(1, 1, "work").dispatched(1).position(4),
+                WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+            ),
+            settled(
+                SettledSpec::new(2, 2, "docs").dispatched(2).position(3),
+                verdict("accepted"),
+            ),
+        ];
+        let result = native(&graph, &json!({}), &history);
+        assert!(result.terminal.is_none());
+        assert!(result.decisions.iter().any(|decision| matches!(decision,
+            Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "tail")));
+    }
 }
 
 #[tokio::test]
