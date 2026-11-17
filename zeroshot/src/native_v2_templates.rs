@@ -47,6 +47,7 @@ const TASK_FIELD: &str = "task";
 const ACCEPTANCE_FEEDBACK_FIELD: &str = "acceptanceFeedback";
 const CODE_FEEDBACK_FIELD: &str = "codeFeedback";
 const DELIVERY_FEEDBACK_FIELD: &str = "deliveryFeedback";
+const REVIEW_CONTEXT_FIELD: &str = "reviewContext";
 const PHASE_FIELD: &str = "phase";
 const CONTINUE_ITEMS_FIELD: &str = "continueItems";
 const TITLE_FIELD: &str = "title";
@@ -57,6 +58,14 @@ const VERDICT_FIELD: &str = "verdict";
 const ACCEPTED_LABEL: &str = "accepted";
 const REJECTED_LABEL: &str = "rejected";
 const DELIVERY_NODE: &str = "deliver";
+const SOFTWARE_REVIEW_GUIDANCE: &str = "Use reviewContext as setup hints, not proof. Run relevant available checks with reasonable \
+     effort; report results and gaps. Reject only a material defect caused or exposed by the change, \
+     or an unmet explicit requirement, supported by source or execution evidence. Give required \
+     fixes with location, impact and a concrete correction. Use 'Required fixes:' only when rejecting; \
+     label other notes 'Advisory:'. Unavailable checks, unrelated failures and optional improvements \
+     are advisory. Reject repairs that publish outside delivery or weaken forge restrictions. \
+     Verify repairs against deliveryFeedback and independently verify every reviewResponses \
+     disposition, response, thread identity and version before accepting.";
 
 fn single_worker_graph() -> Result<GraphSpec, BuiltinTemplateError> {
     let state = task_type()?;
@@ -93,10 +102,15 @@ fn software_worker(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTempl
         worker: worker_ref("builtin.agent.software-worker@1")?,
         instructions: Some(instructions(
             "Implement the requested software change fully in the shared workspace. Follow the \
-             repository's guidance, keep the change focused, and run relevant checks. Delivery runs \
+             repository's guidance, keep the change focused, and add useful regression coverage where \
+             relevant. Prepare documented prerequisites and candidate builds for review; run relevant \
+             checks with reasonable effort. Do not repeat unchanged setup failures. Return fresh \
+             reviewContext with shared paths, completed checks and remaining gaps on every visit. \
+             Delivery runs \
              `git add --all`; do not leave unrelated unignored files in the repository checkout. \
              Use current input on every visit. An empty phase means implementation; phase.after \
-             accepted or rejected means repair the latest acceptanceFeedback and codeFeedback; \
+             accepted or rejected means repair required fixes in the latest acceptanceFeedback and \
+             codeFeedback; advisory notes are optional; \
              ci_failed, conflict, or repair_required means repair deliveryFeedback. Other feedback \
              is historical. Resolve Git/CI issues without weakening the task; preserve integrated \
              upstream changes. sourceRevision is original provenance, reviewBaseRevision the \
@@ -120,11 +134,10 @@ fn software_worker(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTempl
         .into_iter()
         .map(|field| state_input(field, field))
         .collect::<Result<_, _>>()?,
-        write_bindings: vec![output_write(
-            "worker",
-            "reviewResponses",
-            "reviewResponses",
-        )?],
+        write_bindings: vec![
+            output_write("worker", REVIEW_CONTEXT_FIELD, REVIEW_CONTEXT_FIELD)?,
+            output_write("worker", "reviewResponses", "reviewResponses")?,
+        ],
         timeout_ms: None,
         attempts: positive(1)?,
     }))
@@ -243,11 +256,8 @@ fn parallel_reviewers(
         name: "acceptance",
         worker: "builtin.agent.acceptance-verifier@1",
         authored_instructions: if delivery_metadata {
-            "Verify the change independently against the user's request and observable behavior. \
-             Try to run the repository's pre-commit checks and report the results. \
-             Reject repairs that publish outside delivery or weaken forge restrictions. \
-             When delivery feedback is present, verify that the repair addresses it and independently verify every reviewResponses disposition, response, thread identity and version before accepting. \
-             Accept only with concrete evidence; otherwise return actionable feedback. Provide \
+            "Check the explicit requested behavior independently against the implementation, \
+             relevant test assertions and documentation. Provide \
              an accurate, informative prospective pull request title and description for the \
              complete change under review regardless of the verdict. Follow the repository's pull \
              request conventions, use a ready (non-draft) title of at most 255 Unicode characters, \
@@ -256,11 +266,8 @@ fn parallel_reviewers(
              directly by command output and do not infer counts. Do not add issue-closing \
              references because delivery owns them."
         } else {
-            "Verify the change independently against the user's request and observable behavior. \
-             Try to run the repository's pre-commit checks and report the results. \
-             Reject repairs that publish outside delivery or weaken forge restrictions. \
-             When delivery feedback is present, verify that the repair addresses it and independently verify every reviewResponses disposition, response, thread identity and version before accepting. \
-             Accept only with concrete evidence; otherwise return actionable feedback."
+            "Check the explicit requested behavior independently against the implementation, \
+             relevant test assertions and documentation."
         },
         feedback_target: ACCEPTANCE_FEEDBACK_FIELD,
         output: if delivery_metadata {
@@ -273,12 +280,9 @@ fn parallel_reviewers(
     let code = review_verifier(ReviewVerifierSpec {
         name: "code",
         worker: "builtin.agent.code-verifier@1",
-        authored_instructions: "Review the change independently for correctness, safety, \
-             integration, and substantive maintainability. \
-             Reject repairs that publish outside delivery or weaken forge restrictions. \
-             Do not reject for style-only preferences. \
-             When delivery feedback is present, verify that the repair \
-             addresses it. Independently verify every reviewResponses disposition, response, thread identity and version before accepting. Return actionable feedback when rejecting.",
+        authored_instructions: "Review the current change and affected callers independently, riskiest first. \
+             Trace contracts, state, errors, trust boundaries and resource use. Construct concrete \
+             failure scenarios, then try to disprove them through callers, guards and tests.",
         feedback_target: CODE_FEEDBACK_FIELD,
         output: PayloadType::Null,
         write_bindings: Vec::new(),
@@ -329,13 +333,17 @@ fn review_verifier(spec: ReviewVerifierSpec<'_>) -> Result<GraphNode, BuiltinTem
             state_input(TASK_FIELD, TASK_FIELD)?,
             state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
             state_input("reviewResponses", "reviewResponses")?,
+            state_input(REVIEW_CONTEXT_FIELD, REVIEW_CONTEXT_FIELD)?,
         ],
         write_bindings,
         timeout_ms: None,
         attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
         signals,
         diagnostic: diagnostic_type()?,
-        instructions: Some(delivery_feedback_instructions(spec.authored_instructions)?),
+        instructions: Some(delivery_feedback_instructions(&format!(
+            "{} {SOFTWARE_REVIEW_GUIDANCE}",
+            spec.authored_instructions
+        ))?),
     }))
 }
 

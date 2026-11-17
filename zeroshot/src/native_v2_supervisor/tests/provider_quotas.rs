@@ -15,7 +15,7 @@ async fn builtin_review_failure_preserves_quota_node_reset_and_resume_guidance_i
                 vec![Behavior::Complete {
                     delay: Duration::ZERO,
                     outcome: WorkerOutcome::Verified {
-                        output: json!({"reviewResponses":[]}),
+                        output: json!({"reviewResponses":[],"reviewContext":"Focused checks passed."}),
                         artifacts: Vec::new(),
                     },
                 }],

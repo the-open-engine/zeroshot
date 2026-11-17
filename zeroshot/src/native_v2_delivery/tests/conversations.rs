@@ -112,12 +112,17 @@ impl NodeDriver for ReviewedLane {
                     ]
                 };
                 Ok(WorkerOutcome::Verified {
-                    output: json!({"reviewResponses":responses}),
+                    output: json!({"reviewResponses":responses,"reviewContext":format!("Prepared visit {visit}")}),
                     artifacts: Vec::new(),
                 })
             }
             node @ ("acceptance" | "code") => {
                 self.reviewers.fetch_add(1, Ordering::SeqCst);
+                let visit = self.worker_visits.load(Ordering::SeqCst) - 1;
+                assert_eq!(
+                    invocation.node.input["reviewContext"],
+                    format!("Prepared visit {visit}")
+                );
                 let responses = invocation.node.input["reviewResponses"].as_array().unwrap();
                 if !responses.is_empty() {
                     assert_eq!(responses[0]["threadId"], "THREAD_1");

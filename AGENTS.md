@@ -1481,7 +1481,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unchanged. The final rejected round fails without starting an unreviewable extra repair.
   Every software-change delivery mode, including none, reserves remote publication for delivery;
   worker guidance forbids pushing branches or weakening forge restrictions, and both reviewers
-  reject repairs that do either.
+  reject repairs that do either. Each worker visit writes fresh internal `reviewContext` with shared
+  setup/build paths, check results and gaps alongside `reviewResponses`; both reviewers receive it
+  as setup hints, never proof. Relevant checks use reasonable effort. Reviews reject evidence-backed
+  material defects caused or exposed by the change or unmet explicit requirements; unavailable
+  checks, unrelated failures and optional improvements are advisory. Rejected diagnostics label
+  required fixes separately from advisory notes. Runtime-owned setup guidance preserves shared
+  checkout safety without prescribing a verdict. Caller input and delivery contracts are unchanged.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
