@@ -90,6 +90,20 @@ impl LocalCliBackend {
         crate::native_v2_local::validate_clean_checkout(&prepared, &self.git_program)
             .await
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        let harnesses = crate::harnesses::HarnessRegistry::local();
+        let sizes = crate::native_v2_hosting::host_run_sizes();
+        let admitted = NativeV2Admission
+            .admit_with_context(
+                prepared.submission.clone(),
+                crate::native_v2_admission::NativeV2AdmissionContext::new(
+                    &harnesses,
+                    DeliveryPolicy::Optional,
+                )
+                .with_run_sizes(&sizes),
+            )
+            .await
+            .map_err(NativeV2CliError::InvalidRun)?;
+        crate::v2_run_ledger::validate_admitted_run(&admitted)?;
         if worktree.is_some() {
             crate::native_v2_local::create_run_worktree(
                 &mut prepared,

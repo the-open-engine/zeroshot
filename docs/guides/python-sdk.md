@@ -56,6 +56,11 @@ Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspac
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 `run()` submits once and waits; `submit()` returns a durable `Run` handle immediately.
 
+Run input has the same [submission and node-input limits](../getting-started/first-run.md#1-write-the-task)
+as the CLI: 2 MiB for the stored submission and 1 MiB for each node's serialized start record,
+including its input and bookkeeping. A local early size refusal raises `InvalidRequestError` with
+code `submission.too_large`. A node-input overflow fails the admitted run with a size diagnostic.
+
 ## Manage named targets
 
 `Client.list_targets()` returns a tuple of typed `NamedTarget` records with `name`, `origin` and

@@ -29,10 +29,22 @@ fn assert_event_boundaries(prior: &RunEvent, run_id: &RunId) {
         let exact = with_sized_payload(event.clone(), pointer, bound);
         validate_event(&exact).assert_value();
         let oversized = with_sized_payload(event, pointer, bound + 1);
-        assert_eq!(
-            validate_event(&oversized),
-            Err(RunLedgerError::EventTooLarge)
-        );
+        let error = validate_event(&oversized).expect_err("one byte beyond the event limit");
+        if let RunEvent::NodeStarted {
+            reference, input, ..
+        } = &oversized
+        {
+            assert_eq!(
+                error,
+                RunLedgerError::NodeInputTooLarge {
+                    node: reference.node.clone(),
+                    input_bytes: serde_json::to_vec(input).assert_value().len(),
+                    event_bytes: bound + 1,
+                }
+            );
+        } else {
+            assert_eq!(error, RunLedgerError::EventTooLarge);
+        }
     }
 }
 
@@ -156,4 +168,47 @@ async fn fake_imports_maximum_source_payloads_and_replays_large_prerequisites() 
 #[tokio::test]
 async fn sqlite_imports_maximum_source_payloads_and_replays_large_prerequisites() {
     assert_large_prerequisite_replay(&SqliteRunLedger::open_in_memory().assert_value()).await;
+}
+
+#[test]
+fn admitted_run_size_boundary_reports_complete_submission_and_input_bytes() {
+    use crate::v2_run_ledger::{MAX_ADMITTED_RUN_BYTES, validate_create};
+    let mut request = create("size-boundary", "size-boundary", 'a');
+    request.admitted.initial_input = json!("");
+    let overhead = serde_json::to_vec(&request.admitted).assert_value().len();
+    request.admitted.initial_input = json!("x".repeat(MAX_ADMITTED_RUN_BYTES - overhead));
+    validate_create(&request).assert_value();
+    let input_bytes = serde_json::to_vec(&request.admitted.initial_input)
+        .assert_value()
+        .len();
+    request.admitted.initial_input = json!("x".repeat(MAX_ADMITTED_RUN_BYTES - overhead + 1));
+    assert_eq!(
+        validate_create(&request),
+        Err(RunLedgerError::AdmittedRunTooLarge {
+            submission_bytes: MAX_ADMITTED_RUN_BYTES + 1,
+            input_bytes: input_bytes + 1,
+        })
+    );
+}
+
+#[test]
+fn node_input_size_counts_json_escaping_and_multibyte_text() {
+    let input = json!({"task":"界\n".repeat(MAX_EVENT_BYTES / 4)});
+    let event = RunEvent::NodeStarted {
+        reference: reference(&RunId::new("escaped-input"), 1),
+        occurrence: StructuralOccurrence {
+            node: NodeName::new("worker").assert_value(),
+            map_indices: Vec::new(),
+        },
+        attempt: PositiveInteger::new(1).assert_value(),
+        input: input.clone(),
+    };
+    assert_eq!(
+        validate_event(&event),
+        Err(RunLedgerError::NodeInputTooLarge {
+            node: NodeName::new("worker").assert_value(),
+            input_bytes: serde_json::to_vec(&input).assert_value().len(),
+            event_bytes: serde_json::to_vec(&event).assert_value().len(),
+        })
+    );
 }
