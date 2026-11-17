@@ -210,10 +210,18 @@ async fn shipped_cli_observes_one_bounded_provider_continuation_for_both_harness
         assert!(stdout.contains("[REDACTED]"));
         assert!(!stdout.contains("sentinel-secret"));
         assert!(stdout.contains("\"terminalResult\":{\"status\":\"succeeded\""));
-        assert_eq!(
-            std::fs::read_to_string(allocator.capture("attempt-2.prompt")).assert_value(),
-            "Continue"
-        );
+        let continuation =
+            std::fs::read_to_string(allocator.capture("attempt-2.prompt")).assert_value();
+        // Claude Code takes its prompt as one stream-json user message.
+        let continuation = match lane {
+            RetryLane::Codex => continuation,
+            RetryLane::Claude => serde_json::from_str::<serde_json::Value>(&continuation)
+                .assert_value()["message"]["content"][0]["text"]
+                .as_str()
+                .assert_value()
+                .to_owned(),
+        };
+        assert_eq!(continuation, "Continue");
         assert!(!allocator.capture("attempt-3.prompt").exists());
     }
 }
@@ -310,7 +318,7 @@ for arg in "$@"; do if [ "$arg" = --safe-mode ]; then exit 1; fi; done
 attempt=1
 if [ -e attempt.state ]; then attempt=$(( $(/usr/bin/cat attempt.state) + 1 )); fi
 /usr/bin/printf '%s' "$attempt" > attempt.state
-prompt=$(/usr/bin/cat)
+prompt=$(/usr/bin/head -n 1)
 /usr/bin/printf '%s' "$prompt" > "attempt-$attempt.prompt"
 if [ "$attempt" = 1 ]; then
   /usr/bin/printf '%s\n' '{"type":"system","subtype":"init","session_id":"retry-session"}'

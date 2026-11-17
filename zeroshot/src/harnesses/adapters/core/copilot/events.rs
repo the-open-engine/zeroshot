@@ -19,6 +19,12 @@ pub(super) async fn receive(
     match kind {
         "assistant.usage" => usage(rpc, data).await,
         "assistant.message" => assistant_message(rpc, data).await,
+        "user.message" => {
+            if let Some(content) = data["content"].as_str() {
+                rpc.user_message_shown(content).await;
+            }
+            Ok(())
+        }
         "session.error" => session_error(data),
         "tool.execution_start" => tool_started(rpc, data).await,
         "permission.requested" => permission(rpc, data),
@@ -68,6 +74,7 @@ fn known_event(kind: &str) -> bool {
     matches!(
         kind,
         "assistant.message"
+            | "user.message"
             | "assistant.usage"
             | "session.error"
             | "permission.requested"

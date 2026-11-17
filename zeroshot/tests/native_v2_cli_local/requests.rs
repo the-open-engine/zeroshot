@@ -290,9 +290,7 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
         2
     );
 }
-#[tokio::test(flavor = "multi_thread")]
-async fn request_suspension_waits_for_a_slow_checkpoint() {
-    let mut fixture = LocalFixture::new().with_request(None);
+fn with_slow_checkpoint(mut fixture: LocalFixture) -> (LocalFixture, PathBuf) {
     let delayed = fixture.root.path("checkpoint-delayed");
     let wrapper = fixture.root.path("slow-restic");
     openengine_cluster_testkit::fixture::write_executable(
@@ -325,6 +323,24 @@ exec {restic} "$@"
         .harness_environment
         .insert("ZEROSHOT_RESTIC".to_owned(), wrapper.display().to_string());
 
+    (fixture, delayed)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn terminal_failure_waits_for_a_slow_checkpoint() {
+    let (fixture, delayed) = with_slow_checkpoint(LocalFixture::new());
+    let run = fixture.submit_detached("hold-fail").await;
+    fixture.wait_running(&run).await;
+    let started = Instant::now();
+    fs::write(fixture.repository.join("release-turn"), "go").assert_value();
+    fixture.wait_terminal(&run, "hold-fail", "worker_failed").await;
+    assert!(delayed.exists(), "the failure checkpoint must be delayed");
+    assert!(started.elapsed() > CLI_TIMEOUT);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn request_suspension_waits_for_a_slow_checkpoint() {
+    let (fixture, delayed) = with_slow_checkpoint(LocalFixture::new().with_request(None));
     let run = fixture.submit_detached("hold").await;
     fixture.wait_running(&run).await;
     let started = Instant::now();

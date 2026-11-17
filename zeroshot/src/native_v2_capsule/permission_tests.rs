@@ -368,7 +368,8 @@ if native:
     resumed = 'resume' in sys.argv if harness == 'codex' else '--resume' in sys.argv
     assert resumed == (count == 1), sys.argv
 pathlib.Path('model-proof').touch()
-sys.stdin.read()
+# Claude Code reads its prompt as one stream-json line and leaves stdin open for the turn.
+sys.stdin.readline() if harness == 'claude' else sys.stdin.read()
 response = {'output':None,'signals':{'verdict':'accepted'},'diagnostic':None} if verifier else None
 if native and count == 0:
     response = 'invalid output to require correction'

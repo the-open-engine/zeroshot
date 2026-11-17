@@ -877,18 +877,28 @@ async fn root_steer_direct_composition_delivers_without_active_memory() {
     let callback = root.child("steer-callback");
     fs::copy(&cli, &callback).assert_value();
     let script = format!(
-        r#"import json, os, pathlib, shlex, subprocess, sys, time
+        r#"import json, os, pathlib, select, shlex, subprocess, sys, time
 if '--version' in sys.argv:
     print('2.1.318 (Claude Code)'); sys.exit(0)
-sys.stdin.read()
+def emit(record): print(json.dumps(record), flush=True)
+def replay(line):
+    record = json.loads(line); record['isReplay'] = True; emit(record)
+# Like the real CLI with stream-json input: the prompt is one line and stdin stays open.
+prompt = sys.stdin.readline()
+emit({{'type':'system','subtype':'init','session_id':'steer-session'}})
+replay(prompt)
 settings = json.loads(sys.argv[sys.argv.index('--settings')+1])
 command = shlex.split(settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])
 command[0] = {cli}
 pathlib.Path('steer-held').touch()
 while not pathlib.Path('steer-release').exists(): time.sleep(.01)
-result = subprocess.run(command, input=json.dumps({{'hook_event_name':'PreToolUse','tool_name':'Read'}}), text=True, capture_output=True, check=True)
-pathlib.Path('steer-context').write_text(result.stdout)
-sys.exit(17)
+subprocess.run(command, input=json.dumps({{'hook_event_name':'PreToolUse','tool_name':'Read'}}), text=True, capture_output=True, check=True)
+# The steer is a user message on stdin; the real CLI replays it once the conversation holds it.
+message = sys.stdin.readline() if select.select([sys.stdin], [], [], 5)[0] else ''
+pathlib.Path('steer-message').write_text(message)
+if message: replay(message)
+emit({{'type':'result','subtype':'success','is_error':False,'session_id':'steer-session','structured_output':{{'response':None}}}})
+sys.stdin.read()
 "#,
         cli = serde_json::to_string(&callback).assert_value()
     );
@@ -966,7 +976,7 @@ sys.exit(17)
         .await
         .assert_value();
     assert!(
-        fs::read_to_string(workspace.join("steer-context"))
+        fs::read_to_string(workspace.join("steer-message"))
             .assert_value()
             .contains("Steer the contained agent.")
     );

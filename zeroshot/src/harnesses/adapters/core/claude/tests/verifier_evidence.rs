@@ -18,7 +18,7 @@ async fn verifier_evidence_redacts_the_same_declared_and_ambient_auth_marker_bef
         workspace.write("response.json", &format!("{response}\n"));
         write_claude_script(
             &workspace,
-            "set -eu\ncat >/dev/null\nexec /bin/cat response.json\n",
+            "set -eu\nhead -n 1 >/dev/null\nexec /bin/cat response.json\n",
         );
         let binding = agent_binding(
             "claude-fable-5",
