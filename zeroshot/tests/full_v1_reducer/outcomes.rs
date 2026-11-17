@@ -375,11 +375,13 @@ fn race_definition(left: Value, condition: Value, schema: &Value) -> Value {
 mod write_order;
 
 #[tokio::test]
-async fn impossible_joins_preserve_prior_worker_error_and_guarded_output() {
+async fn first_no_satisfier_preserves_prior_worker_error_and_guarded_output() {
     let state =
         json!({"kind":"record","fields":{"result":{"type":{"kind":"integer"},"required":false}}});
-    for (join, branches) in impossible_joins::impossible_joins() {
-        let root = json!({"kind":"seq","name":"run","state":state,"children":[
+    let join = json!({"kind":"first","when":{"kind":"in",
+        "value":{"name":"pending","source":"signal","field":"verdict"},"labels":["accepted"]}});
+    let branches = vec![verifier("pending", 1)];
+    let root = json!({"kind":"seq","name":"run","state":state,"children":[
             promoted_integer_step("writer","result"),
             {"kind":"par","name":"parallel","state":state,"branches":branches,"join":join,"promotedStatePaths":[]},
             {"kind":"choice","name":"check_writer","state":state,"branches":[{
@@ -388,35 +390,37 @@ async fn impossible_joins_preserve_prior_worker_error_and_guarded_output() {
                 "otherwise":{"kind":"succeed","name":"read","output":{"kind":"record","fields":{"result":{"type":{"kind":"integer"},"required":true}}},
                     "bindings":[{"target":["result"],"value":{"source":"state","path":["result"]}}]},"promotedStatePaths":[]}
         ],"promotedStatePaths":[]});
-        let graph = reducer_test_support::verified_graph(root, state.clone(), true).await;
-        for failed in [true, false] {
-            let outcome = if failed {
-                WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash)
-            } else {
-                success(7)
-            };
-            let history = [settled(
-                SettledSpec::new(1, 1, "writer").position(2),
-                outcome,
-            )];
-            let reduced = one_slot(&graph, &json!({}), &history);
-            let expected = if failed {
-                TerminalProjection::Failed {
-                    context: None,
-                    reason: "writer_failed".parse().assert_value(),
-                }
-            } else {
-                TerminalProjection::Succeeded {
-                    output: json!({"result":7}),
-                }
-            };
-            assert_eq!(reduced.terminal, Some(expected));
-            assert!(
-                !reduced
-                    .decisions
-                    .iter()
-                    .any(|decision| matches!(decision, Decision::Dispatch { .. }))
-            );
-        }
+    let graph = reducer_test_support::verified_graph(root, state.clone(), true).await;
+    for failed in [true, false] {
+        let outcome = if failed {
+            WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash)
+        } else {
+            success(7)
+        };
+        let history = [
+            settled(SettledSpec::new(1, 1, "writer").position(2), outcome),
+            settled(
+                SettledSpec::new(2, 2, "pending").dispatched(3).position(4),
+                verdict("rejected"),
+            ),
+        ];
+        let reduced = one_slot(&graph, &json!({}), &history);
+        let expected = if failed {
+            TerminalProjection::Failed {
+                context: None,
+                reason: "writer_failed".parse().assert_value(),
+            }
+        } else {
+            TerminalProjection::Succeeded {
+                output: json!({"result":7}),
+            }
+        };
+        assert_eq!(reduced.terminal, Some(expected));
+        assert!(
+            !reduced
+                .decisions
+                .iter()
+                .any(|decision| matches!(decision, Decision::Dispatch { .. }))
+        );
     }
 }

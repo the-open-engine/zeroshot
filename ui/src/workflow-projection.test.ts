@@ -238,9 +238,16 @@ test('parallel joins show their actual rule and never connect terminal activitie
     return { kind: 'par', name: 'parallel', branches: [fail('stop'), agent('work')], join };
   }
   const all = projectWorkflow(doc(parallel({ kind: 'all' })));
-  assert.equal(byOwner(all, 'parallel', 'join').label, 'Parallel group ends');
+  assert.match(byOwner(all, 'parallel', 'fork').detail ?? '', /All branches complete/);
+  assert.equal(
+    all.nodes.some((node) => node.role === 'join'),
+    false
+  );
   assert.deepEqual(outgoing(all, byOwner(all, 'stop').id), []);
-  assert.ok(all.edges.some((edge) => edge.secondary && /join not reached/.test(edge.label ?? '')));
+  assert.equal(
+    all.edges.some((edge) => edge.secondary),
+    false
+  );
   const any = projectWorkflow(doc(parallel({ kind: 'any' })));
   assert.match(byOwner(any, 'parallel', 'join').label, /Any one branch/);
   assert.deepEqual(outgoing(any, byOwner(any, 'stop').id), []);
@@ -249,7 +256,11 @@ test('parallel joins show their actual rule and never connect terminal activitie
     1
   );
   const quorum = projectWorkflow(doc(parallel({ kind: 'quorum', count: 2 })));
-  assert.equal(byOwner(quorum, 'parallel', 'join').label, 'Parallel group ends');
+  assert.match(byOwner(quorum, 'parallel', 'fork').detail ?? '', /2 branches complete/);
+  assert.equal(
+    quorum.nodes.some((node) => node.role === 'join'),
+    false
+  );
   const first = projectWorkflow(doc(parallel({ kind: 'first', when: signal('work') })));
   assert.match(byOwner(first, 'parallel', 'join').label, /First matching branch/);
   assert.match(byOwner(first, 'parallel', 'join').detail ?? '', /without a matching branch/);

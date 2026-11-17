@@ -166,7 +166,7 @@ async fn race_probes_do_not_leak_a_losing_terminal_path_or_duplicate_winners() {
 }
 
 #[tokio::test]
-async fn terminal_parallel_branches_remain_visible_when_the_group_continues() {
+async fn terminal_parallel_selection_traces_only_the_winning_branch() {
     let graph = observed_graph(sequence("root", vec![
         verifier("check",1),
         json!({"kind":"par","name":"parallel","state":{"kind":"record","fields":{}},"branches":[route("left_route",accepted("check"),succeed("left_end"),step("left",1)),route("right_route",accepted("check"),json!({"kind":"fail","name":"right_end","reason":"declined"}),step("right",1))],"promotedStatePaths":[],"join":{"kind":"all"}}),
@@ -194,14 +194,15 @@ async fn terminal_parallel_branches_remain_visible_when_the_group_continues() {
             .filter(|record| record.node.as_str() == "right_end"
                 && record.state == StructuralTraceState::Failed)
             .count(),
-        1
+        0
     );
     assert!(
-        observed
+        !observed
             .iter()
             .any(|record| record.node.as_str() == "parallel"
                 && record.detail.as_deref() == Some("quorum_unreachable"))
     );
+    assert!(!observed.iter().any(|record| record.node.as_str() == "done"));
 }
 
 #[tokio::test]

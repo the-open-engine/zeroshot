@@ -22,6 +22,40 @@ use support::*;
 mod continuity;
 
 #[test]
+fn built_in_templates_have_no_terminals_inside_parallel_branches() {
+    for template in BuiltinGraphTemplate::all() {
+        for delivery in [
+            TemplateDelivery::None,
+            TemplateDelivery::Push,
+            TemplateDelivery::PullRequest,
+            TemplateDelivery::Merge,
+            TemplateDelivery::Comment,
+        ] {
+            let graph = match template.materialize(delivery) {
+                Ok(graph) => graph,
+                Err(BuiltinTemplateError::UnsupportedDelivery { .. }) => continue,
+                Err(error) => panic!("invalid built-in template: {error}"),
+            };
+            for node in all_nodes(&graph.root) {
+                if let GraphNode::Par(group) = node {
+                    for branch in group.branches.as_slice() {
+                        assert!(
+                            all_nodes(branch).iter().all(|node| !matches!(
+                                node,
+                                GraphNode::Succeed(_) | GraphNode::Fail(_)
+                            )),
+                            "{} ({delivery}) has a terminal in {}",
+                            template.name(),
+                            group.name
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn catalog_and_template_inputs_are_closed() {
     assert_eq!(
         BuiltinGraphTemplate::all(),

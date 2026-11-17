@@ -54,8 +54,8 @@ Normal-success continuation requires every branch for `all`, one branch for `any
 size-`count` completing branch set. A set is valid only when its branch-completion predicates are
 jointly satisfiable under one legal control assignment; branches guarded by mutually exclusive
 outcomes never fabricate a completion set. Quorum one behaves as alternatives, while quorum over
-every branch carries the same completion guarantees as `all`. For `all`, `any`, and `quorum`,
-`joined=reached|quorum_unreachable` is correlated with that required-completion predicate;
+every branch carries the same completion guarantees as `all`. For `all`, `any`, and `quorum`, the
+verifier conservatively correlates `joined=reached|quorum_unreachable` with that required-completion predicate;
 assignments combining `reached` with an unsatisfied predicate or `quorum_unreachable` with a
 satisfied predicate are not legal control assignments. Inside a map, this correlation is applied
 to each item's joint join/branch-control outcome before `k_of_map` aggregates label counts.
@@ -69,9 +69,15 @@ It does not simulate future writes, map sizes, choice routes, convergence, or al
 An unfinished loop's current-round controls cannot establish a final result; completed loops expose
 only their final-round facts. Missing foreign controls remain unknown, including beneath negation.
 
-A satisfied join cancels or voids remaining active and queued losers through confirmed cleanup.
-When actual settled outcomes leave too few contributors, `first` reports `no_satisfier` and other
-joins report `quorum_unreachable`. Unstarted losers cannot cause a work-limit failure. Each next
+A branch that reaches `fail` or `succeed` before join satisfaction ends the run with that terminal's
+reason or output, including through nested groups, maps and loops. Recorded history orders the
+terminal against join satisfaction: an earlier satisfied join continues and discards slower
+branches' terminals. The earliest terminal wins; canonical branch order breaks ties between
+terminals, and a terminal tied with join satisfaction wins.
+A terminal or a satisfied join cancels or voids remaining active and queued losers through confirmed
+cleanup. When every candidate settles without satisfying `first`, it reports `no_satisfier`.
+For `all`, `any` and `quorum`, `joined=quorum_unreachable` remains in the contract but no longer
+occurs: a noncompleting branch ends the run instead. Unstarted losers cannot cause a work-limit failure. Each next
 actual executable visit or loop-body entry checks its own 65,536-unit ceiling before consuming it;
 queued work spends neither attempts nor timeout. Static graph validation separately preserves
 signal/error exclusivity and sound correlated aggregate proofs without consulting runtime history.

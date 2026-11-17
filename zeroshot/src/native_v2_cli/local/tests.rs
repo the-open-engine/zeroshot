@@ -188,7 +188,6 @@ fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     }
 }
 
-#[cfg(unix)]
 fn initialize_local_repository(root: &Path) {
     fn git(root: &Path, arguments: &[&str]) {
         let status = std::process::Command::new("git")
