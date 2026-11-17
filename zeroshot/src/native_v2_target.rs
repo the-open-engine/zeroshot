@@ -115,10 +115,10 @@ pub enum TargetConnectorError {
     RegistryPath(&'static str),
     #[error("target registry I/O failed: {0}")]
     RegistryIo(#[source] std::io::Error),
-    #[error("target registry is malformed: {0}")]
-    RegistryJson(#[source] serde_json::Error),
-    #[error("target registry exceeds 1 MiB")]
-    RegistryTooLarge,
+    #[error("target registry {path} is malformed: {1}", path = .0.display())]
+    RegistryJson(std::path::PathBuf, #[source] serde_json::Error),
+    #[error("target registry {path} exceeds 1 MiB", path = .0.display())]
+    RegistryTooLarge(std::path::PathBuf),
     #[error("local workspace-recovery authorization is unavailable")]
     RecoveryAuthorizationUnavailable,
     #[error("workspace-recovery connection requirements do not match the original run")]
