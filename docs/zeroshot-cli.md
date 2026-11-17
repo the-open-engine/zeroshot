@@ -151,15 +151,51 @@ The built-in `platform` target points to https://api.app.zeroshot.sh. Run `zeros
 Usage: zeroshot target <COMMAND>
 
 Commands:
-  add    Register a named target
-  login  Authenticate with a hosted named target
-  sizes  List the target's offered size identifiers and descriptions
-  serve  Serve an unauthenticated direct target
-  help   Print this message or the help of the given subcommand(s)
+  list    List local target names, origins and access kinds without login data
+  remove  Remove a local target, its stored login and resume permissions
+  add     Register a named target
+  login   Authenticate with a hosted named target
+  sizes   List the target's offered size identifiers and descriptions
+  serve   Serve an unauthenticated direct target
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
           Print help (see a summary with '-h')
+```
+
+#### `zeroshot target list`
+
+```text
+List local target names, origins and access kinds without login data
+
+Usage: zeroshot target list [OPTIONS]
+
+Options:
+      --json
+          Emit the target inventory as JSON
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot target remove`
+
+```text
+Remove a local target, its stored login and resume permissions
+
+Usage: zeroshot target remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Local target name. The built-in platform target cannot be removed
+
+Options:
+      --json
+          Emit the removal receipt as JSON
+
+  -h, --help
+          Print help
 ```
 
 #### `zeroshot target add`
@@ -261,11 +297,13 @@ Print this message or the help of the given subcommand(s)
 Usage: zeroshot target help [COMMAND]
 
 Commands:
-  add    Register a named target
-  login  Authenticate with a hosted named target
-  sizes  List the target's offered size identifiers and descriptions
-  serve  Serve an unauthenticated direct target
-  help   Print this message or the help of the given subcommand(s)
+  list    List local target names, origins and access kinds without login data
+  remove  Remove a local target, its stored login and resume permissions
+  add     Register a named target
+  login   Authenticate with a hosted named target
+  sizes   List the target's offered size identifiers and descriptions
+  serve   Serve an unauthenticated direct target
+  help    Print this message or the help of the given subcommand(s)
 ```
 
 ### `zeroshot delegation`

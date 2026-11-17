@@ -111,6 +111,31 @@ async fn execute_management<B: NativeV2CliBackend, W: Write>(
         return profiles::execute_profile(command, backend, output).await;
     }
     match command {
+        NativeV2CliCommand::TargetList { json } => {
+            let targets = backend.target_list().await?;
+            if json {
+                write_json(output, &targets)?;
+            } else {
+                writeln!(output, "Name\tKind\tOrigin")?;
+                for target in targets {
+                    let kind = match target.kind {
+                        super::NamedTargetKind::Hosted => "hosted",
+                        super::NamedTargetKind::Direct => "direct",
+                    };
+                    writeln!(output, "{}\t{kind}\t{}", target.name, target.origin)?;
+                }
+            }
+            Ok(CliOutcome::Completed)
+        }
+        NativeV2CliCommand::TargetRemove { name, json } => {
+            let receipt = backend.target_remove(&name).await?;
+            if json {
+                write_json(output, &receipt)?;
+            } else {
+                writeln!(output, "Removed target {:?}.", receipt.name)?;
+            }
+            Ok(CliOutcome::Completed)
+        }
         NativeV2CliCommand::Delegation(command) => {
             write_json(output, &backend.delegation(command).await?)?;
             Ok(CliOutcome::Completed)

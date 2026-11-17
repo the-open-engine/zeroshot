@@ -56,6 +56,30 @@ Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspac
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 `run()` submits once and waits; `submit()` returns a durable `Run` handle immediately.
 
+## Manage named targets
+
+`Client.list_targets()` returns a tuple of typed `NamedTarget` records with `name`, `origin` and
+`kind` (`hosted` or `direct`), including the built-in `platform` target. It shares the local
+registry used by `zeroshot target list` and returns no login data. These operations use the user's
+local registry independently of the client's selected run target, and do not contact a target.
+
+```python
+from zeroshot import Client
+
+
+async def remove_old_target() -> None:
+    async with Client() as client:
+        for target in await client.list_targets():
+            print(target.name, target.origin, target.kind)
+        receipt = await client.remove_target("old-target")
+        print(receipt.name, receipt.removed)
+```
+
+`remove_target()` returns `TargetRemoveResult` after deleting the registration, stored login and
+saved resume permissions. It raises `InvalidRequestError` for `platform` or an unknown name.
+Removal does not stop remote runs. Configure replacements with `zeroshot target add` and, for hosted
+targets, `zeroshot target login`.
+
 ## Use a local Git worktree
 
 Pass `worktree=True` to `run()` or `submit()` to create a retained Git worktree on a managed run
