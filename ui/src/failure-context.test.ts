@@ -26,6 +26,16 @@ test('native optional failure fields use their defaults through validation and r
   );
 });
 
+test('unhandled worker cause is visible as the primary failure', () => {
+  const context = { primary: { message: 'Node worker failed with unhandled error: crash' } };
+  validateFailureContext(context, 'v2:9');
+  const markup = renderToStaticMarkup(
+    createElement(RunFailureDetails, { context, openLog: () => {}, hasLog: () => false })
+  );
+  assert.match(markup, /Failure<\/h3>/);
+  assert.match(markup, /worker.*unhandled.*crash/);
+});
+
 test('verifier evidence renders literal graph names, nested paths, loop rounds and retained cursors', () => {
   const context = {
     verifiers: [

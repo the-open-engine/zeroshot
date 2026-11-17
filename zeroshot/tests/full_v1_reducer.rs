@@ -442,5 +442,8 @@ async fn repeated_race_does_not_revisit_or_cancel_a_later_rounds_first_execution
 #[path = "full_v1_reducer/replay_windows.rs"]
 mod replay_windows;
 
+#[path = "full_v1_reducer/unhandled.rs"]
+mod unhandled;
+
 #[path = "full_v1_reducer/parallel_terminals.rs"]
 mod parallel_terminals;
