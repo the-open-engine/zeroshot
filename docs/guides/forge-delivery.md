@@ -189,8 +189,8 @@ Resume starts with fresh rejection memory. Once the cause is removed,
 `zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` to retry the retained candidate without
 another agent round. Local checkpoint restores also require `--discard-workspace-changes`, which
 replaces current files and the index; preserve any later edits first. A plain `zeroshot resume RUN_ID`
-restarts the graph and can run workers and reviewers again before delivery, potentially changing
-the candidate.
+restarts from that run's entry point and can run workers and reviewers again before delivery,
+potentially changing the candidate.
 
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
