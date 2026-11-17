@@ -25,8 +25,6 @@ mod preflight_tests;
 
 #[path = "input_size_tests.rs"]
 mod input_size_tests;
-#[path = "startup_tests.rs"]
-mod startup_tests;
 
 fn contract_backend(root: &Path) -> LocalCliBackend {
     LocalCliBackend::new(
@@ -1474,3 +1472,6 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
     child.kill().await.assert_value();
     child.wait().await.assert_value();
 }
+
+#[path = "startup_tests.rs"]
+mod startup_tests;
