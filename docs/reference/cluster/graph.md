@@ -333,12 +333,19 @@ fixed set of states independent of input length.
 The verifier decides each condition by search, not by listing every combination of how the nodes
 it depends on can end. A check reads only the controls that its condition and their join, loop and
 map rules mention. Labels a check cannot tell apart count as one, and controls no rule connects add
-to the work instead of multiplying it, so another reviewer or signal costs its own size. Inside one
-map, a check still lists the joint outcomes of one item that it reads and folds them into saturated
-counts: at most 65,536 distinct count states per map. One check may take 1,048,576 search steps, a
-backstop far above authored graphs that checks do not share. A check that passes either bound
-reports `ceiling_exceeded` at the choice, join or guard it was deciding; there is no user budget or
-timeout setting.
+to the work instead of multiplying it, so another reviewer or signal costs its own size.
+
+Inside one map, the parts of an item that no rule ties together are folded into saturated counts
+separately and meet only in the number of items, so a guard that reads several independent
+reviewers of one map also costs the sum of their sizes. What a rule does tie together is still
+listed jointly, for example the branches of an `any`, `quorum` or `first` join, and so are the
+items of a map nested in another map's item. A part whose states depend on the exact number of
+items for more than 64 items is folded with the rest of its item. Each part may have at most
+65,536 distinct count states.
+
+One check may take 1,048,576 search steps, a backstop far above authored graphs that checks do
+not share. A check that passes either bound reports `ceiling_exceeded` at the choice, join or
+guard it was deciding; there is no user budget or timeout setting.
 
 Graph-bearing JSON decoding first checks a fixed 512-container envelope for structural arrays,
 payload nesting and transport wrappers. The graph verifier separately checks authored depth 64.
