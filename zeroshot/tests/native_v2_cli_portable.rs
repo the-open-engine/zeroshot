@@ -65,6 +65,9 @@ fn connection_store_errors_name_file_and_location_without_secret_values() {
     assert!(!fixture.workspace.join("mutation.txt").exists());
 }
 
+#[path = "native_v2_cli_portable/tool_activity_tests.rs"]
+mod tool_activity_tests;
+
 #[cfg(unix)]
 #[path = "native_v2_cli_portable/unix_controller_tests.rs"]
 mod unix_controller;
@@ -281,6 +284,3 @@ fn process_exists(pid: u32) -> bool {
         pending
     }
 }
-
-#[path = "native_v2_cli_portable/tool_activity_tests.rs"]
-mod tool_activity_tests;
