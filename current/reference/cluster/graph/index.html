@@ -2481,7 +2481,7 @@ object declares peer communication permissions; omission or <code>{}</code> gran
 </tr>
 <tr>
 <td><code>fail</code></td>
-<td>Finite-enum reason; <code>unhandled</code> is reserved for a future compiler's implicit sink</td>
+<td>Finite-enum reason; <code>unhandled</code> is reserved for runtime handling of unchecked worker errors</td>
 </tr>
 </tbody>
 </table>
@@ -2493,8 +2493,16 @@ completion or cancellation. On a request verifier (<code>builtin.request.ask@1</
 request deadline from creation: omission means 7 days, with a maximum of 30 days. Other explicit
 node deadlines accept the <code>PositiveInteger</code> wire range.
 Built-in graphs omit deadlines for every node; provider processes have no separate execution
-deadline. Custom graphs may still declare a node deadline.
-Normal-success continuation requires every branch for <code>all</code>, one branch for <code>any</code>/<code>first</code>, and
+deadline. Custom graphs may still declare a node deadline.</p>
+<p>After a step or verifier uses its crash retry attempts, a final worker error ends its path as a
+<code>fail</code> with reason <code>unhandled</code> unless a guard anywhere in the graph reads that node's <code>error</code>
+selector. The failure context names the node and error code. Error reads in a choice condition,
+loop <code>until</code>, or <code>first</code> join <code>when</code> count, including selectors inside <code>all</code>, <code>any</code>, <code>not</code>,
+<code>k_of_n</code>, and <code>k_of_map</code>. This is a graph-wide rule: the guard need not execute or match the
+particular error label. A node with an error read retains authored routing, and an optional step
+can use such a guard to continue after errors. There is no additional graph field or validation
+requirement. Like an authored <code>fail</code>, propagation follows the enclosing group's terminal semantics.</p>
+<p>Normal-success continuation requires every branch for <code>all</code>, one branch for <code>any</code>/<code>first</code>, and
 <code>count</code> branches for <code>quorum</code>. Quorum flow and promotion guarantees range over every valid
 size-<code>count</code> completing branch set. A set is valid only when its branch-completion predicates are
 jointly satisfiable under one legal control assignment; branches guarded by mutually exclusive
