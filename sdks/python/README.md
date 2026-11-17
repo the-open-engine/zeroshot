@@ -218,3 +218,12 @@ An SDK release tag is `zeroshot-python-vZEROSHOT_SDK`, for example
 `zeroshot-python-v8.0.0_1`; its PEP 440 package version is `8.0.0.post1`. Revision `1` is released
 automatically after the corresponding Zeroshot release. Later SDK-only revisions may be released
 independently against the same immutable Zeroshot release.
+
+## Standing direction
+
+`steer = await run.steer("Prioritize the parser regression.")` records standing direction without
+continuing a suspended run. `RunStatus.steers` exposes excerpts and confirmed receiving executions;
+`omitted_steers` reports the bounded listing's omissions. Each agent conversation receives a steer
+at its next tool call or prompt. `await run.vector(steer.id)` reads its full text, and
+`await run.vectors()` includes `steer` and `steer_receipt` entries. Direction is limited to 262,144
+UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error types report refusals.

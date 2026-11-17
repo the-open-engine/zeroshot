@@ -151,6 +151,17 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .ok_or_else(|| authority_error("target does not advertise run sizes"))
     }
 
+    async fn forget(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {
+        if matches!(target.access, TargetAccess::Direct) {
+            return Ok(());
+        }
+        let mut cached = self.hosted_access.lock().await;
+        let _refresh_guard = self.lock_refresh_family(&target.id).await?;
+        self.credentials.remove(&target.id).await?;
+        *cached = None;
+        Ok(())
+    }
+
     async fn login(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {
         self.require_human_credential()?;
         let device_token = target
@@ -260,6 +271,21 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             target.access.authentication(),
         )?;
         super::require_session_capability(&descriptor, super::TargetSessionPurpose::RequestAsk)
+    }
+
+    async fn steering_session(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        let access = self
+            .controller_access_inner(
+                target,
+                super::TargetSessionPurpose::Steering,
+                super::RequestCapabilities::default(),
+            )
+            .await?;
+        self.issue_oecp_session(target, request, access).await
     }
 
     async fn run_suspension_session(

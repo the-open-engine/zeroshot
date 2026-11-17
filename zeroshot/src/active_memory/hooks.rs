@@ -1,10 +1,11 @@
-//! Native harness bridges for deterministic, run-owned Active Memory retrieval.
+//! Native harness bridges for run-owned memory and steering delivery.
 //!
-//! Only a private, run-scoped capability crosses into a harness. Matching remains in the
-//! controller's resident index; hooks never receive the persistent store or provider credentials.
+//! Only a private, run-scoped capability crosses into a harness. Memory matching uses the
+//! resident index; steering uses the run record. Hooks receive neither store nor credentials.
 
 mod broker;
-mod native;
+pub(crate) mod native;
+mod steering;
 #[cfg(test)]
 mod tests;
 
@@ -30,11 +31,35 @@ pub struct HookQuery {
     pub tool_name: String,
     pub tool_input: Value,
     pub cwd: PathBuf,
+    /// A native subagent's tool call; its returned context never reaches this conversation.
+    pub subagent: bool,
+    /// Steers join this tool call's context only while the whole of it stays within this bound.
+    pub context_budget: usize,
+    /// Whether a steer delivered at this tool call stands in the conversation afterwards. It does
+    /// not where the provider writes no hook context to its session (Copilot) or shows the text
+    /// inside a tool result, which a model may refuse as untrusted (Pi, OpenCode). Such a steer
+    /// also goes into the conversation's next prompt.
+    pub standing: bool,
+}
+
+/// Complete callback context and the steers awaiting a carrier acknowledgement.
+#[derive(Default)]
+pub struct HookDelivery {
+    pub context: String,
+    pub steers: Vec<openengine_cluster_protocol::VectorId>,
 }
 
 /// The host owns the immutable index, relevance budget, session deduplication and supplied receipts.
 /// Returned strings must contain complete cards and stay within the configured context budget.
 pub trait ActiveMemorySource: Send + Sync {
+    fn tool_delivery(&self, query: &HookQuery) -> HookDelivery {
+        HookDelivery {
+            context: self.tool_context(query),
+            steers: Vec::new(),
+        }
+    }
+    fn acknowledged(&self, _query: &HookQuery, _delivery: &HookDelivery) {}
+
     fn tool_context(&self, query: &HookQuery) -> String;
     fn graph_context(&self, node_id: &str, session_key: &str) -> String;
     fn unavailable(&self, _reason: &str) {}
@@ -42,19 +67,80 @@ pub trait ActiveMemorySource: Send + Sync {
 
 /// Shared by all effective runtime lanes in one run. Dropping it closes the callback listener.
 pub struct ActiveMemoryHooks {
-    source: Arc<dyn ActiveMemorySource>,
+    source: Arc<steering::DeliverySource>,
     broker: broker::Broker,
 }
 
 pub(crate) struct HookInstallation<'a> {
     pub invocation: &'a DriverInvocation,
     pub home: &'a Path,
+    /// A carrier that shows less than the shared maximum inline; `None` keeps that maximum.
+    pub context_budget: Option<usize>,
+    /// See `HookQuery::standing`.
+    pub standing: bool,
 }
 
 impl ActiveMemoryHooks {
+    pub(crate) fn empty() -> io::Result<Self> {
+        Self::new(Arc::new(steering::EmptySource))
+    }
+    pub(crate) fn bind_ledger(
+        &self,
+        run: openengine_cluster_protocol::RunId,
+        ledger: Arc<dyn crate::v2_run_ledger::RunLedger>,
+    ) {
+        self.source.bind(run, ledger);
+    }
+    pub(crate) fn restore_steers(
+        &self,
+        instance: u64,
+        receipts: crate::native_v2_runner::conversations::SteeringReceipts,
+    ) {
+        self.source.restore(instance, receipts);
+    }
+    pub(crate) fn capture_steers(
+        &self,
+    ) -> std::collections::BTreeMap<
+        crate::native_v2_contract::NodeInstanceId,
+        crate::native_v2_runner::conversations::SteeringReceipts,
+    > {
+        self.source.capture()
+    }
+    pub(crate) async fn prepare_steers(
+        &self,
+        invocation: &mut DriverInvocation,
+        continued: bool,
+    ) -> Option<u64> {
+        if auxiliary_invocation(invocation) {
+            return None;
+        }
+        self.source.prepare(invocation, continued).await
+    }
+    /// Settles an execution or releases unconfirmed prompt offers before a native retry.
+    pub(crate) async fn finish_steers(&self, execution: u64, success: bool) {
+        self.broker.retire(execution);
+        self.source.finish(execution, success).await;
+    }
+    pub(crate) async fn steer_prompt(
+        &self,
+        invocation: &DriverInvocation,
+        control: &crate::native_v2_runner::DriverControl,
+        prompt: String,
+    ) -> String {
+        let mut supplemental = invocation.clone();
+        supplemental.host_context = None;
+        self.prepare_steers(&mut supplemental, control.is_restored_conversation())
+            .await;
+        match supplemental.host_context {
+            Some(context) => DriverInvocation::prepend_host_context(prompt, &context),
+            None => prompt,
+        }
+    }
+
     pub fn new(source: Arc<dyn ActiveMemorySource>) -> io::Result<Self> {
+        let source = Arc::new(steering::DeliverySource::new(source));
         Ok(Self {
-            broker: broker::Broker::new(Arc::clone(&source))?,
+            broker: broker::Broker::new(source.clone())?,
             source,
         })
     }
@@ -94,7 +180,15 @@ impl ActiveMemoryHooks {
                 installation.home,
             )
             .and_then(|capability| match capability {
-                Some(path) => install(command, &path),
+                Some(path) => {
+                    if let Some(budget) = installation.context_budget {
+                        self.broker.bound(installation.invocation, budget);
+                    }
+                    if !installation.standing {
+                        self.broker.shown_only(installation.invocation);
+                    }
+                    install(command, &path)
+                }
                 None => Ok(()),
             });
         if result.is_err() {
@@ -132,6 +226,7 @@ impl ActiveMemoryHooks {
         );
     }
 
+    #[cfg(test)]
     pub(crate) fn tool_context(
         &self,
         invocation: &DriverInvocation,
@@ -141,9 +236,35 @@ impl ActiveMemoryHooks {
         if auxiliary_invocation(invocation) {
             return String::new();
         }
-        let scope = broker::HookScope::new(invocation, workspace);
-        let query = scope.query(input);
+        let query = broker::HookScope::new(invocation, workspace).query(input);
         native::bounded_context(self.source.tool_context(&query))
+    }
+
+    pub(crate) async fn tool_delivery(
+        &self,
+        invocation: &DriverInvocation,
+        input: &Value,
+        workspace: &Path,
+    ) -> (HookQuery, HookDelivery) {
+        let query = broker::HookScope::new(invocation, workspace).query(input);
+        let delivery = if auxiliary_invocation(invocation) {
+            HookDelivery::default()
+        } else {
+            self.source.delivery(&query).await
+        };
+        (query, delivery)
+    }
+    /// Acknowledges a delivery made in process. `standing` is `HookQuery::standing` for the
+    /// carrier that made it.
+    pub(crate) async fn acknowledge(
+        &self,
+        query: &HookQuery,
+        delivery: &HookDelivery,
+        standing: bool,
+    ) {
+        let mut query = query.clone();
+        query.standing = standing;
+        self.source.receipt(&query, delivery).await;
     }
 }
 

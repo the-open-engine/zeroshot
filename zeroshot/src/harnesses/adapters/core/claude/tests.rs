@@ -54,6 +54,22 @@ use crate::native_v2_runner::{
 };
 use crate::worker_catalog::{self, ReasoningEffort};
 
+fn assert_tool_delivery(prompt: &str) {
+    assert!(prompt.contains(concat!(
+        "Submit the final answer exactly once using the session-provided ",
+        "StructuredOutput tool."
+    )));
+    assert!(prompt.contains("Do not also write the final answer as a text message."));
+    for conflict in [
+        "Return only JSON",
+        "Return a corrected provider response only",
+        "Start the reply with the opening brace",
+        "The reply began with text",
+    ] {
+        assert!(!prompt.contains(conflict), "{conflict}");
+    }
+}
+
 fn adapter_configuration(
     provider: ClaudeProvider,
     executable: &str,
@@ -310,7 +326,7 @@ async fn runner(
         TestRunnerConfig {
             provider,
             binding,
-            verifier,
+            graph: graph(verifier),
             command: TestProviderCommand {
                 executable: "/bin/sh".to_owned(),
                 prefix_arguments: vec![
@@ -336,7 +352,7 @@ struct TestProviderCommand {
 struct TestRunnerConfig {
     provider: ClaudeProvider,
     binding: NodeRuntimeBinding,
-    verifier: bool,
+    graph: GraphSpec,
     command: TestProviderCommand,
 }
 
@@ -344,6 +360,14 @@ async fn admitted_claude(
     provider: ClaudeProvider,
     binding: NodeRuntimeBinding,
     verifier: bool,
+) -> crate::native_v2_contract::AdmittedRun {
+    admitted_claude_graph(provider, binding, graph(verifier)).await
+}
+
+async fn admitted_claude_graph(
+    provider: ClaudeProvider,
+    binding: NodeRuntimeBinding,
+    graph: GraphSpec,
 ) -> crate::native_v2_contract::AdmittedRun {
     let runtime = RuntimePlan::new(
         openengine_cluster_protocol::RuntimeLane::new("claude", (provider).name()).assert_value(),
@@ -353,7 +377,7 @@ async fn admitted_claude(
     admit(RunSubmission {
         environment: None,
         title: RunTitle::new("Claude adapter test").assert_value(),
-        graph: graph(verifier),
+        graph,
         initial_input: Value::Null,
         runtime,
         source: serde_json::from_value(json!({
@@ -374,10 +398,10 @@ async fn runner_with_command(
     let TestRunnerConfig {
         provider,
         binding,
-        verifier,
+        graph,
         command,
     } = configuration;
-    let admitted = admitted_claude(provider, binding, verifier).await;
+    let admitted = admitted_claude_graph(provider, binding, graph).await;
     let mut base_environment = BTreeMap::from([
         (
             "HOME".to_owned(),
@@ -711,6 +735,7 @@ printf '%s%s%s%s\n' \
             .contains("Runtime-owned verifier guidance:")
     );
     assert_eq!(workspace.read("verifier.context"), "verifier\n0\n");
+    assert_tool_delivery(&workspace.read("verifier.prompt"));
     let arguments = workspace.read("verifier.args");
     assert!(!arguments.contains("--permission-mode"));
     assert!(!arguments.contains("--tools"));

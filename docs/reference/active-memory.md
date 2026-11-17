@@ -245,3 +245,9 @@ Its snapshot and publication operations carry run identity; the backend must der
 accepted run's tenant, repository and graph scope independently of request fields. SQLite implements
 the same interface for local and direct-target runs. Hosts must return complete bounded snapshots;
 failed or partial reads must never masquerade as an empty lesson set.
+
+The native tool-call carrier is installed for every agent conversation, including when Active
+Memory is off, so it can deliver standing [steers](../guides/observe-and-control.md#steer-a-run).
+Memory off still leaves its database unopened. Steers come from the run vector record and precede
+memory cards. They are delivered whole and do not count against `nodeInjectionTokens` or
+`hookInjectionTokens`; memory card selection keeps its own limits.

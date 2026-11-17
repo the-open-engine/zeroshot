@@ -125,8 +125,12 @@ impl HermesAdapter {
         )
         .await?
         .map_err(connection::process_error)?;
-        let mut connection =
-            connection::HermesConnection::new(process.detach_stdout(), control, redactions.clone());
+        let mut connection = connection::HermesConnection::new(
+            process.detach_stdout(),
+            control,
+            redactions.clone(),
+            self.active_memory.as_deref(),
+        );
         let result = connection.execute(&process, invocation, init).await;
         let result = connection
             .finish(&mut process, kill, result)

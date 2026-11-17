@@ -110,6 +110,13 @@ where
         self.backend().run_force(self.context(), params).await
     }
 
+    pub async fn run_steer(
+        &self,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
+        self.backend().run_steer(self.context(), params).await
+    }
+
     pub async fn run_suspend(
         &self,
         params: openengine_cluster_protocol::RunSuspendParams,

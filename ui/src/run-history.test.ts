@@ -9,6 +9,8 @@ import {
   invocationLabel,
   observedRoutes,
   projectHistory,
+  requestStanding,
+  suspensionStatus,
   type HistoryEvent,
   type Outcome,
   type Reference,
@@ -640,4 +642,326 @@ test('request suspension retains the question and pending execution without a co
   const projection = projectHistory(doc, history, history.length - 1);
   assert.equal(projection.invocations[0].state, 'suspended');
   assert.equal(projection.invocations[0].outcome, undefined);
+});
+
+test('a continued run carries earlier work over and settles the question a person answered', () => {
+  const approval: GraphNode = {
+    name: 'approval',
+    kind: 'verifier',
+    worker: 'builtin.request.ask@1',
+  };
+  const doc = document(sequence('run', step('implement'), approval, step('ship')));
+  const question = {
+    kind: 'request',
+    id: 'q1',
+    runId: 'first-run',
+    createdAt: 1_000,
+    node: 'approval',
+    text: 'Approve these changes?',
+    signals: { decision: ['approved', 'rejected'] },
+    output: { kind: 'record', fields: {} },
+    expiresAt: 900_000,
+  };
+  const held = ref('approval', '2', '2');
+  const history = events(
+    {
+      kind: 'prior_execution',
+      execution: {
+        execution: '1',
+        node_instance: '1',
+        occurrence: { node: 'implement', mapIndices: [] },
+        attempt: 1,
+        input: null,
+        state: { Settled: { outcome: { status: 'verified', output: { done: true } } } },
+      },
+    } as unknown as HistoryEvent['event'],
+    {
+      kind: 'prior_execution',
+      execution: {
+        execution: '2',
+        node_instance: '2',
+        occurrence: { node: 'approval', mapIndices: [] },
+        attempt: 1,
+        input: { text: 'Approve these changes?' },
+        state: 'Active',
+      },
+    } as unknown as HistoryEvent['event'],
+    { kind: 'vector', vector: question },
+    {
+      kind: 'vector',
+      vector: { kind: 'continuation', id: 'c1', createdAt: 8_000, resumedFrom: 'first-run' },
+    },
+    {
+      kind: 'vector',
+      vector: {
+        kind: 'answer',
+        id: 'a1',
+        runId: 'second-run',
+        createdAt: 7_000,
+        requestId: 'q1',
+        answer: { signals: { decision: 'approved' }, output: {} },
+      },
+    },
+    complete(
+      { ...held, runId: 'second-run' },
+      {
+        status: 'verifier',
+        signals: { decision: 'approved' },
+        output: {},
+      }
+    ),
+    start(ref('ship', '3', '3'))
+  );
+  const projection = projectHistory(doc, history, history.length - 1);
+  const [implement, ask, ship] = projection.invocations;
+  assert.equal(implement.imported, true);
+  assert.equal(implement.state, 'succeeded');
+  assert.equal(ask.imported, true);
+  assert.equal(ask.state, 'succeeded');
+  assert.deepEqual(ask.outcome?.signals, { decision: 'approved' });
+  assert.equal(ask.request?.text, 'Approve these changes?');
+  assert.deepEqual(ask.request?.resolution, {
+    kind: 'answer',
+    signals: { decision: 'approved' },
+    output: {},
+    at: 7_000,
+    runId: 'second-run',
+  });
+  assert.equal(ship.state, 'running');
+  // Carried-over work is context, not a replay stop of its own.
+  assert.equal(
+    historyMoments(history).some((moment) => moment.label.includes('carried over')),
+    false
+  );
+});
+
+test('a paused run keeps the pending question on the execution that asked it', () => {
+  const approval: GraphNode = { name: 'worker', kind: 'verifier', worker: 'builtin.request.ask@1' };
+  const doc = document(sequence('run', approval));
+  const history = events(
+    start(),
+    { kind: 'request_deferred', reference: ref() },
+    {
+      kind: 'suspended',
+      suspension: {
+        reason: 'request',
+        node: 'worker',
+        createdAt: 1000,
+        request: {
+          id: 'question',
+          text: 'Approve?',
+          signals: { decision: ['approved', 'rejected'] },
+          output: { kind: 'record', fields: {} },
+          expiresAt: 2000,
+        },
+      },
+    }
+  );
+  const projection = projectHistory(doc, history, history.length - 1);
+  const [ask] = projection.invocations;
+  assert.equal(projection.nodes.worker.detail, '“Approve?”');
+  assert.equal(ask.state, 'suspended');
+  assert.equal(ask.request?.text, 'Approve?');
+  assert.equal(ask.request?.createdAt, 1000);
+  assert.equal(ask.request?.resolution, undefined);
+});
+
+test('a question belongs to the execution that asked, not the first run of its node', () => {
+  const approval: GraphNode = { name: 'worker', kind: 'verifier', worker: 'builtin.request.ask@1' };
+  const doc = document(sequence('run', approval));
+  const asked = (id: string, text: string): HistoryEvent['event'] => ({
+    kind: 'vector',
+    vector: {
+      kind: 'request',
+      id,
+      runId: 'test-run',
+      createdAt: 1000,
+      node: 'worker',
+      text,
+      signals: { decision: ['approved', 'rejected'] },
+      output: { kind: 'record', fields: {} },
+      expiresAt: 2000,
+    },
+  });
+  const history = events(
+    // The first attempt is voided before it asks; its retry asks.
+    start(ref('worker', '1', '1')),
+    { kind: 'execution_voided', reference: ref('worker', '1', '1'), reason: 'interrupted' },
+    start(ref('worker', '2', '1'), 2),
+    { kind: 'request_deferred', reference: ref('worker', '2', '1') },
+    asked('question', 'Approve?')
+  );
+  const projection = projectHistory(doc, history, history.length - 1);
+  const [voided, retry] = projection.invocations;
+  assert.equal(voided.request, undefined);
+  assert.equal(retry.request?.text, 'Approve?');
+  assert.equal(projection.nodes.worker.detail, '“Approve?”');
+});
+
+test('a carried-over held request waits until this run settles it', () => {
+  const approval: GraphNode = { name: 'worker', kind: 'verifier', worker: 'builtin.request.ask@1' };
+  const doc = document(sequence('run', approval));
+  const history = events({
+    kind: 'prior_execution',
+    execution: {
+      execution: '1',
+      node_instance: '1',
+      occurrence: { node: 'worker', mapIndices: [] },
+      attempt: 1,
+      input: { text: 'Approve?' },
+      state: 'Active',
+    },
+  } as unknown as HistoryEvent['event']);
+  const [held] = projectHistory(doc, history, 0).invocations;
+  assert.equal(held.imported, true);
+  assert.equal(held.state, 'suspended');
+});
+
+test('a stopped run no longer shows its unanswered question as pending', () => {
+  const approval: GraphNode = { name: 'worker', kind: 'verifier', worker: 'builtin.request.ask@1' };
+  const doc = document(sequence('run', approval));
+  const history = events(
+    start(),
+    { kind: 'request_deferred', reference: ref() },
+    {
+      kind: 'vector',
+      vector: {
+        kind: 'request',
+        id: 'question',
+        node: 'worker',
+        text: 'Approve?',
+        signals: {},
+        output: { kind: 'record', fields: {} },
+        expiresAt: 2000,
+      },
+    },
+    { kind: 'terminal', result: { status: 'stopped' } } as unknown as HistoryEvent['event']
+  );
+  assert.equal(projectHistory(doc, history, 2).nodes.worker.detail, '“Approve?”');
+  const projection = projectHistory(doc, history, history.length - 1);
+  assert.equal(projection.invocations[0].request?.text, 'Approve?');
+  assert.equal(projection.nodes.worker.detail, undefined);
+  // The card no longer reads as waiting: the step was stopped with the run.
+  assert.equal(projectHistory(doc, history, 2).nodes.worker.state, 'suspended');
+  assert.equal(projection.nodes.worker.state, 'skipped');
+});
+
+test('inherited questions recorded before their executions still find them', () => {
+  // A continued run's ledger lists inherited vectors first, then the carried-over executions.
+  const approval: GraphNode = {
+    name: 'approval',
+    kind: 'verifier',
+    worker: 'builtin.request.ask@1',
+  };
+  const doc = document(sequence('run', approval));
+  const question = (id: string, text: string): HistoryEvent['event'] => ({
+    kind: 'vector',
+    vector: {
+      kind: 'request',
+      id,
+      runId: 'first-run',
+      createdAt: 1000,
+      node: 'approval',
+      text,
+      signals: { decision: ['approved', 'rejected'] },
+      output: { kind: 'record', fields: {} },
+      expiresAt: 2000,
+    },
+  });
+  const carried = (execution: string, state: unknown): HistoryEvent['event'] =>
+    ({
+      kind: 'prior_execution',
+      execution: {
+        execution,
+        node_instance: execution,
+        occurrence: { node: 'approval', mapIndices: [] },
+        attempt: 1,
+        input: null,
+        state,
+      },
+    }) as unknown as HistoryEvent['event'];
+  const history = events(
+    question('q1', 'First?'),
+    question('q2', 'Second?'),
+    // Voided before it asked; settled after timing out; still held.
+    carried('1', { Voided: { reason: 'interrupted' } }),
+    carried('2', { Settled: { outcome: { status: 'error', code: 'timeout', output: null } } }),
+    carried('3', 'Active')
+  );
+  const [voided, timedOut, held] = projectHistory(doc, history, history.length - 1).invocations;
+  assert.equal(voided.request, undefined);
+  assert.equal(timedOut.request?.text, 'First?');
+  assert.equal(held.request?.text, 'Second?');
+  assert.equal(held.state, 'suspended');
+});
+
+test('the status of a suspended run shows a bounded excerpt of its question and keeps the deadline', () => {
+  const expiresAt = Date.parse('2026-12-01T08:00:00Z');
+  const suspension = (text: string) => ({
+    reason: 'request' as const,
+    node: 'approval',
+    createdAt: expiresAt - 1000,
+    request: { id: 'q', text, signals: {}, output: null, expiresAt },
+  });
+  const status = suspensionStatus(suspension('x'.repeat(600_000)));
+  assert.ok(status.length < 200, `${status.length} characters`);
+  assert.equal(
+    status,
+    `Suspended (request) at approval: ${'x'.repeat(60)}… (deadline 2026-12-01T08:00:00.000Z)`
+  );
+  // The cut falls between characters, never inside a surrogate pair.
+  assert.match(suspensionStatus(suspension('🙂'.repeat(100))), new RegExp(`: (🙂){60}… \\(`, 'u'));
+  assert.equal(
+    suspensionStatus(suspension('Approve?')),
+    'Suspended (request) at approval: Approve? (deadline 2026-12-01T08:00:00.000Z)'
+  );
+});
+
+test('a suspended request stands pending until its run continues or its deadline passes', () => {
+  const expiresAt = 2000;
+  const suspension = {
+    reason: 'request' as const,
+    node: 'approval',
+    createdAt: 1000,
+    request: { id: 'q', text: 'Approve?', signals: {}, output: null, expiresAt },
+  };
+  const nodes = {
+    approval: { state: 'suspended' as const },
+    other: { state: 'succeeded' as const },
+  };
+  const standing = (continued: boolean, now: number) =>
+    requestStanding(nodes, suspension, continued, now).approval.request;
+  assert.equal(standing(false, expiresAt - 1), 'pending');
+  assert.equal(standing(false, expiresAt), 'expired');
+  // A successor started by an answer or by a late one: the predecessor cannot tell which.
+  assert.equal(standing(true, expiresAt - 1), 'continued');
+  assert.equal(standing(true, expiresAt + 1), 'continued');
+  assert.equal(requestStanding(nodes, suspension, true, 0).other, nodes.other);
+  assert.equal(requestStanding(nodes, undefined, true, 0), nodes);
+  assert.equal(
+    requestStanding({ approval: { state: 'skipped' } }, suspension, false, 0).approval.request,
+    undefined
+  );
+});
+
+test('a run that ended suspended shows its held-back node and open groups as suspended', () => {
+  const doc = document(
+    sequence('run', { kind: 'loop', name: 'rounds', body: sequence('body', step('a'), step('b')) })
+  );
+  const history = events({ kind: 'run_started' }, start(ref('a')), complete(ref('a')), {
+    kind: 'suspended',
+    suspension: { reason: 'command', node: 'b', createdAt: 1000 },
+  });
+  const controls: ControlRecord[] = [
+    { cursor: 'v2:1', node: 'rounds', mapIndices: [], visitId: 'rounds', state: 'entered' },
+    { cursor: 'v2:3', node: 'b', mapIndices: [], visitId: 'b', state: 'queued' },
+  ];
+  const before = projectHistory(doc, history, 2, controls);
+  assert.equal(before.nodes.rounds.state, 'running');
+  assert.equal(before.nodes.b.state, 'queued');
+  const ended = projectHistory(doc, history, history.length - 1, controls);
+  assert.equal(ended.nodes.rounds.state, 'suspended');
+  assert.equal(ended.nodes.b.state, 'suspended');
+  assert.doesNotMatch(ended.nodes.b.detail ?? '', /queued/);
+  assert.equal(ended.nodes.a.state, 'succeeded');
 });

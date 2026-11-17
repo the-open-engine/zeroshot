@@ -483,3 +483,21 @@ fn active_memory_capability_is_private_and_failed_installation_reports_unknown_d
     assert!(init["memoryCapability"].is_null());
     assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+#[test]
+fn steer_hermes_native_carrier_handles_maximum_text() {
+    let output =
+        std::process::Command::new(openengine_cluster_testkit::fixture::python3_interpreter())
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/harnesses/adapters/contributed/hermes/tests/native_memory_test.py"
+            ))
+            .arg("NativeMemoryTest.test_steer_maximum_text_survives_native_bookkeeping")
+            .output()
+            .assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

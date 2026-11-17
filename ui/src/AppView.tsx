@@ -8,7 +8,6 @@ import {
   Download,
   FilePlus2,
   Loader2,
-  Menu,
   Plus,
   Redo2,
   Undo2,
@@ -38,6 +37,7 @@ import {
   removeNode,
   reorder,
   replaceNode,
+  type GraphNode,
 } from './domain';
 import { AppHeader } from './AppHeader';
 import { StandaloneRuns } from './StandaloneRuns';
@@ -89,16 +89,13 @@ export function AppView({ model }: { model: AppModel }) {
               navigate={(section) => {
                 if (section === 'runs') window.location.hash = lastRun.current;
               }}
-            >
-              <button
-                className="icon-button sidebar-toggle"
-                title="Profiles"
-                aria-label="Profiles"
-                onClick={() => setSidebar(!sidebar)}
-              >
-                <Menu size={19} />
-              </button>
-            </AppHeader>
+              sidebar={{
+                label: 'Profiles',
+                id: 'profiles-sidebar',
+                open: sidebar,
+                setOpen: setSidebar,
+              }}
+            />
           )}
           <div className="app-body">
             {!host && <ProfileSidebar model={model} />}
@@ -853,6 +850,7 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
                 }}
                 inspectorHidden={!inspector}
                 showInspector={() => setInspector(true)}
+                deselect={() => setSelected(doc.graph.root.name)}
               />
             </ReactFlowProvider>
             {inspector && (
@@ -926,13 +924,7 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
             <span className="status-message" role="status">
               {notice}
             </span>
-            <span className="status-count">
-              {
-                allNodes(doc.graph.root).filter((node) => ['step', 'verifier'].includes(node.kind))
-                  .length
-              }{' '}
-              activities
-            </span>
+            <span className="status-count">{activityCount(doc.graph.root)}</span>
           </footer>
           {issues && validation.message && (
             <ValidationDetail
@@ -989,7 +981,11 @@ function ProfileSidebar({ model }: { model: AppModel }) {
     setJson,
   } = model;
   return (
-    <nav className={`profile-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Profiles">
+    <nav
+      id="profiles-sidebar"
+      className={`page-sidebar profile-sidebar ${sidebar ? 'visible' : ''}`}
+      aria-label="Profiles"
+    >
       <div className="sidebar-heading">
         <span className="sidebar-title">Profiles</span>
         <button
@@ -1108,4 +1104,9 @@ function Modal({
       {children}
     </dialog>
   );
+}
+
+function activityCount(root: GraphNode) {
+  const count = allNodes(root).filter((node) => ['step', 'verifier'].includes(node.kind)).length;
+  return `${count} ${count === 1 ? 'activity' : 'activities'}`;
 }

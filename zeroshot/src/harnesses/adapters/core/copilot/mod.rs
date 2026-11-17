@@ -170,6 +170,13 @@ impl CopilotAdapter {
                 )
                 .await;
             let retryable_grammar_rate_limit = result.retryable_grammar_rate_limit;
+            if result.outcome.is_err()
+                && let Some(hooks) = &self.active_memory
+            {
+                hooks
+                    .finish_steers(invocation.node.reference.execution.get(), false)
+                    .await;
+            }
 
             match result.outcome {
                 Err(NodeRunnerError::DriverDetail(_))

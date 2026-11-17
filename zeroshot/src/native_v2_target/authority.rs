@@ -60,6 +60,12 @@ pub trait TargetControlAuthority: Send + Sync {
         ))
     }
     async fn login(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError>;
+    /// Delete locally stored authentication without contacting the target.
+    async fn forget(&self, _target: &TargetRecord) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target credential cleanup is unavailable",
+        ))
+    }
     async fn default_resource_scope(
         &self,
         _target: &TargetRecord,
@@ -109,6 +115,16 @@ pub trait TargetControlAuthority: Send + Sync {
     ) -> Result<(), TargetAuthorityError> {
         Err(TargetAuthorityError::new(
             "target does not advertise openengine.request-ask/v1",
+        ))
+    }
+
+    async fn steering_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise steering",
         ))
     }
 

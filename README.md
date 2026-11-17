@@ -12,13 +12,15 @@
 npm install -g @the-open-engine-company/zeroshot
 ```
 
+Runs locally on top of your agent subscription.
+
 As a coding agent's context fills up, it forgets requirements, stops questioning its own
 assumptions and calls the work done, even when you tell it to check its work.
 
 The agent that wrote the code shouldn't be the one that says it works
 ([see our benchmark](https://zeroshot.sh/blog/review-loop/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot)).
 
-So zeroshot runs your team's process as a graph the engine enforces. You decide who writes, who
+So zeroshot runs your process as a graph the engine enforces. You decide who writes, who
 reviews, what must pass and where failures loop back, and pick the agent and model for each step.
 Every task runs through that graph, no agent can skip a step, and the graph, not the agent,
 decides what happens after a review.
@@ -174,8 +176,9 @@ Drive zeroshot from your own code, CI or UI.
 
 ## Hosting
 
-Run locally, [self-host with Docker](docker/zeroshot-target/README.md), or share graphs and run
-on [zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API keys.
+Run locally on your Claude, ChatGPT or Copilot subscription,
+[self-host with Docker](docker/zeroshot-target/README.md), or share graphs and run on
+[zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API keys.
 
 zeroshot sends no telemetry. The CLI contacts GitHub only to install or update, and otherwise only
 the model providers, Git hosts and targets you set up. See

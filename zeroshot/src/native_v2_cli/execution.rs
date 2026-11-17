@@ -111,6 +111,31 @@ async fn execute_management<B: NativeV2CliBackend, W: Write>(
         return profiles::execute_profile(command, backend, output).await;
     }
     match command {
+        NativeV2CliCommand::TargetList { json } => {
+            let targets = backend.target_list().await?;
+            if json {
+                write_json(output, &targets)?;
+            } else {
+                writeln!(output, "Name\tKind\tOrigin")?;
+                for target in targets {
+                    let kind = match target.kind {
+                        super::NamedTargetKind::Hosted => "hosted",
+                        super::NamedTargetKind::Direct => "direct",
+                    };
+                    writeln!(output, "{}\t{kind}\t{}", target.name, target.origin)?;
+                }
+            }
+            Ok(CliOutcome::Completed)
+        }
+        NativeV2CliCommand::TargetRemove { name, json } => {
+            let receipt = backend.target_remove(&name).await?;
+            if json {
+                write_json(output, &receipt)?;
+            } else {
+                writeln!(output, "Removed target {:?}.", receipt.name)?;
+            }
+            Ok(CliOutcome::Completed)
+        }
         NativeV2CliCommand::Delegation(command) => {
             write_json(output, &backend.delegation(command).await?)?;
             Ok(CliOutcome::Completed)
@@ -154,6 +179,22 @@ where
 {
     let backend = context.backend;
     let command = match command {
+        NativeV2CliCommand::Steer { run, text } => {
+            let text = read_steer_text(text)?;
+            write_json(
+                output,
+                &backend
+                    .run_steer(
+                        run.target.as_deref(),
+                        openengine_cluster_protocol::RunSteerParams {
+                            run_id: run.run_id,
+                            text,
+                        },
+                    )
+                    .await?,
+            )?;
+            return Ok(CliOutcome::Completed);
+        }
         NativeV2CliCommand::Suspend(run) => {
             write_json(
                 output,
@@ -279,6 +320,12 @@ where
                 | openengine_cluster_protocol::RunResumeFrom::Expiry {}
         )
     );
+    if let Some(successor) = &status.workspace_recovery.successor_run_id {
+        return Err(NativeV2CliError::Usage(format!(
+            "run already has successor {}",
+            successor.as_str()
+        )));
+    }
     if let CliRunStatus::Target(RunStatus::Suspended {
         suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
         ..
@@ -305,12 +352,6 @@ where
                 due.get()
             )));
         }
-    }
-    if let Some(successor) = &status.workspace_recovery.successor_run_id {
-        return Err(NativeV2CliError::Usage(format!(
-            "run already has successor {}",
-            successor.as_str()
-        )));
     }
     if !status.workspace_recovery.recoverable && !answering {
         return Err(NativeV2CliError::Usage(
@@ -976,9 +1017,14 @@ async fn execute_answer<B: NativeV2CliBackend, W: Write>(
     if let (Some(input_error), Err(NativeV2CliError::Remote { message, .. })) =
         (input_error, &mut result)
     {
-        // Keep the controller's refusal (in particular expiry and its successor) first.
-        message.push_str("; answer file: ");
-        message.push_str(&input_error);
+        // A path names only the placeholder's shape; any other refusal (in particular expiry and
+        // its successor) stays first.
+        if message.starts_with('$') {
+            *message = format!("answer file: {input_error}");
+        } else {
+            message.push_str("; answer file: ");
+            message.push_str(&input_error);
+        }
     }
     result
 }
@@ -1016,3 +1062,41 @@ fn read_request_answer(
 #[cfg(test)]
 #[path = "execution/request_tests.rs"]
 mod request_tests;
+
+#[cfg(test)]
+#[path = "execution/steer_tests.rs"]
+mod steer_tests;
+
+fn read_steer_text(source: super::SteerText) -> Result<String, NativeV2CliError> {
+    use std::io::Read;
+    let limit = openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES;
+    let text = match source {
+        super::SteerText::Text(text) => text,
+        source => {
+            let reader: Box<dyn Read> = match source {
+                super::SteerText::File(path) => {
+                    Box::new(std::fs::File::open(path).map_err(|error| {
+                        NativeV2CliError::Usage(format!("cannot read steer text file: {error}"))
+                    })?)
+                }
+                _ => Box::new(std::io::stdin()),
+            };
+            let mut bytes = Vec::new();
+            reader
+                .take(limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| {
+                    NativeV2CliError::Usage(format!("cannot read steer text: {error}"))
+                })?;
+            if bytes.len() > limit {
+                return Err(NativeV2CliError::Usage(format!(
+                    "steer exceeds {limit} UTF-8 bytes"
+                )));
+            }
+            String::from_utf8(bytes)
+                .map_err(|_| NativeV2CliError::Usage("steer must be UTF-8".into()))?
+        }
+    };
+    openengine_cluster_protocol::validate_steer(&text).map_err(NativeV2CliError::Usage)?;
+    Ok(text)
+}

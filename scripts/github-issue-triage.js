@@ -88,11 +88,9 @@ async function visibleLabelHistory(payload, repository, number, request, pause) 
 }
 
 async function approvedLabels(events, repository, serviceBot, request) {
-  const desired = new Set(['triage']);
+  const desired = new Set();
   const permissions = new Map();
   for (const event of events) {
-    if (event.event === 'closed') desired.delete('triage');
-    if (event.event === 'reopened') desired.add('triage');
     if (!['labeled', 'unlabeled'].includes(event.event)) continue;
     const name = labelName(event.label);
     if (!(await mayManage(event.actor, repository, serviceBot, request, permissions))) continue;

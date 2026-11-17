@@ -62,6 +62,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) audience: String,
     pub(super) workspace_recovery: bool,
     pub(super) run_suspension: bool,
+    pub(super) steering: bool,
     pub(super) run_vectors: bool,
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
@@ -135,6 +136,11 @@ pub(super) fn build_controller_descriptor(
         session_url: same_origin_path(origin, &wire.session_path)?,
         audience: wire.audience,
         workspace_recovery,
+        steering: wire
+            .extensions
+            .steering
+            .as_ref()
+            .is_some_and(|marker| marker.kind == openengine_cluster_protocol::STEERING_KIND),
         run_suspension: wire
             .extensions
             .run_suspension

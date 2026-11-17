@@ -217,6 +217,10 @@ pub enum CapsuleConnectionError {
 
 #[async_trait]
 pub trait CapsuleNodeChannel: Send + Sync {
+    fn delivery_hooks(&self) -> Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>> {
+        None
+    }
+
     async fn capture_conversations(
         &self,
         _run_id: &RunId,

@@ -6,13 +6,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::{Cursor, IdempotencyKey, RunId};
+use openengine_cluster_protocol::{Cursor, IdempotencyKey, RunId, UnixTimestampMillis};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use super::{
-    AppendResult, CreateRun, CreateRunOutcome, RunEvent, RunLedger, RunLedgerError, RunSummary,
-    SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, cursor_for, cursor_sequence,
-    prepare_event, validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
+    AppendResult, CreateRun, CreateRunOutcome, LedgerClock, RunEvent, RunLedger, RunLedgerError,
+    RunSummary, SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, batch_recorded_at,
+    cursor_for, cursor_sequence, prepare_event, system_clock, validate_create, MAX_REPLAY_BYTES,
+    MAX_REPLAY_EVENTS,
 };
 
 const SCHEMA: &str = "
@@ -28,12 +29,17 @@ CREATE TABLE IF NOT EXISTS v2_run_events (
     run_id TEXT NOT NULL,
     sequence INTEGER NOT NULL,
     event_json TEXT NOT NULL,
+    recorded_at_ms INTEGER,
     PRIMARY KEY (run_id, sequence),
     FOREIGN KEY (run_id) REFERENCES v2_runs(run_id) ON DELETE CASCADE
 ) STRICT;
 CREATE INDEX IF NOT EXISTS v2_run_vector_ids
     ON v2_run_events (run_id, json_extract(event_json, '$.vector.id'), sequence)
     WHERE json_extract(event_json, '$.kind') = 'vector';
+CREATE INDEX IF NOT EXISTS v2_run_steering
+    ON v2_run_events (run_id, sequence)
+    WHERE json_extract(event_json, '$.kind') = 'vector'
+        AND json_extract(event_json, '$.vector.kind') IN ('steer', 'steer_receipt');
 ";
 
 const VECTOR_CURSOR_QUERY: &str = "SELECT sequence FROM v2_run_events
@@ -41,8 +47,15 @@ const VECTOR_CURSOR_QUERY: &str = "SELECT sequence FROM v2_run_events
         AND json_extract(event_json, '$.vector.id') = ?2
     ORDER BY sequence LIMIT 1";
 
+/// Ledgers created before recorded times existed lack the nullable `recorded_at_ms` column;
+/// their rows stay NULL.
+const HAS_RECORDED_AT_QUERY: &str =
+    "SELECT COUNT(*) FROM pragma_table_info('v2_run_events') WHERE name = 'recorded_at_ms'";
+
 #[path = "sqlite/readonly.rs"]
 mod readonly;
+#[path = "sqlite/steering.rs"]
+mod steering;
 
 // The temporary recovered image must live through clones and cancelled blocking operations,
 // and must be removed only after SQLite has closed its handles (including on Windows).
@@ -54,6 +67,10 @@ struct LedgerConnection {
 #[derive(Clone)]
 pub struct SqliteRunLedger {
     connection: Arc<Mutex<LedgerConnection>>,
+    clock: LedgerClock,
+    /// Whether events carry recorded times: fixed once open, since writable opens migrate first
+    /// and read-only opens never change schema.
+    recorded_at: bool,
 }
 
 impl SqliteRunLedger {
@@ -64,8 +81,12 @@ impl SqliteRunLedger {
 
     /// Opens retained history without creating a database, changing schema, or admitting writes.
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, RunLedgerError> {
+        let connection = readonly::open(path.as_ref())?;
+        let recorded_at = has_recorded_at_column(&connection.connection)?;
         Ok(Self {
-            connection: Arc::new(Mutex::new(readonly::open(path.as_ref())?)),
+            connection: Arc::new(Mutex::new(connection)),
+            clock: system_clock(),
+            recorded_at,
         })
     }
 
@@ -74,14 +95,24 @@ impl SqliteRunLedger {
         Self::from_connection(connection)
     }
 
-    fn from_connection(connection: Connection) -> Result<Self, RunLedgerError> {
+    fn from_connection(mut connection: Connection) -> Result<Self, RunLedgerError> {
         connection.execute_batch(SCHEMA).map_err(sqlite_error)?;
+        add_recorded_at_column(&mut connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(LedgerConnection {
                 connection,
                 _snapshot: None,
             })),
+            clock: system_clock(),
+            recorded_at: true,
         })
+    }
+
+    /// Stamps recorded events from `clock` instead of the system wall clock.
+    #[must_use]
+    pub fn with_wall_clock(mut self, clock: LedgerClock) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Lists a bounded descending page through the run-ID index without loading run payloads.
@@ -203,12 +234,16 @@ impl RunLedger for SqliteRunLedger {
         events: Vec<RunEvent>,
     ) -> Result<AppendResult, RunLedgerError> {
         let run_id = run_id.clone();
-        self.with_transaction(move |transaction| append_transaction(transaction, &run_id, events))
-            .await
+        let clock = self.clock.clone();
+        self.with_transaction(move |transaction| {
+            append_transaction(transaction, &clock, &run_id, events)
+        })
+        .await
     }
 
     async fn request_force_stop(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
         let run_id = run_id.clone();
+        let clock = self.clock.clone();
         self.with_transaction(move |transaction| {
             let stored = load_by_id(transaction, &run_id)?.ok_or(RunLedgerError::RunNotFound)?;
             if stored.snapshot.force_stop_requested || stored.snapshot.terminal.is_some() {
@@ -217,7 +252,12 @@ impl RunLedger for SqliteRunLedger {
                     events: Vec::new(),
                 })
             } else {
-                append_transaction(transaction, &run_id, vec![RunEvent::ForceStopRequested])
+                append_transaction(
+                    transaction,
+                    &clock,
+                    &run_id,
+                    vec![RunEvent::ForceStopRequested],
+                )
             }
         })
         .await
@@ -225,10 +265,11 @@ impl RunLedger for SqliteRunLedger {
 
     async fn request_suspend(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
         let run_id = run_id.clone();
+        let clock = self.clock.clone();
         self.with_transaction(move |transaction| {
             let stored = load_by_id(transaction, &run_id)?.ok_or(RunLedgerError::RunNotFound)?;
             match super::suspension_request_events(&stored)? {
-                Some(events) => append_transaction(transaction, &run_id, events),
+                Some(events) => append_transaction(transaction, &clock, &run_id, events),
                 None => Ok(AppendResult {
                     snapshot: stored.snapshot,
                     events: Vec::new(),
@@ -274,13 +315,28 @@ impl RunLedger for SqliteRunLedger {
     ) -> Result<SnapshotAndTail, RunLedgerError> {
         let run_id = run_id.clone();
         let after = after.cloned();
-        self.with_connection(move |connection| snapshot_page(connection, &run_id, after.as_ref()))
+        let recorded_at = self.recorded_at;
+        self.with_connection(move |connection| {
+            snapshot_page(connection, recorded_at, &run_id, after.as_ref())
+        })
+        .await
+    }
+
+    async fn steering_events(
+        &self,
+        run_id: &RunId,
+        after: Option<&Cursor>,
+    ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+        let run_id = run_id.clone();
+        let after = after.cloned();
+        self.with_connection(move |connection| steering::read(connection, &run_id, after.as_ref()))
             .await
     }
 }
 
 fn snapshot_page(
     connection: &Connection,
+    recorded_at: bool,
     run_id: &RunId,
     after: Option<&Cursor>,
 ) -> Result<SnapshotAndTail, RunLedgerError> {
@@ -292,21 +348,25 @@ fn snapshot_page(
     let after = i64::try_from(after).map_err(|_| RunLedgerError::CursorAhead)?;
     Ok(SnapshotAndTail {
         snapshot: stored.snapshot,
-        events: read_page(connection, run_id, after)?,
+        events: read_page(connection, recorded_at, run_id, after)?,
     })
 }
 
 fn read_page(
     connection: &Connection,
+    recorded_at: bool,
     run_id: &RunId,
     after: i64,
 ) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
-    let mut statement = connection
-        .prepare(
-            "SELECT sequence, event_json FROM v2_run_events
-                  WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3",
-        )
-        .map_err(sqlite_error)?;
+    // Read-only opens never migrate, so retained pre-column ledgers read every time as unknown.
+    let query = if recorded_at {
+        "SELECT sequence, event_json, recorded_at_ms FROM v2_run_events
+              WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3"
+    } else {
+        "SELECT sequence, event_json, NULL FROM v2_run_events
+              WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3"
+    };
+    let mut statement = connection.prepare(query).map_err(sqlite_error)?;
     let mut rows = statement
         .query(params![run_id.as_str(), after, MAX_REPLAY_EVENTS as i64])
         .map_err(sqlite_error)?;
@@ -335,25 +395,85 @@ fn decode_replay_event(
     let sequence = u64::try_from(sequence).map_err(|_| RunLedgerError::Corrupt)?;
     let event = openengine_cluster_protocol::bounded_json_from_str(json)
         .map_err(|_| RunLedgerError::Corrupt)?;
+    let recorded_at = row
+        .get::<_, Option<i64>>(2)
+        .map_err(sqlite_error)?
+        .map(decode_recorded_at)
+        .transpose()?;
     Ok(StoredRunEvent {
         cursor: cursor_for(sequence),
+        recorded_at,
         event,
     })
 }
 
+fn decode_recorded_at(milliseconds: i64) -> Result<UnixTimestampMillis, RunLedgerError> {
+    u64::try_from(milliseconds)
+        .ok()
+        .and_then(|milliseconds| UnixTimestampMillis::new(milliseconds).ok())
+        .ok_or(RunLedgerError::Corrupt)
+}
+
+fn has_recorded_at_column(connection: &Connection) -> Result<bool, RunLedgerError> {
+    connection
+        .query_row(HAS_RECORDED_AT_QUERY, [], |row| row.get::<_, i64>(0))
+        .map(|count| count > 0)
+        .map_err(sqlite_error)
+}
+
+/// Adds the nullable column under a write lock so concurrent opens migrate exactly once.
+/// Current ledgers return after a read, so ordinary opens never contend for the write lock.
+fn add_recorded_at_column(connection: &mut Connection) -> Result<(), RunLedgerError> {
+    if has_recorded_at_column(connection)? {
+        return Ok(());
+    }
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(sqlite_error)?;
+    if !has_recorded_at_column(&transaction)? {
+        transaction
+            .execute_batch("ALTER TABLE v2_run_events ADD COLUMN recorded_at_ms INTEGER")
+            .map_err(sqlite_error)?;
+    }
+    transaction.commit().map_err(sqlite_error)
+}
+
+/// The latest recorded time in the run. Rows without one (written before the column existed, or
+/// by an older binary after it was added) are skipped so a later time can never be earlier.
+fn previous_recorded_at(
+    transaction: &Transaction<'_>,
+    run_id: &RunId,
+) -> Result<Option<UnixTimestampMillis>, RunLedgerError> {
+    transaction
+        .query_row(
+            "SELECT recorded_at_ms FROM v2_run_events
+             WHERE run_id = ?1 AND recorded_at_ms IS NOT NULL
+             ORDER BY sequence DESC LIMIT 1",
+            params![run_id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .map(decode_recorded_at)
+        .transpose()
+}
+
 fn append_transaction(
     transaction: &Transaction<'_>,
+    clock: &LedgerClock,
     run_id: &RunId,
     events: Vec<RunEvent>,
 ) -> Result<AppendResult, RunLedgerError> {
     require_events(&events)?;
     let stored = load_by_id(transaction, run_id)?.ok_or(RunLedgerError::RunNotFound)?;
     let sequence = cursor_sequence(&stored.snapshot.cursor)?;
+    let previous = previous_recorded_at(transaction, run_id)?;
     let mut append = PendingAppend {
         transaction,
         run_id,
         stored,
         sequence,
+        recorded_at: batch_recorded_at(clock, previous),
     };
     let appended = append.events(events)?;
     update_stored_run(transaction, run_id, append.sequence, &append.stored)?;
@@ -376,6 +496,7 @@ struct PendingAppend<'a, 'connection> {
     run_id: &'a RunId,
     stored: StoredRun,
     sequence: u64,
+    recorded_at: UnixTimestampMillis,
 }
 
 impl PendingAppend<'_, '_> {
@@ -391,11 +512,13 @@ impl PendingAppend<'_, '_> {
         let event = prepare_event(&self.stored.snapshot, event);
         self.sequence = next_sequence(self.sequence)?;
         apply_event(&mut self.stored.snapshot, &event, self.sequence)?;
-        insert_event(self.transaction, self.run_id, self.sequence, &event)?;
-        Ok(StoredRunEvent {
+        let stored = StoredRunEvent {
             cursor: cursor_for(self.sequence),
+            recorded_at: Some(self.recorded_at),
             event,
-        })
+        };
+        insert_event(self.transaction, self.run_id, self.sequence, &stored)?;
+        Ok(stored)
     }
 }
 
@@ -409,13 +532,19 @@ fn insert_event(
     transaction: &Transaction<'_>,
     run_id: &RunId,
     sequence: u64,
-    event: &RunEvent,
+    stored: &StoredRunEvent,
 ) -> Result<(), RunLedgerError> {
-    let event_json = serde_json::to_string(event).map_err(|_| RunLedgerError::Storage)?;
+    let sequence = i64::try_from(sequence).map_err(|_| RunLedgerError::Storage)?;
+    let event_json = serde_json::to_string(&stored.event).map_err(|_| RunLedgerError::Storage)?;
+    let recorded_at = stored
+        .recorded_at
+        .map(|time| i64::try_from(time.get()).map_err(|_| RunLedgerError::Storage))
+        .transpose()?;
     transaction
         .execute(
-            "INSERT INTO v2_run_events (run_id, sequence, event_json) VALUES (?1, ?2, ?3)",
-            params![run_id.as_str(), sequence as i64, event_json],
+            "INSERT INTO v2_run_events (run_id, sequence, event_json, recorded_at_ms)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![run_id.as_str(), sequence, event_json, recorded_at],
         )
         .map_err(sqlite_error)?;
     Ok(())

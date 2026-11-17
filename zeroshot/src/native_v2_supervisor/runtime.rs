@@ -425,6 +425,14 @@ pub(crate) fn continuation_history(
     durable_history(&continuation)
 }
 
+/// The seed for restarting a failed run: a failed run restarts where it started. A successor that
+/// began at a held node, after an answer or at a selected checkpoint recorded those results as its
+/// starting point, so its restart begins there and an answered request stays answered. A run that
+/// was submitted has no such record and restarts at the root.
+pub(crate) fn restart_history(snapshot: &RunSnapshot) -> Vec<DurableExecution> {
+    snapshot.execution_seed.clone()
+}
+
 fn offset_position(
     position: HistoryPosition,
     offset: u64,

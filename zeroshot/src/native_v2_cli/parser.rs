@@ -190,6 +190,9 @@ enum UtilityCommand {
     /// Its successor continues captured node-instance conversations from that checkpoint.
     Suspend(RunSelectorArgs),
 
+    /// Broadcast standing direction to every agent conversation in a running or suspended run.
+    Steer(RunSteerArgs),
+
     /// Answer a suspended request from a JSON file and start its successor.
     ///
     /// The file contains signals and output matching the request's declared shape. At or after
@@ -208,7 +211,9 @@ enum UtilityCommand {
     /// A suspended run continues at its saved boundary without restoring files. A suspended wait
     /// continues after its wait node, from the due time onward. Suspended runs accept no checkpoint
     /// selection or --discard-workspace-changes. Every successor takes over the vector record.
-    /// By default, a failed run restarts the original graph on its retained workspace. A local run keeps its
+    /// By default, a failed run restarts where it started, on its retained workspace: a submitted
+    /// run at the root of its graph, a successor at the boundary it began at, so an answered
+    /// request stays answered. A local run keeps its
     /// checkout as it is now, including files and Git state changed after the failure; a named
     /// target restarts on the latest snapshot of its retained copy.
     /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a
@@ -224,7 +229,8 @@ enum UtilityCommand {
     /// then startup runs before the graph. Startup must tolerate existing workspace files.
     /// Checkpoint continuations and suspended successors restore captured node-instance agent
     /// conversations. Missing or unsupported conversations start new with a system log explanation.
-    /// Restarts and execution-scoped agents start new conversations. Token usage starts at zero.
+    /// Restarting a successor restores the conversations it started with; restarting a submitted
+    /// run, and execution-scoped agents, start new ones. Token usage starts at zero.
     /// Services and Docker state are not restored.
     Resume(RunResumeArgs),
 
@@ -309,6 +315,12 @@ enum StackCommand {
 
 #[derive(Debug, Subcommand)]
 enum TargetCommand {
+    /// List local target names, origins and access kinds without login data.
+    List(TargetListArgs),
+
+    /// Remove a local target, its stored login and resume permissions.
+    Remove(TargetRemoveArgs),
+
     /// Register a named target.
     Add(TargetAddArgs),
 
@@ -448,6 +460,24 @@ struct TargetNameArgs {
     /// Local target name.
     #[arg(value_name = "NAME")]
     name: String,
+}
+
+#[derive(Debug, Args)]
+struct TargetListArgs {
+    /// Emit the target inventory as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct TargetRemoveArgs {
+    /// Local target name. The built-in platform target cannot be removed.
+    #[arg(value_name = "NAME")]
+    name: String,
+
+    /// Emit the removal receipt as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -866,6 +896,26 @@ struct RunExportWorkspaceArgs {
     /// Explicit destination path for the raw tar archive; must not exist.
     #[arg(long, value_name = "PATH")]
     output: PathBuf,
+}
+
+#[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("text_source").required(true).args(["text", "text_file", "text_stdin"])))]
+// Clap lists required groups before positionals, but the run ID comes first.
+#[command(
+    override_usage = "zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>"
+)]
+struct RunSteerArgs {
+    #[command(flatten)]
+    run: RunSelectorArgs,
+    /// Direction, as given. Do not put secrets in a steer.
+    #[arg(value_name = "TEXT")]
+    text: Option<String>,
+    /// Read UTF-8 direction from this file.
+    #[arg(long, value_name = "FILE")]
+    text_file: Option<PathBuf>,
+    /// Read UTF-8 direction from standard input.
+    #[arg(long)]
+    text_stdin: bool,
 }
 
 #[derive(Debug, Args)]

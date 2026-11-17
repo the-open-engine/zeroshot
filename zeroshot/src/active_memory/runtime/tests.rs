@@ -58,6 +58,9 @@ fn query(session: &str) -> HookQuery {
         tool_name: "exec_command".into(),
         tool_input: json!({"cmd":"cat guard.rs", "workdir":workspace().join("src")}),
         cwd: workspace(),
+        subagent: false,
+        context_budget: crate::active_memory::hooks::native::MAX_CONTEXT_BYTES,
+        standing: true,
     }
 }
 
@@ -326,7 +329,7 @@ fn each_hook_has_a_fresh_limit_but_delivered_versions_stay_deduplicated() {
 }
 
 #[test]
-fn graph_guidance_larger_than_authored_instruction_bound_uses_supplemental_context() {
+fn graph_guidance_at_steer_instruction_bound_uses_supplemental_context() {
     let mut source = source(64_000);
     source.graph_enabled = true;
     let lessons = (0..50)
@@ -360,7 +363,7 @@ fn graph_guidance_larger_than_authored_instruction_bound_uses_supplemental_conte
     assert_eq!(augmented.node.instructions, original.node.instructions);
     let context = augmented.host_context.as_ref().unwrap();
     assert!(context.starts_with("Current shared resource context"));
-    assert!(context.len() > openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES);
+    assert!(context.len() > 16_384);
     assert!(
         augmented
             .agent_prompt()
@@ -677,4 +680,79 @@ fn native_compaction_does_not_reset_provider_conversation_deduplication() {
     tool.native_session_id = Some("native-after-compaction".into());
     assert!(source.tool_context(&tool).is_empty());
     assert_eq!(source.manifest().unwrap().lessons.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_whole_text_precedes_memory_without_spending_either_injection_limit() {
+    use crate::v2_run_ledger::{CreateRun, RunLedger};
+    use openengine_cluster_protocol::{IdempotencyKey, RunSteerParams, Sha256Digest};
+    fn recall() -> RunMemorySource {
+        let mut source = source(2048);
+        source.graph_enabled = true;
+        source.index = MemoryIndex::new(MemorySnapshot {
+            generation: 1,
+            lessons: vec![repository_lesson(), graph_lesson()],
+        })
+        .unwrap();
+        source
+    }
+    let original = invocation(crate::execution::SessionScope::Execution, 2);
+    let run = original.node.reference.run_id.clone();
+    let ledger = Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run.clone(),
+            submission_key: IdempotencyKey::new("steer-memory-budgets").unwrap(),
+            submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
+            admitted: crate::native_v2_contract::AdmittedRun {
+                title: openengine_cluster_protocol::RunTitle::new("Steer memory budgets").unwrap(),
+                graph: serde_json::from_str(include_str!(
+                    "../../../../protocol/openengine-cluster/v1/fixtures/graph/canonical/base.json"
+                ))
+                .unwrap(),
+                initial_input: Value::Null,
+                environment: None,
+                source: None,
+                runtime: crate::native_v2_candidate::test_support::codex_runtime(
+                    openengine_cluster_testkit::fixture::run_size("small"),
+                    BTreeMap::new(),
+                ),
+            },
+        })
+        .await
+        .unwrap();
+    let source = Arc::new(recall());
+    let hooks = ActiveMemoryHooks::new(source.clone()).unwrap();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut started = original.clone();
+    hooks.prepare_steers(&mut started, false).await.unwrap();
+    let text = "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES);
+    crate::v2_run_ledger::steering::record(
+        ledger.as_ref(),
+        RunSteerParams {
+            run_id: run,
+            text: text.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    let tool = json!({"tool_name":"Read","tool_input":{"file_path":"src/guard.rs"}});
+    let baseline = ActiveMemoryHooks::new(Arc::new(recall())).unwrap();
+    let expected = baseline.tool_context(&original, &tool, &source.workspace);
+    assert!(expected.contains("Preserve sibling guards"));
+    let (_, delivered) = hooks
+        .tool_delivery(&started, &tool, &source.workspace)
+        .await;
+    assert!(delivered.context.contains(&text));
+    assert!(delivered.context.ends_with(&expected));
+    assert!(delivered.context.find("<steer>") < delivered.context.find("<active_memory>"));
+    let expected_graph = baseline.invocation(original.clone()).host_context.unwrap();
+    let mut next = original;
+    next.node.reference.execution = crate::native_v2_contract::ExecutionId::new(3).unwrap();
+    next.provider_home_slot = crate::native_v2_contract::NodeInstanceId::new(3).unwrap();
+    hooks.prepare_steers(&mut next, false).await.unwrap();
+    let prompt = hooks.invocation(next).host_context.unwrap();
+    assert!(prompt.contains(&text));
+    assert!(prompt.ends_with(&expected_graph));
+    assert_eq!(source.manifest().unwrap().lessons.len(), 2);
 }

@@ -20,7 +20,7 @@ fn agent_messages_accept_invalid_unicode_across_chunks() {
                     .iter()
                     .filter_map(|emission| match emission {
                         CodexEmission::AgentMessage(text) => Some(text.as_str()),
-                        CodexEmission::Progress(_) => None,
+                        CodexEmission::Progress(_) | CodexEmission::StreamError(_) => None,
                     })
                     .collect();
                 assert_eq!(messages, ["answer:�"]);

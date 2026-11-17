@@ -28,7 +28,9 @@ in-process zeroshot workers and is not a portable protocol adapter.
 ## Extension boundary
 
 `WorkerRegistry` is the integration point: an implementation resolves an exact `WorkerRef` or
-returns a typed registry error. `WorkerDescriptor` then checks the requested identity, graph
+returns a typed registry error. Verification asks per node through `resolve_node`, which receives
+the node's path and by default resolves the reference alone; a registry may answer per node where
+one reference serves nodes with different contracts. `WorkerDescriptor` then checks the requested identity, graph
 profile, input and output types, verifier contract, artifact policy, and credential handles before
 admission. External protocol names and versions are bounded opaque strings; the core protocol does
 not keep a catalog of them.

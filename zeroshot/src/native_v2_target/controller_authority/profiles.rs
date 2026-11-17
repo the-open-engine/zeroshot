@@ -1,3 +1,4 @@
+const MAX_PROFILE_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 use openengine_cluster_protocol::{
     RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
     RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileRunRequest,
@@ -128,7 +129,12 @@ impl TargetHttpControlAuthority {
             .header(CACHE_CONTROL, "no-store")
             .json(input);
         let result = self
-            .hosted_json((builder, &access), operation.label(), None)
+            .hosted_json(
+                (builder, &access),
+                operation.label(),
+                matches!(&operation, ProfileOperation::Set | ProfileOperation::Show)
+                    .then_some(MAX_PROFILE_RESPONSE_BYTES),
+            )
             .await;
         match operation {
             ProfileOperation::Run => result.map_err(TargetAuthorityError::submission),

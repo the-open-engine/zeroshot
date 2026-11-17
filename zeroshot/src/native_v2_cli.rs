@@ -99,6 +99,29 @@ pub struct TargetAdd {
     pub direct: bool,
 }
 
+/// Public inventory of local target registrations; never contains authentication material.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NamedTarget {
+    pub name: String,
+    pub origin: String,
+    pub kind: NamedTargetKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamedTargetKind {
+    Hosted,
+    Direct,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetRemoveResult {
+    pub name: String,
+    pub removed: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetServe {
     pub listen: SocketAddr,
@@ -309,6 +332,13 @@ pub struct RunSelector {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SteerText {
+    Text(String),
+    File(PathBuf),
+    Stdin,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunResumeCommand {
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
@@ -366,6 +396,13 @@ pub enum NativeV2CliCommand {
     },
     Update,
     TargetAdd(TargetAdd),
+    TargetList {
+        json: bool,
+    },
+    TargetRemove {
+        name: String,
+        json: bool,
+    },
     TargetLogin {
         name: String,
     },
@@ -424,6 +461,10 @@ pub enum NativeV2CliCommand {
         execution: ExecutionRef,
     },
     Suspend(RunSelector),
+    Steer {
+        run: RunSelector,
+        text: SteerText,
+    },
     Answer {
         run: RunSelector,
         input: PathBuf,
@@ -493,7 +534,11 @@ impl NativeV2CliCommand {
     fn is_target_operation(&self) -> bool {
         matches!(
             self,
-            Self::TargetAdd(_) | Self::TargetLogin { .. } | Self::TargetSizes { .. }
+            Self::TargetAdd(_)
+                | Self::TargetLogin { .. }
+                | Self::TargetSizes { .. }
+                | Self::TargetList { .. }
+                | Self::TargetRemove { .. }
         )
     }
 }
@@ -641,6 +686,18 @@ pub trait NativeV2CliBackend: Send + Sync {
 
     async fn target_add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn target_login(&self, name: &str) -> Result<(), NativeV2CliError>;
+
+    async fn target_list(&self) -> Result<Vec<NamedTarget>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target inventory is unavailable".to_owned(),
+        ))
+    }
+
+    async fn target_remove(&self, _name: &str) -> Result<TargetRemoveResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target removal is unavailable".to_owned(),
+        ))
+    }
 
     async fn target_sizes(
         &self,
@@ -879,6 +936,16 @@ pub trait NativeV2CliBackend: Send + Sync {
             "target does not advertise workspace export".to_owned(),
         ))
     }
+    async fn run_steer(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise steering".into(),
+        ))
+    }
+
     async fn run_suspend(
         &self,
         _target: Option<&str>,

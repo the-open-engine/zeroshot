@@ -107,6 +107,10 @@ pub enum TargetConnectorError {
     AlreadyExists(String),
     #[error("target {0:?} not found")]
     NotFound(String),
+    #[error("target registration changed; select the target again")]
+    RegistrationChanged,
+    #[error("built-in target \"platform\" cannot be removed")]
+    BuiltinTarget,
     #[error("target registry path cannot be resolved: {0}")]
     RegistryPath(&'static str),
     #[error("target registry I/O failed: {0}")]
@@ -137,6 +141,8 @@ impl TargetConnectorError {
     pub(super) fn to_cli_error(&self) -> NativeV2CliError {
         match self {
             Self::NotFound(_)
+            | Self::RegistrationChanged
+            | Self::BuiltinTarget
             | Self::RecoveryAuthorizationUnavailable
             | Self::RecoveryAuthorizationMismatch
             | Self::RecoveryAuthorizationInvalid => {
@@ -159,6 +165,7 @@ pub struct NativeV2TargetConnector<R, A, D> {
 
 #[derive(Clone, Copy)]
 enum TargetSessionPurpose {
+    Steering,
     General,
     WorkspaceRecovery,
     RunSuspension,
@@ -225,10 +232,52 @@ where
     async fn login(&self, name: &str) -> Result<(), NativeV2CliError> {
         validate_target_name(name).map_err(cli_target_error)?;
         let target = self.registry.get(name).map_err(cli_target_error)?;
-        self.authority
-            .login(&target)
+        self.registry
+            .login(&target, &self.authority)
             .await
-            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+            .map_err(|error| match error {
+                TargetConnectorError::Authority(error) => {
+                    self.authority.redact_error(error).into_cli(&target)
+                }
+                error => cli_target_error(error),
+            })
+    }
+
+    async fn list(
+        &self,
+    ) -> Result<Vec<zeroshot_engine::native_v2_cli::NamedTarget>, NativeV2CliError> {
+        use zeroshot_engine::native_v2_cli::{NamedTarget, NamedTargetKind};
+        self.registry
+            .list()
+            .map_err(cli_target_error)
+            .map(|targets| {
+                targets
+                    .into_iter()
+                    .map(|target| NamedTarget {
+                        name: target.name,
+                        origin: target.origin,
+                        kind: match target.access {
+                            TargetAccess::Hosted { .. } => NamedTargetKind::Hosted,
+                            TargetAccess::Direct => NamedTargetKind::Direct,
+                        },
+                    })
+                    .collect()
+            })
+    }
+
+    async fn remove(
+        &self,
+        name: &str,
+    ) -> Result<zeroshot_engine::native_v2_cli::TargetRemoveResult, NativeV2CliError> {
+        validate_target_name(name).map_err(cli_target_error)?;
+        self.registry
+            .remove(name, &self.authority)
+            .await
+            .map_err(cli_target_error)?;
+        Ok(zeroshot_engine::native_v2_cli::TargetRemoveResult {
+            name: name.to_owned(),
+            removed: true,
+        })
     }
 
     async fn sizes(
@@ -510,6 +559,15 @@ where
             .validate_request_ask(&target)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn connect_steering(
+        &self,
+        name: &str,
+        run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(name, Some(run_id), TargetSessionPurpose::Steering)
+            .await
     }
 
     async fn connect_run_suspension(
@@ -853,6 +911,9 @@ where
         let target = self.registry.get(name).map_err(cli_target_error)?;
         let request = TargetOecpSessionRequest { run_id };
         let session = match purpose {
+            TargetSessionPurpose::Steering => {
+                self.authority.steering_session(&target, &request).await
+            }
             TargetSessionPurpose::General => self.authority.oecp_session(&target, &request).await,
             TargetSessionPurpose::WorkspaceRecovery => {
                 self.authority
@@ -954,9 +1015,15 @@ where
         let Some(requirements) = requirements else {
             return Ok(());
         };
-        self.registry
-            .record_recovery_authorization_with_source(&target.id, run_id, requirements)
-            .map_err(cli_target_error)
+        match self.registry.record_recovery_authorization_with_source(
+            &target.id,
+            run_id,
+            requirements,
+        ) {
+            // An admitted run still has a receipt, but removal must revoke its local permissions.
+            Err(TargetConnectorError::RegistrationChanged) => Ok(()),
+            result => result.map_err(cli_target_error),
+        }
     }
 
     fn target(&self, name: &str) -> Result<TargetRecord, NativeV2CliError> {

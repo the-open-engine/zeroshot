@@ -36,7 +36,6 @@ import {
   ChevronRight,
   Repeat2,
   Columns3,
-  Settings2,
   PanelRightOpen,
   Info,
   Check,
@@ -45,6 +44,7 @@ import {
   X,
   Minus,
   FoldVertical,
+  UnfoldVertical,
   Clock3,
 } from 'lucide-react';
 import {
@@ -54,12 +54,18 @@ import {
   type Document,
   type GraphNode,
   type Positions,
+  REQUEST_WORKER,
 } from './domain';
 import { typeSummary } from './schema';
 import { nodeOutputFields } from './node-data';
 import { nodePresentation, nodeIcons } from './node-presentation';
 import type { WorkerOption } from './workers';
-import { projectWorkflow, type WorkflowNode, type WorkflowEdge } from './workflow-projection';
+import {
+  drawableGroups,
+  projectWorkflow,
+  type WorkflowNode,
+  type WorkflowEdge,
+} from './workflow-projection';
 import { compactWorkflow } from './workflow-display';
 import { arrangeWorkflow } from './workflow-layout';
 import {
@@ -67,7 +73,11 @@ import {
   withWorkflowDimensions,
   type WorkflowMeasurements,
 } from './workflow-measurements';
+import { MoreMenu } from './MoreMenu';
 import {
+  collapsedRunGroups,
+  currentRunWork,
+  revealRunWork,
   collapsedWorkflowGroups,
   revealWorkflowNode,
   type WorkflowNodeObservation,
@@ -219,15 +229,6 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   const Icon = activity ? presentation.Icon : (nodeIcons[item.kind] ?? presentation.Icon);
   const terminal = ['succeed', 'fail'].includes(item.kind);
   const junction = ['fork', 'join', 'loop-start', 'loop-end', 'map-end'].includes(item.role);
-  const outputFields = nodeOutputFields(node);
-  const outputs = outputFields.length
-    ? typeSummary({
-        kind: 'record',
-        fields: Object.fromEntries(outputFields.map((field) => [field.name, field])),
-      })
-    : node.output?.kind !== 'null' && node.output?.kind
-      ? typeSummary(node.output)
-      : '';
   return (
     <>
       <ActivityToolbar data={data} selected={selected} node={node} />
@@ -247,14 +248,20 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
           <span>{activity && presentation.delivery ? presentation.label : item.label}</span>
         </div>
         {activity && executable(node) && (
-          <small className={!presentation.detail ? 'needs-value' : ''}>
-            {presentation.detail || (data.readOnly ? 'Agent' : 'Choose model')}
-          </small>
+          <ActivityDetail
+            detail={presentation.detail}
+            readOnly={data.readOnly}
+            request={
+              data.observation?.state === 'suspended' && node.worker === REQUEST_WORKER
+                ? (data.observation.request ?? 'pending')
+                : undefined
+            }
+          />
         )}
         {item.detail && !activity && !junction && item.role !== 'decision' && (
           <small title={item.detail}>{item.detail}</small>
         )}
-        {activity && executable(node) && <ActivityFields node={node} outputs={outputs} />}
+        {activity && executable(node) && <ActivityFields node={node} />}
         {activity && <span className="workflow-node-identity">{node.name}</span>}
         {item.role === 'collapsed' && (
           <button
@@ -278,7 +285,41 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   );
 }
 
-function ActivityFields({ node, outputs }: { node: GraphNode; outputs: string }) {
+const requestStandingLabels = {
+  pending: 'Waiting for an answer',
+  continued: 'Continued in a successor run',
+  expired: 'Expired without an answer',
+} as const;
+
+/** The card's one-line worker detail; a suspended request step says how its question stands. */
+function ActivityDetail({
+  detail,
+  readOnly,
+  request,
+}: {
+  detail?: string;
+  readOnly?: boolean;
+  request?: keyof typeof requestStandingLabels;
+}) {
+  // Same one-line slot as the worker detail, so the measured layout is unchanged.
+  if (request) return <small className="workflow-waiting">{requestStandingLabels[request]}</small>;
+  return (
+    <small className={detail ? '' : 'needs-value'}>
+      {detail || (readOnly ? 'Agent' : 'Choose model')}
+    </small>
+  );
+}
+
+function ActivityFields({ node }: { node: GraphNode }) {
+  const outputFields = nodeOutputFields(node);
+  const outputs = outputFields.length
+    ? typeSummary({
+        kind: 'record',
+        fields: Object.fromEntries(outputFields.map((field) => [field.name, field])),
+      })
+    : node.output?.kind !== 'null' && node.output?.kind
+      ? typeSummary(node.output)
+      : '';
   return (
     <div className="workflow-fields">
       {node.input?.kind && node.input.kind !== 'null' && (
@@ -371,96 +412,149 @@ function CanvasToolbar({
   readOnly,
   selectedNode,
   collapseAll,
+  expandAll,
+  allCollapsed,
+  noneCollapsed,
   arrange,
 }: {
   p: WorkflowCanvasProps;
   readOnly: boolean;
   selectedNode: GraphNode | undefined;
   collapseAll: () => void;
+  expandAll: () => void;
+  allCollapsed: boolean;
+  noneCollapsed: boolean;
   arrange: () => void;
 }) {
+  const groupTools = [
+    {
+      label: 'Expand all groups',
+      icon: <UnfoldVertical size={17} />,
+      disabled: noneCollapsed,
+      onSelect: expandAll,
+    },
+    {
+      label: 'Collapse all groups',
+      icon: <FoldVertical size={17} />,
+      disabled: allCollapsed,
+      onSelect: collapseAll,
+    },
+  ];
+  const tools = [
+    {
+      label: 'Runtime settings',
+      title: 'Runtime settings · whole graph',
+      icon: <SlidersHorizontal size={17} />,
+      onSelect: () => p.runtime?.(),
+    },
+    {
+      label: 'Graph JSON',
+      title: 'Graph JSON',
+      icon: <Braces size={17} />,
+      onSelect: () => p.json?.(),
+    },
+    {
+      label: 'Workflow defaults',
+      title: 'Workflow defaults',
+      icon: <Info size={17} />,
+      onSelect: () => p.info?.(),
+    },
+    {
+      label: 'Arrange workflow',
+      title: 'Arrange workflow',
+      icon: <LayoutGrid size={17} />,
+      onSelect: arrange,
+    },
+  ];
   return (
     <div className="canvas-toolbar">
       <div className="canvas-start">
-        <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
-          {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
-          {readOnly ? 'Run overview' : 'Run settings'}
-        </button>
-        {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
-      </div>
-      <div className="canvas-actions">
+        {/* The view's main use leads: adding to the profile, or a host's controls. The workflow's
+            own details open from the inspector button, or, while the inspector is open, from the
+            empty canvas or the breadcrumb's first link. */}
         {readOnly ? (
-          <button
-            className="icon-button"
-            title="Collapse all groups"
-            aria-label="Collapse all groups"
-            onClick={collapseAll}
-          >
-            <FoldVertical size={17} />
-          </button>
+          p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>
         ) : (
           <>
             <button
-              className="icon-button"
-              title="Runtime settings · whole graph"
-              aria-label="Runtime settings"
-              onClick={p.runtime}
+              className="button compact add-activity"
+              aria-label="Add activity"
+              title="Add activity"
+              disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
+              onClick={() =>
+                p.action?.({
+                  kind:
+                    selectedNode && executable(selectedNode)
+                      ? 'next'
+                      : selectedNode?.kind === 'choice'
+                        ? 'outcome'
+                        : 'append',
+                  owner:
+                    selectedNode &&
+                    (['seq', 'choice', 'loop', 'map', 'par'].includes(selectedNode.kind) ||
+                      executable(selectedNode))
+                      ? selectedNode.name
+                      : p.document.graph.root.name,
+                })
+              }
             >
-              <SlidersHorizontal size={17} />
+              <Plus size={15} /> <span className="add-activity-label">Add activity</span>
             </button>
+            {p.toolbarStart && <div className="canvas-host-actions">{p.toolbarStart}</div>}
+          </>
+        )}
+      </div>
+      <div className="canvas-actions">
+        {/* Kept in read-only views; the editor folds these into "More tools" on a phone. */}
+        <div className={`canvas-group-tools ${readOnly ? '' : 'foldable'}`}>
+          {groupTools.map((tool) => (
             <button
+              key={tool.label}
               className="icon-button"
-              title="Graph JSON"
-              aria-label="Graph JSON"
-              onClick={p.json}
+              title={tool.label}
+              aria-label={tool.label}
+              aria-disabled={tool.disabled}
+              onClick={() => !tool.disabled && tool.onSelect()}
             >
-              <Braces size={17} />
+              {tool.icon}
             </button>
-            <button
-              className="icon-button"
-              title="Workflow defaults"
-              aria-label="Workflow defaults"
-              onClick={p.info}
-            >
-              <Info size={17} />
-            </button>
-            <button
-              className="icon-button"
-              title="Arrange workflow"
-              aria-label="Arrange workflow"
-              onClick={arrange}
-            >
-              <LayoutGrid size={17} />
-            </button>
+          ))}
+        </div>
+        {!readOnly && (
+          <>
+            {/* Shown while the canvas is wide; folded behind "More tools" when it is narrow. */}
+            <div className="canvas-tools">
+              {tools.map((tool) => (
+                <button
+                  key={tool.label}
+                  className="icon-button"
+                  title={tool.title}
+                  aria-label={tool.label}
+                  onClick={tool.onSelect}
+                >
+                  {tool.icon}
+                </button>
+              ))}
+            </div>
+            <div className="canvas-tools-more">
+              <MoreMenu
+                label="More tools"
+                items={[
+                  ...groupTools.map((tool) => ({ ...tool, className: 'canvas-group-tool' })),
+                  ...tools.map(({ label, icon, onSelect }) => ({ label, icon, onSelect })),
+                ]}
+              />
+            </div>
           </>
         )}
         {p.inspectorHidden && (
-          <button className="icon-button" aria-label="Open inspector" onClick={p.showInspector}>
-            <PanelRightOpen size={17} />
-          </button>
-        )}
-        {!readOnly && (
           <button
-            className="button compact"
-            disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
-            onClick={() =>
-              p.action?.({
-                kind:
-                  selectedNode && executable(selectedNode)
-                    ? 'next'
-                    : selectedNode?.kind === 'choice'
-                      ? 'outcome'
-                      : 'append',
-                owner:
-                  selectedNode &&
-                  (['seq', 'choice', 'loop', 'map', 'par'].includes(selectedNode.kind) ||
-                    executable(selectedNode))
-                    ? selectedNode.name
-                    : p.document.graph.root.name,
-              })
-            }
+            className="icon-button"
+            title="Show details"
+            aria-label="Show details"
+            onClick={p.showInspector}
           >
-            <Plus size={15} /> Add activity
+            <PanelRightOpen size={17} />
           </button>
         )}
       </div>
@@ -561,9 +655,31 @@ type WorkflowCanvasProps = {
   info?: () => void;
   inspectorHidden: boolean;
   showInspector: () => void;
-  /** Controls a host places beside the settings button when it has no header of its own. */
+  /** Clicking the empty canvas: selects the whole graph without opening the inspector. */
+  deselect?: () => void;
+  /** Controls a host places at the start of the toolbar when it has no header of its own. */
   toolbarStart?: ReactNode;
 };
+
+/**
+ * An activity selects its node. A group's box is drawn space, not a target of its own, so its
+ * blank inside acts as the canvas (the workflow's details), except its header, whose buttons select
+ * or fold the group. Double-click zoom is off on the canvas so a click always means selection; the
+ * zoom controls, scroll and pinch still zoom.
+ */
+function clickNode(
+  p: WorkflowCanvasProps,
+  target: Element,
+  node: { type?: string; data: unknown }
+) {
+  if (node.type === 'activity') p.select((node.data as ActivityData).item.owner);
+  else if (node.type === 'region' && !target.closest('.workflow-region-header')) p.deselect?.();
+}
+
+/** Groups Expand and Collapse all can change: those the canvas draws, expanded or folded. */
+function useDrawnGroups(document: Document) {
+  return useMemo(() => drawableGroups(document), [document]);
+}
 
 export function WorkflowCanvas(p: WorkflowCanvasProps) {
   const { fitView, setCenter, setViewport } = useReactFlow();
@@ -580,6 +696,7 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
     [p.document, collapsed]
   );
   const groups = useGroupToggles(projection, p.document.graph.root, setCollapsed);
+  const allGroups = useDrawnGroups(p.document);
   const signature = JSON.stringify([
     projection.nodes.map((n) => [n.id, dimensions(n)]),
     projection.edges.map((e) => [e.source, e.target, e.repeat]),
@@ -655,13 +772,25 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
       p.view
         ? new Set(p.view.collapsed)
         : readOnly
-          ? collapsedWorkflowGroups(p.document.graph.root)
+          ? collapsedRunGroups(p.document.graph.root, p.observation?.nodes)
           : new Set()
     );
     setDragPositions({});
     lastFocus.current = undefined;
     groups.forget();
   }, [contextKey, readOnly]);
+  // Live history arrives after the canvas mounts: unfold work as it becomes current, never refold.
+  // Scrubbing and replay move through recorded work and keep the reader's folds.
+  const currentWork = readOnly
+    ? currentRunWork(p.document.graph.root, p.observation?.nodes).join('\n')
+    : '';
+  const revealedWork = useRef(p.view ? currentWork : '');
+  useEffect(() => {
+    if (currentWork === revealedWork.current) return;
+    revealedWork.current = currentWork;
+    if (currentWork && p.observation?.following)
+      setCollapsed((value) => revealRunWork(value, p.document.graph.root, currentWork.split('\n')));
+  }, [currentWork]);
   useEffect(() => {
     void layout();
     return () => {
@@ -779,6 +908,9 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
         readOnly={readOnly}
         selectedNode={selectedNode}
         collapseAll={groups.collapseAll}
+        expandAll={groups.expandAll}
+        allCollapsed={[...allGroups].every((name) => collapsed.has(name))}
+        noneCollapsed={![...allGroups].some((name) => collapsed.has(name))}
         arrange={() => void layout(true)}
       />
       <div ref={canvasRef} className={`flow ${layoutBusy ? 'workflow-arranging' : ''}`}>
@@ -788,9 +920,9 @@ export function WorkflowCanvas(p: WorkflowCanvasProps) {
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          onNodeClick={(_, node) => {
-            if (node.type === 'activity') p.select((node.data as ActivityData).item.owner);
-          }}
+          zoomOnDoubleClick={false}
+          onPaneClick={p.deselect}
+          onNodeClick={(event, node) => clickNode(p, event.target as Element, node)}
           onNodeDragStop={(_, node) => {
             if (readOnly) return;
             p.setPositions({ ...positionsRef.current, [layoutKey + node.id]: node.position });
@@ -872,7 +1004,7 @@ function useCanvasView(p: WorkflowCanvasProps, readOnly: boolean) {
     p.view
       ? new Set(p.view.collapsed)
       : readOnly
-        ? collapsedWorkflowGroups(p.document.graph.root)
+        ? collapsedRunGroups(p.document.graph.root, p.observation?.nodes)
         : new Set()
   );
   const initialViewport = useRef(p.view?.viewport);
@@ -938,6 +1070,10 @@ function useGroupToggles(
     collapseAll() {
       anchor.current = undefined;
       setCollapsed(collapsedWorkflowGroups(root));
+    },
+    expandAll() {
+      anchor.current = undefined;
+      setCollapsed(new Set());
     },
     forget() {
       anchor.current = undefined;

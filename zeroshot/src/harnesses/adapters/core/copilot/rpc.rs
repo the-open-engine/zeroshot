@@ -77,16 +77,17 @@ impl RpcReply {
     }
 }
 
+type Outbound = (Value, Option<tokio::sync::oneshot::Sender<()>>);
+
 pub(super) async fn write_messages(
     process: &ProviderProcess,
-    mut receiver: mpsc::Receiver<Value>,
+    mut receiver: mpsc::Receiver<Outbound>,
 ) -> Result<(), NodeRunnerError> {
-    while let Some(message) = receiver.recv().await {
+    while let Some((message, acknowledged)) = receiver.recv().await {
         let body = serde_json::to_vec(&message)
             .map_err(|_| failure("Copilot RPC serialization failed"))?;
-        if body.len() > super::framing::MAX_BODY {
-            return Err(failure("Copilot RPC request exceeds 64 MiB"));
-        }
+        // Owned prompts can contain arbitrarily many standing steers. Stream them through
+        // the existing bounded process frames; MAX_BODY bounds untrusted inbound RPC only.
         let written = write_body(process, &body).await;
         match written {
             Err(ProcessRunnerError::Io(_)) if message["method"] == "session.detach" => {
@@ -95,6 +96,9 @@ pub(super) async fn write_messages(
                 return Ok(());
             }
             result => result.map_err(process_error)?,
+        }
+        if let Some(acknowledged) = acknowledged {
+            let _ = acknowledged.send(());
         }
     }
     Ok(())
@@ -116,7 +120,7 @@ pub(super) struct CopilotRpc<'a> {
     frames: Frames,
     pub(super) invocation: &'a DriverInvocation,
     pub(super) control: &'a DriverControl,
-    sender: Option<mpsc::Sender<Value>>,
+    sender: Option<mpsc::Sender<Outbound>>,
     next_id: u64,
     pending: BTreeSet<u64>,
     pub(super) session_id: String,
@@ -187,7 +191,7 @@ impl<'a> CopilotRpc<'a> {
 
     pub(super) async fn run(
         &mut self,
-        sender: mpsc::Sender<Value>,
+        sender: mpsc::Sender<Outbound>,
         turn: CopilotRpcTurn<'_>,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         self.sender = Some(sender);
@@ -270,8 +274,16 @@ impl<'a> CopilotRpc<'a> {
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         loop {
             self.response = None;
+            let prompt = match &self.active_memory {
+                Some(hooks) => {
+                    hooks
+                        .steer_prompt(self.invocation, self.control, state.prompt().to_owned())
+                        .await
+                }
+                None => state.prompt().to_owned(),
+            };
             self.request("session.send", json!({
-                "sessionId":self.session_id, "prompt":state.prompt(), "wait":true,
+                "sessionId":self.session_id, "prompt":prompt, "wait":true,
                 "responseFormat":{"type":"json_schema", "jsonSchema":{
                     "name":"zeroshot_response", "strict":true,
                     "schema":self.invocation.response.provider_schema(ProviderSchemaDialect::OpenAiStrict),
@@ -320,7 +332,7 @@ impl<'a> CopilotRpc<'a> {
         self.sender
             .as_ref()
             .ok_or_else(|| failure("Copilot RPC is closed"))?
-            .try_send(value)
+            .try_send((value, None))
             .map_err(|_| failure("Copilot RPC output queue is full or closed"))
     }
 
@@ -361,29 +373,56 @@ impl<'a> CopilotRpc<'a> {
         match dispatch_action(message) {
             DispatchAction::Event => events::receive(self, &message["params"]).await,
             DispatchAction::AcquireToken => self.acquire_token(message).await,
-            DispatchAction::MemoryHook => self.memory_hook(message),
+            DispatchAction::MemoryHook => self.memory_hook(message).await,
             DispatchAction::Reject => self.queue(json!({"jsonrpc":"2.0", "id":message["id"],
                 "error":{"code":-32601,"message":"Method not supported by Zeroshot"}})),
             DispatchAction::Ignore => Ok(()),
         }
     }
 
-    fn memory_hook(&self, message: &Value) -> Result<(), NodeRunnerError> {
+    async fn memory_hook(&self, message: &Value) -> Result<(), NodeRunnerError> {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
         let params = &message["params"];
-        let context = if params["sessionId"].as_str() == Some(&self.session_id)
+        let delivery = if params["sessionId"].as_str() == Some(&self.session_id)
             && params["hookType"].as_str() == Some("preToolUse")
         {
-            self.active_memory
-                .as_ref()
-                .map(|memory| {
-                    memory.tool_context(self.invocation, &params["input"], &self.workspace)
-                })
-                .filter(|value| !value.is_empty())
+            match &self.active_memory {
+                Some(memory) => tokio::time::timeout_at(
+                    deadline,
+                    memory.tool_delivery(self.invocation, &params["input"], &self.workspace),
+                )
+                .await
+                .ok(),
+                None => None,
+            }
         } else {
             None
         };
-        let output = context.map_or(Value::Null, |context| json!({"additionalContext":context}));
-        self.queue(json!({"jsonrpc":"2.0","id":message["id"],"result":{"output":output}}))
+        let output = delivery
+            .as_ref()
+            .filter(|(_, delivery)| !delivery.context.is_empty())
+            .map_or(
+                Value::Null,
+                |(_, delivery)| json!({"additionalContext":delivery.context}),
+            );
+        let (acknowledged, written) = tokio::sync::oneshot::channel();
+        let reply = json!({"jsonrpc":"2.0","id":message["id"],"result":{"output":output}});
+        self.sender
+            .as_ref()
+            .ok_or_else(|| failure("Copilot RPC is closed"))?
+            .try_send((reply, Some(acknowledged)))
+            .map_err(|_| failure("Copilot RPC output queue is full or closed"))?;
+        // Queueing a reply does not establish native delivery. Only the existing RPC writer's
+        // completed handoff can acknowledge a steer, within the callback's shared deadline.
+        if matches!(tokio::time::timeout_at(deadline, written).await, Ok(Ok(())))
+            && let (Some(memory), Some((query, delivery))) = (&self.active_memory, delivery)
+        {
+            // Copilot applies hook context to the turn in progress and writes none of it to its
+            // session, so a steer does not stand there.
+            let _ = tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery, false))
+                .await;
+        }
+        Ok(())
     }
 
     async fn acquire_token(&mut self, message: &Value) -> Result<(), NodeRunnerError> {

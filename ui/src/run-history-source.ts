@@ -162,6 +162,13 @@ export function createExampleRunHistory(
   };
 }
 
+function isRecordedAt(value: unknown): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+/** The event without its informational time, so a resent copy matches whether or not it has one. */
+function withoutRecordedAt({ recordedAt: _recordedAt, ...event }: HistoryEvent): string {
+  return JSON.stringify(event);
+}
 /** Merge a contiguous replay prefix, accepting identical retransmitted events only. */
 export function appendHistory(
   previous: readonly HistoryEvent[],
@@ -170,14 +177,17 @@ export function appendHistory(
   readPageRuntimeFailure(page);
   const seen = new Map<string, HistoryEvent>();
   let sequence = 0n;
+  let latestRecordedAt = 0;
   for (const event of previous) {
     if (cursorSequence(event.cursor) !== sequence + 1n) throw historyPageError();
     seen.set(event.cursor, event);
     sequence++;
+    latestRecordedAt = event.recordedAt ?? latestRecordedAt;
   }
   const next = [...previous];
   let pageSequence = -1n;
   for (const event of page.events) {
+    if (event.recordedAt !== undefined && !isRecordedAt(event.recordedAt)) throw historyPageError();
     if (event.event.kind === 'terminal' && event.event.result?.status === 'failed')
       validateFailureContext(event.event.result.context, event.cursor);
     const current = cursorSequence(event.cursor);
@@ -185,10 +195,15 @@ export function appendHistory(
     pageSequence = current;
     const existing = seen.get(event.cursor);
     if (existing) {
-      if (JSON.stringify(existing) !== JSON.stringify(event)) throw historyPageError();
+      if (withoutRecordedAt(existing) !== withoutRecordedAt(event)) throw historyPageError();
       continue;
     }
     if (current !== sequence + 1n) throw historyPageError();
+    // Recorded times never decrease; an unknown time between known ones is allowed.
+    if (event.recordedAt !== undefined) {
+      if (event.recordedAt < latestRecordedAt) throw historyPageError();
+      latestRecordedAt = event.recordedAt;
+    }
     seen.set(event.cursor, event);
     next.push(event);
     sequence = current;

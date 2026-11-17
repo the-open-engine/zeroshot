@@ -138,6 +138,11 @@ impl PiAdapter {
                 retryable,
                 diagnostic,
             } => {
+                if let Some(hooks) = &self.active_memory {
+                    hooks
+                        .finish_steers(turn.invocation.node.reference.execution.get(), false)
+                        .await;
+                }
                 state
                     .retry_provider_failure(turn, retryable, &diagnostic)
                     .await?;

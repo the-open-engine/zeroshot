@@ -13,9 +13,9 @@ use crate::native_v2_capsule::provider_process::{
     text::ProviderText,
 };
 use crate::native_v2_contract::TokenUsageDelta;
-use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
+use crate::native_v2_runner::{DriverControl, LiveOutput, NodeRunnerError};
 
-use super::output::{CodexOutput, CodexOutputDecoder};
+use super::output::{CodexEmission, CodexOutput, CodexOutputDecoder};
 use super::session::CodexSession;
 
 const COMPLETED_TURN_GRACE: Duration = Duration::from_millis(250);
@@ -72,8 +72,7 @@ async fn collect_output(
             if delivery_error.is_some() {
                 continue;
             }
-            let (stream, message) = emission.log();
-            if let Err(error) = emit_text(control, stream, message, redactions).await {
+            if let Err(error) = emit_text(control, &emission, redactions).await {
                 delivery_error = Some(error);
             }
         }
@@ -353,15 +352,15 @@ fn merge_completion_detail(
 
 async fn emit_text(
     control: &DriverControl,
-    stream: LiveOutputStream,
-    text: &str,
+    emission: &CodexEmission,
     redactions: &[String],
 ) -> Result<(), NodeRunnerError> {
     let mut emissions = Vec::new();
-    ProviderText::new(redactions).emit(&mut emissions, stream, text);
+    emission.emit(&ProviderText::new(redactions), &mut emissions);
     for output in emissions {
         control.emit(output).await?;
     }
+    let (stream, text) = emission.log();
     if text.is_empty() {
         control.emit(LiveOutput::new(stream, "")?).await?;
     }

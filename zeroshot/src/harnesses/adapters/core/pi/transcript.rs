@@ -227,11 +227,12 @@ impl PiTranscript {
             }
             "auto_retry_start" => {
                 let attempt = value.get("attempt").and_then(Value::as_i64).unwrap_or(0);
-                self.output.emit(
-                    emissions,
-                    LiveOutputStream::System,
-                    &format!("Pi is retrying the model turn (attempt {attempt})"),
-                );
+                let mut message = format!("Pi is retrying the model turn (attempt {attempt})");
+                if let Some(error) = value.get("errorMessage").and_then(Value::as_str) {
+                    message.push_str(": ");
+                    message.push_str(error);
+                }
+                self.output.emit_progress(emissions, &message);
             }
             // Unknown future event types are ignored before any provider-owned field is validated.
             _ => {}

@@ -20,6 +20,118 @@ use super::{
 
 const TARGET_ID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[path = "tests/removal.rs"]
+mod removal;
+
+#[tokio::test]
+async fn target_removal_deletes_private_login_backend_and_resume_permissions() {
+    use crate::native_v2_target::{
+        FileTargetRegistry, TargetRegistry, TargetHttpControlAuthority, TargetRecord, TargetAccess,
+    };
+    use super::test_support::MemoryDeviceCodeNotifier;
+
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("zeroshot-target-removal");
+    let directory = root.path("credentials");
+    let registry = FileTargetRegistry::new(root.path("targets.json"));
+    let target = TargetRecord {
+        id: TARGET_ID.to_owned(),
+        name: "cloud".to_owned(),
+        origin: "https://unreachable.example".to_owned(),
+        access: TargetAccess::Hosted {
+            device_token: "33333333-3333-4333-8333-333333333333".to_owned(),
+        },
+    };
+    registry.insert(target.clone()).assert_value();
+    let store = LinuxTargetCredentialStore::with_dependencies(
+        directory.clone(),
+        Arc::new(UnavailableCredentialStore),
+        Some("file"),
+        false,
+    )
+    .assert_value();
+    store.prepare_for_login(&target.id).await.assert_value();
+    store
+        .set(&target.id, "private-login-to-delete")
+        .await
+        .assert_value();
+    let other_id = "22222222-2222-4222-8222-222222222222";
+    store
+        .set(other_id, "private-login-to-retain")
+        .await
+        .assert_value();
+    let run = openengine_cluster_protocol::RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
+    registry
+        .record_recovery_authorization(&target.id, &run, &Default::default())
+        .assert_value();
+
+    // Removal follows persisted backend selection even when this process forces a different one.
+    let store = Arc::new(
+        LinuxTargetCredentialStore::with_dependencies(
+            directory.clone(),
+            Arc::new(UnavailableCredentialStore),
+            Some("system"),
+            true,
+        )
+        .assert_value(),
+    );
+    let authority = TargetHttpControlAuthority::with_dependencies(
+        store,
+        Arc::new(MemoryDeviceCodeNotifier::default()),
+        root.path("auth"),
+    );
+    registry.remove("cloud", &authority).await.assert_value();
+    assert!(!directory.join(format!("{TARGET_ID}.json")).exists());
+    assert!(!directory.join(format!("{TARGET_ID}.store")).exists());
+    assert!(directory.join(format!("{other_id}.store")).exists());
+    let file = PrivateFileTargetCredentialStore::new(directory);
+    assert_eq!(file.get(TARGET_ID).await.assert_value(), None);
+    assert_eq!(
+        file.get(other_id).await.assert_value().as_deref(),
+        Some("private-login-to-retain")
+    );
+    assert!(registry.get("cloud").is_err());
+    assert!(registry.recovery_authorization(&target.id, &run).is_err());
+}
+
+#[test]
+fn keyring_removal_handles_present_missing_and_failed_credentials() {
+    let entry = mock_keyring_entry(Some("stored-login"), false);
+    super::remove_keyring_password(Ok(entry)).assert_value();
+    super::remove_keyring_password(Ok(mock_keyring_entry(None, false))).assert_value();
+    assert_eq!(
+        super::remove_keyring_password(Ok(mock_keyring_entry(Some("stored-login"), true)))
+            .assert_error()
+            .to_string(),
+        "target credential store cleanup failed"
+    );
+}
+
+#[tokio::test]
+async fn removal_uses_the_saved_system_backend_and_can_be_retried() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("zeroshot-system-removal");
+    let directory = root.path("credentials");
+    let system = Arc::new(MemoryCredentialStore::default());
+    let first = LinuxTargetCredentialStore::with_dependencies(
+        directory.clone(),
+        system.clone(),
+        Some("system"),
+        true,
+    )
+    .assert_value();
+    first.set(TARGET_ID, "system-login").await.assert_value();
+    let second = LinuxTargetCredentialStore::with_dependencies(
+        directory.clone(),
+        system.clone(),
+        Some("file"),
+        false,
+    )
+    .assert_value();
+    second.remove(TARGET_ID).await.assert_value();
+    assert_eq!(system.get(TARGET_ID).await.assert_value(), None);
+    assert!(!directory.join(format!("{TARGET_ID}.store")).exists());
+    second.remove(TARGET_ID).await.assert_value();
+}
+
 fn mock_keyring_entry(password: Option<&str>, fail_next_operation: bool) -> keyring::Entry {
     let credential = MockCredential::default();
     if let Some(password) = password {
@@ -554,7 +666,7 @@ async fn private_file_store_rejects_malformed_tokens_metadata_and_backend_select
             .to_string(),
         "target credential store selection is invalid"
     );
-    for backend in ["system\n", "file\n"] {
+    for backend in ["system\n", "file\n", "file-only\n"] {
         store.write_backend(TARGET_ID, backend).await.assert_value();
         assert_eq!(
             store

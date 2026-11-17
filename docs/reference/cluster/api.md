@@ -389,6 +389,25 @@ This method has no parameters.
 | --- | --- |
 | <code>runForceResult</code> | <a href="../schema.json#/$defs/RunForceResult"><code>schema.json#/$defs/RunForceResult</code></a> |
 
+### <code>run/steer</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>text</code> | Yes | <a href="../schema.json#/$defs/NodeInstructions"><code>schema.json#/$defs/NodeInstructions</code></a> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runSteerResult</code> | <a href="../schema.json#/$defs/RunSteerResult"><code>schema.json#/$defs/RunSteerResult</code></a> |
+
 ### <code>run/suspend</code>
 
 | Parameter structure | Transport | Server push | Inbound notifications |
@@ -511,7 +530,7 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 
 ### <code>run/resume</code>
 
-Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed. Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations; restarts start new conversations. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.
+Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed. Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.
 
 | Parameter structure | Transport | Server push | Inbound notifications |
 | --- | --- | --- | --- |

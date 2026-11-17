@@ -399,3 +399,33 @@ def test_suspended_status_rejects_incoherent_due_time(reason: str, wait: object)
     }
     with pytest.raises(ProtocolError, match=r"suspension\.wait"):
         _status(value)
+
+
+def test_steer_status_projects_receiving_executions_and_omissions() -> None:
+    value = local_status()
+    value["steers"] = [
+        {
+            "id": "steer-1",
+            "createdAt": 1000,
+            "textBytes": 2000,
+            "excerpt": "é",
+            "receivedExecutions": 65,
+            "executions": ["execution-2"],
+            "executionsOmitted": True,
+        }
+    ]
+    value["omittedSteers"] = 3
+    status = _status(value)
+    assert status.omitted_steers == 3
+    assert status.steers[0].executions == ("execution-2",)
+    assert status.steers[0].received_executions == 65
+    assert status.steers[0].executions_omitted
+    assert _status(local_status()).steers == ()
+
+
+@pytest.mark.parametrize("count", [True, -1, "1", 9007199254740992])
+def test_steer_status_rejects_malformed_counts(count: object) -> None:
+    value = local_status()
+    value["omittedSteers"] = count
+    with pytest.raises(ProtocolError):
+        _status(value)

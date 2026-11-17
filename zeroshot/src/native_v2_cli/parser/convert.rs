@@ -193,6 +193,7 @@ impl UtilityCommand {
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
             Self::Suspend(args) => args.into_selector().map(NativeV2CliCommand::Suspend),
+            Self::Steer(args) => args.into_command(),
             Self::Answer(args) => Ok(NativeV2CliCommand::Answer {
                 run: args.run.into_selector()?,
                 input: args.input,
@@ -259,6 +260,25 @@ impl UtilityCommand {
     }
 }
 
+impl super::RunSteerArgs {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        let text = match (self.text, self.text_file, self.text_stdin) {
+            (Some(text), None, false) => crate::native_v2_cli::SteerText::Text(text),
+            (None, Some(path), false) => crate::native_v2_cli::SteerText::File(path),
+            (None, None, true) => crate::native_v2_cli::SteerText::Stdin,
+            _ => {
+                return Err(NativeV2CliError::Usage(
+                    "steer requires exactly one text source".into(),
+                ));
+            }
+        };
+        Ok(NativeV2CliCommand::Steer {
+            run: self.run.into_selector()?,
+            text,
+        })
+    }
+}
+
 impl RunResumeArgs {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         let from = self
@@ -322,6 +342,14 @@ impl RunCheckpointsArgs {
 impl TargetCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::List(args) => Ok(NativeV2CliCommand::TargetList { json: args.json }),
+            Self::Remove(args) => {
+                validate_public_id(&args.name, "target name")?;
+                Ok(NativeV2CliCommand::TargetRemove {
+                    name: args.name,
+                    json: args.json,
+                })
+            }
             Self::Add(args) => {
                 validate_public_id(&args.name, "target name")?;
                 Ok(NativeV2CliCommand::TargetAdd(TargetAdd {

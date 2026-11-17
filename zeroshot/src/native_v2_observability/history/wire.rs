@@ -206,6 +206,8 @@ pub struct HistoryMetadata {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistoryPage {
+    /// Projected `StoredRunEvent` envelopes: `cursor`, optional ledger `recordedAt` Unix
+    /// milliseconds (absent when unknown), and `event`.
     pub events: Vec<Value>,
     pub next_cursor: Cursor,
     pub head_cursor: Cursor,

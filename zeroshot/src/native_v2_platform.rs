@@ -769,6 +769,35 @@ impl NativeV2PlatformController {
         }
     }
 
+    pub async fn steer(
+        &self,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2PlatformError> {
+        openengine_cluster_protocol::validate_steer(&params.text)
+            .map_err(NativeV2PlatformError::InvalidRequest)?;
+        let _control = self.lock_run_control(&params.run_id).await;
+        if let Some(successor) = self
+            .allocator
+            .workspace_recovery(&params.run_id)
+            .await
+            .successor_run_id
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(format!(
+                "run already has successor {}",
+                successor.as_str()
+            )));
+        }
+        crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params)
+            .await
+            .map_err(|error| match error {
+                // The ledger refuses a steer by run state: the caller's to correct.
+                RunLedgerError::InvalidEvent(message) => {
+                    NativeV2PlatformError::InvalidRequest(message.to_owned())
+                }
+                error => error.into(),
+            })
+    }
+
     pub async fn suspend(
         &self,
         params: openengine_cluster_protocol::RunSuspendParams,
@@ -817,8 +846,22 @@ impl NativeV2PlatformController {
         &self,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, NativeV2PlatformError> {
-        if self.ledger.get(&params.run_id).await?.is_none() {
+        let Some(stored) = self.ledger.get(&params.run_id).await? else {
             return Err(RunLedgerError::RunNotFound.into());
+        };
+        // Without its workspace a suspended attempt could never continue or be answered, yet
+        // would stay suspended. Force-stop ends it and removes what it retains.
+        if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            && self
+                .allocator
+                .workspace_recovery(&params.run_id)
+                .await
+                .successor_run_id
+                .is_none()
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "run is suspended; force-stop it before discarding its workspace".to_owned(),
+            ));
         }
         let discarded = self
             .allocator
@@ -834,6 +877,22 @@ impl NativeV2PlatformController {
     /// Waits until the run's live runtime, if any, has settled its observed outcome, including
     /// the terminal append attempt that follows a published runtime failure. A preparation hands
     /// off to its engine before it finishes, so the engine that replaced it is awaited too.
+    /// Whether a stop signal must leave the run alone. A live engine answers from memory once it
+    /// disposed its runtime for a suspension, so stopping live work never waits for the ledger;
+    /// the ledger is read only when no engine is live.
+    pub(crate) async fn holds_suspension(&self, run_id: &RunId) -> bool {
+        let runtime = self.runtimes.lock().await.get(run_id).cloned();
+        match runtime {
+            Some(RuntimeSlot::Running(engine)) => engine.suspending(),
+            Some(RuntimeSlot::Preparing(_)) => false,
+            None => matches!(
+                self.ledger.get(run_id).await,
+                Ok(Some(stored))
+                    if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            ),
+        }
+    }
+
     pub(crate) async fn wait_runtime_settled(&self, run_id: &RunId) {
         loop {
             // Read the slot and its preparation state under one lock: a finished preparation
@@ -1127,6 +1186,7 @@ impl NativeV2PlatformController {
 
     async fn force_result(&self, run_id: &RunId) -> Result<RunForceResult, NativeV2PlatformError> {
         let RunStatusResult {
+            steering: _,
             run_id,
             title,
             source,
@@ -1142,6 +1202,7 @@ impl NativeV2PlatformController {
             })
             .await?;
         Ok(RunForceResult {
+            steering: Default::default(),
             run_id,
             title,
             source,

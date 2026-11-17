@@ -496,6 +496,22 @@ async fn definition_uses_admitted_inputs_and_history_preserves_browser_identitie
         page["events"][3]["event"]["completion"]["reference"]["execution"],
         identity.to_string()
     );
+    // Ledger-recorded times ride on the envelope beside the cursor, never inside the event.
+    let recorded: Vec<u64> = page["events"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .map(|event| {
+            assert!(event["event"].get("recordedAt").is_none());
+            event["recordedAt"].as_u64().assert_value()
+        })
+        .collect();
+    assert_eq!(recorded.len(), 5);
+    assert!(recorded.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert_eq!(
+        recorded[2], recorded[4],
+        "one batch shares one recorded time"
+    );
     assert_eq!(page["complete"], true);
     assert_eq!(page["finished"], true);
     assert_eq!(page["nextCursor"], "v2:5");

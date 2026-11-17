@@ -153,7 +153,7 @@ fn device_complete_uri(
     body
 }
 
-fn authority_response(
+pub(super) fn authority_response(
     request: &CapturedHttpRequest,
     origin: &str,
     address: std::net::SocketAddr,
@@ -562,6 +562,12 @@ impl LoginBlockingCredentialStore {
 
 #[async_trait]
 impl TargetCredentialStore for LoginBlockingCredentialStore {
+    async fn remove(&self, _target_id: &str) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "test store does not support removal",
+        ))
+    }
+
     async fn prepare_for_login(
         &self,
         _target_id: &str,
@@ -600,6 +606,12 @@ impl RotatingCredentialStore {
 
 #[async_trait]
 impl TargetCredentialStore for RotatingCredentialStore {
+    async fn remove(&self, _target_id: &str) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "test store does not support removal",
+        ))
+    }
+
     async fn get(&self, _target_id: &str) -> Result<Option<String>, TargetAuthorityError> {
         let value = {
             let mut state = self.state.lock().assert_value();
