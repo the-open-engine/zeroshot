@@ -450,7 +450,9 @@ fn pending_legacy_token_file_keeps_only_empty_github_com_defaults_unmaterialized
 #[tokio::test]
 async fn native_helpers_forward_the_captured_absolute_config_directories() {
     let invoking = tempfile::tempdir().assert_value();
-    let workspace = invoking.path().join("selected-workspace");
+    let home = invoking.path().join("home-alias");
+    std::os::unix::fs::symlink(invoking.path(), &home).assert_value();
+    let workspace = home.join("selected-workspace");
     std::fs::create_dir(&workspace).assert_value();
     for (program, response) in [
         ("gh", "printf 'native-config-token\\n'"),
@@ -468,7 +470,7 @@ printf 'password=native-config-token\n\n'"#,
             r#"#!/bin/sh
 [ "$GH_CONFIG_DIR" = "$HOME/config/gh" ] || exit 2
 [ "$GLAB_CONFIG_DIR" = "$HOME/config/glab" ] || exit 3
-[ "$PWD" = "$HOME/selected-workspace" ] || exit 4
+[ "$PWD" = "$(cd "$HOME/selected-workspace" && /bin/pwd -P)" ] || exit 4
 {response}
 "#
         );
@@ -479,22 +481,14 @@ printf 'password=native-config-token\n\n'"#,
         )
         .assert_value();
     }
-    let mut environment = fixture_environment(invoking.path());
+    let mut environment = fixture_environment(&home);
     environment.insert(
         "GH_CONFIG_DIR".to_owned(),
-        invoking
-            .path()
-            .join("config/gh")
-            .to_string_lossy()
-            .into_owned(),
+        home.join("config/gh").to_string_lossy().into_owned(),
     );
     environment.insert(
         "GLAB_CONFIG_DIR".to_owned(),
-        invoking
-            .path()
-            .join("config/glab")
-            .to_string_lossy()
-            .into_owned(),
+        home.join("config/glab").to_string_lossy().into_owned(),
     );
     for provider in [GITHUB, GITLAB] {
         let token = process::stored_token(

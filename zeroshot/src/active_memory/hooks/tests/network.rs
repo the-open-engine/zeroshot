@@ -90,7 +90,11 @@ impl NetworkFixture {
     }
     async fn deliver(&self, invocation: &DriverInvocation) -> (HookQuery, HookDelivery) {
         self.hooks
-            .tool_delivery(invocation, &json!({"tool_name":"Read"}), self.home.path())
+            .tool_delivery(ToolCall::hook(
+                invocation,
+                &json!({"tool_name":"Read"}),
+                self.home.path(),
+            ))
             .await
     }
 }
@@ -291,7 +295,7 @@ async fn network_lost_ack_reservations_release_and_failed_start_does_not_consume
     fixture.hooks.discard_delivery(&query, &first).await;
     let (query, retry) = fixture.deliver(&reader).await;
     assert_eq!(retry.steers, first.steers);
-    fixture.hooks.acknowledge(&query, &retry, true).await;
+    fixture.hooks.acknowledge(&query, &retry).await;
     assert!(fixture.deliver(&reader).await.1.steers.is_empty());
     fixture
         .publish(fixture.params("no-carrier-note", SteeringMode::Once, &["alpha"]))
@@ -472,48 +476,81 @@ async fn network_native_broker_reoffers_after_missing_ack_and_accepts_complete_m
     .assert_value();
 }
 
+// A harness with a message channel takes the steers of one tool call as one user message. The
+// person's block speaks in the first person; peer guidance stays described as another agent's.
+// Once the harness has shown the message, no later prompt repeats it, in either mode.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn network_transient_callback_reoffers_only_standing_until_a_prompt_succeeds() {
+async fn network_message_shown_at_a_tool_call_is_not_repeated_in_either_mode() {
     let fixture = NetworkFixture::new().await;
     let mut reader = turn("reader", 7, 7, 7);
     assert!(fixture.prepare(&mut reader).await.is_empty());
     for (text, mode) in [
-        ("once-transient", SteeringMode::Once),
-        ("standing-transient", SteeringMode::Standing),
+        ("once-message", SteeringMode::Once),
+        ("standing-message", SteeringMode::Standing),
     ] {
         fixture
             .publish(fixture.params(text, mode, &["alpha", "beta"]))
             .await
             .assert_value();
     }
-    let (query, delivery) = fixture.deliver(&reader).await;
-    assert_eq!(delivery.steers.len(), 2);
-    fixture.hooks.acknowledge(&query, &delivery, false).await;
-    assert!(fixture.deliver(&reader).await.1.steers.is_empty());
+    record_steer(fixture.ledger.as_ref(), &fixture.run, "human-message").await;
+    let input = json!({"tool_name":"Read"});
+    let call = || ToolCall {
+        steers: SteerCarrier::ShownMessage,
+        ..ToolCall::hook(&reader, &input, fixture.home.path())
+    };
+    let (_, delivery) = fixture.hooks.tool_delivery(call()).await;
+    assert_eq!(delivery.steers.len(), 3);
+    assert!(delivery.context.is_empty());
+    let (human, peers) = delivery
+        .steer
+        .split_once("</steer>\n\n<network-steer>\n")
+        .assert_value();
+    assert!(human.starts_with("<steer>\nA message from me, the person running this run"));
+    assert!(human.contains("human-message") && !human.contains("once-message"));
+    assert!(peers.starts_with("Guidance from other graph agents."));
+    assert!(peers.contains("From worker (instance 1): once-message"));
+    assert!(peers.contains("standing-message") && peers.ends_with("</network-steer>"));
+    assert!(!peers.contains("human-message") && !peers.contains("my direction"));
+    // On its way: not offered again, and not received before the harness shows it.
+    assert!(
+        fixture
+            .hooks
+            .tool_delivery(call())
+            .await
+            .1
+            .steers
+            .is_empty()
+    );
     let instance = reader.node.reference.node_instance;
-    assert_eq!(fixture.hooks.capture_steers()[&instance].receipts.len(), 1);
+    assert!(
+        fixture.hooks.capture_steers()[&instance]
+            .receipts
+            .is_empty()
+    );
+    fixture.hooks.steer_shown(7, &delivery.steer).await;
+    assert_eq!(fixture.hooks.capture_steers()[&instance].receipts.len(), 3);
+    assert!(
+        fixture
+            .hooks
+            .tool_delivery(call())
+            .await
+            .1
+            .steers
+            .is_empty()
+    );
     fixture.hooks.finish_steers(7, true).await;
     for (execution, success) in [(8, false), (9, true)] {
         let mut revisit = turn("reader", 7, execution, 7);
-        let context = fixture.prepare(&mut revisit).await;
-        assert!(!context.contains("once-transient"));
-        assert_eq!(context.matches("standing-transient").count(), 1);
-        assert_eq!(fixture.hooks.capture_steers()[&instance].receipts.len(), 1);
+        assert!(fixture.prepare(&mut revisit).await.is_empty());
         fixture.hooks.finish_steers(execution, success).await;
     }
-    assert_eq!(fixture.hooks.capture_steers()[&instance].receipts.len(), 2);
-    let mut settled = turn("reader", 7, 10, 7);
-    assert!(fixture.prepare(&mut settled).await.is_empty());
+    // A fresh conversation of the same instance gets what stands, not what was consumed once.
+    let mut fresh = turn("reader", 7, 10, 9);
+    let context = fixture.prepare(&mut fresh).await;
+    assert!(!context.contains("once-message"));
+    assert!(context.contains("standing-message") && context.contains("human-message"));
     let mut sender = fixture.sender.clone();
     let context = fixture.prepare(&mut sender).await;
-    assert!(!context.contains("once-transient") && !context.contains("standing-transient"));
-    let status = crate::v2_run_ledger::steering::status(fixture.ledger.as_ref(), &fixture.run)
-        .await
-        .assert_value();
-    assert!(
-        status
-            .steers
-            .iter()
-            .all(|steer| steer.received_executions == 1)
-    );
+    assert!(!context.contains("once-message") && !context.contains("standing-message"));
 }

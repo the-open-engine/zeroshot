@@ -57,10 +57,13 @@ pub(super) fn claude_arguments(
     mut argv: Vec<String>,
     turn: ClaudeTurnArguments<'_>,
 ) -> Vec<String> {
+    // Stream-json input keeps stdin open as the channel for user messages sent while the turn
+    // runs, and the replay flag makes Claude Code report each one when it enters the conversation.
     argv.extend([
         "--print".to_owned(),
         "--input-format".to_owned(),
-        "text".to_owned(),
+        "stream-json".to_owned(),
+        "--replay-user-messages".to_owned(),
         "--output-format".to_owned(),
         "stream-json".to_owned(),
         "--verbose".to_owned(),

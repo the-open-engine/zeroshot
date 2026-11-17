@@ -124,7 +124,8 @@ def wait(predicate):
         if time.monotonic() >= deadline: raise RuntimeError('network fixture barrier timed out')
         time.sleep(.01)
 
-save('prompt', sys.stdin.read())
+# Claude Code takes the prompt as one stream-json line and keeps stdin open for further messages.
+save('prompt', json.loads(sys.stdin.readline())['message']['content'][0]['text'])
 save('launch', sys.argv[1:])
 save('capability', bool(os.environ.get('ZEROSHOT_STEERING_CAPABILITY')))
 save('identity', {'node':node,'nodeInstance':int(instance),'execution':os.environ['ZEROSHOT_EXECUTION_REF']})
@@ -190,10 +191,24 @@ tool('tool-1')
 if scenario == 'resume' and node == 'receiver' and iteration == '1':
     (root/'network-resume-held').touch()
     wait(lambda: (root/'network-resume-release').exists())
-print(json.dumps({'type':'system','subtype':'init','session_id':'network-'+identity}))
-print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':'network-'+identity,
-    'structured_output':{'response':response},'model_usage_since_last_result':{'fixture-model':{
-        'inputTokens':1,'outputTokens':1,'cacheReadInputTokens':0,'cacheCreationInputTokens':0}}}))
+def emit(record):
+    print(json.dumps(record), flush=True)
+def result():
+    emit({'type':'result','subtype':'success','is_error':False,'session_id':'network-'+identity,
+        'structured_output':{'response':response},'model_usage_since_last_result':{'fixture-model':{
+            'inputTokens':1,'outputTokens':1,'cacheReadInputTokens':0,'cacheCreationInputTokens':0}}})
+emit({'type':'system','subtype':'init','session_id':'network-'+identity})
+result()
+# A message written to stdin at a tool call is still queued when the turn ends: as in Claude
+# Code it is reported, and starts a turn with a result of its own. Stdin closes after that.
+messages = []
+for line in sys.stdin:
+    record = json.loads(line)
+    messages.append(record['message']['content'][0]['text'])
+    record['isReplay'] = True
+    emit(record)
+    result()
+save('messages', '\n'.join(messages))
 "#;
 
 fn network_captures(
@@ -254,22 +269,16 @@ async fn network_wait(fixture: &LocalFixture, marker: &str) {
     .assert_value_with(marker);
 }
 
-fn network_tool_context(text: &str) -> String {
-    let tool: Value = serde_json::from_str(text).assert_value();
-    tool["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned()
-}
-
+/// What a conversation was given: its prompt, the user messages sent at its tool calls, and
+/// the output of its hooks, which never carries a message.
 fn network_received(fixture: &LocalFixture, run: &str, node: &str, iteration: u64) -> String {
-    ["prompt", "tool-0", "tool-1"]
+    ["prompt", "messages", "tool-0", "tool-1"]
         .map(|kind| network_capture(fixture, run, (node, iteration), kind))
         .join("\n")
 }
 
 fn network_no_messages(fixture: &LocalFixture, run: &str, node: &str, iteration: u64) {
-    for kind in ["prompt", "tool-0", "tool-1"] {
+    for kind in ["prompt", "messages", "tool-0", "tool-1"] {
         let text = network_capture(fixture, run, (node, iteration), kind);
         assert!(
             !text.contains(ONCE) && !text.contains(STANDING),
@@ -374,34 +383,25 @@ async fn networks_map_peers_deliver_at_live_hooks_once_per_sibling_and_future_me
     for prompt in prompts {
         assert!(!messages.iter().any(|message| prompt.contains(message)));
     }
-    let tools = network_captures(&fixture, &run, ("talker", 0), "tool-0");
-    let later = network_captures(&fixture, &run, ("talker", 0), "tool-1");
-    assert_eq!(tools.len(), 2);
-    assert_eq!(later.len(), tools.len());
-    let tools = tools
-        .into_iter()
-        .zip(later)
-        .map(|(first, second)| {
-            format!(
-                "{}\n{}",
-                network_tool_context(&first),
-                network_tool_context(&second)
-            )
-        })
-        .collect::<Vec<_>>();
+    // Each running sibling is sent the other's publications as a user message at a tool call.
+    let received = network_captures(&fixture, &run, ("talker", 0), "messages");
+    assert_eq!(received.len(), 2);
     let identities = network_captures(&fixture, &run, ("talker", 0), "identity");
-    assert_eq!(identities.len(), tools.len());
-    for (tool, identity) in tools.into_iter().zip(identities) {
+    assert_eq!(identities.len(), received.len());
+    for (message, identity) in received.into_iter().zip(identities) {
         let identity: Value = serde_json::from_str(&identity).assert_value();
         let own_instance = identity["nodeInstance"].as_u64().assert_value();
-        let context = tool;
-        assert!(!context.contains(&format!("mapped-once-{own_instance}\n")));
-        assert!(!context.contains(&format!("mapped-standing-{own_instance}\n")));
-        assert_eq!(context.matches("mapped-once-").count(), 1);
-        assert_eq!(context.matches("mapped-standing-").count(), 1);
+        assert!(message.starts_with("<network-steer>\n"), "{message}");
+        assert!(!message.contains(&format!("mapped-once-{own_instance}\n")));
+        assert!(!message.contains(&format!("mapped-standing-{own_instance}\n")));
+        assert_eq!(message.matches("mapped-once-").count(), 1);
+        assert_eq!(message.matches("mapped-standing-").count(), 1);
     }
-    for tool in network_captures(&fixture, &run, ("talker", 0), "tool-before") {
-        assert!(!tool.contains("mapped-once-") && !tool.contains("mapped-standing-"));
+    // Nothing travels inside what a hook returns.
+    for kind in ["tool-before", "tool-0", "tool-1"] {
+        for tool in network_captures(&fixture, &run, ("talker", 0), kind) {
+            assert!(!tool.contains("mapped-once-") && !tool.contains("mapped-standing-"));
+        }
     }
     let receiver = network_received(&fixture, &run, "receiver", 0);
     for message in messages {

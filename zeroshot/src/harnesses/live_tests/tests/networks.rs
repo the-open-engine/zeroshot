@@ -132,7 +132,8 @@ fn messages(completion: crate::native_v2_contract::NodeCompletion) -> Vec<String
 const RECEIVE: &str = concat!(
     "First make one NEW native shell call `printf peer-network-callback-proof`. ",
     "Return an array containing exactly the text of each peer message actually delivered in a ",
-    "<network-steer> block of your host context or native tool callback, once per distinct text. ",
+    "<network-steer> block of your host context, of a native tool callback or of a message that ",
+    "reached you while you worked, once per distinct text. ",
     "Do not include attribution, vector IDs, or unrelated guidance. If none arrived, return []. ",
     "Do not edit files, call other tools, invent messages, or use Git. Follow the output contract."
 );

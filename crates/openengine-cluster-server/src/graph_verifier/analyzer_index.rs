@@ -4,7 +4,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn new(graph: &'a GraphSpec) -> Self {
         Self {
             graph,
-            proof_work: ProofWork::default(),
+            search_steps: 0,
             nodes: BTreeMap::new(),
             authored: Vec::new(),
             dependencies: BTreeMap::new(),
@@ -55,9 +55,6 @@ impl<'a> Analyzer<'a> {
                 map_index_targets: None,
             },
         );
-        if self.proof_work.charge(0).is_none() {
-            self.assignment_ceiling(&root_path);
-        }
         self.validate_terminal_coverage();
         let order = self.reference_topological_order();
         let fold = self.fold_node(&self.graph.root);

@@ -103,16 +103,35 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   run's vector record, are not ranked, and go first. Separate per-injection ceilings for memory default
   to 16000 approximate tokens for node graph guidance and 8000 for repository hooks; each accepts
   1..=64000 and converts one token to four UTF-8 bytes, including framing. A steer is delivered whole
-  and does not count against them. Claude Code shows at most 10,000 characters of hook context
-  inline, so a Claude Code tool call adds steers only while its whole context, memory included,
-  stays within 9,000 bytes: a steer that does not fit waits, with every later steer, for the
-  conversation's next prompt. A tool call made by a Claude Code subagent never carries or
-  receipts a steer. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
+  and does not count against them. A steer is the operator's own words and is never placed
+  inside a tool result, which a model may refuse to follow. At a tool call it travels as a user
+  message through the harness's message channel where one exists (`SteerCarrier`): Claude Code's
+  stream-json stdin, Copilot's `session.send` in `immediate` mode, Pi's steering queue and a stored
+  OpenCode session message; Codex and Hermes take it inside hook context. A steer sent as a
+  message is framed in its sender's first person and repeats the request to follow it after the
+  text: the descriptive frame of prompts and hook context reads there as quoted material, which
+  a small model dismisses. A message is receipted
+  when the harness shows it in the conversation (OpenCode: when it is stored), not when a hook
+  returned. A message that is never shown carries no receipt, and its steers are due again in
+  that conversation's next prompt. A message that was shown is part of the conversation: its
+  steers are not delivered to that conversation again, whether or not the model followed them,
+  and the snapshot keeps the receipt. One tool call hands over at most 1 MiB of steers; later ones
+  wait for the next tool call or prompt. A native subagent's tool call never carries or receipts a
+  steer inside hook context; a message reaches the node's own conversation whichever tool call
+  asked. Claude Code's stdin stays open until a turn's result arrives with no steer outstanding.
+  A tool-call memory lesson is a session entry on Pi and a stored message on OpenCode, and hook
+  context elsewhere. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
   including compaction; new conversations and conversations continued in a successor receive fresh
-  memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
+  memory delivery sets. Copilot writes no hook context to its session, so there a tool-call
+  lesson is deduplicated per execution and a later execution is given it again
+  (`HookQuery::context_kept`). Steers use the same conversation keys; a conversation continued in a successor
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
   restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
-  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  standing steers again. A prompt-carried Standing steer is receipted when the prompt is prepared;
+  the snapshot omits that receipt too until the execution ends successfully, and a failed execution
+  leaves the steer due for that conversation's next prompt. A prompt-carried Once steer is
+  receipted only when its execution ends successfully.
+  The carrier retains incremental vector-record read progress across callback deadlines.
   GraphSpec.networks owns default-deny peer communication: members name every participating logical
   agent node and publishers are a subset. All mapped copies participate. Only publishers receive
   network publication context and an execution-scoped broker capability; labels never authorize it.
@@ -141,12 +160,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   independently of selected checkpoint prerequisites; retained instances keep their IDs. Publication
   uses the existing vector record and native carrier, delivering
   to active hooks or future prompts without waking, restarting or scheduling recipients.
-  A Standing steer does not stand after a tool-call delivery on Copilot, whose hook context
-  is not written to its session, or on Pi and OpenCode, whose tool result a model may refuse
-  to follow (`HookQuery::standing`): its receipt remains excluded from conversation snapshots
-  until a subsequent prompt carries it successfully. Standing prompt receipts are provisional
-  from preparation; Once prompt consumption requires successful delivery. Once messages never
-  repeat solely because a carrier does not persist hook context.
+  Peer guidance travels on the same carriers as a steer and in the same hand-over. It keeps its
+  descriptive `<network-steer>` frame inside a user message too: it is another agent's text, not
+  the operator's. No carrier repeats a message the conversation holds, in either mode.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.
@@ -250,8 +266,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   One scoped assignment traversal owns flat and nested map proofs, preserving shared item populations
   and applying enclosing retention after candidate qualification. Incoming controls and lifted writes
   retain their conditions. Choice routes and candidate availability are shared immutable proofs.
-  Correlated aggregate verification uses saturated joint counts and one deterministic 8 Mi count-cell
-  proof-work bound; an exhausted proof budget stays exhausted through admission.
+  Control checks are decided by search over decision diagrams (`graph_verifier/assignments/`): a
+  check reads only the selectors its condition and their join, loop and execution rules mention,
+  labels it cannot tell apart share one class, and controls no rule connects add to the work
+  instead of multiplying it. Never list joint outcomes of unrelated nodes or share a work budget
+  between checks: whether one condition is valid must not depend on the rest of the graph. A map
+  item's joint outcomes are still listed per check and folded into saturated joint counts (65,536
+  count states per map); one check may take 1,048,576 search steps, a backstop reported at the
+  condition being decided.
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
@@ -270,7 +292,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Closed-window replay never contributes pending work; terminal maps discard their queued siblings.
   Static aggregate proofs check private qualification before exporting retained controls, preserve
   presence and success/failure refinement in every compressed label class, saturate higher counts at
-  authored thresholds, and charge shared-guard expansion before allocation.
+  authored thresholds, and expand each distinct first-join selector once per racer.
   Aggregate guards can use nested map facts when an enclosing map dominates their scope.
   The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
   actual traversal to find ready work; static write/retention witnesses remain private to admission.
@@ -1104,7 +1126,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
   read-only boundaries reuse bytes. Local/direct storage normalizes Git into a temporary private
   filesystem stage, commits it to one deduplicated Restic repository per recovery lineage, and then
-  removes the full stage. Small catalogs atomically map logical checkpoint IDs to Restic snapshots.
+  removes the full stage. Capture does not sync each copied workspace file or directory;
+  metadata and catalogs retain their durable writes. Small catalogs atomically map logical
+  checkpoint IDs to Restic snapshots.
   Restic drains progress and private stderr completely with bounded memory, retaining only the
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
@@ -2121,7 +2145,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 Run the narrowest relevant checks first, then the complete affected lane.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
-Suspension polling has a separate bounded checkpoint and cleanup budget from individual CLI calls.
+Suspension and terminal-failure polling share a bounded checkpoint and cleanup budget separate from
+individual CLI calls. Terminal polling rejects a different completed outcome immediately and includes
+the last observed status when its settlement deadline expires.
 Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.
 
 ```bash
