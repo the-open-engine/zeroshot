@@ -480,6 +480,10 @@ jobs:
         run: |
           cargo test --locked --package zeroshot --features ui --lib -- native_v2_portable_controller::availability::tests native_v2_cli::local::inspection::tests v2_run_ledger::sqlite::readonly::tests
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable inspection
+      - name: Run macOS local startup regressions
+        run: |
+          cargo test --locked --package zeroshot --lib --features ui native_v2_cli::local::
+          cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable startup::
 
   python-check:
     name: Python SDK

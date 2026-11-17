@@ -471,87 +471,110 @@ impl LocalCliBackend {
                     }),
             );
         let storage = self.create_run_storage(&prepared.run_id)?;
-        self.write_recovery_document(
-            &prepared.run_id,
-            &LocalRecoveryDocument {
-                delivery_receipt: delivery_receipt.clone(),
+        let new_submission = resumed_from.is_none();
+        let run_id = prepared.run_id.clone();
+        let result = async {
+            self.write_recovery_document(
+                &prepared.run_id,
+                &LocalRecoveryDocument {
+                    delivery_receipt: delivery_receipt.clone(),
+                    local_branch: prepared.local_branch.clone(),
+                    invoking_workspace: prepared.invoking_workspace.clone(),
+                    request_digest: prepared.request_digest.clone(),
+                    workspace_revision: prepared.workspace_revision.clone(),
+                    submission: prepared.submission.clone(),
+                    workspace: prepared.workspace.clone(),
+                    delivery_run_id: Some(prepared.delivery_run_id.clone()),
+                    resumed_from: resumed_from.clone(),
+                    successor_run_id: None,
+                    pending_restore: None,
+                },
+            )?;
+            let workspace_lease = self.workspace_lease(&prepared.workspace)?;
+            let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
+            let bootstrap_path = storage.join(BOOTSTRAP_FILE);
+            let bootstrap = PortableControllerBootstrap {
+                request_resolution,
+                predecessor: resumed_from,
+                delivery_receipt,
                 local_branch: prepared.local_branch.clone(),
-                invoking_workspace: prepared.invoking_workspace.clone(),
-                request_digest: prepared.request_digest.clone(),
-                workspace_revision: prepared.workspace_revision.clone(),
-                submission: prepared.submission.clone(),
-                workspace: prepared.workspace.clone(),
-                delivery_run_id: Some(prepared.delivery_run_id.clone()),
-                resumed_from: resumed_from.clone(),
-                successor_run_id: None,
-                pending_restore: None,
-            },
-        )?;
-        let workspace_lease = self.workspace_lease(&prepared.workspace)?;
-        let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
-        let bootstrap_path = storage.join(BOOTSTRAP_FILE);
-        let bootstrap = PortableControllerBootstrap {
-            request_resolution,
-            predecessor: resumed_from,
-            delivery_receipt,
-            local_branch: prepared.local_branch.clone(),
-            memory_storage: Some(
-                self.state_root
-                    .join("active-memory")
-                    .join("lessons.sqlite3"),
-            ),
-            checkpoint,
-            preparation_timeout: self.preparation_timeout,
-            run_id: prepared.run_id.clone(),
-            delivery_run_id: prepared.delivery_run_id,
-            adopt_existing_delivery,
-            submission: prepared.submission,
-            environment: prepared.environment,
-            native_environment: prepared.native_environment,
-            github_token: prepared.github_token,
-            github_token_file: prepared.github_token_file,
-            delivery_validator: prepared.delivery_validator,
-            git_credentials: prepared.git_credentials,
-            workspace: prepared.workspace,
-            workspace_lease,
-            checkpoint_repository,
-            storage,
-            delivery_policy: DeliveryPolicy::Optional,
-        };
-        write_bootstrap_file(&bootstrap_path, &bootstrap).map_err(local_error)?;
-        let mut child = match self.spawn_controller(&bootstrap_path) {
-            Ok(child) => child,
-            Err(error) => {
-                remove_private_bootstrap(&bootstrap_path);
-                return Err(error.into());
+                memory_storage: Some(
+                    self.state_root
+                        .join("active-memory")
+                        .join("lessons.sqlite3"),
+                ),
+                checkpoint,
+                preparation_timeout: self.preparation_timeout,
+                run_id: prepared.run_id.clone(),
+                delivery_run_id: prepared.delivery_run_id,
+                adopt_existing_delivery,
+                submission: prepared.submission,
+                environment: prepared.environment,
+                native_environment: prepared.native_environment,
+                github_token: prepared.github_token,
+                github_token_file: prepared.github_token_file,
+                delivery_validator: prepared.delivery_validator,
+                git_credentials: prepared.git_credentials,
+                workspace: prepared.workspace,
+                workspace_lease,
+                checkpoint_repository,
+                storage: storage.clone(),
+                delivery_policy: DeliveryPolicy::Optional,
+            };
+            write_bootstrap_file(&bootstrap_path, &bootstrap).map_err(local_error)?;
+            let mut child = match self.spawn_controller(&bootstrap_path) {
+                Ok(child) => child,
+                Err(error) => {
+                    remove_private_bootstrap(&bootstrap_path);
+                    return Err(error.into());
+                }
+            };
+            let started = Instant::now();
+            let wait =
+                wait_for_controller(&mut child, &paths, &prepared.run_id, ready_timeout).await;
+            if matches!(wait, Ok(ControllerWait::Ready)) {
+                return Ok(prepared.run_id);
             }
-        };
-        let started = Instant::now();
-        let wait = wait_for_controller(&mut child, &paths, &prepared.run_id, ready_timeout).await;
-        if matches!(wait, Ok(ControllerWait::Ready)) {
-            return Ok(prepared.run_id);
+            let controller_stopped = matches!(wait, Ok(ControllerWait::Exited(_)))
+                || crate::execution::platform::stop_controller(&mut child)
+                    .await
+                    .is_ok();
+            remove_private_bootstrap(&bootstrap_path);
+            // A stopped controller may still have recorded why it had not become ready.
+            let recorded = take_startup_failure(&paths);
+            let error = match wait {
+                Ok(ControllerWait::Exited(reason)) => {
+                    self.controller_exit_error(reason.or(recorded), started.elapsed())
+                }
+                Ok(ControllerWait::TimedOut) => {
+                    self.preparation_timeout_error(recorded, started.elapsed(), controller_stopped)
+                }
+                Ok(ControllerWait::Ready) => unreachable!("a ready controller returned above"),
+                Err(error) => error,
+            };
+            Err(StartFailure {
+                error,
+                controller_stopped,
+            })
         }
-        let controller_stopped = matches!(wait, Ok(ControllerWait::Exited(_)))
-            || crate::execution::platform::stop_controller(&mut child)
+        .await;
+        if new_submission && let Err(failure) = &result {
+            let handoff = if failure.controller_stopped {
+                Duration::ZERO
+            } else {
+                self.ready_timeout
+            };
+            // Preserve the startup diagnostic above, and retain any live or admitted run.
+            // Cleanup is best effort so it cannot replace the original refusal.
+            if self
+                .successor_claim_is_live_or_admitted(&run_id, &storage, handoff)
                 .await
-                .is_ok();
-        remove_private_bootstrap(&bootstrap_path);
-        // A stopped controller may still have recorded why it had not become ready.
-        let recorded = take_startup_failure(&paths);
-        let error = match wait {
-            Ok(ControllerWait::Exited(reason)) => {
-                self.controller_exit_error(reason.or(recorded), started.elapsed())
+                .is_ok_and(|owned| !owned)
+            {
+                let _ = std::fs::remove_dir_all(&storage);
             }
-            Ok(ControllerWait::TimedOut) => {
-                self.preparation_timeout_error(recorded, started.elapsed(), controller_stopped)
-            }
-            Ok(ControllerWait::Ready) => unreachable!("a ready controller returned above"),
-            Err(error) => error,
-        };
-        Err(StartFailure {
-            error,
-            controller_stopped,
-        })
+        }
+        result
     }
 
     fn controller_exit_error(&self, reason: Option<String>, elapsed: Duration) -> NativeV2CliError {

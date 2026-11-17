@@ -553,10 +553,9 @@ async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_re
             assert!(matches!(error, NativeV2CliError::Local(_)), "{error}");
             let storage = backend.run_storage(&run_id).assert_value();
             assert!(
-                storage.exists(),
-                "checkpoint resume must reach controller launch"
+                !storage.exists(),
+                "a failed fresh launch removes its storage"
             );
-            assert!(!storage.join(BOOTSTRAP_FILE).exists());
             continue;
         }
         assert!(matches!(error, NativeV2CliError::Usage(_)));
@@ -646,16 +645,10 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
     let original_storage = backend.run_storage(&original).assert_value();
-    assert!(original_storage.is_dir());
-    assert!(!original_storage.join(BOOTSTRAP_FILE).exists());
-    assert_eq!(
-        backend
-            .read_recovery_document(&original)
-            .assert_value()
-            .delivery_run_id,
-        Some(original.clone())
-    );
+    assert!(!original_storage.exists());
 
+    // Resume starts from an admitted predecessor and keeps its recovery state.
+    drop(create_contract_run(&backend, &original, &submission).await);
     let recovery = recovery_document(submission, workspace, None);
     backend
         .write_recovery_document(&original, &recovery)
@@ -1479,3 +1472,6 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
     child.kill().await.assert_value();
     child.wait().await.assert_value();
 }
+
+#[path = "startup_tests.rs"]
+mod startup_tests;
