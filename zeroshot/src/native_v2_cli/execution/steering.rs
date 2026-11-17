@@ -25,6 +25,8 @@ pub(super) async fn try_publish(
                 "node messages require an authorized --network".into(),
             ));
         }
+        crate::execution::process::authority::require_human(std::process::id())
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         return Ok(None);
     }
     if run.target.is_some() {

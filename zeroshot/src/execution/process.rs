@@ -1,3 +1,4 @@
+pub(crate) mod authority;
 pub(crate) mod platform;
 #[cfg(unix)]
 mod platform_unix;

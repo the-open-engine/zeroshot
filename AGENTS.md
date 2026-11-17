@@ -116,6 +116,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   GraphSpec.networks owns default-deny peer communication: members name every participating logical
   agent node and publishers are a subset. All mapped copies participate. Only publishers receive
   network publication context and an execution-scoped broker capability; labels never authorize it.
+  Native local human steering checks OS caller provenance at CLI fallback and RPC acceptance,
+  independently of environment labels or state-directory overrides. Shared process launch publishes
+  an ownership lease before Unix exec or Windows resume and retains it through confirmed cleanup;
+  Linux's private supervisor retains the descriptor after owner loss. Bounded PID/creation identity
+  ancestry and native process-group evidence fence same-run, foreign-run and suspended-ledger paths.
+  Uncertain callers cannot publish human guidance. These mandates govern normal CLI/RPC use under
+  existing native account permissions; they do not create an OS sandbox. Deliberate same-account
+  state/credential tampering, external proxies and macOS session detachment plus orphaning require
+  stronger isolation. Never treat labels as authority or silently relax an uncertain provenance check.
   Local `steer --network` uses that capability without controller discovery, stamps its origin at
   the host and refuses foreign runs or human-broadcast escalation. Repeated destinations and
   overlapping memberships deduplicate delivery. Per-message once mode defaults for networks and

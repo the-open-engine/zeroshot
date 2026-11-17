@@ -8,10 +8,25 @@ use tokio::sync::Mutex;
 use crate::execution::platform::windows::security::{PrivateSecurity, validate};
 
 pub(crate) type Client = NamedPipeClient;
+pub(crate) type Server = NamedPipeServer;
 
 pub(crate) struct Listener {
     path: PathBuf,
     pending: Mutex<NamedPipeServer>,
+}
+
+pub(crate) fn peer_pid(stream: &NamedPipeServer) -> io::Result<u32> {
+    let mut pid = 0;
+    if unsafe {
+        windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId(
+            stream.as_raw_handle(),
+            &mut pid,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(pid)
 }
 
 pub(crate) async fn connect(path: &Path) -> io::Result<Client> {

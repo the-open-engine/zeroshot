@@ -473,8 +473,10 @@ human direction.
 Publishers receive their authorized network names and publication instructions in private context.
 The host supplies an execution-scoped capability and records the origin itself; environment labels
 do not grant publication access. Members outside the publisher set can receive messages but cannot
-send them. An agent cannot use the human broadcast form to bypass that restriction, and a caller
-outside the authorized execution cannot publish a network message.
+send them. The CLI and local RPC reject agent calls to the human broadcast form, including calls
+with cleared execution labels or another local run as their destination. A caller outside the
+authorized execution cannot publish a network message. Native execution permissions, including
+OS account access, remain in effect.
 
 Pending messages enter a recipient's next prompt or native tool callback. Sequential recipients
 receive them once they start. A failed record read leaves the message pending for the next delivery

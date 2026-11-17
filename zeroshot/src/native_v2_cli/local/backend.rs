@@ -619,6 +619,8 @@ impl NativeV2CliBackend for LocalCliBackend {
         target: Option<&str>,
         params: openengine_cluster_protocol::RunSteerParams,
     ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2CliError> {
+        crate::execution::process::authority::require_human(std::process::id())
+            .map_err(local_error)?;
         let run_id = params.run_id.clone();
         tokio::time::timeout(DEFAULT_READY_TIMEOUT, async {
             require_local(target)?;

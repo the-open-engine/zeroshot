@@ -39,6 +39,7 @@ struct SystemWindowsContainmentCalls<'a> {
     process: HANDLE,
     process_id: u32,
     child: &'a mut tokio::process::Child,
+    authority: Option<&'a mut super::authority::Registration>,
 }
 
 #[cfg(test)]
@@ -70,6 +71,9 @@ impl WindowsContainmentCalls for SystemWindowsContainmentCalls<'_> {
         if assigned == 0 {
             Err(io::Error::last_os_error())
         } else {
+            if let Some(authority) = &mut self.authority {
+                authority.capture_windows(self.process_id, self.process)?;
+            }
             Ok(())
         }
     }
@@ -93,6 +97,7 @@ impl WindowsContainmentCalls for SystemWindowsContainmentCalls<'_> {
 pub(super) fn assign_process_tree(
     job: usize,
     child: &mut tokio::process::Child,
+    authority: Option<&mut super::authority::Registration>,
 ) -> Result<(), io::Error> {
     let process = child
         .raw_handle()
@@ -105,6 +110,7 @@ pub(super) fn assign_process_tree(
         process: process as HANDLE,
         process_id,
         child,
+        authority,
     };
     assign_suspended_process(&mut calls)
 }

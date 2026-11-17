@@ -653,3 +653,7 @@ async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_
         run = next;
     }
 }
+
+mod authority {
+    include!("network_steering_authority.rs");
+}

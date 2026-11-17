@@ -3,12 +3,21 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 pub(crate) type Client = tokio::net::UnixStream;
+pub(crate) type Server = tokio::net::UnixStream;
 
 pub(crate) struct Listener {
     inner: tokio::net::UnixListener,
     path: PathBuf,
     identity: (u64, u64),
     temporary_directory: Option<PathBuf>,
+}
+
+pub(crate) fn peer_pid(stream: &Client) -> io::Result<u32> {
+    stream
+        .peer_cred()?
+        .pid()
+        .and_then(|pid| u32::try_from(pid).ok())
+        .ok_or_else(|| io::Error::other("local controller peer PID is unavailable"))
 }
 
 pub(crate) async fn connect(path: &Path) -> io::Result<Client> {
@@ -21,11 +30,7 @@ impl Listener {
         let directory = path
             .parent()
             .ok_or_else(|| io::Error::other("socket has no directory"))?;
-        match crate::execution::platform::create_private_directory(directory) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
+        crate::execution::platform::ensure_private_directory(directory)?;
         remove_endpoint(path)?;
         let inner = tokio::net::UnixListener::bind(path)?;
         let metadata = std::fs::symlink_metadata(path)?;
