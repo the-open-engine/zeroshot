@@ -1310,7 +1310,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   abrupt controller death keeps workspace locks held until then. No PID registry, cgroup or root
   privilege is required; procfs provides owned-child enumeration. Dedicated worker identities and
   Windows Job Objects keep their existing containment. macOS process groups do not cover descendants
-  that detach themselves; stronger macOS ownership remains deferred.
+  that detach themselves; stronger macOS ownership remains deferred. macOS refuses a signal for a
+  process group that holds only exited, unreaped members with EPERM: that is no termination failure,
+  and the cleanup wait that follows still has to see the group empty.
 - Contained provider sessions clean up surviving descendants immediately after the main process exits,
   before draining inherited output streams. Buffered output still drains under any explicit command
   deadline and a ten-minute ceiling while observing cancellation; cleanup stays scoped to its session.
