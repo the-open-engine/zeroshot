@@ -118,7 +118,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and the snapshot keeps the receipt. One tool call hands over at most 1 MiB of steers; later ones
   wait for the next tool call or prompt. A native subagent's tool call never carries or receipts a
   steer inside hook context; a message reaches the node's own conversation whichever tool call
-  asked. Claude Code's stdin stays open until a turn's result arrives with no steer outstanding.
+  asked. Claude Code's stdin normally closes after a turn's result with no steer outstanding.
+  If sent steers remain unacknowledged after a result, stdin closes after a 60-second grace period
+  so a missing replay acknowledgement cannot keep the turn alive indefinitely. Delivery stays
+  unconfirmed: those steers have no receipts and remain due for a later prompt.
   A tool-call memory lesson is a session entry on Pi and a stored message on OpenCode, and hook
   context elsewhere. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
   including compaction; new conversations and conversations continued in a successor receive fresh

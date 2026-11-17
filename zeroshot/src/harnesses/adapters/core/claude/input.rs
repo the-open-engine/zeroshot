@@ -14,8 +14,8 @@ use tokio::sync::mpsc;
 use crate::active_memory::hooks::ActiveMemoryHooks;
 use crate::native_v2_capsule::provider_process::LiveInput;
 
-/// How long a sent steer may stay unreported after a turn has ended before stdin closes
-/// without it. Claude Code then never took the message, and the steer stays due.
+/// Maximum wait for a sent steer's replay acknowledgement after a turn result. Closing stdin
+/// then leaves delivery unconfirmed: the steer has no receipt and remains due.
 const UNREPORTED_AFTER_RESULT: Duration = if cfg!(test) {
     Duration::from_millis(500)
 } else {
@@ -49,8 +49,9 @@ pub(super) struct LiveTurn {
     pub(super) execution: u64,
 }
 
-/// Stdin after the prompt. It ends, and stdin closes, when a turn has ended with every sent
-/// steer reported, or when stdout has. Until then Claude Code would wait for input for ever.
+/// Stdin after the prompt. It closes after a result with every sent steer reported, when stdout
+/// ends, or when the post-result acknowledgement deadline expires. The deadline bounds a wait
+/// for missing replay acknowledgements without receipting the pending steers.
 pub(super) fn live(turn: LiveTurn) -> LiveInput<'static> {
     let state = State {
         turn,
