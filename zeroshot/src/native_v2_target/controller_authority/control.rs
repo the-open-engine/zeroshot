@@ -151,6 +151,17 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .ok_or_else(|| authority_error("target does not advertise run sizes"))
     }
 
+    async fn forget(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {
+        if matches!(target.access, TargetAccess::Direct) {
+            return Ok(());
+        }
+        let mut cached = self.hosted_access.lock().await;
+        let _refresh_guard = self.lock_refresh_family(&target.id).await?;
+        self.credentials.remove(&target.id).await?;
+        *cached = None;
+        Ok(())
+    }
+
     async fn login(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {
         self.require_human_credential()?;
         let device_token = target

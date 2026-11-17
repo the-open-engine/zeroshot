@@ -31,7 +31,7 @@ fn connection_store_errors_name_file_and_location_without_secret_values() {
         .write_all(br#"{"OPENAI_API_KEY":"fixture-key"}"#)
         .unwrap();
     success(&child.wait_with_output().unwrap());
-    let path = fixture.root.path("state/connections.json");
+    let path = fixture.root.path("state").join("connections.json");
     let encoded = "{\n  \"openai\": {\"OPENAI_API_KEY\": 987654321012345}\n}";
     std::fs::write(&path, encoded).unwrap();
     for output in [

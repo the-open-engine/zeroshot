@@ -47,7 +47,7 @@ async fn unknown_target_is_rejected_before_contacting_authority() {
 #[test]
 fn malformed_registry_names_file_and_keeps_parser_or_validation_detail() {
     let root = temp_root();
-    let path = root.path("config/targets.json");
+    let path = root.path("config").join("targets.json");
     std::fs::create_dir_all(path.parent().assert_value()).assert_value();
     let registry = FileTargetRegistry::new(path.clone());
     let valid = json!({"version":5,"targets":{"prod":target()}});
@@ -115,7 +115,7 @@ fn malformed_registry_names_file_and_keeps_parser_or_validation_detail() {
 #[test]
 fn registry_read_errors_name_the_file() {
     let root = temp_root();
-    let path = root.path("config/targets.json");
+    let path = root.path("config").join("targets.json");
     std::fs::create_dir_all(path.parent().assert_value()).assert_value();
     let registry = FileTargetRegistry::new(path.clone());
     std::fs::write(&path, vec![b' '; 1024 * 1024 + 1]).assert_value();

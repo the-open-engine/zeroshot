@@ -4,12 +4,13 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+use async_trait::async_trait;
 use openengine_cluster_protocol::{RunConnectionRequirements, RunId, is_canonical_uuid_v7};
 use serde::{Deserialize, Serialize};
 
 use super::contract::{normalize_origin, prepare_target, validate_target_name};
 use super::TargetAdd;
-use super::{TargetAccess, TargetConnectorError, TargetRecord};
+use super::{TargetAccess, TargetConnectorError, TargetRecord, TargetControlAuthority};
 
 const REGISTRY_VERSION: u32 = 5;
 const LEGACY_REGISTRY_VERSION: u32 = 4;
@@ -24,9 +25,21 @@ pub struct RecoveryConnectionAuthorization {
     pub source_connections: RunConnectionRequirements,
 }
 
+#[async_trait]
 pub trait TargetRegistry: Send + Sync {
     fn insert(&self, target: TargetRecord) -> Result<(), TargetConnectorError>;
     fn get(&self, name: &str) -> Result<TargetRecord, TargetConnectorError>;
+    fn list(&self) -> Result<Vec<TargetRecord>, TargetConnectorError>;
+    async fn login(
+        &self,
+        target: &TargetRecord,
+        authority: &dyn TargetControlAuthority,
+    ) -> Result<(), TargetConnectorError>;
+    async fn remove(
+        &self,
+        name: &str,
+        authority: &dyn TargetControlAuthority,
+    ) -> Result<(), TargetConnectorError>;
     fn record_recovery_authorization(
         &self,
         target_id: &str,
@@ -84,6 +97,16 @@ impl FileTargetRegistry {
         mutate: bool,
         operation: impl FnOnce(&mut RegistryState) -> Result<T, TargetConnectorError>,
     ) -> Result<T, TargetConnectorError> {
+        let (_lock, mut state, initialized) = self.locked_state()?;
+        let result = operation(&mut state)?;
+        if mutate || initialized {
+            state.version = REGISTRY_VERSION;
+            write_registry(&self.path, &state)?;
+        }
+        Ok(result)
+    }
+
+    fn locked_state(&self) -> Result<(File, RegistryState, bool), TargetConnectorError> {
         let parent = self
             .path
             .parent()
@@ -93,17 +116,76 @@ impl FileTargetRegistry {
         let lock = open_lock(&lock_path)?;
         lock_registry(&lock, &lock_path, true)?;
         remove_abandoned_temporaries(&self.path)?;
-        let (mut state, initialized) = initialize_registry(&self.path)?;
-        let result = operation(&mut state)?;
-        if mutate || initialized {
-            state.version = REGISTRY_VERSION;
-            write_registry(&self.path, &state)?;
-        }
-        Ok(result)
+        let (state, initialized) = initialize_registry(&self.path)?;
+        Ok((lock, state, initialized))
+    }
+
+    async fn locked_state_async(
+        &self,
+    ) -> Result<(File, RegistryState, bool), TargetConnectorError> {
+        let registry = self.clone();
+        tokio::task::spawn_blocking(move || registry.locked_state())
+            .await
+            .map_err(|_| {
+                TargetConnectorError::RegistryIo(std::io::Error::other(
+                    "target registry lock task failed",
+                ))
+            })?
     }
 }
 
+#[async_trait]
 impl TargetRegistry for FileTargetRegistry {
+    fn list(&self) -> Result<Vec<TargetRecord>, TargetConnectorError> {
+        self.with_state(false, |state| Ok(state.targets.values().cloned().collect()))
+    }
+
+    async fn login(
+        &self,
+        target: &TargetRecord,
+        authority: &dyn TargetControlAuthority,
+    ) -> Result<(), TargetConnectorError> {
+        let (_lock, mut state, initialized) = self.locked_state_async().await?;
+        if state.targets.get(&target.name) != Some(target) {
+            return Err(TargetConnectorError::RegistrationChanged);
+        }
+        if initialized {
+            state.version = REGISTRY_VERSION;
+            write_registry(&self.path, &state)?;
+        }
+        // Match removal's registry -> credential-lock order, including discovery and persistence.
+        authority.login(target).await?;
+        Ok(())
+    }
+
+    async fn remove(
+        &self,
+        name: &str,
+        authority: &dyn TargetControlAuthority,
+    ) -> Result<(), TargetConnectorError> {
+        if name == "platform" {
+            return Err(TargetConnectorError::BuiltinTarget);
+        }
+        let (_lock, mut state, _) = self.locked_state_async().await?;
+        let target = state
+            .targets
+            .get(name)
+            .ok_or_else(|| TargetConnectorError::NotFound(name.to_owned()))?;
+        // Keep the record until cleanup succeeds, so failures can be retried by name.
+        authority.forget(target).await?;
+        let _recovery_lock = self.lock_recovery_authorizations()?;
+        let directory = self.path.with_extension("recovery").join(&target.id);
+        match std::fs::remove_dir_all(directory) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(TargetConnectorError::RegistryIo(error));
+            }
+            _ => {}
+        }
+        state.targets.remove(name);
+        state.version = REGISTRY_VERSION;
+        write_registry(&self.path, &state)
+    }
+
     fn insert(&self, target: TargetRecord) -> Result<(), TargetConnectorError> {
         self.with_state(true, |state| {
             if state.targets.contains_key(&target.name) {
@@ -150,22 +232,27 @@ impl TargetRegistry for FileTargetRegistry {
             return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
         }
         let path = recovery_authorization_path(&self.path, target_id, run_id)?;
-        let _lock = self.lock_recovery_authorizations()?;
-        if let Some(stored) = read_recovery_authorization(&path)? {
-            return if stored.matches(target_id, run_id, authorized) {
-                Ok(())
-            } else {
-                Err(TargetConnectorError::RecoveryAuthorizationMismatch)
+        self.with_state(false, |state| {
+            if !state.targets.values().any(|target| target.id == target_id) {
+                return Err(TargetConnectorError::RegistrationChanged);
+            }
+            let _lock = self.lock_recovery_authorizations()?;
+            if let Some(stored) = read_recovery_authorization(&path)? {
+                return if stored.matches(target_id, run_id, authorized) {
+                    Ok(())
+                } else {
+                    Err(TargetConnectorError::RecoveryAuthorizationMismatch)
+                };
+            }
+            let authorization = RecoveryAuthorization {
+                version: RECOVERY_AUTHORIZATION_VERSION,
+                target_id: target_id.to_owned(),
+                run_id: run_id.clone(),
+                connection_requirements: authorized.connections.clone(),
+                source_connections: authorized.source_connections.clone(),
             };
-        }
-        let authorization = RecoveryAuthorization {
-            version: RECOVERY_AUTHORIZATION_VERSION,
-            target_id: target_id.to_owned(),
-            run_id: run_id.clone(),
-            connection_requirements: authorized.connections.clone(),
-            source_connections: authorized.source_connections.clone(),
-        };
-        write_recovery_authorization(&path, &authorization)
+            write_recovery_authorization(&path, &authorization)
+        })
     }
 
     fn recovery_authorization(

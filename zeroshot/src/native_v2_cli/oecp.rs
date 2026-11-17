@@ -188,6 +188,17 @@ where
         self.connector.login(name).await
     }
 
+    async fn target_list(&self) -> Result<Vec<super::NamedTarget>, NativeV2CliError> {
+        self.connector.list().await
+    }
+
+    async fn target_remove(
+        &self,
+        name: &str,
+    ) -> Result<super::TargetRemoveResult, NativeV2CliError> {
+        self.connector.remove(name).await
+    }
+
     async fn target_sizes(
         &self,
         name: &str,
