@@ -103,6 +103,32 @@ def local_status() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("timestamp", [None, 1, 1_725_000_000_123, 9_007_199_254_740_991])
+def test_status_and_watch_preserve_optional_recording_times(timestamp: int | None) -> None:
+    value = local_status()
+    execution = {"execution": "opaque:1", "node": "worker", "mapIndices": [2]}
+    if timestamp is not None:
+        execution["startedAt"] = timestamp
+        value["recordedAt"] = timestamp
+    value["status"] = {"phase": "running", "activeExecutions": [execution]}
+    status = _status(value)
+    assert status.active_executions[0].started_at == timestamp
+    assert status.recorded_at == timestamp
+    assert status.active_executions[0].map_indices == (2,)
+
+
+@pytest.mark.parametrize("field", ["startedAt", "recordedAt"])
+@pytest.mark.parametrize("timestamp", [True, 1.0, "1", 0, -1, 9_007_199_254_740_992])
+def test_observation_rejects_invalid_recording_times(field: str, timestamp: object) -> None:
+    value = local_status()
+    execution = {"execution": "opaque:1", "node": "worker"}
+    target = execution if field == "startedAt" else value
+    target[field] = timestamp
+    value["status"] = {"phase": "running", "activeExecutions": [execution]}
+    with pytest.raises(ProtocolError, match=field):
+        _status(value)
+
+
 @pytest.mark.parametrize("phase", ["running", "stopping"])
 @pytest.mark.parametrize("succeeded", [False, True])
 def test_graph_result_is_visible_without_becoming_a_terminal_result(

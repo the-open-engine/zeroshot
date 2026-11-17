@@ -128,6 +128,12 @@ async def observe(runtime: UniformRuntime) -> None:
 A `RunWaitTimeout` carries the still-active run handle, and cancelling the Python task detaches in
 the same way. Neither action stops native work; only `await run.force_stop()` changes run lifetime.
 
+`status.active_executions` entries expose optional `started_at` ledger recording times. Statuses
+yielded by `run.watch()` also expose optional `recorded_at` for the event producing that notification.
+Both use Unix milliseconds, remain `None` when unknown, and are not precise provider measurements.
+Imported history reports its import time rather than its original execution time. Use `cursor` for
+ordering and resumption, and `execution` to distinguish retries and simultaneous mapped executions.
+
 ## Run on a direct target
 
 Local execution uses `LocalTarget`. Docker/direct and hosted targets require a committed Git

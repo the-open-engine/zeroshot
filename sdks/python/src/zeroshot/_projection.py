@@ -63,6 +63,7 @@ def _status(value: object) -> RunStatus:
             execution=_string(item, "execution", "active execution"),
             node=_string(item, "node", "active execution"),
             map_indices=_map_indices(item),
+            started_at=_optional_timestamp(item, "startedAt", "active execution"),
         )
         for item in _mapping_list(
             native_status.get("activeExecutions", []),
@@ -89,6 +90,7 @@ def _status(value: object) -> RunStatus:
         source=_source(root.get("source")),
         size=_string(root, "size", "run status"),
         cursor=_cursor(root),
+        recorded_at=_optional_timestamp(root, "recordedAt", "watch event"),
         phase=phase,
         active_executions=active,
         steers=tuple(_steer(item) for item in _mapping_list(root.get("steers", []), "steers")),
@@ -278,6 +280,7 @@ def _failure_diagnostic(value: object) -> FailureDiagnostic:
             execution=_string(identity, "execution", "failure diagnostic.execution"),
             node=_string(identity, "node", "failure diagnostic.execution"),
             map_indices=_map_indices(identity),
+            started_at=_optional_timestamp(identity, "startedAt", "failure diagnostic.execution"),
         )
     cursor = diagnostic.get("cursor")
     if cursor is not None and not isinstance(cursor, str):
@@ -314,6 +317,12 @@ def _string(value: Mapping[str, object], name: str, kind: str) -> str:
     if not isinstance(selected, str):
         raise ProtocolError(f"Zeroshot emitted malformed {kind}.{name}")
     return selected
+
+
+def _optional_timestamp(value: Mapping[str, object], name: str, kind: str) -> int | None:
+    if value.get(name) is None:
+        return None
+    return _positive_javascript_safe_integer(value, name, kind)
 
 
 def _positive_javascript_safe_integer(

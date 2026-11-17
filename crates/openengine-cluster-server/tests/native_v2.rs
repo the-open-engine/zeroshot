@@ -140,6 +140,7 @@ impl ClusterBackend for FakeBackend {
             },
             stream(vec![
                 RunSubscriptionItem::Event(RunWatchEventNotification {
+                    recorded_at: None,
                     subscription_id,
                     run_id: run_id(),
                     title: title(),
@@ -156,6 +157,7 @@ impl ClusterBackend for FakeBackend {
                     reason: SubscriptionCloseReason::Done,
                 },
                 RunSubscriptionItem::Event(RunWatchEventNotification {
+                    recorded_at: None,
                     subscription_id: SubscriptionId::new("watch-1"),
                     run_id: run_id(),
                     title: title(),

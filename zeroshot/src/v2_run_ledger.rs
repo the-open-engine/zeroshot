@@ -30,8 +30,8 @@ pub mod sqlite;
 mod state;
 
 pub(crate) use state::{
-    apply_event, cursor_for, cursor_sequence, initial_cursor, prepare_event, validate_create,
-    validate_event,
+    apply_event, apply_stored_event, cursor_for, cursor_sequence, initial_cursor, prepare_event,
+    validate_create, validate_event,
 };
 
 pub(crate) mod steering;
@@ -274,6 +274,9 @@ pub struct PrimaryGraphCompletion {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct NodeSnapshot {
+    /// Recording time of the event at `started_at`, independent of its ordering cursor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_recorded_at: Option<UnixTimestampMillis>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_state: Option<crate::native_v2_contract::DeliveryCheckpoint>,
     pub reference: ExecutionRef,

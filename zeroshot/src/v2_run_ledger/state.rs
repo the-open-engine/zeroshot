@@ -94,6 +94,22 @@ pub(crate) fn prepare_event(snapshot: &RunSnapshot, mut event: RunEvent) -> RunE
     event
 }
 
+/// Project envelope timing without changing event validation or reducer semantics.
+pub(crate) fn apply_stored_event(
+    snapshot: &mut RunSnapshot,
+    stored: &super::StoredRunEvent,
+) -> Result<(), RunLedgerError> {
+    apply_event(snapshot, &stored.event, cursor_sequence(&stored.cursor)?)?;
+    if let RunEvent::NodeStarted { reference, .. } = &stored.event {
+        snapshot
+            .executions
+            .get_mut(&reference.execution)
+            .ok_or(RunLedgerError::Corrupt)?
+            .started_recorded_at = stored.recorded_at;
+    }
+    Ok(())
+}
+
 pub(crate) fn apply_event(
     snapshot: &mut RunSnapshot,
     event: &RunEvent,
@@ -328,6 +344,7 @@ fn apply_node_started(
     snapshot.executions.insert(
         reference.execution,
         NodeSnapshot {
+            started_recorded_at: None,
             delivery_state: None,
             reference: reference.clone(),
             occurrence: occurrence.clone(),
@@ -490,6 +507,7 @@ fn diagnostic_execution(
                 ))?;
             node.failure_diagnostic |= kind == FailureDiagnosticKind::Failure;
             Ok(Some(ActiveExecution {
+                started_at: None,
                 execution: node
                     .reference
                     .public_execution()

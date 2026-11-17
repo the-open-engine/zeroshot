@@ -1185,6 +1185,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   before the column read as unknown rather than estimated. Imported prerequisites and inherited
   vectors carry their import time in the successor, since checkpoint snapshots keep no original
   timing; vectors retain their own `createdAt`. `SafeLog.timestamp` keeps its producer meaning.
+  Status/watch active executions expose optional `startedAt` from their exact `NodeStarted`
+  envelope; watch notifications expose their producing event's optional `recordedAt`. The shared
+  stored-event fold retains start times beside start cursors. Older SQLite snapshots recover active
+  start times through exact indexed cursor reads without rewriting state; unknown times stay omitted.
+  Status never accumulates finished execution timing. Python exposes these as `started_at` and
+  watch-only `recorded_at`.
 - Durable observation replay reads bounded ledger pages that fit every accepted event, including
   combined request text and contracts, and retains its scan cursor across pages.
   NDJSON and WebSocket run inventories bound each typed status separately from the response

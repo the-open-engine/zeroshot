@@ -72,6 +72,7 @@ impl Case {
             .or_insert(next_instance);
         let name: NodeName = name.parse().assert_value();
         let node = NodeSnapshot {
+            started_recorded_at: None,
             delivery_state: None,
             reference: ExecutionRef {
                 run_id: self.snapshot.run_id.clone(),

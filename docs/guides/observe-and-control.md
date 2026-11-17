@@ -77,6 +77,17 @@ Local inspection (`status`, `list`, `checkpoints`, `vectors`, `watch`, `logs` an
 retained history without taking recovery ownership or writing to the run directory. Finished and
 suspended runs need no controller and retain their usual exit codes.
 
+Each `status.activeExecutions` entry can include `startedAt`, the ledger recording time of that
+execution's `NodeStarted`. Watch notifications also include optional `recordedAt` for the event
+that produced the notification. Match the opaque `execution` selector across active sets to identify
+starts and settlements, including retries and simultaneous map items. Status remains a summary;
+completed execution timing is available through watch replay and the history API.
+
+These times are Unix milliseconds recorded by the ledger, not precise provider start/stop
+measurements. Events in one append transaction share a time, and `cursor` alone defines ordering
+and reconnection boundaries. Missing times in older ledgers stay omitted. Imported history carries
+its import time, not the time the original work ran. Log `timestamp` retains its producer meaning.
+
 For an unfinished local run whose controller does not answer, `status` and each `list` entry keep
 the recorded status and add an optional entry beside it:
 
