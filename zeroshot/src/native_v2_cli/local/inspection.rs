@@ -24,7 +24,7 @@ impl LocalCliBackend {
         let paths = self.existing_run_paths(id)?;
         let directory =
             crate::execution::platform::open_directory(paths.storage()).map_err(local_io)?;
-        if !require_existing_ledger(&paths.ledger())? {
+        if !require_existing_ledger(&paths.ledger()).map_err(local_io)? {
             return Err(NativeV2CliError::RunNotFound {
                 run_id: id.as_str().to_owned(),
             });
