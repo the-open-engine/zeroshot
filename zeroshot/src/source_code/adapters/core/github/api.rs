@@ -1,11 +1,14 @@
 use serde_json::Value;
+#[cfg(test)]
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::timeout;
 
 use super::wire::{GitReferenceWire, reference_revision, require_review_head};
 use super::*;
-use super::super::ci_diagnostics::{MAX_JOB_LOG_BYTES, job_log_tail};
+use super::super::ci_diagnostics::{
+    JobLog, MAX_JOB_LOG_BYTES, diagnostic_secrets as api_secrets, job_log_tail, redact_log,
+};
 
 const MAX_API_OUTPUT_BYTES: usize = MAX_JOB_LOG_BYTES;
 const MAX_API_ERROR_BYTES: usize = 64 * 1024;
@@ -30,7 +33,8 @@ impl GhCliDeliveryAuthority {
         self.ensure_instance(credential).await?;
         let output = self
             .request_api_output(&arguments, credential, true)
-            .await?;
+            .await
+            .map_err(|failure| failure.error)?;
         self.decode_api_output(output, credential)
     }
 
@@ -63,7 +67,9 @@ impl GhCliDeliveryAuthority {
         arguments: &[String],
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Vec<u8>, SourceDeliveryError> {
-        self.request_api_output(arguments, credential, false).await
+        self.request_api_output(arguments, credential, false)
+            .await
+            .map_err(|failure| failure.error)
     }
 
     async fn request_api_output(
@@ -71,7 +77,7 @@ impl GhCliDeliveryAuthority {
         arguments: &[String],
         credential: SourceDeliveryCredential<'_>,
         allow_unavailable_rules: bool,
-    ) -> Result<Vec<u8>, SourceDeliveryError> {
+    ) -> Result<Vec<u8>, ApiFailure> {
         let mut command = self.api_command(credential);
         command
             .arg("api")
@@ -84,18 +90,19 @@ impl GhCliDeliveryAuthority {
         ));
         bounded_output(command, self, credential, allow_unavailable_rules)
             .await
-            .map_err(|error| {
-                let retryable = error.retryable_operation();
+            .map_err(|mut failure| {
+                let retryable = failure.error.retryable_operation();
                 let wrapped = redacted_api_error(
-                    error.api_status(),
-                    format!("{context}\n{error}"),
+                    failure.error.api_status(),
+                    format!("{context}\n{}", failure.error),
                     credential,
                 );
-                if retryable {
+                failure.error = if retryable {
                     wrapped.temporary()
                 } else {
                     wrapped
-                }
+                };
+                failure
             })
     }
 
@@ -104,22 +111,24 @@ impl GhCliDeliveryAuthority {
         repository: &str,
         job: u64,
         credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Vec<u8>, SourceDeliveryError> {
+    ) -> Result<JobLog, SourceDeliveryError> {
         let mut arguments = vec![
             format!("repos/{repository}/actions/jobs/{job}/logs"),
             "--method".to_owned(),
             "GET".to_owned(),
             "--allow-escape-sequences".to_owned(),
         ];
-        let output = self.api_output(&arguments, credential).await;
-        if matches!(&output, Err(error) if error.api_status().is_none()
-            && error.to_string().lines().any(|line| line == "unknown flag: --allow-escape-sequences"))
-        {
+        self.ensure_instance(credential).await?;
+        let mut output = self.request_api_output(&arguments, credential, false).await;
+        if matches!(&output, Err(failure) if failure.unsupported_escape_sequences) {
             // Older gh rejects this flag before sending the request.
             arguments.pop();
-            return self.api_output(&arguments, credential).await;
+            output = self.request_api_output(&arguments, credential, false).await;
         }
+        // Redact complete credentials before excerpt selection can split one.
         output
+            .map(|bytes| check_log_tail(&bytes, credential, &self.network.secrets()))
+            .map_err(|failure| failure.error)
     }
 
     pub(super) async fn confirm_review_head(
@@ -343,12 +352,26 @@ pub(super) fn command_failure(
     if retryable { error.temporary() } else { error }
 }
 
+struct ApiFailure {
+    error: SourceDeliveryError,
+    unsupported_escape_sequences: bool,
+}
+
+impl From<SourceDeliveryError> for ApiFailure {
+    fn from(error: SourceDeliveryError) -> Self {
+        Self {
+            error,
+            unsupported_escape_sequences: false,
+        }
+    }
+}
+
 async fn bounded_output(
     mut command: Command,
     authority: &GhCliDeliveryAuthority,
     credential: SourceDeliveryCredential<'_>,
     allow_unavailable_rules: bool,
-) -> Result<Vec<u8>, SourceDeliveryError> {
+) -> Result<Vec<u8>, ApiFailure> {
     let deadline = authority.config.api_deadline;
     command
         .kill_on_drop(true)
@@ -385,7 +408,9 @@ async fn bounded_output(
     })
     .await;
     match result {
-        Ok(Ok((status, (), ()))) if status.success() => validate_api_output(output.stdout),
+        Ok(Ok((status, (), ()))) if status.success() => {
+            validate_api_output(output.stdout).map_err(Into::into)
+        }
         Ok(Ok((status, (), ())))
             if allow_unavailable_rules
                 && status.code() == Some(1)
@@ -393,12 +418,21 @@ async fn bounded_output(
         {
             Ok(b"[[]]".to_vec())
         }
-        Ok(Ok((status, (), ()))) => Err(output.failure(
-            Some(status),
-            &format!("command exited unsuccessfully: {status}"),
-            credential,
-        )),
-        Ok(Err(error)) => Err(output.failure(None, &error, credential)),
+        Ok(Ok((status, (), ()))) => {
+            // Classify complete native stderr before credential redaction or bounds.
+            let unsupported_escape_sequences = output.unsupported_escape_sequences();
+            let error = output.failure(
+                Some(status),
+                &format!("command exited unsuccessfully: {status}"),
+                credential,
+            );
+            Err(ApiFailure {
+                unsupported_escape_sequences: unsupported_escape_sequences
+                    && error.api_status().is_none(),
+                error,
+            })
+        }
+        Ok(Err(error)) => Err(output.failure(None, &error, credential).into()),
         Err(_) => Err(output
             .failure(
                 None,
@@ -408,7 +442,8 @@ async fn bounded_output(
                 ),
                 credential,
             )
-            .temporary()),
+            .temporary()
+            .into()),
     }
 }
 
@@ -420,6 +455,13 @@ struct ApiOutput {
 }
 
 impl ApiOutput {
+    fn unsupported_escape_sequences(&self) -> bool {
+        std::str::from_utf8(&self.stderr).ok().is_some_and(|text| {
+            text.lines()
+                .any(|line| line == "unknown flag: --allow-escape-sequences")
+        })
+    }
+
     fn branch_rules_unavailable(&self) -> bool {
         const MESSAGE: &str =
             "Upgrade to GitHub Pro or make this repository public to enable this feature.";
@@ -449,6 +491,7 @@ impl ApiOutput {
         // Incomplete stderr is not an authoritative HTTP response.
         let api_error = status.map(|_| github_api_error(&self.stderr));
         let api_status = api_error.as_ref().and_then(SourceDeliveryError::api_status);
+        let transport_error = github_transport_error(&String::from_utf8_lossy(&self.stderr));
         let secrets = api_secrets(self.secrets, credential);
         let (stdout, stdout_truncated) = api_diagnostic_text(
             self.stdout,
@@ -461,7 +504,7 @@ impl ApiOutput {
         let rate_limited = api_error
             .as_ref()
             .is_some_and(|error| error.api_status() == Some(403) && error.retryable_operation());
-        let transient = rate_limited || api_status.is_none() && github_transport_error(&stderr);
+        let transient = rate_limited || api_status.is_none() && transport_error;
         let failure = redacted_api_error(
             api_status,
             format!(
@@ -484,19 +527,8 @@ fn redacted_api_error(
     diagnostic: impl Into<String>,
     credential: SourceDeliveryCredential<'_>,
 ) -> SourceDeliveryError {
-    let diagnostic = diagnostic
-        .into()
-        .replace(credential.expose(), "[REDACTED]")
-        .replace(&encode_basic_credential(credential.expose()), "[REDACTED]");
+    let diagnostic = redact_log(&diagnostic.into(), credential, &[]);
     SourceDeliveryError::api(status, diagnostic)
-}
-
-fn api_secrets(mut secrets: Vec<String>, credential: SourceDeliveryCredential<'_>) -> Vec<String> {
-    secrets.extend([
-        credential.expose().to_owned(),
-        encode_basic_credential(credential.expose()),
-    ]);
-    secrets
 }
 
 fn api_diagnostic_text(
@@ -641,21 +673,28 @@ fn validate_api_output(output: Vec<u8>) -> Result<Vec<u8>, SourceDeliveryError> 
     Ok(output)
 }
 
-pub(super) fn check_log_tail(output: &[u8]) -> String {
+pub(super) fn check_log_tail(
+    output: &[u8],
+    credential: SourceDeliveryCredential<'_>,
+    extra_secrets: &[String],
+) -> JobLog {
+    let output = String::from_utf8_lossy(output);
+    let bytes = output.as_bytes();
     const ERROR_MARKER: &[u8] = b"##[error]";
     // GitHub appends checkout and service cleanup after the failed step. Keep
-    // the raw context ending at its last error annotation instead of that noise.
-    let end = output
+    // the failed step through its last error annotation instead of that noise;
+    // the shared excerpt selector retains early failure context and the summary.
+    let end = bytes
         .windows(ERROR_MARKER.len())
         .rposition(|window| window == ERROR_MARKER)
         .map(|offset| {
-            output[offset..]
+            bytes[offset..]
                 .iter()
                 .position(|byte| *byte == b'\n')
                 .map_or(output.len(), |length| offset + length + 1)
         })
         .unwrap_or(output.len());
-    job_log_tail(&output[..end])
+    job_log_tail(&output, end, credential, extra_secrets)
 }
 
 #[cfg(test)]

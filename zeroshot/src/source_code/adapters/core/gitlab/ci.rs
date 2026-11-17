@@ -1,8 +1,8 @@
 //! Enrich an already-failed required pipeline without granting it merge authority.
 use super::*;
 use super::super::ci_diagnostics::{
-    MAX_FAILED_CHECK_LOGS, MAX_FAILURE_DIAGNOSTIC_CHARS, MAX_FAILURE_ITEM_CHARS, bounded_text,
-    include_job_logs, job_log_tail,
+    JobLog, MAX_FAILED_CHECK_LOGS, MAX_FAILURE_DIAGNOSTIC_CHARS, MAX_FAILURE_ITEM_CHARS,
+    bounded_text, include_job_logs, redact_log,
 };
 use wire::{Job, Pipeline};
 
@@ -117,10 +117,8 @@ pub(super) async fn include_failure_details(
             )
             .await
         {
-            Ok(bytes) => {
-                job_log_tail(redacted(&String::from_utf8_lossy(&bytes), credential).as_bytes())
-            }
-            Err(error) => format!("GitLab job log unavailable: {error}"),
+            Ok(log) => log,
+            Err(error) => JobLog::unavailable(format!("GitLab job log unavailable: {error}")),
         };
         logs.push((job, log));
     }
@@ -145,7 +143,7 @@ fn require_pipeline(value: &Pipeline, head: &Pipeline) -> Result<(), SourceDeliv
 
 fn failure_text(value: &str, credential: SourceDeliveryCredential<'_>) -> String {
     bounded_text(
-        &one_line(&redacted(value, credential)),
+        &one_line(&redact_log(value, credential, &[])),
         MAX_FAILURE_ITEM_CHARS,
     )
 }
@@ -164,14 +162,4 @@ fn one_line(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn redacted(value: &str, credential: SourceDeliveryCredential<'_>) -> String {
-    crate::native_v2_delivery::command::redact(
-        value,
-        &[
-            credential.expose().to_owned(),
-            crate::native_v2_delivery::git_auth::encode_basic_credential(credential.expose()),
-        ],
-    )
 }

@@ -450,6 +450,11 @@ fn sanitize(mut captured: CapturedBytes, secrets: &[String]) -> (String, bool) {
 }
 
 pub(crate) fn redact(value: &str, secrets: &[String]) -> String {
+    redact_prefix(value, secrets, value.len())
+}
+
+/// Retain a prefix while matching complete secrets against the full input.
+pub(crate) fn redact_prefix(value: &str, secrets: &[String], end: usize) -> String {
     let mut secrets = secrets
         .iter()
         .filter(|secret| !secret.is_empty())
@@ -457,9 +462,12 @@ pub(crate) fn redact(value: &str, secrets: &[String]) -> String {
     secrets
         .sort_unstable_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
     secrets.dedup();
-    let mut redacted = String::with_capacity(value.len());
+    let mut redacted = String::with_capacity(value.len().min(end));
     let mut skip_until = 0;
-    for (position, character) in value.char_indices() {
+    for (position, character) in value
+        .char_indices()
+        .take_while(|(position, _)| *position < end)
+    {
         if position < skip_until {
             continue;
         }

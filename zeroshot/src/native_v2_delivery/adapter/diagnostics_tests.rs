@@ -20,6 +20,49 @@ fn adapter() -> NativeV2DeliveryAdapter {
     )
 }
 
+#[test]
+fn native_git_secrets_reach_forge_diagnostics_without_node_connections() {
+    let password = "native-password-private-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let adapter = adapter()
+        .with_trusted_github_token(Some(Arc::from("forge-token")))
+        .with_local_git_environment(Some(BTreeMap::from([
+            ("GIT_PASSWORD".to_owned(), password.to_owned()),
+            ("PUBLIC_VALUE".to_owned(), "public-value".to_owned()),
+        ])));
+    let environment = ResolvedEnvironment::exact(
+        &NodeRuntimeBinding::GitDelivery {
+            connections: Default::default(),
+            pull_request_feedback: Default::default(),
+        },
+        BTreeMap::new(),
+    )
+    .assert_value();
+    let credentials = match adapter.delivery_credentials(&environment) {
+        Ok(credentials) => credentials,
+        Err(_) => panic!("trusted forge credential must suffice without node connections"),
+    };
+    let credential = credentials.current();
+    assert!(credential.git().is_none());
+    assert!(
+        credential
+            .diagnostic_secrets()
+            .contains(&password.to_owned())
+    );
+    assert!(
+        credential
+            .diagnostic_secrets()
+            .contains(&git_auth::encode_basic_credential(password))
+    );
+    assert!(
+        !credential
+            .diagnostic_secrets()
+            .contains(&"public-value".to_owned())
+    );
+    for secret in adapter.feedback_secrets(&credentials) {
+        assert!(credential.diagnostic_secrets().contains(&secret));
+    }
+}
+
 #[tokio::test]
 async fn unconfirmed_delivery_cleanup_keeps_its_classification_and_never_waits_for_a_stalled_consumer()
  {
@@ -40,6 +83,7 @@ async fn unconfirmed_delivery_cleanup_keeps_its_classification_and_never_waits_f
             forge_field: Some(GITHUB_TOKEN_ENV),
             github_git_token: String::new(),
             token_from_environment: false,
+            diagnostic_secrets: Vec::new(),
         };
         let encoded = git_auth::encode_basic_credential("native-cleanup-token");
         let adapter = adapter().with_local_git_environment(Some(BTreeMap::from([

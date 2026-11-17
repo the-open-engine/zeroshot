@@ -164,6 +164,7 @@ impl NodeDriver for SyncProbe {
             forge_field: Some(GITHUB_TOKEN_ENV),
             github_git_token: "test-token".to_owned(),
             token_from_environment: true,
+            diagnostic_secrets: Vec::new(),
         };
         match self
             .adapter

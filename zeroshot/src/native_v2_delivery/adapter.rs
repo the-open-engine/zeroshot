@@ -419,6 +419,7 @@ struct DeliveryCredentials<'a> {
     forge_field: Option<&'static str>,
     github_git_token: String,
     token_from_environment: bool,
+    diagnostic_secrets: Vec<String>,
 }
 
 impl<'a> DeliveryCredentials<'a> {
@@ -431,12 +432,14 @@ impl<'a> DeliveryCredentials<'a> {
             forge_field: None,
             github_git_token: String::new(),
             token_from_environment: false,
+            diagnostic_secrets: Vec::new(),
         }
     }
 
     fn current(&self) -> SourceDeliveryCredential<'_> {
         super::transport::source_credential(&self.github_git_token, self.git.as_ref())
             .with_forge_token(&self.token)
+            .with_diagnostic_secrets(&self.diagnostic_secrets)
     }
 
     fn can_refresh(&self) -> bool {
@@ -603,7 +606,7 @@ impl NativeV2DeliveryAdapter {
     > {
         let (mode, pull_request_feedback) = authorized_mode(invocation)?;
         validate_delivery_contract(mode, &invocation.response)?;
-        let credentials = self.delivery_credentials(invocation)?;
+        let credentials = self.delivery_credentials(&invocation.environment)?;
         let session = invocation
             .session
             .as_any()
@@ -614,12 +617,11 @@ impl NativeV2DeliveryAdapter {
 
     fn delivery_credentials<'a>(
         &'a self,
-        invocation: &'a DriverInvocation,
+        environment: &'a ResolvedEnvironment,
     ) -> Result<DeliveryCredentials<'a>, DeliveryStop> {
         let forge_field = self.authority.forge_credential_field();
-        let token_file = self.file_credential(&invocation.environment, forge_field)?;
-        let declared =
-            forge_field.and_then(|field| forge_credential(&invocation.environment, field));
+        let token_file = self.file_credential(environment, forge_field)?;
+        let declared = forge_field.and_then(|field| forge_credential(environment, field));
         let trusted = (forge_field == Some(GITHUB_TOKEN_ENV))
             .then_some(self.trusted_github_token.as_deref())
             .flatten();
@@ -639,27 +641,24 @@ impl NativeV2DeliveryAdapter {
                 .to_owned(),
             None => String::new(),
         };
-        let github_git_token = github_git_token(
-            &invocation.environment,
-            self.trusted_github_token.as_deref(),
-        )
-        .map_err(refresh_failure)?
-        .unwrap_or("")
-        .to_owned();
-        let git = resolved_git_credentials(
-            &invocation.environment,
-            self.trusted_git_credentials.as_ref(),
-        )
-        .map_err(|_| DeliveryStop::Outcome(WorkerOutcome::malformed()))?;
-        Ok(DeliveryCredentials {
-            environment: Some(&invocation.environment),
+        let github_git_token = github_git_token(environment, self.trusted_github_token.as_deref())
+            .map_err(refresh_failure)?
+            .unwrap_or("")
+            .to_owned();
+        let git = resolved_git_credentials(environment, self.trusted_git_credentials.as_ref())
+            .map_err(|_| DeliveryStop::Outcome(WorkerOutcome::malformed()))?;
+        let mut credentials = DeliveryCredentials {
+            environment: Some(environment),
             token_file,
             token,
             git,
             forge_field,
             github_git_token,
             token_from_environment: declared.is_some(),
-        })
+            diagnostic_secrets: Vec::new(),
+        };
+        credentials.diagnostic_secrets = self.feedback_secrets(&credentials);
+        Ok(credentials)
     }
 
     fn file_credential<'a>(

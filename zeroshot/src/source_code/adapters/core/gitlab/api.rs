@@ -9,7 +9,7 @@ use tokio::sync::OnceCell;
 use url::Position;
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
 use super::wire::ServerMetadata;
-use super::super::ci_diagnostics::MAX_JOB_LOG_BYTES;
+use super::super::ci_diagnostics::{JobLog, MAX_JOB_LOG_BYTES, job_log_tail};
 
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 /// GitLab explains a rejection in a short JSON body; longer bodies keep only their prefix.
@@ -213,7 +213,7 @@ impl Api {
         &self,
         segments: &[&str],
         credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Vec<u8>, SourceDeliveryError> {
+    ) -> Result<JobLog, SourceDeliveryError> {
         response_bytes(
             self.response(ApiRequest::get(segments), credential).await?,
             credential,
@@ -221,6 +221,10 @@ impl Api {
             &self.network,
         )
         .await
+        .map(|bytes| {
+            let value = String::from_utf8_lossy(&bytes);
+            job_log_tail(&value, value.len(), credential, &self.network.secrets())
+        })
     }
 
     /// Notes can be filtered after pagination, so item count cannot prove the final page.
@@ -400,6 +404,7 @@ fn display_text_with_secrets(
     let mut values = vec![credential.expose()];
     values.extend(credential.github_git_token());
     let mut secrets = extra_secrets.to_vec();
+    secrets.extend_from_slice(credential.diagnostic_secrets());
     match credential.git() {
         Some(SourceGitCredential::Https { username, password }) => {
             values.extend([username, password]);

@@ -428,7 +428,7 @@ pub(super) fn queue_check_failures(
     ))
 }
 
-pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, String)]) {
+pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, JobLog)]) {
     let SourceReviewState::Open {
         checks: SourceChecks::Failed { diagnostic },
     } = &mut snapshot.state

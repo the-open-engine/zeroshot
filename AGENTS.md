@@ -1462,7 +1462,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   credential, and the trusted lane pins their contained repository-local commit identity to the delivery
   identity before handoff. Local checkouts retain their user's Git configuration. Merge receipts preserve GitHub's
   authoritative merged revision. When a required check fails, bounded repair diagnostics include
-  supporting failed checks and labelled raw job excerpts ending at the last GitHub error annotation.
+  supporting failed checks and labelled job excerpts retaining early failure context and the
+  final summary within both capture and per-job feedback bounds. Panic, assertion and traceback
+  contexts take priority over generic error/fatal fallback lines. GitHub excludes cleanup after
+  the last error annotation; truncated excerpts explicitly mark omitted output and keep a tail
+  fallback when no failure marker is recognized. Shared GitHub/GitLab log redaction covers forge
+  and separate Git credentials, including encoded authentication and SSH key lines, before excerpt selection.
+  The host carries its complete effective feedback-redaction set, including captured native Git
+  credentials without node connections, into successful log reads and bounded API failure diagnostics.
+  Classify raw failures before redaction and carry their positions with redacted log text through
+  capture, control removal and feedback aggregation; never infer failure positions from redacted text.
+  Classify raw GitHub annotations and unsupported log options before redaction; preserve full-secret
+  lookahead when excluding cleanup.
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
   Job-log reads opt into raw terminal sequences only inside bounded pipe capture, then remove
   controls before feedback; older GitHub CLI versions retry without the unsupported opt-in flag.

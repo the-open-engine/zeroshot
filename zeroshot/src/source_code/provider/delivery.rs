@@ -54,6 +54,7 @@ pub struct SourceDeliveryCredential<'a> {
     token: &'a str,
     github_git_token: Option<&'a str>,
     git: Option<SourceGitCredential<'a>>,
+    diagnostic_secrets: &'a [String],
 }
 
 /// Borrowed private Git authority; it is never part of a request, receipt, or stored identity.
@@ -82,6 +83,7 @@ impl<'a> SourceDeliveryCredential<'a> {
             token,
             git: None,
             github_git_token: None,
+            diagnostic_secrets: &[],
         }
     }
 
@@ -112,6 +114,16 @@ impl<'a> SourceDeliveryCredential<'a> {
     #[must_use]
     pub const fn git(self) -> Option<SourceGitCredential<'a>> {
         self.git
+    }
+
+    /// Redaction-only material from the host; never executable authentication authority.
+    pub(crate) const fn with_diagnostic_secrets(mut self, secrets: &'a [String]) -> Self {
+        self.diagnostic_secrets = secrets;
+        self
+    }
+
+    pub(crate) const fn diagnostic_secrets(self) -> &'a [String] {
+        self.diagnostic_secrets
     }
 
     #[must_use]

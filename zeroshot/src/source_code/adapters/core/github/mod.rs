@@ -1,3 +1,4 @@
+use super::ci_diagnostics::JobLog;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -639,12 +640,14 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
 }
 
 fn job_log_excerpt(
-    output: Result<Vec<u8>, SourceDeliveryError>,
-) -> Result<String, SourceDeliveryError> {
+    output: Result<JobLog, SourceDeliveryError>,
+) -> Result<JobLog, SourceDeliveryError> {
     match output {
-        Ok(output) => Ok(check_log_tail(&output)),
+        Ok(output) => Ok(output),
         Err(error) if error.authentication_failed() || error.retryable_operation() => Err(error),
-        Err(error) => Ok(format!("GitHub job log unavailable: {error}")),
+        Err(error) => Ok(JobLog::unavailable(format!(
+            "GitHub job log unavailable: {error}"
+        ))),
     }
 }
 
@@ -701,7 +704,6 @@ mod source_issue;
 mod wire;
 use policy::{PolicySnapshot, classify_policy, include_check_logs, query_arguments};
 use source_issue::{connect_source_issue, pull_request_body, refresh_pull_request_body};
-use api::check_log_tail;
 use wire::{PullRequestWire, require_review_identity, review_receipt};
 
 #[cfg(test)]
