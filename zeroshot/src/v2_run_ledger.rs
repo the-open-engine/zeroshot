@@ -29,9 +29,10 @@ pub mod sqlite;
 #[path = "v2_run_ledger/state.rs"]
 mod state;
 
+pub(crate) use state::validate_admitted_run;
 pub(crate) use state::{
     apply_event, cursor_for, cursor_sequence, initial_cursor, prepare_event, validate_create,
-    validate_event, validate_admitted_run,
+    validate_event,
 };
 
 pub(crate) mod steering;
