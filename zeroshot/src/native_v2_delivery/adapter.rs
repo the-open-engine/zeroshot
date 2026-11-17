@@ -880,6 +880,10 @@ impl NativeV2DeliveryAdapter {
                 .await
             {
                 Ok(()) => {
+                    self.state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .last_rejected_push = None;
                     self.record_publication(SourceReviewReceipt::for_request(
                         review,
                         String::new(),
@@ -887,6 +891,7 @@ impl NativeV2DeliveryAdapter {
                     return Ok(());
                 }
                 Err(error) => {
+                    self.remember_push_rejection(&push, &error)?;
                     self.retry_operation(
                         error,
                         preparation
