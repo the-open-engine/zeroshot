@@ -10,8 +10,10 @@ use crate::native_v2_platform::{CapsuleAllocationUnavailable, RetainedAllocation
 use super::{
     ProductionCapsuleAllocator, RetainedAllocationPaths, read_recovery, retained_claim_failure,
     failed_run_directory_state, FailedRunDirectoryState, HostedRecoveryDocument,
-    RetainedAllocationClaim, retained_delivery_run_id, write_recovery,
+    RetainedAllocationClaim, recovery_path, write_recovery,
 };
+
+const MAX_RECOVERY_LINEAGE_DEPTH: usize = 64;
 
 #[derive(Default)]
 pub(super) struct AllocationTurns {
@@ -150,6 +152,30 @@ impl ProductionCapsuleAllocator {
             original_source,
         })
     }
+}
+
+pub(super) fn retained_delivery_run_id(
+    root: &Path,
+    run_id: &RunId,
+    document: &HostedRecoveryDocument,
+) -> Option<RunId> {
+    let mut lineage_run_id = run_id.clone();
+    let mut lineage = document.clone();
+    for _ in 0..MAX_RECOVERY_LINEAGE_DEPTH {
+        if let Some(delivery_run_id) = lineage.delivery_run_id {
+            return Some(delivery_run_id);
+        }
+        let Some(predecessor) = lineage.resumed_from else {
+            return Some(lineage_run_id);
+        };
+        lineage_run_id = predecessor;
+        let Some(predecessor_document) = read_recovery(&recovery_path(root, &lineage_run_id))
+        else {
+            return Some(lineage_run_id);
+        };
+        lineage = predecessor_document;
+    }
+    None
 }
 
 pub(super) fn transfer_workspace_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {

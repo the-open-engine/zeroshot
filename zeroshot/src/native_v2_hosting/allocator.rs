@@ -58,7 +58,6 @@ type FilesystemPreparer =
     fn(&Path, &Path, HostedProcessPool) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable>;
 
 const RECOVERY_DIRECTORY: &str = "workspace-recovery";
-const MAX_RECOVERY_LINEAGE_DEPTH: usize = 64;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -1415,30 +1414,6 @@ fn complete_reconciled_handoff(
     successor.delivery_run_id = source.delivery_run_id;
     successor.resumed_from = Some(source_run_id);
     write_recovery(successor_path, &successor)
-}
-
-fn retained_delivery_run_id(
-    root: &Path,
-    run_id: &RunId,
-    document: &HostedRecoveryDocument,
-) -> Option<RunId> {
-    let mut lineage_run_id = run_id.clone();
-    let mut lineage = document.clone();
-    for _ in 0..MAX_RECOVERY_LINEAGE_DEPTH {
-        if let Some(delivery_run_id) = lineage.delivery_run_id {
-            return Some(delivery_run_id);
-        }
-        let Some(predecessor) = lineage.resumed_from else {
-            return Some(lineage_run_id);
-        };
-        lineage_run_id = predecessor;
-        let Some(predecessor_document) = read_recovery(&recovery_path(root, &lineage_run_id))
-        else {
-            return Some(lineage_run_id);
-        };
-        lineage = predecessor_document;
-    }
-    None
 }
 
 pub(super) fn production_filesystem(
