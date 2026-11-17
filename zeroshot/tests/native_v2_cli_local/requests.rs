@@ -564,6 +564,25 @@ fn two_request_fixture() -> LocalFixture {
     fixture
 }
 
+/// Restarts a run whose controller was killed. The worker that controller left behind keeps the
+/// run claimed until it exits, and `resume` is refused until then.
+async fn resume_lost(fixture: &LocalFixture, run: &str, mode: &str) -> String {
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+    loop {
+        let output = fixture.output(&["resume", run], mode).await;
+        if output.status.success() {
+            let receipt: Value = serde_json::from_slice(&output.stdout).assert_value();
+            return receipt["runId"].as_str().assert_value().to_owned();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "resume of the lost run kept failing: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
 fn kinds(vectors: &Value, kind: &str) -> usize {
     vectors["vectors"]
         .as_array()
@@ -602,10 +621,9 @@ async fn lost_and_failed_answer_successors_restart_after_the_answer() {
     wait_for_exit(controller).await;
 
     // Its restart begins after the answer, and the worker then fails the run.
-    let failed = fixture.json(&["resume", &lost], "fail").await;
-    let failed = failed["runId"].as_str().assert_value();
+    let failed = resume_lost(&fixture, &lost, "fail").await;
     fixture
-        .wait_terminal(failed, "finish", "worker_failed")
+        .wait_terminal(&failed, "finish", "worker_failed")
         .await;
     let worker_calls = |mode: &str| {
         fs::read_to_string(&calls)
@@ -619,7 +637,7 @@ async fn lost_and_failed_answer_successors_restart_after_the_answer() {
     assert_eq!(worker_calls("finish"), 0);
 
     // The restart of that failed restart begins after the answer as well.
-    let restarted = fixture.json(&["resume", failed], "finish").await;
+    let restarted = fixture.json(&["resume", &failed], "finish").await;
     let restarted = restarted["runId"].as_str().assert_value();
     let status = fixture.wait_suspended(restarted).await;
     assert_eq!(status["status"]["node"], "rating");
@@ -677,9 +695,8 @@ async fn a_lost_answer_successor_restarts_with_the_conversation_it_started_with(
     conversations::new_provider_home(&mut fixture);
 
     // Its restart begins after the answer with the conversation the lost run started with.
-    let restarted = fixture.json(&["resume", lost], "finish").await;
-    let restarted = restarted["runId"].as_str().assert_value();
-    fixture.wait_suspended(restarted).await;
+    let restarted = resume_lost(&fixture, lost, "finish").await;
+    fixture.wait_suspended(&restarted).await;
     assert_eq!(
         conversations::worker_calls(&fixture),
         [
@@ -688,5 +705,5 @@ async fn a_lost_answer_successor_restarts_with_the_conversation_it_started_with(
             "resume local-thread"
         ]
     );
-    fixture.json(&["force-stop", restarted], "finish").await;
+    fixture.json(&["force-stop", &restarted], "finish").await;
 }
