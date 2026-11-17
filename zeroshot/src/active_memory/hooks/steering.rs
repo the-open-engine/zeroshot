@@ -188,18 +188,37 @@ pub(super) struct DeliverySource {
 const DEADLINE: Duration = Duration::from_millis(250);
 const PREAMBLE: &str = "<steer>\nDirection from the person running this run, given while it is in progress. It takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
 
-pub(crate) fn frame<'a>(vectors: impl IntoIterator<Item = &'a RunVector>) -> String {
+/// A steer sent as a user message speaks as its sender. A model reads a description of a third
+/// party's direction as quoted material; the request to follow it is repeated after the text,
+/// where it is still in view at the end of a long steer.
+const MESSAGE_PREAMBLE: &str = "<steer>\nA message from me, the person running this run, sent while you work. Follow it from here on: it takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
+const MESSAGE_CLOSING: &str =
+    "That is my direction. Apply it to the rest of your work in this run.\n";
+const END: &str = "</steer>";
+
+/// Opening and closing text around steers: for a user message, or for a prompt or hook context.
+fn framing(message: bool) -> (&'static str, &'static str) {
+    if message {
+        (MESSAGE_PREAMBLE, MESSAGE_CLOSING)
+    } else {
+        (PREAMBLE, "")
+    }
+}
+
+pub(crate) fn frame<'a>(vectors: impl IntoIterator<Item = &'a RunVector>, message: bool) -> String {
+    let (opening, closing) = framing(message);
     let mut context = String::new();
     for vector in vectors {
         if let RunVectorContent::Steer { text } = &vector.content {
             if context.is_empty() {
-                context.push_str(PREAMBLE);
+                context.push_str(opening);
             }
             context.push_str(&format!("[{}] {}\n", vector.id, text));
         }
     }
     if !context.is_empty() {
-        context.push_str("</steer>");
+        context.push_str(closing);
+        context.push_str(END);
     }
     context
 }
@@ -347,7 +366,7 @@ impl DeliverySource {
             let index = record.index.data.lock().ok()?;
             let due: Vec<_> = index.due_in_prompt(&conversation, &shown_only).collect();
             let ids: Vec<_> = due.iter().map(|v| v.id.clone()).collect();
-            (frame(due.iter().copied()), ids)
+            (frame(due.iter().copied(), false), ids)
         };
         conversation.offered.extend(ids.iter().cloned());
         // Marked before the receipt is written, as in `receipt`.
@@ -428,7 +447,8 @@ impl DeliverySource {
         // One hand-over stays within the carriers' shared frame bound. A steer that does not
         // fit waits, with every later one, for the next tool call or prompt.
         let mut selected = Vec::new();
-        let mut bytes = PREAMBLE.len() + "</steer>".len();
+        let (opening, closing) = framing(!in_context);
+        let mut bytes = opening.len() + closing.len() + END.len();
         if in_context && !delivery.context.is_empty() {
             bytes += delivery.context.len() + 2;
         }
@@ -444,7 +464,7 @@ impl DeliverySource {
             delivery.steers.push(vector.id.clone());
             selected.push(vector);
         }
-        let text = frame(selected);
+        let text = frame(selected, !in_context);
         drop(index);
         if text.is_empty() {
             return delivery;

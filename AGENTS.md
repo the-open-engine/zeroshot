@@ -107,7 +107,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   inside a tool result, which a model may refuse to follow. At a tool call it travels as a user
   message through the harness's message channel where one exists (`SteerCarrier`): Claude Code's
   stream-json stdin, Copilot's `session.send` in `immediate` mode, Pi's steering queue and a stored
-  OpenCode session message; Codex and Hermes take it inside hook context. A message is receipted
+  OpenCode session message; Codex and Hermes take it inside hook context. A steer sent as a
+  message is framed in its sender's first person and repeats the request to follow it after the
+  text: the descriptive frame of prompts and hook context reads there as quoted material, which
+  a small model dismisses. A message is receipted
   when the harness shows it in the conversation (OpenCode: when it is stored), not when a hook
   returned. A message that is never shown carries no receipt, and its steers are due again in
   that conversation's next prompt. A message that was shown is part of the conversation: its

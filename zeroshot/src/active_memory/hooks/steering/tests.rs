@@ -504,7 +504,13 @@ async fn steer_sent_as_a_message_is_received_when_shown_and_delivered_once() {
     let (query, delivery) = hooks.tool_delivery(message(&first)).await;
     assert!(delivery.context.is_empty(), "the steer is no hook context");
     assert_eq!(delivery.steers.len(), 1);
-    assert!(delivery.steer.contains("Standing direction"));
+    // A message speaks as its sender and asks once more, after the text, to be followed.
+    assert!(delivery.steer.starts_with(MESSAGE_PREAMBLE));
+    assert!(
+        delivery
+            .steer
+            .ends_with(&format!("] Standing direction\n{MESSAGE_CLOSING}</steer>"))
+    );
     let received = || async {
         steering::status(ledger.as_ref(), &run)
             .await
