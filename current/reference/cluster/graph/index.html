@@ -2476,8 +2476,8 @@ Normal-success continuation requires every branch for <code>all</code>, one bran
 size-<code>count</code> completing branch set. A set is valid only when its branch-completion predicates are
 jointly satisfiable under one legal control assignment; branches guarded by mutually exclusive
 outcomes never fabricate a completion set. Quorum one behaves as alternatives, while quorum over
-every branch carries the same completion guarantees as <code>all</code>. For <code>all</code>, <code>any</code>, and <code>quorum</code>,
-<code>joined=reached|quorum_unreachable</code> is correlated with that required-completion predicate;
+every branch carries the same completion guarantees as <code>all</code>. For <code>all</code>, <code>any</code>, and <code>quorum</code>, the
+verifier conservatively correlates <code>joined=reached|quorum_unreachable</code> with that required-completion predicate;
 assignments combining <code>reached</code> with an unsatisfied predicate or <code>quorum_unreachable</code> with a
 satisfied predicate are not legal control assignments. Inside a map, this correlation is applied
 to each item's joint join/branch-control outcome before <code>k_of_map</code> aggregates label counts.
@@ -2490,9 +2490,15 @@ or map body, run a queued item, or enter another loop round before deciding whet
 It does not simulate future writes, map sizes, choice routes, convergence, or alternative loop exits.
 An unfinished loop's current-round controls cannot establish a final result; completed loops expose
 only their final-round facts. Missing foreign controls remain unknown, including beneath negation.</p>
-<p>A satisfied join cancels or voids remaining active and queued losers through confirmed cleanup.
-When actual settled outcomes leave too few contributors, <code>first</code> reports <code>no_satisfier</code> and other
-joins report <code>quorum_unreachable</code>. Unstarted losers cannot cause a work-limit failure. Each next
+<p>A branch that reaches <code>fail</code> or <code>succeed</code> before join satisfaction ends the run with that terminal's
+reason or output, including through nested groups, maps and loops. Recorded history orders the
+terminal against join satisfaction: an earlier satisfied join continues and discards slower
+branches' terminals. The earliest terminal wins; canonical branch order breaks ties between
+terminals, and a terminal tied with join satisfaction wins.
+A terminal or a satisfied join cancels or voids remaining active and queued losers through confirmed
+cleanup. When every candidate settles without satisfying <code>first</code>, it reports <code>no_satisfier</code>.
+For <code>all</code>, <code>any</code> and <code>quorum</code>, <code>joined=quorum_unreachable</code> remains in the contract but no longer
+occurs: a noncompleting branch ends the run instead. Unstarted losers cannot cause a work-limit failure. Each next
 actual executable visit or loop-body entry checks its own 65,536-unit ceiling before consuming it;
 queued work spends neither attempts nor timeout. Static graph validation separately preserves
 signal/error exclusivity and sound correlated aggregate proofs without consulting runtime history.</p>
@@ -2873,7 +2879,7 @@ potential contributors until actual outcomes settle the join.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-15">15 November 2026</time>
+    Last updated <time datetime="2026-11-17">17 November 2026</time>
   </span>
 
     
