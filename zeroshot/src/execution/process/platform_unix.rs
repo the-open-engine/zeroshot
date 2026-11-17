@@ -86,7 +86,7 @@ fn kill_process_tree_with(
         return errors;
     };
     if let Err(error) = kill_group(process_group_id) {
-        if !process_is_missing(&error) {
+        if !group_has_nothing_to_signal(&error, EXITED_MEMBERS_REFUSE_SIGNALS) {
             errors.push(super::io_error_detail(
                 "process group termination failed",
                 &error,
@@ -534,6 +534,18 @@ fn reap_action(target: ReapTarget, result: i32, error: Option<i32>) -> ReapActio
 
 fn process_is_missing(error: &io::Error) -> bool {
     error.raw_os_error() == Some(libc::ESRCH)
+}
+
+/// macOS refuses a signal for a process group whose members have all exited and only wait to be
+/// reaped with EPERM. Linux accepts the signal, and both report a group that is gone as ESRCH.
+const EXITED_MEMBERS_REFUSE_SIGNALS: bool = cfg!(target_os = "macos");
+
+/// A group that is gone, or that holds only exited members, has nothing left to signal. The
+/// cleanup wait after the kill still has to see the group empty, so a live member that refused
+/// the signal is reported there.
+fn group_has_nothing_to_signal(error: &io::Error, exited_members_refuse_signals: bool) -> bool {
+    process_is_missing(error)
+        || (exited_members_refuse_signals && error.raw_os_error() == Some(libc::EPERM))
 }
 
 #[cfg(target_os = "linux")]

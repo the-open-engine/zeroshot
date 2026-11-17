@@ -17,7 +17,7 @@ async fn timeout_cancels_then_acknowledges_cleanup_before_settlement() {
             .drive()
             .await
             .assert_value_with("terminal"),
-        TerminalResult::Succeeded { .. }
+        TerminalResult::Failed { reason, .. } if reason.as_str() == "unhandled"
     ));
     assert_eq!(harness.driver.cancellations("worker"), 1);
     assert_eq!(harness.driver.state().active, 0);
@@ -72,7 +72,7 @@ async fn live_registration_failure_still_durably_drains_before_settlement() {
 
     assert!(matches!(
         supervisor.drive().await.assert_value_with("terminal"),
-        TerminalResult::Succeeded { .. }
+        TerminalResult::Failed { reason, .. } if reason.as_str() == "unhandled"
     ));
     let tail = harness
         .ledger

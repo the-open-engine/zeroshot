@@ -1,5 +1,10 @@
 use super::*;
 
+/// The limit for real Git commands, which no assertion here depends on. Under the cleared
+/// environment of `local_git_command` the first Git launch of a test process has taken more than
+/// five seconds on the hosted macOS runners.
+const GIT_FIXTURE_DEADLINE: Duration = Duration::from_secs(60);
+
 #[cfg(unix)]
 #[tokio::test]
 async fn private_input_and_early_output_drain_concurrently() {
@@ -376,15 +381,52 @@ async fn completed_commands_cannot_leave_background_helpers_mutating_the_workspa
 #[tokio::test]
 async fn helper_pipe_inheritance_preserves_the_main_exit_status() {
     let mut command = Command::new("/bin/sh");
-    command.args(["-c", "(/usr/bin/sleep 2) & exit 17"]);
+    // The search path finds `sleep` on every Unix. macOS has none in `/usr/bin`, and a helper
+    // that never starts holds no pipe.
+    command.args(["-c", "(sleep 30) & exit 17"]);
     let started = std::time::Instant::now();
-    let outcome = capture(&mut command, Duration::from_secs(1))
+    let outcome = capture(&mut command, Duration::from_secs(10))
         .await
         .expect("confirmed descendant cleanup must close inherited pipes");
-    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(outcome.exit_status, Some(17));
     assert!(!outcome.timed_out);
     assert!(!outcome.cleanup_unconfirmed);
+}
+
+/// A command that has exited and is not reaped yet leaves its process group with nothing to
+/// signal. macOS refuses the kill for such a group, and that refusal once failed the command.
+#[cfg(unix)]
+#[tokio::test]
+async fn cleanup_accepts_a_process_group_whose_only_member_has_exited() {
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "exit 17"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let (mut child, group) = spawn_contained(&mut command).expect("contained command starts");
+    let pid = child.id().expect("unreaped child has a PID");
+    // Wait for the exit without reaping the child: its group then holds one exited member.
+    let mut exited = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    while unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid,
+            exited.as_mut_ptr(),
+            libc::WEXITED | libc::WNOWAIT,
+        )
+    } != 0
+    {
+        let error = std::io::Error::last_os_error();
+        assert_eq!(error.raw_os_error(), Some(libc::EINTR), "{error}");
+    }
+    let cleanup = terminate_process_tree(&group.tree, &mut child).await;
+    assert_eq!(cleanup.error, None);
+    assert!(cleanup.cleanup.proves_tree_empty());
+    assert_eq!(
+        cleanup.exit_status.and_then(|status| status.code()),
+        Some(17)
+    );
 }
 
 #[cfg(unix)]
@@ -567,7 +609,7 @@ async fn native_credentials_are_private_protocol_bytes_but_never_printable_diagn
             "--get",
             "probe.value",
         ]);
-        let output = capture_sensitive(&mut command, Duration::from_secs(5), &[])
+        let output = capture_sensitive(&mut command, GIT_FIXTURE_DEADLINE, &[])
             .await
             .unwrap()
             .require_success()
@@ -603,7 +645,7 @@ async fn failing_git_filter_redacts_all_native_credential_fields() {
         "-c", "filter.canary.clean=printf '%s\\n' \"$GITHUB_TOKEN\" \"$FORGE_PASSWORD\" \"$FORGE_API_KEY\" >&2; exit 1",
         "-c", "filter.canary.required=true", "add", "filtered.txt",
     ]);
-    let output = capture(&mut command, Duration::from_secs(5)).await.unwrap();
+    let output = capture(&mut command, GIT_FIXTURE_DEADLINE).await.unwrap();
     assert_ne!(output.exit_status, Some(0));
     assert!(output.stderr.contains("[REDACTED]"));
     for (_, secret) in fields {
@@ -635,7 +677,7 @@ async fn fixed_identity_wins_over_global_and_environment_git_configuration() {
             command.env("GIT_CONFIG_GLOBAL", config);
         }
         command.args(["commit", "--allow-empty", "--message", "fixed identity"]);
-        capture(&mut command, Duration::from_secs(5))
+        capture(&mut command, GIT_FIXTURE_DEADLINE)
             .await
             .unwrap()
             .require_success()

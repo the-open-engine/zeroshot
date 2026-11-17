@@ -287,3 +287,6 @@ impl Diagram {
         Some(held[count])
     }
 }
+
+#[cfg(test)]
+mod tests;
