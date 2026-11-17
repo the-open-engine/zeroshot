@@ -230,6 +230,120 @@ async fn map_terminal_selection_traces_only_the_winning_item_scope() {
 }
 
 #[tokio::test]
+async fn unchecked_error_traces_failed_groups_only_in_the_ending_round_and_map_item() {
+    let state = required_array_record(&[("items", "null")]);
+    let item = route(
+        "route",
+        accepted("check"),
+        sequence("selected", vec![step("work", 1)]),
+        step("fallback", 1),
+    );
+    let mapped = json!({"kind":"map","name":"mapped","state":state,"over":{"source":"state","path":["items"]},"maxItems":2,"body":item,"promotedStatePaths":[]});
+    let mut round = sequence("round", vec![mapped]);
+    round["state"] = state.clone();
+    let rounds = json!({"kind":"loop","name":"rounds","state":state,"maxIterations":2,"body":round,"promotedStatePaths":[]});
+    let mut root = sequence("root", vec![verifier("check", 1), rounds, succeed("done")]);
+    root["state"] = state;
+    let graph = observed_graph(root).await;
+    let input = json!({"items":[null,null]});
+    let mut history = vec![
+        settled(
+            SettledSpec::new(1, 1, "check").position(2),
+            verdict("accepted"),
+        ),
+        settled(
+            SettledSpec::new(2, 2, "work")
+                .map_indices(vec![0])
+                .position(4),
+            success(1),
+        ),
+        settled(
+            SettledSpec::new(3, 3, "work")
+                .map_indices(vec![1])
+                .position(6),
+            success(1),
+        ),
+    ];
+    let before = trace(&graph, &input, &history);
+    assert!(
+        !before
+            .iter()
+            .any(|record| record.state == StructuralTraceState::Failed)
+    );
+
+    let mut sibling = active(4, 2, "work", 7);
+    sibling.occurrence.map_indices = vec![0];
+    history.push(sibling);
+    history.push(settled(
+        SettledSpec::new(5, 3, "work")
+            .map_indices(vec![1])
+            .position(9),
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Timeout),
+    ));
+    let after = trace(&graph, &input, &history);
+    let failed = after
+        .iter()
+        .filter(|record| record.state == StructuralTraceState::Failed)
+        .collect::<Vec<_>>();
+    assert_eq!(failed.len(), 6);
+    for record in failed {
+        assert_eq!(record.detail.as_deref(), Some("unhandled"));
+        match record.node.as_str() {
+            "root" | "rounds" => assert!(record.loop_iterations.is_empty()),
+            "round" | "mapped" => assert_eq!(record.loop_iterations, vec![2]),
+            "route" | "selected" => {
+                assert_eq!(record.loop_iterations, vec![2]);
+                assert_eq!(record.map_indices, vec![1]);
+            }
+            _ => panic!("unexpected failed trace: {record:?}"),
+        }
+    }
+    assert!(
+        after
+            .iter()
+            .filter(|record| record.loop_iterations == vec![1])
+            .all(|record| record.state == StructuralTraceState::Completed)
+    );
+    assert!(
+        !after
+            .iter()
+            .any(|record| record.loop_iterations == vec![2] && record.map_indices == vec![0])
+    );
+    assert!(
+        !after
+            .iter()
+            .any(|record| ["done", "fallback"].contains(&record.node.as_str()))
+    );
+}
+
+#[tokio::test]
+async fn unchecked_crash_traces_failure_only_after_retries_finish() {
+    let graph = observed_graph(sequence(
+        "root",
+        vec![sequence("nested", vec![step("work", 2)]), succeed("done")],
+    ))
+    .await;
+    let crash =
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash);
+    let first = settled(SettledSpec::new(1, 1, "work").position(2), crash.clone());
+    let before = trace(&graph, &json!({}), std::slice::from_ref(&first));
+    assert!(
+        !before
+            .iter()
+            .any(|record| record.state == StructuralTraceState::Failed)
+    );
+    let retry = settled(SettledSpec::new(2, 1, "work").attempt(2).position(4), crash);
+    let after = trace(&graph, &json!({}), &[first, retry]);
+    assert_eq!(after.len(), 2);
+    assert!(
+        after
+            .iter()
+            .all(|record| record.state == StructuralTraceState::Failed
+                && record.detail.as_deref() == Some("unhandled"))
+    );
+}
+
+#[tokio::test]
 async fn queue_observation_is_bounded_independently_of_dispatch_and_keeps_item_loop_identity() {
     let state = required_array_record(&[("items", "null")]);
     let graph = reducer_test_support::verified_graph(json!({"kind":"seq","name":"run","state":state,"promotedStatePaths":[],"children":[

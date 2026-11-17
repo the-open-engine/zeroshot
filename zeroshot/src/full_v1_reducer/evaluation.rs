@@ -32,7 +32,16 @@ impl<'history> Engine<'history> {
         .after(traversal.after);
         record_completed(node, context, traversal, &status);
         self.trace_finish(trace, &status, context);
-        if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_)) {
+        // Implicit failures have no authored terminal node to expose their enclosing outcome.
+        if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_))
+            || matches!(
+                &status,
+                Status::Terminal {
+                    projection: TerminalProjection::Failed { .. },
+                    ..
+                }
+            )
+        {
             self.trace_terminal(trace, &status)?;
         }
         Ok(status)
