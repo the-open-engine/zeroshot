@@ -10,10 +10,12 @@ use serde_json::{Value, json};
 use super::fixture::{Fixture, success};
 
 fn run_directories(fixture: &Fixture) -> BTreeSet<OsString> {
-    std::fs::read_dir(fixture.root.path("state/runs"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect()
+    let entries = match std::fs::read_dir(fixture.root.path("state/runs")) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return BTreeSet::new(),
+        Err(error) => panic!("cannot inspect run storage: {error}"),
+    };
+    entries.map(|entry| entry.unwrap().file_name()).collect()
 }
 
 #[test]
@@ -48,27 +50,20 @@ fn busy_workspace_refusal_removes_only_the_new_run_directory() {
 }
 
 #[test]
-fn oversized_bootstrap_and_admission_refusals_remove_the_run_directory() {
+fn oversized_submission_refusals_leave_no_run_directory() {
     let fixture = Fixture::new();
     let mut leftovers = Vec::new();
     for megabytes in [3, 5] {
         let mut command = fixture.run_command("volume", true);
+        command.env("ZEROSHOT_ERROR_FORMAT", "json");
         fixture.write(
             "input.json",
             &json!({"blob": "x".repeat(megabytes * 1024 * 1024)}),
         );
         let refused = command.output().unwrap();
         assert!(!refused.status.success());
-        let expected = if megabytes == 3 {
-            "controller exited before becoming ready: admitted run exceeds the storage bound"
-        } else {
-            "portable controller bootstrap is malformed or too large"
-        };
-        assert!(
-            String::from_utf8_lossy(&refused.stderr).contains(expected),
-            "{}",
-            String::from_utf8_lossy(&refused.stderr)
-        );
+        let error: Value = serde_json::from_slice(&refused.stderr).unwrap();
+        assert_eq!(error["code"], "submission.too_large", "{error}");
         leftovers.push((megabytes, run_directories(&fixture).len()));
     }
     assert_eq!(leftovers, [(3, 0), (5, 0)]);

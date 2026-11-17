@@ -464,6 +464,8 @@ pub enum NativeV2CliCommand {
     Steer {
         run: RunSelector,
         text: SteerText,
+        networks: Vec<openengine_cluster_protocol::NodeName>,
+        mode: openengine_cluster_protocol::SteeringMode,
     },
     Answer {
         run: RunSelector,
@@ -593,6 +595,8 @@ pub enum NativeV2CliError {
     Target(String),
     #[error("local controller operation failed: {0}")]
     Local(String),
+    #[error(transparent)]
+    Ledger(#[from] crate::v2_run_ledger::RunLedgerError),
     #[error("{0}")]
     LocalRequestTimeout(String),
     #[error("Zeroshot OECP request failed: {0}")]

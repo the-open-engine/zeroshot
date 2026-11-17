@@ -78,6 +78,7 @@ pub struct CleanupOutcome {
 }
 
 pub struct ProcessTreeRegistration {
+    authority: Option<super::authority::Registration>,
     #[cfg(windows)]
     job: Option<usize>,
     #[cfg(unix)]
@@ -104,6 +105,7 @@ impl Drop for ProcessTreeRegistration {
 
 #[derive(Debug)]
 pub struct ProcessTreeHandle {
+    authority: Option<super::authority::Registration>,
     #[cfg(unix)]
     process_group_id: Option<i32>,
     #[cfg(unix)]
@@ -128,9 +130,15 @@ impl ProcessTreeHandle {
     }
 }
 
-#[cfg(windows)]
 impl Drop for ProcessTreeHandle {
     fn drop(&mut self) {
+        if self.authority.is_some()
+            && matches!(process_tree_has_live_members(self), Ok(false))
+            && let Some(authority) = &mut self.authority
+        {
+            let _ = authority.retire();
+        }
+        #[cfg(windows)]
         super::platform_windows::close_job(self.job);
     }
 }
@@ -146,11 +154,13 @@ pub fn register_process_tree_for(
     {
         Ok(ProcessTreeRegistration {
             job: Some(super::platform_windows::create_kill_on_close_job()?),
+            authority: None,
         })
     }
     #[cfg(not(windows))]
     {
         Ok(ProcessTreeRegistration {
+            authority: None,
             #[cfg(unix)]
             containment,
             #[cfg(target_os = "linux")]
@@ -159,28 +169,43 @@ pub fn register_process_tree_for(
     }
 }
 
+/// A failed spawn never executes native provider code; retire its provisional ownership.
+pub(super) fn retire_failed_spawn(registration: &mut ProcessTreeRegistration) -> io::Result<()> {
+    if let Some(authority) = &mut registration.authority {
+        authority.retire()?;
+    }
+    Ok(())
+}
+
 pub fn capture_process_tree(
-    registration: ProcessTreeRegistration,
+    mut registration: ProcessTreeRegistration,
     child: &mut tokio::process::Child,
 ) -> Result<ProcessTreeHandle, io::Error> {
     #[cfg(unix)]
     {
+        if let Some(authority) = &mut registration.authority
+            && let Some(pid) = child.id()
+        {
+            authority.capture(pid, None)?;
+        }
         Ok(ProcessTreeHandle {
+            authority: registration.authority.take(),
             process_group_id: child.id().and_then(|value| i32::try_from(value).ok()),
             containment: registration.containment,
             #[cfg(target_os = "linux")]
             supervisor: registration
                 .supervisor
+                .take()
                 .map(super::tree_supervisor::Registration::capture),
         })
     }
 
     #[cfg(windows)]
     {
-        let mut registration = registration;
         let job = registration.job.expect("process job is registered");
-        super::platform_windows::assign_process_tree(job, child)?;
+        super::platform_windows::assign_process_tree(job, child, registration.authority.as_mut())?;
         Ok(ProcessTreeHandle {
+            authority: registration.authority.take(),
             job: registration.take_job(),
         })
     }
@@ -188,7 +213,7 @@ pub fn capture_process_tree(
     {
         let _ = registration;
         let _ = child;
-        Ok(ProcessTreeHandle {})
+        Ok(ProcessTreeHandle { authority: None })
     }
 }
 
@@ -462,8 +487,20 @@ pub(super) fn prepare_supervisor(
     workspace: &std::path::Path,
 ) -> io::Result<bool> {
     #[cfg(target_os = "linux")]
+    let track = registration.containment == ProcessContainment::ProcessGroup;
+    #[cfg(not(target_os = "linux"))]
+    let track = true;
+    if track {
+        let authority = super::authority::Registration::prepare()?;
+        authority.configure(command)?;
+        registration.authority = Some(authority);
+    }
+    #[cfg(target_os = "linux")]
     if registration.containment == ProcessContainment::ProcessGroup {
-        let supervisor = super::tree_supervisor::Registration::new(workspace)?;
+        let mut supervisor = super::tree_supervisor::Registration::new(workspace)?;
+        if let Some(authority) = &registration.authority {
+            supervisor.retain(authority.lease()?);
+        }
         supervisor.configure(command);
         registration.supervisor = Some(supervisor);
         return Ok(true);

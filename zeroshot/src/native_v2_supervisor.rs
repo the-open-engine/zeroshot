@@ -240,7 +240,12 @@ impl NativeV2Supervisor {
         }
         match self.initialize().await? {
             Initialization::Terminal(terminal) => Ok(terminal),
-            Initialization::Program(program) => self.drive_program(program).await,
+            Initialization::Program(program) => {
+                if let Some(hooks) = self.runner.delivery_hooks() {
+                    hooks.configure_networks(&program.admitted.graph.networks);
+                }
+                self.drive_program(program).await
+            }
         }
     }
 
@@ -371,6 +376,13 @@ impl NativeV2Supervisor {
                     // stop. Latch the same intent even if the process listener won the race with
                     // the server's force request, then let the ordinary stop path settle it.
                     self.force_stop().await?;
+                }
+                Err(NativeV2SupervisorError::Ledger(
+                    error @ RunLedgerError::NodeInputTooLarge { .. },
+                )) => {
+                    return self
+                        .terminalize_input_failure(&mut active.tasks, &error.to_string())
+                        .await;
                 }
                 Err(error) => return Err(error),
             }
@@ -780,7 +792,7 @@ mod postmortem;
 mod runtime;
 // Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
 pub(crate) use runtime::{
-    request_history, continuation_history, durable_history, next_execution, next_node_instance,
+    request_history, continuation_history, durable_history, next_execution, next_node_instance_for,
     restart_history,
 };
 pub use environment::{RunEnvironment, RunEnvironmentError};

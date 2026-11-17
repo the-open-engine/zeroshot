@@ -56,6 +56,11 @@ Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspac
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 `run()` submits once and waits; `submit()` returns a durable `Run` handle immediately.
 
+Run input has the same [submission and node-input limits](../getting-started/first-run.md#1-write-the-task)
+as the CLI: 2 MiB for the stored submission and 1 MiB for each node's serialized start record,
+including its input and bookkeeping. A local early size refusal raises `InvalidRequestError` with
+code `submission.too_large`. A node-input overflow fails the admitted run with a size diagnostic.
+
 ## Manage named targets
 
 `Client.list_targets()` returns a tuple of typed `NamedTarget` records with `name`, `origin` and
@@ -277,8 +282,10 @@ inbox reads never apply them. See [Ask a person](ask-a-person.md).
 ## Standing direction
 
 `steer = await run.steer("Prioritize the parser regression.")` records standing direction without
-continuing a suspended run. `RunStatus.steers` from `Run.status()` exposes excerpts and confirmed
-receiving executions (statuses streamed by `Run.watch()` omit them); `omitted_steers` reports the
+continuing a suspended run. Use `await run.steer(text, mode="once")` to deliver once per node instance;
+`mode="standing"` delivers per provider conversation and remains the default. `RunStatus.steers` from
+`Run.status()` exposes excerpts, message modes, optional network origin metadata and recorded
+receiving executions; statuses streamed by `Run.watch()` omit them. `omitted_steers` reports the
 bounded listing's omissions. Each agent conversation receives a steer at its next tool call or
 prompt, within the [Claude Code limits](observe-and-control.md#steer-a-run).
 `await run.vector(steer.id)` reads its full text, and

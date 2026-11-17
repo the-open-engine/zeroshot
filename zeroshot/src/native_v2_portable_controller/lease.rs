@@ -174,17 +174,7 @@ pub(crate) struct LeaseProbe {
     pub held: bool,
 }
 
-fn lock_is_contended(error: &io::Error) -> bool {
-    if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_IO_PENDING as i32)
-    }
-    #[cfg(not(windows))]
-    false
-}
+use crate::execution::platform::lock_is_contended;
 
 impl Drop for ControllerLease {
     fn drop(&mut self) {

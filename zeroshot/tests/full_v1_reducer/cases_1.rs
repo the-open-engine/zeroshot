@@ -68,7 +68,7 @@ async fn step_verifier_seq_choice_succeed_and_fail_follow_authored_control() {
     let reduction = reduce(&failed_step_graph, &json!({}), &failed);
     assert!(matches!(
         reduction.terminal,
-        Some(TerminalProjection::Succeeded { .. })
+        Some(TerminalProjection::Failed { reason, .. }) if reason.as_str() == "unhandled"
     ));
     assert!(
         !reduction

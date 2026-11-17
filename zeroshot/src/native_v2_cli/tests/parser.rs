@@ -1195,6 +1195,8 @@ fn steer_parser_requires_exactly_one_text_source() {
                     target: Some("prod".into())
                 },
                 text: expected,
+                networks: vec![],
+                mode: openengine_cluster_protocol::SteeringMode::Standing,
             }
         );
     }

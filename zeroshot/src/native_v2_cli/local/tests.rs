@@ -23,6 +23,8 @@ use crate::v2_run_ledger::CreateRun;
 #[path = "preflight_tests.rs"]
 mod preflight_tests;
 
+#[path = "input_size_tests.rs"]
+mod input_size_tests;
 #[path = "startup_tests.rs"]
 mod startup_tests;
 
@@ -188,7 +190,6 @@ fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     }
 }
 
-#[cfg(unix)]
 fn initialize_local_repository(root: &Path) {
     fn git(root: &Path, arguments: &[&str]) {
         let status = std::process::Command::new("git")

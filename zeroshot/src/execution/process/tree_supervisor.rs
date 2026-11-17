@@ -3,13 +3,15 @@
 //! or owner loss. The post-fork branch uses only async-signal-safe syscalls and preallocated data.
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::ExitStatus;
 use std::sync::Mutex;
 use tokio::process::Command;
+
+use crate::execution::platform::retained_descriptor;
 
 #[path = "tree_supervisor/leases.rs"]
 mod leases;
@@ -33,6 +35,9 @@ impl Registration {
             child,
             leases: leases::capture(workspace)?,
         })
+    }
+    pub(super) fn retain(&mut self, file: File) {
+        self.leases.push(file);
     }
     pub(super) fn configure(&self, command: &mut Command) {
         let (owner, child) = (self.owner.as_raw_fd(), self.child.as_raw_fd());
@@ -338,16 +343,6 @@ fn kill_children() {
         }
         libc::close(file);
     }
-}
-
-fn retained_descriptor(file: &impl AsRawFd) -> io::Result<OwnedFd> {
-    // SAFETY: fcntl duplicates a borrowed live descriptor, returning unique CLOEXEC ownership.
-    let descriptor = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
-    if descriptor < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: descriptor was newly allocated above and has no other owning Rust value.
-    Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
 }
 
 #[cfg(test)]

@@ -112,13 +112,41 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
   restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
-  standing steers again. A steer does not stand after a tool-call delivery on Copilot, whose hook
-  context is not written to its session, or on Pi and OpenCode, whose tool result a model may
-  refuse to follow (`HookQuery::standing`): the delivery is receipted, the steer stays due for
-  that conversation's next prompt, and the snapshot omits the receipt until an execution whose
-  prompt carried it ends successfully. Prompt-carried steers are receipted when the prompt is
-  prepared and follow the same rule.
-  The carrier retains incremental vector-record read progress across callback deadlines.
+  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  GraphSpec.networks owns default-deny peer communication: members name every participating logical
+  agent node and publishers are a subset. All mapped copies participate. Only publishers receive
+  network publication context and an execution-scoped broker capability; labels never authorize it.
+  Native local human steering checks OS caller provenance at CLI fallback and RPC acceptance,
+  independently of environment labels or state-directory overrides. Shared process launch publishes
+  an ownership lease before Unix exec or Windows resume and retains it through confirmed cleanup;
+  Linux's private supervisor retains the descriptor after owner loss. Bounded PID/creation identity
+  ancestry and native process-group evidence fence same-run, foreign-run and suspended-ledger paths.
+  macOS reads public short BSD ancestry bracketed by matching KERN_PROC_PID creation times.
+  The bounded full sysctl response exposes only its documented native timeval prefix; the
+  complete short BSD ABI, returned PID and timestamps are validated. Query errors retain denial.
+  A departed or reused Windows parent ends ancestry only when the original caller's native creation
+  identity still matches and it is outside every Job; owned roots and ordinary descendants retain
+  their non-breakaway Job. Other process-query errors, changed current identities and bounds still deny.
+  Uncertain callers cannot publish human guidance. These mandates govern normal CLI/RPC use under
+  existing native account permissions; they do not create an OS sandbox. Deliberate same-account
+  state/credential tampering, external proxies and macOS session detachment plus orphaning require
+  stronger isolation. Never treat labels as authority or silently relax an uncertain provenance check.
+  Local `steer --network` uses that capability without controller discovery, stamps its origin at
+  the host and refuses foreign runs or human-broadcast escalation. Repeated destinations and
+  overlapping memberships deduplicate delivery. Per-message once mode defaults for networks and
+  consumes receipts per recipient node instance across fresh conversations and successors; standing
+  tracks provider conversations. Human broadcast retains its standing default and precedence.
+  Both modes permanently exclude the originating node instance, including across retries, fresh
+  sessions and resume. Successors reserve fresh node-instance IDs above full predecessor history
+  independently of selected checkpoint prerequisites; retained instances keep their IDs. Publication
+  uses the existing vector record and native carrier, delivering
+  to active hooks or future prompts without waking, restarting or scheduling recipients.
+  A Standing steer does not stand after a tool-call delivery on Copilot, whose hook context
+  is not written to its session, or on Pi and OpenCode, whose tool result a model may refuse
+  to follow (`HookQuery::standing`): its receipt remains excluded from conversation snapshots
+  until a subsequent prompt carries it successfully. Standing prompt receipts are provisional
+  from preparation; Once prompt consumption requires successful delivery. Once messages never
+  repeat solely because a carrier does not persist hook context.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.
@@ -186,8 +214,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Capsule allocation reuses the resolved
   `ProductionHostingConfig`; instantiated diagnostic storage remains separate from configuration.
 
+- Run storage bounds stay ledger-owned: 2 MiB for the serialized admitted definition and 1 MiB
+  for a node start record, including input and bookkeeping. Local submissions apply the same
+  admitted-definition check before creating run storage or a controller. Oversized node starts
+  fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
+- The reducer inventories error selectors across all choice, loop and first-join guards once per
+  reduction, including nested and aggregate guards. A final step/verifier error without any such
+  read becomes the reserved `unhandled` failure after crash retries, with node/code as the primary
+  diagnostic. Reads are graph-wide rather than path- or label-dependent; enclosing groups retain
+  their authored-terminal semantics. Keep reducer primary causes alongside retained ledger evidence.
 - Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`
   while running or stopping, including postmortem/finalization. Finished status carries only
   `terminalResult`. Graph-result logging and its watch event publish with `PrimaryGraphCompleted`;
@@ -218,6 +255,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
+  A parallel branch terminal propagates its result when reached no later than join satisfaction;
+  recorded history orders competing terminals, with canonical branch order breaking ties.
+  Terminal replay retains only that branch's evidence, validates started siblings within the
+  selected history window without charging unstarted branches, and cancels siblings through the
+  existing parallel-loser cleanup. Non-first joins continue only when reached; their legacy
+  `quorum_unreachable` label remains in the contract but is no longer emitted.
   Shared short-circuiting three-valued guard evaluation preserves candidate-local first-join eligibility.
   Reducer history indexes borrow immutable executions; ready-frontier probes release discarded
   branches on join settlement, consuming only executions owned by that visit window and preserving
@@ -446,7 +489,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
   their separate short bound.
   A later local submission or resume scavenges orphaned bootstrap files after the bounded controller handoff
-  window without removing other run state.
+  window without removing other run state. Scavenging and submission-key lookup skip permission-denied
+  run storage, checking directory readability even when child metadata is accessible; readable runs
+  retain ordinary duplicate/conflict checks. Reported scan I/O errors name the failed path. Keep
+  filesystem error kinds until the scan applies its skip policy.
   The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
   provider variables; provider children still start from an empty environment. Snapshot values
   never enter profiles, ledgers, observation, or hosted adapters. Relative harness home overrides
@@ -484,6 +530,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   outcome change. Never publish configuration responses; overrides, configured policy,
   cancellation and unconfirmed cleanup are not fallbacks.
 - The local target registry initializes `platform` at `https://api.app.zeroshot.sh` with a persistent hosted device identity.
+  Connection-store and target-registry reads fail as a whole. Diagnostics name the file; connection
+  decode errors expose only parser line/column, never file values or parser text. Target validation
+  errors name the stored record or unsupported version. These local diagnostics do not change MCP tools.
 - Local runs select an optional `--cwd` workspace, defaulting to the invoking folder. File arguments
   stay relative to the invoking folder. A Git checkout uses its canonical root; plain, unborn, and
   detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot
@@ -1269,7 +1318,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   abrupt controller death keeps workspace locks held until then. No PID registry, cgroup or root
   privilege is required; procfs provides owned-child enumeration. Dedicated worker identities and
   Windows Job Objects keep their existing containment. macOS process groups do not cover descendants
-  that detach themselves; stronger macOS ownership remains deferred.
+  that detach themselves; stronger macOS ownership remains deferred. macOS refuses a signal for a
+  process group that holds only exited, unreaped members with EPERM: that is no termination failure,
+  and the cleanup wait that follows still has to see the group empty.
 - Contained provider sessions clean up surviving descendants immediately after the main process exits,
   before draining inherited output streams. Buffered output still drains under any explicit command
   deadline and a ten-minute ceiling while observing cancellation; cleanup stays scoped to its session.
@@ -1410,8 +1461,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unfamiliar failures use the existing optional `repair_required` signal. After exact-ref
   confirmation, only the exact forge-authored branch-protection and push-permission texts in
   `git_diagnostic.rs` (relayed `remote:` lines or GitHub's SSH `ERROR:` lines) become
-  `policy_refusal`, never repair; generic hook declines, `[remote rejected]` and bare HTTP 403 stay
-  on their existing paths. Only successful receipts
+  `policy_refusal`, never repair. Other `!` ref-status rejections first follow ordinary repair;
+  repeating the same branch, revision and status reason ends as a plain `refusal`, preserving work
+  for resume. Compare complete raw ref-status evidence before credential redaction, never variable
+  `remote:` text. Select the intended ref before rejecting duplicate statuses; rejections of unrelated
+  refs, including followed tags, cannot hide its evidence. Retain its redacted reason with that ref.
+  Rejection memory belongs only to the running delivery adapter, resets on resume,
+  and clears after successful or exact-ref-confirmed push. Changed revisions/reasons are new cases;
+  authentication, transient transport and failures without ref-status evidence retain their paths.
+  Only successful receipts
   require complete remote identity. Live output splits large UTF-8 diagnostics into bounded records.
   Delivery checks unresolved index entries before `git add --all` and completes resolved merges even
   when their tree has no staged difference. Other unfinished Git operations return raw status for
@@ -1457,7 +1515,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   credential, and the trusted lane pins their contained repository-local commit identity to the delivery
   identity before handoff. Local checkouts retain their user's Git configuration. Merge receipts preserve GitHub's
   authoritative merged revision. When a required check fails, bounded repair diagnostics include
-  supporting failed checks and labelled raw job excerpts ending at the last GitHub error annotation.
+  supporting failed checks and labelled job excerpts retaining early failure context and the
+  final summary within both capture and per-job feedback bounds. Panic, assertion and traceback
+  contexts take priority over generic error/fatal fallback lines. GitHub excludes cleanup after
+  the last error annotation; truncated excerpts explicitly mark omitted output and keep a tail
+  fallback when no failure marker is recognized. Shared GitHub/GitLab log redaction covers forge
+  and separate Git credentials, including encoded authentication and SSH key lines, before excerpt selection.
+  The host carries its complete effective feedback-redaction set, including captured native Git
+  credentials without node connections, into successful log reads and bounded API failure diagnostics.
+  Classify raw failures before redaction and carry their positions with redacted log text through
+  capture, control removal and feedback aggregation; never infer failure positions from redacted text.
+  Classify raw GitHub annotations and unsupported log options before redaction; preserve full-secret
+  lookahead when excluding cleanup.
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
   Job-log reads opt into raw terminal sequences only inside bounded pipe capture, then remove
   controls before feedback; older GitHub CLI versions retry without the unsupported opt-in flag.
@@ -1476,7 +1545,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unchanged. The final rejected round fails without starting an unreviewable extra repair.
   Every software-change delivery mode, including none, reserves remote publication for delivery;
   worker guidance forbids pushing branches or weakening forge restrictions, and both reviewers
-  reject repairs that do either.
+  reject repairs that do either. Each worker visit writes fresh internal `reviewContext` with shared
+  setup/build paths, check results and gaps alongside `reviewResponses`; both reviewers receive it
+  as setup hints, never proof. Relevant checks use reasonable effort. Reviews reject evidence-backed
+  material defects caused or exposed by the change or unmet explicit requirements; unavailable
+  checks, unrelated failures and optional improvements are advisory. Rejected diagnostics label
+  required fixes separately from advisory notes. Runtime-owned setup guidance preserves shared
+  checkout safety without prescribing a verdict. Caller input and delivery contracts are unchanged.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
@@ -1960,8 +2035,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
-  A reducer `completed` group visit alone is neutral. The seq, choice, loop and map visits that a
-  succeed/fail node ended at its cursor take its outcome; a par stops that propagation.
+  Implicit `unhandled` failures mark ending structural visits failed. A reducer `completed` group
+  visit alone is neutral. All enclosing visits that the selected succeed/fail node ended at its
+  cursor, including parallel groups, take its outcome. The canonical
+  trace excludes terminals discarded by an earlier join. Editor terminals describe run outcomes;
+  terminal-only parallel paths never acquire a synthetic unmet-join continuation. The shared
+  `ui/src/fixtures/parallel-terminal.json` is checked by native control replay and browser projection.
 - Profile and run inspectors share `InspectorPanel`, pointer/keyboard resizing, and one client-only
   width preference. Viewport clamping preserves the preferred width when the available space shrinks.
 - Run navigation retains tab-scoped view preferences (node/inspector, execution, cursor, graph
@@ -2043,6 +2122,7 @@ Run the narrowest relevant checks first, then the complete affected lane.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
 Suspension polling has a separate bounded checkpoint and cleanup budget from individual CLI calls.
+Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.
 
 ```bash
 cargo fmt --all -- --check

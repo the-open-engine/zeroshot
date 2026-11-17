@@ -222,7 +222,9 @@ independently against the same immutable Zeroshot release.
 ## Standing direction
 
 `steer = await run.steer("Prioritize the parser regression.")` records standing direction without
-continuing a suspended run. `RunStatus.steers` exposes excerpts and confirmed receiving executions;
+continuing a suspended run. Use `await run.steer(text, mode="once")` to deliver once per node instance;
+`mode="standing"` delivers once per provider conversation and remains the default. `RunStatus.steers`
+exposes excerpts, message modes, optional network origin metadata and confirmed receiving executions;
 `omitted_steers` reports the bounded listing's omissions. Each agent conversation receives a steer
 at its next tool call or prompt. `await run.vector(steer.id)` reads its full text, and
 `await run.vectors()` includes `steer` and `steer_receipt` entries. Direction is limited to 262,144

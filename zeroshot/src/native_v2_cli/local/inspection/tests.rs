@@ -353,6 +353,7 @@ async fn steer_and_suspend_leave_a_lost_run_as_recorded() {
             openengine_cluster_protocol::RunSteerParams {
                 run_id: lost.id.clone(),
                 text: "direction".into(),
+                mode: openengine_cluster_protocol::SteeringMode::Standing,
             },
         )
         .await

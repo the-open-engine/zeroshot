@@ -32,12 +32,11 @@ fn workspace_and_verifier_guidance_are_runtime_owned() {
     assert!(prompt.contains("other nodes may run concurrently"));
     assert!(prompt.contains("Do not modify reviewed material"));
     assert!(prompt.contains("create artifacts"));
-    assert!(prompt.contains("installable setup gaps or an incomplete candidate build"));
-    assert!(prompt.contains("actionable rejected feedback for the worker"));
-    assert!(prompt.contains("missing prerequisites and command evidence"));
-    assert!(prompt.contains("Reserve blocked for a demonstrated external limitation"));
-    assert!(!prompt.contains("missing declared dependency is an environment blocker"));
-    assert!(prompt.contains("do not request unrelated code repairs"));
+    assert!(prompt.contains("missing prerequisites, incomplete builds and failed checks"));
+    assert!(prompt.contains("with command evidence"));
+    assert!(prompt.contains("Follow authored instructions when deciding the verdict"));
+    assert!(!prompt.contains("rejected"));
+    assert!(!prompt.contains("blocked"));
     assert!(prompt.contains(&input.to_string()));
     assert!(prompt.contains(&serde_json::to_string(&verifier).assert_value()));
     let worker = render_agent_prompt(&instructions, &input, &worker_contract()).assert_value();
@@ -184,8 +183,8 @@ fn native_schema_lanes_keep_the_contract_prompt_byte_for_byte() {
         "Authored instructions:\n",
         "Change the workspace.\n",
         "Runtime-owned workspace setup guidance:\n",
-        "Before returning, follow repository setup and install manifest/lockfile dependencies in ",
-        "the checkout; do not use an ad hoc unpinned list. Wait for setup to finish and check exit ",
+        "Follow repository setup using manifest/lockfile dependencies in the checkout; ",
+        "do not use an ad hoc unpinned list. Wait for setup to finish and check exit ",
         "status. Leave ignored dependencies there. Homes are session-local. Prepare required ",
         "dependencies and candidate binaries in shared paths, and report the paths/settings fresh ",
         "reviewers need. Put standalone tools under an executable user path: use ",

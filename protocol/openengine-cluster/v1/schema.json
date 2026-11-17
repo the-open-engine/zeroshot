@@ -1758,6 +1758,18 @@
         "initialInput": {
           "$ref": "#/$defs/PayloadType"
         },
+        "networks": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SteeringNetwork"
+          },
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "type": "object"
+        },
         "policy": {
           "$ref": "#/$defs/PolicyBinding"
         },
@@ -3940,6 +3952,29 @@
       ],
       "type": "object"
     },
+    "NetworkSteer": {
+      "additionalProperties": false,
+      "properties": {
+        "networks": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "origin": {
+          "$ref": "#/$defs/SteerOrigin"
+        }
+      },
+      "required": [
+        "networks",
+        "origin"
+      ],
+      "type": "object"
+    },
     "NodeAddress": {
       "additionalProperties": false,
       "properties": {
@@ -5870,6 +5905,20 @@
         "id": {
           "$ref": "#/$defs/VectorId"
         },
+        "mode": {
+          "$ref": "#/$defs/SteeringMode",
+          "default": "standing"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkSteer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "receivedExecutions": {
           "format": "uint64",
           "minimum": 0,
@@ -5894,6 +5943,10 @@
     "RunSteerParams": {
       "additionalProperties": false,
       "properties": {
+        "mode": {
+          "$ref": "#/$defs/SteeringMode",
+          "default": "standing"
+        },
         "runId": {
           "type": "string"
         },
@@ -6013,6 +6066,20 @@
             "kind": {
               "const": "steer",
               "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/SteeringMode",
+              "default": "standing"
+            },
+            "network": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkSteer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "text": {
               "$ref": "#/$defs/NodeInstructions"
@@ -6266,6 +6333,20 @@
             "kind": {
               "const": "steer",
               "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/SteeringMode",
+              "default": "standing"
+            },
+            "network": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkSteer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "textBytes": {
               "format": "uint",
@@ -6827,6 +6908,73 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "SteerOrigin": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "nodeInstance": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "nodeInstance",
+        "execution"
+      ],
+      "type": "object"
+    },
+    "SteeringMode": {
+      "enum": [
+        "once",
+        "standing"
+      ],
+      "type": "string"
+    },
+    "SteeringNetwork": {
+      "additionalProperties": false,
+      "description": "Graph-local participants and explicit publishing authority for a steering network.",
+      "properties": {
+        "members": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "publishers": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "members"
+      ],
       "type": "object"
     },
     "StopMode": {
