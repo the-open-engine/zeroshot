@@ -31,6 +31,10 @@ impl WorkerRegistry for PermissiveRegistry {
                 },
                 "diagnostic": {"kind":"null"}
             }),
+            "worker.pair-verify@1" => json!({
+                "signals":{"verdict":["low","mid","high"]},
+                "diagnostic":{"kind":"null"}
+            }),
             worker if worker.contains("verify") => json!({
                 "signals":{"verdict":["accepted","rejected"]},
                 "diagnostic":{"kind":"null"}
@@ -319,16 +323,17 @@ fn group_assignment_choice(groups: u64) -> Value {
 }
 
 #[tokio::test]
-async fn finite_guard_space_accepts_exact_assignment_limit_and_rejects_next_dimension() {
+async fn independent_guard_controls_do_not_multiply_into_an_assignment_limit() {
+    // Sixteen two-label controls were the largest product the row table held (2^16 rows).
     assert_eq!(FULL_V1_MAX_GUARD_ASSIGNMENTS, 2_u64.pow(16));
     let graph_with_groups = |groups: u64| {
         let mut children = (0..groups).map(joined_group).collect::<Vec<_>>();
         children.push(group_assignment_choice(groups));
         graph(children)
     };
-    verify(&graph_with_groups(16)).await.assert_value();
-    let error = verify(&graph_with_groups(17)).await.assert_error();
-    assert_ceiling(error);
+    for groups in [16, 17, 64] {
+        verify(&graph_with_groups(groups)).await.assert_value();
+    }
 }
 
 #[tokio::test]
@@ -375,7 +380,8 @@ async fn ceiling_compliant_map_aggregate_does_not_exhaust_the_call_stack() {
 }
 
 #[tokio::test]
-async fn signal_product_is_rejected_before_materializing_over_limit_assignments() {
+async fn signal_product_is_decided_without_materializing_its_assignments() {
+    // 4,096 x 4,096 joint signal outcomes; the guards tell one label of each signal apart.
     let left_labels = enum_labels("left", 4_096);
     let right_labels = enum_labels("right", 4_096);
     let graph = graph(vec![
@@ -411,8 +417,7 @@ async fn signal_product_is_rejected_before_materializing_over_limit_assignments(
         })),
     ]);
 
-    let error = verify(&graph).await.assert_error();
-    assert_ceiling(error);
+    verify(&graph).await.assert_value();
 }
 
 fn exact_fold_map() -> Value {
@@ -658,7 +663,7 @@ async fn static_visit_and_loop_entry_totals_keep_their_exact_ceilings() {
 }
 
 #[tokio::test]
-async fn choice_route_availability_shares_large_predicates_and_keeps_the_proof_ceiling() {
+async fn choice_route_availability_shares_large_predicates() {
     for count in [1, 2050] {
         let mut gate = null_verifier("gate");
         gate["worker"] = json!("worker.route-verify@1");
@@ -675,11 +680,57 @@ async fn choice_route_availability_shares_large_predicates_and_keeps_the_proof_c
             .collect::<Vec<_>>();
         let first = json!({"kind":"par","name":"race","state":state(),"branches":[choice],"promotedStatePaths":[],
             "join":{"kind":"first","when":{"kind":"k_of_n","count":1,"values":selectors,"labels":["crash"]}}});
-        let result = verify(&graph(vec![gate, first, succeed("done")])).await;
-        if count == 1 {
-            result.unwrap_or_else(|error| panic!("ordinary route proof failed: {error:?}"));
-        } else {
-            assert_ceiling(result.assert_error());
-        }
+        verify(&graph(vec![gate, first, succeed("done")]))
+            .await
+            .unwrap_or_else(|error| panic!("route proof over {count} controls failed: {error:?}"));
     }
+}
+
+fn paired_reviews(pairs: usize) -> GraphSpec {
+    let reviewer = |name: String| {
+        let mut reviewer = null_verifier(&name);
+        reviewer["worker"] = json!("worker.pair-verify@1");
+        reviewer["signals"]["verdict"] = json!(["low", "mid", "high"]);
+        reviewer
+    };
+    // Every `left` is declared before every `right`, so agreement of each pair has to carry
+    // all left verdicts across: 3^pairs distinct cases.
+    let branches = (0..pairs)
+        .map(|index| reviewer(format!("left{index}")))
+        .chain((0..pairs).map(|index| reviewer(format!("right{index}"))))
+        .collect::<Vec<_>>();
+    let agrees = |index: usize, label: &str| {
+        json!({"kind":"all","guards":[
+            {"kind":"in","value":{"name":format!("left{index}"),"source":"signal","field":"verdict"},"labels":[label]},
+            {"kind":"in","value":{"name":format!("right{index}"),"source":"signal","field":"verdict"},"labels":[label]}
+        ]})
+    };
+    let agreement = (0..pairs)
+        .map(|index| {
+            let same = ["low", "mid", "high"].map(|label| agrees(index, label));
+            json!({"kind":"any","guards":same})
+        })
+        .collect::<Vec<_>>();
+    graph(vec![
+        json!({"kind":"par","name":"reviews","state":state(),"branches":branches,
+            "promotedStatePaths":[],"join":{"kind":"all"}}),
+        json!({"kind":"choice","name":"agreement","state":state(),"promotedStatePaths":[],
+            "branches":[{"when":{"kind":"all","guards":agreement},"node":succeed("agreed")}],
+            "otherwise":{"kind":"fail","name":"disagreed","reason":"disagreed"}}),
+    ])
+}
+
+#[tokio::test]
+async fn search_backstop_is_reported_once_at_the_condition_it_could_not_decide() {
+    verify(&paired_reviews(6)).await.assert_value();
+
+    let rejected = diagnostics(verify(&paired_reviews(13)).await.assert_error());
+    assert_eq!(rejected.len(), 1, "{rejected:?}");
+    assert_eq!(rejected[0].code, GraphDiagnosticCode::CeilingExceeded);
+    assert_eq!(path_nodes(&rejected[0].path), ["root", "agreement"]);
+    assert!(
+        rejected[0].message.contains("search steps"),
+        "{}",
+        rejected[0].message
+    );
 }

@@ -8,18 +8,99 @@ struct AssignmentInputs {
     label_classes: BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>,
 }
 
+/// The legal joint outcomes of every control one check reads, as a condition to ask about.
+pub(super) struct ControlProof {
+    pub(super) diagram: Diagram,
+    pub(super) controls: Controls,
+    /// Holds exactly for the legal outcomes.
+    pub(super) legal: Ref,
+    /// Nodes whose success or failure the check can observe.
+    outcomes: BTreeSet<NodeName>,
+}
+
+impl ControlProof {
+    pub(super) fn guard(&mut self, guard: &Guard) -> Option<Ref> {
+        self.diagram.guard(&self.controls, guard)
+    }
+
+    pub(super) fn predicate(&mut self, predicate: &CompletionPredicate) -> Option<Ref> {
+        self.diagram.predicate(&self.controls, predicate)
+    }
+
+    /// Whether some legal outcome satisfies `condition`.
+    pub(super) fn possible(&mut self, condition: Ref) -> Option<bool> {
+        Some(self.diagram.and(self.legal, condition)? != NEVER)
+    }
+
+    /// Routes legal outcomes through a choice: each branch takes what its guard accepts of
+    /// the outcomes no earlier branch took, and the last entry is what `otherwise` is left
+    /// with. A route no legal outcome takes is `None`.
+    pub(super) fn routes(
+        &mut self,
+        choice: &ChoiceNode,
+        conditions: &[(NodeName, CompletionPredicate)],
+    ) -> Option<Vec<Option<OutcomeRefinement>>> {
+        let writes = conditions
+            .iter()
+            .map(|(name, condition)| Some((name, self.predicate(condition)?)))
+            .collect::<Option<Vec<_>>>()?;
+        let mut uncovered = self.legal;
+        let mut routes = Vec::with_capacity(choice.branches.as_slice().len() + 1);
+        for branch in choice.branches.as_slice() {
+            let when = self.guard(&branch.when)?;
+            let skipped = self.diagram.not(when)?;
+            routes.push(self.diagram.and(uncovered, when)?);
+            uncovered = self.diagram.and(uncovered, skipped)?;
+        }
+        routes.push(uncovered);
+        routes
+            .into_iter()
+            .map(|residual| self.refinement(residual, &writes))
+            .collect()
+    }
+
+    /// What every outcome in `residual` implies about observed nodes: a node counts as failed
+    /// when any such outcome fails it, and a conditional write as made when all of them make
+    /// it. `None` inside means no legal outcome is in `residual`.
+    fn refinement(
+        &mut self,
+        residual: Ref,
+        writes: &[(&NodeName, Ref)],
+    ) -> Option<Option<OutcomeRefinement>> {
+        if residual == NEVER {
+            return Some(None);
+        }
+        let mut refinement = OutcomeRefinement::default();
+        for name in &self.outcomes {
+            let failure = self.diagram.failure(&self.controls, name)?;
+            if self.diagram.and(residual, failure)? == NEVER {
+                refinement.success.insert(name.clone());
+            } else {
+                refinement.failed.insert(name.clone());
+            }
+        }
+        for (name, written) in writes {
+            let unwritten = self.diagram.not(*written)?;
+            if self.diagram.and(residual, unwritten)? == NEVER {
+                refinement.failed.remove(*name);
+                refinement.success.insert((*name).clone());
+            }
+        }
+        Some(Some(refinement))
+    }
+}
+
 impl<'a> Analyzer<'a> {
     pub(super) fn guard_has_satisfying_assignment(
         &mut self,
         guard: &Guard,
         path: &[DiagnosticPathSegment],
     ) -> bool {
-        self.assignments_for_guards(&[guard], path)
-            .is_some_and(|assignments| {
-                assignments
-                    .iter()
-                    .any(|assignment| evaluate_guard(guard, assignment))
-            })
+        self.decide(&[guard], path, |proof| {
+            let guard = proof.guard(guard)?;
+            proof.possible(guard)
+        })
+        .unwrap_or(false)
     }
 
     pub(super) fn restrict_completion(
@@ -40,72 +121,94 @@ impl<'a> Analyzer<'a> {
         predicate: &CompletionPredicate,
         path: &[DiagnosticPathSegment],
     ) -> Option<bool> {
-        self.assignments_for_completion_predicates(&[predicate], path)
-            .map(|assignments| {
-                assignments
-                    .iter()
-                    .any(|assignment| predicate.evaluate(assignment))
-            })
-    }
-
-    pub(super) fn assignments_for_completion_predicates(
-        &mut self,
-        predicates: &[&CompletionPredicate],
-        path: &[DiagnosticPathSegment],
-    ) -> Option<Vec<Assignment>> {
         let mut guards = Vec::new();
-        for predicate in predicates {
-            predicate.collect_guards(&mut guards);
-        }
-        self.assignments_for_guards(&guards, path)
+        predicate.collect_guards(&mut guards);
+        self.decide(&guards, path, |proof| {
+            let predicate = proof.predicate(predicate)?;
+            proof.possible(predicate)
+        })
     }
 
-    pub(super) fn assignments_for_guards(
+    /// Answers one question about the controls `guards` read.
+    pub(super) fn decide<T>(
         &mut self,
         guards: &[&Guard],
         path: &[DiagnosticPathSegment],
-    ) -> Option<Vec<Assignment>> {
-        let Some(AssignmentInputs {
+        question: impl FnOnce(&mut ControlProof) -> Option<T>,
+    ) -> Option<T> {
+        let mut proof = self.control_proof(guards, path)?;
+        let answer = question(&mut proof);
+        self.search_steps += proof.diagram.steps();
+        if answer.is_none() {
+            self.assignment_ceiling(path);
+        }
+        answer
+    }
+
+    /// The legal outcomes of the controls `guards` read. A search that cannot finish within
+    /// its backstop is a ceiling diagnostic at `path`, the condition being decided.
+    pub(super) fn control_proof(
+        &mut self,
+        guards: &[&Guard],
+        path: &[DiagnosticPathSegment],
+    ) -> Option<ControlProof> {
+        let proof = self.search_controls(guards, path);
+        if proof.is_none() {
+            self.assignment_ceiling(path);
+        }
+        proof
+    }
+
+    fn search_controls(
+        &self,
+        guards: &[&Guard],
+        path: &[DiagnosticPathSegment],
+    ) -> Option<ControlProof> {
+        let AssignmentInputs {
             selectors,
             map_aggregates,
             join_correlations,
             count_limits,
             label_classes,
-        }) = self.assignment_inputs(guards, path)
-        else {
-            self.assignment_ceiling(path);
-            return None;
+        } = self.assignment_inputs(guards, path)?;
+        let inputs = DimensionInputs {
+            count_limits: &count_limits,
+            label_classes: &label_classes,
+            nodes: &self.nodes,
+            map_aggregates: &map_aggregates,
+            join_correlations: &self.parallel_join_correlations,
+            execution_correlations: &self.map_execution_correlations,
         };
-        if self.proof_work.charge(1 + selectors.len()).is_none() {
-            self.assignment_ceiling(path);
-            return None;
+        let plan = scope_plan(&selectors, inputs);
+        let mut search = Search {
+            inputs,
+            diagram: Diagram::default(),
+        };
+        let mut scope = search.scope(&plan, &Controls::new())?;
+        for name in &join_correlations {
+            let aggregated = map_aggregates
+                .keys()
+                .any(|key| key.name == *name && key.source == ControlSourceKey::Group);
+            if let Some(correlation) = self
+                .parallel_join_correlations
+                .get(name)
+                .filter(|_| !aggregated)
+            {
+                let joined = search.join(name, correlation, &scope.controls)?;
+                scope.legal = search.diagram.and(scope.legal, joined)?;
+            }
         }
-        let Some(mut assignments) = build_assignments(
-            &selectors,
-            DimensionInputs {
-                count_limits: &count_limits,
-                budget: &self.proof_work,
-                label_classes: &label_classes,
-                nodes: &self.nodes,
-                map_aggregates: &map_aggregates,
-                join_correlations: &self.parallel_join_correlations,
-                execution_correlations: &self.map_execution_correlations,
-            },
-        ) else {
-            self.assignment_ceiling(path);
-            return None;
-        };
-        assignments.retain(|assignment| {
-            join_correlations
+        Some(ControlProof {
+            outcomes: plan
+                .keys
                 .iter()
-                .filter(|name| {
-                    !map_aggregates
-                        .keys()
-                        .any(|key| &key.name == *name && key.source == ControlSourceKey::Group)
-                })
-                .all(|name| self.assignment_matches_parallel_join_correlation(assignment, name))
-        });
-        Some(assignments)
+                .filter(|key| observes_outcome(key))
+                .map(|key| key.name.clone())
+                .collect(),
+            diagram: search.diagram,
+            controls: scope.controls,
+            legal: scope.legal,
+        })
     }
 
     fn assignment_inputs(
@@ -131,13 +234,6 @@ impl<'a> Analyzer<'a> {
         let mut loop_correlations = BTreeSet::new();
         loop {
             aggregates.retain(|_, aggregate| !local_maps.contains(&aggregate.owner));
-            self.proof_work.charge(
-                expanded
-                    .iter()
-                    .map(|guard| guard_node_count(guard) as usize)
-                    .sum::<usize>()
-                    .saturating_add(aggregates.len()),
-            )?;
             let mut discovered = false;
             let selectors = expanded
                 .iter()
@@ -201,6 +297,9 @@ impl<'a> Analyzer<'a> {
             }
         }
         aggregates.retain(|_, aggregate| !local_maps.contains(&aggregate.owner));
+        // Shared route predicates contribute the same guard once per reader.
+        let mut seen = BTreeSet::new();
+        expanded.retain(|guard| seen.insert(std::ptr::from_ref(*guard)));
         self.assignment_controls(&expanded, aggregates, join_correlations)
     }
 
@@ -321,30 +420,31 @@ impl<'a> Analyzer<'a> {
         aggregates: &BTreeMap<SelectorKey, MapAggregate>,
         expanded: &[&Guard],
     ) -> Option<BTreeMap<SelectorKey, BTreeMap<EnumLabel, EnumLabel>>> {
-        let mut queries = BTreeMap::<SelectorKey, Vec<Vec<EnumLabel>>>::new();
+        let mut queries = BTreeMap::new();
         for guard in expanded {
-            collect_label_queries(guard, &mut queries, &self.proof_work)?;
+            collect_label_queries(guard, &mut queries);
         }
         let mut label_classes = BTreeMap::new();
         for selector in selectors {
             let key = SelectorKey::from(selector);
-            if !aggregates.contains_key(&key) || label_classes.contains_key(&key) {
+            if label_classes.contains_key(&key) {
                 continue;
             }
-            let domain = self.proof_selector_domain(selector)?;
-            let tests = queries.get(&key)?;
-            self.proof_work.charge(
-                domain
-                    .len()
-                    .checked_mul(2 + tests.iter().map(Vec::len).sum::<usize>())?,
-            )?;
+            let (Some(domain), Some(tests)) =
+                (self.proof_selector_domain(selector), queries.get(&key))
+            else {
+                if aggregates.contains_key(&key) {
+                    return None;
+                }
+                continue;
+            };
             let mut representatives = BTreeMap::<Vec<bool>, EnumLabel>::new();
             let classes = domain
                 .into_iter()
                 .map(|label| {
                     let mut signature = tests
                         .iter()
-                        .map(|labels| labels.contains(&label))
+                        .map(|labels| labels.contains(&&label))
                         .collect::<Vec<_>>();
                     // Refinement and joined/raced correlations also observe failure.
                     signature.push(control_label_is_failure(&key, &label));
@@ -383,18 +483,6 @@ impl<'a> Analyzer<'a> {
                     .map(|aggregate| (SelectorKey::from(selector), aggregate))
             })
             .collect()
-    }
-
-    fn assignment_matches_parallel_join_correlation(
-        &self,
-        assignment: &Assignment,
-        name: &NodeName,
-    ) -> bool {
-        self.parallel_join_correlations
-            .get(name)
-            .is_none_or(|correlation| {
-                assignment_matches_parallel_join_correlation(assignment, name, correlation)
-            })
     }
 }
 
@@ -456,43 +544,29 @@ fn is_parallel_join_selector(selector: &ControlSelector, field: &str) -> bool {
         })
 }
 
-fn collect_label_queries(
-    guard: &Guard,
-    queries: &mut BTreeMap<SelectorKey, Vec<Vec<EnumLabel>>>,
-    budget: &ProofWork,
-) -> Option<()> {
-    match guard {
-        Guard::In { value, labels } | Guard::KOfMap { value, labels, .. } => add_label_queries(
-            std::slice::from_ref(value),
-            labels.values(),
-            queries,
-            budget,
-        )?,
-        Guard::KOfN { values, labels, .. } => {
-            add_label_queries(values.as_slice(), labels.values(), queries, budget)?
+/// The label sets each selector is tested against; labels no test separates are one class.
+fn collect_label_queries<'g>(
+    guard: &'g Guard,
+    queries: &mut BTreeMap<SelectorKey, Vec<BTreeSet<&'g EnumLabel>>>,
+) {
+    let mut add = |values: &'g [ControlSelector], labels: &'g [EnumLabel]| {
+        for value in values {
+            queries
+                .entry(SelectorKey::from(value))
+                .or_default()
+                .push(labels.iter().collect());
         }
+    };
+    match guard {
+        Guard::In { value, labels } | Guard::KOfMap { value, labels, .. } => {
+            add(std::slice::from_ref(value), labels.values());
+        }
+        Guard::KOfN { values, labels, .. } => add(values.as_slice(), labels.values()),
         Guard::All { guards } | Guard::Any { guards } => {
             for guard in guards.as_slice() {
-                collect_label_queries(guard, queries, budget)?;
+                collect_label_queries(guard, queries);
             }
         }
-        Guard::Not { guard } => collect_label_queries(guard, queries, budget)?,
+        Guard::Not { guard } => collect_label_queries(guard, queries),
     }
-    Some(())
-}
-
-fn add_label_queries(
-    values: &[ControlSelector],
-    labels: &[EnumLabel],
-    queries: &mut BTreeMap<SelectorKey, Vec<Vec<EnumLabel>>>,
-    budget: &ProofWork,
-) -> Option<()> {
-    budget.charge(values.len().checked_mul(1 + labels.len())?)?;
-    for value in values {
-        queries
-            .entry(SelectorKey::from(value))
-            .or_default()
-            .push(labels.to_vec());
-    }
-    Some(())
 }
