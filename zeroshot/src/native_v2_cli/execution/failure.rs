@@ -145,10 +145,27 @@ impl RunFailure {
         failure
     }
 
-    pub(super) fn report_memory(&self) {
+    pub(super) fn report_memory(&self, finished: bool) {
         for error in &self.memory_errors {
             eprintln!("{}", error.as_str());
         }
+        if let Some(notice) = self.incomplete_memory_notice(finished) {
+            eprintln!("{notice}");
+        }
+    }
+
+    pub(super) fn incomplete_memory_notice(&self, finished: bool) -> Option<String> {
+        (finished && !self.complete).then(|| {
+            let target = self
+                .target
+                .as_ref()
+                .map(|target| format!(" --target {target}"))
+                .unwrap_or_default();
+            format!(
+                "Active Memory log check incomplete; see zeroshot logs {}{target}",
+                self.run_id.as_str()
+            )
+        })
     }
 }
 

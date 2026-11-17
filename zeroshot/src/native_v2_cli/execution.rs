@@ -417,7 +417,7 @@ where
         detach.as_mut(),
     )
     .await
-    .report_memory();
+    .report_memory(false);
     Ok(CliOutcome::Completed)
 }
 
@@ -665,7 +665,7 @@ where
     // log stream for successful runs too, including recall-only runs and resumed controllers.
     let logs = if matches!(outcome, CliOutcome::Finished | CliOutcome::Failed) {
         let logs = RunFailure::read(backend, target, run_id.clone(), detach.as_mut()).await;
-        logs.report_memory();
+        logs.report_memory(true);
         Some(logs)
     } else {
         None

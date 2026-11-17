@@ -236,6 +236,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   deduplicate per execution and flush after callback retirement drains bounded in-flight receipt work.
   Foreground observation and resume
   reuse bounded log reads to print memory errors without changing the graph result or wire types.
+  A finished run reports an incomplete memory-log check with its full-log command; the bounded
+  read for an ongoing resumed run stays quiet when it has no confirmed memory error.
   Claude requests native hook events and attributes failures only when they name the owned helper
   or the executable path frozen at hook installation, including after that executable moves;
   missing callbacks and unrelated native hook errors do not establish failure.

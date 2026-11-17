@@ -70,14 +70,24 @@ async fn error_log_read_ends_at_its_deadline_or_ctrl_c() {
         tokio::pin!(detach);
         let started = tokio::time::Instant::now();
 
-        let failure =
-            RunFailure::read(&backend, None, RunId::new("run-local"), detach.as_mut()).await;
+        let failure = RunFailure::read(
+            &backend,
+            Some("cloud"),
+            RunId::new("run-local"),
+            detach.as_mut(),
+        )
+        .await;
 
         assert_eq!(started.elapsed(), Duration::from_secs(waited));
         assert_eq!(
+            failure.incomplete_memory_notice(true).as_deref(),
+            Some("Active Memory log check incomplete; see zeroshot logs run-local --target cloud")
+        );
+        assert!(failure.incomplete_memory_notice(false).is_none());
+        assert_eq!(
             failure.to_string(),
             "run finished unsuccessfully\nThe run log could not be read completely.\n\
-             Full run log: zeroshot logs run-local"
+             Full run log: zeroshot logs run-local --target cloud"
         );
     }
 }
@@ -264,4 +274,13 @@ fn foreground_failure_reports_verifier_results_loop_rounds_and_nested_paths_as_r
     assert!(failure.contains("assessor[1][2]: readiness=revise; missing test (log v2:7)"));
     assert!(failure.contains("Loop refinement[1] exhausted after 3 completed iterations"));
     assert!(!failure.contains("Recorded failures:"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn completed_memory_log_reads_do_not_warn() {
+    let backend = FakeBackend::default();
+    let detach = std::future::pending();
+    tokio::pin!(detach);
+    let logs = RunFailure::read(&backend, None, RunId::new("run-local"), detach.as_mut()).await;
+    assert!(logs.incomplete_memory_notice(true).is_none());
 }
