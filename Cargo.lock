@@ -3546,7 +3546,6 @@ dependencies = [
  "agent-client-protocol",
  "async-trait",
  "axum",
- "cc",
  "clap",
  "dbus",
  "flate2",

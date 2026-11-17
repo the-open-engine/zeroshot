@@ -6,7 +6,7 @@ use super::*;
 use crate::execution::process::authority::{Registration, require_human};
 
 #[test]
-fn sdk_process_identity_matches_same_user_bsd_metadata() {
+fn public_process_identity_matches_same_user_bsd_metadata() {
     let pid = std::process::id();
     let identity = process_identity(pid).assert_value();
     let mut info = MaybeUninit::<libc::proc_bsdinfo>::uninit();
@@ -55,4 +55,40 @@ fn invalid_and_departed_pids_do_not_supply_identity() {
         process_identity(i32::MAX as u32).unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
+}
+
+fn time_prefix(seconds: libc::time_t, micros: libc::suseconds_t) -> Vec<u8> {
+    let mut bytes = vec![0; size_of::<libc::timeval>()];
+    let seconds = seconds.to_ne_bytes();
+    bytes[..seconds.len()].copy_from_slice(&seconds);
+    let offset = std::mem::offset_of!(libc::timeval, tv_usec);
+    let micros = micros.to_ne_bytes();
+    bytes[offset..offset + micros.len()].copy_from_slice(&micros);
+    bytes
+}
+
+#[test]
+fn native_time_prefix_preserves_microsecond_creation_identity() {
+    assert_eq!(
+        parse_birth(&time_prefix(12, 345_678)).assert_value(),
+        12_345_678
+    );
+}
+
+#[test]
+fn invalid_native_time_prefixes_never_supply_a_creation_identity() {
+    assert_eq!(
+        parse_birth(&[0; size_of::<libc::timeval>() - 1])
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+    for (seconds, micros) in [(-1, 0), (0, -1), (0, 0), (0, 1_000_000), (i64::MAX, 0)] {
+        assert_eq!(
+            parse_birth(&time_prefix(seconds, micros))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
 }
