@@ -21,6 +21,9 @@ use support::*;
 #[path = "tests/continuity.rs"]
 mod continuity;
 
+#[path = "tests/unhandled.rs"]
+mod unhandled;
+
 #[test]
 fn built_in_templates_have_no_terminals_inside_parallel_branches() {
     for template in BuiltinGraphTemplate::all() {
