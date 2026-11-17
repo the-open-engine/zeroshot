@@ -14,6 +14,13 @@ This run leaves the result in your folder instead of opening a pull request.
 
 [![The software-change graph: implementation, parallel acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](../assets/zeroshot-workflow-mobile.svg){ loading=lazy }](../assets/zeroshot-workflow-mobile.svg){ .docs-graph-tall }
 
+The worker prepares documented prerequisites and candidate builds, then passes check results and
+remaining gaps to both reviewers. Acceptance review checks the requested behavior; code review traces
+concrete failure scenarios through affected callers. Reviews require source or execution evidence for
+material defects or unmet explicit requirements. Unavailable checks, unrelated failures and optional
+improvements are advisory. Required fixes return to the worker; Git delivery still enforces the
+repository's required CI and merge policy.
+
 ## Before you start
 
 - zeroshot is [installed](install.md).

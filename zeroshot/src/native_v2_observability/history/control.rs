@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::v2_run_ledger::StoredRun;
 use crate::full_v1_reducer::{FullV1Reducer, ReductionInput, StructuralTrace, StructuralTraceState};
 use crate::native_v2_contract::AdmittedRun;
-use crate::native_v2_supervisor::{durable_history, next_execution, next_node_instance};
+use crate::native_v2_supervisor::{durable_history, next_execution, next_node_instance_for};
 use crate::v2_run_ledger::{apply_event, RunEvent, RunPhase, StoredRunEvent};
 
 const MAX_CACHED_RUNS: usize = 4;
@@ -299,7 +299,7 @@ impl ControlReplay {
             .reduce_with_trace(ReductionInput {
                 initial_input: &self.admitted.initial_input,
                 executions: &executions,
-                next_node_instance: next_node_instance(&executions)
+                next_node_instance: next_node_instance_for(&self.snapshot, &executions)
                     .map_err(|_| PROJECTION_FAILED)?,
                 next_execution: next_execution(&executions).map_err(|_| PROJECTION_FAILED)?,
             })

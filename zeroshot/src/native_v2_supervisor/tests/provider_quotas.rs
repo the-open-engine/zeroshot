@@ -15,7 +15,7 @@ async fn builtin_review_failure_preserves_quota_node_reset_and_resume_guidance_i
                 vec![Behavior::Complete {
                     delay: Duration::ZERO,
                     outcome: WorkerOutcome::Verified {
-                        output: json!({"reviewResponses":[]}),
+                        output: json!({"reviewResponses":[],"reviewContext":"Focused checks passed."}),
                         artifacts: Vec::new(),
                     },
                 }],
@@ -141,7 +141,8 @@ async fn authored_loop_can_revisit_a_quota_refusal_without_a_global_cooldown() {
     )]);
     let repeated = json!({
         "kind":"loop", "name":"authored_recovery", "state":null_type(),
-        "maxIterations":2, "promotedStatePaths":[], "body":step("worker", 1_000)
+        "maxIterations":2, "promotedStatePaths":[], "body":step("worker", 1_000),
+        "until":{"kind":"not","guard":{"kind":"in","value":{"name":"worker","source":"error"},"labels":["refusal"]}}
     });
     let harness = harness(
         graph(

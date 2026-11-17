@@ -13,6 +13,9 @@ mod fixture {
     mod steering {
         include!("native_v2_cli_local/steering.rs");
     }
+    mod networks {
+        include!("native_v2_cli_local/networks.rs");
+    }
 }
 use fixture::*;
 

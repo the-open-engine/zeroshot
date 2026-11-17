@@ -2,7 +2,202 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use openengine_cluster_testkit::fixture::TemporaryDirectory;
 
 use super::*;
-use crate::source_code_provider::adapters::core::ci_diagnostics::MAX_JOB_LOG_TAIL_BYTES;
+use crate::source_code_provider::adapters::core::ci_diagnostics::{
+    MAX_FAILURE_FEEDBACK_CHARS, MAX_JOB_LOG_TAIL_BYTES, include_job_logs,
+};
+
+fn check_log_tail(output: &[u8]) -> JobLog {
+    super::check_log_tail(output, SourceDeliveryCredential::token(""), &[])
+}
+
+#[test]
+fn redaction_preserves_raw_annotation_boundaries_through_final_feedback() {
+    use crate::native_v2_delivery::{command, git_auth};
+    use crate::source_code_provider::SourceGitCredential;
+
+    let raw = format!(
+        "setup context\nassertion failed: useful causal detail\n\
+         ##[error]supporting annotation\n{}##[error]Process completed with exit code 1.\n{}",
+        "noise\n".repeat(24_000),
+        "cleanup-must-disappear\n".repeat(20_000),
+    );
+    for (username, password, summary) in [
+        (
+            "ordinary-user",
+            "separate-private-password",
+            "Process completed with exit code 1.",
+        ),
+        (
+            "error",
+            "separate-private-password",
+            "Process completed with exit code 1.",
+        ),
+        (
+            "ordinary-user",
+            "##[error]Process completed",
+            "[REDACTED] with exit code 1.",
+        ),
+        (
+            "ordinary-user",
+            "exit code 1.\ncleanup-must-disappear",
+            "Process completed with [REDACTED]",
+        ),
+    ] {
+        let secrets = vec![
+            username.to_owned(),
+            password.to_owned(),
+            git_auth::encode_user_password(username, password),
+        ];
+        for native in [false, true] {
+            let credential = SourceDeliveryCredential::token("forge-token");
+            let credential = if native {
+                credential.with_diagnostic_secrets(&secrets)
+            } else {
+                credential.with_git(SourceGitCredential::Https { username, password })
+            };
+            let output = super::check_log_tail(raw.as_bytes(), credential, &[]);
+            assert!(output.text.len() <= MAX_JOB_LOG_TAIL_BYTES);
+            let excerpt = super::super::job_log_excerpt(Ok(output)).assert_value();
+            for jobs in [1, 2] {
+                let logs = (91..91 + jobs)
+                    .map(|job| (job, excerpt.clone()))
+                    .collect::<Vec<_>>();
+                let mut feedback = "Required CI checks failed".to_owned();
+                include_job_logs(&mut feedback, "GitHub Actions", &logs);
+                let feedback = command::redact(&feedback, &secrets);
+                assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+                assert!(feedback.contains("setup context"));
+                assert!(feedback.contains("assertion failed: useful causal detail"));
+                assert!(feedback.contains(summary));
+                assert!(!feedback.contains("cleanup-must-disappear"));
+                assert!(!feedback.contains(password));
+            }
+        }
+    }
+}
+
+#[test]
+fn credential_collisions_preserve_raw_failure_context_through_both_budgets() {
+    use crate::native_v2_delivery::command::redact;
+    use crate::source_code_provider::SourceGitCredential;
+
+    for (username, marker) in [
+        ("ordinary-user", "assertion failed: causal detail"),
+        ("assertion", "assertion failed: causal detail"),
+        ("error", "error: unresolved symbol"),
+        ("panic", "panic: causal detail"),
+        ("panicked", "thread case panicked at source.rs:64"),
+        ("traceback", "Traceback (most recent call last)"),
+        ("fatal", "fatal: unresolved symbol"),
+    ] {
+        let secrets = vec![username.to_owned()];
+        for native in [false, true] {
+            let credential = SourceDeliveryCredential::token("independent-forge-token");
+            let credential = if native {
+                credential.with_diagnostic_secrets(&secrets)
+            } else {
+                credential.with_git(SourceGitCredential::Https {
+                    username,
+                    password: "independent-git-password",
+                })
+            };
+            for (noise, jobs) in [(24_000, 1), (24_000, 8), (8_000, 2)] {
+                let logs = (91..91 + jobs)
+                    .map(|job| {
+                        let raw = format!(
+                            "{}{}\nsetup-critical {job} 界🙂\n\u{001b}[31m{marker}\u{001b}[0m\n\
+                             causal description {job}\n{}\n##[error]exit code 1\ncleanup sentinel",
+                            // Passing negative-test errors must not displace a later assertion.
+                            if username == "assertion" {
+                                "error: expected fixture rejection\n"
+                            } else {
+                                ""
+                            },
+                            // Redaction and control removal both move the raw failure position.
+                            format!("\u{001b}[32m{username} 界🙂\u{0000}\n").repeat(300),
+                            "noise\n".repeat(noise),
+                        );
+                        assert_eq!(raw.len() > MAX_JOB_LOG_TAIL_BYTES, noise == 24_000);
+                        let log = super::check_log_tail(raw.as_bytes(), credential, &[]);
+                        assert!(log.text.len() <= MAX_JOB_LOG_TAIL_BYTES);
+                        (job, log)
+                    })
+                    .collect::<Vec<_>>();
+                let mut feedback = "Required CI checks failed".to_owned();
+                include_job_logs(&mut feedback, "GitHub Actions", &logs);
+                let feedback = redact(&feedback, &secrets);
+                assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+                for (job, _) in logs {
+                    assert!(
+                        feedback.contains(&format!("setup-critical {job} 界🙂")),
+                        "{username}"
+                    );
+                    assert!(
+                        feedback.contains(&format!("causal description {job}")),
+                        "{username}"
+                    );
+                }
+                assert!(feedback.contains("exit code 1"));
+                assert!(!feedback.contains("cleanup sentinel"));
+                assert!(!feedback.contains(username));
+                assert!(!feedback.contains('\u{fffd}'));
+                assert!(
+                    feedback
+                        .chars()
+                        .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unsupported_log_option_is_classified_before_redaction() {
+    use crate::source_code_provider::SourceGitCredential;
+
+    let message = "unknown flag: --allow-escape-sequences";
+    for username in [
+        "ordinary-user",
+        "flag",
+        "unknown",
+        "--allow-escape-sequences",
+    ] {
+        let credential =
+            SourceDeliveryCredential::token("forge-token").with_git(SourceGitCredential::Https {
+                username,
+                password: "private-password",
+            });
+        let output = ApiOutput {
+            stderr: format!("{message}\n").into_bytes(),
+            ..Default::default()
+        };
+        assert!(output.unsupported_escape_sequences());
+        let error = output.failure(None, "download failed", credential);
+        assert!(!error.authentication_failed());
+        assert!(!error.retryable_operation());
+        assert!(!error.to_string().contains(username));
+    }
+    for stderr in [
+        "unknown flag: --other-option",
+        "prefix unknown flag: --allow-escape-sequences",
+        "unexpected EOF",
+    ] {
+        assert!(
+            !ApiOutput {
+                stderr: stderr.as_bytes().to_vec(),
+                ..Default::default()
+            }
+            .unsupported_escape_sequences()
+        );
+    }
+    assert!(
+        !ApiOutput {
+            stdout: message.as_bytes().to_vec(),
+            ..Default::default()
+        }
+        .unsupported_escape_sequences()
+    );
+}
 
 #[test]
 fn api_payload_budget_and_log_tail_are_bounded() {
@@ -20,9 +215,9 @@ fn api_payload_budget_and_log_tail_are_bounded() {
     output.extend(vec![b'x'; MAX_JOB_LOG_TAIL_BYTES]);
     output.extend_from_slice(b"failure at end");
     let tail = check_log_tail(&output);
-    assert_eq!(tail.len(), MAX_JOB_LOG_TAIL_BYTES);
-    assert!(!tail.contains("discard"));
-    assert!(tail.ends_with("failure at end"));
+    assert_eq!(tail.text.len(), MAX_JOB_LOG_TAIL_BYTES);
+    assert!(!tail.text.contains("discard"));
+    assert!(tail.text.ends_with("failure at end"));
 }
 
 #[test]
@@ -354,27 +549,269 @@ fn failed_step_output_survives_large_github_cleanup_logs() {
         b"setup\nassertion: expected 400, received 202\n2026-09-14 ##[error]exit code 1\n".to_vec();
     output.extend_from_slice(&vec![b'x'; MAX_JOB_LOG_TAIL_BYTES * 2]);
     let excerpt = check_log_tail(&output);
-    assert!(excerpt.contains("assertion: expected 400, received 202"));
-    assert!(excerpt.ends_with("##[error]exit code 1\n"));
-    assert!(!excerpt.contains("xxxx"));
+    assert!(
+        excerpt
+            .text
+            .contains("assertion: expected 400, received 202")
+    );
+    assert!(excerpt.text.ends_with("##[error]exit code 1\n"));
+    assert!(!excerpt.text.contains("xxxx"));
 }
 
 #[test]
 fn last_github_error_is_retained_without_rewriting_its_output() {
     let output = b"first ##[error]earlier failure\nraw final failure\nlast ##[error]later failure";
-    assert_eq!(check_log_tail(output).as_bytes(), output);
+    assert_eq!(check_log_tail(output).text.as_bytes(), output);
+}
+
+#[test]
+fn early_failure_survives_noisy_capture_and_final_feedback() {
+    for jobs in [1, 2, 8] {
+        let logs = (91..91 + jobs)
+            .map(|job| {
+                let output = format!(
+                    "fatal: Not a valid commit name fixture-ref\n\
+                     error: expected fixture rejection\n\
+                     test source::error::validates_assertion_messages ... ok\n{}\nsetup context for job {job}\n\
+                     thread 'case-{job}' panicked at fixture.rs:64:9:\n\
+                     \u{001b}[31massertion `left == right` failed\u{001b}[0m\n\
+                     recovery record detail for job {job}: résumé 界\n\
+                     {}\n##[error]Process completed with exit code 1.\n\
+                     cleanup must disappear{}",
+                    "preamble\n".repeat(1_000),
+                    "unrelated output\n".repeat(10_000),
+                    "cleanup\n".repeat(10_000),
+                );
+                let excerpt = check_log_tail(output.as_bytes());
+                assert!(excerpt.text.len() <= MAX_JOB_LOG_TAIL_BYTES);
+                assert!(excerpt.text.contains("[intermediate log output truncated]"));
+                (job, excerpt)
+            })
+            .collect::<Vec<_>>();
+        let mut feedback = "Required CI checks failed".to_owned();
+        include_job_logs(&mut feedback, "GitHub Actions", &logs);
+        assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+        assert!(!feedback.contains("cleanup must disappear"));
+        assert!(!feedback.contains('\u{fffd}'));
+        assert!(
+            feedback
+                .chars()
+                .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        );
+        for (job, _) in logs {
+            assert!(feedback.contains(&format!("GitHub Actions job {job} log excerpt")));
+            assert!(feedback.contains(&format!("setup context for job {job}")));
+            assert!(
+                feedback.contains(&format!("thread 'case-{job}' panicked at fixture.rs:64:9:"))
+            );
+            assert!(feedback.contains("assertion `left == right` failed"));
+            assert!(feedback.contains(&format!("recovery record detail for job {job}: résumé 界")));
+        }
+        assert_eq!(
+            feedback
+                .matches("##[error]Process completed with exit code 1.")
+                .count(),
+            jobs as usize
+        );
+    }
+}
+
+#[test]
+fn feedback_budget_preserves_failures_from_individually_uncut_ascii_logs() {
+    let logs = (91..93)
+        .map(|job| {
+            let output = format!(
+                "fatal: Not a valid commit name fixture-ref\n\
+                 error: expected fixture rejection\n\
+                 test expected_git_refusal ... ok\n{}\n\
+                 setup context for job {job}\nassertion failed in job {job}\n\
+                 error detail for job {job}\n{}\n##[error]exit code 1\n",
+                "preamble\n".repeat(1_000),
+                "noise\n".repeat(8_000),
+            );
+            assert!(output.is_ascii());
+            assert!(output.len() < MAX_JOB_LOG_TAIL_BYTES);
+            let excerpt = check_log_tail(output.as_bytes());
+            assert_eq!(excerpt.text, output);
+            (job, excerpt)
+        })
+        .collect::<Vec<_>>();
+    assert!(logs.iter().map(|(_, log)| log.text.len()).sum::<usize>() > MAX_FAILURE_FEEDBACK_CHARS);
+    for selected in [&logs[..1], &logs[1..], &logs[..]] {
+        let mut feedback = "Required CI checks failed".to_owned();
+        include_job_logs(&mut feedback, "GitHub Actions", selected);
+        assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+        for (job, _) in selected {
+            assert!(feedback.contains(&format!("GitHub Actions job {job} log excerpt")));
+            assert!(feedback.contains(&format!("setup context for job {job}")));
+            assert!(feedback.contains(&format!("assertion failed in job {job}")));
+            assert!(feedback.contains(&format!("error detail for job {job}")));
+        }
+        if selected.len() == 2 {
+            assert_eq!(
+                feedback
+                    .matches("[intermediate log output truncated]")
+                    .count(),
+                2
+            );
+        }
+    }
+}
+
+#[test]
+fn generic_errors_remain_a_fallback_without_panic_or_assertion_evidence() {
+    for failure in [
+        "error: compiler failed",
+        "error[E0433]: unresolved item",
+        "fatal: build tool failed",
+        "##[error]build tool failed",
+    ] {
+        let output = format!(
+            "setup context\n{failure}\nerror detail\n{}\n##[error]exit code 1\n",
+            "noise\n".repeat(24_000),
+        );
+        let excerpt = check_log_tail(output.as_bytes());
+        assert!(excerpt.text.len() <= MAX_JOB_LOG_TAIL_BYTES);
+        let mut feedback = "Required CI checks failed".to_owned();
+        include_job_logs(&mut feedback, "GitHub Actions", &[(91, excerpt)]);
+        assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+        assert!(feedback.contains("setup context"));
+        assert!(feedback.contains(failure));
+        assert!(feedback.contains("error detail"));
+        assert!(feedback.contains("##[error]exit code 1"));
+        assert!(feedback.contains("[intermediate log output truncated]"));
+    }
+}
+
+#[test]
+fn unrecognized_unicode_failures_keep_a_valid_bounded_tail() {
+    let output = format!(
+        "discard this preamble\n{}\nunknown termination 界🙂",
+        "界🙂\n".repeat(30_000)
+    );
+    let excerpt = check_log_tail(output.as_bytes());
+    assert!(excerpt.text.len() <= MAX_JOB_LOG_TAIL_BYTES);
+    assert!(excerpt.text.starts_with("[earlier log output truncated]"));
+    assert!(excerpt.text.ends_with("unknown termination 界🙂"));
+    assert!(!excerpt.text.contains("discard this preamble"));
+    assert!(!excerpt.text.contains('\u{fffd}'));
+    let logs = (91..99)
+        .map(|job| (job, excerpt.clone()))
+        .collect::<Vec<_>>();
+    let mut feedback = "Required CI checks failed".to_owned();
+    include_job_logs(&mut feedback, "GitHub Actions", &logs);
+    assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+    assert_eq!(feedback.matches("unknown termination 界🙂").count(), 8);
+    assert_eq!(feedback.matches("log excerpt ---").count(), 8);
+    assert!(!feedback.contains('\u{fffd}'));
+}
+
+#[test]
+fn separate_git_credentials_cannot_be_split_into_visible_log_fragments() {
+    use crate::native_v2_delivery::{command::redact, git_auth};
+    use crate::source_code_provider::SourceGitCredential;
+
+    let token = "forge-token-independent-of-git-0123456789";
+    let github_git_token = "github-git-token-independent-of-forge-0123456789";
+    let username = "git-username-private-0123456789";
+    let password = "git-password-private-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let private_key = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+        private-key-first-line-0123456789-abcdefghijklmnopqrstuvwxyz\n\
+        private-key-second-line-0123456789-abcdefghijklmnopqrstuvwxyz\n\
+        -----END OPENSSH PRIVATE KEY-----";
+    let known_hosts = "git.example.invalid ssh-ed25519 private-host-key-0123456789";
+    let proxy = "proxy-secret-independent-of-git-0123456789";
+    for (git, mut secrets) in [
+        (
+            SourceGitCredential::Https { username, password },
+            vec![
+                username.to_owned(),
+                password.to_owned(),
+                git_auth::encode_user_password(username, password),
+            ],
+        ),
+        (
+            SourceGitCredential::Ssh {
+                private_key,
+                known_hosts,
+            },
+            [private_key, known_hosts]
+                .into_iter()
+                .chain(private_key.lines())
+                .map(str::to_owned)
+                .collect(),
+        ),
+    ] {
+        let credential = SourceDeliveryCredential::token(token)
+            .with_github_git_token(github_git_token)
+            .with_git(git);
+        secrets.extend([
+            token.to_owned(),
+            git_auth::encode_basic_credential(token),
+            github_git_token.to_owned(),
+            git_auth::encode_basic_credential(github_git_token),
+            proxy.to_owned(),
+        ]);
+        for secret in &secrets {
+            // Cross the 8 KiB context boundary at either truncation stage.
+            // Final redaction alone cannot recognize the retained prefix.
+            let fragment = &secret[..24];
+            for noise_lines in [8_000, 24_000] {
+                let mut raw = "setup context\nassertion failed: credential boundary\n".to_owned();
+                raw.push_str(&"x".repeat(8 * 1024 - fragment.len() - raw.len()));
+                raw.push_str(secret);
+                raw.push('\n');
+                raw.push_str(&"noise\n".repeat(noise_lines));
+                raw.push_str("##[error]exit code 1\n");
+                assert_eq!(raw.len() > MAX_JOB_LOG_TAIL_BYTES, noise_lines == 24_000);
+                let excerpt =
+                    super::check_log_tail(raw.as_bytes(), credential, &[proxy.to_owned()]);
+                assert!(excerpt.text.len() <= MAX_JOB_LOG_TAIL_BYTES);
+                for jobs in [1, 2] {
+                    let logs = (91..91 + jobs)
+                        .map(|job| (job, excerpt.clone()))
+                        .collect::<Vec<_>>();
+                    let mut feedback = "Required CI checks failed".to_owned();
+                    include_job_logs(&mut feedback, "GitHub Actions", &logs);
+                    let feedback = redact(&feedback, &secrets);
+                    assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+                    assert!(feedback.contains("setup context"));
+                    assert!(feedback.contains("assertion failed: credential boundary"));
+                    assert!(feedback.contains("##[error]exit code 1"));
+                    assert!(feedback.contains("[REDACTED]"));
+                    assert!(
+                        !feedback.contains(fragment),
+                        "credential fragment survived selection"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn job_log_capture_opts_in_and_feedback_removes_terminal_controls() {
+    use crate::native_v2_delivery::git_auth;
+    use crate::source_code_provider::SourceGitCredential;
+
     let root = TemporaryDirectory::for_test("github-job-log");
-    let expected = concat!(
-        "\x1b[31massertion failed: expected 400, got 202\x1b[0m\n",
-        "\x1b]8;;https://example.invalid\x07link\x1b]8;;\x07\n"
-    )
-    .as_bytes();
-    std::fs::write(root.as_path().join("payload"), expected).assert_value();
+    let credential = SourceDeliveryCredential::token("test-token")
+        .with_github_git_token("separate-github-git-token")
+        .with_git(SourceGitCredential::Https {
+            username: "delivery-user",
+            password: "separate-git-password",
+        });
+    let payload = format!(
+        "\x1b[31massertion failed: expected 400, got 202\x1b[0m\n\
+         credential: test-token; encoded: {}\n\
+         git: delivery-user separate-git-password {}; legacy: separate-github-git-token {}\n\
+         \x1b]8;;https://example.invalid\x07link\x1b]8;;\x07\n",
+        git_auth::encode_basic_credential("test-token"),
+        git_auth::encode_user_password("delivery-user", "separate-git-password"),
+        git_auth::encode_basic_credential("separate-github-git-token"),
+    );
+    std::fs::write(root.as_path().join("payload"), &payload).assert_value();
     let program = script(
         root.as_path(),
         r#"case "$*" in
@@ -385,14 +822,19 @@ exec /bin/cat "$HOME/payload"
 "#,
     );
     let output = authority(program, Duration::from_secs(10))
-        .job_log_output(
-            "acme/project",
-            91,
-            SourceDeliveryCredential::token("test-token"),
-        )
+        .job_log_output("acme/project", 91, credential)
         .await
         .assert_value();
-    assert_eq!(output, expected);
+    assert_eq!(
+        output.text.as_bytes(),
+        concat!(
+            "\x1b[31massertion failed: expected 400, got 202\x1b[0m\n",
+            "credential: [REDACTED]; encoded: [REDACTED]\n",
+            "git: [REDACTED] [REDACTED] [REDACTED]; legacy: [REDACTED] [REDACTED]\n",
+            "\x1b]8;;https://example.invalid\x07link\x1b]8;;\x07\n"
+        )
+        .as_bytes()
+    );
     let mut snapshot = PolicySnapshot {
         pull_request_id: "PR_node_17".to_owned(),
         is_in_merge_queue: false,
@@ -408,7 +850,7 @@ exec /bin/cat "$HOME/payload"
         pull_request_ready: false,
         observed_required_checks: Default::default(),
     };
-    include_check_logs(&mut snapshot, &[(91, check_log_tail(&output))]);
+    include_check_logs(&mut snapshot, &[(91, output)]);
     let SourceReviewState::Open {
         checks: SourceChecks::Failed { diagnostic },
     } = snapshot.state
@@ -417,6 +859,8 @@ exec /bin/cat "$HOME/payload"
     };
     assert!(diagnostic.contains("GitHub Actions job 91 log excerpt"));
     assert!(diagnostic.contains("assertion failed: expected 400, got 202"));
+    assert!(diagnostic.contains("credential: [REDACTED]; encoded: [REDACTED]"));
+    assert!(!diagnostic.contains("test-token"));
     assert!(
         diagnostic
             .chars()
@@ -424,32 +868,184 @@ exec /bin/cat "$HOME/payload"
     );
 }
 
+#[test]
+fn native_git_credentials_remain_redacted_through_capture_and_aggregation() {
+    let password = "native-password-private-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let secrets = vec![password.to_owned(), encode_basic_credential(password)];
+    let credential =
+        SourceDeliveryCredential::token("forge-token").with_diagnostic_secrets(&secrets);
+    assert!(credential.git().is_none());
+    for secret in &secrets {
+        for (noise, jobs) in [(24_000, 1), (8_000, 2)] {
+            let mut raw = "setup context\nassertion failed: native password boundary\n".to_owned();
+            raw.push_str(&"x".repeat(8 * 1024 - 24 - raw.len()));
+            raw.push_str(secret);
+            raw.push_str(&format!(
+                "\n{}\n##[error]exit code 1\n",
+                "noise\n".repeat(noise)
+            ));
+            assert_eq!(raw.len() > MAX_JOB_LOG_TAIL_BYTES, jobs == 1);
+            let logs = (91..91 + jobs)
+                .map(|job| (job, super::check_log_tail(raw.as_bytes(), credential, &[])))
+                .collect::<Vec<_>>();
+            for label in ["GitHub Actions", "GitLab"] {
+                let mut feedback = "Required CI checks failed".to_owned();
+                include_job_logs(&mut feedback, label, &logs);
+                let feedback = crate::native_v2_delivery::command::redact(&feedback, &secrets);
+                assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+                assert!(feedback.contains("assertion failed: native password boundary"));
+                assert!(feedback.contains("setup context"));
+                assert!(feedback.contains("##[error]exit code 1"));
+                assert!(!feedback.contains(&secret[..24]));
+            }
+        }
+    }
+}
+
+#[test]
+fn interrupted_log_streams_redact_all_credentials_before_diagnostic_bounds() {
+    use crate::source_code_provider::SourceGitCredential;
+
+    let password = "interrupted-private-password-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let secrets = vec![password.to_owned()];
+    for native in [false, true] {
+        let credential = SourceDeliveryCredential::token("forge-token");
+        let credential = if native {
+            credential.with_diagnostic_secrets(&secrets)
+        } else {
+            credential.with_git(SourceGitCredential::Https {
+                username: "git-user",
+                password,
+            })
+        };
+        for stderr in ["unexpected EOF", "error connecting to api.github.com"] {
+            let mut stdout = "assertion failed: interrupted log\n".to_owned();
+            stdout.push_str(&"x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 24 - stdout.len()));
+            stdout.push_str(password);
+            stdout.push_str(&"noise\n".repeat(8_000));
+            let error = ApiOutput {
+                stdout: stdout.into_bytes(),
+                stderr: stderr.as_bytes().to_vec(),
+                ..Default::default()
+            }
+            .failure(None, "could not read command stdout", credential);
+            assert_eq!(error.api_status(), None);
+            assert!(!error.authentication_failed());
+            assert_eq!(
+                error.retryable_operation(),
+                stderr.starts_with("error connecting")
+            );
+            let log = JobLog::unavailable(format!("GitHub job log unavailable: {error}"));
+            assert!(log.text.contains(stderr));
+            assert!(!log.text.contains(&password[..24]));
+            let logs = (91..99).map(|job| (job, log.clone())).collect::<Vec<_>>();
+            let mut feedback = "Required CI checks failed".to_owned();
+            include_job_logs(&mut feedback, "GitHub Actions", &logs);
+            let feedback = crate::native_v2_delivery::command::redact(&feedback, &secrets);
+            assert!(!feedback.contains(&password[..24]));
+            assert!(feedback.contains("--- GitHub Actions job 91 log excerpt ---"));
+            assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+        }
+    }
+    // Secret replacement must not hide a native transport classification.
+    let transport = "error connecting to api.github.com".to_owned();
+    let credential = SourceDeliveryCredential::token("forge-token")
+        .with_diagnostic_secrets(std::slice::from_ref(&transport));
+    let error = ApiOutput {
+        stderr: transport.as_bytes().to_vec(),
+        ..Default::default()
+    }
+    .failure(None, "download failed", credential);
+    assert!(error.retryable_operation());
+    assert!(!error.to_string().contains(&transport));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn interrupted_job_log_download_redacts_partial_stdout_before_feedback() {
+    use crate::source_code_provider::SourceGitCredential;
+
+    let root = TemporaryDirectory::for_test("github-partial-log");
+    let password = "interrupted-private-password-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let mut payload = "assertion failed: interrupted log\n".to_owned();
+    payload.push_str(&"x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 24 - payload.len()));
+    payload.push_str(password);
+    std::fs::write(root.as_path().join("payload"), payload).assert_value();
+    let program = script(
+        root.as_path(),
+        "cat \"$HOME/payload\"\nprintf 'unexpected EOF\\n' >&2\nexit 1\n",
+    );
+    let authority = authority(program, Duration::from_secs(10));
+    let secrets = vec![password.to_owned()];
+    for native in [false, true] {
+        let credential = SourceDeliveryCredential::token("forge-token");
+        let credential = if native {
+            credential.with_diagnostic_secrets(&secrets)
+        } else {
+            credential.with_git(SourceGitCredential::Https {
+                username: "git-user",
+                password,
+            })
+        };
+        let error = authority
+            .job_log_output("acme/project", 91, credential)
+            .await
+            .unwrap_err();
+        assert_eq!(error.api_status(), None);
+        assert!(!error.authentication_failed());
+        assert!(!error.retryable_operation());
+        let log = super::super::job_log_excerpt(Err(error)).assert_value();
+        assert!(log.text.contains("unexpected EOF"));
+        assert!(log.text.contains("job log unavailable"));
+        assert!(!log.text.contains(&password[..24]));
+        let logs = (91..99).map(|job| (job, log.clone())).collect::<Vec<_>>();
+        let mut feedback = "Required CI checks failed".to_owned();
+        include_job_logs(&mut feedback, "GitHub Actions", &logs);
+        let feedback = crate::native_v2_delivery::command::redact(&feedback, &secrets);
+        assert!(!feedback.contains(&password[..24]));
+        assert!(feedback.contains("--- GitHub Actions job 91 log excerpt ---"));
+    }
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn job_log_capture_supports_older_gh_without_the_opt_in_flag() {
-    let root = TemporaryDirectory::for_test("github-job-log");
-    let program = script(
-        root.as_path(),
-        r#"printf 'call\n' >> "$HOME/calls"
+    use crate::source_code_provider::SourceGitCredential;
+
+    for username in ["ordinary-user", "flag", "unknown", "error"] {
+        let root = TemporaryDirectory::for_test("github-job-log");
+        let program = script(
+            root.as_path(),
+            r#"printf 'call\n' >> "$HOME/calls"
 case "$*" in
   *--allow-escape-sequences*) printf '%s\n' 'unknown flag: --allow-escape-sequences' >&2; exit 1 ;;
 esac
-printf 'older CLI failure details\n'
+printf 'older CLI failure details test-token\n##[error]exit code 1\ncleanup-must-disappear\n'
 "#,
-    );
-    let output = authority(program, Duration::from_secs(10))
-        .job_log_output(
-            "acme/project",
-            91,
-            SourceDeliveryCredential::token("test-token"),
-        )
-        .await
-        .assert_value();
-    assert_eq!(output, b"older CLI failure details\n");
-    assert_eq!(
-        std::fs::read_to_string(root.as_path().join("calls")).assert_value(),
-        "call\ncall\n"
-    );
+        );
+        let output = authority(program, Duration::from_secs(10))
+            .job_log_output(
+                "acme/project",
+                91,
+                SourceDeliveryCredential::token("test-token").with_git(
+                    SourceGitCredential::Https {
+                        username,
+                        password: "private-password",
+                    },
+                ),
+            )
+            .await
+            .assert_value();
+        let expected = crate::native_v2_delivery::command::redact(
+            "older CLI failure details test-token\n##[error]exit code 1\n",
+            &["test-token".to_owned(), username.to_owned()],
+        );
+        assert_eq!(output.text, expected);
+        assert_eq!(
+            std::fs::read_to_string(root.as_path().join("calls")).assert_value(),
+            "call\ncall\n"
+        );
+    }
 }
 
 #[cfg(unix)]

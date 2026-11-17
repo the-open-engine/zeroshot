@@ -1,5 +1,10 @@
 use super::*;
 
+/// The limit for real Git commands, which no assertion here depends on. Under the cleared
+/// environment of `local_git_command` the first Git launch of a test process has taken more than
+/// five seconds on the hosted macOS runners.
+const GIT_FIXTURE_DEADLINE: Duration = Duration::from_secs(60);
+
 #[cfg(unix)]
 #[tokio::test]
 async fn private_input_and_early_output_drain_concurrently() {
@@ -37,6 +42,98 @@ fn http_failure(status: u16) -> GitCommandFailure {
     failure(format!(
         "fatal: unable to access 'https://github.com/acme/project': The requested URL returned error: {status}"
     ))
+}
+
+#[test]
+fn push_rejection_requires_complete_status_for_the_exact_ref() {
+    let revision = "a".repeat(40);
+    let branch = "zeroshot/run";
+    let rejected = format!("!\t{revision}:refs/heads/{branch}\t[remote rejected] (content rule)\n");
+    let mut diagnostic = failure("");
+    diagnostic.stdout.clone_from(&rejected);
+    diagnostic.classify_stdout(&rejected, true, str::to_owned);
+    assert!(diagnostic.push_rejection(branch, &revision).is_some());
+    assert!(diagnostic.push_rejection("other", &revision).is_none());
+    assert!(diagnostic.push_rejection(branch, &"b".repeat(40)).is_none());
+    diagnostic.classify_stdout(&rejected, false, str::to_owned);
+    assert!(diagnostic.push_rejection(branch, &revision).is_none());
+    for stdout in [
+        format!("remote: {rejected}"),
+        rejected.replace("!\t", " \t"),
+        format!("!\t{revision}:refs/heads/{branch}\t\n"),
+        format!("{rejected}{rejected}"),
+        "fatal: transport failed\n".to_owned(),
+    ] {
+        diagnostic.classify_stdout(&stdout, true, str::to_owned);
+        assert!(
+            diagnostic.push_rejection(branch, &revision).is_none(),
+            "{stdout}"
+        );
+    }
+}
+
+#[test]
+fn push_rejection_ignores_other_refs_but_requires_one_matching_status() {
+    let revision = "a".repeat(40);
+    let branch = "zeroshot/run";
+    let rejected = format!("!\t{revision}:refs/heads/{branch}\t[remote rejected] (branch rule)\n");
+    let tag = "!\trefs/tags/other:refs/tags/other\t[remote rejected] (tag rule)\n";
+    let mut diagnostic = failure("");
+    for stdout in [
+        format!("{tag}{rejected}"),
+        format!("{rejected}{tag}"),
+        format!("{tag}{tag}{rejected}"),
+    ] {
+        diagnostic.classify_stdout(&stdout, true, str::to_owned);
+        assert_eq!(
+            diagnostic.push_rejection(branch, &revision).unwrap().1,
+            "[remote rejected] (branch rule)"
+        );
+    }
+    for stdout in [tag.to_owned(), format!("{tag}{rejected}{rejected}")] {
+        diagnostic.classify_stdout(&stdout, true, str::to_owned);
+        assert!(diagnostic.push_rejection(branch, &revision).is_none());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn push_rejection_matches_raw_ref_and_reason_before_credential_redaction() {
+    let revision = "a".repeat(40);
+    let branch = "zeroshot/private-branch";
+    let secrets = [
+        revision.clone(),
+        branch.to_owned(),
+        "secret-one".to_owned(),
+        "secret-two".to_owned(),
+    ];
+    let mut fingerprints = Vec::new();
+    for reason in ["secret-one", "secret-two"] {
+        let stdout = format!(
+            "!\trefs/tags/other:refs/tags/other\t[remote rejected] (other rule)\n\
+             !\t{revision}:refs/heads/{branch}\t[remote rejected] ({reason})"
+        );
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "printf '%s\\n' \"$1\"; exit 1",
+            "push-fixture",
+            &stdout,
+        ]);
+        let diagnostic = capture_with_secrets(&mut command, Duration::from_secs(5), &secrets)
+            .await
+            .unwrap()
+            .require_success()
+            .unwrap_err();
+        let (fingerprint, summary) = diagnostic.push_rejection(branch, &revision).unwrap();
+        assert_eq!(summary, "[remote rejected] ([REDACTED])");
+        fingerprints.push(fingerprint);
+        let printable = format!("{diagnostic:?}\n{diagnostic}");
+        for secret in &secrets {
+            assert!(!printable.contains(secret), "{printable}");
+        }
+    }
+    assert_ne!(fingerprints[0], fingerprints[1]);
 }
 
 #[test]
@@ -284,15 +381,52 @@ async fn completed_commands_cannot_leave_background_helpers_mutating_the_workspa
 #[tokio::test]
 async fn helper_pipe_inheritance_preserves_the_main_exit_status() {
     let mut command = Command::new("/bin/sh");
-    command.args(["-c", "(/usr/bin/sleep 2) & exit 17"]);
+    // The search path finds `sleep` on every Unix. macOS has none in `/usr/bin`, and a helper
+    // that never starts holds no pipe.
+    command.args(["-c", "(sleep 30) & exit 17"]);
     let started = std::time::Instant::now();
-    let outcome = capture(&mut command, Duration::from_secs(1))
+    let outcome = capture(&mut command, Duration::from_secs(10))
         .await
         .expect("confirmed descendant cleanup must close inherited pipes");
-    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(outcome.exit_status, Some(17));
     assert!(!outcome.timed_out);
     assert!(!outcome.cleanup_unconfirmed);
+}
+
+/// A command that has exited and is not reaped yet leaves its process group with nothing to
+/// signal. macOS refuses the kill for such a group, and that refusal once failed the command.
+#[cfg(unix)]
+#[tokio::test]
+async fn cleanup_accepts_a_process_group_whose_only_member_has_exited() {
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "exit 17"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let (mut child, group) = spawn_contained(&mut command).expect("contained command starts");
+    let pid = child.id().expect("unreaped child has a PID");
+    // Wait for the exit without reaping the child: its group then holds one exited member.
+    let mut exited = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    while unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid,
+            exited.as_mut_ptr(),
+            libc::WEXITED | libc::WNOWAIT,
+        )
+    } != 0
+    {
+        let error = std::io::Error::last_os_error();
+        assert_eq!(error.raw_os_error(), Some(libc::EINTR), "{error}");
+    }
+    let cleanup = terminate_process_tree(&group.tree, &mut child).await;
+    assert_eq!(cleanup.error, None);
+    assert!(cleanup.cleanup.proves_tree_empty());
+    assert_eq!(
+        cleanup.exit_status.and_then(|status| status.code()),
+        Some(17)
+    );
 }
 
 #[cfg(unix)]
@@ -475,7 +609,7 @@ async fn native_credentials_are_private_protocol_bytes_but_never_printable_diagn
             "--get",
             "probe.value",
         ]);
-        let output = capture_sensitive(&mut command, Duration::from_secs(5), &[])
+        let output = capture_sensitive(&mut command, GIT_FIXTURE_DEADLINE, &[])
             .await
             .unwrap()
             .require_success()
@@ -511,7 +645,7 @@ async fn failing_git_filter_redacts_all_native_credential_fields() {
         "-c", "filter.canary.clean=printf '%s\\n' \"$GITHUB_TOKEN\" \"$FORGE_PASSWORD\" \"$FORGE_API_KEY\" >&2; exit 1",
         "-c", "filter.canary.required=true", "add", "filtered.txt",
     ]);
-    let output = capture(&mut command, Duration::from_secs(5)).await.unwrap();
+    let output = capture(&mut command, GIT_FIXTURE_DEADLINE).await.unwrap();
     assert_ne!(output.exit_status, Some(0));
     assert!(output.stderr.contains("[REDACTED]"));
     for (_, secret) in fields {
@@ -543,7 +677,7 @@ async fn fixed_identity_wins_over_global_and_environment_git_configuration() {
             command.env("GIT_CONFIG_GLOBAL", config);
         }
         command.args(["commit", "--allow-empty", "--message", "fixed identity"]);
-        capture(&mut command, Duration::from_secs(5))
+        capture(&mut command, GIT_FIXTURE_DEADLINE)
             .await
             .unwrap()
             .require_success()

@@ -34,6 +34,32 @@ On Windows, detached controllers retain their Ctrl-C and Ctrl-Break protections.
 handler for console close, logoff or system shutdown events, which can terminate them without
 cleanup or a terminal record. Use `zeroshot force-stop` for a cooperative stop on Windows.
 
+## Peer-message delivery
+
+Declared [graph networks](cluster/graph.md#peer-networks) let authorized local agent executions
+publish through `zeroshot steer --network NAME`. The host authenticates the execution capability,
+checks its publisher permission and assigns the origin. Public execution labels do not authorize
+a message. Receivers need membership in a selected network; repeated destinations or overlapping
+memberships do not multiply delivery.
+
+A peer message reaches a recipient through its next prompt or native tool callback. Future recipients
+receive it once they start. Publication creates no execution and does not interrupt, restart or
+wake a recipient. It also keeps suspended runs suspended. The originating node instance never
+receives that message, while other mapped copies of its logical node remain eligible members.
+
+Network messages default to `once`, with receipt tracking by recipient node instance across
+retries, fresh conversations and successors. `standing` tracks each provider conversation; a
+continued conversation retains messages kept in its saved session and a fresh conversation receives
+them again. On Copilot, Pi and OpenCode, standing guidance shown by a transient tool callback also
+returns in the next prompt. Its receipt is excluded from saved conversation snapshots until that
+prompt succeeds. Both modes preserve sender exclusion. Human broadcast steering keeps its standing default
+and instruction precedence. Peer messages remain attributed context under authored instructions.
+
+The existing vector ledger owns messages and receipts. A carrier acknowledgement confirms returned
+context. Once prompt delivery records a receipt after successful provider completion. Standing
+prompt receipts are recorded at preparation and remain provisional until successful completion.
+Receipts do not prove model compliance. A missing acknowledgement leaves delivery pending and can cause a repeat.
+
 ## Auto-research
 
 `auto-research` runs ten iterations by default. Optional run input `options.iterations` selects a

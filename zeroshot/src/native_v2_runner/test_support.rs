@@ -124,6 +124,7 @@ pub(crate) fn admitted() -> AdmittedRun {
         environment: None,
         title: RunTitle::new("Runner test run").assert_value(),
         graph: CompiledGraphIr {
+            networks: BTreeMap::new(),
             profile: graph.profile,
             initial_input: graph.initial_input,
             policy: graph.policy,
