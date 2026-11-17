@@ -448,7 +448,7 @@ jobs:
         run: |
           cargo test --locked --package zeroshot --features ui --test full_v1_reducer unhandled::
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unchecked_worker_error_fails_foreground_status_and_logs
-          cargo test --locked --package zeroshot --features ui --lib -- native_v2_templates::tests::unhandled native_v2_supervisor::tests::failure_logs v2_run_ledger::tests::failure_context
+          cargo test --locked --package zeroshot --features ui --lib -- native_v2_cli::templates::tests::unhandled native_v2_supervisor::tests::failure_logs v2_run_ledger::tests::failure_context
       - name: Run macOS checkpoint forge access regression
         run: >-
           cargo test --locked --package zeroshot --features ui
