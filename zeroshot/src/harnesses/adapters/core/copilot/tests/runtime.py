@@ -320,6 +320,19 @@ while (message := read()) is not None:
             decision = read()
             assert decision["params"]["result"]["kind"] == "approve-once"
             send({"id": decision["id"], "result": {"success": True}})
+        if mode == "tool_activity":
+            for suffix, success in (("ok", True), ("bad", False), ("unknown", None)):
+                call = {"toolCallId": suffix, "toolName": "native-shell",
+                        "arguments": {"command": "HEAD gho_fake-secret " + "界" * 9000 + " TAIL"}}
+                result = {"toolCallId": suffix,
+                          "result": {"content": "HEAD gho_fake-secret " + "é" * 9000 + " TAIL"}}
+                if success is not None:
+                    result["success"] = success
+                if success is False:
+                    result["error"] = {"message": "tool-error"}
+                for _ in range(2): event("tool.execution_start", call)
+                event("tool.execution_partial_result", {"toolCallId": suffix, "partialOutput": "cumulative"})
+                for _ in range(2): event("tool.execution_complete", result)
         if mode == "duplex":
             for _ in range(80):
                 event("future.event", {"padding": "x" * 1048576})

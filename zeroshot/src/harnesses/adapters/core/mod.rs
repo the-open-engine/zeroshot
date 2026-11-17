@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use crate::harnesses::HarnessRegistry;
 
+pub(crate) mod tool_activity;
+
 pub use crate::native_v2_codex as codex;
 pub use crate::native_v2_claude as claude;
 pub use crate::native_v2_copilot as copilot;

@@ -1,3 +1,4 @@
+use crate::harnesses::adapters::core::tool_activity::{ToolActivity, ToolIdentity, ToolEntry};
 use serde_json::Value;
 
 use crate::native_v2_capsule::provider_json_lines::{
@@ -11,24 +12,18 @@ pub(super) enum CodexEmission {
     AgentMessage(String),
     Progress(String),
     StreamError(String),
+    Tool(ToolEntry),
 }
 
 impl CodexEmission {
-    pub(super) fn log(&self) -> (LiveOutputStream, &str) {
-        match self {
-            Self::AgentMessage(message) => (LiveOutputStream::Output, message),
-            Self::Progress(message) | Self::StreamError(message) => {
-                (LiveOutputStream::System, message.as_str())
-            }
-        }
-    }
-
     pub(super) fn emit(&self, publisher: &ProviderText, emissions: &mut Vec<ProviderEmission>) {
-        let (stream, message) = self.log();
-        if matches!(self, Self::StreamError(_)) {
-            publisher.emit_progress(emissions, message);
-        } else {
-            publisher.emit(emissions, stream, message);
+        match self {
+            Self::AgentMessage(message) => {
+                publisher.emit(emissions, LiveOutputStream::Output, message)
+            }
+            Self::Progress(message) => publisher.emit(emissions, LiveOutputStream::System, message),
+            Self::StreamError(message) => publisher.emit_progress(emissions, message),
+            Self::Tool(entry) => entry.emit(publisher, emissions),
         }
     }
 }
@@ -43,6 +38,7 @@ pub(super) struct CodexOutput {
     token_usage: Option<TokenUsageDelta>,
     malformed_records: usize,
     oversized_records: usize,
+    tools: ToolActivity,
 }
 
 pub(super) struct CodexOutputDecoder {
@@ -64,6 +60,7 @@ enum TerminalUsage {
 
 enum AcceptedLine {
     Emission(CodexEmission),
+    Emissions(Vec<CodexEmission>),
     Ignored,
     Malformed,
     ThreadFailure(String),
@@ -91,9 +88,7 @@ impl CodexOutputDecoder {
             if self.output.is_settled() {
                 break;
             }
-            if let Some(emission) = self.accept_line(line) {
-                emitted.push(emission);
-            }
+            emitted.extend(self.accept_line(line));
         }
         if self.output.is_settled() {
             self.lines.discard();
@@ -111,24 +106,35 @@ impl CodexOutputDecoder {
         self.output
     }
 
-    fn accept_line(&mut self, line: ProviderJsonLine) -> Option<CodexEmission> {
+    pub(super) fn finish_stream(&mut self) -> Vec<CodexEmission> {
+        if self.output.is_settled() {
+            self.lines.discard();
+            return Vec::new();
+        }
+        self.lines
+            .finish()
+            .map_or_else(Vec::new, |line| self.accept_line(line))
+    }
+
+    fn accept_line(&mut self, line: ProviderJsonLine) -> Vec<CodexEmission> {
         match line {
             ProviderJsonLine::Oversized => {
                 self.output.oversized_records = self.output.oversized_records.saturating_add(1);
-                None
+                Vec::new()
             }
             ProviderJsonLine::Record(line) => match self.output.accept_bytes(&line) {
-                AcceptedLine::Emission(emission) => Some(emission),
-                AcceptedLine::Ignored => None,
+                AcceptedLine::Emission(emission) => vec![emission],
+                AcceptedLine::Emissions(emissions) => emissions,
+                AcceptedLine::Ignored => Vec::new(),
                 AcceptedLine::Malformed => {
                     self.output.malformed_records = self.output.malformed_records.saturating_add(1);
-                    None
+                    Vec::new()
                 }
                 AcceptedLine::ThreadFailure(detail) => {
                     if self.output.thread_failure.is_none() {
                         self.output.thread_failure = Some(detail);
                     }
-                    None
+                    Vec::new()
                 }
             },
         }
@@ -154,6 +160,7 @@ impl CodexOutput {
             token_usage: None,
             malformed_records: 0,
             oversized_records: 0,
+            tools: ToolActivity::default(),
         }
     }
 
@@ -348,6 +355,16 @@ impl CodexOutput {
         let Some(phase) = event_type.strip_prefix("item.") else {
             return AcceptedLine::Malformed;
         };
+        if matches!(
+            item_type,
+            "command_execution"
+                | "file_change"
+                | "mcp_tool_call"
+                | "collab_tool_call"
+                | "web_search"
+        ) {
+            return self.accept_tool(item, item_type, phase);
+        }
         match item_type {
             "agent_message" if event_type == "item.completed" => {
                 let Some(message) = item.get("text").and_then(Value::as_str) else {
@@ -361,6 +378,66 @@ impl CodexOutput {
                 item, item_type, phase,
             ))),
         }
+    }
+    fn accept_tool(&mut self, item: &Value, kind: &str, phase: &str) -> AcceptedLine {
+        if phase == "updated" {
+            return AcceptedLine::Ignored;
+        }
+        let name = match kind {
+            "mcp_tool_call" => format!(
+                "{}.{}",
+                item["server"].as_str().unwrap_or("unknown"),
+                item["tool"].as_str().unwrap_or("unknown")
+            ),
+            "collab_tool_call" => item["tool"].as_str().unwrap_or("unknown").to_owned(),
+            _ => kind.to_owned(),
+        };
+        let identity = ToolIdentity {
+            name,
+            id: item["id"].as_str().map(str::to_owned),
+        };
+        let mut emissions = Vec::new();
+        if let Some(identity) = self.tools.record(identity.clone(), false) {
+            let input = match kind {
+                "command_execution" => item["command"].clone(),
+                "file_change" => item["changes"].clone(),
+                "mcp_tool_call" => item["arguments"].clone(),
+                "collab_tool_call" => serde_json::json!({
+                    "sender_thread_id":item["sender_thread_id"],
+                    "receiver_thread_ids":item["receiver_thread_ids"], "prompt":item["prompt"]
+                }),
+                // `query` may only summarize the first query; retain the complete native action.
+                _ => serde_json::json!({"action":item["action"], "query":item["query"]}),
+            };
+            emissions.push(CodexEmission::Tool(ToolEntry::call(
+                "Codex", identity, input,
+            )));
+        }
+        if phase == "completed" {
+            if let Some(identity) = self.tools.record(identity, true) {
+                let mut status = item["status"].as_str().unwrap_or("unknown").to_owned();
+                if let Some(exit) = item["exit_code"].as_i64() {
+                    status.push_str(&format!(" exit={exit}"));
+                }
+                let result = match kind {
+                    "command_execution" => item["aggregated_output"].clone(),
+                    "file_change" => item["changes"].clone(),
+                    "mcp_tool_call" => {
+                        serde_json::json!({"result":item["result"], "error":item["error"]})
+                    }
+                    "collab_tool_call" => serde_json::json!({
+                        "sender_thread_id":item["sender_thread_id"],
+                        "receiver_thread_ids":item["receiver_thread_ids"],
+                        "agents_states":item["agents_states"]
+                    }),
+                    _ => serde_json::json!({"action":item["action"], "query":item["query"]}),
+                };
+                emissions.push(CodexEmission::Tool(ToolEntry::completed(
+                    "Codex", identity, status, result,
+                )));
+            }
+        }
+        AcceptedLine::Emissions(emissions)
     }
 }
 
@@ -404,10 +481,6 @@ fn failure_detail(event: &Value, event_type: &str) -> Option<String> {
 fn semantic_item(item: &Value, item_type: &str, phase: &str) -> String {
     match item_type {
         "reasoning" => semantic_reasoning(item, phase),
-        "command_execution" => semantic_command(item, phase),
-        "file_change" => semantic_file_change(item, phase),
-        "mcp_tool_call" => semantic_tool_call(item, phase),
-        "web_search" => semantic_web_search(item, phase),
         "todo_list" => semantic_todo_list(item, phase),
         "error" => format!(
             "Codex activity error: {}",
@@ -424,84 +497,6 @@ fn semantic_reasoning(item: &Value, phase: &str) -> String {
         Some(text) if !text.is_empty() => format!("Codex reasoning {phase}: {text}"),
         _ => format!("Codex reasoning {phase}"),
     }
-}
-
-fn semantic_command(item: &Value, phase: &str) -> String {
-    let command = item
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown command");
-    let mut message = format!("Codex command {phase}: {command}");
-    if let Some(status) = item.get("status").and_then(Value::as_str) {
-        message.push_str(&format!(" [{status}]"));
-    }
-    if let Some(exit_code) = item.get("exit_code").and_then(Value::as_i64) {
-        message.push_str(&format!(" exit={exit_code}"));
-    }
-    if let Some(output) = item
-        .get("aggregated_output")
-        .and_then(Value::as_str)
-        .filter(|output| !output.is_empty())
-    {
-        message.push('\n');
-        message.push_str(output);
-    }
-    message
-}
-
-fn semantic_file_change(item: &Value, phase: &str) -> String {
-    let changes = item
-        .get("changes")
-        .and_then(Value::as_array)
-        .map(|changes| {
-            changes
-                .iter()
-                .filter_map(|change| {
-                    Some(format!(
-                        "{} {}",
-                        change.get("kind")?.as_str()?,
-                        change.get("path")?.as_str()?
-                    ))
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        })
-        .filter(|changes| !changes.is_empty())
-        .unwrap_or_else(|| "unknown changes".to_owned());
-    let status = item.get("status").and_then(Value::as_str).unwrap_or(phase);
-    format!("Codex file change {status}: {changes}")
-}
-
-fn semantic_tool_call(item: &Value, phase: &str) -> String {
-    let server = item
-        .get("server")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let tool = item
-        .get("tool")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let status = item.get("status").and_then(Value::as_str).unwrap_or(phase);
-    let mut message = format!("Codex tool {status}: {server}.{tool}");
-    if let Some(error) = item
-        .get("error")
-        .and_then(|error| error.get("message"))
-        .and_then(Value::as_str)
-    {
-        message.push_str(&format!(" error={error}"));
-    } else if let Some(result) = item.get("result").filter(|result| !result.is_null()) {
-        message.push_str(" result=");
-        message.push_str(&result.to_string());
-    }
-    message
-}
-
-fn semantic_web_search(item: &Value, phase: &str) -> String {
-    let query = item
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown query");
-    format!("Codex web search {phase}: {query}")
 }
 
 fn semantic_todo_list(item: &Value, phase: &str) -> String {

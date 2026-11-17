@@ -57,7 +57,10 @@ async fn large_output_provisional_error_and_nul_log_complete_successfully() {
     );
     assert!(rendered.contains("Codex stream error: temporary transport retry [REDACTED]"));
     assert!(!rendered.contains("fake-openai-key"));
-    assert!(rendered.contains("Codex command completed: scan [completed] exit=0\nbefore�after"));
+    assert!(
+        rendered.contains("Codex tool call: command_execution id=unknown status=unknown\nscan")
+    );
+    assert!(rendered.contains("status=completed exit=0\nbefore�after"));
     assert!(!rendered.contains('\0'));
     assert!(!rendered.contains("999"));
     assert!(!rendered.contains("trailing failure"));

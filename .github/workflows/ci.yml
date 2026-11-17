@@ -452,6 +452,7 @@ jobs:
       - name: Run native macOS controller termination regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unix_controller
+          cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable tool_activity
           cargo test --locked --package zeroshot --features ui --lib native_v2_portable_controller::process::shutdown_tests
       - name: Run native macOS read-only controller inspection regressions
         run: |

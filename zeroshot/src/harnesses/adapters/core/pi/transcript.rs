@@ -4,6 +4,9 @@
 //! response value itself is taken from the authoritative final assistant message. Only the last
 //! assistant message is the node's response: Pi can emit several per run.
 
+use crate::harnesses::adapters::core::tool_activity::{
+    ToolActivity, ToolIdentity, ToolEntry, error_status,
+};
 use crate::native_v2_capsule::{
     provider_json_lines::{ProviderJsonLine, ProviderJsonLines, parse_provider_json},
     provider_process::{
@@ -42,6 +45,7 @@ pub(crate) struct PiTranscript {
     /// Malformed counts or overflow make the turn total permanently incomplete.
     usage_invalid: bool,
     output: ProviderText,
+    tools: ToolActivity,
 }
 
 impl PiTranscript {
@@ -54,6 +58,7 @@ impl PiTranscript {
             current_usage: None,
             usage_invalid: false,
             output: ProviderText::new(&redactions),
+            tools: ToolActivity::default(),
         }
     }
 }
@@ -217,6 +222,38 @@ impl PiTranscript {
             "message_end" => {
                 self.output.boundary(emissions);
                 self.record_message_end(value);
+            }
+            "tool_execution_start" | "tool_execution_end" => {
+                self.output.boundary(emissions);
+                let completed = kind == "tool_execution_end";
+                let identity = ToolIdentity {
+                    name: value
+                        .get("toolName")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .into(),
+                    id: value
+                        .get("toolCallId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                };
+                if let Some(identity) = self.tools.record(identity, completed) {
+                    let entry = if completed {
+                        ToolEntry::completed(
+                            "Pi",
+                            identity,
+                            error_status(value.get("isError").and_then(Value::as_bool)),
+                            value.get("result").cloned().unwrap_or(Value::Null),
+                        )
+                    } else {
+                        ToolEntry::call(
+                            "Pi",
+                            identity,
+                            value.get("args").cloned().unwrap_or(Value::Null),
+                        )
+                    };
+                    entry.emit(&self.output, emissions);
+                }
             }
             "compaction_start" => {
                 self.output.emit(

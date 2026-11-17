@@ -302,6 +302,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Caller-selected remote backends retain native containment guarantees. Native token deltas remain visible; unreported
   auxiliary or child work marks totals incomplete. Active Memory attaches native model-facing
   notices after tool-result bookkeeping, preserving native transforms and durable messages.
+- The four core harnesses publish native tool calls/completions through
+  `harnesses::adapters::core::tool_activity` into existing durable text logs and node transcripts.
+  Each complete entry, including identity/status framing and truncation markers, is at most 8 KiB
+  with head/tail excerpts. Redact decoded strings before JSON rendering and serialized payloads
+  before truncation; deduplicate native IDs per phase and omit cumulative updates. Missing native
+  status stays unknown. These are log-only per-entry bounds, independent of Active Memory and
+  provider response/outcome handling.
 - Agent bindings may carry a secret-free `harnessConfig` object (64 KiB encoded), with native
   `args` and/or `options` carriers owned by each adapter. The effective node lane interprets it;
   lane changes retain it without translation. Registration supplies pure reserved-control validation,

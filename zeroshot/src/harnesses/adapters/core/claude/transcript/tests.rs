@@ -1011,3 +1011,63 @@ fn transcripts_without_rate_limit_events_keep_their_existing_output_behavior() {
     assert!(decoded.emissions.is_empty());
     assert_eq!(completed_response(decoded.attempt), json!("done"));
 }
+
+#[test]
+fn tool_activity_survives_streamed_commentary() {
+    let mut transcript = ClaudeTranscript::new(Vec::new());
+    let stream = concat!(
+        r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"before"}}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"before"},{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"check-tool"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"tool-result","is_error":false}]}}"#,
+        "\n"
+    );
+    let mut logs = transcript.push(stream.as_bytes());
+    logs.extend(transcript.finish_stream());
+    assert_eq!(logs[0].text, "before");
+    let text = logs
+        .iter()
+        .map(|log| log.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for expected in ["before", "Bash", "tool-1", "check-tool", "tool-result"] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+}
+
+#[test]
+fn tool_activity_success_failure_unknown_and_repeated_events() {
+    for is_error in [Some(false), Some(true), None] {
+        let mut transcript = ClaudeTranscript::new(vec!["secret-key".into()]);
+        let call = json!({"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"call-2","input":{"file_path":"source.rs","credential":"secret-key"}}]}});
+        let mut result = json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-2","content":[{"type":"text","text":"HEAD secret-key".to_owned() + &"界".repeat(9000) + " secret-key TAIL"}]}]}});
+        if let Some(error) = is_error {
+            result["message"]["content"][0]["is_error"] = json!(error);
+        }
+        let mut logs = Vec::new();
+        for event in [&call, &call, &result, &result] {
+            let wire = format!("{event}\n").replace("secret-key", r"\u0073ecret-key");
+            for chunk in wire.as_bytes().chunks(97) {
+                logs.extend(transcript.push(chunk));
+            }
+        }
+        logs.extend(transcript.finish_stream());
+        assert_eq!(logs.len(), 2);
+        for log in &logs {
+            assert!(log.text.len() <= 8192);
+            assert!(log.text.contains("call-2"));
+            assert!(!log.text.contains("secret-key"));
+        }
+        assert!(logs[0].text.contains("source.rs"));
+        assert!(logs[1].text.contains("HEAD"));
+        assert!(logs[1].text.contains("TAIL"));
+        assert!(logs[1].text.contains("[truncated]"));
+        let status = match is_error {
+            Some(true) => "error",
+            Some(false) => "success",
+            None => "unknown",
+        };
+        assert!(logs[1].text.contains(&format!("status={status}")));
+    }
+}

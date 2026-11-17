@@ -137,11 +137,16 @@ async fn terminal_error_continues_once_in_the_same_session() {
         fs::read_to_string(state.with_extension("prompt.2")).assert_value(),
         "Continue"
     );
-    assert!(rendered.contains("Codex command completed: cargo test [failed] exit=1"));
+    assert!(
+        rendered
+            .contains("Codex tool call: command_execution id=unknown status=unknown\ncargo test")
+    );
+    assert!(rendered.contains("status=failed exit=1"));
     assert!(rendered.contains("hidden [REDACTED]"));
     assert!(rendered.contains("Codex provider failure: provider lost [REDACTED]"));
     assert!(rendered.contains("Codex provider failed; continuing once"));
-    assert!(rendered.contains("Codex file change completed: update src/lib.rs"));
+    assert!(rendered.contains("Codex tool completed: file_change"));
+    assert!(rendered.contains(r#""kind":"update","path":"src/lib.rs""#));
     assert!(!rendered.contains("sentinel-secret"));
     let paths = fs::read_to_string(state.with_extension("files")).assert_value();
     let paths = paths.lines().collect::<Vec<_>>();

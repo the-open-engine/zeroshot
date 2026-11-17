@@ -1,3 +1,4 @@
+use crate::harnesses::adapters::core::tool_activity::ToolActivity;
 use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -127,6 +128,7 @@ pub(super) struct CopilotRpc<'a> {
     pub(super) response: Option<String>,
     pub(super) initialized: bool,
     pub(super) redactions: Vec<String>,
+    pub(super) tools: ToolActivity,
     authentication: auth::CopilotAuthentication<'a>,
     provider: Option<&'a provider::LocalProvider>,
     active_memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
@@ -172,6 +174,7 @@ impl<'a> CopilotRpc<'a> {
             response: None,
             initialized: false,
             redactions,
+            tools: ToolActivity::default(),
             authentication: native.authentication,
             provider: native.provider,
             active_memory: None,

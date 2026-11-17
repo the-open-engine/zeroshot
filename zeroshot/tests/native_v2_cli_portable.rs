@@ -193,3 +193,6 @@ fn process_exists(pid: u32) -> bool {
         pending
     }
 }
+
+#[path = "native_v2_cli_portable/tool_activity_tests.rs"]
+mod tool_activity_tests;

@@ -154,6 +154,14 @@ Successful terminal results keep their existing representation.
 
 ## Resume event and log streams
 
+Codex, Claude, Copilot and Pi record native tool calls and completions in both logs and node
+transcripts by default, including tool identity, available call IDs, arguments, reported status
+and result excerpts. Missing status remains unknown. Known credentials are redacted before each
+entry is shortened. Each complete call entry and each completion entry is limited to 8 KiB,
+including its header and any visible truncation marker; large payloads retain their head and tail.
+Intermediate cumulative updates are omitted. These limits apply only to logs, so storage grows
+with tool count; they do not limit provider inputs, agent-visible results or total run storage.
+
 `watch` follows status events; `logs` follows safe provider and controller log records. Both accept
 an opaque cursor and resume strictly after it:
 

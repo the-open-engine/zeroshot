@@ -50,11 +50,19 @@ impl Observed {
         assert_token_usage(self.usages[0], USAGE);
     }
 
-    fn assert_inputs_private(&self, case: &str) {
+    fn assert_denial_inputs_private(&self, case: &str) {
         for record in &self.records {
             assert!(
-                !record.text.contains(PRIVATE_INPUT) && !record.text.contains(CREDENTIAL),
-                "{case}: a denied call's input or credential was published: {}",
+                !record.text.contains(CREDENTIAL),
+                "{case}: a credential was published: {}",
+                record.text
+            );
+        }
+        // Native call entries include redacted arguments; denial summaries still exclude inputs.
+        for record in self.diagnostics() {
+            assert!(
+                !record.text.contains(PRIVATE_INPUT),
+                "{case}: a denial summary included a call's input: {}",
                 record.text
             );
         }
@@ -218,7 +226,16 @@ fn stated_counts(text: &str, tools: &[&str]) -> [BTreeMap<String, u64>; 2] {
 async fn completed_task_with_three_of_ten_calls_denied_stays_successful_and_reports_them() {
     let observed = observe("claude-three-of-ten-denied", &three_of_ten_denied()).await;
     observed.assert_completed("three of ten denied");
-    observed.assert_inputs_private("three of ten denied");
+    observed.assert_denial_inputs_private("three of ten denied");
+    assert_eq!(
+        observed
+            .records
+            .iter()
+            .filter(|record| record.text.starts_with("Claude tool "))
+            .count(),
+        20,
+        "tool activity remains separate from the permission-denial summary"
+    );
     let diagnostics = observed.diagnostics();
     assert_eq!(
         diagnostics.len(),
@@ -276,7 +293,7 @@ async fn many_adversarial_denied_tools_stay_one_bounded_redacted_record() {
     )
     .await;
     observed.assert_completed("many denied tools");
-    observed.assert_inputs_private("many denied tools");
+    observed.assert_denial_inputs_private("many denied tools");
     let diagnostics = observed.diagnostics();
     assert_eq!(
         diagnostics.len(),

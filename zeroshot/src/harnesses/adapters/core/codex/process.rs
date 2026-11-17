@@ -13,7 +13,7 @@ use crate::native_v2_capsule::provider_process::{
     text::ProviderText,
 };
 use crate::native_v2_contract::TokenUsageDelta;
-use crate::native_v2_runner::{DriverControl, LiveOutput, NodeRunnerError};
+use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
 
 use super::output::{CodexEmission, CodexOutput, CodexOutputDecoder};
 use super::session::CodexSession;
@@ -78,6 +78,11 @@ async fn collect_output(
         }
         if completion_deadline.is_none() && decoder.is_completed() {
             completion_deadline = Some(Instant::now() + COMPLETED_TURN_GRACE);
+        }
+    }
+    for emission in decoder.finish_stream() {
+        if delivery_error.is_none() {
+            delivery_error = emit_text(control, &emission, redactions).await.err();
         }
     }
     let mut collected = finish_collection(decoder, delivery_error);
@@ -360,9 +365,10 @@ async fn emit_text(
     for output in emissions {
         control.emit(output).await?;
     }
-    let (stream, text) = emission.log();
-    if text.is_empty() {
-        control.emit(LiveOutput::new(stream, "")?).await?;
+    if matches!(emission, CodexEmission::AgentMessage(text) if text.is_empty()) {
+        control
+            .emit(LiveOutput::new(LiveOutputStream::Output, "")?)
+            .await?;
     }
     Ok(())
 }

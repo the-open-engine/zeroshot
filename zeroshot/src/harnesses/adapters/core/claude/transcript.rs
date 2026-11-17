@@ -1,3 +1,6 @@
+use crate::harnesses::adapters::core::tool_activity::{
+    ToolActivity, ToolIdentity, ToolEntry, error_status,
+};
 use crate::native_v2_capsule::{
     provider_json_lines::{ProviderJsonLine, ProviderJsonLines, parse_provider_json},
     provider_process::{
@@ -66,6 +69,7 @@ pub(super) struct ClaudeTranscript {
     oversized_records: usize,
     permission_denials: PermissionDenials,
     pending: ProviderText,
+    tools: ToolActivity,
 }
 
 impl ClaudeTranscript {
@@ -87,6 +91,7 @@ impl ClaudeTranscript {
             oversized_records: 0,
             permission_denials: PermissionDenials::default(),
             pending: ProviderText::new(&redactions),
+            tools: ToolActivity::default(),
         }
     }
 }
@@ -258,7 +263,7 @@ impl ClaudeTranscript {
         };
         if !matches!(
             event_type,
-            "system" | "stream_event" | "assistant" | "rate_limit_event" | "result"
+            "system" | "stream_event" | "assistant" | "user" | "rate_limit_event" | "result"
         ) {
             return;
         }
@@ -285,6 +290,7 @@ impl ClaudeTranscript {
             "system" => self.parse_system(object, emissions),
             "stream_event" => self.parse_stream_event(object, emissions),
             "assistant" => self.parse_assistant(object, emissions),
+            "user" => self.parse_tool_results(object, emissions),
             "rate_limit_event" => self.parse_rate_limit_event(object, emissions),
             "result" => self.parse_result(object, emissions),
             _ => {}
@@ -465,9 +471,7 @@ impl ClaudeTranscript {
             self.authentication_rejected = true;
         }
         self.record_assistant_usage(event, message);
-        if self.visible_text_emitted {
-            return;
-        }
+        let visible_text_emitted = self.visible_text_emitted;
         let Some(content) = message.get("content").and_then(Value::as_array) else {
             return;
         };
@@ -475,12 +479,67 @@ impl ClaudeTranscript {
             let Some(block) = block.as_object() else {
                 continue;
             };
-            if block.get("type").and_then(Value::as_str) == Some("text") {
+            if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                let identity = ToolIdentity {
+                    name: block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .into(),
+                    id: block.get("id").and_then(Value::as_str).map(str::to_owned),
+                };
+                if let Some(identity) = self.tools.record(identity, false) {
+                    self.pending.boundary(emissions);
+                    ToolEntry::call(
+                        "Claude",
+                        identity,
+                        block.get("input").cloned().unwrap_or(Value::Null),
+                    )
+                    .emit(&self.pending, emissions);
+                }
+            }
+            if !visible_text_emitted && block.get("type").and_then(Value::as_str) == Some("text") {
                 if let Some(text) = block.get("text").and_then(Value::as_str) {
                     self.pending.push(emissions, LiveOutputStream::Output, text);
                     self.pending.boundary(emissions);
                     self.visible_text_emitted = true;
                 }
+            }
+        }
+    }
+
+    fn parse_tool_results(
+        &mut self,
+        event: &serde_json::Map<String, Value>,
+        emissions: &mut Vec<ClaudeEmission>,
+    ) {
+        let Some(content) = event
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array)
+        else {
+            return;
+        };
+        for block in content {
+            if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                continue;
+            }
+            let identity = ToolIdentity {
+                name: "unknown".into(),
+                id: block
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            };
+            if let Some(identity) = self.tools.record(identity, true) {
+                self.pending.boundary(emissions);
+                ToolEntry::completed(
+                    "Claude",
+                    identity,
+                    error_status(block.get("is_error").and_then(Value::as_bool)),
+                    block.get("content").cloned().unwrap_or(Value::Null),
+                )
+                .emit(&self.pending, emissions);
             }
         }
     }

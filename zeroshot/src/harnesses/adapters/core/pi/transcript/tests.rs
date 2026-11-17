@@ -779,3 +779,60 @@ fn redactions_are_deduplicated_and_applied_longest_first() {
         failure.diagnostic
     );
 }
+
+#[test]
+fn tool_activity_records_native_execution_events() {
+    let mut transcript = PiTranscript::new(Vec::new());
+    let stream = concat!(
+        r#"{"type":"tool_execution_start","toolCallId":"tool-1","toolName":"bash","args":{"command":"check-tool"}}"#,
+        "\n",
+        r#"{"type":"tool_execution_end","toolCallId":"tool-1","toolName":"bash","result":{"content":[{"type":"text","text":"tool-result"}]},"isError":false}"#,
+        "\n"
+    );
+    let mut logs = transcript.push(stream.as_bytes());
+    logs.extend(transcript.finish_stream());
+    let text = logs
+        .iter()
+        .map(|log| log.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for expected in ["bash", "tool-1", "check-tool", "tool-result"] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+}
+
+#[test]
+fn tool_activity_success_failure_unknown_and_repeated_events() {
+    for is_error in [Some(false), Some(true), None] {
+        let mut transcript = PiTranscript::new(vec!["secret-key".into()]);
+        let call = json!({"type":"tool_execution_start","toolName":"read","toolCallId":"call-2","args":{"path":"source.rs","credential":"secret-key"}});
+        let mut result = json!({"type":"tool_execution_end","toolName":"read","toolCallId":"call-2","result":{"content":[{"type":"text","text":"HEAD secret-key".to_owned() + &"界".repeat(9000) + " secret-key TAIL"}]}});
+        if let Some(error) = is_error {
+            result["isError"] = json!(error);
+        }
+        let mut logs = Vec::new();
+        for event in [&call, &call, &result, &result] {
+            let wire = format!("{event}\n").replace("secret-key", r"\u0073ecret-key");
+            for chunk in wire.as_bytes().chunks(97) {
+                logs.extend(transcript.push(chunk));
+            }
+        }
+        logs.extend(transcript.finish_stream());
+        assert_eq!(logs.len(), 2);
+        for log in &logs {
+            assert!(log.text.len() <= 8192);
+            assert!(log.text.contains("call-2"));
+            assert!(!log.text.contains("secret-key"));
+        }
+        assert!(logs[0].text.contains("source.rs"));
+        assert!(logs[1].text.contains("HEAD"));
+        assert!(logs[1].text.contains("TAIL"));
+        assert!(logs[1].text.contains("[truncated]"));
+        let status = match is_error {
+            Some(true) => "error",
+            Some(false) => "success",
+            None => "unknown",
+        };
+        assert!(logs[1].text.contains(&format!("status={status}")));
+    }
+}
