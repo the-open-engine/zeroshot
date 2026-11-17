@@ -8,8 +8,6 @@ use zeroshot_engine::full_v1_reducer::{
     StructuralOccurrence, TerminalProjection,
 };
 
-#[path = "support/impossible_joins.rs"]
-mod impossible_joins;
 #[path = "support/full_v1_reducer.rs"]
 mod reducer_test_support;
 use reducer_test_support::{verifier, TestWorkers};
@@ -321,7 +319,7 @@ async fn repeated_races_revisit_a_previously_voided_loser() {
 }
 
 #[tokio::test]
-async fn impossible_parallel_join_preserves_an_earlier_map_terminal_cancellation() {
+async fn parallel_terminal_preserves_an_earlier_map_terminal_cancellation() {
     let state = required_array_record(&[("items", "null")]);
     let fail = |name: &str| json!({"kind":"fail","name":name,"reason":"ended"});
     let graph = reducer_test_support::verified_graph(json!({"kind":"seq","name":"run","state":state,"promotedStatePaths":[],"children":[
@@ -343,7 +341,10 @@ async fn impossible_parallel_join_preserves_an_earlier_map_terminal_cancellation
         position: HistoryPosition::new(5).unwrap(),
         reason: ExecutionVoidReason::MapTerminal,
     };
-    let other = settled(SettledSpec::new(3, 3, "other").position(6), success(1));
+    let other = settled(
+        SettledSpec::new(3, 3, "other").dispatched(3).position(6),
+        success(1),
+    );
     let history = vec![first, cancelled, other];
     let reduced = FullV1Reducer::native_v2(&graph)
         .reduce(ReductionInput {
@@ -440,3 +441,6 @@ async fn repeated_race_does_not_revisit_or_cancel_a_later_rounds_first_execution
 
 #[path = "full_v1_reducer/replay_windows.rs"]
 mod replay_windows;
+
+#[path = "full_v1_reducer/parallel_terminals.rs"]
+mod parallel_terminals;

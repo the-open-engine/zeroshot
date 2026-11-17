@@ -173,11 +173,24 @@ has been reviewed. Deferred integration never advances `reviewBaseRevision`; `so
 the admitted source. Queue admission still uses the exact reviewed head and success requires an observed
 merged revision.
 
-When the forge refuses the run-branch push because of branch protection or missing push permission,
-delivery stops with a policy refusal naming the run branch and the forge's message, without another
+When delivery recognizes a forge refusal of the run-branch push due to branch protection or missing
+push permission, it stops with a policy refusal naming the run branch and the forge's message, without another
 agent round. Local work is preserved: let delivery push its run branch, then
 [resume the run](observe-and-control.md#restart-or-resume-a-failed-run). Other push rejections,
-including generic pre-receive hook messages, return to the repair loop.
+including generic pre-receive hook messages, first return to the repair loop. If the next rejected
+push has the same branch, revision and reason in Git's ref-status line, delivery stops with a plain
+refusal, preserving the work. Changing server messages outside that status line do not reset the
+rule. A different revision or reason gets another repair attempt; a successful or exact-ref-confirmed
+push clears the rejection. This applies to GitHub, GitLab and plain Git delivery. Push failures
+without a rejected ref-status line retain their existing handling.
+
+Resume starts with fresh rejection memory. Once the cause is removed,
+[select the `deliver` checkpoint](observe-and-control.md#restart-or-resume-a-failed-run) with
+`zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` to retry the retained candidate without
+another agent round. Local checkpoint restores also require `--discard-workspace-changes`, which
+replaces current files and the index; preserve any later edits first. A plain `zeroshot resume RUN_ID`
+restarts from that run's entry point and can run workers and reviewers again before delivery,
+potentially changing the candidate.
 
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale

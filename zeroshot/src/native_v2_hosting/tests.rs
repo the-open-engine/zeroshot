@@ -964,6 +964,7 @@ sys.stdin.read()
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "Steer the contained agent.".into(),
         },

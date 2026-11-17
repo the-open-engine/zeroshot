@@ -71,7 +71,11 @@ async fn steered_turn(mode: &str) -> (Value, usize) {
     use crate::v2_run_ledger::{CreateRun, RunLedger};
     use openengine_cluster_protocol::{RunId, RunSteerParams, RunVectorContent, Sha256Digest};
     let directory = TestDirectory::new("copilot-steer");
-    let executable = directory.write_executable("copilot", &script());
+    let source = script().replace(
+        "mode = os.environ.get",
+        "capability = os.environ.get('ZEROSHOT_STEERING_CAPABILITY')\nassert capability and __import__('pathlib').Path(capability).is_file()\nwith open(os.environ['CAPTURE_PATH']+'.network-capability', 'w') as capture: capture.write(capability)\nmode = os.environ.get",
+    );
+    let executable = directory.write_executable("copilot", &source);
     let mut values = fixture_values(&directory, mode);
     values.insert(auth::TOKEN.to_owned(), "gho_fake-secret".into());
     let binding = binding(values.keys().cloned());
@@ -89,6 +93,12 @@ async fn steered_turn(mode: &str) -> (Value, usize) {
         .assert_value();
     let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
     hooks.bind_ledger(run.clone(), ledger.clone());
+    hooks.configure_networks(
+        &serde_json::from_value(json!({
+            "team":{"members":["work"],"publishers":["work"]}
+        }))
+        .assert_value(),
+    );
     let workspace = directory.child("workspace");
     std::fs::create_dir(&workspace).assert_value();
     crate::execution::platform::private_directory(&directory.child("runtime")).assert_value();
@@ -144,6 +154,7 @@ async fn steered_turn(mode: &str) -> (Value, usize) {
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: openengine_cluster_protocol::SteeringMode::Standing,
             run_id: run.clone(),
             text: "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES),
         },
@@ -153,6 +164,11 @@ async fn steered_turn(mode: &str) -> (Value, usize) {
     std::fs::write(directory.child("capture.steer-release"), "").assert_value();
     let (_, outcome) = complete(handle).await;
     verified(outcome);
+    assert!(
+        directory
+            .read("capture.network-capability")
+            .ends_with("active-memory-capability.json")
+    );
     let replies: Value =
         serde_json::from_str(&directory.read("capture.steer-replies")).assert_value();
     let receipts = crate::v2_run_ledger::steering::all(ledger.as_ref(), &run)

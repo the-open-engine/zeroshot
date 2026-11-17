@@ -66,6 +66,10 @@ pub(crate) async fn try_execute_native_v2_preflight_with_environment<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
+    if let Some(result) = super::steering::try_publish(command, &environment).await? {
+        write_json(output, &result)?;
+        return Ok(Some(CliOutcome::Completed));
+    }
     if matches!(command, NativeV2CliCommand::Update) {
         return super::super::update::execute(output).await.map(Some);
     }

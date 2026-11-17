@@ -1152,10 +1152,13 @@ def test_steer_preserves_text_and_uses_run_route(
             assert steer.text_bytes == 262144
             assert len(steer.excerpt.encode()) == 1024
             assert steer.executions == ()
+            assert steer.mode == "standing"
+            assert steer.network is None
 
     asyncio.run(exercise())
     call = next(item for item in read_invocations(fake_native) if item["args"][0] == "steer")
     assert call["text"] == text
+    assert call["args"][call["args"].index("--mode") + 1] == "standing"
     assert ("--target" in call["args"]) == (target_kind != "local")
     assert not Path(call["args"][call["args"].index("--text-file") + 1]).exists()
 
@@ -1186,5 +1189,29 @@ def test_steer_vectors_preserve_kinds_receipts_and_maximum_full_text(
             assert page.vectors[1].content["execution"] == "execution-1"
             direction = await run.vector(page.vectors[0].id)
             assert direction.content["text"] == "é" * 131072
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("mode", ["once", "standing"])
+def test_steer_dispatches_explicit_mode(fake_native: Path, mode: str) -> None:
+    async def exercise() -> None:
+        async with Client() as client:
+            steer = await client.get_run("original").steer("direction", mode=mode)
+            assert steer.mode == mode
+
+    asyncio.run(exercise())
+    call = next(item for item in read_invocations(fake_native) if item["args"][0] == "steer")
+    assert call["args"][call["args"].index("--mode") + 1] == mode
+
+
+@pytest.mark.parametrize("mode", ["", "ONCE", "other", None, ["once"]])
+def test_steer_rejects_invalid_mode_before_dispatch(fake_native: Path, mode: object) -> None:
+    async def exercise() -> None:
+        async with Client() as client:
+            before = read_invocations(fake_native)
+            with pytest.raises(ValueError, match="mode must be once or standing"):
+                await client.get_run("original").steer("direction", mode=mode)
+            assert read_invocations(fake_native) == before
 
     asyncio.run(exercise())

@@ -272,10 +272,36 @@ impl super::RunSteerArgs {
                 ));
             }
         };
+        let networks = self
+            .networks
+            .into_iter()
+            .map(openengine_cluster_protocol::NodeName::new)
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?
+            .into_iter()
+            .collect::<Vec<_>>();
+        let run = self.run.into_selector()?;
+        if !networks.is_empty() && run.target.is_some() {
+            return Err(NativeV2CliError::Usage(
+                "network messages use the node's current run; --target is unsupported".into(),
+            ));
+        }
+        let mode = steer_mode(self.mode.as_deref(), !networks.is_empty());
         Ok(NativeV2CliCommand::Steer {
-            run: self.run.into_selector()?,
+            run,
             text,
+            networks,
+            mode,
         })
+    }
+}
+
+fn steer_mode(requested: Option<&str>, network: bool) -> openengine_cluster_protocol::SteeringMode {
+    match requested {
+        Some("once") => openengine_cluster_protocol::SteeringMode::Once,
+        Some("standing") => openengine_cluster_protocol::SteeringMode::Standing,
+        _ if network => openengine_cluster_protocol::SteeringMode::Once,
+        _ => openengine_cluster_protocol::SteeringMode::Standing,
     }
 }
 

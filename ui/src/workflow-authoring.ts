@@ -143,8 +143,16 @@ function terminalEndpoint(node: GraphNode): string | undefined {
   }
   if (node.kind === 'loop') return terminalEndpoint(node.body);
   if (node.kind === 'choice' && nested.length && nested.every(terminalEndpoint)) return node.name;
-  // Parallel consumes branch terminals and returns its group result even when the
-  // join cannot be reached. Following checkpoints must remain authorable.
+  if (node.kind === 'par' && nested.length) {
+    const continuing = nested.filter((child) => !terminalEndpoint(child)).length;
+    const required =
+      node.join?.kind === 'all'
+        ? nested.length
+        : node.join?.kind === 'quorum'
+          ? node.join.count
+          : 1;
+    if (continuing < required) return node.name;
+  }
   // An empty map bypasses even a terminal-only body.
   return undefined;
 }
@@ -503,8 +511,8 @@ export function automaticProtectionTarget(document: Document, name: string): str
 
   // A business decision can make a whole repeat unsuitable for automatic
   // protection. A fresh sequential activity still gets its own error checkpoint.
-  // Parallel/map branch terminals have group semantics: do not put that fallback
-  // inside them, where it would not represent ordinary sequential failure.
+  // Do not introduce a run-ending fallback inside a parallel branch or map item;
+  // selecting that earlier checkpoint would change cancellation and aggregation.
   const node = path.at(-1);
   if (
     node &&

@@ -264,7 +264,12 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
     assert_eq!(fixture.invocation_count(), 1);
     let logs = fixture.output(&["logs", next], "finish").await;
     assert_success(&logs, "expiry logs");
-    assert_eq!(String::from_utf8_lossy(&logs.stdout).matches("Node approval failed: timeout").count(), 1);
+    assert_eq!(
+        String::from_utf8_lossy(&logs.stdout)
+            .matches("Node approval failed: timeout")
+            .count(),
+        1
+    );
     let vectors = fixture.json(&["vectors", next], "finish").await;
     assert_eq!(vectors["vectors"][0]["kind"], "request");
     assert!(
@@ -304,7 +309,11 @@ done
 exec {restic} "$@"
 "#,
             mutation = shell_literal(
-                fixture.repository.join("local-mutation.txt").to_str().assert_value(),
+                fixture
+                    .repository
+                    .join("local-mutation.txt")
+                    .to_str()
+                    .assert_value(),
             ),
             delayed = shell_literal(delayed.to_str().assert_value()),
             restic = shell_literal(restic_selector::test_restic().to_str().assert_value()),
@@ -444,7 +453,10 @@ async fn request_answers_continue_the_checkpoint_conversation_without_replaying_
     let run = fixture.submit_detached("finish").await;
     fixture.wait_suspended(&run).await;
     wait_for_exit(fixture.ready_pid(&run)).await;
-    assert_eq!(conversations::worker_calls(&fixture), ["fresh local-thread"]);
+    assert_eq!(
+        conversations::worker_calls(&fixture),
+        ["fresh local-thread"]
+    );
     conversations::new_provider_home(&mut fixture);
 
     let answer = fixture.root.path("answer.json");
