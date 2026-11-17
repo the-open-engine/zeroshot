@@ -452,7 +452,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
   their separate short bound.
   A later local submission or resume scavenges orphaned bootstrap files after the bounded controller handoff
-  window without removing other run state.
+  window without removing other run state. Scavenging and submission-key lookup skip permission-denied
+  run storage, checking directory readability even when child metadata is accessible; readable runs
+  retain ordinary duplicate/conflict checks. Reported scan I/O errors name the failed path. Keep
+  filesystem error kinds until the scan applies its skip policy.
   The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
   provider variables; provider children still start from an empty environment. Snapshot values
   never enter profiles, ledgers, observation, or hosted adapters. Relative harness home overrides
@@ -1417,8 +1420,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unfamiliar failures use the existing optional `repair_required` signal. After exact-ref
   confirmation, only the exact forge-authored branch-protection and push-permission texts in
   `git_diagnostic.rs` (relayed `remote:` lines or GitHub's SSH `ERROR:` lines) become
-  `policy_refusal`, never repair; generic hook declines, `[remote rejected]` and bare HTTP 403 stay
-  on their existing paths. Only successful receipts
+  `policy_refusal`, never repair. Other `!` ref-status rejections first follow ordinary repair;
+  repeating the same branch, revision and status reason ends as a plain `refusal`, preserving work
+  for resume. Compare complete raw ref-status evidence before credential redaction, never variable
+  `remote:` text. Select the intended ref before rejecting duplicate statuses; rejections of unrelated
+  refs, including followed tags, cannot hide its evidence. Retain its redacted reason with that ref.
+  Rejection memory belongs only to the running delivery adapter, resets on resume,
+  and clears after successful or exact-ref-confirmed push. Changed revisions/reasons are new cases;
+  authentication, transient transport and failures without ref-status evidence retain their paths.
+  Only successful receipts
   require complete remote identity. Live output splits large UTF-8 diagnostics into bounded records.
   Delivery checks unresolved index entries before `git add --all` and completes resolved merges even
   when their tree has no staged difference. Other unfinished Git operations return raw status for

@@ -185,6 +185,7 @@ struct TransportAuthority {
     expire_during_update: AtomicBool,
     expire_before_push: AtomicBool,
     reject_expired_push: AtomicBool,
+    reject_review: AtomicBool,
     merged: AtomicBool,
     updates: AtomicUsize,
     synchronizations: AtomicUsize,
@@ -203,6 +204,7 @@ impl TransportAuthority {
             expire_during_update: AtomicBool::new(false),
             expire_before_push: AtomicBool::new(false),
             reject_expired_push: AtomicBool::new(false),
+            reject_review: AtomicBool::new(false),
             merged: AtomicBool::new(false),
             updates: AtomicUsize::new(0),
             synchronizations: AtomicUsize::new(0),
@@ -308,6 +310,12 @@ impl SourceDeliveryAuthority for TransportAuthority {
         request: &SourceReviewRequest,
         _credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
+        if self.reject_review.load(Ordering::SeqCst) {
+            return Err(SourceDeliveryError::api(
+                Some(400),
+                "review creation refused",
+            ));
+        }
         assert_eq!(
             reference(&self.remote, &request.head_branch),
             Some(request.head_revision.clone())
@@ -421,11 +429,20 @@ async fn execute(
     adapter: Arc<NativeV2DeliveryAdapter>,
     refresh: bool,
 ) -> DeliveryExecution {
-    let binding = delivery_runtime_binding(repo, DeliveryMode::Merge).await;
+    execute_mode(repo, adapter, refresh, DeliveryMode::Merge).await
+}
+
+async fn execute_mode(
+    repo: &TempRepo,
+    adapter: Arc<NativeV2DeliveryAdapter>,
+    refresh: bool,
+    mode: DeliveryMode,
+) -> DeliveryExecution {
+    let binding = delivery_runtime_binding(repo, mode).await;
     let request = DeliveryRunRequest {
         repo,
         attempts: 5,
-        mode: DeliveryMode::Merge,
+        mode,
         run_id: RUN,
         refresh: refresh.then(|| {
             Arc::new(RefreshedDeliveryEnvironment { binding })
@@ -954,4 +971,215 @@ async fn generic_pre_receive_rejection_still_reaches_the_repair_loop() {
         reference(&repo.remote, &delivery_head_branch(&RunId::new(RUN))),
         None
     );
+}
+
+#[tokio::test]
+async fn repeated_push_rejection_refuses_and_resume_publishes_the_retained_candidate() {
+    for (mode, delivered) in [
+        (DeliveryMode::Push, DELIVERY_PUSHED_LABEL),
+        (DeliveryMode::PullRequestV2, DELIVERY_READY_LABEL),
+        (DeliveryMode::MergeV3, DELIVERY_MERGED_LABEL),
+    ] {
+        let repo = TempRepo::delivery();
+        let server = HttpGit::start(&repo.remote);
+        let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
+        let delivery = adapter(&repo, authority.clone());
+        decline_run_branch_pushes(&repo.remote, &["request one: test-token"]);
+
+        let first = execute_mode(&repo, delivery.clone(), false, mode).await;
+        assert_delivery_signal(&first.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        let revision = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+        let branch = delivery_head_branch(&RunId::new(RUN));
+        decline_run_branch_pushes(&repo.remote, &["request two: test-token"]);
+
+        let second = execute_mode(&repo, delivery, false, mode).await;
+        assert_eq!(
+            second.outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+        );
+        let output = second
+            .output
+            .iter()
+            .map(|record| record.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for expected in [
+            &branch,
+            &revision,
+            "pre-receive hook declined",
+            "preserved",
+            "resume",
+        ] {
+            assert!(output.contains(expected), "missing {expected}: {output}");
+        }
+        assert!(!output.contains("test-token"));
+        assert_eq!(authority.pushes.load(Ordering::SeqCst), 2);
+        assert_eq!(reference(&repo.remote, &branch), None);
+        assert_eq!(
+            git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+            revision
+        );
+
+        let resumed_delivery = adopting_adapter(&repo, authority.clone());
+        let first_resumed = execute_mode(&repo, resumed_delivery.clone(), false, mode).await;
+        assert_delivery_signal(&first_resumed.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        fs::remove_file(repo.remote.join("hooks/pre-receive")).assert_value();
+        let resumed = execute_mode(&repo, resumed_delivery, false, mode).await;
+        assert_delivery_signal(&resumed.outcome, delivered);
+        assert_eq!(reference(&repo.remote, &branch), Some(revision.clone()));
+        assert_eq!(
+            git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+            revision
+        );
+        assert_eq!(authority.pushes.load(Ordering::SeqCst), 4);
+    }
+}
+
+#[tokio::test]
+async fn repeated_push_rejection_with_followed_tags_refuses_the_branch() {
+    let repo = TempRepo::delivery();
+    let revision = commit_file(&repo.workspace, "result.txt", "reviewed\n");
+    git(&repo.workspace, &["config", "push.followTags", "true"]);
+    git(
+        &repo.workspace,
+        &[
+            "-c",
+            "user.name=Transport Test",
+            "-c",
+            "user.email=transport@example.invalid",
+            "tag",
+            "-a",
+            "unpublished",
+            "-m",
+            "followed tag",
+        ],
+    );
+    let server = HttpGit::start(&repo.remote);
+    let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
+    let delivery = adapter(&repo, authority.clone());
+    decline_run_branch_pushes(&repo.remote, &["repairable content rule"]);
+
+    let first = execute_mode(&repo, delivery.clone(), false, DeliveryMode::Push).await;
+    assert_delivery_signal(&first.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    let diagnostic = outcome_diagnostic(&first.outcome);
+    assert!(
+        diagnostic.contains(":refs/tags/unpublished"),
+        "{diagnostic}"
+    );
+    assert_eq!(
+        diagnostic
+            .lines()
+            .filter(|line| line.starts_with("!\t"))
+            .count(),
+        2
+    );
+
+    let second = execute_mode(&repo, delivery, false, DeliveryMode::Push).await;
+    assert_eq!(
+        second.outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+    );
+    assert_eq!(authority.pushes.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+        revision
+    );
+
+    fs::remove_file(repo.remote.join("hooks/pre-receive")).assert_value();
+    let resumed = execute_mode(
+        &repo,
+        adopting_adapter(&repo, authority),
+        false,
+        DeliveryMode::Push,
+    )
+    .await;
+    assert_delivery_signal(&resumed.outcome, DELIVERY_PUSHED_LABEL);
+    assert_eq!(
+        git_output(&repo.remote, &["rev-parse", "refs/tags/unpublished^{}"]),
+        revision
+    );
+}
+
+#[tokio::test]
+async fn changed_revision_or_ref_status_reason_gets_a_new_repair_attempt() {
+    let repo = TempRepo::delivery();
+    let server = HttpGit::start(&repo.remote);
+    let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
+    let delivery = adapter(&repo, authority.clone());
+    decline_run_branch_pushes(&repo.remote, &["repairable content rule"]);
+    let first = execute(&repo, delivery.clone(), false).await;
+    assert_delivery_signal(&first.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    let first_revision = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+
+    fs::write(repo.workspace.join("repair.txt"), "content repair\n").assert_value();
+    let changed = execute(&repo, delivery.clone(), false).await;
+    assert_delivery_signal(&changed.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    let revision = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+    assert_ne!(revision, first_revision);
+
+    // An update hook yields `(hook declined)`, rather than `(pre-receive hook declined)`.
+    fs::remove_file(repo.remote.join("hooks/pre-receive")).assert_value();
+    write_executable(&repo.remote.join("hooks"), "update", "#!/bin/sh\nexit 1\n");
+    let changed_reason = execute(&repo, delivery.clone(), false).await;
+    assert_delivery_signal(&changed_reason.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(
+        outcome_diagnostic(&changed_reason.outcome).contains("[remote rejected] (hook declined)")
+    );
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+        revision
+    );
+
+    let repeated = execute(&repo, delivery, false).await;
+    assert_eq!(
+        repeated.outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+    );
+    assert_eq!(authority.pushes.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn confirmed_push_clears_rejection_even_when_review_creation_fails() {
+    for lost_response in [false, true] {
+        let repo = TempRepo::delivery();
+        let server = HttpGit::start(&repo.remote);
+        let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
+        let delivery = adapter(&repo, authority.clone());
+        decline_run_branch_pushes(&repo.remote, &["temporary content rule"]);
+        let first = execute(&repo, delivery.clone(), false).await;
+        assert_delivery_signal(&first.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        let revision = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+        let branch = delivery_head_branch(&RunId::new(RUN));
+
+        fs::remove_file(repo.remote.join("hooks/pre-receive")).assert_value();
+        authority.reject_review.store(true, Ordering::SeqCst);
+        server
+            .faults
+            .drop_push_response_once
+            .store(lost_response, Ordering::SeqCst);
+        let published = execute(&repo, delivery.clone(), false).await;
+        assert_eq!(
+            published.outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+        );
+        assert_eq!(reference(&repo.remote, &branch), Some(revision.clone()));
+        assert_eq!(
+            server.faults.dropped_responses.load(Ordering::SeqCst),
+            usize::from(lost_response)
+        );
+
+        // No review was bound: a new rejection of this same candidate must start fresh.
+        git(
+            &repo.remote,
+            &["update-ref", "-d", &format!("refs/heads/{branch}")],
+        );
+        decline_run_branch_pushes(&repo.remote, &["temporary content rule"]);
+        let rejected_again = execute(&repo, delivery, false).await;
+        assert_delivery_signal(&rejected_again.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        assert_eq!(
+            git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+            revision
+        );
+        assert_eq!(authority.pushes.load(Ordering::SeqCst), 3);
+    }
 }
