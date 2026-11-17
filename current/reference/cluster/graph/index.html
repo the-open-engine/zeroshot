@@ -1714,6 +1714,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#peer-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Peer networks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#data-and-control-separation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2287,6 +2298,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#peer-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Peer networks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#data-and-control-separation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2415,7 +2437,8 @@ only an admission fixture for tests. Protocol methods and advertised backend cap
 separate from verification.</p>
 <h2 id="graph-wire-format">Graph wire format<a class="headerlink" href="#graph-wire-format" title="Permanent link">&para;</a></h2>
 <p><code>GraphSpec</code> has the required camel-case fields <code>profile</code>, <code>initialInput</code>, <code>policy</code>, and <code>root</code>.
-Every graph node is tagged by <code>kind</code>. Node payloads reject unknown fields.</p>
+Every graph node is tagged by <code>kind</code>. Node payloads reject unknown fields. The optional <code>networks</code>
+object declares peer communication permissions; omission or <code>{}</code> grants none.</p>
 <table>
 <thead>
 <tr>
@@ -2580,6 +2603,34 @@ and loops retain control of recovery; there is no global abort, cooldown, waitin
 automatic resumption. After usage becomes available,
 <a href="../../../guides/observe-and-control/#restart-or-resume-a-failed-run">resume the failed run</a> using its
 retained workspace or an available checkpoint.</p>
+<h2 id="peer-networks">Peer networks<a class="headerlink" href="#peer-networks" title="Permanent link">&para;</a></h2>
+<p><code>GraphSpec.networks</code> maps network names to <code>members</code> and <code>publishers</code> sets. Names use the same
+bounded identifier type as node names. A network must have at least one member. Every publisher
+must also be a member, and every listed
+node must name an executable graph node with an agent runtime binding. A network declaration
+applies to all instances of that logical node, including mapped instances. Omitted <code>publishers</code>
+defaults to an empty set, granting receive-only access.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"networks"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">"review"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">      </span><span class="nt">"members"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"builder"</span><span class="p">,</span><span class="w"> </span><span class="s2">"reviewer"</span><span class="p">],</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">      </span><span class="nt">"publishers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"builder"</span><span class="p">]</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>This fragment belongs beside <code>profile</code>, <code>initialInput</code>, <code>policy</code> and <code>root</code> in the graph. Admission
+rejects unknown node references and publishers outside their network's member set. The default is
+deny: undeclared networks grant no publication or message-delivery access. Only authorized
+publishers receive publication instructions and a host-owned execution capability. Other members
+receive attributed peer messages; nodes outside the member set receive neither those messages
+nor publication context.</p>
+<p>A publisher may address several networks in one message. Membership overlap yields one delivery
+per recipient, and the originating node instance stays excluded across provider sessions and
+successors. Other mapped instances of the same logical node can receive it. The message's <code>once</code>
+mode consumes one receipt per recipient node instance; <code>standing</code> consumes one receipt per
+provider conversation. Message publication supplements private agent context without changing
+authored instructions, routing, bindings or scheduling. See <a href="../../../guides/observe-and-control/#send-a-peer-message">Send a peer message</a>.</p>
 <h2 id="data-and-control-separation">Data and control separation<a class="headerlink" href="#data-and-control-separation" title="Permanent link">&para;</a></h2>
 <p>No selector or guard is source text. <code>DataSelector</code> is tagged by <code>source</code> and reads only a bounded,
 non-empty <code>FieldPath</code> from <code>state</code> or the current map <code>item</code>. An input binding has an explicit target
@@ -2810,7 +2861,7 @@ further diagnostics. The path shows field names with their <code>[index]</code> 
 The message is never shortened. The count and then the path only use the bytes the message leaves
 within 1,024 bytes: the count is left out when it does not fit, and <code>.../</code> replaces leading path
 segments that do not fit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis exceeds 65536 states or 8388608 count-cell work units (and 1 more diagnostic)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis exceeds 65536 states or 8388608 count-cell work units (and 1 more diagnostic)
 </code></pre></div>
 <p><code>StructuralBounds</code> carries a termination witness, a positive executable-visit upper limit,
 a positive concurrency upper limit, and positive per-node attempt ceilings. Maps rely on runtime

@@ -3951,7 +3951,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>  attach             Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>  force-stop         Force a run to stop and write the result as JSON
 <a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>  suspend            Request suspension at the next checkpoint and print status immediately
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>  steer              Send direction to agents or publish guidance to authorized graph networks
 <a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>  answer             Answer a suspended request from a JSON file and start its successor
 <a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>  inbox              Read pending requests or show the request made by one run. Reads never apply expiry
 <a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>  vectors            Read one page of the run vector record, or show an entry in full
@@ -5282,7 +5282,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-56-16" name="__codelineno-56-16" href="#__codelineno-56-16"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-steer"><code>zeroshot steer</code><a class="headerlink" href="#zeroshot-steer" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-57-1" name="__codelineno-57-1" href="#__codelineno-57-1"></a>Broadcast standing direction to every agent conversation in a running or suspended run
+<div class="highlight"><pre><span></span><code><a id="__codelineno-57-1" name="__codelineno-57-1" href="#__codelineno-57-1"></a>Send direction to agents or publish guidance to authorized graph networks
 <a id="__codelineno-57-2" name="__codelineno-57-2" href="#__codelineno-57-2"></a>
 <a id="__codelineno-57-3" name="__codelineno-57-3" href="#__codelineno-57-3"></a>Usage: zeroshot steer [OPTIONS] &lt;RUN_ID&gt; &lt;TEXT|--text-file &lt;FILE&gt;|--text-stdin&gt;
 <a id="__codelineno-57-4" name="__codelineno-57-4" href="#__codelineno-57-4"></a>
@@ -5303,8 +5303,16 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-57-19" name="__codelineno-57-19" href="#__codelineno-57-19"></a>      --text-stdin
 <a id="__codelineno-57-20" name="__codelineno-57-20" href="#__codelineno-57-20"></a>          Read UTF-8 direction from standard input
 <a id="__codelineno-57-21" name="__codelineno-57-21" href="#__codelineno-57-21"></a>
-<a id="__codelineno-57-22" name="__codelineno-57-22" href="#__codelineno-57-22"></a>  -h, --help
-<a id="__codelineno-57-23" name="__codelineno-57-23" href="#__codelineno-57-23"></a>          Print help
+<a id="__codelineno-57-22" name="__codelineno-57-22" href="#__codelineno-57-22"></a>      --network &lt;NAME&gt;
+<a id="__codelineno-57-23" name="__codelineno-57-23" href="#__codelineno-57-23"></a>          Broadcast to this authorized graph-local network; repeat for several networks
+<a id="__codelineno-57-24" name="__codelineno-57-24" href="#__codelineno-57-24"></a>
+<a id="__codelineno-57-25" name="__codelineno-57-25" href="#__codelineno-57-25"></a>      --mode &lt;MODE&gt;
+<a id="__codelineno-57-26" name="__codelineno-57-26" href="#__codelineno-57-26"></a>          Once per recipient node instance, or standing across fresh conversations. Defaults to once for network messages and standing for human direction
+<a id="__codelineno-57-27" name="__codelineno-57-27" href="#__codelineno-57-27"></a>
+<a id="__codelineno-57-28" name="__codelineno-57-28" href="#__codelineno-57-28"></a>          [possible values: once, standing]
+<a id="__codelineno-57-29" name="__codelineno-57-29" href="#__codelineno-57-29"></a>
+<a id="__codelineno-57-30" name="__codelineno-57-30" href="#__codelineno-57-30"></a>  -h, --help
+<a id="__codelineno-57-31" name="__codelineno-57-31" href="#__codelineno-57-31"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-answer"><code>zeroshot answer</code><a class="headerlink" href="#zeroshot-answer" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-58-1" name="__codelineno-58-1" href="#__codelineno-58-1"></a>Answer a suspended request from a JSON file and start its successor.
@@ -5573,7 +5581,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-71-21" name="__codelineno-71-21" href="#__codelineno-71-21"></a>  attach             Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-71-22" name="__codelineno-71-22" href="#__codelineno-71-22"></a>  force-stop         Force a run to stop and write the result as JSON
 <a id="__codelineno-71-23" name="__codelineno-71-23" href="#__codelineno-71-23"></a>  suspend            Request suspension at the next checkpoint and print status immediately
-<a id="__codelineno-71-24" name="__codelineno-71-24" href="#__codelineno-71-24"></a>  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+<a id="__codelineno-71-24" name="__codelineno-71-24" href="#__codelineno-71-24"></a>  steer              Send direction to agents or publish guidance to authorized graph networks
 <a id="__codelineno-71-25" name="__codelineno-71-25" href="#__codelineno-71-25"></a>  answer             Answer a suspended request from a JSON file and start its successor
 <a id="__codelineno-71-26" name="__codelineno-71-26" href="#__codelineno-71-26"></a>  inbox              Read pending requests or show the request made by one run. Reads never apply expiry
 <a id="__codelineno-71-27" name="__codelineno-71-27" href="#__codelineno-71-27"></a>  vectors            Read one page of the run vector record, or show an entry in full

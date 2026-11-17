@@ -4488,7 +4488,7 @@ completes before local controller startup or direct-target contact.</p>
 
 
 <h3 id="zeroshot.Run.steer" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">steer</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RunSteer</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">steer</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'once'</span><span class="p">,</span> <span class="s1">'standing'</span><span class="p">]</span> <span class="o">=</span> <span class="s1">'standing'</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RunSteer</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -4499,7 +4499,7 @@ completes before local controller startup or direct-target contact.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Record standing direction without continuing a suspended run.</p>
+        <p>Record direction without continuing a suspended run.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4512,13 +4512,23 @@ completes before local controller startup or direct-target contact.</p>
             <p>Nonblank UTF-8 direction, at most 262,144 bytes. Do not include secrets.</p>
           </div>
         </li>
+        <li class="doc-section-item field-body">
+            <b><code>mode</code></b>
+              (<code><span title="typing.Literal">Literal</span>[&#39;once&#39;, &#39;standing&#39;]</code>, default:
+                  <code>&#39;standing&#39;</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Standing once per provider conversation, or once per node instance.</p>
+          </div>
+        </li>
     </ul>
 
 
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunSteer(*, id: str, created_at: int, text_bytes: int, excerpt: str, received_executions: int, executions: tuple[str, ...], executions_omitted: bool = False)
+              <code><a class="autorefs autorefs-internal" title="              RunSteer(*, id: str, created_at: int, text_bytes: int, excerpt: str, received_executions: int, executions: tuple[str, ...], executions_omitted: bool = False, mode: Literal['once', 'standing'] = 'standing', network: dict[str, JsonValue] | None = None)
 
   
       dataclass
@@ -4533,6 +4543,13 @@ completes before local controller startup or direct-target contact.</p>
 
 <p><span class="doc-section-title">Raises:</span></p>
     <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If mode is neither once nor standing.</p>
+          </div>
+        </li>
         <li class="doc-section-item field-body">
               <code><a class="autorefs autorefs-internal" title="              RunNotFoundError(message: str, *, exit_code: int | None = None) (zeroshot.run_errors.RunNotFoundError)" href="../errors/#zeroshot.RunNotFoundError">RunNotFoundError</a></code>
             –
@@ -4981,6 +4998,7 @@ during review are not restacked, so rebase the pull requests above it by hand.</
 
 </div><p><code>await run.steer(text)</code> returns a <code>RunSteer</code> receipt for standing direction. It follows the handle's
 local or named-target route, leaves suspended runs suspended and uses the existing typed errors.
+Pass <code>mode="once"</code> to deliver once per node instance; <code>mode="standing"</code> remains the default.
 Read complete text through <code>Run.vector(receipt.id)</code>.</p>
 
 

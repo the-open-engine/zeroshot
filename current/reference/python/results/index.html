@@ -3945,7 +3945,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>steers</code></b>
-              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              RunSteer(*, id: str, created_at: int, text_bytes: int, excerpt: str, received_executions: int, executions: tuple[str, ...], executions_omitted: bool = False)
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              RunSteer(*, id: str, created_at: int, text_bytes: int, excerpt: str, received_executions: int, executions: tuple[str, ...], executions_omitted: bool = False, mode: Literal['once', 'standing'] = 'standing', network: dict[str, JsonValue] | None = None)
 
   
       dataclass
@@ -3954,7 +3954,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 )
           –
           <div class="doc-md-description">
-            <p>Standing directions with confirmed receiving executions.</p>
+            <p>Human and peer messages with recorded receiving executions.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -4003,7 +4003,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunSteer" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSteer</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">text_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">excerpt</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">received_executions</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">executions_omitted</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSteer</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">text_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">excerpt</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">received_executions</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">executions_omitted</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'once'</span><span class="p">,</span> <span class="s1">'standing'</span><span class="p">]</span> <span class="o">=</span> <span class="s1">'standing'</span><span class="p">,</span> <span class="n">network</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">JsonValue</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -4016,7 +4016,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 
-        <p>A recorded direction and its confirmed receiving executions.</p>
+        <p>A steering message with recorded receiving executions.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4058,7 +4058,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
               (<code><span title="int">int</span></code>)
           –
           <div class="doc-md-description">
-            <p>Total confirmed receiving executions.</p>
+            <p>Total recorded receiving executions.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -4077,6 +4077,31 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
           –
           <div class="doc-md-description">
             <p>Whether earlier receiving executions were omitted.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>mode</code></b>
+              (<code><span title="typing.Literal">Literal</span>[&#39;once&#39;, &#39;standing&#39;]</code>, default:
+                  <code>&#39;standing&#39;</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Once per node instance or standing guidance for each provider conversation.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>network</code></b>
+              (<code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a>] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Network names and originating node, instance and execution.
+None for human direction.</p>
           </div>
         </li>
     </ul>
@@ -5348,9 +5373,11 @@ and seven days after readiness.</p>
 
     </div>
 
-</div><p><code>RunStatus.steers</code> contains recorded directions and their confirmed receiving execution references.
+</div><p><code>RunStatus.steers</code> contains recorded directions and their recorded receiving execution references.
 Each <code>RunSteer</code> includes a vector ID, recording time, UTF-8 byte length, excerpt, total receiving
-executions and the 64 most recent references. <code>RunStatus.omitted_steers</code> reports omitted older steers.</p>
+executions and the 64 most recent references. Its <code>mode</code> is <code>once</code> or <code>standing</code>; optional <code>network</code>
+metadata retains destination names and the originating node, node instance and execution.
+<code>RunStatus.omitted_steers</code> reports omitted older steers.</p>
 
 
 
