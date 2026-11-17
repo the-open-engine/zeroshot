@@ -79,6 +79,7 @@ elif harness == 'pi':
     emit({'type':'session','id':identifier})
     emit({'type':'message_end','message':{'role':'assistant','content':[{'type':'text','text':answer}],'stopReason':'stop','usage':{'input':10,'output':2}}})
 elif harness == 'opencode':
+    sys.stdin.read()
     identifier=option('--session','ses_checkpoint')
     address(identifier,pathlib.Path(os.environ['HOME'])/'.local/share/opencode/opencode.db','--session' in args)
     emit({'type':'text','sessionID':identifier,'part':{'id':'text','messageID':'message','text':answer}})
