@@ -20,7 +20,8 @@ macOS retains process-group cleanup; descendants that detach can outlive the com
 
 On Linux and macOS, `SIGTERM` requests a cooperative stop of a detached local controller. It
 cancels owned work, confirms cleanup and records the existing `force_stopped` terminal result
-before exiting. An already recorded terminal result is preserved. The workspace and checkpoints
+before exiting. An already recorded terminal result is preserved, and a run that already
+suspended stays suspended. The workspace and checkpoints
 remain available for `zeroshot resume`; explicit `zeroshot force-stop` keeps its checkpoint
 discard behavior. Closing the invoking terminal still leaves a detached run running.
 

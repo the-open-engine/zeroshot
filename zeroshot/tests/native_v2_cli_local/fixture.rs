@@ -214,10 +214,23 @@ impl LocalFixture {
     }
 
     pub(super) async fn output(&self, args: &[&str], mode: &str) -> Output {
-        timeout(CLI_TIMEOUT, self.command(args, mode).output())
-            .await
-            .assert_value_with(&format!("local CLI deadline: {args:?}"))
-            .assert_value_with("start local CLI")
+        let deadline = Instant::now() + CLI_TIMEOUT;
+        loop {
+            let started = timeout(CLI_TIMEOUT, self.command(args, mode).output())
+                .await
+                .assert_value_with(&format!("local CLI deadline: {args:?}"));
+            match started {
+                // A process another test forked while this fixture's executable was being
+                // written holds it open for writing until that process executes.
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                        && Instant::now() < deadline =>
+                {
+                    sleep(Duration::from_millis(20)).await;
+                }
+                started => return started.assert_value_with("start local CLI"),
+            }
+        }
     }
 
     pub(super) async fn connection_set(&self) -> Value {

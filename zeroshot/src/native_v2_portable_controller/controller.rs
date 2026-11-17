@@ -281,6 +281,12 @@ impl PortableRunController {
     /// Reuses force-stop's cancellation and durable terminal semantics. The process request also
     /// tells local checkpoint cleanup to retain recovery data, unlike explicit force-stop.
     pub(super) async fn stop_for_shutdown(&self) -> Result<(), PortableControllerError> {
+        // A suspended attempt has no work left to stop, and forcing it would discard what it
+        // retains.
+        if self.inner.holds_suspension(&self.run_id).await {
+            self.inner.wait_runtime_settled(&self.run_id).await;
+            return Ok(());
+        }
         let result = self
             .inner
             .force(openengine_cluster_protocol::RunForceParams {
@@ -436,13 +442,15 @@ where
         .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     require_not_stopping(prepared)?;
     runtime.execution_seed = execution_seed;
-    let conversation_restore = seed_predecessor_history(bootstrap, &mut runtime)
-        .await?
-        .or_else(|| bootstrap.checkpoint.clone());
+    let source = seed_predecessor_history(bootstrap, &mut runtime).await?;
     let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
-    if let Some(selection) = conversation_restore {
-        let restored = crate::native_v2_supervisor::checkpoints::restore_checkpoint_conversations(
-            &selection,
+    if let Some(source) = source {
+        use crate::native_v2_supervisor::checkpoints;
+        let own = prepared.paths.storage().join("checkpoints");
+        let conversations = checkpoints::successor_conversations(source, &own)
+            .map_err(|error| PortableControllerError::Io(error.0))?;
+        let restored = checkpoints::restore_checkpoint_conversations(
+            &conversations,
             prepared.stopping.clone(),
         )
         .await;
@@ -494,12 +502,27 @@ async fn seed_predecessor_history(
             None => crate::native_v2_supervisor::continuation_history(&stored.snapshot),
         }
         .map_err(crate::native_v2_platform::NativeV2PlatformError::from)?;
-        Some(CheckpointRestore {
+        CheckpointRestore {
             directory: root.join(predecessor.as_str()).join("checkpoints"),
             selection: CheckpointRestoreSelection::Continue,
-        })
+        }
     } else {
-        None
+        if !matches!(
+            &bootstrap.checkpoint,
+            Some(CheckpointRestore {
+                selection: CheckpointRestoreSelection::Checkpoint { .. },
+                ..
+            })
+        ) {
+            runtime.execution_seed = crate::native_v2_supervisor::restart_history(&stored.snapshot);
+        }
+        bootstrap
+            .checkpoint
+            .clone()
+            .unwrap_or_else(|| CheckpointRestore {
+                directory: root.join(predecessor.as_str()).join("checkpoints"),
+                selection: CheckpointRestoreSelection::Latest,
+            })
     };
     let mut after = None;
     loop {
@@ -540,7 +563,7 @@ async fn seed_predecessor_history(
     )? {
         runtime.vector_seed.push(vector);
     }
-    Ok(conversation_restore)
+    Ok(Some(conversation_restore))
 }
 
 fn require_not_stopping(prepared: &PreparedControllerStart) -> Result<(), PortableControllerError> {

@@ -38,9 +38,10 @@ impl fmt::Display for CheckpointId {
     }
 }
 
-/// A successor restarts a failed graph or continues from a selected checkpoint or suspension.
-/// Checkpoint continuations, including suspended successors, restore captured node-instance provider
-/// conversations; restarts start new ones. Suspended local/direct continuations retain workspace files.
+/// A successor restarts a failed run where it started, or continues from a selected checkpoint or
+/// suspension. Checkpoint continuations, including suspended successors, restore captured
+/// node-instance provider conversations, and so does the restart of such a successor; the restart
+/// of a submitted run starts new ones. Suspended local/direct continuations retain workspace files.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunResumeFrom {

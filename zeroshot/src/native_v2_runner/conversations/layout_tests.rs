@@ -12,6 +12,19 @@ pub(crate) fn usage() -> Option<TokenUsageDelta> {
 }
 
 pub(crate) fn roundtrip(make: impl Fn(PathBuf, &Path) -> ConversationLayout, name: &str) {
+    let content = b"only the named conversation";
+    roundtrip_with(make, name, content, |restored, _| {
+        assert_eq!(restored, content);
+    });
+}
+
+/// `restored` receives the restored file's bytes and the successor workspace.
+pub(crate) fn roundtrip_with(
+    make: impl Fn(PathBuf, &Path) -> ConversationLayout,
+    name: &str,
+    content: &[u8],
+    restored: impl Fn(&[u8], &Path),
+) {
     let root = tempfile::tempdir().assert_value();
     let one = root.path().join("first/workspace");
     let two = root.path().join("second/workspace");
@@ -21,7 +34,7 @@ pub(crate) fn roundtrip(make: impl Fn(PathBuf, &Path) -> ConversationLayout, nam
     let after = make(root.path().join("second/provider"), &two);
     let file = before.storage.join(name);
     fs::create_dir_all(file.parent().unwrap()).assert_value();
-    fs::write(&file, b"only the named conversation").assert_value();
+    fs::write(&file, content).assert_value();
     fs::write(before.storage.join("auth.json"), b"credential marker").assert_value();
     fs::write(
         before.storage.join("settings.json"),
@@ -59,10 +72,7 @@ pub(crate) fn roundtrip(make: impl Fn(PathBuf, &Path) -> ConversationLayout, nam
         crate::execution::platform::FileAccess::Read,
     )
     .expect("restored transcript must remain private to the current user");
-    assert_eq!(
-        fs::read(after.storage.join(name)).assert_value(),
-        b"only the named conversation"
-    );
+    restored(&fs::read(after.storage.join(name)).assert_value(), &two);
     assert!(!after.storage.join("auth.json").exists());
     assert!(!after.storage.join("settings.json").exists());
 }
@@ -131,6 +141,54 @@ pub(crate) fn nested_storage_ownership(make: impl Fn(&Path) -> ConversationLayou
             )
             .is_err()
     );
+}
+
+/// A restore that fails after it created storage leaves that storage to the provider, which then
+/// writes its new conversation there.
+pub(crate) fn failed_restore_storage_ownership(
+    make: impl Fn(&Path) -> ConversationLayout,
+    filename: &str,
+    content: &[u8],
+) {
+    let root = tempfile::tempdir().assert_value();
+    let before = make(&root.path().join("old"));
+    fs::create_dir_all(&before.storage).assert_value();
+    fs::write(before.storage.join(filename), content).assert_value();
+    let source = before
+        .capture(ConversationMetadata {
+            harness: before.harness.to_owned(),
+            id: "checkpoint-id".to_owned(),
+            usage: usage(),
+        })
+        .assert_value();
+    let home = root.path().join("new");
+    crate::execution::platform::private_directory(&home).assert_value();
+    let after = make(&home);
+    let mut assigned = Vec::new();
+    assert!(
+        after
+            .restore_with_ownership(
+                ConversationRestore {
+                    source: &source,
+                    private_home: Some(&home),
+                    operation: &ConversationIo::default(),
+                },
+                |path| {
+                    assigned.push(path.to_owned());
+                    Ok(())
+                },
+            )
+            .is_err()
+    );
+    let expected = after
+        .storage
+        .ancestors()
+        .take_while(|path| path.starts_with(&home))
+        .map(Path::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(assigned, expected);
+    assert!(after.storage.is_dir());
+    assert!(!after.storage.join(filename).exists());
 }
 
 #[cfg(unix)]

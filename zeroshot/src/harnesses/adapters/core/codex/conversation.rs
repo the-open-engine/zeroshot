@@ -7,6 +7,7 @@ pub(crate) fn layout(home: PathBuf) -> ConversationLayout {
         harness: "codex",
         storage: home.join("sessions"),
         select,
+        relocate: None,
     }
 }
 fn select(root: &Path, id: &str) -> io::Result<Vec<PathBuf>> {
