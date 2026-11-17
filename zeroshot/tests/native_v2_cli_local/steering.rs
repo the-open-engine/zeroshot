@@ -390,6 +390,14 @@ async fn steer_request_answer_continues_conversation_with_only_new_direction() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_conversation() {
     let mut fixture = steer_fixture();
+    // Continue past the injected worker crash so both verifier attempts receive the steer.
+    let mut graph: Value =
+        serde_json::from_slice(&fs::read(&fixture.graph).assert_value()).assert_value();
+    let until = graph["root"]["children"][0]["until"].take();
+    graph["root"]["children"][0]["until"] = json!({"kind":"any","guards":[until,
+        {"kind":"in","value":{"source":"error","name":"worker"},"labels":["crash"]}
+    ]});
+    write_json(&fixture.graph, &graph);
     let run = fixture.submit_detached("steer-old").await;
     steer_held(&fixture).await;
     fixture

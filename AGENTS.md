@@ -232,6 +232,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
+- The reducer inventories error selectors across all choice, loop and first-join guards once per
+  reduction, including nested and aggregate guards. A final step/verifier error without any such
+  read becomes the reserved `unhandled` failure after crash retries, with node/code as the primary
+  diagnostic. Reads are graph-wide rather than path- or label-dependent; enclosing groups retain
+  their authored-terminal semantics. Keep reducer primary causes alongside retained ledger evidence.
 - Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`
   while running or stopping, including postmortem/finalization. Finished status carries only
   `terminalResult`. Graph-result logging and its watch event publish with `PrimaryGraphCompleted`;
@@ -1321,7 +1326,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   abrupt controller death keeps workspace locks held until then. No PID registry, cgroup or root
   privilege is required; procfs provides owned-child enumeration. Dedicated worker identities and
   Windows Job Objects keep their existing containment. macOS process groups do not cover descendants
-  that detach themselves; stronger macOS ownership remains deferred.
+  that detach themselves; stronger macOS ownership remains deferred. macOS refuses a signal for a
+  process group that holds only exited, unreaped members with EPERM: that is no termination failure,
+  and the cleanup wait that follows still has to see the group empty.
 - Contained provider sessions clean up surviving descendants immediately after the main process exits,
   before draining inherited output streams. Buffered output still drains under any explicit command
   deadline and a ten-minute ceiling while observing cancellation; cleanup stays scoped to its session.
@@ -1516,7 +1523,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   credential, and the trusted lane pins their contained repository-local commit identity to the delivery
   identity before handoff. Local checkouts retain their user's Git configuration. Merge receipts preserve GitHub's
   authoritative merged revision. When a required check fails, bounded repair diagnostics include
-  supporting failed checks and labelled raw job excerpts ending at the last GitHub error annotation.
+  supporting failed checks and labelled job excerpts retaining early failure context and the
+  final summary within both capture and per-job feedback bounds. Panic, assertion and traceback
+  contexts take priority over generic error/fatal fallback lines. GitHub excludes cleanup after
+  the last error annotation; truncated excerpts explicitly mark omitted output and keep a tail
+  fallback when no failure marker is recognized. Shared GitHub/GitLab log redaction covers forge
+  and separate Git credentials, including encoded authentication and SSH key lines, before excerpt selection.
+  The host carries its complete effective feedback-redaction set, including captured native Git
+  credentials without node connections, into successful log reads and bounded API failure diagnostics.
+  Classify raw failures before redaction and carry their positions with redacted log text through
+  capture, control removal and feedback aggregation; never infer failure positions from redacted text.
+  Classify raw GitHub annotations and unsupported log options before redaction; preserve full-secret
+  lookahead when excluding cleanup.
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
   Job-log reads opt into raw terminal sequences only inside bounded pipe capture, then remove
   controls before feedback; older GitHub CLI versions retry without the unsupported opt-in flag.
@@ -2025,8 +2043,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
-  A reducer `completed` group visit alone is neutral. All enclosing visits that the selected
-  succeed/fail node ended at its cursor, including parallel groups, take its outcome. The canonical
+  Implicit `unhandled` failures mark ending structural visits failed. A reducer `completed` group
+  visit alone is neutral. All enclosing visits that the selected succeed/fail node ended at its
+  cursor, including parallel groups, take its outcome. The canonical
   trace excludes terminals discarded by an earlier join. Editor terminals describe run outcomes;
   terminal-only parallel paths never acquire a synthetic unmet-join continuation. The shared
   `ui/src/fixtures/parallel-terminal.json` is checked by native control replay and browser projection.
@@ -2110,7 +2129,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 Run the narrowest relevant checks first, then the complete affected lane.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
-Suspension polling has a separate bounded checkpoint and cleanup budget from individual CLI calls.
+Suspension and terminal-failure polling share a bounded checkpoint and cleanup budget separate from
+individual CLI calls. Terminal polling rejects a different completed outcome immediately and includes
+the last observed status when its settlement deadline expires.
 Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.
 
 ```bash

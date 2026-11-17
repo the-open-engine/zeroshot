@@ -75,14 +75,13 @@ pub(crate) fn prepare_event(snapshot: &RunSnapshot, mut event: RunEvent) -> RunE
         && (context.is_none()
             || (snapshot.primary_graph.is_none()
                 && context.as_ref().is_some_and(|evidence| {
-                    evidence.primary.is_none()
-                        && evidence.recorded.is_empty()
-                        && evidence.verifiers.is_empty()
+                    evidence.recorded.is_empty() && evidence.verifiers.is_empty()
                 })))
         && reason.as_str() != "force_stopped"
     {
         let mut evidence = snapshot.failure_context.clone().unwrap_or_default();
         if let Some(reducer) = context.take() {
+            evidence.primary = reducer.primary.or(evidence.primary);
             for visit in reducer.exhausted_loops {
                 evidence.record_exhausted_loop(visit);
             }

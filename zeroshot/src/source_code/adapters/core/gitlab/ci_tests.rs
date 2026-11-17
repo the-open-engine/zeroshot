@@ -553,6 +553,182 @@ async fn unavailable_job_logs_preserve_job_details_and_other_excerpts() {
 }
 
 #[tokio::test]
+async fn shared_feedback_preserves_early_failures_in_multiple_uncut_logs() {
+    for native in [false, true] {
+        let fixture = ci_fixture(Some(json!(true)), Some("failed")).await;
+        let basic =
+            crate::native_v2_delivery::git_auth::encode_basic_credential(credential().expose());
+        let password = "separate-git-password-0123456789-abcdefghijklmnopqrstuvwxyz";
+        let git_basic = if native {
+            crate::native_v2_delivery::git_auth::encode_basic_credential(password)
+        } else {
+            crate::native_v2_delivery::git_auth::encode_user_password("git-user", password)
+        };
+        let secrets = vec![password.to_owned(), git_basic.clone()];
+        {
+            let mut state = fixture.state.lock().unwrap();
+            state.job_pages.insert(
+                1,
+                vec![
+                    failed_job(91, "first-tests", "test", Some("script_failure")),
+                    failed_job(92, "second-tests", "test", Some("script_failure")),
+                ],
+            );
+            for job in 91..93 {
+                let mut log = format!(
+                    "setup context for job {job}\nassertion failed in job {job}\n\
+                 error detail: \u{001b}[31mtest-private-token {basic}\u{0000}\n",
+                );
+                let redacted_prefix_len = log
+                    .replace("test-private-token", "[REDACTED]")
+                    .replace(&basic, "[REDACTED]")
+                    .len();
+                log.push_str(&"x".repeat(8 * 1024 - 24 - redacted_prefix_len));
+                log.push_str(if job == 91 { password } else { &git_basic });
+                log.push_str(&format!(
+                    "\n{}\njob ended with exit code 1\n",
+                    "noise\n".repeat(8_000)
+                ));
+                assert!(log.len() < 64 * 1024);
+                state.job_logs.insert(job, log.into_bytes());
+            }
+        }
+        let observed = fixture
+            .authority
+            .inspect_review(
+                &receipt(),
+                if native {
+                    credential().with_diagnostic_secrets(&secrets)
+                } else {
+                    credential().with_git(SourceGitCredential::Https {
+                        username: "git-user",
+                        password,
+                    })
+                },
+            )
+            .await
+            .unwrap();
+        let SourceReviewState::Open {
+            checks: SourceChecks::Failed { diagnostic },
+        } = observed.state
+        else {
+            panic!("expected a failed required pipeline");
+        };
+        let diagnostic = crate::native_v2_delivery::command::redact(
+            &diagnostic,
+            &[
+                password.to_owned(),
+                git_basic.clone(),
+                "git-user".to_owned(),
+            ],
+        );
+        assert!(diagnostic.chars().count() <= 64 * 1024);
+        for job in 91..93 {
+            assert!(diagnostic.contains(&format!("--- GitLab job {job} log excerpt ---")));
+            assert!(diagnostic.contains(&format!("setup context for job {job}")));
+            assert!(diagnostic.contains(&format!("assertion failed in job {job}")));
+        }
+        assert_eq!(
+            diagnostic
+                .matches("[intermediate log output truncated]")
+                .count(),
+            2
+        );
+        assert_eq!(
+            diagnostic
+                .matches("error detail: [31m[REDACTED] [REDACTED]")
+                .count(),
+            2
+        );
+        assert!(!diagnostic.contains("test-private-token"));
+        assert!(!diagnostic.contains(&basic));
+        assert!(!diagnostic.contains(&password[..24]));
+        assert!(!diagnostic.contains(&git_basic[..24]));
+        assert_eq!(diagnostic.matches("job ended with exit code 1").count(), 2);
+        assert!(
+            diagnostic
+                .chars()
+                .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        );
+    }
+}
+
+#[tokio::test]
+async fn redacted_failure_markers_retain_context_through_capture_and_aggregation() {
+    for (username, marker) in [
+        ("ordinary-user", "assertion failed: causal detail"),
+        ("assertion", "assertion failed: causal detail"),
+        ("error", "error: unresolved symbol"),
+    ] {
+        for native in [false, true] {
+            for (noise, jobs) in [(24_000, 1), (8_000, 2)] {
+                let fixture = ci_fixture(Some(json!(true)), Some("failed")).await;
+                {
+                    let mut state = fixture.state.lock().unwrap();
+                    state.job_pages.insert(
+                        1,
+                        (91..91 + jobs)
+                            .map(|id| failed_job(id, "tests", "test", Some("script_failure")))
+                            .collect(),
+                    );
+                    for job in 91..91 + jobs {
+                        let log = format!(
+                            "{}\nsetup-critical {job} 界🙂\n\u{001b}[31m{marker}\u{001b}[0m\n\
+                             causal description {job}\n{}\njob ended with exit code 1\n",
+                            format!("{username} 界🙂\u{0000}\n").repeat(300),
+                            "noise\n".repeat(noise),
+                        );
+                        assert_eq!(log.len() > 64 * 1024, jobs == 1);
+                        state.job_logs.insert(job, log.into_bytes());
+                    }
+                }
+                let secrets = vec![username.to_owned()];
+                let credential = if native {
+                    credential().with_diagnostic_secrets(&secrets)
+                } else {
+                    credential().with_git(SourceGitCredential::Https {
+                        username,
+                        password: "independent-git-password",
+                    })
+                };
+                let observed = fixture
+                    .authority
+                    .inspect_review(&receipt(), credential)
+                    .await
+                    .unwrap();
+                let SourceReviewState::Open {
+                    checks: SourceChecks::Failed { diagnostic },
+                } = observed.state
+                else {
+                    panic!("expected a failed required pipeline");
+                };
+                let diagnostic = crate::native_v2_delivery::command::redact(&diagnostic, &secrets);
+                assert!(diagnostic.chars().count() <= 64 * 1024);
+                for job in 91..91 + jobs {
+                    assert!(diagnostic.contains(&format!("--- GitLab job {job} log excerpt ---")));
+                    assert!(
+                        diagnostic.contains(&format!("setup-critical {job} 界🙂")),
+                        "{username}"
+                    );
+                    assert!(
+                        diagnostic.contains(&format!("causal description {job}")),
+                        "{username}"
+                    );
+                }
+                assert!(diagnostic.contains("job ended with exit code 1"));
+                assert!(!diagnostic.contains(username));
+                assert!(!diagnostic.contains('\u{fffd}'));
+                assert!(
+                    diagnostic
+                        .chars()
+                        .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn large_logs_are_bounded_redacted_and_fairly_shared_with_explicit_omissions() {
     let fixture = ci_fixture(Some(json!(true)), Some("failed")).await;
     let basic = crate::native_v2_delivery::git_auth::encode_basic_credential(credential().expose());

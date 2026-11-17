@@ -32,7 +32,16 @@ impl<'history> Engine<'history> {
         .after(traversal.after);
         record_completed(node, context, traversal, &status);
         self.trace_finish(trace, &status, context);
-        if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_)) {
+        // Implicit failures have no authored terminal node to expose their enclosing outcome.
+        if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_))
+            || matches!(
+                &status,
+                Status::Terminal {
+                    projection: TerminalProjection::Failed { reason, .. },
+                    ..
+                } if reason.as_str() == "unhandled"
+            )
+        {
             self.trace_terminal(trace, &status)?;
         }
         Ok(status)
@@ -386,6 +395,30 @@ impl<'history> Engine<'history> {
                 traversal,
                 execution,
                 input,
+            });
+        }
+        if let WorkerOutcome::Error { code, .. } = outcome
+            && !self.error_reads.contains(spec.name)
+        {
+            return Ok(Status::Terminal {
+                position: *position,
+                projection: TerminalProjection::Failed {
+                    reason: EnumLabel::new("unhandled")
+                        .map_err(|_| ReducerError::InconsistentHistory)?,
+                    context: Some(Box::new(openengine_cluster_protocol::FailureContext {
+                        primary: Some(openengine_cluster_protocol::FailureDiagnostic {
+                            message: openengine_cluster_protocol::BoundedLogMessage::new(format!(
+                                "Node {} failed with unhandled error: {}",
+                                spec.name,
+                                code.as_str(),
+                            ))
+                            .map_err(|_| ReducerError::Encoding)?,
+                            execution: None,
+                            cursor: None,
+                        }),
+                        ..Default::default()
+                    })),
+                },
             });
         }
         let writes_applied = self.apply_outcome(OutcomeApplication {

@@ -209,7 +209,9 @@ impl<'a> FullV1Reducer<'a> {
                     && (!engine.loop_evidence.exhausted_loops.is_empty()
                         || engine.loop_evidence.incomplete)
                 {
-                    *context = Some(Box::new(engine.loop_evidence));
+                    let evidence = context.get_or_insert_default();
+                    evidence.exhausted_loops = engine.loop_evidence.exhausted_loops;
+                    evidence.incomplete |= engine.loop_evidence.incomplete;
                 }
                 Some(projection)
             }
@@ -436,6 +438,7 @@ struct Engine<'a> {
     decisions: Vec<Decision>,
     map_depths: BTreeMap<NodeName, usize>,
     map_owners: BTreeMap<NodeName, NodeName>,
+    error_reads: BTreeSet<NodeName>,
     by_occurrence: BTreeMap<StructuralOccurrence, Vec<&'a DurableExecution>>,
     optional_promotions: BTreeMap<NodeName, BTreeSet<FieldPath>>,
     consumed_executions: BTreeSet<ExecutionId>,
@@ -469,6 +472,8 @@ impl<'a> Engine<'a> {
         collect_map_depths(root, 0, &mut map_depths);
         let mut map_owners = BTreeMap::new();
         collect_map_owners(root, None, &mut map_owners);
+        let mut error_reads = BTreeSet::new();
+        control::collect_error_reads(root, &mut error_reads);
         let mut by_occurrence = BTreeMap::<StructuralOccurrence, Vec<&'a DurableExecution>>::new();
         for execution in input.executions {
             by_occurrence
@@ -509,6 +514,7 @@ impl<'a> Engine<'a> {
             decisions: Vec::new(),
             map_depths,
             map_owners,
+            error_reads,
             by_occurrence,
             optional_promotions,
             consumed_executions: BTreeSet::new(),

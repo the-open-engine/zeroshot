@@ -11,7 +11,7 @@ use tokio::process::{Child, Command};
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
-// Suspension includes checkpoint I/O and runtime cleanup, beyond a single CLI request.
+// Checkpoint I/O and runtime cleanup can outlast an individual CLI request.
 const SUSPENSION_TIMEOUT: Duration = Duration::from_secs(120);
 const DECLARED_KEY: &str = "local-declared-key";
 
@@ -394,18 +394,19 @@ impl LocalFixture {
     }
 
     pub(super) async fn wait_terminal(&self, run_id: &str, mode: &str, reason: &str) -> Value {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+        let mut last_status = None;
         loop {
             if let Some(status) = self.available_status(run_id, mode).await {
-                if terminal_result(&status)
-                    .is_some_and(|terminal| terminal.assert_key("reason") == reason)
-                {
+                if let Some(terminal) = terminal_result(&status) {
+                    assert_eq!(terminal.assert_key("reason"), reason, "{status}");
                     return status;
                 }
+                last_status = Some(status);
             }
             assert!(
                 Instant::now() < deadline,
-                "run did not finish with reason {reason}"
+                "run did not finish with reason {reason}; last status: {last_status:?}"
             );
             sleep(Duration::from_millis(30)).await;
         }
@@ -682,10 +683,10 @@ printf 'declared-only\n' > "$PWD/environment-proof.txt"
 cat >/dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"local-thread"}'
 printf '%s\n' '{"type":"turn.started"}'
-if test "${FAKE_CODEX_MODE-}" = hold; then
+if test "${FAKE_CODEX_MODE-}" = hold || test "${FAKE_CODEX_MODE-}" = hold-fail; then
   while ! test -f "$PWD/release-turn"; do sleep 0.05; done
 fi
-if test "${FAKE_CODEX_MODE-}" = fail; then
+if test "${FAKE_CODEX_MODE-}" = fail || test "${FAKE_CODEX_MODE-}" = hold-fail; then
   printf '%s\n' '{"type":"turn.failed","error":{"message":"injected failure"}}'
   exit 1
 fi
