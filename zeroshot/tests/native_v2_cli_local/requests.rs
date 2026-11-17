@@ -327,15 +327,27 @@ exec {restic} "$@"
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn terminal_failure_waits_for_a_slow_checkpoint() {
-    let (fixture, delayed) = with_slow_checkpoint(LocalFixture::new());
-    let run = fixture.submit_detached("hold-fail").await;
-    fixture.wait_running(&run).await;
-    let started = Instant::now();
-    fs::write(fixture.repository.join("release-turn"), "go").assert_value();
-    fixture.wait_terminal(&run, "hold-fail", "worker_failed").await;
-    assert!(delayed.exists(), "the failure checkpoint must be delayed");
-    assert!(started.elapsed() > CLI_TIMEOUT);
+async fn terminal_outcomes_wait_for_slow_checkpoints() {
+    for (mode, reason) in [("hold-fail", Some("worker_failed")), ("hold", None)] {
+        let fixture = LocalFixture::new();
+        let fixture = if reason.is_none() {
+            fixture.with_second_worker()
+        } else {
+            fixture
+        };
+        let (fixture, delayed) = with_slow_checkpoint(fixture);
+        let run = fixture.submit_detached(mode).await;
+        fixture.wait_running(&run).await;
+        let started = Instant::now();
+        fs::write(fixture.repository.join("release-turn"), "go").assert_value();
+        if let Some(reason) = reason {
+            fixture.wait_terminal(&run, mode, reason).await;
+        } else {
+            fixture.wait_succeeded(&run, mode).await;
+        }
+        assert!(delayed.exists(), "the final checkpoint must be delayed");
+        assert!(started.elapsed() > CLI_TIMEOUT);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

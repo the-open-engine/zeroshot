@@ -188,7 +188,7 @@ async fn assert_authority_steers(fixture: &LocalFixture, run: &str, expected: us
 async fn networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs() {
     let suspended = authority_fixture();
     let suspended_run = suspended.submit_detached("networks").await;
-    network_wait(&suspended, "authority-held").await;
+    network_wait(&suspended, &suspended_run, "authority-held").await;
     suspended
         .json(&["suspend", &suspended_run], "networks")
         .await;
@@ -197,10 +197,10 @@ async fn networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs()
     wait_for_exit(suspended.ready_pid(&suspended_run)).await;
     let active = authority_fixture();
     let active_run = active.submit_detached("networks").await;
-    network_wait(&active, "authority-held").await;
+    network_wait(&active, &active_run, "authority-held").await;
     let source = authority_fixture();
     let source_run = source.submit_detached("networks").await;
-    network_wait(&source, "authority-held").await;
+    network_wait(&source, &source_run, "authority-held").await;
     for (fixture, run) in [(&source, &source_run), (&suspended, &suspended_run)] {
         let owner = fixture
             .json(&["steer", run, "authorized-owner-marker"], "networks")
@@ -225,7 +225,7 @@ async fn networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs()
         authority_target(&suspended, &suspended_run, false),
     ]);
     write_json(&source.repository.join("authority-jobs.json"), &json!(jobs));
-    network_wait(&source, "authority-checked").await;
+    network_wait(&source, &source_run, "authority-checked").await;
     assert_authority_denials(&source, &source_run, &jobs);
     for (fixture, run, count) in [
         (&source, &source_run, 2),

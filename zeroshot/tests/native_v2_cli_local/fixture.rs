@@ -274,7 +274,7 @@ impl LocalFixture {
             self.runtime.to_str().assert_value_with("runtime path"),
         ];
         timeout(
-            CLI_TIMEOUT,
+            SUSPENSION_TIMEOUT,
             self.command_with_inline(&arguments, "finish", false)
                 .output(),
         )
@@ -380,7 +380,7 @@ impl LocalFixture {
     }
 
     pub(super) async fn wait_running(&self, run_id: &str) -> Value {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let deadline = Instant::now() + SUSPENSION_TIMEOUT;
         loop {
             if let Some(status) = self.available_status(run_id, "block").await {
                 if status.assert_key("status").assert_key("phase") == "running"
@@ -418,7 +418,7 @@ impl LocalFixture {
     }
 
     pub(super) async fn wait_succeeded(&self, run_id: &str, mode: &str) -> Value {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let deadline = Instant::now() + SUSPENSION_TIMEOUT;
         let mut last_status = None;
         loop {
             if let Some(status) = self.available_status(run_id, mode).await {
