@@ -433,6 +433,7 @@ jobs:
           cargo test --locked --package zeroshot --lib --features ui --
           native_v2_portable_controller::transport::unix::tests
           native_v2_supervisor::checkpoints::filesystem::tests::macos_
+          native_v2_supervisor::checkpoints::filesystem::tests::cancellation_after_metadata_leaves_only_the_prior_snapshot
       - name: Run macOS workspace export regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace

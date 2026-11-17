@@ -1118,7 +1118,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
   read-only boundaries reuse bytes. Local/direct storage normalizes Git into a temporary private
   filesystem stage, commits it to one deduplicated Restic repository per recovery lineage, and then
-  removes the full stage. Small catalogs atomically map logical checkpoint IDs to Restic snapshots.
+  removes the full stage. Capture does not sync each copied workspace file or directory;
+  metadata and catalogs retain their durable writes. Small catalogs atomically map logical
+  checkpoint IDs to Restic snapshots.
   Restic drains progress and private stderr completely with bounded memory, retaining only the
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
