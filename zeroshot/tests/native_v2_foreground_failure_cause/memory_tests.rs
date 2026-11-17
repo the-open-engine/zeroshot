@@ -1,6 +1,7 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 fn memory_runtime(fixture: &LocalFixture, enabled: bool, postmortem: bool) {
     let path = fixture.repository.parent().unwrap().join("runtime.json");
@@ -72,6 +73,90 @@ async fn corrupt_memory_store_is_visible_with_postmortem_disabled_and_preserves_
             );
         }
         assert_eq!(fs::read(&store).unwrap(), b"this is not a SQLite database");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn malformed_memory_records_report_safe_causes_without_exposing_stored_values() {
+    let fixture = LocalFixture::new().without_checkpoints();
+    memory_runtime(&fixture, true, false);
+    let seeded = fixture.run("Initialize memory", "finish", false).await;
+    assert_success(&seeded, "initialize healthy memory");
+    let receipt = json_lines(&seeded.stdout);
+    let ledger = rusqlite::Connection::open(
+        fixture
+            .run_storage(receipt[0]["runId"].as_str().unwrap())
+            .join("runs.sqlite3"),
+    )
+    .unwrap();
+    let stored: String = ledger
+        .query_row("SELECT stored_json FROM v2_runs LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let admitted: Value = serde_json::from_str(&stored).unwrap();
+    let graph: openengine_cluster_protocol::CompiledGraphIr =
+        serde_json::from_value(admitted["admitted"]["graph"].clone()).unwrap();
+    let graph_hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&graph).unwrap()));
+    drop(ledger);
+    let store = fixture
+        .repository
+        .parent()
+        .unwrap()
+        .join("state/active-memory/lessons.sqlite3");
+    // This is the fixture's declared provider credential. Neither a whole-record type error nor
+    // an invalid scope tag may echo stored text, even if its value is unknown to a redactor.
+    let private = "local-declared-key";
+    for body in [json!(private), json!({"scope":{"kind":private}})] {
+        let body = body.to_string();
+        let database = rusqlite::Connection::open(&store).unwrap();
+        database.execute(
+            "INSERT OR REPLACE INTO active_memory_records(id,revision,deleted,kind,graph_hash,body) VALUES('malformed',1,0,'graph',?1,?2)",
+            rusqlite::params![graph_hash, body],
+        ).unwrap();
+        drop(database);
+        let result = fixture
+            .run("Malformed memory diagnostics", "finish", false)
+            .await;
+        assert_success(&result, "malformed memory must preserve graph success");
+        let receipt = json_lines(&result.stdout);
+        let logs = fixture
+            .output(&["logs", receipt[0]["runId"].as_str().unwrap()], "finish")
+            .await;
+        assert_success(&logs, "read malformed-record diagnostic");
+        for text in [
+            String::from_utf8_lossy(&result.stderr),
+            String::from_utf8_lossy(&logs.stdout),
+        ] {
+            assert!(!text.contains(private), "diagnostic exposed stored value");
+            for expected in [
+                store.to_str().unwrap(),
+                "record encoding failed",
+                "Data JSON error",
+                "line 1 column",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "diagnostic lost {expected}: {text}"
+                );
+            }
+        }
+        let status = fixture
+            .json(&["status", receipt[0]["runId"].as_str().unwrap()], "finish")
+            .await;
+        assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
+        let unchanged: String = rusqlite::Connection::open(&store)
+            .unwrap()
+            .query_row(
+                "SELECT body FROM active_memory_records WHERE id='malformed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            unchanged, body,
+            "diagnostics must leave the record unchanged"
+        );
     }
 }
 

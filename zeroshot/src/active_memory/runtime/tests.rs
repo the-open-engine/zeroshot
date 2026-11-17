@@ -2,6 +2,31 @@ use super::*;
 use crate::active_memory::{LessonDraft, LessonEvidence, LessonScope};
 use serde_json::json;
 
+#[test]
+fn initialization_diagnostic_omits_stored_json_values_but_keeps_category_and_location() {
+    let private = "private-stored-value";
+    let mut errors: Vec<_> = [
+        json!(private).to_string(),
+        json!({"scope":{"kind":private}}).to_string(),
+        "{\n".into(),
+        "{]".into(),
+    ]
+    .into_iter()
+    .map(|body| serde_json::from_str::<crate::active_memory::Lesson>(&body).unwrap_err())
+    .collect();
+    errors.push(serde_json::Error::io(std::io::Error::other(private)));
+    for cause in errors {
+        let location = format!("line {} column {}", cause.line(), cause.column());
+        let category = format!("{:?} JSON error", cause.classify());
+        let path = workspace().join("lessons.sqlite3");
+        let diagnostic = initialization_diagnostic(Some(&path), &cause.into());
+        assert!(diagnostic.contains(path.to_str().unwrap()), "{diagnostic}");
+        assert!(diagnostic.contains(&category), "{diagnostic}");
+        assert!(diagnostic.contains(&location), "{diagnostic}");
+        assert!(!diagnostic.contains(private), "{diagnostic}");
+    }
+}
+
 fn repository_lesson() -> crate::active_memory::Lesson {
     LessonDraft {
         id: "runtime-recall".into(),

@@ -222,10 +222,20 @@ pub(crate) fn initialization_diagnostic(path: Option<&Path>, error: &ActiveMemor
     use std::error::Error;
     let location = path.map_or_else(String::new, |path| format!(" for {}", path.display()));
     let mut message = format!("Active Memory recall and postmortem unavailable{location}: {error}");
-    let mut source = error.source();
-    while let Some(cause) = source {
-        message.push_str(&format!(": {cause}"));
-        source = cause.source();
+    if let ActiveMemoryError::Encoding(cause) = error {
+        // Parser messages can quote private stored values, including unrecognized scope tags.
+        message.push_str(&format!(
+            ": {:?} JSON error at line {} column {}",
+            cause.classify(),
+            cause.line(),
+            cause.column(),
+        ));
+    } else {
+        let mut source = error.source();
+        while let Some(cause) = source {
+            message.push_str(&format!(": {cause}"));
+            source = cause.source();
+        }
     }
     crate::native_v2_runner::bounded_log_text(message, crate::v2_run_ledger::MAX_SAFE_LOG_BYTES)
 }

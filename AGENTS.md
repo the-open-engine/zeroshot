@@ -230,7 +230,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Capsule allocation reuses the resolved
   `ProductionHostingConfig`; instantiated diagnostic storage remains separate from configuration.
   Failed memory preparation retains its bounded safe cause on the unavailable postmortem wrapper;
-  supervisor startup logs it independently of the postmortem opt-out. Role failures and confirmed
+  supervisor startup logs it independently of the postmortem opt-out. JSON decoding failures report
+  only category and line/column, never stored values or raw parser text. Role failures and confirmed
   hook/carrier failures use existing error logs with no primary failure diagnostic. Hook errors
   deduplicate per execution and flush after callback retirement drains bounded in-flight receipt work.
   Foreground observation and resume
