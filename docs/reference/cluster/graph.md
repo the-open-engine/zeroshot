@@ -344,8 +344,9 @@ items for more than 64 items is folded with the rest of its item. Each part may 
 65,536 distinct count states.
 
 One check may take 1,048,576 search steps, a backstop far above authored graphs that checks do
-not share. A check that passes either bound reports `ceiling_exceeded` at the choice, join or
-guard it was deciding; there is no user budget or timeout setting.
+not share. A join lists every set of branches it can complete with, and writing those sets out
+counts toward its steps. A check that passes either bound reports `ceiling_exceeded` at the
+choice, join or guard it was deciding; there is no user budget or timeout setting.
 
 Graph-bearing JSON decoding first checks a fixed 512-container envelope for structural arrays,
 payload nesting and transport wrappers. The graph verifier separately checks authored depth 64.

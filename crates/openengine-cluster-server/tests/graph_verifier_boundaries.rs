@@ -734,3 +734,43 @@ async fn search_backstop_is_reported_once_at_the_condition_it_could_not_decide()
         rejected[0].message
     );
 }
+
+/// A join that one branch completes. A `gated` branch qualifies only when its reviewer
+/// accepts and a `plain` one always, so every choice of gated branches beside all the plain
+/// ones is a set the join can complete with.
+fn wide_join(gated: usize, plain: usize) -> GraphSpec {
+    let gated = (0..gated).map(|index| {
+        let accepted = json!({"kind":"in","labels":["accepted"],
+            "value":{"name":format!("check{index}"),"source":"signal","field":"verdict"}});
+        json!({"kind":"seq","name":format!("gated{index}"),"state":state(),"promotedStatePaths":[],
+        "children":[
+            null_verifier(&format!("check{index}")),
+            {"kind":"choice","name":format!("route{index}"),"state":state(),"promotedStatePaths":[],
+                "branches":[{"when":accepted,"node":null_step(&format!("pass{index}"), 1)}],
+                "otherwise":{"kind":"fail","name":format!("stop{index}"),"reason":"rejected"}}
+        ]})
+    });
+    let plain = (0..plain).map(|index| null_step(&format!("plain{index}"), 1));
+    graph(vec![
+        json!({"kind":"par","name":"wide","state":state(),"promotedStatePaths":[],
+            "join":{"kind":"any"},"branches":gated.chain(plain).collect::<Vec<_>>()}),
+        succeed("done"),
+    ])
+}
+
+#[tokio::test]
+async fn search_backstop_covers_listing_the_branch_sets_a_join_can_complete_with() {
+    // Ten gated branches leave 1,024 sets of about 1,000 branches each.
+    verify(&wide_join(10, 1_000)).await.assert_value();
+
+    // Fourteen leave 16,384 sets of over 300 branches each, more than one check may list.
+    let rejected = diagnostics(verify(&wide_join(14, 300)).await.assert_error());
+    assert_eq!(rejected.len(), 1, "{rejected:?}");
+    assert_eq!(rejected[0].code, GraphDiagnosticCode::CeilingExceeded);
+    assert_eq!(path_nodes(&rejected[0].path), ["root", "wide"]);
+    assert!(
+        rejected[0].message.contains("search steps"),
+        "{}",
+        rejected[0].message
+    );
+}
