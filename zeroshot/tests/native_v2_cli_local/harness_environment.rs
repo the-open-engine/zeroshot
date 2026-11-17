@@ -76,7 +76,7 @@ async fn detached_controller_uses_codex_configured_gateway_environment_without_a
         "-d",
     ];
     let output = timeout(
-        CLI_TIMEOUT,
+        SUSPENSION_TIMEOUT,
         fixture
             .command_with_inline(&arguments, "finish", false)
             .output(),
@@ -473,7 +473,7 @@ fi
 "#;
 
 async fn assert_succeeded(fixture: &LocalFixture, run_id: &str) {
-    let deadline = Instant::now() + CLI_TIMEOUT;
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
     loop {
         let status = fixture.json(&["status", run_id], "finish").await;
         if status["status"]["phase"] == "finished" {

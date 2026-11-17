@@ -173,6 +173,8 @@ mod parallel_attach;
 mod replay;
 #[path = "tests/status.rs"]
 mod status;
+#[path = "tests/timing.rs"]
+mod timing;
 #[path = "tests/watch.rs"]
 mod watch;
 

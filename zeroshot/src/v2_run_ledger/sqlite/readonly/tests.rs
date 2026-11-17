@@ -2,6 +2,9 @@ use super::*;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 use crate::v2_run_ledger::sqlite_crash;
 
+#[path = "timing_tests.rs"]
+mod timing;
+
 fn seed(path: &Path) {
     let connection = Connection::open(path).unwrap();
     connection

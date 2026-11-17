@@ -198,6 +198,7 @@ fn snapshot(
         snapshot.executions.insert(
             reference.execution,
             NodeSnapshot {
+                started_recorded_at: None,
                 delivery_state: None,
                 failure_diagnostic: false,
                 reference: reference.clone(),

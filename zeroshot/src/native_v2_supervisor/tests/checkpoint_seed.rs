@@ -1,7 +1,7 @@
 use super::*;
 use super::checkpoint_tests::prerequisite;
 use crate::native_v2_contract::TokenUsageDelta;
-use crate::v2_run_ledger::{SnapshotAndTail, apply_event};
+use crate::v2_run_ledger::{SnapshotAndTail, apply_stored_event};
 use openengine_cluster_protocol::TokenCount;
 
 fn prerequisite_graph() -> GraphSpec {
@@ -101,12 +101,7 @@ async fn record_successor_usage(harness: &Harness) {
 fn assert_replay_and_accounting(tail: &SnapshotAndTail) {
     let mut replay = tail.snapshot.replay_seed();
     for event in &tail.events {
-        apply_event(
-            &mut replay,
-            &event.event,
-            cursor_sequence(&event.cursor).assert_value(),
-        )
-        .assert_value();
+        apply_stored_event(&mut replay, event).assert_value();
     }
     assert_eq!(replay, tail.snapshot);
     assert_eq!(replay.executions.len(), 1);

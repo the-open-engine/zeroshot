@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
-use crate::v2_run_ledger::{LedgerClock, StoredRunEvent};
+use crate::v2_run_ledger::{LedgerClock, StoredRunEvent, apply_stored_event};
 
 fn settable_clock(start: u64) -> (Arc<AtomicU64>, LedgerClock) {
     let now = Arc::new(AtomicU64::new(start));
@@ -75,12 +75,7 @@ async fn assert_batch_clock_and_clamping(ledger: &dyn RunLedger, now: &AtomicU64
     assert_eq!(replay.events.assert_at(0).event, RunEvent::RunStarted);
     let mut snapshot = RunSnapshot::admitted(run_id.clone(), &admitted_run()).assert_value();
     for stored in &replay.events {
-        apply_event(
-            &mut snapshot,
-            &stored.event,
-            cursor_sequence(&stored.cursor).assert_value(),
-        )
-        .assert_value();
+        apply_stored_event(&mut snapshot, stored).assert_value();
     }
     assert_eq!(snapshot, replay.snapshot);
 }

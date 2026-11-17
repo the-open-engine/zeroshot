@@ -56,11 +56,14 @@ class ActiveExecution:
         execution: Opaque selector accepted by log filtering.
         node: Executable graph node name.
         map_indices: Zero-based map path, outermost first; empty outside maps.
+        started_at: Ledger recording time of NodeStarted in Unix milliseconds, or None when
+            unknown. This is not a precise provider start measurement.
     """
 
     execution: str
     node: str
     map_indices: tuple[int, ...] = ()
+    started_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -179,6 +182,9 @@ class RunStatus:
         request: Human request contract when suspended for a request.
         steers: Human and peer messages with recorded receiving executions.
         omitted_steers: Older directions omitted by the bounded status listing.
+        recorded_at: Ledger recording time of the event producing a watch notification, in Unix
+            milliseconds. None for status responses and old events without timing. Imported
+            history carries its import time, not the original execution time. Cursor defines order.
     """
 
     run_id: str
@@ -199,6 +205,7 @@ class RunStatus:
     request: HumanRequest | None = None
     steers: tuple[RunSteer, ...] = ()
     omitted_steers: int = 0
+    recorded_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

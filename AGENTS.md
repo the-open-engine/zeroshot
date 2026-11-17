@@ -1213,6 +1213,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   before the column read as unknown rather than estimated. Imported prerequisites and inherited
   vectors carry their import time in the successor, since checkpoint snapshots keep no original
   timing; vectors retain their own `createdAt`. `SafeLog.timestamp` keeps its producer meaning.
+  Status/watch active executions expose optional `startedAt` from their exact `NodeStarted`
+  envelope; watch notifications expose their producing event's optional `recordedAt`. The shared
+  stored-event fold retains start times beside start cursors. Older SQLite snapshots recover active
+  start times through exact indexed cursor reads without rewriting state; unknown times stay omitted.
+  Status never accumulates finished execution timing. Python exposes these as `started_at` and
+  watch-only `recorded_at`.
 - Durable observation replay reads bounded ledger pages that fit every accepted event, including
   combined request text and contracts, and retains its scan cursor across pages.
   NDJSON and WebSocket run inventories bound each typed status separately from the response
@@ -2144,6 +2150,10 @@ other integration suites can reuse the fixture without duplicating those scenari
 Suspension and terminal-failure polling share a bounded checkpoint and cleanup budget separate from
 individual CLI calls. Terminal polling rejects a different completed outcome immediately and includes
 the last observed status when its settlement deadline expires.
+Local CLI fixture lifecycle commands (run, resume, answer and force-stop) use that longer budget;
+read-only calls keep the short request deadline. Wait for suspended controllers to exit before cleanup.
+Worker-start markers and run-success polling use the lifecycle budget too; marker failures include
+the last run status and reject an unexpectedly settled run. Explicit probe-cancellation bounds stay short.
 Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.
 
 ```bash
@@ -2197,7 +2207,8 @@ python -m mkdocs build --strict
   fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
   CLI subprocess tests. Windows uses
-  `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job; the CI-only
+  `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job and prints Cargo's
+  rendered compiler diagnostics while collecting executable metadata; the CI-only
   `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted

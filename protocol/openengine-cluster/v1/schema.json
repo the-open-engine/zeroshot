@@ -24,6 +24,15 @@
           "minLength": 1,
           "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
           "type": "string"
+        },
+        "startedAt": {
+          "description": "Ledger recording time of this execution's `NodeStarted`, in Unix milliseconds.\nOmitted when unknown; not a precise provider start measurement.",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -6619,6 +6628,15 @@
       "properties": {
         "cursor": {
           "type": "string"
+        },
+        "recordedAt": {
+          "description": "Ledger recording time of the event producing this projection, in Unix milliseconds.\nCursor alone defines ordering. Imported history carries its import time; old times\nremain unknown rather than estimated.",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "runId": {
           "type": "string"

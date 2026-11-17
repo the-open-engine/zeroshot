@@ -256,17 +256,26 @@ fn network_capture(
     captures[0].clone()
 }
 
-async fn network_wait(fixture: &LocalFixture, marker: &str) {
-    timeout(CLI_TIMEOUT, async {
-        loop {
-            if fixture.repository.join(marker).exists() {
-                return;
-            }
-            sleep(Duration::from_millis(20)).await;
+async fn network_wait(fixture: &LocalFixture, run: &str, marker: &str) {
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+    let mut last_status = None;
+    loop {
+        if fixture.repository.join(marker).exists() {
+            return;
         }
-    })
-    .await
-    .assert_value_with(marker);
+        if let Some(status) = fixture.available_status(run, "networks").await {
+            assert!(
+                terminal_result(&status).is_none(),
+                "run settled before network marker {marker}: {status}"
+            );
+            last_status = Some(status);
+        }
+        assert!(
+            Instant::now() < deadline,
+            "network marker {marker} did not appear; last status: {last_status:?}"
+        );
+        sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// What a conversation was given: its prompt, the user messages sent at its tool calls, and
@@ -422,7 +431,7 @@ async fn networks_map_peers_deliver_at_live_hooks_once_per_sibling_and_future_me
 async fn networks_denied_host_member_and_spoofed_publisher_calls_append_no_messages() {
     let fixture = network_fixture("deny", false);
     let run = fixture.submit_detached("networks").await;
-    network_wait(&fixture, "network-host-held").await;
+    network_wait(&fixture, &run, "network-host-held").await;
     let denied = fixture
         .output(
             &["steer", &run, "--network", "alpha", "forbidden-host"],
@@ -478,7 +487,7 @@ async fn networks_suspended_successor_keeps_once_consumption_and_sender_exclusio
  {
     let fixture = network_fixture("resume", false);
     let run = fixture.submit_detached("networks").await;
-    network_wait(&fixture, "network-resume-held").await;
+    network_wait(&fixture, &run, "network-resume-held").await;
     fixture.json(&["suspend", &run], "networks").await;
     fs::write(fixture.repository.join("network-resume-release"), "go").assert_value();
     fixture.wait_suspended(&run).await;

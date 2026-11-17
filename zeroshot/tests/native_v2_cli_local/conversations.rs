@@ -85,7 +85,7 @@ async fn suspend_turn(fixture: &LocalFixture, mode: &str, turn: u64) -> String {
 }
 
 async fn hold_and_suspend(fixture: &LocalFixture, run: &str, mode: &str, turn: u64) {
-    let deadline = Instant::now() + CLI_TIMEOUT;
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
     while !fixture.repository.join(format!("held-{turn}")).exists() {
         assert!(
             Instant::now() < deadline,
