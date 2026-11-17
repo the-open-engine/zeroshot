@@ -26,11 +26,24 @@ from .runs import (
 )
 from .source import ResolvedGitRemote, ResolvedSource, SourceForgeIdentity
 from .stacks import StackRunStatus, StackStatus
+from .targets import NamedTarget
 from .values import JsonValue
 
 _Phase: TypeAlias = Literal["admitted", "running", "stopping", "suspended", "finished"]
 _Level: TypeAlias = Literal["debug", "info", "error"]
 _MAX_JAVASCRIPT_SAFE_INTEGER = 9_007_199_254_740_991
+
+
+def _named_target(value: object) -> NamedTarget:
+    root = _mapping(value, "named target")
+    return NamedTarget(
+        name=_string(root, "name", "named target"),
+        origin=_string(root, "origin", "named target"),
+        kind=cast(
+            Literal["hosted", "direct"],
+            _enum_string(root, "kind", {"hosted", "direct"}, "named target"),
+        ),
+    )
 
 
 def _status(value: object) -> RunStatus:

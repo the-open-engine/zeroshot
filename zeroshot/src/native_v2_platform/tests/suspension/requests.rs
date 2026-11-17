@@ -236,3 +236,110 @@ async fn host_requires_the_independent_request_opt_in() {
     ));
     assert!(harness.ledger.list().await.assert_value().is_empty());
 }
+#[tokio::test]
+async fn lost_answer_successor_restarts_after_the_answer() {
+    let driver = Arc::new(FakeDriver::new(Behavior::Hang));
+    let (ledger, _, runtime) = runtime_parts(driver.clone());
+    let store = Arc::new(SuspensionStore::default());
+    let allocator = Arc::new(SuspensionAllocator {
+        runtime: runtime.clone(),
+        policy: Default::default(),
+        store: store.clone(),
+        successor: StdMutex::new(None),
+        preparation_gate: None,
+    });
+    let controller = NativeV2PlatformController::new_with_delivery_policy(
+        ledger.clone(),
+        allocator.clone(),
+        DeliveryPolicy::Optional,
+    )
+    .await
+    .assert_value();
+    let run = submit_test_request(&controller, ask_request())
+        .await
+        .assert_value()
+        .run_id;
+    suspended(&controller, &run).await;
+    let mut answer = resume_params(&run);
+    answer.from = Some(RunResumeFrom::Answer {
+        signals: serde_json::from_value(json!({"decision":"approved"})).assert_value(),
+        output: json!({}),
+    });
+    controller.resume(answer.clone()).await.assert_value();
+    let worker_starts = async |count| {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while driver.starts.load(Ordering::SeqCst) < count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .assert_value();
+    };
+    worker_starts(1).await;
+    runtime.lose_capsule();
+    assert!(matches!(
+        terminal(&controller, &answer.successor_run_id).await,
+        TerminalResult::Failed { reason, .. } if reason.as_str() == "runtime_lost"
+    ));
+    let lost = ledger
+        .get(&answer.successor_run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert!(!lost.snapshot.execution_seed.is_empty());
+
+    // The restart begins where the lost successor began: the request stays answered.
+    *allocator.successor.lock().assert_value() = None;
+    store.restart.store(true, Ordering::SeqCst);
+    let mut restart = resume_params(&answer.successor_run_id);
+    restart.successor_run_id = RunId::new("restart");
+    controller.resume(restart.clone()).await.assert_value();
+    worker_starts(2).await;
+    let restarted = ledger
+        .get(&restart.successor_run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(
+        restarted.snapshot.execution_seed,
+        lost.snapshot.execution_seed
+    );
+    assert!(restarted.snapshot.suspension.is_none());
+    assert!(
+        controller
+            .inbox_list(InboxListParams::default())
+            .await
+            .assert_value()
+            .requests
+            .is_empty()
+    );
+    let vectors = controller
+        .vectors(RunVectorsParams {
+            run_id: restart.successor_run_id.clone(),
+            after: None,
+            limit: None,
+        })
+        .await
+        .assert_value();
+    let count = |wanted: fn(&RunVectorSummaryContent) -> bool| {
+        vectors
+            .vectors
+            .iter()
+            .filter(|entry| wanted(&entry.content))
+            .count()
+    };
+    assert_eq!(
+        count(|content| matches!(content, RunVectorSummaryContent::Request { .. })),
+        1
+    );
+    assert_eq!(
+        count(|content| matches!(content, RunVectorSummaryContent::Answer { .. })),
+        1
+    );
+    controller
+        .force(RunForceParams {
+            run_id: restart.successor_run_id,
+        })
+        .await
+        .assert_value();
+}

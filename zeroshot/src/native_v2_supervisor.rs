@@ -131,6 +131,7 @@ pub struct NativeV2Supervisor {
     postmortem: Option<Arc<dyn crate::active_memory::postmortem::RunPostmortem>>,
     runtime_lost: Arc<AtomicBool>,
     force_requested: Arc<AtomicBool>,
+    suspending: Arc<AtomicBool>,
     resolution_stop: watch::Sender<bool>,
     version_initialized: Arc<Mutex<bool>>,
     conversations_initialized: Arc<Mutex<bool>>,
@@ -162,6 +163,7 @@ impl NativeV2Supervisor {
             postmortem: None,
             runtime_lost: Arc::new(AtomicBool::new(false)),
             force_requested: Arc::new(AtomicBool::new(false)),
+            suspending: Arc::new(AtomicBool::new(false)),
             resolution_stop: watch::channel(false).0,
             conversations_initialized: Arc::default(),
             conversation_notices: Arc::default(),
@@ -594,6 +596,11 @@ impl NativeV2Supervisor {
 
     /// Stops live work before waiting for persistence. Local intent prevents interrupted work
     /// from becoming a retryable crash while the durable force request is pending.
+    /// True once the runtime was disposed for a suspension: no work is left for a stop signal.
+    pub(crate) fn suspending(&self) -> bool {
+        self.suspending.load(Ordering::Acquire)
+    }
+
     pub async fn force_stop(&self) -> Result<(), NativeV2SupervisorError> {
         self.force_requested.store(true, Ordering::Release);
         self.resolution_stop.send_replace(true);
@@ -774,6 +781,7 @@ mod runtime;
 // Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
 pub(crate) use runtime::{
     request_history, continuation_history, durable_history, next_execution, next_node_instance,
+    restart_history,
 };
 pub use environment::{RunEnvironment, RunEnvironmentError};
 pub(crate) use environment::{ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver};

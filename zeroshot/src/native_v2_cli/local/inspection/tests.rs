@@ -425,6 +425,118 @@ async fn force_of_a_recorded_terminal_needs_no_controller() {
 }
 
 #[tokio::test]
+async fn steer_and_suspend_leave_a_lost_run_as_recorded() {
+    use crate::native_v2_cli::NativeV2CliBackend;
+    let lost = Fixture::new(false, true).await;
+    let before = tree(lost.root.path());
+    let steer = lost
+        .backend
+        .run_steer(
+            None,
+            openengine_cluster_protocol::RunSteerParams {
+                run_id: lost.id.clone(),
+                text: "direction".into(),
+            },
+        )
+        .await
+        .map(|_| ());
+    let suspend = lost
+        .backend
+        .run_suspend(
+            None,
+            RunStatusParams {
+                run_id: lost.id.clone(),
+            },
+        )
+        .await
+        .map(|_| ());
+    for result in [steer, suspend] {
+        let message = result.unwrap_err().to_string();
+        for expected in [
+            "controller is lost",
+            "zeroshot resume",
+            "zeroshot force-stop",
+        ] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+    // Only resume and force-stop confirm the loss and record it.
+    assert_eq!(before, tree(lost.root.path()));
+}
+
+#[tokio::test]
+async fn resume_waits_for_an_ended_run_to_release_its_controller_lease() {
+    let fixture = Fixture::new(true, false).await;
+    let lease_path = fixture.backend.paths(&fixture.id).unwrap().lease();
+    let lease = ControllerLease::acquire(lease_path.clone()).unwrap();
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        drop(lease);
+    });
+    let started = Instant::now();
+    fixture
+        .backend
+        .confirm_loss_for_resume(&fixture.id)
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(100),
+        "the recorded end was taken as a free workspace while its controller still held it"
+    );
+    release.await.unwrap();
+
+    // A controller that never lets go bounds the wait; starting the successor then reports it.
+    let _held = ControllerLease::acquire(lease_path).unwrap();
+    let backend = fixture
+        .backend
+        .clone()
+        .with_ready_timeout(Duration::from_millis(100));
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        backend.confirm_loss_for_resume(&fixture.id),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+}
+
+#[tokio::test]
+async fn list_skips_a_run_directory_without_a_ledger() {
+    use crate::native_v2_cli::NativeV2CliBackend;
+    let fixture = Fixture::new(true, false).await;
+    // A refused or interrupted start leaves such a directory behind.
+    fixture
+        .backend
+        .create_run_storage(&RunId::new(uuid::Uuid::now_v7().to_string()))
+        .unwrap();
+    let listed = fixture
+        .backend
+        .run_list(None, RunListParams::default())
+        .await
+        .unwrap();
+    assert_eq!(listed.runs.len(), 1);
+    assert_eq!(listed.runs[0].run_id, fixture.id);
+    let inbox = fixture
+        .backend
+        .inbox_list(None, Default::default())
+        .await
+        .unwrap();
+    assert!(inbox.requests.is_empty());
+    let cursor = fixture
+        .backend
+        .inbox_list(
+            None,
+            openengine_cluster_protocol::InboxListParams {
+                after: Some(RunId::new("garbage")),
+                limit: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(cursor, NativeV2CliError::Usage(message) if message.contains("cursor")));
+}
+
+#[tokio::test]
 async fn controls_refuse_a_live_pid_or_held_lease_and_only_resume_confirms_loss() {
     let live = Fixture::new(false, false).await;
     let before = tree(live.root.path());

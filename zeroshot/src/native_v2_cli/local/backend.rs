@@ -122,7 +122,9 @@ impl LocalCliBackend {
                         ),
                 )
                 .await?;
-            let claim = self.claim_recovery_workspace(&params.run_id)?;
+            let claim = self
+                .claim_recovery_workspace_within(&params.run_id, false, RECOVERY_CLAIM_HANDOFF)
+                .await?;
             self.retain_predecessor_delivery(&params.run_id, &recovery)
                 .await?;
             (recovery, claim)
@@ -652,24 +654,26 @@ impl NativeV2CliBackend for LocalCliBackend {
             require_local(target)?;
             openengine_cluster_protocol::validate_steer(&params.text)
                 .map_err(NativeV2CliError::Usage)?;
-            let _claim = if self.recovery_path(&params.run_id)?.exists() {
-                Some(self.claim_recovery_workspace(&params.run_id)?)
+            let claim = if self.recovery_path(&params.run_id)?.exists() {
+                Some(
+                    self.claim_recovery_workspace_within(&params.run_id, true, RECOVERY_CLAIM_WAIT)
+                        .await?,
+                )
             } else {
                 None
             };
-            if let Ok(recovery) = self.read_recovery_document(&params.run_id)
-                && let Some(successor) = recovery.successor_run_id
-            {
-                return Err(local_message(format!(
-                    "run already has successor {}",
-                    successor.as_str()
-                )));
-            }
             let status = self
                 .read_recorded_status(RunStatusParams {
                     run_id: params.run_id.clone(),
                 })
                 .await?;
+            // Status reads an interrupted launch as no successor; the next resume removes it.
+            if let Some(successor) = self.workspace_recovery(&status).await?.successor_run_id {
+                return Err(invalid_request(format!(
+                    "run already has successor {}",
+                    successor.as_str()
+                )));
+            }
             if matches!(
                 status.status,
                 openengine_cluster_protocol::RunStatus::Suspended { .. }
@@ -689,11 +693,14 @@ impl NativeV2CliBackend for LocalCliBackend {
                         ..
                     }
             ) {
-                return Err(local_message(
+                return Err(invalid_request(
                     "steer requires an admitted, running or suspended run before its graph ends",
                 ));
             }
-            let transport = self.connect_run(&params.run_id).await?;
+            // A live controller records the steer itself. The claim guards only the direct
+            // record above and must not keep force-stop from a controller that does not answer.
+            drop(claim);
+            let transport = self.connect_run(&params.run_id, false).await?;
             controller_request(
                 &params.run_id,
                 "steer (it may have been recorded; check status)",
@@ -732,14 +739,18 @@ impl NativeV2CliBackend for LocalCliBackend {
                 details: None,
             });
         }
-        let transport = self.connect_run(&params.run_id).await?;
-        controller_request(&params.run_id, "suspend", async {
-            ClusterClient::new(transport.as_ref())
-                .run_suspend(params.clone())
-                .await
-                .map(Into::into)
-                .map_err(protocol_error)
-        })
+        let transport = self.connect_run(&params.run_id, false).await?;
+        controller_request(
+            &params.run_id,
+            "suspend (it may still take effect; check status)",
+            async {
+                ClusterClient::new(transport.as_ref())
+                    .run_suspend(params.clone())
+                    .await
+                    .map(Into::into)
+                    .map_err(protocol_error)
+            },
+        )
         .await
     }
 
@@ -752,6 +763,14 @@ impl NativeV2CliBackend for LocalCliBackend {
         params
             .validate()
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        // Any other text would compare as a position and read as an empty or a full inbox.
+        if let Some(after) = &params.after
+            && validate_local_run_id(after).is_err()
+        {
+            return Err(NativeV2CliError::Usage(
+                "inbox cursor is not a run ID".to_owned(),
+            ));
+        }
         let mut requests = Vec::new();
         let mut runs = self.list_local().await?.runs;
         runs.sort_by(|a, b| a.run_id.as_str().cmp(b.run_id.as_str()));

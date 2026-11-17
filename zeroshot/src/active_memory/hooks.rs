@@ -31,6 +31,15 @@ pub struct HookQuery {
     pub tool_name: String,
     pub tool_input: Value,
     pub cwd: PathBuf,
+    /// A native subagent's tool call; its returned context never reaches this conversation.
+    pub subagent: bool,
+    /// Steers join this tool call's context only while the whole of it stays within this bound.
+    pub context_budget: usize,
+    /// Whether a steer delivered at this tool call stands in the conversation afterwards. It does
+    /// not where the provider writes no hook context to its session (Copilot) or shows the text
+    /// inside a tool result, which a model may refuse as untrusted (Pi, OpenCode). Such a steer
+    /// also goes into the conversation's next prompt.
+    pub standing: bool,
 }
 
 /// Complete callback context and the steers awaiting a carrier acknowledgement.
@@ -65,6 +74,10 @@ pub struct ActiveMemoryHooks {
 pub(crate) struct HookInstallation<'a> {
     pub invocation: &'a DriverInvocation,
     pub home: &'a Path,
+    /// A carrier that shows less than the shared maximum inline; `None` keeps that maximum.
+    pub context_budget: Option<usize>,
+    /// See `HookQuery::standing`.
+    pub standing: bool,
 }
 
 impl ActiveMemoryHooks {
@@ -167,7 +180,15 @@ impl ActiveMemoryHooks {
                 installation.home,
             )
             .and_then(|capability| match capability {
-                Some(path) => install(command, &path),
+                Some(path) => {
+                    if let Some(budget) = installation.context_budget {
+                        self.broker.bound(installation.invocation, budget);
+                    }
+                    if !installation.standing {
+                        self.broker.shown_only(installation.invocation);
+                    }
+                    install(command, &path)
+                }
                 None => Ok(()),
             });
         if result.is_err() {
@@ -233,8 +254,17 @@ impl ActiveMemoryHooks {
         };
         (query, delivery)
     }
-    pub(crate) async fn acknowledge(&self, query: &HookQuery, delivery: &HookDelivery) {
-        self.source.receipt(query, delivery).await;
+    /// Acknowledges a delivery made in process. `standing` is `HookQuery::standing` for the
+    /// carrier that made it.
+    pub(crate) async fn acknowledge(
+        &self,
+        query: &HookQuery,
+        delivery: &HookDelivery,
+        standing: bool,
+    ) {
+        let mut query = query.clone();
+        query.standing = standing;
+        self.source.receipt(&query, delivery).await;
     }
 }
 
