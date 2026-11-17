@@ -1,4 +1,5 @@
 use super::*;
+use crate::full_v1_reducer::DurableExecutionState;
 
 #[tokio::test]
 async fn review_and_delivery_repairs_share_the_budget_and_worker_instance() {
@@ -11,12 +12,20 @@ async fn review_and_delivery_repairs_share_the_budget_and_worker_instance() {
             let next = reduce(&verified, &input, &history);
             assert_dispatched_together(&next, &["worker"]);
             let execution = history.len() as u64 + 1;
-            settle_worker_visit(&next, &mut history, &expected_phase);
-            assert_dispatched_together(
-                &reduce(&verified, &input, &history),
-                &["acceptance", "code"],
-            );
-            let review_input = json!({"task":"repair checkout", "deliveryFeedback":delivery_feedback,"reviewResponses":[]});
+            let review_context = format!("Shared candidate {round}; remaining setup gaps: none.");
+            settle_worker_visit(&next, &mut history, &expected_phase, &review_context);
+            let reviews = reduce(&verified, &input, &history);
+            assert_dispatched_together(&reviews, &["acceptance", "code"]);
+            let review_input = json!({"task":"repair checkout", "deliveryFeedback":delivery_feedback,
+                "reviewResponses":[],"reviewContext":review_context});
+            for decision in &reviews.decisions {
+                if let Decision::Dispatch { input, .. } = decision {
+                    assert_eq!(
+                        input, &review_input,
+                        "both reviewers receive the fresh handoff"
+                    );
+                }
+            }
             history.push(settled_review_execution_with_output(
                 SettledExecutionSpec {
                     execution: execution + 1,
@@ -95,6 +104,7 @@ fn settle_worker_visit(
     reduction: &Reduction,
     history: &mut Vec<DurableExecution>,
     expected_phase: &Value,
+    review_context: &str,
 ) {
     let worker_input = reduction
         .decisions
@@ -118,11 +128,20 @@ fn settle_worker_visit(
         .assert_value();
     assert_eq!(&worker_input["phase"], expected_phase);
     let execution = history.len() as u64 + 1;
-    history.push(settled_agent(SettledExecutionSpec {
+    let mut settled = settled_agent(SettledExecutionSpec {
         execution,
         node_instance: 1,
         node: "worker",
         settled_at: execution,
         input: worker_input,
-    }));
+    });
+    let DurableExecutionState::Settled {
+        outcome: WorkerOutcome::Verified { output, .. },
+        ..
+    } = &mut settled.state
+    else {
+        panic!("worker fixture must settle successfully");
+    };
+    output[REVIEW_CONTEXT_FIELD] = json!(review_context);
+    history.push(settled);
 }
