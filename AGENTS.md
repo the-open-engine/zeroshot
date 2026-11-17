@@ -489,6 +489,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   outcome change. Never publish configuration responses; overrides, configured policy,
   cancellation and unconfirmed cleanup are not fallbacks.
 - The local target registry initializes `platform` at `https://api.app.zeroshot.sh` with a persistent hosted device identity.
+  Connection-store and target-registry reads fail as a whole. Diagnostics name the file; connection
+  decode errors expose only parser line/column, never file values or parser text. Target validation
+  errors name the stored record or unsupported version. These local diagnostics do not change MCP tools.
 - Local runs select an optional `--cwd` workspace, defaulting to the invoking folder. File arguments
   stay relative to the invoking folder. A Git checkout uses its canonical root; plain, unborn, and
   detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot
@@ -2045,6 +2048,7 @@ Run the narrowest relevant checks first, then the complete affected lane.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
 Suspension polling has a separate bounded checkpoint and cleanup budget from individual CLI calls.
+Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.
 
 ```bash
 cargo fmt --all -- --check
