@@ -251,7 +251,12 @@ enum UtilityCommand {
     /// Ctrl-C cancels the download and removes its temporary file. Does not restart the run or extract files.
     ExportWorkspace(RunExportWorkspaceArgs),
 
-    /// Permanently delete an abandoned retained target workspace.
+    /// Delete a retained target workspace or a finished local run's checkpoints.
+    ///
+    /// Locally, frees space retained by failed runs across their recovery lineage without
+    /// reading or changing the checkout, ledger or logs. Delivery recovery state is kept.
+    /// Running runs must be force-stopped first; interrupted restores must be resumed first.
+    /// Local checkpoints never expire automatically. Plain resume keeps the current checkout.
     DiscardWorkspace(RunSelectorArgs),
 
     /// Print the Zeroshot version.
