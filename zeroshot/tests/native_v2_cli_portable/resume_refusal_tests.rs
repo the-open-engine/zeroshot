@@ -111,7 +111,7 @@ fn local_resume_names_ineligible_run_states() {
 fn local_resume_names_recovery_record_and_claim_failures() {
     let fixture = Fixture::new();
     let id = failed_run(&fixture);
-    let storage = fixture.root.path(&format!("state/runs/{id}"));
+    let storage = fixture.root.path("state").join("runs").join(&id);
     let record = storage.join("workspace-recovery.json");
     let original = fs::read(&record).unwrap();
     fs::remove_file(&record).unwrap();
