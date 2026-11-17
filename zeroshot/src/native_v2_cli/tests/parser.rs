@@ -1208,3 +1208,18 @@ fn steer_parser_requires_exactly_one_text_source() {
         assert!(parse_native_v2_args(args(&argv)).is_err());
     }
 }
+
+#[test]
+fn steer_usage_names_the_run_id_before_the_text_source() {
+    use clap::CommandFactory;
+    let mut command = Cli::command();
+    let usage = command
+        .find_subcommand_mut("steer")
+        .assert_value()
+        .render_usage()
+        .to_string();
+    assert_eq!(
+        usage,
+        "Usage: zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>"
+    );
+}

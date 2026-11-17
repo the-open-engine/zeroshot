@@ -552,6 +552,9 @@ struct ResolvedDeclaration {
 #[derive(Clone, Debug)]
 pub struct GraphBoundWorkerRegistry {
     descriptors: BTreeMap<WorkerRef, WorkerDescriptor>,
+    /// Request nodes share one fixed worker reference, and each declares its own answer shape.
+    /// They resolve by node only: the reference alone names no descriptor.
+    request_nodes: BTreeMap<NodeName, WorkerDescriptor>,
 }
 
 impl GraphBoundWorkerRegistry {
@@ -561,13 +564,27 @@ impl GraphBoundWorkerRegistry {
         runtime: &RuntimePlan,
     ) -> Result<Self, NativeV2AdmissionError> {
         let mut resolved = BTreeMap::<WorkerRef, ResolvedDeclaration>::new();
+        let mut request_nodes = BTreeMap::new();
         for declaration in declarations {
             let Some(binding) = runtime.nodes().get(&declaration.name) else {
                 continue;
             };
             let role = runtime_role(binding);
+            let request = role == RuntimeRole::Request
+                && declaration.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF;
+            if request {
+                request_nodes.insert(
+                    declaration.name.clone(),
+                    descriptor(
+                        graph,
+                        declaration.worker.clone(),
+                        declaration.contract.clone(),
+                    )?,
+                );
+                continue;
+            }
             if let Some(first) = resolved.get(&declaration.worker) {
-                if first.contract != declaration.contract || first.role != role {
+                if first.role != role || first.contract != declaration.contract {
                     return Err(NativeV2AdmissionError::InconsistentWorkerReuse {
                         worker: declaration.worker.clone(),
                         first: first.first_node.clone(),
@@ -592,7 +609,10 @@ impl GraphBoundWorkerRegistry {
                 descriptor(graph, worker.clone(), declaration.contract).map(|value| (worker, value))
             })
             .collect::<Result<_, _>>()?;
-        Ok(Self { descriptors })
+        Ok(Self {
+            descriptors,
+            request_nodes,
+        })
     }
 }
 
@@ -637,6 +657,22 @@ impl WorkerRegistry for GraphBoundWorkerRegistry {
             .ok_or_else(|| WorkerRegistryError::NotFound {
                 worker: worker.clone(),
             })
+    }
+
+    async fn resolve_node(
+        &self,
+        worker: &WorkerRef,
+        path: &[String],
+    ) -> Result<WorkerDescriptor, WorkerRegistryError> {
+        let request = path
+            .last()
+            .and_then(|name| NodeName::new(name.as_str()).ok())
+            .and_then(|name| self.request_nodes.get(&name))
+            .filter(|descriptor| descriptor.worker == *worker);
+        match request {
+            Some(descriptor) => Ok(descriptor.clone()),
+            None => self.resolve(worker).await,
+        }
     }
 }
 

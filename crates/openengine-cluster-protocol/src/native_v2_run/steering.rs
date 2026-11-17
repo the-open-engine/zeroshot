@@ -1,7 +1,10 @@
 //! Human direction and graph-local node messages share the run vector record.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::{ExecutionRef, NodeInstructions, NodeName, RunId, UnixTimestampMillis, VectorId};
+use crate::{
+    ExecutionRef, NodeInstructions, NodeInstructionsError, NodeName, RunId, UnixTimestampMillis,
+    VectorId, MAX_NODE_INSTRUCTIONS_BYTES,
+};
 
 pub const RUN_STEER_METHOD: &str = "run/steer";
 
@@ -52,7 +55,13 @@ pub struct NetworkSteerParams {
 }
 
 pub fn validate_steer(text: &str) -> Result<(), String> {
-    NodeInstructions::new(text).map_err(|error| error.to_string())?;
+    NodeInstructions::new(text).map_err(|error| match error {
+        NodeInstructionsError::Empty => "steer must contain a non-whitespace character".to_owned(),
+        NodeInstructionsError::TooLong => {
+            format!("steer exceeds {MAX_NODE_INSTRUCTIONS_BYTES} UTF-8 bytes")
+        }
+        NodeInstructionsError::Nul => "steer must not contain NUL".to_owned(),
+    })?;
     if text
         .chars()
         .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))

@@ -193,7 +193,7 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             }
             let forced_timeout =
                 !delivery.steers.is_empty() && ledger.timeout_next_receipt.load(Ordering::SeqCst);
-            hooks.acknowledge(&query, &delivery).await;
+            hooks.acknowledge(&query, &delivery, true).await;
             // Acknowledgement can time out without publication, or while an already
             // started SQLite write drains. Read durable receipts through that same
             // connection before advancing; a repeated offer is valid until then.
@@ -558,4 +558,89 @@ async fn network_timeout_keeps_the_started_write_fenced_until_retirement_drains(
     let status = steering::status(ledger.as_ref(), &run).await.assert_value();
     assert_eq!(status.steers.len(), 1);
     assert_eq!(status.steers[0].excerpt, "delayed-note");
+}
+
+// Copilot applies hook context to the turn in progress and writes none of it to its session, so
+// a steer shown that way must also reach the conversation's next prompt, and a successor that
+// restores the conversation before then must not inherit the receipt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_unkept_at_a_tool_call_reaches_the_next_prompt_once_and_is_inherited_only_after_it() {
+    let (ledger, run) = steer_record().await;
+    let hooks = ActiveMemoryHooks::empty().assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut first = invocation();
+    if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { session_scope, .. } =
+        &mut first.node.binding
+    {
+        *session_scope = crate::execution::SessionScope::NodeInstance;
+    }
+    let instance = first.node.reference.node_instance;
+    let execution = hooks.prepare_steers(&mut first, false).await.assert_value();
+    assert!(first.host_context.is_none());
+    steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            run_id: run.clone(),
+            text: "Standing direction".into(),
+            mode: openengine_cluster_protocol::SteeringMode::Standing,
+        },
+    )
+    .await
+    .assert_value();
+    let tool = serde_json::json!({"tool_name":"Read"});
+    let workspace = std::path::Path::new("/workspace");
+    let (query, delivery) = hooks.tool_delivery(&first, &tool, workspace).await;
+    assert!(delivery.context.contains("Standing direction"));
+    hooks.acknowledge(&query, &delivery, false).await;
+    let received = || async {
+        steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value()
+            .steers[0]
+            .received_executions
+    };
+    assert_eq!(received().await, 1);
+    // The turn in progress has it: no later tool call of this execution repeats it.
+    let (_, again) = hooks.tool_delivery(&first, &tool, workspace).await;
+    assert!(again.steers.is_empty());
+    assert!(hooks.capture_steers()[&instance].receipts.is_empty());
+    hooks.finish_steers(execution, true).await;
+    assert!(hooks.capture_steers()[&instance].receipts.is_empty());
+
+    let mut revisit = first.clone();
+    revisit.host_context = None;
+    revisit.node.reference.execution =
+        crate::native_v2_contract::ExecutionId::new(3).assert_value();
+    let execution = hooks
+        .prepare_steers(&mut revisit, false)
+        .await
+        .assert_value();
+    assert!(
+        revisit
+            .host_context
+            .as_ref()
+            .assert_value()
+            .contains("Standing direction")
+    );
+    // A prompt the provider refused keeps nothing either.
+    hooks.finish_steers(execution, false).await;
+    assert!(hooks.capture_steers()[&instance].receipts.is_empty());
+    revisit.host_context = None;
+    let execution = hooks
+        .prepare_steers(&mut revisit, false)
+        .await
+        .assert_value();
+    assert!(revisit.host_context.is_some());
+    hooks.finish_steers(execution, true).await;
+    assert_eq!(hooks.capture_steers()[&instance].receipts.len(), 1);
+
+    let mut later = revisit.clone();
+    later.host_context = None;
+    later.node.reference.execution = crate::native_v2_contract::ExecutionId::new(4).assert_value();
+    let execution = hooks.prepare_steers(&mut later, false).await.assert_value();
+    assert!(later.host_context.is_none());
+    let (_, at_tool_call) = hooks.tool_delivery(&later, &tool, workspace).await;
+    assert!(at_tool_call.steers.is_empty());
+    hooks.finish_steers(execution, true).await;
+    assert_eq!(received().await, 1);
 }

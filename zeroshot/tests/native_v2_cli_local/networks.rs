@@ -254,6 +254,20 @@ async fn network_wait(fixture: &LocalFixture, marker: &str) {
     .assert_value_with(marker);
 }
 
+fn network_tool_context(text: &str) -> String {
+    let tool: Value = serde_json::from_str(text).assert_value();
+    tool["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn network_received(fixture: &LocalFixture, run: &str, node: &str, iteration: u64) -> String {
+    ["prompt", "tool-0", "tool-1"]
+        .map(|kind| network_capture(fixture, run, (node, iteration), kind))
+        .join("\n")
+}
+
 fn network_no_messages(fixture: &LocalFixture, run: &str, node: &str, iteration: u64) {
     for kind in ["prompt", "tool-0", "tool-1"] {
         let text = network_capture(fixture, run, (node, iteration), kind);
@@ -283,12 +297,9 @@ async fn networks_sequential_default_once_standing_and_overlap_keep_sender_and_o
     for iteration in [1, 2] {
         network_no_messages(&fixture, &run, "sender", iteration);
         let prompt = network_capture(&fixture, &run, ("receiver", iteration), "prompt");
-        assert_eq!(prompt.matches(ONCE).count(), usize::from(iteration == 1));
-        assert_eq!(prompt.matches(STANDING).count(), 1);
-        for kind in ["tool-0", "tool-1"] {
-            let tool = network_capture(&fixture, &run, ("receiver", iteration), kind);
-            assert!(!tool.contains(ONCE) && !tool.contains(STANDING));
-        }
+        let received = network_received(&fixture, &run, "receiver", iteration);
+        assert_eq!(received.matches(ONCE).count(), usize::from(iteration == 1));
+        assert_eq!(received.matches(STANDING).count(), 1);
         assert_eq!(
             network_capture(&fixture, &run, ("sender", iteration), "capability"),
             "true"
@@ -364,16 +375,26 @@ async fn networks_map_peers_deliver_at_live_hooks_once_per_sibling_and_future_me
         assert!(!messages.iter().any(|message| prompt.contains(message)));
     }
     let tools = network_captures(&fixture, &run, ("talker", 0), "tool-0");
+    let later = network_captures(&fixture, &run, ("talker", 0), "tool-1");
     assert_eq!(tools.len(), 2);
+    assert_eq!(later.len(), tools.len());
+    let tools = tools
+        .into_iter()
+        .zip(later)
+        .map(|(first, second)| {
+            format!(
+                "{}\n{}",
+                network_tool_context(&first),
+                network_tool_context(&second)
+            )
+        })
+        .collect::<Vec<_>>();
     let identities = network_captures(&fixture, &run, ("talker", 0), "identity");
     assert_eq!(identities.len(), tools.len());
     for (tool, identity) in tools.into_iter().zip(identities) {
         let identity: Value = serde_json::from_str(&identity).assert_value();
         let own_instance = identity["nodeInstance"].as_u64().assert_value();
-        let tool: Value = serde_json::from_str(&tool).assert_value();
-        let context = tool["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .assert_value();
+        let context = tool;
         assert!(!context.contains(&format!("mapped-once-{own_instance}\n")));
         assert!(!context.contains(&format!("mapped-standing-{own_instance}\n")));
         assert_eq!(context.matches("mapped-once-").count(), 1);
@@ -382,15 +403,12 @@ async fn networks_map_peers_deliver_at_live_hooks_once_per_sibling_and_future_me
     for tool in network_captures(&fixture, &run, ("talker", 0), "tool-before") {
         assert!(!tool.contains("mapped-once-") && !tool.contains("mapped-standing-"));
     }
-    for tool in network_captures(&fixture, &run, ("talker", 0), "tool-1") {
-        assert!(!tool.contains("mapped-once-") && !tool.contains("mapped-standing-"));
-    }
-    let receiver = network_capture(&fixture, &run, ("receiver", 0), "prompt");
+    let receiver = network_received(&fixture, &run, "receiver", 0);
     for message in messages {
         assert_eq!(receiver.matches(&message).count(), 1);
     }
     assert_eq!(receiver.matches("mapped-standing-").count(), 2);
-    let outsider = network_capture(&fixture, &run, ("outsider", 0), "prompt");
+    let outsider = network_received(&fixture, &run, "outsider", 0);
     assert!(!outsider.contains("mapped-once-") && !outsider.contains("mapped-standing-"));
     let status = fixture.json(&["status", &run], "networks").await;
     let steers = status["steers"].as_array().assert_value();
@@ -470,9 +488,7 @@ async fn networks_suspended_successor_keeps_once_consumption_and_sender_exclusio
     fixture.wait_succeeded(next, "networks").await;
     wait_for_exit(fixture.ready_pid(next)).await;
     network_no_messages(&fixture, next, "sender", 2);
-    let receiver = ["prompt", "tool-0", "tool-1"]
-        .map(|kind| network_capture(&fixture, next, ("receiver", 2), kind))
-        .join("\n");
+    let receiver = network_received(&fixture, next, "receiver", 2);
     assert!(!receiver.contains(ONCE), "{receiver}");
     assert_eq!(receiver.matches(STANDING).count(), 1, "{receiver}");
     let launch: Vec<String> =
@@ -564,7 +580,7 @@ async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_
         .await;
     wait_for_exit(fixture.ready_pid(&run)).await;
     network_no_messages(&fixture, &run, "sender", 0);
-    let original = network_capture(&fixture, &run, ("receiver", 0), "prompt");
+    let original = network_received(&fixture, &run, "receiver", 0);
     assert_eq!(original.matches(ONCE).count(), 1);
     let source: Value =
         serde_json::from_str(&network_capture(&fixture, &run, ("sender", 0), "identity"))
@@ -620,13 +636,13 @@ async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_
             highest = highest.max(instance);
         }
         for node in ["rerouted", "receiver"] {
-            let prompt = network_capture(&fixture, &next, (node, 0), "prompt");
+            let received = network_received(&fixture, &next, node, 0);
             assert_eq!(
-                prompt.matches(ONCE).count(),
+                received.matches(ONCE).count(),
                 1,
                 "{node} lost once delivery after rollback"
             );
-            assert_eq!(prompt.matches(STANDING).count(), 1);
+            assert_eq!(received.matches(STANDING).count(), 1);
         }
         let status = fixture.json(&["status", &next], "networks").await;
         let steers = status["steers"].as_array().assert_value();

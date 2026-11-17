@@ -630,6 +630,7 @@ fn recovery_source_metadata_is_atomic_immutable_and_legacy_records_remain_readab
     let target = direct_target("http://127.0.0.1:8080");
     let run = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
     let authorization = source_authorization();
+    registry.insert(target.clone()).assert_value();
     registry
         .record_recovery_authorization_with_source(&target.id, &run, &authorization)
         .assert_value();

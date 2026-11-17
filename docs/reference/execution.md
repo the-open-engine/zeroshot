@@ -20,7 +20,8 @@ macOS retains process-group cleanup; descendants that detach can outlive the com
 
 On Linux and macOS, `SIGTERM` requests a cooperative stop of a detached local controller. It
 cancels owned work, confirms cleanup and records the existing `force_stopped` terminal result
-before exiting. An already recorded terminal result is preserved. The workspace and checkpoints
+before exiting. An already recorded terminal result is preserved, and a run that already
+suspended stays suspended. The workspace and checkpoints
 remain available for `zeroshot resume`; explicit `zeroshot force-stop` keeps its checkpoint
 discard behavior. Closing the invoking terminal still leaves a detached run running.
 
@@ -48,13 +49,16 @@ receives that message, while other mapped copies of its logical node remain elig
 
 Network messages default to `once`, with receipt tracking by recipient node instance across
 retries, fresh conversations and successors. `standing` tracks each provider conversation; a
-continued conversation retains its acknowledged messages and a fresh conversation receives them
-again. Both modes preserve sender exclusion. Human broadcast steering keeps its standing default
+continued conversation retains messages kept in its saved session and a fresh conversation receives
+them again. On Copilot, Pi and OpenCode, standing guidance shown by a transient tool callback also
+returns in the next prompt. Its receipt is excluded from saved conversation snapshots until that
+prompt succeeds. Both modes preserve sender exclusion. Human broadcast steering keeps its standing default
 and instruction precedence. Peer messages remain attributed context under authored instructions.
 
 The existing vector ledger owns messages and receipts. A carrier acknowledgement confirms returned
-context, while prompt delivery records a receipt after successful provider completion. Neither
-proves model compliance. A missing acknowledgement leaves delivery pending and can cause a repeat.
+context. Once prompt delivery records a receipt after successful provider completion. Standing
+prompt receipts are recorded at preparation and remain provisional until successful completion.
+Receipts do not prove model compliance. A missing acknowledgement leaves delivery pending and can cause a repeat.
 
 ## Auto-research
 

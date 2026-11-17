@@ -43,6 +43,19 @@ pub trait TargetConnector: Send + Sync {
 
     async fn add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn login(&self, name: &str) -> Result<(), NativeV2CliError>;
+    async fn list(&self) -> Result<Vec<crate::native_v2_cli::NamedTarget>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target inventory is unavailable".to_owned(),
+        ))
+    }
+    async fn remove(
+        &self,
+        _name: &str,
+    ) -> Result<crate::native_v2_cli::TargetRemoveResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target removal is unavailable".to_owned(),
+        ))
+    }
     async fn sizes(
         &self,
         _name: &str,

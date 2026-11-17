@@ -5412,7 +5412,7 @@
       "type": "object"
     },
     "RunResumeFrom": {
-      "description": "A successor restarts a failed graph or continues from a selected checkpoint or suspension.\nCheckpoint continuations, including suspended successors, restore captured node-instance provider\nconversations; restarts start new ones. Suspended local/direct continuations retain workspace files.",
+      "description": "A successor restarts a failed run where it started, or continues from a selected checkpoint or\nsuspension. Checkpoint continuations, including suspended successors, restore captured\nnode-instance provider conversations, and so does the restart of such a successor; the restart\nof a submitted run starts new ones. Suspended local/direct continuations retain workspace files.",
       "oneOf": [
         {
           "additionalProperties": false,

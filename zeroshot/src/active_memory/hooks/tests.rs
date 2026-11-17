@@ -312,6 +312,8 @@ fn harness_configuration_preserves_arguments_and_uses_private_capabilities() {
             HookInstallation {
                 invocation: &invocation,
                 home: directory.path(),
+                context_budget: None,
+                standing: true,
             },
             install,
         );
@@ -434,6 +436,8 @@ fn auxiliary_roles_never_recall_even_when_a_main_node_has_the_same_name() {
                 HookInstallation {
                     invocation: &auxiliary,
                     home: home.path(),
+                    context_budget: None,
+                    standing: true,
                 },
                 install,
             );
@@ -553,6 +557,8 @@ fn full_authored_instructions_and_failed_hook_setup_preserve_the_primary_invocat
             HookInstallation {
                 invocation: &original,
                 home: invalid_home.path(),
+                context_budget: None,
+                standing: true,
             },
             install,
         );
@@ -770,15 +776,20 @@ async fn steer_prompt_preserves_authored_contract_and_retries_worker_errors() {
         )
         .await;
     assert!(!tool.context.contains("Standing direction"));
-    hooks.finish_steers(delivery, false).await;
-    assert_eq!(
+    // The prompt was handed over, so the steer counts as received while the turn still runs.
+    let received = || async {
         crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
             .await
             .assert_value()
             .steers[0]
-            .received_executions,
-        0
-    );
+            .received_executions
+    };
+    assert_eq!(received().await, 1);
+    // The turn failed: a successor does not inherit the receipt, and the retry carries the steer
+    // again.
+    hooks.finish_steers(delivery, false).await;
+    let instance = original.node.reference.node_instance;
+    assert!(hooks.capture_steers()[&instance].receipts.is_empty());
     let mut retry = original.clone();
     retry.node.reference.execution = crate::native_v2_contract::ExecutionId::new(3).assert_value();
     let delivery = hooks.prepare_steers(&mut retry, false).await.assert_value();
@@ -790,14 +801,8 @@ async fn steer_prompt_preserves_authored_contract_and_retries_worker_errors() {
             .contains("Standing direction")
     );
     hooks.finish_steers(delivery, true).await;
-    assert_eq!(
-        crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
-            .await
-            .assert_value()
-            .steers[0]
-            .received_executions,
-        1
-    );
+    assert_eq!(received().await, 1);
+    assert_eq!(hooks.capture_steers()[&instance].receipts.len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -894,6 +899,8 @@ fn steer_empty_memory_installs_claude_codex_pi_carriers_and_helper_preserves_max
             HookInstallation {
                 invocation: &invocation(),
                 home: directory.path(),
+                context_budget: None,
+                standing: true,
             },
             install,
         );
@@ -973,7 +980,7 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
         )
         .await;
     assert!(delivery.context.contains("Retry at the next callback"));
-    hooks.acknowledge(&query, &delivery).await;
+    hooks.acknowledge(&query, &delivery, true).await;
     assert_eq!(
         crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
             .await
@@ -985,3 +992,248 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
 }
 
 mod network;
+
+/// An unacknowledged delivery records no receipt; it waits until the record holds `text`.
+async fn await_steer(hooks: &ActiveMemoryHooks, invocation: &DriverInvocation, text: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let (query, delivery) = hooks
+                .tool_delivery(
+                    invocation,
+                    &json!({"tool_name":"Read"}),
+                    Path::new("/workspace"),
+                )
+                .await;
+            let received = delivery.context.contains(text);
+            hooks.discard_delivery(&query, &delivery).await;
+            if received {
+                break;
+            }
+        }
+    })
+    .await
+    .assert_value();
+}
+
+fn installed_capability(
+    hooks: &ActiveMemoryHooks,
+    installation: HookInstallation<'_>,
+    install: NativeInstaller,
+) -> super::broker::Capability {
+    let home = installation.home;
+    hooks.configure_with(&mut command(home), installation, install);
+    serde_json::from_slice(
+        &std::fs::read(home.join("active-memory-capability.json")).assert_value(),
+    )
+    .assert_value()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_is_not_receipted_at_a_subagent_tool_call_and_reaches_the_conversation_next() {
+    let (ledger, run) = steer_record().await;
+    let source = Arc::new(Source::default());
+    let hooks = Arc::new(ActiveMemoryHooks::new(source.clone()).assert_value());
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut invocation = invocation();
+    let prompt = hooks
+        .prepare_steers(&mut invocation, false)
+        .await
+        .assert_value();
+    record_steer(ledger.as_ref(), &run, "Parent direction").await;
+    await_steer(&hooks, &invocation, "Parent direction").await;
+    let cap = hooks
+        .broker
+        .capability(&invocation, Path::new("/workspace"))
+        .assert_value();
+    tokio::task::spawn_blocking(move || {
+        let subagent = json!({"tool_name":"Read","agent_id":"a456838012fb65c82","agent_type":"general-purpose"});
+        let context = callback(&cap, &cap.token, subagent);
+        assert_eq!(context, "[lesson@1] Keep the generated schema synchronized.");
+        let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+        assert!(context.contains("Parent direction"));
+        // The next accepted callback is a barrier after the previous carrier's receipt.
+        assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+    })
+    .await
+    .assert_value();
+    hooks.finish_steers(prompt, true).await;
+    let subagent: Vec<_> = source
+        .queries
+        .lock()
+        .assert_value()
+        .iter()
+        .rev()
+        .take(3)
+        .map(|query| query.subagent)
+        .collect();
+    assert_eq!(subagent, [false, false, true]);
+    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert_eq!(status.steers[0].received_executions, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_beyond_the_claude_inline_budget_waits_with_later_steers_for_the_next_prompt() {
+    use crate::harnesses::adapters::core::claude::memory::{INLINE_CONTEXT_BYTES, install};
+    let (ledger, run) = steer_record().await;
+    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let directory = tempfile::tempdir().assert_value();
+    let mut invocation = invocation();
+    let execution = hooks
+        .prepare_steers(&mut invocation, false)
+        .await
+        .assert_value();
+    let large = "x".repeat(INLINE_CONTEXT_BYTES);
+    record_steer(ledger.as_ref(), &run, &large).await;
+    record_steer(ledger.as_ref(), &run, "Queued small direction").await;
+    await_steer(&hooks, &invocation, "Queued small direction").await;
+    let installation = HookInstallation {
+        invocation: &invocation,
+        home: directory.path(),
+        context_budget: Some(INLINE_CONTEXT_BYTES),
+        standing: true,
+    };
+    let cap = Arc::new(installed_capability(&hooks, installation, install));
+    let tool = cap.clone();
+    tokio::task::spawn_blocking(move || {
+        for _ in 0..2 {
+            let context = callback(&tool, &tool.token, json!({"tool_name":"Read"}));
+            assert_eq!(
+                context,
+                "[lesson@1] Keep the generated schema synchronized."
+            );
+        }
+    })
+    .await
+    .assert_value();
+    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert!(status.steers.iter().all(|s| s.received_executions == 0));
+    invocation.host_context = None;
+    hooks
+        .prepare_steers(&mut invocation, false)
+        .await
+        .assert_value();
+    let prompt = invocation.host_context.as_ref().assert_value();
+    assert!(prompt.contains(&large));
+    assert!(prompt.find(&large) < prompt.find("Queued small direction"));
+    record_steer(ledger.as_ref(), &run, "Fits inline").await;
+    await_steer(&hooks, &invocation, "Fits inline").await;
+    let context = tokio::task::spawn_blocking(move || {
+        let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+        assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+        context
+    })
+    .await
+    .assert_value();
+    assert!(context.contains("Fits inline"));
+    assert!(!context.contains("Queued small direction"));
+    assert!(context.len() <= INLINE_CONTEXT_BYTES);
+    hooks.finish_steers(execution, true).await;
+    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert!(status.steers.iter().all(|s| s.received_executions == 1));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_beyond_the_claude_inline_budget_still_reaches_other_carriers_at_a_tool_call() {
+    use crate::harnesses::adapters::core::{claude::memory::INLINE_CONTEXT_BYTES, codex};
+    let (ledger, run) = steer_record().await;
+    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let directory = tempfile::tempdir().assert_value();
+    let mut invocation = invocation();
+    let execution = hooks
+        .prepare_steers(&mut invocation, false)
+        .await
+        .assert_value();
+    let large = "x".repeat(INLINE_CONTEXT_BYTES);
+    record_steer(ledger.as_ref(), &run, &large).await;
+    await_steer(&hooks, &invocation, &large).await;
+    let installation = HookInstallation {
+        invocation: &invocation,
+        home: directory.path(),
+        context_budget: None,
+        standing: true,
+    };
+    let cap = installed_capability(&hooks, installation, codex::memory::install);
+    let context = tokio::task::spawn_blocking(move || {
+        let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+        assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+        context
+    })
+    .await
+    .assert_value();
+    assert!(context.contains(&large));
+    hooks.finish_steers(execution, true).await;
+    let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+        .await
+        .assert_value();
+    assert_eq!(status.steers[0].received_executions, 1);
+}
+
+// The same callback path serves a carrier on which a steer stands (Codex) and one on which it
+// does not (Pi): only the installation differs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_at_a_tool_call_returns_in_the_next_prompt_only_where_it_does_not_stand() {
+    use crate::harnesses::adapters::core::{codex, pi};
+    let carriers: [(NativeInstaller, bool); 2] =
+        [(codex::memory::install, true), (pi::memory::install, false)];
+    for (install, standing) in carriers {
+        let (ledger, run) = steer_record().await;
+        let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+        hooks.bind_ledger(run.clone(), ledger.clone());
+        let directory = tempfile::tempdir().assert_value();
+        let mut invocation = invocation();
+        if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { session_scope, .. } =
+            &mut invocation.node.binding
+        {
+            *session_scope = crate::execution::SessionScope::NodeInstance;
+        }
+        let instance = invocation.node.reference.node_instance;
+        let execution = hooks
+            .prepare_steers(&mut invocation, false)
+            .await
+            .assert_value();
+        record_steer(ledger.as_ref(), &run, "Standing direction").await;
+        await_steer(&hooks, &invocation, "Standing direction").await;
+        let installation = HookInstallation {
+            invocation: &invocation,
+            home: directory.path(),
+            context_budget: None,
+            standing,
+        };
+        let cap = installed_capability(&hooks, installation, install);
+        let context = tokio::task::spawn_blocking(move || {
+            let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+            // The broker serves one callback at a time, so the first receipt is written by now.
+            assert!(!callback(&cap, &cap.token, json!({"tool_name":"Read"})).contains("<steer>"));
+            context
+        })
+        .await
+        .assert_value();
+        assert!(context.contains("Standing direction"));
+        let status = crate::v2_run_ledger::steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value();
+        assert_eq!(status.steers[0].received_executions, 1);
+        assert_eq!(
+            hooks.capture_steers()[&instance].receipts.len(),
+            usize::from(standing)
+        );
+        hooks.finish_steers(execution, true).await;
+        let mut revisit = invocation.clone();
+        revisit.host_context = None;
+        revisit.node.reference.execution =
+            crate::native_v2_contract::ExecutionId::new(3).assert_value();
+        hooks
+            .prepare_steers(&mut revisit, false)
+            .await
+            .assert_value();
+        assert_eq!(revisit.host_context.is_some(), !standing);
+    }
+}

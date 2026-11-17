@@ -22820,8 +22820,8 @@
                       },
                       "children": [
                         {
-                          "kind": "par",
-                          "name": "parallel_reviews",
+                          "kind": "seq",
+                          "name": "reviews",
                           "state": {
                             "kind": "record",
                             "fields": {
@@ -22926,7 +22926,67 @@
                               }
                             }
                           },
-                          "branches": [
+                          "promotedStatePaths": [
+                            ["acceptanceFeedback"],
+                            ["codeFeedback"],
+                            ["title"],
+                            ["description"]
+                          ],
+                          "children": [
+                            {
+                              "kind": "verifier",
+                              "name": "code",
+                              "worker": "builtin.agent.code-verifier@1",
+                              "input": {
+                                "kind": "record",
+                                "fields": {
+                                  "task": {
+                                    "type": {
+                                      "kind": "string"
+                                    },
+                                    "required": true
+                                  }
+                                }
+                              },
+                              "output": {
+                                "kind": "null"
+                              },
+                              "inputBindings": [
+                                {
+                                  "target": ["task"],
+                                  "value": {
+                                    "source": "state",
+                                    "path": ["task"]
+                                  }
+                                }
+                              ],
+                              "writeBindings": [
+                                {
+                                  "value": {
+                                    "node": "code",
+                                    "channel": "diagnostic",
+                                    "path": ["message"]
+                                  },
+                                  "target": ["codeFeedback"]
+                                }
+                              ],
+                              "attempts": 2,
+                              "signals": {
+                                "verdict": ["accepted", "rejected"]
+                              },
+                              "diagnostic": {
+                                "kind": "record",
+                                "fields": {
+                                  "message": {
+                                    "type": {
+                                      "kind": "string"
+                                    },
+                                    "required": true
+                                  }
+                                }
+                              },
+                              "instructions": "Independently review the security patch for alternate exploit paths, input boundaries, error handling, regressions, and unnecessary scope. Inspect files and observable test outputs; do not use git commands. Verify that the regression fixture would catch the original vulnerable behavior. Return accepted only with concrete evidence, otherwise rejected with precise repair instructions."
+                            },
                             {
                               "kind": "verifier",
                               "name": "approval",
@@ -22987,71 +23047,8 @@
                                   }
                                 }
                               }
-                            },
-                            {
-                              "kind": "verifier",
-                              "name": "code",
-                              "worker": "builtin.agent.code-verifier@1",
-                              "input": {
-                                "kind": "record",
-                                "fields": {
-                                  "task": {
-                                    "type": {
-                                      "kind": "string"
-                                    },
-                                    "required": true
-                                  }
-                                }
-                              },
-                              "output": {
-                                "kind": "null"
-                              },
-                              "inputBindings": [
-                                {
-                                  "target": ["task"],
-                                  "value": {
-                                    "source": "state",
-                                    "path": ["task"]
-                                  }
-                                }
-                              ],
-                              "writeBindings": [
-                                {
-                                  "value": {
-                                    "node": "code",
-                                    "channel": "diagnostic",
-                                    "path": ["message"]
-                                  },
-                                  "target": ["codeFeedback"]
-                                }
-                              ],
-                              "attempts": 2,
-                              "signals": {
-                                "verdict": ["accepted", "rejected"]
-                              },
-                              "diagnostic": {
-                                "kind": "record",
-                                "fields": {
-                                  "message": {
-                                    "type": {
-                                      "kind": "string"
-                                    },
-                                    "required": true
-                                  }
-                                }
-                              },
-                              "instructions": "Independently review the security patch for alternate exploit paths, input boundaries, error handling, regressions, and unnecessary scope. Inspect files and observable test outputs; do not use git commands. Verify that the regression fixture would catch the original vulnerable behavior. Return accepted only with concrete evidence, otherwise rejected with precise repair instructions."
                             }
-                          ],
-                          "promotedStatePaths": [
-                            ["acceptanceFeedback"],
-                            ["codeFeedback"],
-                            ["title"],
-                            ["description"]
-                          ],
-                          "join": {
-                            "kind": "all"
-                          }
+                          ]
                         },
                         {
                           "kind": "choice",
@@ -24132,30 +24129,9 @@
           "kind": "node_started",
           "reference": {
             "runId": "example-security-patch-approval",
-            "node": "approval",
+            "node": "code",
             "nodeInstance": "instance-2",
             "execution": "execution-2"
-          },
-          "occurrence": {
-            "node": "approval",
-            "mapIndices": []
-          },
-          "attempt": 1,
-          "input": {
-            "text": "Does this patch close the tenant boundary bug? Approve, or reject with what is missing."
-          }
-        }
-      },
-      {
-        "cursor": "v2:8",
-        "recordedAt": 1789682601000,
-        "event": {
-          "kind": "node_started",
-          "reference": {
-            "runId": "example-security-patch-approval",
-            "node": "code",
-            "nodeInstance": "instance-3",
-            "execution": "execution-3"
           },
           "occurrence": {
             "node": "code",
@@ -24168,22 +24144,22 @@
         }
       },
       {
-        "cursor": "v2:9",
+        "cursor": "v2:8",
         "recordedAt": 1789682820000,
         "event": {
           "kind": "safe_log",
-          "execution": "execution-3",
+          "execution": "execution-2",
           "stream": "output",
           "line": "The guard runs before lookup, and public errors do not reveal another tenant's account.",
           "timestamp": 1789682820000
         }
       },
       {
-        "cursor": "v2:10",
+        "cursor": "v2:9",
         "recordedAt": 1789682822000,
         "event": {
           "kind": "token_usage_observed",
-          "execution": "execution-3",
+          "execution": "execution-2",
           "usage": {
             "inputTokens": 43257,
             "outputTokens": 1029,
@@ -24192,7 +24168,7 @@
         }
       },
       {
-        "cursor": "v2:11",
+        "cursor": "v2:10",
         "recordedAt": 1789682822000,
         "event": {
           "kind": "node_completed",
@@ -24200,8 +24176,8 @@
             "reference": {
               "runId": "example-security-patch-approval",
               "node": "code",
-              "nodeInstance": "instance-3",
-              "execution": "execution-3"
+              "nodeInstance": "instance-2",
+              "execution": "execution-2"
             },
             "outcome": {
               "status": "verifier",
@@ -24218,6 +24194,27 @@
         }
       },
       {
+        "cursor": "v2:11",
+        "recordedAt": 1789682824000,
+        "event": {
+          "kind": "node_started",
+          "reference": {
+            "runId": "example-security-patch-approval",
+            "node": "approval",
+            "nodeInstance": "instance-3",
+            "execution": "execution-3"
+          },
+          "occurrence": {
+            "node": "approval",
+            "mapIndices": []
+          },
+          "attempt": 1,
+          "input": {
+            "text": "Does this patch close the tenant boundary bug? Approve, or reject with what is missing."
+          }
+        }
+      },
+      {
         "cursor": "v2:12",
         "recordedAt": 1789682824000,
         "event": {
@@ -24225,8 +24222,8 @@
           "reference": {
             "runId": "example-security-patch-approval",
             "node": "approval",
-            "nodeInstance": "instance-2",
-            "execution": "execution-2"
+            "nodeInstance": "instance-3",
+            "execution": "execution-3"
           }
         }
       },
@@ -24926,8 +24923,8 @@
                       },
                       "children": [
                         {
-                          "kind": "par",
-                          "name": "parallel_reviews",
+                          "kind": "seq",
+                          "name": "reviews",
                           "state": {
                             "kind": "record",
                             "fields": {
@@ -25032,7 +25029,67 @@
                               }
                             }
                           },
-                          "branches": [
+                          "promotedStatePaths": [
+                            ["acceptanceFeedback"],
+                            ["codeFeedback"],
+                            ["title"],
+                            ["description"]
+                          ],
+                          "children": [
+                            {
+                              "kind": "verifier",
+                              "name": "code",
+                              "worker": "builtin.agent.code-verifier@1",
+                              "input": {
+                                "kind": "record",
+                                "fields": {
+                                  "task": {
+                                    "type": {
+                                      "kind": "string"
+                                    },
+                                    "required": true
+                                  }
+                                }
+                              },
+                              "output": {
+                                "kind": "null"
+                              },
+                              "inputBindings": [
+                                {
+                                  "target": ["task"],
+                                  "value": {
+                                    "source": "state",
+                                    "path": ["task"]
+                                  }
+                                }
+                              ],
+                              "writeBindings": [
+                                {
+                                  "value": {
+                                    "node": "code",
+                                    "channel": "diagnostic",
+                                    "path": ["message"]
+                                  },
+                                  "target": ["codeFeedback"]
+                                }
+                              ],
+                              "attempts": 2,
+                              "signals": {
+                                "verdict": ["accepted", "rejected"]
+                              },
+                              "diagnostic": {
+                                "kind": "record",
+                                "fields": {
+                                  "message": {
+                                    "type": {
+                                      "kind": "string"
+                                    },
+                                    "required": true
+                                  }
+                                }
+                              },
+                              "instructions": "Independently review the security patch for alternate exploit paths, input boundaries, error handling, regressions, and unnecessary scope. Inspect files and observable test outputs; do not use git commands. Verify that the regression fixture would catch the original vulnerable behavior. Return accepted only with concrete evidence, otherwise rejected with precise repair instructions."
+                            },
                             {
                               "kind": "verifier",
                               "name": "approval",
@@ -25093,71 +25150,8 @@
                                   }
                                 }
                               }
-                            },
-                            {
-                              "kind": "verifier",
-                              "name": "code",
-                              "worker": "builtin.agent.code-verifier@1",
-                              "input": {
-                                "kind": "record",
-                                "fields": {
-                                  "task": {
-                                    "type": {
-                                      "kind": "string"
-                                    },
-                                    "required": true
-                                  }
-                                }
-                              },
-                              "output": {
-                                "kind": "null"
-                              },
-                              "inputBindings": [
-                                {
-                                  "target": ["task"],
-                                  "value": {
-                                    "source": "state",
-                                    "path": ["task"]
-                                  }
-                                }
-                              ],
-                              "writeBindings": [
-                                {
-                                  "value": {
-                                    "node": "code",
-                                    "channel": "diagnostic",
-                                    "path": ["message"]
-                                  },
-                                  "target": ["codeFeedback"]
-                                }
-                              ],
-                              "attempts": 2,
-                              "signals": {
-                                "verdict": ["accepted", "rejected"]
-                              },
-                              "diagnostic": {
-                                "kind": "record",
-                                "fields": {
-                                  "message": {
-                                    "type": {
-                                      "kind": "string"
-                                    },
-                                    "required": true
-                                  }
-                                }
-                              },
-                              "instructions": "Independently review the security patch for alternate exploit paths, input boundaries, error handling, regressions, and unnecessary scope. Inspect files and observable test outputs; do not use git commands. Verify that the regression fixture would catch the original vulnerable behavior. Return accepted only with concrete evidence, otherwise rejected with precise repair instructions."
                             }
-                          ],
-                          "promotedStatePaths": [
-                            ["acceptanceFeedback"],
-                            ["codeFeedback"],
-                            ["title"],
-                            ["description"]
-                          ],
-                          "join": {
-                            "kind": "all"
-                          }
+                          ]
                         },
                         {
                           "kind": "choice",
@@ -26227,8 +26221,8 @@
         "event": {
           "kind": "prior_execution",
           "execution": {
-            "execution": "execution-3",
-            "node_instance": "instance-3",
+            "execution": "execution-2",
+            "node_instance": "instance-2",
             "occurrence": {
               "node": "code",
               "mapIndices": []
@@ -26262,8 +26256,8 @@
         "event": {
           "kind": "prior_execution",
           "execution": {
-            "execution": "execution-2",
-            "node_instance": "instance-2",
+            "execution": "execution-3",
+            "node_instance": "instance-3",
             "occurrence": {
               "node": "approval",
               "mapIndices": []
@@ -26325,8 +26319,8 @@
             "reference": {
               "runId": "example-security-patch-approval-revised",
               "node": "approval",
-              "nodeInstance": "instance-2",
-              "execution": "execution-2"
+              "nodeInstance": "instance-3",
+              "execution": "execution-3"
             },
             "outcome": {
               "status": "verifier",
@@ -26416,30 +26410,9 @@
           "kind": "node_started",
           "reference": {
             "runId": "example-security-patch-approval-revised",
-            "node": "approval",
+            "node": "code",
             "nodeInstance": "instance-2",
             "execution": "execution-5"
-          },
-          "occurrence": {
-            "node": "approval",
-            "mapIndices": []
-          },
-          "attempt": 1,
-          "input": {
-            "text": "Regression test added for tenants with no accounts. Approve the patch now?"
-          }
-        }
-      },
-      {
-        "cursor": "v2:15",
-        "recordedAt": 1789691036000,
-        "event": {
-          "kind": "node_started",
-          "reference": {
-            "runId": "example-security-patch-approval-revised",
-            "node": "code",
-            "nodeInstance": "instance-3",
-            "execution": "execution-6"
           },
           "occurrence": {
             "node": "code",
@@ -26452,22 +26425,22 @@
         }
       },
       {
-        "cursor": "v2:16",
+        "cursor": "v2:15",
         "recordedAt": 1789691458000,
         "event": {
           "kind": "safe_log",
-          "execution": "execution-6",
+          "execution": "execution-5",
           "stream": "output",
           "line": "Empty-tenant case is covered and passes.",
           "timestamp": 1789691458000
         }
       },
       {
-        "cursor": "v2:17",
+        "cursor": "v2:16",
         "recordedAt": 1789691460000,
         "event": {
           "kind": "token_usage_observed",
-          "execution": "execution-6",
+          "execution": "execution-5",
           "usage": {
             "inputTokens": 42440,
             "outputTokens": 3080,
@@ -26476,7 +26449,7 @@
         }
       },
       {
-        "cursor": "v2:18",
+        "cursor": "v2:17",
         "recordedAt": 1789691460000,
         "event": {
           "kind": "node_completed",
@@ -26484,8 +26457,8 @@
             "reference": {
               "runId": "example-security-patch-approval-revised",
               "node": "code",
-              "nodeInstance": "instance-3",
-              "execution": "execution-6"
+              "nodeInstance": "instance-2",
+              "execution": "execution-5"
             },
             "outcome": {
               "status": "verifier",
@@ -26502,6 +26475,27 @@
         }
       },
       {
+        "cursor": "v2:18",
+        "recordedAt": 1789691462000,
+        "event": {
+          "kind": "node_started",
+          "reference": {
+            "runId": "example-security-patch-approval-revised",
+            "node": "approval",
+            "nodeInstance": "instance-3",
+            "execution": "execution-6"
+          },
+          "occurrence": {
+            "node": "approval",
+            "mapIndices": []
+          },
+          "attempt": 1,
+          "input": {
+            "text": "Regression test added for tenants with no accounts. Approve the patch now?"
+          }
+        }
+      },
+      {
         "cursor": "v2:19",
         "recordedAt": 1789691462000,
         "event": {
@@ -26509,8 +26503,8 @@
           "reference": {
             "runId": "example-security-patch-approval-revised",
             "node": "approval",
-            "nodeInstance": "instance-2",
-            "execution": "execution-5"
+            "nodeInstance": "instance-3",
+            "execution": "execution-6"
           }
         }
       },
@@ -27222,8 +27216,8 @@
                       },
                       "children": [
                         {
-                          "kind": "par",
-                          "name": "parallel_reviews",
+                          "kind": "seq",
+                          "name": "reviews",
                           "state": {
                             "kind": "record",
                             "fields": {
@@ -27328,7 +27322,67 @@
                               }
                             }
                           },
-                          "branches": [
+                          "promotedStatePaths": [
+                            ["acceptanceFeedback"],
+                            ["codeFeedback"],
+                            ["title"],
+                            ["description"]
+                          ],
+                          "children": [
+                            {
+                              "kind": "verifier",
+                              "name": "code",
+                              "worker": "builtin.agent.code-verifier@1",
+                              "input": {
+                                "kind": "record",
+                                "fields": {
+                                  "task": {
+                                    "type": {
+                                      "kind": "string"
+                                    },
+                                    "required": true
+                                  }
+                                }
+                              },
+                              "output": {
+                                "kind": "null"
+                              },
+                              "inputBindings": [
+                                {
+                                  "target": ["task"],
+                                  "value": {
+                                    "source": "state",
+                                    "path": ["task"]
+                                  }
+                                }
+                              ],
+                              "writeBindings": [
+                                {
+                                  "value": {
+                                    "node": "code",
+                                    "channel": "diagnostic",
+                                    "path": ["message"]
+                                  },
+                                  "target": ["codeFeedback"]
+                                }
+                              ],
+                              "attempts": 2,
+                              "signals": {
+                                "verdict": ["accepted", "rejected"]
+                              },
+                              "diagnostic": {
+                                "kind": "record",
+                                "fields": {
+                                  "message": {
+                                    "type": {
+                                      "kind": "string"
+                                    },
+                                    "required": true
+                                  }
+                                }
+                              },
+                              "instructions": "Independently review the security patch for alternate exploit paths, input boundaries, error handling, regressions, and unnecessary scope. Inspect files and observable test outputs; do not use git commands. Verify that the regression fixture would catch the original vulnerable behavior. Return accepted only with concrete evidence, otherwise rejected with precise repair instructions."
+                            },
                             {
                               "kind": "verifier",
                               "name": "approval",
@@ -27389,71 +27443,8 @@
                                   }
                                 }
                               }
-                            },
-                            {
-                              "kind": "verifier",
-                              "name": "code",
-                              "worker": "builtin.agent.code-verifier@1",
-                              "input": {
-                                "kind": "record",
-                                "fields": {
-                                  "task": {
-                                    "type": {
-                                      "kind": "string"
-                                    },
-                                    "required": true
-                                  }
-                                }
-                              },
-                              "output": {
-                                "kind": "null"
-                              },
-                              "inputBindings": [
-                                {
-                                  "target": ["task"],
-                                  "value": {
-                                    "source": "state",
-                                    "path": ["task"]
-                                  }
-                                }
-                              ],
-                              "writeBindings": [
-                                {
-                                  "value": {
-                                    "node": "code",
-                                    "channel": "diagnostic",
-                                    "path": ["message"]
-                                  },
-                                  "target": ["codeFeedback"]
-                                }
-                              ],
-                              "attempts": 2,
-                              "signals": {
-                                "verdict": ["accepted", "rejected"]
-                              },
-                              "diagnostic": {
-                                "kind": "record",
-                                "fields": {
-                                  "message": {
-                                    "type": {
-                                      "kind": "string"
-                                    },
-                                    "required": true
-                                  }
-                                }
-                              },
-                              "instructions": "Independently review the security patch for alternate exploit paths, input boundaries, error handling, regressions, and unnecessary scope. Inspect files and observable test outputs; do not use git commands. Verify that the regression fixture would catch the original vulnerable behavior. Return accepted only with concrete evidence, otherwise rejected with precise repair instructions."
                             }
-                          ],
-                          "promotedStatePaths": [
-                            ["acceptanceFeedback"],
-                            ["codeFeedback"],
-                            ["title"],
-                            ["description"]
-                          ],
-                          "join": {
-                            "kind": "all"
-                          }
+                          ]
                         },
                         {
                           "kind": "choice",
@@ -28562,8 +28553,8 @@
         "event": {
           "kind": "prior_execution",
           "execution": {
-            "execution": "execution-3",
-            "node_instance": "instance-3",
+            "execution": "execution-2",
+            "node_instance": "instance-2",
             "occurrence": {
               "node": "code",
               "mapIndices": []
@@ -28597,8 +28588,8 @@
         "event": {
           "kind": "prior_execution",
           "execution": {
-            "execution": "execution-2",
-            "node_instance": "instance-2",
+            "execution": "execution-3",
+            "node_instance": "instance-3",
             "occurrence": {
               "node": "approval",
               "mapIndices": []
@@ -28663,8 +28654,8 @@
         "event": {
           "kind": "prior_execution",
           "execution": {
-            "execution": "execution-6",
-            "node_instance": "instance-3",
+            "execution": "execution-5",
+            "node_instance": "instance-2",
             "occurrence": {
               "node": "code",
               "mapIndices": []
@@ -28698,8 +28689,8 @@
         "event": {
           "kind": "prior_execution",
           "execution": {
-            "execution": "execution-5",
-            "node_instance": "instance-2",
+            "execution": "execution-6",
+            "node_instance": "instance-3",
             "occurrence": {
               "node": "approval",
               "mapIndices": []
@@ -28761,8 +28752,8 @@
             "reference": {
               "runId": "example-security-patch-approval-merged",
               "node": "approval",
-              "nodeInstance": "instance-2",
-              "execution": "execution-5"
+              "nodeInstance": "instance-3",
+              "execution": "execution-6"
             },
             "outcome": {
               "status": "verifier",

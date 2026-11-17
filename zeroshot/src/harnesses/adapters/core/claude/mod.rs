@@ -30,8 +30,9 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{
-    AgentResponse, resolve_agent_response, DriverControl, DriverInvocation, LiveOutput,
-    LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
+    AgentResponse, resolve_agent_response_with_delivery, DriverControl, DriverInvocation,
+    LiveOutput, LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
+    ResponseDelivery,
 };
 use command::{LOCAL_ENVIRONMENT, ClaudeTurnArguments, claude_arguments, configure_provider, prompt};
 use session::{ClaudeRunState, ClaudeSession, attempt_session_id, observe_session};
@@ -219,6 +220,8 @@ impl ClaudeAdapter {
                 crate::active_memory::hooks::HookInstallation {
                     invocation,
                     home: input.files.home(),
+                    context_budget: Some(memory::INLINE_CONTEXT_BYTES),
+                    standing: true,
                 },
                 memory::install,
             );
@@ -407,7 +410,11 @@ async fn resolve_claude_attempt(
             });
         }
     };
-    let response = resolve_agent_response(&turn.invocation.response, &result.message)?;
+    let response = resolve_agent_response_with_delivery(
+        &turn.invocation.response,
+        &result.message,
+        ResponseDelivery::StructuredOutput,
+    )?;
     state
         .retry
         .report_correction(

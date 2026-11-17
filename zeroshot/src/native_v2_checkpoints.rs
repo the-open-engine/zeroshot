@@ -570,12 +570,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
 
     async fn restored_conversations(&self) -> Option<ConversationFiles> {
         let selection = self.conversation_restore.as_ref()?;
-        if selection.selection == CheckpointRestoreSelection::Latest {
-            return None;
-        }
-        restore_conversations(selection, self.stopping.clone())
-            .await
-            .ok()
+        restore_checkpoint_conversations(selection, self.stopping.clone()).await
     }
 
     async fn suspend(
@@ -973,8 +968,14 @@ fn snapshot_path(directory: &Path, snapshot: &SnapshotId) -> PathBuf {
 async fn restore_conversations(
     selection: &CheckpointRestore,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
-) -> Result<ConversationFiles, CheckpointError> {
-    let snapshot = selected_snapshot(selection)?;
+) -> Result<Option<ConversationFiles>, CheckpointError> {
+    let snapshot = match selected_snapshot(selection) {
+        // No pointer or catalog entry means no such checkpoint, so no conversation either.
+        Err(CheckpointError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        snapshot => snapshot?,
+    };
     let (configuration, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)?;
     let repository = restic::Repository::new(
         configuration.program.for_restore()?,
@@ -990,13 +991,37 @@ async fn restore_conversations(
         .await?;
     let directory = stage.path().join("conversations");
     if !directory.is_dir() {
-        return Err(catalog::invalid("checkpoint has no conversations"));
+        return Ok(None);
     }
     // Drop the independently extracted workspace immediately; it is never installed.
     let workspace = stage.path().join("workspace");
     let _ = filesystem::remove_disposable_tree(&workspace);
     let retained = ConversationFiles::staged(stage);
-    Ok(ConversationFiles::nested(retained, directory))
+    Ok(Some(ConversationFiles::nested(retained, directory)))
+}
+
+/// The conversations a successor starts with. `source` is its predecessor's checkpoint directory
+/// with the successor's selection: a continuation or a selected checkpoint names them itself. A
+/// restart starts with the ones its source started with, or with new ones when its source
+/// recorded none. The choice is recorded in `own`, the successor's checkpoint directory.
+pub(crate) fn successor_conversations(
+    source: CheckpointRestore,
+    own: &Path,
+) -> Result<CheckpointRestore, CheckpointError> {
+    const ORIGIN: &str = "conversation-origin.json";
+    let origin = if source.selection == CheckpointRestoreSelection::Latest {
+        match catalog::read(&source.directory.join(ORIGIN)) {
+            Ok(origin) => origin,
+            Err(CheckpointError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(source);
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        source
+    };
+    catalog::write_atomic(&own.join(ORIGIN), &origin)?;
+    Ok(origin)
 }
 
 pub(crate) async fn restore_checkpoint_conversations(
@@ -1006,5 +1031,7 @@ pub(crate) async fn restore_checkpoint_conversations(
     if selection.selection == CheckpointRestoreSelection::Latest {
         return None;
     }
-    restore_conversations(selection, stopping).await.ok()
+    restore_conversations(selection, stopping)
+        .await
+        .unwrap_or_else(|_| Some(ConversationFiles::unrestorable()))
 }

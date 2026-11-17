@@ -15,6 +15,7 @@ const CREDENTIAL_STORE_ENV: &str = "ZEROSHOT_CREDENTIAL_STORE";
 enum Backend {
     System,
     File,
+    FileWithSystem,
 }
 
 pub(super) struct LinuxTargetCredentialStore {
@@ -58,7 +59,9 @@ impl LinuxTargetCredentialStore {
             .await?
             .map(|value| match value.as_str() {
                 "system\n" => Ok(Backend::System),
-                "file\n" => Ok(Backend::File),
+                // Legacy file selections may conceal an earlier keyring login.
+                "file\n" => Ok(Backend::FileWithSystem),
+                "file-only\n" => Ok(Backend::File),
                 _ => Err(authority_error(
                     "target credential store selection is malformed",
                 )),
@@ -73,7 +76,11 @@ impl LinuxTargetCredentialStore {
     ) -> Result<(), TargetAuthorityError> {
         let value = match backend {
             Backend::System => "system\n",
-            Backend::File => "file\n",
+            Backend::FileWithSystem => "file\n",
+            Backend::File => match self.stored_backend(target_id).await? {
+                Some(Backend::System | Backend::FileWithSystem) => "file\n",
+                Some(Backend::File) | None => "file-only\n",
+            },
         };
         self.file.write_backend(target_id, value).await
     }
@@ -89,16 +96,19 @@ impl LinuxTargetCredentialStore {
     fn backend(&self, backend: Backend) -> &dyn TargetCredentialStore {
         match backend {
             Backend::System => self.system.as_ref(),
-            Backend::File => &self.file,
+            Backend::File | Backend::FileWithSystem => &self.file,
         }
     }
 
-    async fn initial_backend(&self, target_id: &str) -> Backend {
-        match self.system.get(target_id).await {
-            Ok(Some(_)) => Backend::System,
+    async fn initial_backend(&self, target_id: &str) -> Result<Backend, TargetAuthorityError> {
+        Ok(match self.system.get(target_id).await {
+            Ok(Some(_)) => {
+                self.remember_backend(target_id, Backend::System).await?;
+                Backend::System
+            }
             Ok(None) if self.desktop_session => Backend::System,
             Ok(None) | Err(_) => Backend::File,
-        }
+        })
     }
 
     async fn login_backend(&self, target_id: &str) -> Result<Backend, TargetAuthorityError> {
@@ -107,7 +117,7 @@ impl LinuxTargetCredentialStore {
         }
         Ok(match self.stored_backend(target_id).await? {
             Some(stored) => stored,
-            None => self.initial_backend(target_id).await,
+            None => self.initial_backend(target_id).await?,
         })
     }
 
@@ -129,6 +139,18 @@ impl LinuxTargetCredentialStore {
 
 #[async_trait]
 impl TargetCredentialStore for LinuxTargetCredentialStore {
+    async fn remove(&self, target_id: &str) -> Result<(), TargetAuthorityError> {
+        // A later environment override must not redirect deletion away from the saved login.
+        let selected = match self.stored_backend(target_id).await?.or(self.forced) {
+            Some(selected) => selected,
+            None => self.initial_backend(target_id).await?,
+        };
+        if matches!(selected, Backend::System | Backend::FileWithSystem) {
+            self.system.remove(target_id).await?;
+        }
+        self.file.remove_credential(target_id).await?;
+        self.file.remove_backend(target_id).await
+    }
     async fn prepare_for_login(
         &self,
         target_id: &str,
@@ -160,11 +182,13 @@ impl TargetCredentialStore for LinuxTargetCredentialStore {
             None if self.desktop_session => Backend::System,
             None => Backend::File,
         };
+        // Retain cleanup obligations even if credential storage is interrupted or fails.
+        self.remember_backend(target_id, selected).await?;
         self.backend(selected).set(target_id, refresh_token).await?;
         if selected == Backend::System {
             self.file.remove_credential(target_id).await?;
         }
-        self.remember_backend(target_id, selected).await
+        Ok(())
     }
 }
 

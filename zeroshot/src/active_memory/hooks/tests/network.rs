@@ -291,7 +291,7 @@ async fn network_lost_ack_reservations_release_and_failed_start_does_not_consume
     fixture.hooks.discard_delivery(&query, &first).await;
     let (query, retry) = fixture.deliver(&reader).await;
     assert_eq!(retry.steers, first.steers);
-    fixture.hooks.acknowledge(&query, &retry).await;
+    fixture.hooks.acknowledge(&query, &retry, true).await;
     assert!(fixture.deliver(&reader).await.1.steers.is_empty());
     fixture
         .publish(fixture.params("no-carrier-note", SteeringMode::Once, &["alpha"]))
@@ -470,4 +470,50 @@ async fn network_native_broker_reoffers_after_missing_ack_and_accepts_complete_m
     })
     .await
     .assert_value();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn network_transient_callback_reoffers_only_standing_until_a_prompt_succeeds() {
+    let fixture = NetworkFixture::new().await;
+    let mut reader = turn("reader", 7, 7, 7);
+    assert!(fixture.prepare(&mut reader).await.is_empty());
+    for (text, mode) in [
+        ("once-transient", SteeringMode::Once),
+        ("standing-transient", SteeringMode::Standing),
+    ] {
+        fixture
+            .publish(fixture.params(text, mode, &["alpha", "beta"]))
+            .await
+            .assert_value();
+    }
+    let (query, delivery) = fixture.deliver(&reader).await;
+    assert_eq!(delivery.steers.len(), 2);
+    fixture.hooks.acknowledge(&query, &delivery, false).await;
+    assert!(fixture.deliver(&reader).await.1.steers.is_empty());
+    let instance = reader.node.reference.node_instance;
+    assert_eq!(fixture.hooks.capture_steers()[&instance].receipts.len(), 1);
+    fixture.hooks.finish_steers(7, true).await;
+    for (execution, success) in [(8, false), (9, true)] {
+        let mut revisit = turn("reader", 7, execution, 7);
+        let context = fixture.prepare(&mut revisit).await;
+        assert!(!context.contains("once-transient"));
+        assert_eq!(context.matches("standing-transient").count(), 1);
+        assert_eq!(fixture.hooks.capture_steers()[&instance].receipts.len(), 1);
+        fixture.hooks.finish_steers(execution, success).await;
+    }
+    assert_eq!(fixture.hooks.capture_steers()[&instance].receipts.len(), 2);
+    let mut settled = turn("reader", 7, 10, 7);
+    assert!(fixture.prepare(&mut settled).await.is_empty());
+    let mut sender = fixture.sender.clone();
+    let context = fixture.prepare(&mut sender).await;
+    assert!(!context.contains("once-transient") && !context.contains("standing-transient"));
+    let status = crate::v2_run_ledger::steering::status(fixture.ledger.as_ref(), &fixture.run)
+        .await
+        .assert_value();
+    assert!(
+        status
+            .steers
+            .iter()
+            .all(|steer| steer.received_executions == 1)
+    );
 }

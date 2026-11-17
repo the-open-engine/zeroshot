@@ -192,6 +192,19 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
     backend
         .write_recovery_document(&params.run_id, &recovery)
         .assert_value();
+    // An interrupted launch claimed a successor that never became a run: the direction is
+    // still held on the suspended run, as status reports it.
+    backend.run_steer(None, params.clone()).await.assert_value();
+    let before = crate::v2_run_ledger::steering::all(&ledger, &params.run_id)
+        .await
+        .assert_value();
+    assert_eq!(before.len(), 3);
+    let _admitted = create_contract_run(
+        &backend,
+        &successor,
+        &contract_submission("steer-local-successor"),
+    )
+    .await;
     let error = backend.run_steer(None, params.clone()).await.assert_error();
     assert!(error.to_string().contains(successor.as_str()), "{error}");
     assert_eq!(
@@ -402,4 +415,134 @@ async fn steer_local_controller_forwarding_preserves_receipts_refusals_and_timeo
             .assert_value();
         assert_eq!(vectors.len(), usize::from(mode != "refused"));
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn steer_local_concurrent_steers_share_the_recovery_claim() {
+    let root = TestDirectory::new("steer-local-concurrent");
+    let backend = backend(&root);
+    let params = params();
+    let submission = contract_submission("steer-local-concurrent");
+    let ledger = create_contract_run(&backend, &params.run_id, &submission).await;
+    ledger
+        .append(
+            &params.run_id,
+            vec![
+                RunEvent::RunStarted,
+                RunEvent::Suspended {
+                    suspension: RunSuspension::Command {
+                        node: openengine_cluster_protocol::NodeName::new("next").assert_value(),
+                        created_at: UnixTimestampMillis::MIN,
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    backend
+        .write_recovery_document(
+            &params.run_id,
+            &LocalRecoveryDocument {
+                submission,
+                workspace: root.path().into(),
+                delivery_receipt: None,
+                local_branch: None,
+                invoking_workspace: None,
+                request_digest: None,
+                workspace_revision: None,
+                resumed_from: None,
+                delivery_run_id: None,
+                successor_run_id: None,
+                pending_restore: None,
+            },
+        )
+        .assert_value();
+    let steers = (0..20)
+        .map(|_| {
+            let (backend, params) = (backend.clone(), params.clone());
+            tokio::spawn(async move { backend.run_steer(None, params).await })
+        })
+        .collect::<Vec<_>>();
+    for steer in steers {
+        steer.await.assert_value().assert_value();
+    }
+    assert_eq!(
+        crate::v2_run_ledger::steering::all(&ledger, &params.run_id)
+            .await
+            .assert_value()
+            .len(),
+        20
+    );
+
+    // A steer in flight leaves the workspace recoverable for status; resume and force-stop
+    // wait for it instead of refusing.
+    let shared = backend
+        .try_recovery_claim(&params.run_id, true)
+        .assert_value()
+        .assert_value();
+    assert!(
+        backend
+            .recovery_workspace_is_unclaimed(&params.run_id)
+            .assert_value()
+    );
+    assert!(
+        backend
+            .try_recovery_claim(&params.run_id, false)
+            .assert_value()
+            .is_none()
+    );
+    let waiting = {
+        let (backend, id) = (backend.clone(), params.run_id.clone());
+        tokio::spawn(async move {
+            backend
+                .claim_recovery_workspace_within(&id, false, Duration::from_secs(10))
+                .await
+                .map(|_| ())
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!waiting.is_finished());
+    drop(shared);
+    waiting.await.assert_value().assert_value();
+    // Behind steers alone even a caller with no patience of its own waits them out.
+    let shared = backend
+        .try_recovery_claim(&params.run_id, true)
+        .assert_value()
+        .assert_value();
+    let waiting = {
+        let (backend, id) = (backend.clone(), params.run_id.clone());
+        tokio::spawn(async move {
+            backend
+                .claim_recovery_workspace_within(&id, false, Duration::ZERO)
+                .await
+                .map(|_| ())
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    drop(shared);
+    waiting.await.assert_value().assert_value();
+
+    // A successor's preparation holds the claim alone: a steer waits, then says why.
+    let preparing = backend
+        .claim_recovery_workspace(&params.run_id)
+        .assert_value();
+    assert!(
+        !backend
+            .recovery_workspace_is_unclaimed(&params.run_id)
+            .assert_value()
+    );
+    let error = backend.run_steer(None, params.clone()).await.assert_error();
+    assert!(
+        error.to_string().contains("already being resumed"),
+        "{error}"
+    );
+    // Another resume gives up at its own bound: the holder may need a lock it waits under.
+    assert!(
+        backend
+            .claim_recovery_workspace_within(&params.run_id, false, Duration::ZERO)
+            .await
+            .is_err()
+    );
+    drop(preparing);
+    backend.run_steer(None, params.clone()).await.assert_value();
 }

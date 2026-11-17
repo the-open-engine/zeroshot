@@ -410,7 +410,7 @@ impl<'a> CopilotRpc<'a> {
         if let (Some(memory), Some((query, delivery))) = (&self.active_memory, delivery) {
             // The reply writer must acknowledge handoff before a receipt can consume a message.
             if matches!(handoff, Ok(true)) {
-                if tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery))
+                if tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery, false))
                     .await
                     .is_err()
                 {

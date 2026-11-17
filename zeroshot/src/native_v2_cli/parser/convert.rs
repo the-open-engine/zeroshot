@@ -368,6 +368,14 @@ impl RunCheckpointsArgs {
 impl TargetCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::List(args) => Ok(NativeV2CliCommand::TargetList { json: args.json }),
+            Self::Remove(args) => {
+                validate_public_id(&args.name, "target name")?;
+                Ok(NativeV2CliCommand::TargetRemove {
+                    name: args.name,
+                    json: args.json,
+                })
+            }
             Self::Add(args) => {
                 validate_public_id(&args.name, "target name")?;
                 Ok(NativeV2CliCommand::TargetAdd(TargetAdd {

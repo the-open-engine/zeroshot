@@ -177,7 +177,7 @@ class RunStatus:
         created_at: Suspension time in Unix epoch milliseconds.
         due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
         request: Human request contract when suspended for a request.
-        steers: Standing directions with confirmed receiving executions.
+        steers: Human and peer messages with recorded receiving executions.
         omitted_steers: Older directions omitted by the bounded status listing.
     """
 
@@ -267,17 +267,17 @@ class LogEvent:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RunSteer:
-    """A recorded direction and its confirmed receiving executions.
+    """A steering message with recorded receiving executions.
 
     Args:
         id: Vector entry identity, usable with Run.vector().
         created_at: Recording time in Unix epoch milliseconds.
         text_bytes: Full UTF-8 text length.
         excerpt: First 1,024 bytes, cut at a character boundary.
-        received_executions: Total confirmed receiving executions.
+        received_executions: Total recorded receiving executions.
         executions: Up to 64 most recent execution references.
         executions_omitted: Whether earlier receiving executions were omitted.
-        mode: Once per node instance or standing once per provider conversation.
+        mode: Once per node instance or standing guidance for each provider conversation.
         network: Network names and originating node, instance and execution.
             None for human direction.
     """

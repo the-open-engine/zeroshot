@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,12 +19,13 @@ const MAX_CAPABILITY_BYTES: u64 = 16 * 1024;
 const MAX_SCOPES: usize = 16_384;
 const IO_TIMEOUT: Duration = Duration::from_millis(250);
 
-#[derive(Clone)]
 pub(super) struct HookScope {
     pub(super) reference: crate::native_v2_contract::ExecutionRef,
     pub(super) auxiliary: bool,
     session_key: String,
     workspace: PathBuf,
+    context_budget: AtomicUsize,
+    standing: AtomicBool,
 }
 
 impl HookScope {
@@ -34,6 +35,8 @@ impl HookScope {
             auxiliary: super::auxiliary_invocation(invocation),
             session_key: super::provider_session_key(invocation),
             workspace: workspace.to_path_buf(),
+            context_budget: AtomicUsize::new(native::MAX_CONTEXT_BYTES),
+            standing: AtomicBool::new(true),
         }
     }
 
@@ -68,6 +71,9 @@ impl HookScope {
                 .cloned()
                 .unwrap_or(Value::Null),
             cwd,
+            subagent: event["agent_id"].as_str().is_some_and(|id| !id.is_empty()),
+            context_budget: self.context_budget.load(Ordering::Acquire),
+            standing: self.standing.load(Ordering::Acquire),
         }
     }
 }
@@ -204,6 +210,26 @@ impl Broker {
             endpoint: self.endpoint,
             token,
         })
+    }
+
+    /// Configures the execution's carrier before its native process starts.
+    pub(super) fn configure_carrier(
+        &self,
+        invocation: &DriverInvocation,
+        context_budget: usize,
+        standing: bool,
+    ) {
+        if let Ok(scopes) = self.scopes.lock() {
+            for scope in scopes.live.values().filter(|scope| {
+                scope.scope.reference.execution.get() == invocation.node.reference.execution.get()
+            }) {
+                scope
+                    .scope
+                    .context_budget
+                    .store(context_budget, Ordering::Release);
+                scope.scope.standing.store(standing, Ordering::Release);
+            }
+        }
     }
 
     pub(super) async fn retire(&self, execution: u64) {

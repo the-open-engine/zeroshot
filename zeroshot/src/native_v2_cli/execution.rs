@@ -113,6 +113,31 @@ async fn execute_management<B: NativeV2CliBackend, W: Write>(
         return profiles::execute_profile(command, backend, output).await;
     }
     match command {
+        NativeV2CliCommand::TargetList { json } => {
+            let targets = backend.target_list().await?;
+            if json {
+                write_json(output, &targets)?;
+            } else {
+                writeln!(output, "Name\tKind\tOrigin")?;
+                for target in targets {
+                    let kind = match target.kind {
+                        super::NamedTargetKind::Hosted => "hosted",
+                        super::NamedTargetKind::Direct => "direct",
+                    };
+                    writeln!(output, "{}\t{kind}\t{}", target.name, target.origin)?;
+                }
+            }
+            Ok(CliOutcome::Completed)
+        }
+        NativeV2CliCommand::TargetRemove { name, json } => {
+            let receipt = backend.target_remove(&name).await?;
+            if json {
+                write_json(output, &receipt)?;
+            } else {
+                writeln!(output, "Removed target {:?}.", receipt.name)?;
+            }
+            Ok(CliOutcome::Completed)
+        }
         NativeV2CliCommand::Delegation(command) => {
             write_json(output, &backend.delegation(command).await?)?;
             Ok(CliOutcome::Completed)
@@ -284,6 +309,12 @@ where
                 | openengine_cluster_protocol::RunResumeFrom::Expiry {}
         )
     );
+    if let Some(successor) = &status.workspace_recovery.successor_run_id {
+        return Err(NativeV2CliError::Usage(format!(
+            "run already has successor {}",
+            successor.as_str()
+        )));
+    }
     if let CliRunStatus::Target(RunStatus::Suspended {
         suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
         ..
@@ -310,12 +341,6 @@ where
                 due.get()
             )));
         }
-    }
-    if let Some(successor) = &status.workspace_recovery.successor_run_id {
-        return Err(NativeV2CliError::Usage(format!(
-            "run already has successor {}",
-            successor.as_str()
-        )));
     }
     if !status.workspace_recovery.recoverable && !answering {
         return Err(NativeV2CliError::Usage(
@@ -981,9 +1006,14 @@ async fn execute_answer<B: NativeV2CliBackend, W: Write>(
     if let (Some(input_error), Err(NativeV2CliError::Remote { message, .. })) =
         (input_error, &mut result)
     {
-        // Keep the controller's refusal (in particular expiry and its successor) first.
-        message.push_str("; answer file: ");
-        message.push_str(&input_error);
+        // A path names only the placeholder's shape; any other refusal (in particular expiry and
+        // its successor) stays first.
+        if message.starts_with('$') {
+            *message = format!("answer file: {input_error}");
+        } else {
+            message.push_str("; answer file: ");
+            message.push_str(&input_error);
+        }
     }
     result
 }

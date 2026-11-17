@@ -207,6 +207,9 @@ pub(super) fn install_memory(
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: files.home(),
+                context_budget: None,
+                // As with Pi, the text is appended to a tool result.
+                standing: false,
             },
             super::memory::install,
         );
