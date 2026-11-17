@@ -216,6 +216,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
+- The reducer inventories error selectors across all choice, loop and first-join guards once per
+  reduction, including nested and aggregate guards. A final step/verifier error without any such
+  read becomes the reserved `unhandled` failure after crash retries, with node/code as the primary
+  diagnostic. Reads are graph-wide rather than path- or label-dependent; enclosing groups retain
+  their authored-terminal semantics. Keep reducer primary causes alongside retained ledger evidence.
 - Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`
   while running or stopping, including postmortem/finalization. Finished status carries only
   `terminalResult`. Graph-result logging and its watch event publish with `PrimaryGraphCompleted`;
@@ -2022,8 +2027,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
-  A reducer `completed` group visit alone is neutral. All enclosing visits that the selected
-  succeed/fail node ended at its cursor, including parallel groups, take its outcome. The canonical
+  Implicit `unhandled` failures mark ending structural visits failed. A reducer `completed` group
+  visit alone is neutral. All enclosing visits that the selected succeed/fail node ended at its
+  cursor, including parallel groups, take its outcome. The canonical
   trace excludes terminals discarded by an earlier join. Editor terminals describe run outcomes;
   terminal-only parallel paths never acquire a synthetic unmet-join continuation. The shared
   `ui/src/fixtures/parallel-terminal.json` is checked by native control replay and browser projection.
