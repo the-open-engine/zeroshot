@@ -57,6 +57,7 @@ fn containment_exposes_only_the_authored_worker_identity_and_membership() {
 #[tokio::test]
 async fn detached_and_absent_process_boundaries_settle_without_waiting() {
     let detached = ProcessTreeHandle {
+        authority: None,
         process_group_id: None,
         containment: ProcessContainment::ProcessGroup,
         supervisor: None,
@@ -79,6 +80,7 @@ async fn detached_and_absent_process_boundaries_settle_without_waiting() {
 
     let absent_group = i32::MAX;
     let absent = ProcessTreeHandle {
+        authority: None,
         process_group_id: Some(absent_group),
         containment: ProcessContainment::ProcessGroup,
         supervisor: None,
@@ -98,6 +100,7 @@ async fn detached_and_absent_process_boundaries_settle_without_waiting() {
     );
 
     let absent_worker = ProcessTreeHandle {
+        authority: None,
         process_group_id: None,
         containment: ProcessContainment::WorkerUid {
             uid: u32::MAX,
@@ -116,4 +119,38 @@ async fn detached_and_absent_process_boundaries_settle_without_waiting() {
         cleanup_process_domain(absent_worker.containment).await,
         ProcessCleanupEvidence::Reaped
     );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn failed_exec_retires_its_provisional_process_ownership() {
+    use std::io::{Read, Seek, SeekFrom};
+    use std::os::unix::fs::MetadataExt;
+
+    let workspace = tempfile::tempdir().assert_value();
+    let mut registration =
+        register_process_tree_for(ProcessContainment::ProcessGroup).assert_value();
+    let mut command = Command::new(workspace.path().join("missing-executable"));
+    configure_process(&mut command, ProcessContainment::ProcessGroup);
+    assert!(prepare_supervisor(&mut command, &mut registration, workspace.path()).assert_value());
+    let mut record = registration
+        .authority
+        .as_ref()
+        .assert_value()
+        .lease()
+        .assert_value();
+    let error = command.spawn().err().assert_value();
+    assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
+    record.seek(SeekFrom::Start(0)).assert_value();
+    let mut pid = [0; 8];
+    record.read_exact(&mut pid).assert_value();
+    assert_ne!(
+        u64::from_le_bytes(pid),
+        0,
+        "pre_exec did not publish ownership"
+    );
+    assert_eq!(record.metadata().assert_value().nlink(), 1);
+
+    retire_failed_spawn(&mut registration).assert_value();
+    assert_eq!(record.metadata().assert_value().nlink(), 0);
 }

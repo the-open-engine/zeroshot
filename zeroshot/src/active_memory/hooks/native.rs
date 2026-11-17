@@ -4,6 +4,9 @@ use std::io;
 use std::path::Path;
 
 pub(crate) const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
+/// An extension's reply carries memory context and steers apart, as JSON: two bounded texts,
+/// each at most doubled by string escaping, and the framing around them.
+pub(crate) const MAX_REPLY_BYTES: usize = 4 * MAX_CONTEXT_BYTES + 64;
 
 pub(super) fn bounded_context(context: String) -> String {
     if context.len() > MAX_CONTEXT_BYTES || context.contains('\0') {
@@ -21,7 +24,7 @@ pub(crate) fn hook_command(capability: &Path) -> io::Result<String> {
     ))
 }
 
-fn hook_executable() -> io::Result<std::path::PathBuf> {
+pub(super) fn hook_executable() -> io::Result<std::path::PathBuf> {
     #[cfg(test)]
     {
         test_hook_executable(std::env::var_os("ZEROSHOT_LIVE_CLI_BINARY"))
@@ -51,7 +54,7 @@ pub(super) fn test_hook_executable(
     Ok(executable)
 }
 
-fn shell_quote(path: &Path) -> String {
+pub(crate) fn shell_quote(path: &Path) -> String {
     #[cfg(windows)]
     {
         format!("\"{}\"", path.to_string_lossy().replace('"', "\"\""))

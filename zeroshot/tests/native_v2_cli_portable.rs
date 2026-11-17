@@ -8,11 +8,99 @@ mod inspection;
 #[cfg(windows)]
 #[path = "native_v2_cli_portable/restic_resume_tests.rs"]
 mod restic_resume_tests;
+#[cfg(unix)]
+#[path = "native_v2_cli_portable/submission_scan_tests.rs"]
+mod submission_scan_tests;
 use fixture::{Fixture, success};
+
+#[test]
+fn connection_store_errors_name_file_and_location_without_secret_values() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let fixture = Fixture::new();
+    // Let the CLI create the file with native private ownership before damaging its contents.
+    let mut child = fixture
+        .command(&["connection", "set", "openai", "--json-stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"OPENAI_API_KEY":"fixture-key"}"#)
+        .unwrap();
+    success(&child.wait_with_output().unwrap());
+    let path = fixture.root.path("state").join("connections.json");
+    let encoded = "{\n  \"openai\": {\"OPENAI_API_KEY\": 987654321012345}\n}";
+    std::fs::write(&path, encoded).unwrap();
+    for output in [
+        fixture.command(&["connection", "list"]).output().unwrap(),
+        fixture
+            .command(&["connection", "delete", "openai"])
+            .output()
+            .unwrap(),
+        fixture.run("finish", true),
+    ] {
+        assert!(!output.status.success());
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            diagnostic.contains(&path.display().to_string()),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("is malformed at line 2 column 47"),
+            "{diagnostic}"
+        );
+        assert!(!diagnostic.contains("987654321012345"), "{diagnostic}");
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), encoded);
+    assert!(!fixture.workspace.join("mutation.txt").exists());
+}
 
 #[cfg(unix)]
 #[path = "native_v2_cli_portable/unix_controller_tests.rs"]
 mod unix_controller;
+
+#[test]
+fn unchecked_worker_error_fails_foreground_status_and_logs() {
+    let fixture = Fixture::new();
+    let mut graph: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+    graph["root"]["children"] = serde_json::json!([
+        graph["root"]["children"][0].clone(),
+        {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+    ]);
+    fixture.write("graph.json", &graph);
+    let result = fixture.run("fail", false);
+    assert!(!result.status.success());
+    let receipt: serde_json::Value =
+        serde_json::from_slice(result.stdout.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let status = fixture.json(&["status", id]);
+    let terminal = &status["status"]["terminalResult"];
+    assert_eq!(terminal["status"], "failed");
+    assert_eq!(terminal["reason"], "unhandled");
+    let cause = terminal["context"]["primary"]["message"].as_str().unwrap();
+    assert!(
+        cause.contains("worker") && cause.contains("crash"),
+        "{terminal}"
+    );
+    let logs = fixture.command(&["logs", id]).output().unwrap();
+    success(&logs);
+    let text = String::from_utf8(logs.stdout).unwrap();
+    assert!(
+        text.contains("unhandled") && text.contains("worker") && text.contains("crash"),
+        "{text}"
+    );
+}
 
 #[test]
 fn native_local_run_handles_unicode_paths_correction_and_large_output() {

@@ -5,7 +5,7 @@ use futures_util::FutureExt;
 
 use crate::execution::process::{ProcessRunnerError, ProcessSessionCommand, ProcessSessionOutput};
 use crate::native_v2_capsule::provider_process::{
-    ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
+    LiveInput, ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
     ProviderProcessFailure, ProviderProcessFailureKind, exchange_process_io, open_provider_process,
     process_failure_context, process_failure_detail, process_failure_evidence,
     report_cleanup_failure, require_process_cleanup,
@@ -67,6 +67,24 @@ pub(crate) async fn open(
 pub(crate) async fn finish_process<T: ProviderTranscript>(
     process: &mut ProviderProcess,
     prompt: &[u8],
+    transcript: T,
+    control: &DriverControl,
+) -> Result<ProviderAttempt, NodeRunnerError> {
+    let input = TurnInput { prompt, live: None };
+    finish_live_process(process, input, transcript, control).await
+}
+
+/// What a turn's process reads on stdin: the prompt and, where the harness takes further
+/// messages while it works, a stream of them. That stream has to end once the transcript has
+/// read the turn's output, because stdin closes only then.
+pub(crate) struct TurnInput<'a> {
+    pub(crate) prompt: &'a [u8],
+    pub(crate) live: Option<LiveInput<'a>>,
+}
+
+pub(crate) async fn finish_live_process<T: ProviderTranscript>(
+    process: &mut ProviderProcess,
+    input: TurnInput<'_>,
     mut transcript: T,
     control: &DriverControl,
 ) -> Result<ProviderAttempt, NodeRunnerError> {
@@ -76,7 +94,7 @@ pub(crate) async fn finish_process<T: ProviderTranscript>(
     // result so failure cleanup can drain it without polling a completed future twice.
     let output = collect_transcript(stdout, &mut transcript, control, failed).shared();
     let exchange = {
-        let exchange = exchange_process_io(process, prompt, output.clone());
+        let exchange = exchange_process_io(process, input.prompt, input.live, output.clone());
         tokio::pin!(exchange);
         tokio::select! {
             result = &mut exchange => Some(result),

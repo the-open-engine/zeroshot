@@ -11,6 +11,33 @@ use serde_json::json;
 #[path = "tests/unicode.rs"]
 mod unicode;
 
+// A steer sent at a tool call is handed over when Pi puts it into the conversation as a user
+// message: the transcript reports every user message, and only those.
+#[test]
+fn user_messages_are_reported_when_pi_puts_them_into_the_conversation() {
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut transcript = PiTranscript::new(Vec::new()).reporting_user_messages(sender);
+    let steer = "<steer>\n[id] line one\nline \"two\"\n</steer>";
+    for event in [
+        json!({"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"the prompt"}]}}),
+        json!({"type":"message_start","message":{"role":"assistant","content":[]}}),
+        json!({"type":"message_start","message":{"role":"toolResult","content":[{"type":"text","text":"<steer>"}]}}),
+        json!({"type":"message_start","message":{"role":"custom","customType":"zeroshot-memory","content":"lesson"}}),
+        json!({"type":"message_start","message":{"role":"user","content":[{"type":"text","text":steer}]}}),
+        json!({"type":"message_end","message":{"role":"user","content":[{"type":"text","text":steer}]}}),
+        json!({"type":"message_start","message":{"role":"user","content":steer}}),
+    ] {
+        transcript.push(format!("{event}\n").as_bytes());
+    }
+    let mut reported = Vec::new();
+    while let Ok(text) = receiver.try_recv() {
+        reported.push(text);
+    }
+    assert_eq!(reported, ["the prompt", steer, steer]);
+    drop(transcript);
+    assert!(receiver.is_closed());
+}
+
 #[test]
 fn retry_progress_includes_error_message_when_supplied() {
     for (message, expected) in [

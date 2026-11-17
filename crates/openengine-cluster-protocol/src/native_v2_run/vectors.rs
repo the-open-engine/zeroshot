@@ -73,6 +73,10 @@ pub enum RunVectorContent {
     Steer {
         #[schemars(with = "crate::NodeInstructions")]
         text: String,
+        #[serde(default)]
+        mode: super::SteeringMode,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network: Option<super::NetworkSteer>,
     },
     SteerReceipt {
         #[serde(rename = "steerId")]
@@ -178,9 +182,12 @@ pub(super) fn deserialize_record_run_id<'de, D: serde::Deserializer<'de>>(
 impl RunVector {
     pub fn validate(&self) -> Result<(), super::NativeV2RunValueError> {
         VectorId::new(self.run_id.as_str())?;
-        if let RunVectorContent::Steer { text } = &self.content {
+        if let RunVectorContent::Steer { text, network, .. } = &self.content {
             super::validate_steer(text)
                 .map_err(|_| super::NativeV2RunValueError("invalid steer text"))?;
+            if let Some(network) = network {
+                network.validate()?;
+            }
         }
         if let RunVectorContent::Continuation { resumed_from } = &self.content {
             VectorId::new(resumed_from.as_str())?;
@@ -205,8 +212,12 @@ pub struct RunVectorSummary {
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunVectorSummaryContent {
     Steer {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network: Option<super::NetworkSteer>,
         #[serde(rename = "textBytes")]
         text_bytes: usize,
+        #[serde(default)]
+        mode: super::SteeringMode,
     },
     SteerReceipt {
         #[serde(rename = "steerId")]
@@ -245,8 +256,14 @@ pub enum RunVectorSummaryContent {
 impl From<RunVector> for RunVectorSummary {
     fn from(vector: RunVector) -> Self {
         let content = match vector.content {
-            RunVectorContent::Steer { text } => RunVectorSummaryContent::Steer {
+            RunVectorContent::Steer {
+                text,
+                mode,
+                network,
+            } => RunVectorSummaryContent::Steer {
                 text_bytes: text.len(),
+                mode,
+                network,
             },
             RunVectorContent::SteerReceipt {
                 steer_id,

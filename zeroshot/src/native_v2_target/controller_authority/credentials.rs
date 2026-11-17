@@ -170,7 +170,7 @@ pub(super) fn open_refresh_lock(
         .map_err(|_| authority_error("target refresh lock directory is unavailable"))?;
     let lock =
         open_lock(path).map_err(|_| authority_error("target refresh lock is unavailable"))?;
-    lock_registry(&lock, true)
+    lock_registry(&lock, path, true)
         .map_err(|_| authority_error("target refresh lock could not be acquired"))?;
     Ok(TargetRefreshGuard(lock))
 }

@@ -14,13 +14,16 @@ const NAMES: [&str; 7] = [
 ];
 
 pub(crate) fn is_execution_environment_name(name: &str, windows: bool) -> bool {
-    NAMES.iter().any(|owned| {
-        if windows {
-            owned.eq_ignore_ascii_case(name)
-        } else {
-            *owned == name
-        }
-    })
+    NAMES
+        .iter()
+        .chain([&"ZEROSHOT_STEERING_CAPABILITY"])
+        .any(|owned| {
+            if windows {
+                owned.eq_ignore_ascii_case(name)
+            } else {
+                *owned == name
+            }
+        })
 }
 
 /// Apply after native, base and declared environment merges. Never changes the host environment.

@@ -53,8 +53,8 @@ async fn invalid_output_is_corrected_in_the_same_claude_session() {
         WorkerOutcome::Verified { output, .. } if output == json!("done")
     ));
     assert_resumed_session(&workspace.read("resumed.args"));
-    let prompt = workspace.read("resumed.prompt");
-    assert_tool_delivery(&workspace.read("initial.prompt"));
+    let prompt = prompt_text(&workspace.read("resumed.prompt"));
+    assert_tool_delivery(&prompt_text(&workspace.read("initial.prompt")));
     assert_tool_delivery(&prompt);
     assert!(prompt.contains("Your previous final response was rejected mechanically"));
     assert!(prompt.contains("provider response must be exactly an object containing response"));
@@ -67,7 +67,7 @@ async fn malformed_output_stops_after_two_claude_correction_turns() {
         &workspace,
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf '%s\n' "$@" >> attempts.args
 printf '%s\n' '---' >> attempts.args
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"malformed-session"}'
@@ -132,8 +132,8 @@ async fn gateway_correction_keeps_endpoint_and_key_on_resume() {
         }
     );
     assert_resumed_session(&workspace.read("resumed.args"));
-    assert_tool_delivery(&workspace.read("initial.prompt"));
-    assert_tool_delivery(&workspace.read("resumed.prompt"));
+    assert_tool_delivery(&prompt_text(&workspace.read("initial.prompt")));
+    assert_tool_delivery(&prompt_text(&workspace.read("resumed.prompt")));
     assert_eq!(
         workspace.read("anthropic-base-url.txt").trim(),
         "https://gateway.example/anthropic"
@@ -165,7 +165,7 @@ target=initial
 for arg in "$@"; do
   if [ "$arg" = "--resume" ]; then target=resumed; fi
 done
-cat > "$target.prompt"
+head -n 1 > "$target.prompt"
 printf '%s\n' "$@" > "$target.args"
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"tool-session"}'
 if [ "$target" = initial ]; then
@@ -228,7 +228,7 @@ fi
             );
         }
         for turn in ["initial", "resumed"] {
-            assert_tool_delivery(&workspace.read(&format!("{turn}.prompt")));
+            assert_tool_delivery(&prompt_text(&workspace.read(&format!("{turn}.prompt"))));
             assert!(
                 workspace
                     .read(&format!("{turn}.args"))

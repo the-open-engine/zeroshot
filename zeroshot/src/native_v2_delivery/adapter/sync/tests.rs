@@ -209,6 +209,7 @@ fn gitlab_sync(
         forge_field: Some("GITLAB_TOKEN"),
         github_git_token: request.head_revision.clone(),
         token_from_environment: false,
+        diagnostic_secrets: Vec::new(),
     };
     (adapter, request, credentials)
 }

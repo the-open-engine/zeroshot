@@ -533,6 +533,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
         .steer(openengine_cluster_protocol::RunSteerParams {
             run_id: run,
             text: "late".to_owned(),
+            mode: openengine_cluster_protocol::SteeringMode::Standing,
         })
         .await;
     // The ledger's refusal by run state is the caller's to correct, not an internal error.

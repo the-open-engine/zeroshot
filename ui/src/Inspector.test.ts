@@ -144,6 +144,34 @@ test('root input fields and array item schemas stay visually editable through th
   assert.equal(html.includes('Input mappings'), false);
 });
 
+test('run outputs include a success reached inside a parallel branch', async (t) => {
+  const Inspector = await inspector(t),
+    document = fixture();
+  document.graph.root.children = [
+    {
+      kind: 'par',
+      name: 'parallel',
+      state: document.graph.root.state,
+      promotedStatePaths: [],
+      join: { kind: 'any' },
+      branches: [
+        {
+          kind: 'succeed',
+          name: 'early_result',
+          output: record({ report: { kind: 'string' } }),
+          bindings: [{ target: ['report'], value: { source: 'state', path: ['task'] } }],
+        },
+        document.graph.root.children[0],
+      ],
+    },
+  ];
+  const before = structuredClone(document);
+  const html = renderToStaticMarkup(createElement(Inspector, props(document, 'run')));
+  assert.match(html, /aria-label="Run outputs"/);
+  assert.match(html, /report: string/);
+  assert.deepEqual(document, before);
+});
+
 test('unfamiliar output declarations render a raw control without discarding the saved values', async (t) => {
   const Inspector = await inspector(t),
     document = fixture(),

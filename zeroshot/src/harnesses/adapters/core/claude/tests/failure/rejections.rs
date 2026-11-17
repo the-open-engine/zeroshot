@@ -8,7 +8,7 @@ async fn rejected_limit_with_malformed_result_retains_continuation_and_crash_beh
     ] {
         let script = r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf 'started\n' >> starts
 printf '%s\n' '{"type":"system","subtype":"api_retry","error":"rate_limit"}'
 printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1893456000}}'
@@ -31,7 +31,7 @@ exit 1
 async fn rejected_quota_prevents_continuation_and_retains_usage_and_safe_diagnostics() {
     let script = r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf 'started\n' >> starts
 printf '%s\n' '{"type":"system","subtype":"api_retry","error":"rate_limit"}'
 printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","resetsAt":1893456000}}'
@@ -69,7 +69,7 @@ async fn authentication_signals_prevent_continuation_and_redact_details() {
         let script = format!(
             r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf 'started\n' >> starts
 printf '%s\n' '{signal}'
 printf '%s\n' '{{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":401,"result":"rejected sentinel-secret"}}'
@@ -92,7 +92,7 @@ exit 1
 async fn native_model_marker_on_failed_turn_prevents_continuation() {
     let script = r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf 'started\n' >> starts
 printf '%s\n' '[claude-code:unrecognized_model] {"model":"issue1400-invalid-model","query_source":"sdk"}' >&2
 printf '%s\n' '{"type":"system","subtype":"api_retry","error":"overloaded"}'

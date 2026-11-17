@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 use super::*;
 use crate::native_v2_capsule::provider_process::ProviderProcessFailureKind;
 
+#[path = "tests/input.rs"]
+mod input_tests;
 #[path = "tests/limits.rs"]
 mod limit_tests;
 #[path = "tests/quota.rs"]

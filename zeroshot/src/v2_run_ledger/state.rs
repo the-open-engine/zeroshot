@@ -75,14 +75,13 @@ pub(crate) fn prepare_event(snapshot: &RunSnapshot, mut event: RunEvent) -> RunE
         && (context.is_none()
             || (snapshot.primary_graph.is_none()
                 && context.as_ref().is_some_and(|evidence| {
-                    evidence.primary.is_none()
-                        && evidence.recorded.is_empty()
-                        && evidence.verifiers.is_empty()
+                    evidence.recorded.is_empty() && evidence.verifiers.is_empty()
                 })))
         && reason.as_str() != "force_stopped"
     {
         let mut evidence = snapshot.failure_context.clone().unwrap_or_default();
         if let Some(reducer) = context.take() {
+            evidence.primary = reducer.primary.or(evidence.primary);
             for visit in reducer.exhausted_loops {
                 evidence.record_exhausted_loop(visit);
             }
@@ -130,6 +129,9 @@ fn apply_event_kind(
     sequence: u64,
 ) -> Result<(), RunLedgerError> {
     match event {
+        RunEvent::NodeInstancesReserved { through } => {
+            apply_node_instances_reserved(snapshot, *through)
+        }
         RunEvent::PriorExecution { execution } => apply_prior_execution(snapshot, execution),
         RunEvent::RunStarted => apply_run_started(snapshot),
         RunEvent::NodeStarted {
@@ -222,6 +224,7 @@ fn apply_event_kind(
                     "steer requires an admitted, running or suspended run before its graph ends",
                 ));
             }
+            reserve_vector_instance(snapshot, vector);
             Ok(())
         }
         RunEvent::ForceStopRequested => apply_force_stop(snapshot),
@@ -242,6 +245,35 @@ fn apply_observation_event(
         RunEvent::RunTokenUsageObserved { usage } => add_usage(snapshot, usage.as_ref()),
         _ => Err(RunLedgerError::InvalidEvent("invalid observation event")),
     }
+}
+
+fn apply_node_instances_reserved(
+    snapshot: &mut RunSnapshot,
+    through: u64,
+) -> Result<(), RunLedgerError> {
+    if snapshot.phase != RunPhase::Admitted || through < snapshot.node_instance_floor {
+        return Err(RunLedgerError::InvalidEvent(
+            "invalid node instance reservation",
+        ));
+    }
+    snapshot.node_instance_floor = through;
+    Ok(())
+}
+
+fn reserve_vector_instance(
+    snapshot: &mut RunSnapshot,
+    vector: &openengine_cluster_protocol::RunVector,
+) {
+    use openengine_cluster_protocol::RunVectorContent;
+    let instance = match &vector.content {
+        RunVectorContent::Steer {
+            network: Some(network),
+            ..
+        } => network.origin.node_instance,
+        RunVectorContent::SteerReceipt { node_instance, .. } => *node_instance,
+        _ => return,
+    };
+    snapshot.node_instance_floor = snapshot.node_instance_floor.max(instance);
 }
 
 fn apply_prior_execution(
