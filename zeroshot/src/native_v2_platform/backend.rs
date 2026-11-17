@@ -230,6 +230,18 @@ impl RunSubscriptionSource<RunAttachEventNotification> for AttachSource {
 
 fn platform_backend_error(error: NativeV2PlatformError) -> BackendError {
     match error {
+        NativeV2PlatformError::Ledger(
+            error @ RunLedgerError::AdmittedRunTooLarge {
+                submission_bytes,
+                input_bytes,
+            },
+        ) => BackendError::invalid_params(
+            "submission.too_large",
+            error.to_string(),
+            Some(
+                serde_json::json!({"submissionBytes":submission_bytes,"inputBytes":input_bytes,"limitBytes":crate::v2_run_ledger::MAX_ADMITTED_RUN_BYTES}),
+            ),
+        ),
         NativeV2PlatformError::Admission(error) => {
             BackendError::invalid_params(GRAPH_INVALID, error.to_string(), None)
         }

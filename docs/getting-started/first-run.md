@@ -37,6 +37,13 @@ Save it as `input.json`. Replace the task with a small change that fits your pro
 }
 ```
 
+The stored submission (graph, runtime settings, input and metadata) must fit within **2 MiB
+(2,097,152 bytes)** of JSON. Larger submissions are refused before a run is created.
+Each node's input plus its start-record bookkeeping must fit within **1 MiB (1,048,576 bytes)**.
+An oversized node input fails the run at that node with a size diagnostic. These are serialized
+UTF-8 byte limits, including JSON escaping. A graph may split input larger than 1 MiB into smaller
+node inputs; the whole submission must still fit within 2 MiB.
+
 ## 2. Pick the agent
 
 Save the one for your CLI as `runtime.json`, and replace `YOUR_MODEL_ID` with a model your

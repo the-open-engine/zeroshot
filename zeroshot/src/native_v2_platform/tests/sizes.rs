@@ -67,3 +67,35 @@ async fn unoffered_size_is_rejected_before_ledger_or_capsule_allocation() {
     assert!(harness.ledger.list().await.assert_value().is_empty());
     assert_eq!(harness.allocator.allocation_count(), 0);
 }
+
+#[tokio::test]
+async fn oversized_submissions_preserve_the_ledger_refusal_before_allocation() {
+    for size in [3_000_000, 9_700_000] {
+        let harness = harness(Behavior::Complete).await;
+        let mut request = request(Value::Null);
+        request.submission.initial_input["repository"] = json!("x".repeat(size));
+        let input_bytes = serde_json::to_vec(&request.submission.initial_input)
+            .assert_value()
+            .len();
+        let admitted = NativeV2Admission
+            .admit(request.submission.clone())
+            .await
+            .assert_value();
+        let submission_bytes = serde_json::to_vec(&admitted).assert_value().len();
+        let error = submit_test_request(&harness.controller, request)
+            .await
+            .expect_err("oversized submission");
+        let message = error.to_string();
+        for detail in [
+            submission_bytes.to_string(),
+            input_bytes.to_string(),
+            "2097152".into(),
+            "2 MiB".into(),
+        ] {
+            assert!(message.contains(&detail), "missing {detail}: {message}");
+        }
+        assert!(harness.ledger.list().await.assert_value().is_empty());
+        assert_eq!(harness.allocator.allocation_count(), 0);
+        assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 0);
+    }
+}

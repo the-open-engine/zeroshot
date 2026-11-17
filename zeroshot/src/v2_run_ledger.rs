@@ -31,7 +31,7 @@ mod state;
 
 pub(crate) use state::{
     apply_event, cursor_for, cursor_sequence, initial_cursor, prepare_event, validate_create,
-    validate_event,
+    validate_event, validate_admitted_run,
 };
 
 pub(crate) mod steering;
@@ -508,8 +508,21 @@ pub enum RunLedgerError {
     InvalidCursor,
     #[error("cursor is ahead of the run")]
     CursorAhead,
-    #[error("admitted run exceeds the storage bound")]
-    AdmittedRunTooLarge,
+    #[error(
+        "submission is {submission_bytes} bytes (input: {input_bytes} bytes), exceeding the 2 MiB ({MAX_ADMITTED_RUN_BYTES} bytes) submission limit"
+    )]
+    AdmittedRunTooLarge {
+        submission_bytes: usize,
+        input_bytes: usize,
+    },
+    #[error(
+        "node {node} input is {input_bytes} bytes; its start record is {event_bytes} bytes, exceeding the 1 MiB ({MAX_EVENT_BYTES} bytes) limit"
+    )]
+    NodeInputTooLarge {
+        node: openengine_cluster_protocol::NodeName,
+        input_bytes: usize,
+        event_bytes: usize,
+    },
     #[error("event exceeds the storage bound")]
     EventTooLarge,
     #[error("safe log line exceeds the storage bound")]

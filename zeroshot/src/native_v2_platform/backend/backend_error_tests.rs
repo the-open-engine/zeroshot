@@ -105,3 +105,22 @@ fn backend_errors_preserve_public_refusals_and_hide_internal_failures() {
     assert_eq!(internal.message, "native-v2 operation failed");
     assert!(internal.details.is_none());
 }
+
+#[test]
+fn submission_size_refusal_has_a_stable_public_code_and_sizes() {
+    let source = RunLedgerError::AdmittedRunTooLarge {
+        submission_bytes: 3001000,
+        input_bytes: 3000011,
+    };
+    let message = source.to_string();
+    let error = platform_backend_error(NativeV2PlatformError::Ledger(source));
+    assert_eq!(error.kind, BackendErrorKind::InvalidParams);
+    assert_eq!(error.code, "submission.too_large");
+    assert_eq!(error.message, message);
+    assert_eq!(
+        error.details,
+        Some(
+            serde_json::json!({"submissionBytes":3001000,"inputBytes":3000011,"limitBytes":2097152})
+        )
+    );
+}

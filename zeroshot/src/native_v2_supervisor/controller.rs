@@ -222,6 +222,24 @@ impl NativeV2Supervisor {
         self.preserve_terminalization_logs(logs, result).await
     }
 
+    pub(super) async fn terminalize_input_failure(
+        &self,
+        tasks: &mut JoinSet<FinishedDispatch>,
+        cause: &str,
+    ) -> Result<TerminalResult, NativeV2SupervisorError> {
+        // Preserve the deterministic cause before cancellation or cleanup adds other failures.
+        self.record_failure_logs(vec![super::logging::runtime_failure_log(cause)?])
+            .await;
+        let logs = self.stop_runtime_tasks(tasks).await?;
+        let result = async {
+            self.cleanup_runtime(RunRuntimeExit::Failed).await?;
+            self.append_runtime_failure("runtime_failed", logs.clone())
+                .await
+        }
+        .await;
+        self.preserve_terminalization_logs(logs, result).await
+    }
+
     pub(super) async fn append_runtime_failure(
         &self,
         reason: &str,

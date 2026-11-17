@@ -26,6 +26,8 @@ pub use workspaces::{
 pub use delivery_validation::{HostedDeliveryValidationFactory, HostedDeliveryValidationRequest};
 
 #[cfg(test)]
+mod input_size_tests;
+#[cfg(test)]
 mod tests;
 
 use std::fmt;
@@ -354,7 +356,7 @@ fn project_platform_error(error: NativeV2PlatformError) -> TargetAuthorityError 
         NativeV2PlatformError::Admission(_)
         | NativeV2PlatformError::Environment(_)
         | NativeV2PlatformError::SubmissionIdentity
-        | NativeV2PlatformError::Ledger(RunLedgerError::AdmittedRunTooLarge) => {
+        | NativeV2PlatformError::Ledger(RunLedgerError::AdmittedRunTooLarge { .. }) => {
             TargetAuthorityError::invalid(message)
         }
         NativeV2PlatformError::Ledger(

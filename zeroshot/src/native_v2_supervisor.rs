@@ -372,6 +372,13 @@ impl NativeV2Supervisor {
                     // the server's force request, then let the ordinary stop path settle it.
                     self.force_stop().await?;
                 }
+                Err(NativeV2SupervisorError::Ledger(
+                    error @ RunLedgerError::NodeInputTooLarge { .. },
+                )) => {
+                    return self
+                        .terminalize_input_failure(&mut active.tasks, &error.to_string())
+                        .await;
+                }
                 Err(error) => return Err(error),
             }
         }

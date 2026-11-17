@@ -186,6 +186,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Capsule allocation reuses the resolved
   `ProductionHostingConfig`; instantiated diagnostic storage remains separate from configuration.
 
+- Run storage bounds stay ledger-owned: 2 MiB for the serialized admitted definition and 1 MiB
+  for a node start record, including input and bookkeeping. Local submissions apply the same
+  admitted-definition check before creating run storage or a controller. Oversized node starts
+  fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
 - Status/list/watch expose the durably latched primary graph outcome as optional `graphResult`

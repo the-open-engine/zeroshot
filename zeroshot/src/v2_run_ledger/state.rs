@@ -30,8 +30,21 @@ pub(crate) fn cursor_sequence(cursor: &Cursor) -> Result<u64, RunLedgerError> {
 }
 
 pub(crate) fn validate_create(request: &CreateRun) -> Result<(), RunLedgerError> {
-    bounded_json(&request.admitted, MAX_ADMITTED_RUN_BYTES)
-        .map_err(|_| RunLedgerError::AdmittedRunTooLarge)
+    validate_admitted_run(&request.admitted)
+}
+
+/// The same storage bound applies before a local controller or run directory is created.
+pub(crate) fn validate_admitted_run(
+    admitted: &crate::native_v2_contract::AdmittedRun,
+) -> Result<(), RunLedgerError> {
+    let submission_bytes = json_size(admitted)?;
+    if submission_bytes > MAX_ADMITTED_RUN_BYTES {
+        return Err(RunLedgerError::AdmittedRunTooLarge {
+            submission_bytes,
+            input_bytes: json_size(&admitted.initial_input)?,
+        });
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
@@ -54,12 +67,26 @@ pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
         } => openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES - 1024,
         _ => MAX_EVENT_BYTES,
     };
-    bounded_json(event, maximum).map_err(|_| RunLedgerError::EventTooLarge)
+    let event_bytes = json_size(event)?;
+    if event_bytes > maximum {
+        return Err(match event {
+            RunEvent::NodeStarted {
+                reference, input, ..
+            } => RunLedgerError::NodeInputTooLarge {
+                node: reference.node.clone(),
+                input_bytes: json_size(input)?,
+                event_bytes,
+            },
+            _ => RunLedgerError::EventTooLarge,
+        });
+    }
+    Ok(())
 }
 
-fn bounded_json(value: &impl Serialize, maximum: usize) -> Result<(), ()> {
-    let bytes = serde_json::to_vec(value).map_err(|_| ())?;
-    (bytes.len() <= maximum).then_some(()).ok_or(())
+fn json_size(value: &impl Serialize) -> Result<usize, RunLedgerError> {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .map_err(|_| RunLedgerError::Corrupt)
 }
 
 /// Freeze diagnostics with the primary outcome and include them in terminal events.

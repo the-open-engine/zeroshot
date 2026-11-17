@@ -193,3 +193,83 @@ fn process_exists(pid: u32) -> bool {
         pending
     }
 }
+
+fn write_large_task(fixture: &Fixture, size: usize) -> usize {
+    let mut graph: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+    let task = serde_json::json!({"kind":"record","fields":{"task":{"type":{"kind":"string"},"required":true}}});
+    graph["initialInput"] = task.clone();
+    graph["root"]["state"] = task.clone();
+    graph["root"]["children"][0]["input"] = task.clone();
+    graph["root"]["children"][0]["inputBindings"] = serde_json::json!([
+        {"target":["task"],"value":{"source":"state","path":["task"]}}
+    ]);
+    graph["root"]["children"][1]["state"] = task;
+    let input = serde_json::json!({"task":"x".repeat(size)});
+    fixture.write("graph.json", &graph);
+    fixture.write("input.json", &input);
+    serde_json::to_vec(&input).unwrap().len()
+}
+
+#[test]
+fn oversized_submissions_report_sizes_before_creating_a_run() {
+    for size in [3_000_000, 9_700_000] {
+        let fixture = Fixture::new();
+        let input_bytes = write_large_task(&fixture, size);
+        let output = fixture
+            .run_command("finish", true)
+            .env("ZEROSHOT_ERROR_FORMAT", "json")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["kind"], "invalid_request");
+        assert_eq!(error["code"], "submission.too_large");
+        let message = error["message"].as_str().unwrap();
+        for detail in [
+            "submission",
+            "input",
+            "2 MiB",
+            "2097152",
+            &input_bytes.to_string(),
+        ] {
+            assert!(message.contains(detail), "{message}");
+        }
+        let runs = fixture.root.path("state/runs");
+        assert!(!runs.exists() || std::fs::read_dir(runs).unwrap().next().is_none());
+    }
+}
+
+#[test]
+fn oversized_node_input_is_visible_in_foreground_status_and_logs() {
+    let fixture = Fixture::new();
+    let input_bytes = write_large_task(&fixture, 1_400_000);
+    let output = fixture.run("finish", false);
+    assert!(!output.status.success());
+    let receipt: serde_json::Value =
+        serde_json::from_slice(output.stdout.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let status = fixture.json(&["status", id]);
+    assert_eq!(
+        status["status"]["terminalResult"]["reason"],
+        "runtime_failed"
+    );
+    let logs = fixture.command(&["logs", id]).output().unwrap();
+    success(&logs);
+    let foreground = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for text in [
+        foreground,
+        status.to_string(),
+        String::from_utf8(logs.stdout).unwrap(),
+    ] {
+        for detail in ["worker", "1 MiB", "1048576", &input_bytes.to_string()] {
+            assert!(text.contains(detail), "missing {detail}: {text}");
+        }
+    }
+    assert!(!fixture.workspace.join("mutation.txt").exists());
+}

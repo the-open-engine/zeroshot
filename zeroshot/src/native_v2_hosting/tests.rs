@@ -181,7 +181,10 @@ fn platform_failures_map_to_stable_target_error_classes() {
             TargetAuthorityErrorKind::Invalid,
         ),
         (
-            NativeV2PlatformError::Ledger(RunLedgerError::AdmittedRunTooLarge),
+            NativeV2PlatformError::Ledger(RunLedgerError::AdmittedRunTooLarge {
+                submission_bytes: 3_001_000,
+                input_bytes: 3_000_011,
+            }),
             TargetAuthorityErrorKind::Invalid,
         ),
         (

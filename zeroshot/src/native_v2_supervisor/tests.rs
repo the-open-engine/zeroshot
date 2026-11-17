@@ -486,3 +486,6 @@ mod suspension_tests;
 
 #[path = "tests/concurrency.rs"]
 mod concurrency;
+
+#[path = "tests/input_sizes.rs"]
+mod input_sizes;

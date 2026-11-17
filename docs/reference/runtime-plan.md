@@ -14,6 +14,12 @@ types in `openengine-cluster-protocol` are authoritative; the
 <a href="../cluster/schema.json#/$defs/RuntimePlan">generated protocol schema</a> is the
 machine-readable contract.
 
+The complete stored submission, including the compiled graph, runtime settings and initial input,
+is limited to 2 MiB (2,097,152 bytes) of serialized UTF-8 JSON. Each node's start record, including
+its bound input and bookkeeping, is limited to 1 MiB (1,048,576 bytes). See
+[run input limits](../getting-started/first-run.md#1-write-the-task). These storage bounds are
+independent of a provider's context window and the selected run size.
+
 ## Document fields
 
 `RuntimePlan` is a closed JSON object. The following four fields are required; unknown fields are rejected.

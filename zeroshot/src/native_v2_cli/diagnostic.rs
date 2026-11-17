@@ -77,6 +77,17 @@ impl NativeV2CliError {
 fn request_diagnostic(error: &NativeV2CliError) -> Option<NativeV2CliDiagnostic> {
     let diagnostic = match error {
         NativeV2CliError::Usage(message) => request(usage_code(message), message, None, json!({})),
+        NativeV2CliError::Ledger(
+            source @ crate::v2_run_ledger::RunLedgerError::AdmittedRunTooLarge {
+                submission_bytes,
+                input_bytes,
+            },
+        ) => request(
+            "submission.too_large",
+            source.to_string(),
+            None,
+            json!({"submissionBytes":submission_bytes,"inputBytes":input_bytes,"limitBytes":crate::v2_run_ledger::MAX_ADMITTED_RUN_BYTES}),
+        ),
         NativeV2CliError::Json { kind, path, source } => request(
             json_code(source),
             error.to_string(),
@@ -261,6 +272,7 @@ fn remote_diagnostic(code: &str, message: &str, details: Option<Value>) -> Nativ
         }
     }
     match code {
+        "submission.too_large" => request(code, message, None, details),
         NOT_FOUND => {
             NativeV2CliDiagnostic::new(DiagnosticKind::RunNotFound, "run.not_found", message)
                 .with_details(details)
