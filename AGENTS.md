@@ -241,8 +241,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   One scoped assignment traversal owns flat and nested map proofs, preserving shared item populations
   and applying enclosing retention after candidate qualification. Incoming controls and lifted writes
   retain their conditions. Choice routes and candidate availability are shared immutable proofs.
-  Correlated aggregate verification uses saturated joint counts and one deterministic 8 Mi count-cell
-  proof-work bound; an exhausted proof budget stays exhausted through admission.
+  Control checks are decided by search over decision diagrams (`graph_verifier/assignments/`): a
+  check reads only the selectors its condition and their join, loop and execution rules mention,
+  labels it cannot tell apart share one class, and controls no rule connects add to the work
+  instead of multiplying it. Never list joint outcomes of unrelated nodes or share a work budget
+  between checks: whether one condition is valid must not depend on the rest of the graph. A map
+  item's joint outcomes are still listed per check and folded into saturated joint counts (65,536
+  count states per map); one check may take 1,048,576 search steps, a backstop reported at the
+  condition being decided.
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.
@@ -261,7 +267,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Closed-window replay never contributes pending work; terminal maps discard their queued siblings.
   Static aggregate proofs check private qualification before exporting retained controls, preserve
   presence and success/failure refinement in every compressed label class, saturate higher counts at
-  authored thresholds, and charge shared-guard expansion before allocation.
+  authored thresholds, and expand each distinct first-join selector once per racer.
   Aggregate guards can use nested map facts when an enclosing map dominates their scope.
   The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
   actual traversal to find ready work; static write/retention witnesses remain private to admission.

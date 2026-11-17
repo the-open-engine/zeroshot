@@ -283,17 +283,18 @@ optional descendants.
 
 The full-graph profile has fixed ceilings:
 
-| Bound                         | Maximum |
-| ----------------------------- | ------: |
-| Graph nodes                   |   4,096 |
-| Graph depth                   |      64 |
-| Guard nodes                   |   4,096 |
-| Assignments per finite check  |  65,536 |
-| Concurrent map items          |  65,536 |
-| Attempts per executable node  |     100 |
-| One-run executable node count |  65,536 |
-| Total loop-body entries       |  65,536 |
-| Run execution concurrency     |  65,536 |
+| Bound                         |   Maximum |
+| ----------------------------- | --------: |
+| Graph nodes                   |     4,096 |
+| Graph depth                   |        64 |
+| Guard nodes                   |     4,096 |
+| Count states per map check    |    65,536 |
+| Search steps per check        | 1,048,576 |
+| Concurrent map items          |    65,536 |
+| Attempts per executable node  |       100 |
+| One-run executable node count |    65,536 |
+| Total loop-body entries       |    65,536 |
+| Run execution concurrency     |    65,536 |
 
 Completed-item replay retains scoped runtime facts and promoted values rather than full caller
 state per item. Probe results are released before decision replay; collections still require every
@@ -317,10 +318,17 @@ Aggregate checks preserve each item's joint outcomes and conditional presence. S
 bodies can complete without executable visits, so analysis assumes no cardinality bound from
 concurrency or leaf-work ceilings. The verifier clips
 joint label counts at the largest queried threshold, so common `k_of_map(..., 1)` checks reach a
-fixed set of states independent of input length. One verification admits at most 65,536 assignment
-states and 8,388,608 count-cell operations. Each assignment transition charges its copied selector
-and count cells before allocation. Excess analysis reports `ceiling_exceeded` at the relevant
-node/guard; there is no user budget or timeout setting.
+fixed set of states independent of input length.
+
+The verifier decides each condition by search, not by listing every combination of how the nodes
+it depends on can end. A check reads only the controls that its condition and their join, loop and
+map rules mention. Labels a check cannot tell apart count as one, and controls no rule connects add
+to the work instead of multiplying it, so another reviewer or signal costs its own size. Inside one
+map, a check still lists the joint outcomes of one item that it reads and folds them into saturated
+counts: at most 65,536 distinct count states per map. One check may take 1,048,576 search steps, a
+backstop far above authored graphs that checks do not share. A check that passes either bound
+reports `ceiling_exceeded` at the choice, join or guard it was deciding; there is no user budget or
+timeout setting.
 
 Graph-bearing JSON decoding first checks a fixed 512-container envelope for structural arrays,
 payload nesting and transport wrappers. The graph verifier separately checks authored depth 64.
@@ -344,7 +352,7 @@ within 1,024 bytes: the count is left out when it does not fit, and `.../` repla
 segments that do not fit:
 
 ```text
-graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis exceeds 65536 states or 8388608 count-cell work units (and 1 more diagnostic)
+graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis of this condition exceeds 65536 count states or 1048576 search steps (and 1 more diagnostic)
 ```
 
 `StructuralBounds` carries a termination witness, a positive executable-visit upper limit,

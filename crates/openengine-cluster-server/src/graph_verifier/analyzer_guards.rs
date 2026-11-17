@@ -1,5 +1,5 @@
 use super::*;
-use super::analyzer_choice_writes::{guarded_selector_uses, refine_common_choice_writes};
+use super::analyzer_choice_writes::guarded_selector_uses;
 
 impl<'a> Analyzer<'a> {
     pub(super) fn validate_choice(
@@ -43,30 +43,34 @@ impl<'a> Analyzer<'a> {
         for (_, condition) in &conditions {
             condition.collect_guards(&mut guards);
         }
-        let Some(assignments) = self.assignments_for_guards(&guards, &with_field(path, "branches"))
-        else {
+        let Some(mut routes) = self.decide(&guards, &with_field(path, "branches"), |proof| {
+            proof.routes(choice, &conditions)
+        }) else {
             return ChoiceControl::unknown(choice);
         };
-        let (branches, branch_reachable, covered) =
-            self.choice_branch_outcomes(choice, &assignments, path);
-        let uncovered = assignments
-            .iter()
-            .zip(covered)
-            .filter_map(|(assignment, covered)| (!covered).then_some(assignment))
-            .collect::<Vec<_>>();
+        let uncovered = routes.pop().flatten();
+        for (index, route) in routes.iter().enumerate() {
+            if route.is_none() {
+                emit_diagnostic!(
+                    self,
+                    GraphDiagnosticCode::ChoiceExhaustiveness,
+                    "choice branch is unreachable after excluding earlier branches",
+                    guard_path(path, "branches", index, "when"),
+                    vec![choice.name.clone()],
+                );
+            }
+        }
         let (exhaustive, otherwise_reachable) =
-            self.record_choice_exhaustiveness(choice, &uncovered, path);
-        let mut control = ChoiceControl {
-            branches,
-            branch_reachable,
+            self.record_choice_exhaustiveness(choice, uncovered.is_some(), path);
+        ChoiceControl {
+            branch_reachable: routes.iter().map(Option::is_some).collect(),
+            branches: routes.into_iter().map(Option::unwrap_or_default).collect(),
             branch_completion: choice_branch_completion_predicates(choice),
-            otherwise: outcome_refinement(&uncovered),
+            otherwise: uncovered.unwrap_or_default(),
             otherwise_reachable,
             otherwise_completion: choice_otherwise_completion_predicate(choice),
             exhaustive,
-        };
-        refine_common_choice_writes(&mut control, choice, &assignments, &conditions);
-        control
+        }
     }
 
     pub(super) fn validate_choice_guards(
@@ -96,46 +100,13 @@ impl<'a> Analyzer<'a> {
         valid
     }
 
-    pub(super) fn choice_branch_outcomes(
-        &mut self,
-        choice: &ChoiceNode,
-        assignments: &[Assignment],
-        path: &[DiagnosticPathSegment],
-    ) -> (Vec<OutcomeRefinement>, Vec<bool>, Vec<bool>) {
-        let mut prior = vec![false; assignments.len()];
-        let mut outcomes = Vec::with_capacity(choice.branches.as_slice().len());
-        let mut reachable = Vec::with_capacity(choice.branches.as_slice().len());
-        for (index, branch) in choice.branches.as_slice().iter().enumerate() {
-            let mut residual = Vec::new();
-            for (assignment, matched_prior) in assignments.iter().zip(&mut prior) {
-                let matches = evaluate_guard(&branch.when, assignment);
-                if matches && !*matched_prior {
-                    residual.push(assignment);
-                }
-                *matched_prior |= matches;
-            }
-            if residual.is_empty() {
-                emit_diagnostic!(
-                    self,
-                    GraphDiagnosticCode::ChoiceExhaustiveness,
-                    "choice branch is unreachable after excluding earlier branches",
-                    guard_path(path, "branches", index, "when"),
-                    vec![choice.name.clone()],
-                );
-            }
-            reachable.push(!residual.is_empty());
-            outcomes.push(outcome_refinement(&residual));
-        }
-        (outcomes, reachable, prior)
-    }
-
     pub(super) fn record_choice_exhaustiveness(
         &mut self,
         choice: &ChoiceNode,
-        uncovered: &[&Assignment],
+        uncovered: bool,
         path: &[DiagnosticPathSegment],
     ) -> (bool, bool) {
-        let exhaustive = choice.otherwise.is_some() || uncovered.is_empty();
+        let exhaustive = choice.otherwise.is_some() || !uncovered;
         if choice.otherwise.is_none() && !exhaustive {
             emit_diagnostic!(
                 self,
@@ -145,7 +116,7 @@ impl<'a> Analyzer<'a> {
                 vec![choice.name.clone()],
             );
         }
-        let otherwise_reachable = choice.otherwise.is_some() && !uncovered.is_empty();
+        let otherwise_reachable = choice.otherwise.is_some() && uncovered;
         if let Some(otherwise) = &choice.otherwise {
             if !otherwise_reachable {
                 emit_diagnostic!(
