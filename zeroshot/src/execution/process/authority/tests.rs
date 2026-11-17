@@ -58,9 +58,20 @@ fn an_incomplete_record_never_establishes_human_authority() {
     assert!(read_record(root.path(), 123).is_err());
 }
 
-fn registration() -> (tempfile::TempDir, Registration) {
+#[test]
+fn a_record_with_the_wrong_pid_never_establishes_human_authority() {
+    let (root, identity) = current();
+    let mut file = record(root.path(), identity.pid, identity.born);
+    file.seek(SeekFrom::Start(0)).assert_value();
+    file.write_all(&u64::from(identity.pid.wrapping_add(1)).to_le_bytes())
+        .assert_value();
+    let error = owned(root.path(), identity).unwrap_err();
+    assert_eq!(error.to_string(), "invalid local process ownership");
+}
+
+fn registration(pid: u32, born: u64) -> (tempfile::TempDir, Registration) {
     let root = tempfile::tempdir().assert_value();
-    let file = record(root.path(), 123, 456);
+    let file = record(root.path(), pid, born);
     let registration = Registration {
         directory: root.path().to_owned(),
         pending: ".pending".into(),
@@ -72,7 +83,7 @@ fn registration() -> (tempfile::TempDir, Registration) {
 
 #[test]
 fn retirement_preserves_a_newer_registration_at_the_same_pid() {
-    let (root, mut registration) = registration();
+    let (root, mut registration) = registration(123, 456);
     std::fs::rename(root.path().join("123"), root.path().join("old")).assert_value();
     let newer = record(root.path(), 123, 789);
     registration.retire().assert_value();
@@ -86,8 +97,15 @@ fn retirement_preserves_a_newer_registration_at_the_same_pid() {
 }
 
 #[test]
-fn confirmed_retirement_removes_only_its_own_record() {
-    let (root, mut registration) = registration();
+fn confirmed_retirement_is_idempotent_and_removes_only_its_own_record() {
+    let (root, mut registration) = registration(123, 456);
+    registration.retire().assert_value();
     registration.retire().assert_value();
     assert!(read_record(root.path(), 123).assert_value().is_none());
 }
+
+#[cfg(windows)]
+mod windows;
+
+#[cfg(unix)]
+mod unix;

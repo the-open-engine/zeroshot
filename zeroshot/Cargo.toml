@@ -87,6 +87,9 @@ windows-sys = { workspace = true, features = [
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 dbus.workspace = true
 
+[build-dependencies]
+cc = "1.2"
+
 [dev-dependencies]
 rcgen.workspace = true
 rustls.workspace = true

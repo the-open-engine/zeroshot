@@ -121,6 +121,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   an ownership lease before Unix exec or Windows resume and retains it through confirmed cleanup;
   Linux's private supervisor retains the descriptor after owner loss. Bounded PID/creation identity
   ancestry and native process-group evidence fence same-run, foreign-run and suspended-ledger paths.
+  macOS reads ancestry and creation time together through public KERN_PROC_PID metadata;
+  a small SDK-compiled shim owns the native structure layout and validates the returned PID,
+  record size and timestamp. Query errors retain denial, including protected-process failures.
+  A departed or reused Windows parent ends ancestry only when the original caller's native creation
+  identity still matches and it is outside every Job; owned roots and ordinary descendants retain
+  their non-breakaway Job. Other process-query errors, changed current identities and bounds still deny.
   Uncertain callers cannot publish human guidance. These mandates govern normal CLI/RPC use under
   existing native account permissions; they do not create an OS sandbox. Deliberate same-account
   state/credential tampering, external proxies and macOS session detachment plus orphaning require

@@ -12,6 +12,7 @@ use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
+use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
     PROCESS_QUERY_LIMITED_INFORMATION,
@@ -28,6 +29,22 @@ pub(crate) fn process_identity(pid: u32) -> io::Result<ProcessIdentity> {
     if pid == 4 {
         return system_identity();
     }
+    let process = open_process(pid)?;
+    let born = root_born(process.as_raw_handle())?;
+    let parent = if is_native_shell(pid) {
+        0
+    } else {
+        process_parent(pid)?
+    };
+    Ok(ProcessIdentity {
+        pid,
+        parent,
+        group: 0,
+        born,
+    })
+}
+
+fn open_process(pid: u32) -> io::Result<OwnedHandle> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
         let error = io::Error::last_os_error();
@@ -42,19 +59,22 @@ pub(crate) fn process_identity(pid: u32) -> io::Result<ProcessIdentity> {
             },
         );
     }
-    let process = unsafe { OwnedHandle::from_raw_handle(process) };
-    let born = root_born(process.as_raw_handle())?;
-    let parent = if is_native_shell(pid) {
-        0
-    } else {
-        process_parent(pid)?
-    };
-    Ok(ProcessIdentity {
-        pid,
-        parent,
-        group: 0,
-        born,
-    })
+    Ok(unsafe { OwnedHandle::from_raw_handle(process) })
+}
+
+/// Ordinary owned executions and their descendants cannot leave the host's non-breakaway Job.
+pub(crate) fn outside_jobs(caller: ProcessIdentity) -> io::Result<bool> {
+    let process = open_process(caller.pid)?;
+    if root_born(process.as_raw_handle())? != caller.born {
+        return Err(io::Error::other(
+            "local steering caller creation identity changed",
+        ));
+    }
+    let mut present = 0;
+    if unsafe { IsProcessInJob(process.as_raw_handle(), std::ptr::null_mut(), &mut present) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(present == 0)
 }
 
 /// Reads the held root handle even after exit; borrows it without closing it.

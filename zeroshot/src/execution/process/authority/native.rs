@@ -27,7 +27,12 @@ use macos as platform;
 #[cfg(windows)]
 use windows as platform;
 #[cfg(windows)]
-pub(super) use windows::{registry_directory, root_born};
+pub(super) use windows::{outside_jobs, registry_directory, root_born};
+
+#[cfg(not(windows))]
+pub(super) fn outside_jobs(_caller: ProcessIdentity) -> io::Result<bool> {
+    Ok(false)
+}
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 pub(super) fn process_identity(pid: u32) -> io::Result<ProcessIdentity> {

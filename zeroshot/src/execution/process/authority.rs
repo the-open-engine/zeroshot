@@ -26,7 +26,8 @@ pub(crate) fn require_human(pid: u32) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error),
     }
-    let mut current = native::process_identity(pid)?;
+    let caller = native::process_identity(pid)?;
+    let mut current = caller;
     for _ in 0..MAX_ANCESTORS {
         if owned(&directory, current)? || owned_group(&directory, current.group)? {
             return Err(io::Error::new(
@@ -37,15 +38,36 @@ pub(crate) fn require_human(pid: u32) -> io::Result<()> {
         if current.parent == 0 {
             return Ok(());
         }
-        let parent = native::process_identity(current.parent)?;
-        if parent.born > current.born || native::process_identity(current.pid)? != current {
+        let parent = parent_or_boundary(caller, current)?;
+        if native::process_identity(current.pid)? != current {
             return Err(io::Error::other("local steering caller ancestry changed"));
         }
+        let Some(parent) = parent else {
+            return Ok(());
+        };
         current = parent;
     }
     Err(io::Error::other(
         "local steering caller ancestry exceeds its bound",
     ))
+}
+
+// A departed parent can hide an owned ancestor. Only native Job exclusion can end that search.
+fn parent_or_boundary(
+    caller: native::ProcessIdentity,
+    current: native::ProcessIdentity,
+) -> io::Result<Option<native::ProcessIdentity>> {
+    let error = match native::process_identity(current.parent) {
+        Ok(parent) if parent.born <= current.born => return Ok(Some(parent)),
+        Ok(_) => io::Error::other("local steering caller ancestry changed"),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => error,
+        Err(error) => return Err(error),
+    };
+    if native::outside_jobs(caller)? {
+        Ok(None)
+    } else {
+        Err(error)
+    }
 }
 
 fn read_record(directory: &Path, pid: u32) -> io::Result<Option<File>> {

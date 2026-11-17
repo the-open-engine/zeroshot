@@ -408,6 +408,10 @@ jobs:
           native_v2_claude::transcript::tests
           native_v2_codex::output::tests
           native_v2_pi::transcript::tests
+      - name: Run macOS process provenance regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          execution::process::authority
       - name: Run macOS forge network and access regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --
