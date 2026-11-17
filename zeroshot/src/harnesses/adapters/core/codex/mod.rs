@@ -196,6 +196,8 @@ impl NativeV2CodexAdapter {
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: input.files.home(),
+                context_budget: None,
+                standing: true,
             },
         );
         Ok(command)

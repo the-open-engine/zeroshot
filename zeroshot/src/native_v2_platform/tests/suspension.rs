@@ -21,6 +21,9 @@ mod request_bounds;
 #[derive(Default)]
 struct SuspensionStore {
     published: StdMutex<Vec<RunVector>>,
+    /// Set when the next retained allocation restarts a failed run instead of continuing a
+    /// suspended one.
+    restart: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -108,10 +111,14 @@ impl CapsuleAllocator for SuspensionAllocator {
         &self,
         request: RetainedAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
-        assert!(matches!(
+        assert_eq!(
             request.selection,
-            CheckpointRestoreSelection::Continue
-        ));
+            if self.store.restart.load(Ordering::SeqCst) {
+                CheckpointRestoreSelection::Latest
+            } else {
+                CheckpointRestoreSelection::Continue
+            }
+        );
         assert_eq!(
             self.successor.lock().assert_value().as_ref(),
             Some(request.run_id)
@@ -456,6 +463,8 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
         }
     }).await.assert_value();
     assert_eq!(driver.starts.load(Ordering::SeqCst), 0);
+    // A stop signal may stop live work; it must leave a suspension alone.
+    assert!(!controller.holds_suspension(&run).await);
     controller
         .suspend(RunSuspendParams {
             run_id: run.clone(),
@@ -486,6 +495,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
     .assert_value();
     controller.wait_runtime_settled(&run).await;
     assert_eq!(cleanup.exits(), vec![RunRuntimeExit::Suspended]);
+    assert!(controller.holds_suspension(&run).await);
     let mut params = resume_params(&run);
     params.connections.clear();
     assert!(
@@ -496,14 +506,42 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
             .to_string()
             .contains("due at")
     );
+    // Without its workspace the attempt could never continue, yet would stay suspended.
+    assert!(matches!(
+        controller
+            .discard_workspace(RunDiscardWorkspaceParams { run_id: run.clone() })
+            .await,
+        Err(NativeV2PlatformError::InvalidRequest(message)) if message.contains("force-stop")
+    ));
     let forced = controller
-        .force(RunForceParams { run_id: run })
+        .force(RunForceParams {
+            run_id: run.clone(),
+        })
         .await
         .assert_value();
     assert!(
         matches!(forced.status, RunStatus::Finished {terminal_result:TerminalResult::Failed {ref reason, ..}, ..} if reason.as_str() == "force_stopped")
     );
     assert!(controller.resume(params).await.is_err());
+    controller
+        .discard_workspace(RunDiscardWorkspaceParams {
+            run_id: run.clone(),
+        })
+        .await
+        .assert_value();
+    let late = controller
+        .steer(openengine_cluster_protocol::RunSteerParams {
+            run_id: run,
+            text: "late".to_owned(),
+        })
+        .await;
+    // The ledger's refusal by run state is the caller's to correct, not an internal error.
+    assert!(
+        matches!(&late, Err(NativeV2PlatformError::InvalidRequest(message))
+            if message.contains("already terminal")),
+        "{:?}",
+        late.map(|_| ()).map_err(|error| error.to_string())
+    );
 }
 
 #[tokio::test]

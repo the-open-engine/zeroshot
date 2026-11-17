@@ -728,7 +728,7 @@ async fn local_enumeration_and_readiness_fail_closed_without_controller() {
         .write_all(&ready)
         .assert_value();
     assert!(matches!(
-        backend.connect_run(&run_id).await,
+        backend.connect_run(&run_id, true).await,
         Err(NativeV2CliError::Local(message))
             if message.contains("different run identity")
     ));
@@ -877,6 +877,24 @@ async fn local_stale_state_and_readiness_fail_closed() {
              portable controller I/O failed: restic is unavailable; \
              ZEROSHOT_PREPARATION_TIMEOUT sets its 5 s preparation deadline"
         );
+        // A run that ended, and whose controller exited after its grace, was still started.
+        let ready = serde_json::to_vec(&serde_json::json!({
+            "kind": "zeroshot.portable-controller-ready/v1",
+            "runId": run_id,
+            "socket": paths.socket(),
+            "pid": 1
+        }))
+        .assert_value();
+        private_file(&paths.ready(), FileAccess::CreateNew)
+            .assert_value()
+            .write_all(&ready)
+            .assert_value();
+        assert!(matches!(
+            wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
+                .await
+                .assert_value(),
+            ControllerWait::Ready
+        ));
 
         let mut waiting = tokio::process::Command::new("sh")
             .args(["-c", "read _"])

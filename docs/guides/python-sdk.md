@@ -277,8 +277,10 @@ inbox reads never apply them. See [Ask a person](ask-a-person.md).
 ## Standing direction
 
 `steer = await run.steer("Prioritize the parser regression.")` records standing direction without
-continuing a suspended run. `RunStatus.steers` exposes excerpts and confirmed receiving executions;
-`omitted_steers` reports the bounded listing's omissions. Each agent conversation receives a steer
-at its next tool call or prompt. `await run.vector(steer.id)` reads its full text, and
+continuing a suspended run. `RunStatus.steers` from `Run.status()` exposes excerpts and confirmed
+receiving executions (statuses streamed by `Run.watch()` omit them); `omitted_steers` reports the
+bounded listing's omissions. Each agent conversation receives a steer at its next tool call or
+prompt, within the [Claude Code limits](observe-and-control.md#steer-a-run).
+`await run.vector(steer.id)` reads its full text, and
 `await run.vectors()` includes `steer` and `steer_receipt` entries. Direction is limited to 262,144
 UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error types report refusals.

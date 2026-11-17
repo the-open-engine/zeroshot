@@ -177,8 +177,9 @@ async fn steer_running_local_delivers_tools_then_verifier_prompt_and_retries() {
     }
     assert!(!steer_read(&fixture, "steer-tool-check-1-2-0").contains("<steer>"));
     let status = fixture.json(&["status", &run], "finish").await;
-    // Worker conversation, verifier retry, and the second round's fresh verifier conversation.
-    assert_eq!(status["steers"][0]["receivedExecutions"], 3);
+    // Worker conversation, both verifier attempts, and the second round's fresh verifier
+    // conversation: a prompt that carried the steer counts when its turn starts.
+    assert_eq!(status["steers"][0]["receivedExecutions"], 4);
     assert!(!steer_read(&fixture, "steer-prompt-worker-2-1").contains(&text));
     let vectors = fixture.json(&["vectors", &run], "finish").await;
     assert_eq!(vectors["vectors"][0]["kind"], "steer");
@@ -411,7 +412,8 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
         "{status}"
     );
     assert!(steer_read(&fixture, "steer-tool-worker-2-1-0").contains("direction-after-snapshot"));
-    assert_eq!(status["steers"][1]["receivedExecutions"], 1);
+    // The worker's tool call, and both attempts of the verifier whose prompt carried it.
+    assert_eq!(status["steers"][1]["receivedExecutions"], 3);
     let checkpoints = fixture.json(&["checkpoints", &run], "steer").await;
     let checkpoint = checkpoints["checkpoints"]
         .as_array()
@@ -456,6 +458,7 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
             .iter()
             .filter(|v| v["kind"] == "steer_receipt" && v["steerId"] == after)
             .count(),
-        3
+        // The three inherited from the failed run, then the restored worker and its verifier.
+        5
     );
 }
