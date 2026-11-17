@@ -2325,19 +2325,20 @@ publish through <code>zeroshot steer --network NAME</code>. The host authenticat
 checks its publisher permission and assigns the origin. Public execution labels do not authorize
 a message. Receivers need membership in a selected network; repeated destinations or overlapping
 memberships do not multiply delivery.</p>
-<p>A peer message reaches a recipient through its next prompt or native tool callback. Future recipients
+<p>A peer message reaches a recipient through its next prompt or at its next tool call. Future recipients
 receive it once they start. Publication creates no execution and does not interrupt, restart or
 wake a recipient. It also keeps suspended runs suspended. The originating node instance never
 receives that message, while other mapped copies of its logical node remain eligible members.</p>
 <p>Network messages default to <code>once</code>, with receipt tracking by recipient node instance across
 retries, fresh conversations and successors. <code>standing</code> tracks each provider conversation; a
 continued conversation retains messages kept in its saved session and a fresh conversation receives
-them again. On Copilot, Pi and OpenCode, standing guidance shown by a transient tool callback also
-returns in the next prompt. Its receipt is excluded from saved conversation snapshots until that
-prompt succeeds. Both modes preserve sender exclusion. Human broadcast steering keeps its standing default
+them again. At a tool call a message arrives as a user message of its own on Claude Code, Copilot,
+Pi and OpenCode and with the hook context on Codex; a conversation that holds a message is not
+given it again in either mode. Both modes preserve sender exclusion. Human broadcast steering keeps its standing default
 and instruction precedence. Peer messages remain attributed context under authored instructions.</p>
-<p>The existing vector ledger owns messages and receipts. A carrier acknowledgement confirms returned
-context. Once prompt delivery records a receipt after successful provider completion. Standing
+<p>The existing vector ledger owns messages and receipts. A tool-call receipt is recorded when the
+harness shows the message in the conversation, or on Codex when its hook has returned.
+Once prompt delivery records a receipt after successful provider completion. Standing
 prompt receipts are recorded at preparation and remain provisional until successful completion.
 Receipts do not prove model compliance. A missing acknowledgement leaves delivery pending and can cause a repeat.</p>
 <h2 id="auto-research">Auto-research<a class="headerlink" href="#auto-research" title="Permanent link">&para;</a></h2>

@@ -2947,16 +2947,19 @@ Steering keeps a suspended run suspended. A run with a successor refuses and nam
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.</p>
 <p>With the default standing mode, every agent conversation, including reviewers, receives each steer
 at its next tool call or in its next prompt, whichever comes first. It cannot revise a tool call
-already issued. On Claude Code, a tool call carries steers only while the returned context, Active
-Memory included, stays within 9,000 bytes, because Claude Code passes at most 10,000 characters
-inline; a larger steer, and any steer recorded after it, waits for that conversation's next prompt,
-where it arrives whole. Claude Code subagent tool calls never receive steers; the node's own
-conversation receives them. On Copilot, Pi and OpenCode, a standing steer shown at a tool call also
-arrives in the next prompt: Copilot applies hook context without keeping it, and Pi and OpenCode
-show it inside a tool result which the model may refuse to follow. Once messages are consumed per
-node instance and do not repeat because of these carrier differences. Direction
-takes precedence over authored instructions as guidance; permissions, output contracts, routing,
-runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
+already issued. At a tool call the steer arrives as a user message of its own on Claude Code,
+Copilot, Pi and OpenCode: the harness hands it to the model after the tool call in progress and
+keeps it in the conversation. It is never placed inside a tool result, which a model may refuse to
+follow. Codex has no such channel and receives the steer with the tool call's hook context, which
+it keeps. A steer of any permitted size arrives whole either way. Subagents do not receive steers:
+on Claude Code a message sent while a subagent works reaches the node's own conversation when the
+subagent returns. A message the harness never shows in the conversation is not counted as
+received, and the steer is delivered with that conversation's next prompt instead. A steer that
+reached a conversation is not delivered to it a second time, in either mode. A small model can
+take a large message that arrives while it works for tool output and ignore it; steer again if a
+direction was not followed. Once messages are consumed per node instance. Direction takes
+precedence over authored instructions as guidance; permissions, output contracts, routing, runtime
+bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
 Standing steers last for the rest of the run and its successors. Continued conversations keep receipts;
 new conversations receive the standing direction. A lost acknowledgement can cause repeat delivery.</p>
 <p>Text must be nonblank UTF-8, at most 262,144 bytes, with no NUL or control characters except tab,
@@ -2964,18 +2967,20 @@ newline and carriage return. Text is stored and shown as given: <strong>do not p
 <p>Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. <code>zeroshot status RUN_ID</code> lists steers with recording times,
 byte lengths, character-safe excerpts and receiving execution references. A standing prompt receipt
-is recorded at preparation and stays provisional until the turn succeeds; a failed turn offers it
-in the next prompt, including in a successor. A once prompt receipt is recorded after successful
-provider completion. Tool-call receipts are recorded when the carrier acknowledges the context.
+is recorded when the turn carrying the steer starts and stays provisional until the turn succeeds; a
+failed turn offers the steer in the next prompt, including in a successor. A once prompt receipt is
+recorded after successful provider completion. A tool-call receipt appears when the harness shows
+the message in the conversation, or on Codex when its hook has returned. A receipt records that
+the conversation holds the steer, not that the model followed it.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="go">zeroshot vectors RUN_ID</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">zeroshot vectors show RUN_ID STEER_ID</span>
 </code></pre></div>
 <p>The record includes <code>steer</code> and <code>steer_receipt</code> entries in event order. Add <code>--target NAME</code> to these
-commands for a direct target advertising steering and run vectors. Tool-call receipts record
-acknowledged context, while once prompt receipts record successful provider completion. Standing
-prompt receipts may be provisional, as described above. Receipts do not prove model compliance.</p>
+commands for a direct target advertising steering and run vectors. Tool-call receipts record a
+message the harness showed (on Codex, acknowledged hook context), while once prompt receipts record
+successful provider completion. Standing prompt receipts may be provisional, as described above.</p>
 <h3 id="send-a-peer-message">Send a peer message<a class="headerlink" href="#send-a-peer-message" title="Permanent link">&para;</a></h3>
 <p>A graph can declare <a href="../../reference/cluster/graph/#peer-networks">networks</a> for selected agents.
 An authorized publisher sends a message from its own running local execution:</p>
@@ -2990,8 +2995,7 @@ instances of the publishing node. The originating instance never receives its ow
 even after a retry, a fresh provider conversation or a resume.</p>
 <p>Network messages default to <code>--mode once</code>: each recipient node instance receives one confirmed
 delivery, and that receipt survives fresh provider conversations and successors. Use <code>--mode standing</code>
-to keep guidance for the rest of the run and its successors. Fresh conversations receive it again;
-transient tool-call delivery also returns in the next prompt, as described above.
+to keep guidance for the rest of the run and its successors. Fresh conversations receive it again.
 Human steering without <code>--network</code> keeps its standing default; <code>--mode once</code> selects a one-off
 human direction.</p>
 <p>Publishers receive their authorized network names and publication instructions in private context.
@@ -3001,7 +3005,8 @@ send them. The CLI and local RPC reject agent calls to the human broadcast form,
 with cleared execution labels or another local run as their destination. A caller outside the
 authorized execution cannot publish a network message. Native execution permissions, including
 OS account access, remain in effect.</p>
-<p>Pending messages enter a recipient's next prompt or native tool callback. Sequential recipients
+<p>Pending messages enter a recipient's next prompt or arrive at its next tool call, on the same
+carriers as human steering and never inside a tool result. Sequential recipients
 receive them once they start. A failed record read leaves the message pending for the next delivery
 point. Publication never starts an agent, restarts a recipient
 or wakes a suspended run. Peer messages carry their source as context;
