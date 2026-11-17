@@ -2447,6 +2447,10 @@ Use <code>Preset("software-change", delivery="none")</code> for local changes wi
 Per-run <code>cwd=</code> paths resolve from that captured folder, or <code>LocalTarget.workspace</code> when supplied.
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 <code>run()</code> submits once and waits; <code>submit()</code> returns a durable <code>Run</code> handle immediately.</p>
+<p>Run input has the same <a href="../../getting-started/first-run/#1-write-the-task">submission and node-input limits</a>
+as the CLI: 2 MiB for the stored submission and 1 MiB for each node's serialized start record,
+including its input and bookkeeping. A local early size refusal raises <code>InvalidRequestError</code> with
+code <code>submission.too_large</code>. A node-input overflow fails the admitted run with a size diagnostic.</p>
 <h2 id="manage-named-targets">Manage named targets<a class="headerlink" href="#manage-named-targets" title="Permanent link">&para;</a></h2>
 <p><code>Client.list_targets()</code> returns a tuple of typed <code>NamedTarget</code> records with <code>name</code>, <code>origin</code> and
 <code>kind</code> (<code>hosted</code> or <code>direct</code>), including the built-in <code>platform</code> target. It shares the local

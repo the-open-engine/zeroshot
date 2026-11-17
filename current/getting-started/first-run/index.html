@@ -2393,6 +2393,12 @@ repository's required CI and merge policy.</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"task"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Add JSON output to the status command and cover it with focused tests."</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">}</span>
 </code></pre></div>
+<p>The stored submission (graph, runtime settings, input and metadata) must fit within <strong>2 MiB
+(2,097,152 bytes)</strong> of JSON. Larger submissions are refused before a run is created.
+Each node's input plus its start-record bookkeeping must fit within <strong>1 MiB (1,048,576 bytes)</strong>.
+An oversized node input fails the run at that node with a size diagnostic. These are serialized
+UTF-8 byte limits, including JSON escaping. A graph may split input larger than 1 MiB into smaller
+node inputs; the whole submission must still fit within 2 MiB.</p>
 <h2 id="2-pick-the-agent">2. Pick the agent<a class="headerlink" href="#2-pick-the-agent" title="Permanent link">&para;</a></h2>
 <p>Save the one for your CLI as <code>runtime.json</code>, and replace <code>YOUR_MODEL_ID</code> with a model your
 provider accepts. zeroshot passes it on unchanged.</p>
