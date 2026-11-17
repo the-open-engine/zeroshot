@@ -108,7 +108,6 @@ fn unix_controller_stalled_requests_return_without_killing_the_controller() {
         .as_str()
         .unwrap();
     run.signal(libc::SIGSTOP);
-    let deadline = Instant::now() + Duration::from_secs(14);
     let mut commands = Vec::new();
     for name in [
         "status",
@@ -132,22 +131,26 @@ fn unix_controller_stalled_requests_return_without_killing_the_controller() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        commands.push((name, child));
+        // Slow batch startup must not consume another child's request allowance.
+        commands.push((name, child, Instant::now() + Duration::from_secs(14)));
     }
     while commands
         .iter_mut()
-        .any(|(_, child)| child.try_wait().unwrap().is_none())
+        .any(|(_, child, _)| child.try_wait().unwrap().is_none())
     {
-        if Instant::now() >= deadline {
-            for (_, child) in &mut commands {
+        let expired = commands.iter_mut().find_map(|(name, child, deadline)| {
+            (child.try_wait().unwrap().is_none() && Instant::now() >= *deadline).then_some(*name)
+        });
+        if let Some(name) = expired {
+            for (_, child, _) in &mut commands {
                 let _ = child.kill();
                 child.wait().unwrap();
             }
-            panic!("CLI commands exceeded the controller request deadline");
+            panic!("CLI command {name} exceeded the controller request deadline");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    for (name, child) in commands {
+    for (name, child, _) in commands {
         let output = child.wait_with_output().unwrap();
         if matches!(name, "status" | "list" | "checkpoints") {
             success(&output);

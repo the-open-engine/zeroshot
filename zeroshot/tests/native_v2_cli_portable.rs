@@ -10,6 +10,58 @@ mod inspection;
 mod restic_resume_tests;
 use fixture::{Fixture, success};
 
+#[test]
+fn connection_store_errors_name_file_and_location_without_secret_values() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let fixture = Fixture::new();
+    // Let the CLI create the file with native private ownership before damaging its contents.
+    let mut child = fixture
+        .command(&["connection", "set", "openai", "--json-stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"OPENAI_API_KEY":"fixture-key"}"#)
+        .unwrap();
+    success(&child.wait_with_output().unwrap());
+    let path = fixture.root.path("state").join("connections.json");
+    let encoded = "{\n  \"openai\": {\"OPENAI_API_KEY\": 987654321012345}\n}";
+    std::fs::write(&path, encoded).unwrap();
+    for output in [
+        fixture.command(&["connection", "list"]).output().unwrap(),
+        fixture
+            .command(&["connection", "delete", "openai"])
+            .output()
+            .unwrap(),
+        fixture.run("finish", true),
+    ] {
+        assert!(!output.status.success());
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            diagnostic.contains(&path.display().to_string()),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("is malformed at line 2 column 47"),
+            "{diagnostic}"
+        );
+        assert!(!diagnostic.contains("987654321012345"), "{diagnostic}");
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), encoded);
+    assert!(!fixture.workspace.join("mutation.txt").exists());
+}
+
 #[cfg(unix)]
 #[path = "native_v2_cli_portable/unix_controller_tests.rs"]
 mod unix_controller;
