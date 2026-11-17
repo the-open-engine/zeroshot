@@ -2719,6 +2719,13 @@ navigation. Status/watch <code>activeExecutions</code> and execution-associated 
 empty path). Indices supplement execution identity without changing its opaque selector.
 Successful terminal results keep their existing representation.</p>
 <h2 id="resume-event-and-log-streams">Resume event and log streams<a class="headerlink" href="#resume-event-and-log-streams" title="Permanent link">&para;</a></h2>
+<p>Codex, Claude, Copilot and Pi record native tool calls and completions in both logs and node
+transcripts by default, including tool identity, available call IDs, arguments, reported status
+and result excerpts. Missing status remains unknown. Known credentials are redacted before each
+entry is shortened. Each complete call entry and each completion entry is limited to 8 KiB,
+including its header and any visible truncation marker; large payloads retain their head and tail.
+Intermediate cumulative updates are omitted. These limits apply only to logs, so storage grows
+with tool count; they do not limit provider inputs, agent-visible results or total run storage.</p>
 <p><code>watch</code> follows status events; <code>logs</code> follows safe provider and controller log records. Both accept
 an opaque cursor and resume strictly after it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot watch RUN_ID --after STATUS_CURSOR</span>
