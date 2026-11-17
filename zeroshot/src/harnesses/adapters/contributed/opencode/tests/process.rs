@@ -464,6 +464,7 @@ impl ActiveMemorySource for RecallMemory {
 fn memory_callback_receipts(
     files: &ProviderExecutionFiles,
     context: String,
+    tools: &'static [&'static str],
 ) -> std::thread::JoinHandle<Vec<Option<u8>>> {
     use std::io::{ErrorKind, Read, Write};
     use std::net::TcpListener;
@@ -483,7 +484,7 @@ fn memory_callback_receipts(
     let workspace = files.workspace.clone();
     std::thread::spawn(move || {
         let mut receipts = Vec::new();
-        for tool in ["read", "nativeproof_record", "nativeproof_record"] {
+        for &tool in tools {
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut stream = loop {
                 match listener.accept() {
@@ -557,41 +558,106 @@ fn steer_opencode_carrier_stores_maximum_text_whole_as_a_message_before_the_reca
     exercise_native_plugin_messages(" recalled-marker", &steer);
 }
 
+#[test]
+fn a_session_write_that_never_settles_does_not_hold_the_tool_call() {
+    let plugin = NativePlugin::new("opencode-native-memory-unsettled");
+    let reply = json!({"context":" recalled-marker","steer":"<steer>\n[id] go\n</steer>"});
+    let receipts = memory_callback_receipts(&plugin.files, reply.to_string(), &["read"]);
+    let source_code = r#"const {default:create}=await import(process.argv[1]);
+let writes=0;
+const client={session:{prompt:()=>{ writes+=1; return new Promise(()=>{}); }}};
+const plugin=await create({directory:process.argv[2],client});
+await plugin['tool.execute.after']({tool:'read',sessionID:'ses_fixture',callID:'call1',args:{filePath:'README.md'}},{output:'original'});
+console.log(JSON.stringify({writes}));"#;
+    let output = node_command()
+        .args(["--input-type=module", "-e", source_code, &plugin.url])
+        .arg(&plugin.files.workspace)
+        .output()
+        .assert_value();
+    let receipts = receipts.join().assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
+    // The steer's write did not settle: the hook returned without it and wrote no lesson after it.
+    assert_eq!(returned["writes"], 1);
+    assert_eq!(
+        receipts,
+        vec![None],
+        "a message that was not stored is not acknowledged"
+    );
+}
+
+/// The memory plugin as a real command installs it, with the files its capability lives in.
+struct NativePlugin {
+    _directory: TestDirectory,
+    // The adapter's hooks own the broker the capability was issued by.
+    _adapter: OpenCodeAdapter,
+    files: ProviderExecutionFiles,
+    url: String,
+}
+
+impl NativePlugin {
+    fn new(name: &str) -> Self {
+        let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(RecallMemory)).assert_value());
+        let directory = TestDirectory::new(name);
+        let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n").with_active_memory(Some(hooks));
+        let files = ProviderExecutionFiles::for_test(
+            directory.path(),
+            HostedProcessScope::WriterExecution(1),
+        )
+        .assert_value();
+        let mut invocation = invocation(&[]);
+        crate::harnesses::native_config::tests::set(
+            &mut invocation.node.binding,
+            json!({"options":{"permission":{"edit":"deny"}}}),
+        );
+        let command = command::command(command::CommandRequest {
+            adapter: &adapter,
+            invocation: &invocation,
+            files: &files,
+            session_id: None,
+        })
+        .assert_value();
+        let config: Value =
+            serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
+        assert_eq!(config["permission"]["edit"], "deny");
+        let url = config["plugin"]
+            .as_array()
+            .assert_value()
+            .last()
+            .assert_value()
+            .as_str()
+            .assert_value()
+            .to_owned();
+        Self {
+            _directory: directory,
+            _adapter: adapter,
+            files,
+            url,
+        }
+    }
+}
+
 /// The plugin against a broker that hands `context` and `steer` to each of three tool calls, and
 /// a session client that refuses to store anything for the third.
 fn exercise_native_plugin_messages(context: &str, steer: &str) {
-    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(RecallMemory)).assert_value());
-    let directory = TestDirectory::new("opencode-native-memory-plugin");
-    let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n").with_active_memory(Some(hooks));
-    let files =
-        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
-            .assert_value();
-    let mut invocation = invocation(&[]);
-    crate::harnesses::native_config::tests::set(
-        &mut invocation.node.binding,
-        json!({"options":{"permission":{"edit":"deny"}}}),
-    );
-    let command = command::command(command::CommandRequest {
-        adapter: &adapter,
-        invocation: &invocation,
-        files: &files,
-        session_id: None,
-    })
-    .assert_value();
-    let config: Value =
-        serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
-    assert_eq!(config["permission"]["edit"], "deny");
-    let plugin_url = config["plugin"]
-        .as_array()
-        .assert_value()
-        .last()
-        .assert_value()
-        .as_str()
-        .assert_value();
+    let NativePlugin {
+        _directory,
+        _adapter: adapter,
+        files,
+        url: plugin_url,
+    } = NativePlugin::new("opencode-native-memory-plugin");
     // Check the carrier's bytes directly. The production broker's 250 ms receipt deadline may
     // correctly mark an otherwise returned result unavailable when a loaded CI host delays it.
     let reply = json!({"context":context,"steer":steer}).to_string();
-    let receipts = memory_callback_receipts(&files, reply);
+    let receipts = memory_callback_receipts(
+        &files,
+        reply,
+        &["read", "nativeproof_record", "nativeproof_record"],
+    );
     // Like OpenCode's client, `session.prompt` resolves to data or to an error; it does not throw.
     let source_code = r#"const {default:create}=await import(process.argv[1]);
 const stored=[];
@@ -614,7 +680,7 @@ await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fix
 await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_refused',callID:'call3',args:{marker:'mcp-fixture'}},null);
 console.log(JSON.stringify({output,builtin,mcp,before,stored}));"#;
     let output = node_command()
-        .args(["--input-type=module", "-e", source_code, plugin_url])
+        .args(["--input-type=module", "-e", source_code, &plugin_url])
         .arg(&files.workspace)
         .output()
         .assert_value();

@@ -69,6 +69,25 @@ async fn a_sent_steer_keeps_stdin_open_until_the_turn_that_showed_it_has_ended()
 }
 
 #[tokio::test]
+async fn a_steer_waiting_when_a_result_arrives_is_written_before_stdin_closes() {
+    // Both are ready before stdin is asked for its next message, many times over: whichever
+    // order they are looked at in must not decide whether the steer is written.
+    for _ in 0..64 {
+        let mut turn = turn();
+        turn.signals.send(TurnSignal::Result).unwrap();
+        turn.steers.send("<steer>go</steer>".to_owned()).unwrap();
+        assert_eq!(text(&turn.stdin.next().await.unwrap()), "<steer>go</steer>");
+        // The steer starts a turn of its own; stdin stays open until that turn has ended.
+        assert!(turn.stdin.next().now_or_never().is_none());
+        turn.signals
+            .send(TurnSignal::Replayed("<steer>go</steer>".to_owned()))
+            .unwrap();
+        turn.signals.send(TurnSignal::Result).unwrap();
+        assert!(turn.stdin.next().await.is_none());
+    }
+}
+
+#[tokio::test]
 async fn stdin_closes_when_stdout_has_ended() {
     let mut turn = turn();
     turn.steers.send("<steer>go</steer>".to_owned()).unwrap();

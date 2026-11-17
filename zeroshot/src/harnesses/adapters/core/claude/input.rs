@@ -84,11 +84,9 @@ impl State {
                 }
             };
             tokio::select! {
-                signal = self.turn.signals.recv() => match signal? {
-                    TurnSignal::Replayed(text) => self.reported(&text).await,
-                    TurnSignal::Result if self.unreported.is_empty() => return None,
-                    TurnSignal::Result => self.ended = Some(tokio::time::Instant::now()),
-                },
+                // A steer that is waiting when a result arrives is written first. In any other
+                // order the result would close stdin over a steer its tool call handed over.
+                biased;
                 steer = self.turn.steers.recv(), if self.steers_open => match steer {
                     Some(text) => {
                         let line = user_message(&text);
@@ -96,6 +94,11 @@ impl State {
                         return Some(line);
                     }
                     None => self.steers_open = false,
+                },
+                signal = self.turn.signals.recv() => match signal? {
+                    TurnSignal::Replayed(text) => self.reported(&text).await,
+                    TurnSignal::Result if self.unreported.is_empty() => return None,
+                    TurnSignal::Result => self.ended = Some(tokio::time::Instant::now()),
                 },
                 () = unreported => return None,
             }

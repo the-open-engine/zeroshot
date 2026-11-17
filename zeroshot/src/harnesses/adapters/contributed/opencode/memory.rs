@@ -29,6 +29,10 @@ pub(super) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
 //
 // `noReply` stores a message without starting a model turn of its own (OpenCode 1.19.5). The
 // acknowledgement follows the stored steer, so it is the hand-over.
+//
+// The broker waits 250 ms for that acknowledgement. The session writes of one tool call share
+// the same bound: one that has not settled by then can no longer be acknowledged, and it must
+// not hold the tool call. Its steer and lesson stay due.
 const PLUGIN: &str = r#"import fs from 'node:fs';
 import net from 'node:net';
 const capabilityPath = CAPABILITY_PATH;
@@ -75,14 +79,16 @@ export default async ({directory,client}) => ({
   'tool.execute.after': async (input) => {
     const delivery = await retrieve({toolName:input.tool,input:input.args,cwd:directory,sessionId:input.sessionID});
     if (!delivery) return;
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve({error:'late'}), 250); });
     try {
       const {context,steer} = JSON.parse(delivery.context);
       for (const text of [steer,context]) {
         if (!text) continue;
-        const stored = await client.session.prompt({path:{id:input.sessionID},body:{noReply:true,parts:[{type:'text',text}]}});
+        const stored = await Promise.race([client.session.prompt({path:{id:input.sessionID},body:{noReply:true,parts:[{type:'text',text}]}}),late]);
         if (stored?.error) return delivery.dropped();
       }
-    } catch { return delivery.dropped(); }
+    } catch { return delivery.dropped(); } finally { clearTimeout(timer); }
     delivery.returned();
   }
 });

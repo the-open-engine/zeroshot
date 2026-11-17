@@ -1189,6 +1189,8 @@ mod configuration;
 mod credentials;
 #[path = "tests/endpoints.rs"]
 mod endpoints;
+#[path = "tests/memory_extension.rs"]
+mod memory_extension;
 #[path = "tests/process.rs"]
 mod process;
 
