@@ -112,8 +112,9 @@ impl FileTargetRegistry {
             .parent()
             .ok_or(TargetConnectorError::RegistryPath("path has no parent"))?;
         create_private_directory(parent)?;
-        let lock = open_lock(&self.path.with_extension("lock"))?;
-        lock_registry(&lock, true)?;
+        let lock_path = self.path.with_extension("lock");
+        let lock = open_lock(&lock_path)?;
+        lock_registry(&lock, &lock_path, true)?;
         remove_abandoned_temporaries(&self.path)?;
         let (state, initialized) = initialize_registry(&self.path)?;
         Ok((lock, state, initialized))
@@ -288,9 +289,9 @@ impl TargetRegistry for FileTargetRegistry {
     ) -> Result<(), TargetConnectorError> {
         let path = recovery_authorization_path(&self.path, target_id, run_id)?;
         let _lock = self.lock_recovery_authorizations()?;
-        if let Err(error) = std::fs::remove_file(path) {
+        if let Err(error) = std::fs::remove_file(&path) {
             if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(TargetConnectorError::RegistryIo(error));
+                return Err(registry_io(&path, error));
             }
         }
         Ok(())
@@ -304,8 +305,9 @@ impl FileTargetRegistry {
             .parent()
             .ok_or(TargetConnectorError::RegistryPath("path has no parent"))?;
         create_private_directory(parent)?;
-        let lock = open_lock(&self.path.with_extension("recovery.lock"))?;
-        lock_registry(&lock, true)?;
+        let lock_path = self.path.with_extension("recovery.lock");
+        let lock = open_lock(&lock_path)?;
+        lock_registry(&lock, &lock_path, true)?;
         Ok(lock)
     }
 }
@@ -395,7 +397,7 @@ fn read_recovery_authorization(
     let Some(mut file) = open_registry(path)? else {
         return Ok(None);
     };
-    let metadata = file.metadata().map_err(TargetConnectorError::RegistryIo)?;
+    let metadata = file.metadata().map_err(|error| registry_io(path, error))?;
     if metadata.len() > MAX_RECOVERY_AUTHORIZATION_BYTES {
         return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
     }
@@ -403,7 +405,7 @@ fn read_recovery_authorization(
         .map_err(|_| TargetConnectorError::RecoveryAuthorizationInvalid)?;
     let mut bytes = Vec::with_capacity(capacity);
     file.read_to_end(&mut bytes)
-        .map_err(TargetConnectorError::RegistryIo)?;
+        .map_err(|error| registry_io(path, error))?;
     serde_json::from_slice(&bytes)
         .map(Some)
         .map_err(|_| TargetConnectorError::RecoveryAuthorizationInvalid)
@@ -452,15 +454,19 @@ pub(super) fn open_lock(path: &Path) -> Result<File, TargetConnectorError> {
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true);
     set_private_file_mode(&mut options);
-    options.open(path).map_err(TargetConnectorError::RegistryIo)
+    options.open(path).map_err(|error| registry_io(path, error))
 }
 
-pub(super) fn lock_registry(lock: &File, exclusive: bool) -> Result<(), TargetConnectorError> {
+pub(super) fn lock_registry(
+    lock: &File,
+    path: &Path,
+    exclusive: bool,
+) -> Result<(), TargetConnectorError> {
     if exclusive {
         lock.lock_exclusive()
-            .map_err(TargetConnectorError::RegistryIo)
+            .map_err(|error| registry_io(path, error))
     } else {
-        FileExt::lock_shared(lock).map_err(TargetConnectorError::RegistryIo)
+        FileExt::lock_shared(lock).map_err(|error| registry_io(path, error))
     }
 }
 
@@ -483,18 +489,20 @@ fn read_registry(path: &Path) -> Result<RegistryState, TargetConnectorError> {
     let Some(mut file) = open_registry(path)? else {
         return Ok(RegistryState::default());
     };
-    let metadata = file.metadata().map_err(TargetConnectorError::RegistryIo)?;
+    let metadata = file.metadata().map_err(|error| registry_io(path, error))?;
     if metadata.len() > MAX_REGISTRY_BYTES {
-        return Err(TargetConnectorError::RegistryTooLarge);
+        return Err(TargetConnectorError::RegistryTooLarge(diagnostic_path(
+            path,
+        )));
     }
-    let capacity =
-        usize::try_from(metadata.len()).map_err(|_| TargetConnectorError::RegistryTooLarge)?;
+    let capacity = usize::try_from(metadata.len())
+        .map_err(|_| TargetConnectorError::RegistryTooLarge(diagnostic_path(path)))?;
     let mut bytes = Vec::with_capacity(capacity);
     file.read_to_end(&mut bytes)
-        .map_err(TargetConnectorError::RegistryIo)?;
-    let state: RegistryState =
-        serde_json::from_slice(&bytes).map_err(TargetConnectorError::RegistryJson)?;
-    validate_registry_state(&state)?;
+        .map_err(|error| registry_io(path, error))?;
+    let state: RegistryState = serde_json::from_slice(&bytes)
+        .map_err(|error| TargetConnectorError::RegistryJson(diagnostic_path(path), error))?;
+    validate_registry_state(path, &state)?;
     Ok(state)
 }
 
@@ -502,13 +510,16 @@ fn open_registry(path: &Path) -> Result<Option<File>, TargetConnectorError> {
     match File::open(path) {
         Ok(file) => Ok(Some(file)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(TargetConnectorError::RegistryIo(error)),
+        Err(error) => Err(registry_io(path, error)),
     }
 }
 
-fn validate_registry_state(state: &RegistryState) -> Result<(), TargetConnectorError> {
+fn validate_registry_state(path: &Path, state: &RegistryState) -> Result<(), TargetConnectorError> {
     if !matches!(state.version, REGISTRY_VERSION | LEGACY_REGISTRY_VERSION) {
-        return Err(malformed_registry("unsupported target registry version"));
+        return Err(malformed_registry(
+            path,
+            format!("unsupported target registry version {}", state.version),
+        ));
     }
     for (name, target) in &state.targets {
         if name != &target.name
@@ -517,7 +528,10 @@ fn validate_registry_state(state: &RegistryState) -> Result<(), TargetConnectorE
             || !valid_uuid(&target.id)
             || !valid_target_access(&target.access)
         {
-            return Err(malformed_registry("invalid stored target record"));
+            return Err(malformed_registry(
+                path,
+                format!("invalid stored target record {name:?}"),
+            ));
         }
     }
     Ok(())
@@ -541,14 +555,42 @@ fn valid_uuid(value: &str) -> bool {
         })
 }
 
-fn malformed_registry(message: &'static str) -> TargetConnectorError {
-    TargetConnectorError::RegistryJson(serde_json::Error::io(std::io::Error::other(message)))
+fn malformed_registry(path: &Path, message: String) -> TargetConnectorError {
+    TargetConnectorError::RegistryJson(
+        diagnostic_path(path),
+        serde_json::Error::io(std::io::Error::other(message)),
+    )
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{path}: {source}", path = .path.display())]
+struct RegistryIoContext {
+    path: PathBuf,
+    #[source]
+    source: std::io::Error,
+}
+
+fn registry_io(path: &Path, source: std::io::Error) -> TargetConnectorError {
+    TargetConnectorError::RegistryIo(std::io::Error::new(
+        source.kind(),
+        RegistryIoContext {
+            path: diagnostic_path(path),
+            source,
+        },
+    ))
+}
+
+fn diagnostic_path(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_owned())
 }
 
 fn write_registry(path: &Path, state: &RegistryState) -> Result<(), TargetConnectorError> {
-    let bytes = serde_json::to_vec_pretty(state).map_err(TargetConnectorError::RegistryJson)?;
+    let bytes = serde_json::to_vec_pretty(state)
+        .map_err(|error| TargetConnectorError::RegistryJson(diagnostic_path(path), error))?;
     if bytes.len() as u64 > MAX_REGISTRY_BYTES {
-        return Err(TargetConnectorError::RegistryTooLarge);
+        return Err(TargetConnectorError::RegistryTooLarge(diagnostic_path(
+            path,
+        )));
     }
     write_private_file(path, &bytes)
 }
@@ -561,8 +603,8 @@ fn remove_abandoned_temporaries(path: &Path) -> Result<(), TargetConnectorError>
     let (Some(parent), Some(prefix)) = (prefix.parent(), prefix.file_name()) else {
         return Ok(());
     };
-    for entry in std::fs::read_dir(parent).map_err(TargetConnectorError::RegistryIo)? {
-        let entry = entry.map_err(TargetConnectorError::RegistryIo)?;
+    for entry in std::fs::read_dir(parent).map_err(|error| registry_io(parent, error))? {
+        let entry = entry.map_err(|error| registry_io(parent, error))?;
         let abandoned = entry
             .file_name()
             .as_encoded_bytes()
@@ -576,7 +618,7 @@ fn remove_abandoned_temporaries(path: &Path) -> Result<(), TargetConnectorError>
         if abandoned {
             match std::fs::remove_file(entry.path()) {
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(TargetConnectorError::RegistryIo(error));
+                    return Err(registry_io(&entry.path(), error));
                 }
                 _ => {}
             }
@@ -595,11 +637,12 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), TargetConnectorEr
     let result = (|| {
         let mut file = options
             .open(&temporary)
-            .map_err(TargetConnectorError::RegistryIo)?;
+            .map_err(|error| registry_io(&temporary, error))?;
         file.write_all(bytes)
-            .map_err(TargetConnectorError::RegistryIo)?;
-        file.sync_all().map_err(TargetConnectorError::RegistryIo)?;
-        std::fs::rename(&temporary, path).map_err(TargetConnectorError::RegistryIo)
+            .map_err(|error| registry_io(&temporary, error))?;
+        file.sync_all()
+            .map_err(|error| registry_io(&temporary, error))?;
+        std::fs::rename(&temporary, path).map_err(|error| registry_io(path, error))
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
@@ -622,7 +665,7 @@ pub(super) fn create_private_directory(path: &Path) -> Result<(), TargetConnecto
     set_private_directory_mode(&mut builder);
     builder
         .create(path)
-        .map_err(TargetConnectorError::RegistryIo)
+        .map_err(|error| registry_io(path, error))
 }
 
 #[cfg(unix)]

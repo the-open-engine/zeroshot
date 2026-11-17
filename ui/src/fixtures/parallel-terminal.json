@@ -1,0 +1,77 @@
+{
+  "graph": {
+    "profile": "openengine.graph.full/v1",
+    "initialInput": { "kind": "record", "fields": {} },
+    "policy": { "policy": "policy.native-v2@1", "default": "deny" },
+    "root": {
+      "kind": "seq",
+      "name": "run",
+      "state": { "kind": "record", "fields": {} },
+      "promotedStatePaths": [],
+      "children": [
+        {
+          "kind": "loop",
+          "name": "rounds",
+          "state": { "kind": "record", "fields": {} },
+          "promotedStatePaths": [],
+          "maxIterations": 2,
+          "body": {
+            "kind": "par",
+            "name": "parallel",
+            "state": { "kind": "record", "fields": {} },
+            "promotedStatePaths": [],
+            "join": { "kind": "all" },
+            "branches": [
+              { "kind": "fail", "name": "blocked", "reason": "review_rejected" },
+              {
+                "kind": "verifier",
+                "name": "docs",
+                "worker": "builtin.agent.verifier@1",
+                "instructions": "Review the documentation.",
+                "input": { "kind": "null" },
+                "output": { "kind": "null" },
+                "inputBindings": [],
+                "writeBindings": [],
+                "attempts": 1,
+                "signals": { "verdict": ["accepted", "rejected"] },
+                "diagnostic": { "kind": "null" }
+              }
+            ]
+          }
+        },
+        { "kind": "succeed", "name": "after", "output": { "kind": "null" }, "bindings": [] }
+      ]
+    }
+  },
+  "control": [
+    {
+      "cursor": "v2:1",
+      "node": "run",
+      "mapIndices": [],
+      "visitId": "[\"run\",[],[]]",
+      "state": "completed"
+    },
+    {
+      "cursor": "v2:1",
+      "node": "rounds",
+      "mapIndices": [],
+      "visitId": "[\"rounds\",[],[]]",
+      "state": "completed"
+    },
+    {
+      "cursor": "v2:1",
+      "node": "parallel",
+      "mapIndices": [],
+      "visitId": "[\"parallel\",[],[1]]",
+      "state": "completed"
+    },
+    {
+      "cursor": "v2:1",
+      "node": "blocked",
+      "mapIndices": [],
+      "visitId": "[\"blocked\",[],[1]]",
+      "state": "failed",
+      "detail": "review_rejected"
+    }
+  ]
+}

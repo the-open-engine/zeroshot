@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import parallelTerminal from './fixtures/parallel-terminal.json';
 import {
   appendControlHistory,
   controlVisitLabel,
@@ -224,64 +225,61 @@ test('a terminal settles only the visits it ended, in its own loop iteration', (
   assert.equal(projectHistory(loop, failed, 2, control).nodes.run.state, 'failed');
 });
 
-test('par branch terminals settle only their own branch visits, in every round', () => {
-  const rounds = graph({
-    name: 'run',
-    kind: 'seq',
-    children: [
-      { name: 'review', kind: 'verifier' },
-      {
-        name: 'rounds',
-        kind: 'loop',
-        maxIterations: 2,
-        body: {
-          name: 'lanes',
-          kind: 'par',
-          join: { kind: 'all' },
-          branches: [
-            {
-              name: 'left',
-              kind: 'choice',
-              branches: [{ node: { name: 'left_end', kind: 'succeed' }, when: {} }],
-              otherwise: { name: 'left_work', kind: 'step' },
-            },
-            {
-              name: 'right',
-              kind: 'choice',
-              branches: [{ node: fail('right_end'), when: {} }],
-              otherwise: { name: 'right_work', kind: 'step' },
-            },
-          ],
-        },
+test('the selected par terminal settles its enclosing visits before the final run event', () => {
+  for (const join of [
+    { kind: 'all' },
+    { kind: 'any' },
+    { kind: 'quorum', count: 1 },
+    {
+      kind: 'first',
+      when: {
+        kind: 'in',
+        value: { source: 'signal', name: 'docs', field: 'verdict' },
+        labels: ['accepted'],
       },
-      { name: 'done', kind: 'succeed' },
-    ],
-  });
-  // Both branches end at terminals, so each join is unreachable: both rounds and the run finish in
-  // the reduction after the review.
-  const round = (number: number, node: string, state: ControlRecord['state'], extra = {}) =>
-    visit('v2:3', node, state, { visitId: `${node}-${number}`, ...extra });
-  const control = [
-    visit('v2:1', 'run', 'entered'),
-    visit('v2:3', 'run', 'completed'),
-    visit('v2:3', 'rounds', 'completed'),
-    ...[1, 2].flatMap((number) => [
-      round(number, 'lanes', 'completed', { detail: 'quorum_unreachable' }),
-      round(number, 'left', 'completed', { branch: 'left_end' }),
-      round(number, 'left_end', 'succeeded', { output: null }),
-      round(number, 'right', 'completed', { branch: 'right_end' }),
-      round(number, 'right_end', 'failed', { detail: 'right_end' }),
-    ]),
-    visit('v2:3', 'done', 'succeeded', { output: null }),
-  ];
-  const { nodes, controls } = projectHistory(rounds, events, 2, control);
-  const states = (node: string) =>
-    controls.filter((visit) => visit.node === node).map((visit) => visit.state);
-  assert.equal(nodes.run.state, 'succeeded');
-  assert.equal(nodes.rounds.state, 'recorded');
-  assert.equal(nodes.lanes.state, 'recorded');
-  assert.deepEqual(states('left'), ['succeeded', 'succeeded']);
-  assert.deepEqual(states('right'), ['failed', 'failed']);
+    },
+  ]) {
+    for (const state of ['failed', 'succeeded'] as const) {
+      const terminal =
+        state === 'failed'
+          ? { ...fail('blocked'), reason: 'review_rejected' }
+          : { name: 'blocked', kind: 'succeed', output: { kind: 'null' }, bindings: [] };
+      const rounds: Document = { ...doc, graph: structuredClone(parallelTerminal.graph) };
+      const parallel = rounds.graph.root.children[0].body;
+      parallel.join = join;
+      parallel.branches[0] = terminal;
+      const result =
+        state === 'failed'
+          ? ({ status: 'failed', reason: 'review_rejected' } as const)
+          : ({ status: 'succeeded', output: null } as const);
+      const history: HistoryEvent[] = [
+        { cursor: 'v2:1', event: { kind: 'run_started' } },
+        { cursor: 'v2:2', event: { kind: 'terminal', result } },
+      ];
+      // The Rust control replay test verifies this shared fixture with reduce_with_trace and
+      // ControlRecord::from_trace, including its initial durable cursor and loop visit identities.
+      const control = structuredClone(parallelTerminal.control) as ControlRecord[];
+      if (state === 'succeeded') {
+        delete control[3].detail;
+        control[3].state = state;
+        control[3].output = null;
+      }
+      assert.equal(projectHistory(rounds, history, -1, control).controls.length, 0);
+      for (const through of [0, 1]) {
+        const { nodes, controls, invocations } = projectHistory(rounds, history, through, control);
+        assert.deepEqual(
+          controls.map((visit) => visit.state),
+          Array(4).fill(state)
+        );
+        for (const name of ['run', 'rounds', 'parallel', 'blocked'])
+          assert.equal(nodes[name].state, state, `${join.kind}: ${name}`);
+        assert.equal(controls.length, 4);
+        assert.equal(invocations.length, 0);
+        assert.equal(nodes.docs.state, 'idle');
+        assert.equal(nodes.after, undefined);
+      }
+    }
+  }
 });
 
 test('a terminal settles only the visits of its own map item', () => {
