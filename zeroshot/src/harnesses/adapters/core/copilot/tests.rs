@@ -22,6 +22,8 @@ use crate::native_v2_runner::{
 };
 
 mod authentication;
+mod runtime;
+use runtime::script;
 mod framing;
 mod hosted;
 mod lanes;
@@ -31,16 +33,6 @@ mod memory;
 mod steering;
 
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
-
-fn script() -> String {
-    openengine_cluster_testkit::fixture::python3_script(
-        &std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/harnesses/adapters/core/copilot/tests/runtime.py"
-        ))
-        .unwrap(),
-    )
-}
 
 fn binding(names: impl Iterator<Item = String>) -> NodeRuntimeBinding {
     binding_for_model(names, "auto")
