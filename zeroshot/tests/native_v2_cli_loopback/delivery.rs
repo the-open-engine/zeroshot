@@ -407,14 +407,11 @@ impl CapsuleAllocator for DeliveryAllocator {
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let (sender, loss) = watch::channel(false);
         self.lifecycle.losses.lock().assert_value().push(sender);
-        Ok(AllocatedCapsule {
-            vector_seed: Vec::new(),
-            checkpoints: None,
-            execution_seed: Vec::new(),
-            runner: Arc::new(runner),
+        Ok(AllocatedCapsule::new(
+            Arc::new(runner),
             loss,
-            cleanup: Arc::new(ImmediateCleanup),
-        })
+            Arc::new(ImmediateCleanup),
+        ))
     }
 
     async fn destroy_or_confirm_absent(

@@ -190,6 +190,8 @@ fn steer_queries_supply_nullable_recorded_time_for_the_shared_replay_decoder() {
     let event = vector_event(
         &run,
         RunVectorContent::Steer {
+            mode: Default::default(),
+            network: None,
             text: "keep going".into(),
         },
     )

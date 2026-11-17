@@ -37,7 +37,7 @@ pub struct HookQuery {
     pub context_budget: usize,
     /// Whether a steer delivered at this tool call stands in the conversation afterwards. It does
     /// not where the provider writes no hook context to its session (Copilot) or shows the text
-    /// inside a tool result, which a model may refuse as untrusted (Pi, OpenCode). Such a steer
+    /// inside a tool result, which a model may refuse as untrusted (Pi, OpenCode). Such a Standing steer
     /// also goes into the conversation's next prompt.
     pub standing: bool,
 }
@@ -59,6 +59,7 @@ pub trait ActiveMemorySource: Send + Sync {
         }
     }
     fn acknowledged(&self, _query: &HookQuery, _delivery: &HookDelivery) {}
+    fn unacknowledged(&self, _query: &HookQuery, _delivery: &HookDelivery) {}
 
     fn tool_context(&self, query: &HookQuery) -> String;
     fn graph_context(&self, node_id: &str, session_key: &str) -> String;
@@ -118,7 +119,7 @@ impl ActiveMemoryHooks {
     }
     /// Settles an execution or releases unconfirmed prompt offers before a native retry.
     pub(crate) async fn finish_steers(&self, execution: u64, success: bool) {
-        self.broker.retire(execution);
+        self.broker.retire(execution).await;
         self.source.finish(execution, success).await;
     }
     pub(crate) async fn steer_prompt(
@@ -134,6 +135,67 @@ impl ActiveMemoryHooks {
         match supplemental.host_context {
             Some(context) => DriverInvocation::prepend_host_context(prompt, &context),
             None => prompt,
+        }
+    }
+
+    pub(crate) fn configure_networks(
+        &self,
+        networks: &std::collections::BTreeMap<
+            openengine_cluster_protocol::NodeName,
+            openengine_cluster_protocol::SteeringNetwork,
+        >,
+    ) {
+        self.source.configure_networks(networks);
+    }
+
+    pub(crate) fn publishing_authorized(&self, invocation: &DriverInvocation) -> bool {
+        !auxiliary_invocation(invocation)
+            && self
+                .source
+                .publishing_authorized(&invocation.node.reference.node)
+    }
+
+    /// The same host-owned capability supports publication in every native lane.
+    pub(crate) fn configure_network_command(
+        &self,
+        command: &mut ProcessSessionCommand,
+        invocation: &DriverInvocation,
+        home: &Path,
+    ) -> io::Result<()> {
+        let capability = if self.publishing_authorized(invocation) {
+            self.capability_file(invocation, &command.workspace.current_dir, home)?
+        } else {
+            None
+        };
+        self.configure_network_environment(
+            &mut command.environment,
+            invocation,
+            capability.as_deref(),
+        );
+        Ok(())
+    }
+
+    /// Reuse the native carrier's file rather than replacing its live token.
+    pub(crate) fn configure_network_environment(
+        &self,
+        environment: &mut std::collections::BTreeMap<String, String>,
+        invocation: &DriverInvocation,
+        capability: Option<&Path>,
+    ) {
+        environment.retain(|name, _| {
+            if cfg!(windows) {
+                !name.eq_ignore_ascii_case("ZEROSHOT_STEERING_CAPABILITY")
+            } else {
+                name != "ZEROSHOT_STEERING_CAPABILITY"
+            }
+        });
+        if self.publishing_authorized(invocation)
+            && let Some(path) = capability
+        {
+            environment.insert(
+                "ZEROSHOT_STEERING_CAPABILITY".into(),
+                path.to_string_lossy().into_owned(),
+            );
         }
     }
 
@@ -173,6 +235,7 @@ impl ActiveMemoryHooks {
         installation: HookInstallation<'_>,
         install: fn(&mut ProcessSessionCommand, &Path) -> io::Result<()>,
     ) {
+        self.configure_network_environment(&mut command.environment, installation.invocation, None);
         let result = self
             .capability_file(
                 installation.invocation,
@@ -181,12 +244,18 @@ impl ActiveMemoryHooks {
             )
             .and_then(|capability| match capability {
                 Some(path) => {
-                    if let Some(budget) = installation.context_budget {
-                        self.broker.bound(installation.invocation, budget);
-                    }
-                    if !installation.standing {
-                        self.broker.shown_only(installation.invocation);
-                    }
+                    self.configure_network_environment(
+                        &mut command.environment,
+                        installation.invocation,
+                        Some(&path),
+                    );
+                    self.broker.configure_carrier(
+                        installation.invocation,
+                        installation
+                            .context_budget
+                            .unwrap_or(native::MAX_CONTEXT_BYTES),
+                        installation.standing,
+                    );
                     install(command, &path)
                 }
                 None => Ok(()),
@@ -254,6 +323,10 @@ impl ActiveMemoryHooks {
         };
         (query, delivery)
     }
+    pub(crate) async fn discard_delivery(&self, query: &HookQuery, delivery: &HookDelivery) {
+        self.source.discard(query, delivery).await;
+    }
+
     /// Acknowledges a delivery made in process. `standing` is `HookQuery::standing` for the
     /// carrier that made it.
     pub(crate) async fn acknowledge(
@@ -286,6 +359,15 @@ fn auxiliary_invocation(invocation: &DriverInvocation) -> bool {
 /// operation to continue. The private file contains only a callback capability, never model keys.
 pub fn run_hook_helper(capability_path: &Path) -> io::Result<()> {
     broker::run_helper(capability_path)
+}
+
+/// Publish through an execution capability; request fields never establish sender authority.
+/// Unlike the informational native hook, publication failures are explicit.
+pub fn publish_network(
+    capability_path: &Path,
+    params: openengine_cluster_protocol::NetworkSteerParams,
+) -> io::Result<openengine_cluster_protocol::RunSteerResult> {
+    broker::publish_network(capability_path, params)
 }
 
 pub(crate) use native::command_handler;

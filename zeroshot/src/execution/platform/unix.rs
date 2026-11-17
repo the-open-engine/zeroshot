@@ -1,5 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
@@ -33,6 +34,17 @@ pub(crate) fn process_exists(pid: u32) -> io::Result<bool> {
     } else {
         Err(error)
     }
+}
+
+/// Keep inherited descriptors above the standard streams that Command installs before pre_exec.
+pub(crate) fn retained_descriptor(file: &impl AsRawFd) -> io::Result<OwnedFd> {
+    // SAFETY: fcntl duplicates a borrowed live descriptor, returning unique CLOEXEC ownership.
+    let descriptor = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+    if descriptor < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: descriptor was newly allocated above and has no other owning Rust value.
+    Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
 }
 
 pub(crate) fn file_identity(file: &File) -> io::Result<FileIdentity> {

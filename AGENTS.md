@@ -112,13 +112,41 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
   restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
-  standing steers again. A steer does not stand after a tool-call delivery on Copilot, whose hook
-  context is not written to its session, or on Pi and OpenCode, whose tool result a model may
-  refuse to follow (`HookQuery::standing`): the delivery is receipted, the steer stays due for
-  that conversation's next prompt, and the snapshot omits the receipt until an execution whose
-  prompt carried it ends successfully. Prompt-carried steers are receipted when the prompt is
-  prepared and follow the same rule.
-  The carrier retains incremental vector-record read progress across callback deadlines.
+  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  GraphSpec.networks owns default-deny peer communication: members name every participating logical
+  agent node and publishers are a subset. All mapped copies participate. Only publishers receive
+  network publication context and an execution-scoped broker capability; labels never authorize it.
+  Native local human steering checks OS caller provenance at CLI fallback and RPC acceptance,
+  independently of environment labels or state-directory overrides. Shared process launch publishes
+  an ownership lease before Unix exec or Windows resume and retains it through confirmed cleanup;
+  Linux's private supervisor retains the descriptor after owner loss. Bounded PID/creation identity
+  ancestry and native process-group evidence fence same-run, foreign-run and suspended-ledger paths.
+  macOS reads public short BSD ancestry bracketed by matching KERN_PROC_PID creation times.
+  The bounded full sysctl response exposes only its documented native timeval prefix; the
+  complete short BSD ABI, returned PID and timestamps are validated. Query errors retain denial.
+  A departed or reused Windows parent ends ancestry only when the original caller's native creation
+  identity still matches and it is outside every Job; owned roots and ordinary descendants retain
+  their non-breakaway Job. Other process-query errors, changed current identities and bounds still deny.
+  Uncertain callers cannot publish human guidance. These mandates govern normal CLI/RPC use under
+  existing native account permissions; they do not create an OS sandbox. Deliberate same-account
+  state/credential tampering, external proxies and macOS session detachment plus orphaning require
+  stronger isolation. Never treat labels as authority or silently relax an uncertain provenance check.
+  Local `steer --network` uses that capability without controller discovery, stamps its origin at
+  the host and refuses foreign runs or human-broadcast escalation. Repeated destinations and
+  overlapping memberships deduplicate delivery. Per-message once mode defaults for networks and
+  consumes receipts per recipient node instance across fresh conversations and successors; standing
+  tracks provider conversations. Human broadcast retains its standing default and precedence.
+  Both modes permanently exclude the originating node instance, including across retries, fresh
+  sessions and resume. Successors reserve fresh node-instance IDs above full predecessor history
+  independently of selected checkpoint prerequisites; retained instances keep their IDs. Publication
+  uses the existing vector record and native carrier, delivering
+  to active hooks or future prompts without waking, restarting or scheduling recipients.
+  A Standing steer does not stand after a tool-call delivery on Copilot, whose hook context
+  is not written to its session, or on Pi and OpenCode, whose tool result a model may refuse
+  to follow (`HookQuery::standing`): its receipt remains excluded from conversation snapshots
+  until a subsequent prompt carries it successfully. Standing prompt receipts are provisional
+  from preparation; Once prompt consumption requires successful delivery. Once messages never
+  repeat solely because a carrier does not persist hook context.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.

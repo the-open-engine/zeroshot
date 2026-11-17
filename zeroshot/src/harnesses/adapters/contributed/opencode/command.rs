@@ -187,11 +187,11 @@ pub(super) fn command(
             command: &mut command,
         })?;
     }
-    install_memory(adapter, invocation, files, &mut command);
     crate::native_v2_capsule::provider_process::apply_execution_environment(
         &mut command.environment,
         invocation,
     )?;
+    install_memory(adapter, invocation, files, &mut command);
     Ok(command)
 }
 

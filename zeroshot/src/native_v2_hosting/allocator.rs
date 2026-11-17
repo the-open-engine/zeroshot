@@ -467,6 +467,7 @@ impl ProductionCapsuleAllocator {
             }
         }
         Ok(AllocatedCapsule {
+            node_instance_floor: Default::default(),
             runner,
             cleanup,
             loss,

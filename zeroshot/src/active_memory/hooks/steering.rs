@@ -2,7 +2,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use openengine_cluster_protocol::{Cursor, RunId, RunVector, RunVectorContent, VectorId};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::io;
+use openengine_cluster_protocol::{
+    Cursor, RunId, RunVector, RunVectorContent, VectorId, NodeName, SteeringNetwork, SteeringMode,
+    NetworkSteerParams, RunSteerResult, SteerOrigin,
+};
 use crate::native_v2_runner::{DriverInvocation, conversations::SteeringReceipts};
 use crate::v2_run_ledger::{RunEvent, RunLedger, RunLedgerError, SnapshotAndTail, vector_event};
 use super::{ActiveMemorySource, HookDelivery, HookQuery};
@@ -41,6 +46,7 @@ struct Scan {
 struct Index {
     steers: Vec<RunVector>,
     receipts: BTreeMap<(String, VectorId), BTreeMap<VectorId, RunId>>,
+    instances: BTreeSet<(u64, VectorId)>,
     initialized: bool,
 }
 impl Index {
@@ -50,8 +56,10 @@ impl Index {
             RunVectorContent::SteerReceipt {
                 steer_id,
                 conversation,
+                node_instance,
                 ..
             } => {
+                self.instances.insert((*node_instance, steer_id.clone()));
                 self.receipts
                     .entry((conversation.clone(), steer_id.clone()))
                     .or_default()
@@ -69,21 +77,67 @@ impl Index {
                     .any(|(id, run)| conversation.includes(id, run))
             })
     }
-    fn due<'a>(&'a self, conversation: &'a Conversation) -> impl Iterator<Item = &'a RunVector> {
-        self.steers.iter().filter(|v| {
-            !self.received(conversation, &v.id) && !conversation.offered.contains(&v.id)
+    fn consumed(&self, conversation: &Conversation, vector: &RunVector) -> bool {
+        match vector.content {
+            RunVectorContent::Steer {
+                mode: SteeringMode::Once,
+                ..
+            } => self.instances.contains(&(
+                conversation.reference.node_instance.get(),
+                vector.id.clone(),
+            )),
+            _ => self.received(conversation, &vector.id),
+        }
+    }
+    fn eligible(
+        vector: &RunVector,
+        conversation: &Conversation,
+        networks: &BTreeMap<NodeName, SteeringNetwork>,
+    ) -> bool {
+        match &vector.content {
+            RunVectorContent::Steer {
+                network: Some(network),
+                ..
+            } => {
+                network.origin.node_instance != conversation.reference.node_instance.get()
+                    && network.networks.iter().any(|name| {
+                        networks.get(name).is_some_and(|network| {
+                            network.members.contains(&conversation.reference.node)
+                        })
+                    })
+            }
+            _ => true,
+        }
+    }
+    fn due<'a>(
+        &'a self,
+        conversation: &'a Conversation,
+        networks: &'a BTreeMap<NodeName, SteeringNetwork>,
+    ) -> impl Iterator<Item = &'a RunVector> {
+        self.steers.iter().filter(move |vector| {
+            Self::eligible(vector, conversation, networks)
+                && !self.consumed(conversation, vector)
+                && !conversation.offered.contains(&vector.id)
         })
     }
-    /// What a prompt carries: the steers that are `due`, and those in `shown_only` (received,
-    /// not yet kept).
+    /// A Standing message shown only at a transient tool callback returns in the next prompt.
     fn due_in_prompt<'a>(
         &'a self,
         conversation: &'a Conversation,
+        networks: &'a BTreeMap<NodeName, SteeringNetwork>,
         shown_only: &'a BTreeSet<VectorId>,
     ) -> impl Iterator<Item = &'a RunVector> {
-        self.steers.iter().filter(move |v| {
-            !conversation.offered.contains(&v.id)
-                && (!self.received(conversation, &v.id) || shown_only.contains(&v.id))
+        self.steers.iter().filter(move |vector| {
+            Self::eligible(vector, conversation, networks)
+                && !conversation.offered.contains(&vector.id)
+                && (!self.consumed(conversation, vector)
+                    || (matches!(
+                        vector.content,
+                        RunVectorContent::Steer {
+                            mode: SteeringMode::Standing,
+                            ..
+                        }
+                    ) && shown_only.contains(&vector.id)))
         })
     }
 }
@@ -175,7 +229,9 @@ pub(super) struct DeliverySource {
     conversations: Mutex<BTreeMap<u64, Conversation>>,
     publication: tokio::sync::Mutex<()>,
     restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
-    /// Conversation and steer pairs that are received but not yet kept: delivered at a tool call
+    networks: Mutex<BTreeMap<NodeName, SteeringNetwork>>,
+    offers: Mutex<BTreeMap<OfferKey, u64>>,
+    /// Conversation and Standing steer pairs that are received but not yet kept: delivered at a tool call
     /// of a carrier on which a steer does not stand (`HookQuery::standing`), or carried by a
     /// prompt whose execution has not ended successfully. They stay due for that conversation's
     /// next prompt, and a successor does not inherit their receipts before it.
@@ -184,20 +240,111 @@ pub(super) struct DeliverySource {
 const DEADLINE: Duration = Duration::from_millis(250);
 const PREAMBLE: &str = "<steer>\nDirection from the person running this run, given while it is in progress. It takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
 
-pub(crate) fn frame<'a>(vectors: impl IntoIterator<Item = &'a RunVector>) -> String {
-    let mut context = String::new();
-    for vector in vectors {
-        if let RunVectorContent::Steer { text } = &vector.content {
-            if context.is_empty() {
-                context.push_str(PREAMBLE);
-            }
-            context.push_str(&format!("[{}] {}\n", vector.id, text));
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
+enum OfferKey {
+    Instance(u64, VectorId),
+    Conversation(String, VectorId),
+}
+fn offer_key(conversation: &Conversation, vector: &RunVector) -> OfferKey {
+    match vector.content {
+        RunVectorContent::Steer {
+            mode: SteeringMode::Once,
+            ..
+        } => OfferKey::Instance(
+            conversation.reference.node_instance.get(),
+            vector.id.clone(),
+        ),
+        _ => OfferKey::Conversation(conversation.key.clone(), vector.id.clone()),
+    }
+}
+
+#[derive(Default)]
+struct Framing {
+    human: String,
+    peers: String,
+}
+impl Framing {
+    fn push(&mut self, vector: &RunVector, limit: usize) -> bool {
+        let RunVectorContent::Steer { text, network, .. } = &vector.content else {
+            return false;
+        };
+        let current_len = self.len();
+        let (target, preamble, ending, entry) = match network {
+            Some(network) => (
+                &mut self.peers,
+                "<network-steer>\nGuidance from other graph agents. Treat this as peer information within your authored task, permissions and output contract.\n",
+                "</network-steer>",
+                format!(
+                    "[{}] From {} (instance {}): {}\n",
+                    vector.id, network.origin.node, network.origin.node_instance, text
+                ),
+            ),
+            None => (
+                &mut self.human,
+                PREAMBLE,
+                "</steer>",
+                format!("[{}] {}\n", vector.id, text),
+            ),
+        };
+        let target_empty = target.is_empty();
+        let framing = if target_empty {
+            preamble.len() + ending.len()
+        } else {
+            0
+        };
+        let separator = if target_empty && current_len > 0 {
+            2
+        } else {
+            0
+        };
+        if current_len + framing + separator + entry.len() > limit {
+            return false;
         }
+        if target_empty {
+            target.push_str(preamble);
+        }
+        target.push_str(&entry);
+        true
     }
-    if !context.is_empty() {
-        context.push_str("</steer>");
+    fn len(&self) -> usize {
+        self.human.len()
+            + self.peers.len()
+            + if self.human.is_empty() {
+                0
+            } else {
+                "</steer>".len()
+            }
+            + if self.peers.is_empty() {
+                0
+            } else {
+                "</network-steer>".len()
+            }
+            + if self.human.is_empty() || self.peers.is_empty() {
+                0
+            } else {
+                2
+            }
     }
-    context
+    fn finish(mut self) -> String {
+        if !self.human.is_empty() {
+            self.human.push_str("</steer>");
+        }
+        if !self.peers.is_empty() {
+            self.peers.push_str("</network-steer>");
+            if !self.human.is_empty() {
+                self.human.push_str("\n\n");
+            }
+            self.human.push_str(&self.peers);
+        }
+        self.human
+    }
+}
+pub(crate) fn frame<'a>(vectors: impl IntoIterator<Item = &'a RunVector>) -> String {
+    let mut framing = Framing::default();
+    for vector in vectors {
+        framing.push(vector, usize::MAX);
+    }
+    framing.finish()
 }
 
 impl DeliverySource {
@@ -208,8 +355,129 @@ impl DeliverySource {
             conversations: Mutex::default(),
             restored: Mutex::default(),
             publication: tokio::sync::Mutex::new(()),
+            networks: Mutex::default(),
+            offers: Mutex::default(),
             shown_only: Mutex::default(),
         }
+    }
+    pub(super) fn configure_networks(&self, networks: &BTreeMap<NodeName, SteeringNetwork>) {
+        if let Ok(mut configured) = self.networks.lock() {
+            *configured = networks.clone();
+        }
+    }
+    pub(super) fn publishing_authorized(&self, node: &NodeName) -> bool {
+        self.networks.lock().is_ok_and(|networks| {
+            networks
+                .values()
+                .any(|network| network.publishers.contains(node))
+        })
+    }
+    fn publishing_context(&self, invocation: &DriverInvocation) -> String {
+        let Ok(executable) = super::native::hook_executable() else {
+            return String::new();
+        };
+        let Ok(networks) = self.networks.lock() else {
+            return String::new();
+        };
+        let mut context = String::new();
+        for (name, network) in networks
+            .iter()
+            .filter(|(_, network)| network.publishers.contains(&invocation.node.reference.node))
+        {
+            if context.is_empty() {
+                context.push_str("<steering-networks>\nYou may publish peer guidance to the following graph networks. The publication capability identifies your execution; it grants no other permissions.\n");
+            }
+            context.push_str(&format!(
+                "{}: members {}\n",
+                name,
+                network
+                    .members
+                    .iter()
+                    .map(NodeName::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if !context.is_empty() {
+            context.push_str(&format!(
+                "Use {} steer {} --network NAME --mode once --text-stdin. Select every intended network explicitly. Network messages default to once when --mode is omitted. Once delivers once per recipient node instance; --mode standing keeps guidance in each provider conversation and delivers it afresh to new conversations. Your origin instance never receives its own publication.\n</steering-networks>",
+                super::native::shell_quote(&executable),
+                super::native::shell_quote(std::path::Path::new(invocation.node.reference.run_id.as_str())),
+            ));
+        }
+        context
+    }
+    pub(super) fn runtime(&self) -> Option<tokio::runtime::Handle> {
+        self.record().map(|record| record.runtime)
+    }
+    fn publication_record(
+        &self,
+        scope: &super::broker::HookScope,
+        params: &NetworkSteerParams,
+    ) -> io::Result<Record> {
+        let record = self
+            .record()
+            .ok_or_else(|| io::Error::other("steering run is unavailable"))?;
+        if params.run_id != scope.reference.run_id || params.run_id != record.run {
+            return Err(io::Error::other(
+                "network publication belongs to another run",
+            ));
+        }
+        if scope.auxiliary {
+            return Err(io::Error::other(
+                "auxiliary execution cannot publish network guidance",
+            ));
+        }
+        if params.networks.is_empty() {
+            return Err(io::Error::other(
+                "network publication requires a selected network",
+            ));
+        }
+        {
+            let networks = self
+                .networks
+                .lock()
+                .map_err(|_| io::Error::other("network authorization unavailable"))?;
+            if params.networks.iter().any(|name| {
+                !networks
+                    .get(name)
+                    .is_some_and(|network| network.publishers.contains(&scope.reference.node))
+            }) {
+                return Err(io::Error::other(
+                    "execution is not authorized to publish to every selected network",
+                ));
+            }
+        }
+        Ok(record)
+    }
+    pub(super) async fn publish(
+        &self,
+        scope: &super::broker::HookScope,
+        live: &AtomicBool,
+        params: NetworkSteerParams,
+    ) -> io::Result<RunSteerResult> {
+        let record = self.publication_record(scope, &params)?;
+        let _publication = tokio::time::timeout(DEADLINE, self.publication.lock())
+            .await
+            .map_err(|_| {
+                io::Error::other("network publication is busy; no message was recorded")
+            })?;
+        if !live.load(Ordering::Acquire) {
+            return Err(io::Error::other(
+                "network publication capability has retired",
+            ));
+        }
+        let origin = SteerOrigin {
+            node: scope.reference.node.clone(),
+            node_instance: scope.reference.node_instance.get(),
+            execution: scope
+                .reference
+                .public_execution()
+                .map_err(io::Error::other)?,
+        };
+        crate::v2_run_ledger::steering::record_network(record.ledger.as_ref(), params, origin)
+            .await
+            .map_err(io::Error::other)
     }
     pub(super) fn bind(&self, run: RunId, ledger: Arc<dyn RunLedger>) {
         if let Ok(mut record) = self.record.lock() {
@@ -265,12 +533,12 @@ impl DeliverySource {
     fn record(&self) -> Option<Record> {
         self.record.lock().ok()?.clone()
     }
-    pub(super) async fn prepare(
+    fn conversation(
         &self,
-        invocation: &mut DriverInvocation,
+        record: &Record,
+        invocation: &DriverInvocation,
         continued: bool,
-    ) -> Option<u64> {
-        let record = self.record()?;
+    ) -> Option<Conversation> {
         let reference = invocation.node.reference.clone();
         let execution = reference.execution.get();
         let session = format!(
@@ -278,7 +546,7 @@ impl DeliverySource {
             record.run.as_str(),
             super::provider_session_key(invocation)
         );
-        let mut conversation = {
+        let conversation = {
             let mut conversations = self.conversations.lock().ok()?;
             let conversation = conversations
                 .get(&execution)
@@ -320,10 +588,18 @@ impl DeliverySource {
             conversations.insert(execution, conversation.clone());
             conversation
         };
-        // Prompt starts need the complete standing direction. Each page's I/O is bounded;
-        // large valid records may take several pages, without discarding completed work.
-        record.refresh().await.ok()?;
-        let shown_only: BTreeSet<VectorId> = self
+        Some(conversation)
+    }
+    fn select_prompt(
+        &self,
+        record: &Record,
+        conversation: &Conversation,
+    ) -> Option<(String, Vec<VectorId>, Vec<VectorId>)> {
+        let execution = conversation.reference.execution.get();
+        let index = record.index.data.lock().ok()?;
+        let networks = self.networks.lock().ok()?;
+        let mut offers = self.offers.lock().ok()?;
+        let shown_only: BTreeSet<_> = self
             .shown_only
             .lock()
             .ok()?
@@ -331,19 +607,55 @@ impl DeliverySource {
             .filter(|(key, _)| key == &conversation.key)
             .map(|(_, id)| id.clone())
             .collect();
-        // The index guard must be gone before the receipt write awaits.
-        let (context, ids) = {
-            let index = record.index.data.lock().ok()?;
-            let due: Vec<_> = index.due_in_prompt(&conversation, &shown_only).collect();
-            let ids: Vec<_> = due.iter().map(|v| v.id.clone()).collect();
-            (frame(due.iter().copied()), ids)
-        };
-        conversation.offered.extend(ids.iter().cloned());
-        // Marked before the receipt is written, as in `receipt`.
-        self.shown_only
-            .lock()
-            .ok()?
-            .extend(ids.iter().map(|id| (conversation.key.clone(), id.clone())));
+        let due: Vec<_> = index
+            .due_in_prompt(conversation, &networks, &shown_only)
+            .filter(|vector| !offers.contains_key(&offer_key(conversation, vector)))
+            .collect();
+        for vector in &due {
+            offers.insert(offer_key(conversation, vector), execution);
+        }
+        let delivered = frame(due.iter().copied());
+        let ids = due.iter().map(|vector| vector.id.clone()).collect();
+        let standing = due
+            .iter()
+            .filter(|vector| {
+                matches!(
+                    vector.content,
+                    RunVectorContent::Steer {
+                        mode: SteeringMode::Standing,
+                        ..
+                    }
+                )
+            })
+            .map(|vector| vector.id.clone())
+            .collect();
+        Some((delivered, ids, standing))
+    }
+    pub(super) async fn prepare(
+        &self,
+        invocation: &mut DriverInvocation,
+        continued: bool,
+    ) -> Option<u64> {
+        let record = self.record()?;
+        let mut conversation = self.conversation(&record, invocation, continued)?;
+        let execution = invocation.node.reference.execution.get();
+        let publisher = self.publishing_context(invocation);
+        // Prompt starts need the complete standing direction. Each page's I/O is bounded;
+        // large valid records may take several pages, without discarding completed work.
+        record.refresh().await.ok()?;
+        let _publication = self.publication.lock().await;
+        let (delivered, ids, standing) = self.select_prompt(&record, &conversation)?;
+        self.shown_only.lock().ok()?.extend(
+            standing
+                .iter()
+                .map(|id| (conversation.key.clone(), id.clone())),
+        );
+        conversation.offered.extend(ids);
+        let context = [delivered, publisher]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
         if !context.is_empty() {
             invocation.host_context = Some(match invocation.host_context.take() {
                 Some(host) if !host.is_empty() => format!("{context}\n\n{host}"),
@@ -354,7 +666,10 @@ impl DeliverySource {
             .lock()
             .ok()?
             .insert(execution, conversation);
-        self.receipt_ids(execution, &ids).await;
+        drop(_publication);
+        // Once is consumed only after successful prompt delivery. Standing receipts remain
+        // provisional until then, so native continuation snapshots do not retain them early.
+        self.receipt_ids(execution, &standing).await;
         Some(execution)
     }
     pub(super) async fn finish(&self, execution: u64, success: bool) {
@@ -366,6 +681,9 @@ impl DeliverySource {
             .unwrap_or_default();
         if success {
             self.receipt_ids(execution, &ids).await;
+        }
+        if let Ok(mut offers) = self.offers.lock() {
+            offers.retain(|_, owner| *owner != execution);
         }
         if let Ok(mut conversations) = self.conversations.lock()
             && let Some(conversation) = conversations.get_mut(&execution)
@@ -379,15 +697,76 @@ impl DeliverySource {
             conversation.offered.clear();
         }
     }
-    /// Notes a tool-call delivery after which the steers do not stand in the conversation.
+    fn select_delivery(
+        &self,
+        query: &HookQuery,
+        conversation: &Conversation,
+        delivery: &mut HookDelivery,
+    ) -> String {
+        let Some(record) = self.record() else {
+            return String::new();
+        };
+        let Ok(index) = record.index.data.lock() else {
+            return String::new();
+        };
+        // Read all inherited receipts before deciding whether a continued conversation is due.
+        if !index.initialized {
+            return String::new();
+        }
+        let Ok(networks) = self.networks.lock() else {
+            return String::new();
+        };
+        let Ok(mut offers) = self.offers.lock() else {
+            return String::new();
+        };
+        let mut framing = Framing::default();
+        let limit = query
+            .context_budget
+            .min(super::native::MAX_CONTEXT_BYTES)
+            .saturating_sub(
+                delivery.context.len() + if delivery.context.is_empty() { 0 } else { 2 },
+            );
+        for vector in index.due(conversation, &networks) {
+            let key = offer_key(conversation, vector);
+            if offers.contains_key(&key) {
+                continue;
+            }
+            if !framing.push(vector, limit) {
+                break;
+            }
+            offers.insert(key, conversation.reference.execution.get());
+            delivery.steers.push(vector.id.clone());
+        }
+        framing.finish()
+    }
+
+    /// Notes Standing steers shown by a tool callback without persistent conversation context.
     pub(super) fn shown_only(&self, query: &HookQuery, delivery: &HookDelivery) {
+        let Some(record) = self.record() else {
+            return;
+        };
+        let Ok(index) = record.index.data.lock() else {
+            return;
+        };
+        let standing = delivery.steers.iter().filter(|id| {
+            index.steers.iter().any(|vector| {
+                &vector.id == *id
+                    && matches!(
+                        vector.content,
+                        RunVectorContent::Steer {
+                            mode: SteeringMode::Standing,
+                            ..
+                        }
+                    )
+            })
+        });
         let key = self
             .conversations
             .lock()
             .ok()
             .and_then(|c| c.get(&query.execution_id).map(|c| c.key.clone()));
         if let (Some(key), Ok(mut shown_only)) = (key, self.shown_only.lock()) {
-            shown_only.extend(delivery.steers.iter().map(|id| (key.clone(), id.clone())));
+            shown_only.extend(standing.map(|id| (key.clone(), id.clone())));
         }
     }
     pub(super) async fn delivery(&self, query: &HookQuery) -> HookDelivery {
@@ -413,31 +792,11 @@ impl DeliverySource {
         // Leave time within the carrier's existing deadline for framing and transport. A busy
         // record keeps progressing, and already-read directions remain usable between pages.
         let _ = tokio::time::timeout(DEADLINE / 2, record.refresh()).await;
-        let Ok(index) = record.index.data.lock() else {
+        let Ok(_publication) = tokio::time::timeout(DEADLINE / 4, self.publication.lock()).await
+        else {
             return delivery;
         };
-        // Read all inherited receipts before deciding whether a continued conversation is due.
-        if !index.initialized {
-            return delivery;
-        }
-        let mut selected = Vec::new();
-        let mut bytes = PREAMBLE.len()
-            + "</steer>".len()
-            + delivery.context.len()
-            + if delivery.context.is_empty() { 0 } else { 2 };
-        for vector in index.due(&conversation) {
-            let RunVectorContent::Steer { text } = &vector.content else {
-                continue;
-            };
-            let added = vector.id.as_str().len() + text.len() + 4;
-            if bytes + added > query.context_budget {
-                break;
-            }
-            bytes += added;
-            delivery.steers.push(vector.id.clone());
-            selected.push(vector);
-        }
-        let context = frame(selected);
+        let context = self.select_delivery(query, &conversation, &mut delivery);
         if !context.is_empty() {
             delivery.context = if delivery.context.is_empty() {
                 context
@@ -454,6 +813,17 @@ impl DeliverySource {
             self.shown_only(query, delivery);
         }
         self.receipt_ids(query.execution_id, &delivery.steers).await;
+        self.discard(query, delivery).await;
+    }
+    pub(super) async fn discard(&self, query: &HookQuery, delivery: &HookDelivery) {
+        if let Ok(mut offers) = self.offers.lock() {
+            offers.retain(|key, owner| {
+                let id = match key {
+                    OfferKey::Instance(_, id) | OfferKey::Conversation(_, id) => id,
+                };
+                *owner != query.execution_id || !delivery.steers.contains(id)
+            });
+        }
     }
     async fn receipt_ids(&self, execution: u64, ids: &[VectorId]) {
         if ids.is_empty() {
@@ -479,7 +849,13 @@ impl DeliverySource {
                     .lock()
                     .map_err(|_| RunLedgerError::Corrupt)?;
                 ids.iter()
-                    .filter(|id| !index.received(&conversation, id))
+                    .filter(|id| {
+                        index
+                            .steers
+                            .iter()
+                            .find(|vector| &vector.id == *id)
+                            .is_some_and(|vector| !index.consumed(&conversation, vector))
+                    })
                     .map(|id| {
                         vector_event(
                             &record.run,
@@ -532,6 +908,12 @@ impl ActiveMemorySource for DeliverySource {
             record.runtime.block_on(self.receipt(query, delivery));
         }
         self.memory.acknowledged(query, delivery);
+    }
+    fn unacknowledged(&self, query: &HookQuery, delivery: &HookDelivery) {
+        if let Some(record) = self.record() {
+            record.runtime.block_on(self.discard(query, delivery));
+        }
+        self.memory.unacknowledged(query, delivery);
     }
     fn unavailable(&self, reason: &str) {
         self.memory.unavailable(reason);
