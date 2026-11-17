@@ -3364,7 +3364,7 @@ or Zeroshot rejects the request.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: _RunHandle, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
+              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: Run, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
             –
           <div class="doc-md-description">
             <p>If the attempt suspends; carries its run handle and status.</p>
@@ -4288,7 +4288,7 @@ completes before local controller startup or direct-target contact.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: _RunHandle, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
+              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: Run, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
             –
           <div class="doc-md-description">
             <p>If the attempt suspends; carries this handle and its status.</p>
@@ -4723,6 +4723,14 @@ completes before local controller startup or direct-target contact.</p>
 
 <p><span class="doc-section-title">Raises:</span></p>
     <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: Run, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the run is suspended and already has a successor, which a
+force-stop leaves unchanged.</p>
+          </div>
+        </li>
         <li class="doc-section-item field-body">
               <code><a class="autorefs autorefs-internal" title="              RunNotFoundError(message: str, *, exit_code: int | None = None) (zeroshot.run_errors.RunNotFoundError)" href="../errors/#zeroshot.RunNotFoundError">RunNotFoundError</a></code>
             –

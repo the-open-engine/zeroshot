@@ -2525,7 +2525,8 @@ identity, settle cleanup, and skip automatic correction/fallback/retry. Focused 
 must cover forwarding, isolation, reuse and rejection for every registered adapter.</p>
 <h2 id="conversations-in-checkpoints">Conversations in checkpoints<a class="headerlink" href="#conversations-in-checkpoints" title="Permanent link">&para;</a></h2>
 <p>Adapters select only the files belonging to a conversation identifier and name their destination
-under the successor's provider session storage. They never parse, split, redact or pack transcripts.
+under the successor's provider session storage. They never split, redact or pack transcripts, and
+change one only where the provider records its working directory inside it.
 Capture includes the identifier and Codex's cumulative usage baseline as one complete unit, bounded
 at 1 GiB. Shared checkpoint code copies raw files beside <code>workspace</code> into the lineage's deduplicating
 repository and rejects absolute, escaping or symlink names. Checkpoint deletion removes this data.
@@ -2538,7 +2539,10 @@ restores assign provider ownership to restored files and their ancestors through
 home, so nested storage stays accessible without changing any directory outside that home.</p>
 <p>Codex captures its named rollout under <code>sessions</code>; Claude captures the named transcript and its
 session directory under the cwd-specific project, relocating them for the successor workspace. Pi
-captures the named session JSONL. Copilot captures the named <code>session-state</code> directory. Hermes
+captures the named session JSONL. Pi finds a session ID only among the sessions of its working
+directory, which the file's first line names, so restore writes that line again with the successor
+workspace and copies every later line unchanged; a first line that is no such header starts a new
+conversation. Copilot captures the named <code>session-state</code> directory. Hermes
 captures the private node's SQLite database and sidecars. Contained OpenCode captures its exclusively
 owned database; <strong>local OpenCode's shared database is not captured</strong> because it contains other
 conversations. Local OpenCode and older OpenCode layouts without the private SQLite database
@@ -2578,7 +2582,7 @@ acknowledgement ownership.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-15">15 November 2026</time>
+    Last updated <time datetime="2026-11-17">17 November 2026</time>
   </span>
 
     

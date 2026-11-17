@@ -2631,9 +2631,11 @@ answer still starts the <code>timeout</code> successor. Deadlines default to 7 d
 inbox reads never apply them. See <a href="../ask-a-person/">Ask a person</a>.</p>
 <h2 id="standing-direction">Standing direction<a class="headerlink" href="#standing-direction" title="Permanent link">&para;</a></h2>
 <p><code>steer = await run.steer("Prioritize the parser regression.")</code> records standing direction without
-continuing a suspended run. <code>RunStatus.steers</code> exposes excerpts and confirmed receiving executions;
-<code>omitted_steers</code> reports the bounded listing's omissions. Each agent conversation receives a steer
-at its next tool call or prompt. <code>await run.vector(steer.id)</code> reads its full text, and
+continuing a suspended run. <code>RunStatus.steers</code> from <code>Run.status()</code> exposes excerpts and confirmed
+receiving executions (statuses streamed by <code>Run.watch()</code> omit them); <code>omitted_steers</code> reports the
+bounded listing's omissions. Each agent conversation receives a steer at its next tool call or
+prompt, within the <a href="../observe-and-control/#steer-a-run">Claude Code limits</a>.
+<code>await run.vector(steer.id)</code> reads its full text, and
 <code>await run.vectors()</code> includes <code>steer</code> and <code>steer_receipt</code> entries. Direction is limited to 262,144
 UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error types report refusals.</p>
 
