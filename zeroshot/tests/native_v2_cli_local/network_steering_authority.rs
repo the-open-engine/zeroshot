@@ -53,7 +53,8 @@ def wait(predicate):
         if time.monotonic() >= deadline: raise RuntimeError('authority fixture barrier timed out')
         time.sleep(.01)
 
-save('prompt', sys.stdin.read())
+# Claude Code takes the prompt as one stream-json line and keeps stdin open until its result.
+save('prompt', json.loads(sys.stdin.readline())['message']['content'][0]['text'])
 save('capability', bool(os.environ.get('ZEROSHOT_STEERING_CAPABILITY')))
 if node == 'sender':
     result = subprocess.run([cli, 'steer', run, '--network', 'alpha', 'authorized-network-marker'],
@@ -98,11 +99,12 @@ elif node == 'receiver':
                 save(job['name'], attempt(job))
         (root/'authority-checked').touch()
         wait(lambda: (root/'authority-release').exists())
-print(json.dumps({'type':'system','subtype':'init','session_id':'authority-'+identity}))
+print(json.dumps({'type':'system','subtype':'init','session_id':'authority-'+identity}), flush=True)
 print(json.dumps({'type':'result','subtype':'success','is_error':False,
     'session_id':'authority-'+identity,'structured_output':{'response':None},
     'model_usage_since_last_result':{'fixture-model':{
-        'inputTokens':1,'outputTokens':1,'cacheReadInputTokens':0,'cacheCreationInputTokens':0}}}))
+        'inputTokens':1,'outputTokens':1,'cacheReadInputTokens':0,'cacheCreationInputTokens':0}}}), flush=True)
+sys.stdin.read()
 "#;
 
 fn authority_target(fixture: &LocalFixture, run: &str, active: bool) -> Value {

@@ -23,6 +23,8 @@ mod permission_denials;
 mod permission_inspection;
 #[path = "tests/redaction.rs"]
 mod redaction;
+#[path = "tests/steering.rs"]
+mod steering;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -53,6 +55,19 @@ use crate::native_v2_runner::{
     ResolvedEnvironment,
 };
 use crate::worker_catalog::{self, ReasoningEffort};
+
+/// The text of a prompt a fake Claude captured. Like the real CLI with stream-json input, a
+/// fake reads its prompt as the first line on stdin, which stays open while the turn runs.
+fn prompt_text(captured: &str) -> String {
+    let record: Value =
+        serde_json::from_str(captured.lines().next().unwrap_or_default()).assert_value();
+    assert_eq!(record["type"], "user");
+    assert_eq!(record["message"]["role"], "user");
+    record["message"]["content"][0]["text"]
+        .as_str()
+        .assert_value()
+        .to_owned()
+}
 
 fn assert_tool_delivery(prompt: &str) {
     assert!(prompt.contains(concat!(
@@ -598,7 +613,7 @@ for argument in "$@"; do
 done
 : > "$target.args"
 for argument in "$@"; do printf '%s\n' "$argument" >> "$target.args"; done
-cat > "$target.prompt"
+head -n 1 > "$target.prompt"
 printf '%s\n' "${ANTHROPIC_API_KEY-unset}" > anthropic-key.txt
 printf '%s\n' "${ANTHROPIC_AUTH_TOKEN-unset}" > anthropic-token.txt
 printf '%s\n' "${ANTHROPIC_BASE_URL-unset}" > anthropic-base-url.txt
@@ -693,7 +708,7 @@ async fn verifier_result_is_normalized_to_the_closed_worker_outcome() {
         r#"
 set -eu
 printf '%s\n' "$ZEROSHOT_NODE_KIND" "$ZEROSHOT_NODE_ITERATION" > verifier.context
-cat > verifier.prompt
+head -n 1 > verifier.prompt
 printf '%s\n' "$@" > verifier.args
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"verifier-session"}'
 printf '%s%s%s%s\n' \
@@ -730,20 +745,18 @@ printf '%s%s%s%s\n' \
         }
     );
     assert!(
-        workspace
-            .read("verifier.prompt")
+        prompt_text(&workspace.read("verifier.prompt"))
             .contains("Runtime-owned verifier guidance:")
     );
     assert_eq!(workspace.read("verifier.context"), "verifier\n0\n");
-    assert_tool_delivery(&workspace.read("verifier.prompt"));
+    assert_tool_delivery(&prompt_text(&workspace.read("verifier.prompt")));
     let arguments = workspace.read("verifier.args");
     assert!(!arguments.contains("--permission-mode"));
     assert!(!arguments.contains("--tools"));
     assert!(!arguments.contains("--setting-sources"));
     assert!(arguments.contains("--dangerously-skip-permissions"));
     assert!(
-        workspace
-            .read("verifier.prompt")
+        prompt_text(&workspace.read("verifier.prompt"))
             .contains("\"signals\":{\"verdict\":[\"accepted\",\"rejected\"]}")
     );
 }
@@ -755,7 +768,7 @@ async fn cancellation_reaps_the_script_and_its_child_before_completion() {
         &workspace,
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 (sleep 30; printf survived > survivor.txt) &
 printf '%s' "$!" > child.pid
 printf '%s%s\n' \
@@ -780,7 +793,7 @@ async fn cancellation_records_text_held_back_before_its_block_ended() {
         &workspace,
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf '%s%s\n' \
   '{"type":"stream_event","event":{"type":"content_block_delta",' \
   '"delta":{"type":"text_delta","text":"ready\npartial reply"}}}'

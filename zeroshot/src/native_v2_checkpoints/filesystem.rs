@@ -96,7 +96,7 @@ pub(crate) fn capture_with<T: Serialize>(
         user_metadata: metadata,
     };
     write_metadata(stage.path(), &manifest)?;
-    sync_tree(&tree, operation)?;
+    // Restic reads this disposable tree next; syncing each copied entry adds no durability.
     operation.check()?;
     publish_capture(stage.path(), &snapshots_root)
 }
@@ -394,45 +394,6 @@ fn parse_metadata<T: DeserializeOwned>(file: fs::File) -> io::Result<SnapshotMet
         return Err(invalid("unsupported snapshot format"));
     }
     Ok(metadata)
-}
-
-fn sync_tree(path: &Path, operation: &SnapshotOperation) -> io::Result<()> {
-    operation.check()?;
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        return Ok(());
-    }
-    if metadata.is_dir() {
-        for entry in fs::read_dir(path)? {
-            sync_tree(&entry?.path(), operation)?;
-        }
-        sync_directory(path)
-    } else {
-        sync_file(path, &metadata)
-    }
-}
-
-fn sync_file(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        let _ = metadata;
-        fs::File::open(path)?.sync_all()
-    }
-    #[cfg(windows)]
-    {
-        // FlushFileBuffers requires a writable handle, including for copied read-only Git
-        // objects. Only our private staging copy changes, and its original attributes survive.
-        let mut writable = metadata.permissions();
-        #[expect(
-            clippy::permissions_set_readonly_false,
-            reason = "Windows-only: ACL permissions remain unchanged"
-        )]
-        writable.set_readonly(false);
-        fs::set_permissions(path, writable)?;
-        let file = fs::OpenOptions::new().write(true).open(path);
-        fs::set_permissions(path, metadata.permissions())?;
-        file?.sync_all()
-    }
 }
 
 fn sync_directory(path: &Path) -> io::Result<()> {

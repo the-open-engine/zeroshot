@@ -461,7 +461,7 @@ test -z "${UNDECLARED_SECRET+x}"
 test -z "${OPENAI_API_KEY+x}"
 cat "$CLAUDE_CONFIG_DIR/settings.json" >> config-capture
 printf '%s\n' "$@" >> harness-args
-cat > prompt-capture
+head -n 1 > prompt-capture
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"local-session"}'
 if test -f first-turn; then
   printf '%s%s\n' '{"type":"result","subtype":"success","is_error":false,' \

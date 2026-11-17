@@ -179,56 +179,22 @@ impl Analyzer<'_> {
                 continue;
             };
             let required = CompletionPredicate::all([completion, context.0.clone()]);
-            let Some(assignments) = self.assignments_for_completion_predicates(
-                &[&required, &correlation.presence],
-                context.1,
-            ) else {
-                continue;
-            };
-            if assignments.iter().all(|assignment| {
-                !required.evaluate(assignment) || correlation.presence.evaluate(assignment)
-            }) {
+            let mut guards = Vec::new();
+            required.collect_guards(&mut guards);
+            correlation.presence.collect_guards(&mut guards);
+            // The selector is available when every outcome reaching this guard ran its node.
+            let proved = self.decide(&guards, context.1, |proof| {
+                let required = proof.predicate(&required)?;
+                let present = proof.predicate(&correlation.presence)?;
+                let absent = proof.diagram.not(present)?;
+                let unproved = proof.diagram.and(required, absent)?;
+                proof.possible(unproved).map(|possible| !possible)
+            });
+            if proved == Some(true) {
                 return true;
             }
         }
         false
-    }
-}
-
-pub(super) fn refine_common_choice_writes(
-    control: &mut ChoiceControl,
-    choice: &ChoiceNode,
-    assignments: &[Assignment],
-    conditions: &[(NodeName, CompletionPredicate)],
-) {
-    let mut residuals = vec![Vec::new(); choice.branches.as_slice().len() + 1];
-    for assignment in assignments {
-        let route = choice
-            .branches
-            .as_slice()
-            .iter()
-            .position(|branch| evaluate_guard(&branch.when, assignment))
-            .unwrap_or(choice.branches.as_slice().len());
-        residuals[route].push(assignment);
-    }
-    for (refinement, residual) in control
-        .branches
-        .iter_mut()
-        .chain(std::iter::once(&mut control.otherwise))
-        .zip(residuals)
-    {
-        if residual.is_empty() {
-            continue;
-        }
-        for (name, condition) in conditions {
-            if residual
-                .iter()
-                .all(|assignment| condition.evaluate(assignment))
-            {
-                refinement.failed.remove(name);
-                refinement.success.insert(name.clone());
-            }
-        }
     }
 }
 

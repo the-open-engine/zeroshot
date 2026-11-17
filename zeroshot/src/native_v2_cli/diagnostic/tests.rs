@@ -384,3 +384,30 @@ fn client_errors_preserve_typed_failures_and_fail_closed_without_them() {
         NativeV2CliError::Protocol(message) if message.contains("not JSON-RPC")
     ));
 }
+
+#[test]
+fn submission_size_refusal_is_an_invalid_request_locally_and_over_oecp() {
+    let source = crate::v2_run_ledger::RunLedgerError::AdmittedRunTooLarge {
+        submission_bytes: 3_001_000,
+        input_bytes: 3_000_011,
+    };
+    let details = json!({"submissionBytes":3001000,"inputBytes":3000011,"limitBytes":2097152});
+    assert_diagnostic_cases([
+        (
+            NativeV2CliError::Ledger(source.clone()),
+            "invalid_request",
+            "submission.too_large",
+            details.clone(),
+        ),
+        (
+            NativeV2CliError::Remote {
+                code: "submission.too_large".into(),
+                message: source.to_string(),
+                details: Some(details.clone()),
+            },
+            "invalid_request",
+            "submission.too_large",
+            details,
+        ),
+    ]);
+}

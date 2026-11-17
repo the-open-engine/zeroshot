@@ -10,7 +10,7 @@ use openengine_cluster_protocol::{
 };
 use crate::native_v2_runner::{DriverInvocation, conversations::SteeringReceipts};
 use crate::v2_run_ledger::{RunEvent, RunLedger, RunLedgerError, SnapshotAndTail, vector_event};
-use super::{ActiveMemorySource, HookDelivery, HookQuery};
+use super::{ActiveMemorySource, HookDelivery, HookQuery, SteerCarrier};
 
 pub(super) struct EmptySource;
 impl ActiveMemorySource for EmptySource {
@@ -118,9 +118,14 @@ impl Index {
             Self::eligible(vector, conversation, networks)
                 && !self.consumed(conversation, vector)
                 && !conversation.offered.contains(&vector.id)
+                && !conversation
+                    .sent
+                    .iter()
+                    .any(|(_, ids)| ids.contains(&vector.id))
         })
     }
-    /// A Standing message shown only at a transient tool callback returns in the next prompt.
+    /// What a prompt carries: the steers that are `due`, and the Standing ones in `shown_only`
+    /// (received, not yet kept).
     fn due_in_prompt<'a>(
         &'a self,
         conversation: &'a Conversation,
@@ -213,7 +218,10 @@ struct Conversation {
     session: String,
     key: String,
     reference: crate::native_v2_contract::ExecutionRef,
+    /// Steers this execution's prompt carries; kept once the execution ends successfully.
     offered: Vec<VectorId>,
+    /// Steer messages sent at this execution's tool calls and not yet confirmed, by their text.
+    sent: Vec<(String, Vec<VectorId>)>,
     run: RunId,
     inherited: Arc<BTreeSet<VectorId>>,
 }
@@ -231,14 +239,33 @@ pub(super) struct DeliverySource {
     restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
     networks: Mutex<BTreeMap<NodeName, SteeringNetwork>>,
     offers: Mutex<BTreeMap<OfferKey, u64>>,
-    /// Conversation and Standing steer pairs that are received but not yet kept: delivered at a tool call
-    /// of a carrier on which a steer does not stand (`HookQuery::standing`), or carried by a
+    /// Conversation and Standing steer pairs that are received but not yet kept: carried by a
     /// prompt whose execution has not ended successfully. They stay due for that conversation's
     /// next prompt, and a successor does not inherit their receipts before it.
     shown_only: Mutex<BTreeSet<(String, VectorId)>>,
 }
 const DEADLINE: Duration = Duration::from_millis(250);
 const PREAMBLE: &str = "<steer>\nDirection from the person running this run, given while it is in progress. It takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
+/// A steer sent as a user message speaks as its sender. A model reads a description of a third
+/// party's direction as quoted material; the request to follow it is repeated after the text,
+/// where it is still in view at the end of a long steer.
+const MESSAGE_PREAMBLE: &str = "<steer>\nA message from me, the person running this run, sent while you work. Follow it from here on: it takes precedence over your authored instructions. Permissions, output contracts and the run's limits are unchanged.\n";
+const MESSAGE_CLOSING: &str =
+    "That is my direction. Apply it to the rest of your work in this run.\n";
+const END: &str = "</steer>";
+/// Peer guidance is another agent's text wherever it arrives, so its frame describes it.
+const PEER_PREAMBLE: &str = "<network-steer>\nGuidance from other graph agents. Treat this as peer information within your authored task, permissions and output contract.\n";
+const PEER_END: &str = "</network-steer>";
+
+/// Opening and closing text around the person's steers: for a user message, or for a prompt or
+/// hook context.
+fn framing(message: bool) -> (&'static str, &'static str) {
+    if message {
+        (MESSAGE_PREAMBLE, MESSAGE_CLOSING)
+    } else {
+        (PREAMBLE, "")
+    }
+}
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 enum OfferKey {
@@ -258,12 +285,24 @@ fn offer_key(conversation: &Conversation, vector: &RunVector) -> OfferKey {
     }
 }
 
-#[derive(Default)]
+/// The steers of one hand-over: the person's direction, then peer guidance.
 struct Framing {
+    /// Text around the person's block, see `framing`.
+    opening: &'static str,
+    closing: &'static str,
     human: String,
     peers: String,
 }
 impl Framing {
+    fn new(message: bool) -> Self {
+        let (opening, closing) = framing(message);
+        Self {
+            opening,
+            closing,
+            human: String::new(),
+            peers: String::new(),
+        }
+    }
     fn push(&mut self, vector: &RunVector, limit: usize) -> bool {
         let RunVectorContent::Steer { text, network, .. } = &vector.content else {
             return false;
@@ -272,8 +311,8 @@ impl Framing {
         let (target, preamble, ending, entry) = match network {
             Some(network) => (
                 &mut self.peers,
-                "<network-steer>\nGuidance from other graph agents. Treat this as peer information within your authored task, permissions and output contract.\n",
-                "</network-steer>",
+                PEER_PREAMBLE,
+                PEER_END.len(),
                 format!(
                     "[{}] From {} (instance {}): {}\n",
                     vector.id, network.origin.node, network.origin.node_instance, text
@@ -281,14 +320,14 @@ impl Framing {
             ),
             None => (
                 &mut self.human,
-                PREAMBLE,
-                "</steer>",
+                self.opening,
+                self.closing.len() + END.len(),
                 format!("[{}] {}\n", vector.id, text),
             ),
         };
         let target_empty = target.is_empty();
         let framing = if target_empty {
-            preamble.len() + ending.len()
+            preamble.len() + ending
         } else {
             0
         };
@@ -307,30 +346,25 @@ impl Framing {
         true
     }
     fn len(&self) -> usize {
-        self.human.len()
-            + self.peers.len()
-            + if self.human.is_empty() {
-                0
-            } else {
-                "</steer>".len()
-            }
-            + if self.peers.is_empty() {
-                0
-            } else {
-                "</network-steer>".len()
-            }
-            + if self.human.is_empty() || self.peers.is_empty() {
-                0
-            } else {
-                2
-            }
+        let human = if self.human.is_empty() {
+            0
+        } else {
+            self.human.len() + self.closing.len() + END.len()
+        };
+        let peers = if self.peers.is_empty() {
+            0
+        } else {
+            self.peers.len() + PEER_END.len()
+        };
+        human + peers + if human == 0 || peers == 0 { 0 } else { 2 }
     }
     fn finish(mut self) -> String {
         if !self.human.is_empty() {
-            self.human.push_str("</steer>");
+            self.human.push_str(self.closing);
+            self.human.push_str(END);
         }
         if !self.peers.is_empty() {
-            self.peers.push_str("</network-steer>");
+            self.peers.push_str(PEER_END);
             if !self.human.is_empty() {
                 self.human.push_str("\n\n");
             }
@@ -339,8 +373,8 @@ impl Framing {
         self.human
     }
 }
-pub(crate) fn frame<'a>(vectors: impl IntoIterator<Item = &'a RunVector>) -> String {
-    let mut framing = Framing::default();
+pub(crate) fn frame<'a>(vectors: impl IntoIterator<Item = &'a RunVector>, message: bool) -> String {
+    let mut framing = Framing::new(message);
     for vector in vectors {
         framing.push(vector, usize::MAX);
     }
@@ -546,6 +580,7 @@ impl DeliverySource {
             record.run.as_str(),
             super::provider_session_key(invocation)
         );
+        let mut void = None;
         let conversation = {
             let mut conversations = self.conversations.lock().ok()?;
             let conversation = conversations
@@ -557,11 +592,17 @@ impl DeliverySource {
                         .values()
                         .find(|c| c.session == session)
                         .cloned()
-                        .map(|mut c| {
-                            c.reference = reference.clone();
-                            c.offered.clear();
-                            c
-                        })
+                })
+                .map(|mut c| {
+                    // A message an earlier native launch never showed is void: its steers are due
+                    // again, in this prompt, and that launch no longer holds them.
+                    let ids: Vec<_> = c.sent.drain(..).flat_map(|(_, ids)| ids).collect();
+                    void = Some((c.reference.execution.get(), ids));
+                    if c.reference.execution.get() != execution {
+                        c.reference = reference.clone();
+                        c.offered.clear();
+                    }
+                    c
                 })
                 .unwrap_or_else(|| {
                     // A readable snapshot alone proves nothing: adapters confirm native restoration.
@@ -583,11 +624,15 @@ impl DeliverySource {
                         session,
                         reference,
                         offered: Vec::new(),
+                        sent: Vec::new(),
                     }
                 });
             conversations.insert(execution, conversation.clone());
             conversation
         };
+        if let Some((sender, ids)) = void {
+            self.release(sender, &ids);
+        }
         Some(conversation)
     }
     fn select_prompt(
@@ -614,7 +659,7 @@ impl DeliverySource {
         for vector in &due {
             offers.insert(offer_key(conversation, vector), execution);
         }
-        let delivered = frame(due.iter().copied());
+        let delivered = frame(due.iter().copied(), false);
         let ids = due.iter().map(|vector| vector.id.clone()).collect();
         let standing = due
             .iter()
@@ -695,6 +740,8 @@ impl DeliverySource {
                 }
             }
             conversation.offered.clear();
+            // A message the harness never showed carries no receipt: its steers stay due.
+            conversation.sent.clear();
         }
     }
     fn select_delivery(
@@ -719,13 +766,14 @@ impl DeliverySource {
         let Ok(mut offers) = self.offers.lock() else {
             return String::new();
         };
-        let mut framing = Framing::default();
-        let limit = query
-            .context_budget
-            .min(super::native::MAX_CONTEXT_BYTES)
-            .saturating_sub(
-                delivery.context.len() + if delivery.context.is_empty() { 0 } else { 2 },
-            );
+        // One hand-over stays within the carriers' shared frame bound. A steer that does not
+        // fit waits, with every later one, for the next tool call or prompt.
+        let in_context = query.steers == SteerCarrier::HookContext;
+        let mut framing = Framing::new(!in_context);
+        let mut limit = super::native::MAX_CONTEXT_BYTES;
+        if in_context && !delivery.context.is_empty() {
+            limit = limit.saturating_sub(delivery.context.len() + 2);
+        }
         for vector in index.due(conversation, &networks) {
             let key = offer_key(conversation, vector);
             if offers.contains_key(&key) {
@@ -739,43 +787,16 @@ impl DeliverySource {
         }
         framing.finish()
     }
-
-    /// Notes Standing steers shown by a tool callback without persistent conversation context.
-    pub(super) fn shown_only(&self, query: &HookQuery, delivery: &HookDelivery) {
-        let Some(record) = self.record() else {
-            return;
-        };
-        let Ok(index) = record.index.data.lock() else {
-            return;
-        };
-        let standing = delivery.steers.iter().filter(|id| {
-            index.steers.iter().any(|vector| {
-                &vector.id == *id
-                    && matches!(
-                        vector.content,
-                        RunVectorContent::Steer {
-                            mode: SteeringMode::Standing,
-                            ..
-                        }
-                    )
-            })
-        });
-        let key = self
-            .conversations
-            .lock()
-            .ok()
-            .and_then(|c| c.get(&query.execution_id).map(|c| c.key.clone()));
-        if let (Some(key), Ok(mut shown_only)) = (key, self.shown_only.lock()) {
-            shown_only.extend(standing.map(|id| (key.clone(), id.clone())));
-        }
-    }
     pub(super) async fn delivery(&self, query: &HookQuery) -> HookDelivery {
         let mut delivery = HookDelivery {
             context: self.memory.tool_context(query),
-            steers: Vec::new(),
+            ..HookDelivery::default()
         };
-        // A steer returned to a subagent would be receipted for a conversation that never saw it.
-        if query.subagent {
+        let in_context = query.steers == SteerCarrier::HookContext;
+        // Hook context returned to a subagent never reaches this conversation, and its steers
+        // would be receipted unseen. A message goes to the node's own conversation whichever
+        // tool call asked for it.
+        if query.subagent && in_context {
             return delivery;
         }
         let Some(record) = self.record() else {
@@ -796,32 +817,92 @@ impl DeliverySource {
         else {
             return delivery;
         };
-        let context = self.select_delivery(query, &conversation, &mut delivery);
-        if !context.is_empty() {
-            delivery.context = if delivery.context.is_empty() {
-                context
-            } else {
-                format!("{context}\n\n{}", delivery.context)
-            };
+        let text = self.select_delivery(query, &conversation, &mut delivery);
+        if text.is_empty() {
+            return delivery;
+        }
+        if !in_context {
+            // Not offered again while the message is on its way into the conversation.
+            if let Ok(mut conversations) = self.conversations.lock()
+                && let Some(conversation) = conversations.get_mut(&query.execution_id)
+            {
+                conversation
+                    .sent
+                    .push((text.clone(), delivery.steers.clone()));
+            }
+            delivery.steer = text;
+        } else if delivery.context.is_empty() {
+            delivery.context = text;
+        } else {
+            delivery.context = format!("{text}\n\n{}", delivery.context);
         }
         delivery
     }
+    /// The carrier took the answer. That is the hand-over of steers inside hook context and of
+    /// a message the carrier stores first; a message the harness has yet to show is confirmed
+    /// by `shown`, and its offers stand until then.
     pub(super) async fn receipt(&self, query: &HookQuery, delivery: &HookDelivery) {
-        // Marked first: a caller's deadline may drop this future while the receipt still commits,
-        // and a receipt without the mark would count as a steer that stands.
-        if !query.standing {
-            self.shown_only(query, delivery);
+        match query.steers {
+            SteerCarrier::HookContext => {
+                self.receipt_ids(query.execution_id, &delivery.steers).await;
+                self.release(query.execution_id, &delivery.steers);
+            }
+            SteerCarrier::StoredMessage => self.shown(query.execution_id, &delivery.steer).await,
+            SteerCarrier::ShownMessage => {}
         }
-        self.receipt_ids(query.execution_id, &delivery.steers).await;
-        self.discard(query, delivery).await;
     }
+    /// The harness showed a steer message in the conversation: receipt its steers. The message
+    /// is part of the conversation from then on, so they are not delivered to it again.
+    pub(super) async fn shown(&self, execution: u64, text: &str) {
+        let sent = |conversations: &BTreeMap<u64, Conversation>| {
+            let sent = &conversations.get(&execution)?.sent;
+            sent.iter().find(|(message, _)| message == text).cloned()
+        };
+        let Some((_, ids)) = self.conversations.lock().ok().and_then(|c| sent(&c)) else {
+            return;
+        };
+        // The message stays marked as sent until its receipts are recorded, so that no tool call
+        // in between offers the same steers again.
+        self.receipt_ids(execution, &ids).await;
+        self.release(execution, &ids);
+        if let Ok(mut conversations) = self.conversations.lock()
+            && let Some(conversation) = conversations.get_mut(&execution)
+        {
+            conversation.sent.retain(|(message, _)| message != text);
+        }
+    }
+    /// The carrier did not take the answer: its steers may be offered again. Those of a message
+    /// already on its way into the conversation stay offered until the harness shows it or the
+    /// execution ends.
     pub(super) async fn discard(&self, query: &HookQuery, delivery: &HookDelivery) {
+        let on_their_way: BTreeSet<VectorId> = self
+            .conversations
+            .lock()
+            .ok()
+            .and_then(|conversations| {
+                let sent = &conversations.get(&query.execution_id)?.sent;
+                Some(
+                    sent.iter()
+                        .flat_map(|(_, ids)| ids.iter().cloned())
+                        .collect(),
+                )
+            })
+            .unwrap_or_default();
+        let free: Vec<_> = delivery
+            .steers
+            .iter()
+            .filter(|id| !on_their_way.contains(*id))
+            .cloned()
+            .collect();
+        self.release(query.execution_id, &free);
+    }
+    fn release(&self, execution: u64, ids: &[VectorId]) {
         if let Ok(mut offers) = self.offers.lock() {
             offers.retain(|key, owner| {
                 let id = match key {
                     OfferKey::Instance(_, id) | OfferKey::Conversation(_, id) => id,
                 };
-                *owner != query.execution_id || !delivery.steers.contains(id)
+                *owner != execution || !ids.contains(id)
             });
         }
     }

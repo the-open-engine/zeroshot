@@ -433,6 +433,7 @@ jobs:
           cargo test --locked --package zeroshot --lib --features ui --
           native_v2_portable_controller::transport::unix::tests
           native_v2_supervisor::checkpoints::filesystem::tests::macos_
+          native_v2_supervisor::checkpoints::filesystem::tests::cancellation_after_metadata_leaves_only_the_prior_snapshot
       - name: Run macOS workspace export regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace
@@ -461,6 +462,10 @@ jobs:
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unchecked_worker_error_fails_foreground_status_and_logs
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_local fixture::steering::steer_selected_older_checkpoint_inherits_only_receipts_in_saved_conversation
           cargo test --locked --package zeroshot --features ui --lib -- native_v2_cli::templates::tests::unhandled native_v2_supervisor::tests::failure_logs v2_run_ledger::tests::failure_context
+      - name: Run macOS input size regressions
+        run: |
+          cargo test --locked --package zeroshot --lib --features ui -- input_sizes input_size submission_size oversized_submission admitted_run_size node_input_size
+          cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable -- oversized_submissions oversized_node_input
       - name: Run macOS checkpoint forge access regression
         run: >-
           cargo test --locked --package zeroshot --features ui

@@ -70,7 +70,7 @@ async fn observe(label: &str, records: &[Value]) -> Observed {
     workspace.write("records.jsonl", &lines);
     write_claude_script(
         &workspace,
-        "set -eu\ncat > /dev/null\nexec /bin/cat records.jsonl\n",
+        "set -eu\nhead -n 1 >/dev/null\nexec /bin/cat records.jsonl\n",
     );
     let binding = agent_binding(MODEL, None, SessionScope::Execution, &[ANTHROPIC_KEY]);
     let runtime = runner(
