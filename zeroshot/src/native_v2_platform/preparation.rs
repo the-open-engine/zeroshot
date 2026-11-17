@@ -241,6 +241,19 @@ impl NativeV2PlatformController {
                     events.push(RunEvent::PriorExecution { execution });
                     self.ledger.append(run_id, events).await?;
                 }
+            } else if matches!(resume.selection, CheckpointRestoreSelection::Latest) {
+                let source = self
+                    .ledger
+                    .get(&resume.source_run_id)
+                    .await?
+                    .ok_or(RunLedgerError::RunNotFound)?;
+                let events: Vec<_> = crate::native_v2_supervisor::restart_history(&source.snapshot)
+                    .into_iter()
+                    .map(|execution| RunEvent::PriorExecution { execution })
+                    .collect();
+                if !events.is_empty() {
+                    self.ledger.append(run_id, events).await?;
+                }
             }
             if let Some(resolution) = &resume.request_resolution {
                 let source = self

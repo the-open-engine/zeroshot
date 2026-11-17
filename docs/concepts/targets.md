@@ -16,6 +16,24 @@ graph and models.
 The model provider still receives the code and context its agent needs. Self-hosting the target
 does not make model processing local.
 
+## Manage named targets
+
+Use `zeroshot target list` to see each registered name, origin and hosted/direct kind, including
+the built-in `platform` target. Add `--json` for machine-readable output. Listing reads local
+configuration and prints no stored login data or device token.
+
+```console
+zeroshot target list
+zeroshot target remove old-target
+```
+
+Removal deletes the local registration, its stored login and saved resume permissions. It does not
+contact the target or stop its runs. You can then register that name again with `target add`.
+The built-in `platform` target and unknown names are refused. `target remove NAME --json` returns
+a removal receipt. If cleanup fails, the registration remains so you can retry.
+On Linux, removal clears both credential stores after a store switch. Older file-store selections
+may also require access to Secret Service to finish cleanup.
+
 ## Run locally { #local-controller }
 
 Omit `--target` for a local run. Add `--cwd FOLDER` to choose the workspace; otherwise zeroshot uses

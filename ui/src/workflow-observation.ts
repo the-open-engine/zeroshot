@@ -7,12 +7,19 @@ export type WorkflowNodeObservation = {
   count?: number;
   countUnit?: 'execution' | 'visit';
   detail?: string;
+  /**
+   * For a suspended request step, how its question stands now: still awaiting an answer, the run
+   * continued in a successor, or the deadline passed unanswered. Absent when the observer cannot say.
+   */
+  request?: 'pending' | 'continued' | 'expired';
 };
 
 export type WorkflowObservation = {
   /** Stable run identity. Changing the cursor must not change this key. */
   key: string;
   nodes: Readonly<Record<string, WorkflowNodeObservation>>;
+  /** The view follows a live run's latest events; only then does new work unfold its groups. */
+  following?: boolean;
 };
 
 /** Sequences remain invisible wiring, just as in the editor; fold semantic groups only. */

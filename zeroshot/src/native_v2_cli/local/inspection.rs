@@ -283,6 +283,15 @@ impl LocalCliBackend {
                 RunStatus::Finished { .. } | RunStatus::Suspended { .. }
             )
         }) {
+            // The end is durable moments before its controller exits and frees the workspace
+            // lease that a successor needs.
+            let lease = self.existing_run_paths(id)?.lease();
+            let deadline = Instant::now() + self.ready_timeout;
+            while Instant::now() < deadline
+                && ControllerLease::probe(&lease).is_ok_and(|probe| probe.held)
+            {
+                sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
+            }
             return Ok(());
         }
         let paths = self.existing_run_paths(id)?;

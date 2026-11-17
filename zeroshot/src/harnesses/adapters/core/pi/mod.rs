@@ -250,6 +250,9 @@ impl PiAdapter {
                 crate::active_memory::hooks::HookInstallation {
                     invocation,
                     home: files.home(),
+                    context_budget: None,
+                    // Pi shows the text inside a tool result, which a model may refuse to follow.
+                    standing: false,
                 },
                 memory::install,
             );
@@ -476,7 +479,7 @@ impl PiAdapter {
             .session
             .core
             .prepare_conversation(
-                Some(conversation::layout(files.home())),
+                Some(conversation::layout(files.home(), &files.workspace)),
                 turn.invocation,
                 turn.control,
             )

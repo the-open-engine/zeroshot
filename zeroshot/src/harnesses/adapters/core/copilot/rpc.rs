@@ -420,7 +420,10 @@ impl<'a> CopilotRpc<'a> {
         if matches!(tokio::time::timeout_at(deadline, written).await, Ok(Ok(())))
             && let (Some(memory), Some((query, delivery))) = (&self.active_memory, delivery)
         {
-            let _ = tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery)).await;
+            // Copilot applies hook context to the turn in progress and writes none of it to its
+            // session, so a steer does not stand there.
+            let _ = tokio::time::timeout_at(deadline, memory.acknowledge(&query, &delivery, false))
+                .await;
         }
         Ok(())
     }

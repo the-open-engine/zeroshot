@@ -103,12 +103,22 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   run's vector record, are not ranked, and go first. Separate per-injection ceilings for memory default
   to 16000 approximate tokens for node graph guidance and 8000 for repository hooks; each accepts
   1..=64000 and converts one token to four UTF-8 bytes, including framing. A steer is delivered whole
-  and does not count against them. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
+  and does not count against them. Claude Code shows at most 10,000 characters of hook context
+  inline, so a Claude Code tool call adds steers only while its whole context, memory included,
+  stays within 9,000 bytes: a steer that does not fit waits, with every later steer, for the
+  conversation's next prompt. A tool call made by a Claude Code subagent never carries or
+  receipts a steer. There is no cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
   including compaction; new conversations and conversations continued in a successor receive fresh
   memory delivery sets. Steers use the same conversation keys; a conversation continued in a successor
   keeps only canonical steer receipts referenced by its saved conversation snapshot, after native
   restoration succeeds. Later receipts do not suppress delivery; a fresh fallback receives all
-  standing steers again. The carrier retains incremental vector-record read progress across callback deadlines.
+  standing steers again. A steer does not stand after a tool-call delivery on Copilot, whose hook
+  context is not written to its session, or on Pi and OpenCode, whose tool result a model may
+  refuse to follow (`HookQuery::standing`): the delivery is receipted, the steer stays due for
+  that conversation's next prompt, and the snapshot omits the receipt until an execution whose
+  prompt carried it ends successfully. Prompt-carried steers are receipted when the prompt is
+  prepared and follow the same rule.
+  The carrier retains incremental vector-record read progress across callback deadlines.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.
@@ -698,7 +708,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Discovery uses separate strict `{kind}` markers: `request_wait` (`openengine.request-wait/v1`),
   `run_suspension` (`openengine.run-suspension/v1`), and `run_vectors` (`openengine.run-vectors/v1`).
   `builtin.request.ask@1` uses the same host-owned binding with required string input `text`,
-  authored signals and a flat scalar-record output. It always suspends with reason `request`,
+  authored signals and a flat scalar-record output. Request nodes in one graph may declare
+  different signals and outputs: admission resolves this worker per node, and every other worker
+  reference keeps one contract per graph. It always suspends with reason `request`,
   carrying its question, contract, identity and deadline, and permits the same placements and no
   stack profiles. It requires workspace checkpoints, no instructions and one attempt. Ordinary
   resume refuses it before credential resolution and reports recovery unavailable. Interrupted
@@ -706,8 +718,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   validates its complete verifier result before successor admission and continues on the retained
   workspace; a late answer admits the existing timeout outcome and reports that successor as an
   invalid_request refusal. The owning controller's clock checks expiry before shape; clients send
-  valid answers unchanged and defer file errors until that check, retaining the controller's
-  refusal and the file diagnostic. A second answer names the existing
+  valid answers unchanged and defer file errors until that check, retaining the file diagnostic
+  and any controller refusal other than that of the placeholder's shape. A second answer names the existing
   successor. Request, answer and expiry vectors retain full content through show and inheritance;
   bounded list summaries omit text, schemas and answers. Inbox reads project only each run's own
   request vectors, never apply expiry, and exclude continued or stopped runs from pending pages.
@@ -950,7 +962,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   The connection is granted in request order, also to a pending request that is no longer
   polled, which then blocks every later operation: drop such a request before awaiting other
   ledger work in its place. The local controller's serving loop drops its terminal wait before
-  it runs a requested stop.
+  it runs a requested stop. Once the run ended or suspended it waits at most five seconds for a
+  first connection, so an interrupted launcher cannot keep the controller and its workspace
+  lease. A stop signal leaves a suspended run suspended: a live engine says so from memory once
+  it disposed its runtime for the suspension, and the ledger is read only when no engine is
+  live, so stopping live work never waits for persistence.
 - Live force-stop signals owned work before waiting for persistence. Local stop intent prevents
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;
@@ -981,11 +997,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   recursively transfer them to the successor's newly leased writer identity before admission. They
   advertise `openengine.workspace-recovery/v1`. Local resume persists predecessor/successor
   lineage before controller launch, uses a process-held file lock during admission, and reconciles
-  an interrupted launch before permitting another successor. A launch whose controller is confirmed
+  an interrupted launch before permitting another successor. It first waits, bounded, for an
+  ended or suspended predecessor's controller to release its lease. A launch whose controller is confirmed
   stopped is reconciled without a handoff wait. Status reports a claim whose launcher released it
   and whose controller neither runs nor admitted the run as recoverable, so a crash cannot strand
   the workspace. Local force-stop holds the same per-run recovery claim before reading status or
   successor ownership and through the controller reply, including when the run is still running.
+  Steers share that claim among themselves while they read status and record on a suspended run;
+  resume and force-stop take it alone and wait out steers briefly. Steer and suspend need a live
+  controller and never confirm its loss.
   Direct-target retained-workspace handoff records both sides before moving the tree
   and reconciles incomplete handoffs at startup. Resume reserves this durable handoff before
   acknowledging the successor; asynchronous credential resolution and preparation reuse that claim.
@@ -1006,10 +1026,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
   not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
-  retained workspace recovery. Default resume of a failed run starts a fresh graph on the retained workspace;
+  retained workspace recovery. Default resume of a failed run restarts it where it started on the
+  retained workspace: a submitted run at the graph root, a successor at the boundary it began at;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Checkpoint
   continuations, including request and other suspended successors, restore captured `node_instance`
-  provider conversations; failed-run restarts and `execution` sessions start new conversations.
+  provider conversations. Each such successor writes `conversation-origin.json` (the source
+  checkpoint directory and selection) to its checkpoint directory before preparation can fail. A
+  restart copies its source's record and restores those conversations; a source without one (a
+  submitted run) restarts with new conversations, as do `execution` sessions. An unreadable
+  record fails the start.
   Credentials are resolved again and successor token usage starts at zero. Suspended command/wait
   runs accept only default resume,
   continuing at the held-back node, or after a due wait. Request suspensions require answer and
@@ -1047,6 +1072,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   at 1 GiB; capture/restore failures use a new conversation and a node-naming system log. Pending
   restored conversations survive checkpoints before their next turn. Adapters own filename selection
   and relocation; shared code bounds copies, rejects unsafe names and restores only those files.
+  Pi's relocation writes a restored session's header line again with the successor workspace,
+  inside the private stage, because Pi finds a session ID only among the sessions of its working
+  directory; a first line that is no such header fails the restore.
   Contained capture rechecks storage ancestors from the trusted private home at selection and
   file reads; provider-owned symbolic links cannot redirect supervisor reads outside that home.
   Conversation copies observe execution/controller cancellation between bounded reads. Blocking
@@ -1064,9 +1092,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   deletion can finish, including deletion of private conversation files.
   ACP owner sessions and Active Memory delivery sets are not carried between runs.
   Versioned execution seeds live in separate files and are read only for selected continuation.
-  Target restart restores the latest published snapshot without importing a seed. Local restart
-  restores nothing: the user-owned checkout keeps its files, index, HEAD and branch, so work done
-  after a failure enters the successor. A selected local checkpoint is an explicit rollback that
+  Target restart restores the latest published snapshot without importing a checkpoint's seed.
+  Local restart restores nothing: the user-owned checkout keeps its files, index, HEAD and branch,
+  so work done after a failure enters the successor. Either restart begins where the failed run
+  began: it imports that run's own starting seed, which is empty for a submitted run and holds the
+  settled executions, an accepted answer included, for a successor. A selected local checkpoint is an explicit rollback that
   requires the CLI-only `--discard-workspace-changes` (rejected with `--target`); without it resume
   fails before credential resolution, successor claim or workspace change and names the opt-in
   command. Rollback keeps the shared-Git restore contract below. Restore staging is a
@@ -1501,7 +1531,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   workspace and graph rollback. Disabling workspace snapshots keeps the metadata-only delivery
   store, without initializing Restic or copying the workspace. Receipts contain stable identities,
   approved revisions and response/reply hashes, never full response bodies; both adapters reserve
-  serialized aggregate capacity before posting another reply, including earlier repair rounds. Restart keeps fresh graph history while restoring those owned facts;
+  serialized aggregate capacity before posting another reply, including earlier repair rounds. Restart imports no checkpoint history while restoring those owned facts;
   an older checkpoint cannot replace them, and conflicting generations fail closed. Custom checkpoint
   backends own the same lineage-retention contract through `RunCheckpointStore::delivery_state`
   and its receipt-only `retain_delivery_state` operation. Runtime failure retains acknowledged
@@ -1628,6 +1658,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## CLI and target contracts
 
+- `target list` and `target remove` manage local named-target state, including the built-in
+  `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses
+  `platform`, holds the registry lock through stored-login and resume-authorization cleanup, and
+  retains the record on cleanup failure for retry. Login revalidates the selected record under
+  that lock and holds it through persistence; recovery writes validate the registered target ID
+  under the registry lock before taking the recovery lock. Late receipts retain their run result
+  without restoring a removed target's permissions. Python `Client.list_targets()` and
+  `Client.remove_target()` use that same local registry independently of the client's run target.
+  Linux credential selection retains keyring cleanup after switching to file storage. Legacy
+  `file` selections may have used both stores; only `file-only` selections skip keyring cleanup.
+  Record cleanup obligations before credential writes and retain them until removal succeeds.
+  These commands do not change MCP tools, protocol source types, shared skills or remote plugins.
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
 - Hosted suspend and vector POST routes use the separate `hosted_run_controls` discovery extension
   (`openengine.hosted-run-controls/v1`), relative to `hosted_runs.base_url`. Its strict
@@ -1938,6 +1980,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
   Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
   remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
+- Canvas toolbars keep one row and fold by their own width, as ui/DESIGN.md sets out. Folded tools
+  go through the shared `MoreMenu` (`ui/src/MoreMenu.tsx`), which owns keyboard movement, focus and
+  dismissal; do not add another overflow menu or let a toolbar wrap or scroll.
 - [ui/DESIGN.md](ui/DESIGN.md) is the UI's visual source of truth; tokens and fonts live in
   `ui/src/styles.css` and `ui/src/theme.ts`. Bundle all runtime assets, including the paper textures.
   `embed.html` mounts the same editor/viewer without standalone menus. Its version-1 bridge
@@ -1951,9 +1996,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## Issue triage
 
-- The issue triage workflow adds `triage` to new and reopened issues. Only Maintain/Admin users
-  and the verified support service App may assign or remove other issue labels; ordinary Write
-  and Triage access does not authorize routing decisions.
+- The issue label workflow enforces authorized label decisions without assigning a default stage
+  on creation or reopening. The support service owns stage transitions. Only Maintain/Admin users
+  and the verified support service App may assign or remove issue labels; ordinary Write and
+  Triage access does not authorize routing decisions.
 - `scripts/github-issue-triage.js` derives current label intent from complete issue event history
   and fresh repository role checks. Per-issue workflow serialization may coalesce pending events,
   so reconciliation covers all labels instead of reversing only one webhook. Trigger visibility
@@ -1964,9 +2010,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   uses only repository content read and issue write permissions.
 - The guard's own `github-actions[bot]` corrections are not new label authority. Preserve later
   maintainer/service decisions across stale events and never replace the whole label list.
-- Support-service backlog decisions remain authoritative for scheduling; GitHub labels alone
-  never authorize a code change or merge. Bootstrap `triage`, `auto-fix-0` through `auto-fix-3`,
-  and `plan-0` through `plan-3` before activating this workflow.
+- GitHub issues own current work. Stage labels are `new`, `triage`, `auto-p0` through `auto-p3`,
+  `plan-p0` through `plan-p3`, and `manual-p0` through `manual-p3`; `running` and `needs-attention`
+  are overlays. Stage decisions do not themselves authorize publication or merge.
 
 ## Development conventions
 

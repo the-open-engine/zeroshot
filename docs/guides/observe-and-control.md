@@ -102,6 +102,8 @@ local controller is unavailable. Their error names `zeroshot resume RUN_ID` and 
 does not record a terminal result: an unclaimed lost run keeps its recorded status on every read.
 Only these explicit controls confirm loss under the controller lease before recording `runtime_lost`;
 they refuse to take over a controller that still owns its lease or whose loss cannot be confirmed.
+`steer` and `suspend` never take over: on a lost run they exit non-zero, name the two commands and
+leave the recorded state unchanged.
 
 ## Token usage
 
@@ -196,15 +198,18 @@ Use `code` to distinguish a failed run or a request that needs correction from a
 | Local registry has no workspace-recovery authorization           | `invalid_request` | `request.invalid`    | `{}`                             |
 | Workspace-recovery authorization does not match the original run | `invalid_request` | `request.invalid`    | `{}`                             |
 | Local workspace-recovery authorization is malformed              | `invalid_request` | `request.invalid`    | `{}`                             |
+| Refusal relayed from the run's controller or a target            | `target`          | `invalid_request`    | Target's details, else `{}`      |
 | Target transport failed                                          | `target`          | `target.unavailable` | `target` and `origin` when known |
 
 `run.failed` reports a terminal outcome; retrying observation does not restart that run. Inspect its
 status and logs before selecting a recovery action. Correct the request or local registry state
-for the listed `request.invalid` refusals. Transport failures remain `target.unavailable`.
+for the listed `request.invalid` refusals. A relayed `invalid_request` refusal says what to correct;
+do not retry it unchanged. Transport failures remain `target.unavailable`.
 
 The Python SDK maps `request.invalid` to `InvalidRequestError` and transport failures to
-`TargetError`. A failed run ends `Run.watch()` normally; `Run.wait()` returns its `RunResult`.
-Call `RunResult.raise_for_failure()` to opt into `RunFailedError`.
+`TargetError`; relayed `invalid_request` refusals also arrive as `TargetError`, carrying the
+controller's message. A failed run ends `Run.watch()` normally; `Run.wait()` returns its
+`RunResult`. Call `RunResult.raise_for_failure()` to opt into `RunFailedError`.
 
 ## Attach to an active execution
 
@@ -242,12 +247,18 @@ output and fail the command. The archive is never extracted and its contents are
 
 ## Restart or resume a failed run
 
-Failed local runs and direct targets retain their workspace. Restart the original graph at its root
+Failed local runs and direct targets retain their workspace. Restart a failed run where it started
 with:
 
 ```console
 zeroshot resume RUN_ID
 ```
+
+A run you submitted restarts at the root of its graph. A successor restarts at the point it began
+at: after the answer for the successor of an answered request, after the held node for the
+successor of a suspended run, and at the selected node for a checkpoint successor. An answered
+request therefore stays answered, also when several successors fail in a row. To run the whole
+graph from its root again, submit a new run.
 
 Confirmed Claude account/session quota exhaustion fails promptly as `refusal`, with the affected
 node, available reset information and manual-resume guidance in `status` and terminal failure
@@ -286,8 +297,9 @@ writers do not have separate snapshots. Read-only boundaries can share the same 
 Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
 resolve credentials again. A selected checkpoint or the continuation of a suspended run restores each supported
 `node_instance` agent's provider conversation as it was at the checkpoint, even on another machine
-or without restoring workspace files. A failed-run restart and every `execution`-scoped agent start
-new conversations. Successor token usage starts at zero.
+or without restoring workspace files. Restarting such a successor restores the same conversations
+again, without the turns it added before it failed. A restarted run you submitted and every
+`execution`-scoped agent start new conversations. Successor token usage starts at zero.
 
 Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
 They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
@@ -360,7 +372,8 @@ A suspended wait can continue only from its reported `wait.dueAt`, and continues
 No timer starts successors locally or on a direct target. Selected checkpoint resume and
 `--discard-workspace-changes` are refused for suspended runs. The predecessor stays suspended and
 `workspaceRecovery.successorRunId` links to its sole successor. `force-stop` can finish an unclaimed
-suspended attempt as `force_stopped` and removes its retained checkpoints.
+suspended attempt as `force_stopped` and removes its retained checkpoints. A direct target refuses
+`discard-workspace` for a suspended run that has no successor; force-stop it first.
 
 Foreground `run` and `watch` end with exit 0 at suspension. `logs` and read-only status commands
 continue to work after the controller exits. Add `--target NAME` for the same controls on a direct
@@ -404,8 +417,18 @@ Supply exactly one text source. An admitted, running or suspended run accepts st
 Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
-Every agent conversation, including reviewers, receives each steer once: at its next tool call or
-in its next prompt, whichever comes first. It cannot revise a tool call already issued. Direction
+Every agent conversation, including reviewers, receives each steer at its next tool call or in its
+next prompt, whichever comes first, and once only except on Copilot, Pi and OpenCode as described
+below. It cannot revise a tool call already issued. On Claude
+Code, a tool call carries steers only while the returned context, Active Memory included, stays
+within 9,000 bytes, because Claude Code passes at most 10,000 characters inline; a larger steer, and
+any steer recorded after it, waits for that conversation's next prompt, where it arrives whole, so
+it may not arrive during the current turn. Tool
+calls made by Claude Code subagents never receive steers; the node's own conversation gets them at
+its next tool call or prompt. On Copilot, Pi and OpenCode a steer shown at a tool call does not
+stand in the conversation: Copilot applies it to the turn in progress without keeping it, and Pi
+and OpenCode show it inside a tool result, which a model may refuse to follow. Such a conversation
+receives the steer once more, with its next prompt. Direction
 takes precedence over authored instructions as guidance; permissions, output contracts, routing,
 runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
 Steers stand for the rest of the run and its successors. Continued conversations keep receipts;
@@ -416,8 +439,9 @@ newline and carriage return. Text is stored and shown as given: **do not put sec
 
 Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
-byte lengths, character-safe excerpts and confirmed receiving execution references. Prompt receipts
-appear after a successful provider turn; tool-call receipts appear after the carrier acknowledges.
+byte lengths, character-safe excerpts and receiving execution references. A prompt receipt appears
+when the turn carrying the steer starts, a tool-call receipt once the carrier acknowledges. If that
+turn fails, the conversation's next prompt carries the steer again, also in a successor.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:
 

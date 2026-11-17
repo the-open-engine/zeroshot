@@ -58,6 +58,9 @@ fn query(session: &str) -> HookQuery {
         tool_name: "exec_command".into(),
         tool_input: json!({"cmd":"cat guard.rs", "workdir":workspace().join("src")}),
         cwd: workspace(),
+        subagent: false,
+        context_budget: crate::active_memory::hooks::native::MAX_CONTEXT_BYTES,
+        standing: true,
     }
 }
 
