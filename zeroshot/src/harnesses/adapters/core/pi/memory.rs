@@ -1,4 +1,8 @@
-//! Pi's native tool-result extension for the shared Active Memory broker.
+//! Pi's native extension for the shared Active Memory broker.
+//!
+//! Nothing is placed inside a tool result, which a model may refuse to follow. A steer becomes
+//! a user message through Pi's steering queue; a memory lesson becomes a session entry at the
+//! turn boundary. Both reach the model with its next request and stay in the session file.
 
 use std::io;
 use std::path::Path;
@@ -13,8 +17,8 @@ pub(crate) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
     let source = PI_EXTENSION
         .replace("CAPABILITY_PATH", &serde_json::to_string(capability)?)
         .replace(
-            "MAX_CONTEXT_BYTES",
-            &crate::active_memory::hooks::native::MAX_CONTEXT_BYTES.to_string(),
+            "MAX_REPLY_BYTES",
+            &crate::active_memory::hooks::native::MAX_REPLY_BYTES.to_string(),
         );
     let extension = write_provider_file(home, "active-memory-extension.mjs", source.as_bytes())?;
     command.argv.extend([
@@ -25,11 +29,16 @@ pub(crate) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
 }
 
 // Explicit extension paths are honored even with --no-extensions. No npm imports or child
-// process are needed. Errors leave the original result unchanged and cannot block the tool.
+// process are needed. Errors leave the conversation unchanged and cannot block the tool.
+//
+// Pi 1.4.0 hands over one queued steering message per model turn, so lessons do not use that
+// queue: they wait for `turn_end`, which follows the tool calls of one model response, and are
+// appended there together. The steer is acknowledged by the adapter when Pi reports the user
+// message in its event stream.
 const PI_EXTENSION: &str = r#"import fs from 'node:fs';
 import net from 'node:net';
 const capabilityPath = CAPABILITY_PATH;
-const maxContextBytes = MAX_CONTEXT_BYTES;
+const maxContextBytes = MAX_REPLY_BYTES;
 function retrieve(event) {
   return new Promise((resolve) => {
     let socket;
@@ -66,15 +75,21 @@ function retrieve(event) {
   });
 }
 export default function(pi) {
+  const lessons = [];
   pi.on('tool_result', async (event,ctx) => {
     const delivery = await retrieve({toolName:event.toolName,input:event.input,cwd:ctx.cwd});
     if (!delivery) return;
-    const result = {content:[...event.content,{type:'text',text:delivery.context}],
-      ...(event.structuredContent === undefined ? {} : {structuredContent:event.structuredContent}),
-      ...(event.details === undefined ? {} : {details:event.details}),
-      ...(event.usage === undefined ? {} : {usage:event.usage}),isError:event.isError};
+    try {
+      const {context,steer} = JSON.parse(delivery.context);
+      if (steer) pi.sendUserMessage(steer,{deliverAs:'steer'});
+      if (context) lessons.push(context);
+    } catch { return; }
     delivery.returned();
-    return result;
+  });
+  pi.on('turn_end', async (event) => {
+    if (!lessons.length) return;
+    const entries = lessons.splice(0).map((content) => ({type:'custom_message',customType:'zeroshot-memory',content,display:true}));
+    return {entries:[...event.entries,...entries]};
   });
 }
 "#;

@@ -12,6 +12,10 @@ impl NativeV2Supervisor {
             && admitted.runtime.global_agents().postmortem.enabled
             && !*self.resolution_stop.borrow()
             && provider_rejection(admitted, snapshot).is_none()
+            && self
+                .postmortem
+                .as_ref()
+                .is_some_and(|work| work.initialization_error().is_none())
         {
             self.postmortem.as_ref()
         } else {
@@ -30,7 +34,7 @@ impl NativeV2Supervisor {
                 && admitted.runtime.active_memory().enabled()
                 && admitted.runtime.global_agents().postmortem.enabled
             {
-                self.postmortem_log(format!(
+                self.postmortem_error(format!(
                     "Active Memory postmortem skipped: source node {node} ended with {reason}"
                 ))
                 .await;
@@ -66,8 +70,13 @@ impl NativeV2Supervisor {
             result=&mut work=>result,
         };
         let result = result.unwrap_or(Err(PostmortemError::Preparation));
+        let mut failed = true;
         let message = match result {
             Ok(mut report) => {
+                failed = report.failed_roles > 0
+                    || report.cancelled
+                    || report.timed_out
+                    || watchdog_expired;
                 report.timed_out |= watchdog_expired;
                 if watchdog_expired && !*self.resolution_stop.borrow() {
                     report.cancelled = false;
@@ -82,7 +91,7 @@ impl NativeV2Supervisor {
                 )
             }
             Err(PostmortemError::CleanupUnconfirmed) => {
-                self.postmortem_log(
+                self.postmortem_error(
                     "Active Memory postmortem provider cleanup could not be confirmed".to_owned(),
                 )
                 .await;
@@ -90,11 +99,28 @@ impl NativeV2Supervisor {
             }
             Err(error) => format!("Active Memory postmortem skipped or failed: {error}"),
         };
-        self.postmortem_log(message).await;
+        if failed {
+            self.postmortem_error(message).await;
+        } else {
+            self.postmortem_log(message).await;
+        }
         Ok(())
     }
 
     async fn postmortem_log(&self, line: String) {
+        self.postmortem_log_stream(line, SafeLogStream::System)
+            .await;
+    }
+
+    async fn postmortem_error(&self, line: String) {
+        self.postmortem_log_stream(line, SafeLogStream::Error).await;
+    }
+
+    async fn postmortem_log_stream(&self, line: String, stream: SafeLogStream) {
+        let line = crate::native_v2_runner::bounded_log_text(
+            line,
+            crate::v2_run_ledger::MAX_SAFE_LOG_BYTES,
+        );
         if let Ok(line) = SafeLogLine::new(line) {
             let _ = self
                 .ledger
@@ -103,7 +129,7 @@ impl NativeV2Supervisor {
                     vec![RunEvent::SafeLog {
                         execution: None,
                         timestamp: current_timestamp(),
-                        stream: SafeLogStream::System,
+                        stream,
                         line,
                         diagnostic: None,
                     }],

@@ -164,6 +164,57 @@ async fn diagnostics_are_depth_first_and_cover_each_compatibility_axis() {
     assert!(codes.contains(&WorkerCompatibilityCode::Diagnostic));
 }
 
+struct NodeRegistry {
+    shared: MemoryRegistry,
+    nodes: BTreeMap<Vec<String>, WorkerDescriptor>,
+}
+
+#[async_trait]
+impl WorkerRegistry for NodeRegistry {
+    async fn resolve(&self, worker: &WorkerRef) -> Result<WorkerDescriptor, WorkerRegistryError> {
+        self.shared.resolve(worker).await
+    }
+
+    async fn resolve_node(
+        &self,
+        worker: &WorkerRef,
+        path: &[String],
+    ) -> Result<WorkerDescriptor, WorkerRegistryError> {
+        match self.nodes.get(path) {
+            Some(descriptor) => Ok(descriptor.clone()),
+            None => self.resolve(worker).await,
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_registry_may_describe_one_reference_per_node() {
+    let mut shared = registry();
+    let verifier = WorkerRef::new("mock.verifier@1").assert_value();
+    let other_shape: WorkerDescriptor = serde_json::from_value({
+        let mut value = descriptor("mock.verifier@1", true);
+        *value
+            .assert_at_mut("contract")
+            .assert_at_mut("verifier")
+            .assert_at_mut("signals") = json!({ "colour": ["blue"] });
+        value
+    })
+    .assert_value();
+    shared.0.insert(verifier, other_shape);
+    let graph: GraphSpec = serde_json::from_value(graph()).assert_value();
+    let diagnostics = check_graph_workers(&graph, &shared).await.assert_error();
+    assert_eq!(diagnostics.assert_at(0).path, ["root", "verify"]);
+
+    let registry = NodeRegistry {
+        shared,
+        nodes: BTreeMap::from([(
+            vec!["root".to_owned(), "verify".to_owned()],
+            serde_json::from_value(descriptor("mock.verifier@1", true)).assert_value(),
+        )]),
+    };
+    check_graph_workers(&graph, &registry).await.assert_value();
+}
+
 #[tokio::test]
 async fn resolves_builtin_worker_via_default_compatibility_rules() {
     let mut registry = registry();

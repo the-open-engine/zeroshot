@@ -1,29 +1,5 @@
-.app-sections {
-  display: flex;
-  align-self: stretch;
-  gap: 22px;
-  margin-left: 15px;
-}
-.app-sections button {
-  color: var(--ink-muted);
-  padding: 0 2px;
-  border-bottom: 2px solid transparent;
-  font-size: 13px;
-}
-.app-sections button[aria-current='page'] {
-  color: var(--ink);
-  border-bottom-color: var(--rust);
-}
 .app[hidden] {
   display: none;
-}
-.run-sidebar {
-  width: 258px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--hairline);
-  display: flex;
-  flex-direction: column;
-  padding: 22px 12px 12px;
 }
 .run-search {
   display: flex;
@@ -254,47 +230,145 @@
 }
 .history-timeline {
   flex-shrink: 0;
+  /* The bar lays itself out by its own width, which the sidebar and inspector change. */
+  container-type: inline-size;
   border-top: 1px solid var(--hairline);
   background: var(--surface);
-  padding: 16px 24px 12px;
+  padding: 4px 16px;
   z-index: 10;
 }
-.timeline-caption,
-.timeline-caption > div {
+.timeline-bar {
+  display: grid;
+  /* Controls, track, then the event with live status and Show node. That last column has a fixed
+     width, so the track keeps its length while dragging whatever the event shows. */
+  grid-template-columns: auto minmax(120px, 1fr) clamp(240px, 42%, 560px);
+  grid-template-areas: 'controls track info';
+  align-items: center;
+  gap: 4px 12px;
+}
+.timeline-controls {
+  grid-area: controls;
   display: flex;
   align-items: center;
-  gap: 14px;
+}
+.timeline-controls .icon-button {
+  width: 28px;
+  height: 28px;
+}
+/* Adjacent buttons: draw the focus ring inside so it never covers the neighbour. */
+.timeline-controls .icon-button:focus-visible {
+  outline-offset: -2px;
+}
+/* A thin track: replay is a tool to reach for, not the page's focus. The part already replayed is
+   ink (ui/DESIGN.md); the rest is a muted line that still reads against the surface. */
+.history-timeline input[type='range'] {
+  grid-area: track;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.history-timeline input[type='range']::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to right,
+    var(--ink) 0 var(--progress, 0%),
+    var(--ink-muted) var(--progress, 0%) 100%
+  );
+}
+.history-timeline input[type='range']::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink-muted);
+}
+.history-timeline input[type='range']::-moz-range-progress {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+.history-timeline input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.history-timeline input[type='range']::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.history-timeline input[type='range']:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.timeline-info {
+  grid-area: info;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
 }
 .timeline-caption {
-  justify-content: space-between;
-  margin-bottom: 13px;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
 }
 .timeline-caption strong {
-  font-size: 13px;
+  min-width: 0;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .timeline-mode {
-  font-size: 12px;
   color: var(--ink-muted);
-  flex-shrink: 0;
-}
-.timeline-caption .text-button {
-  font-size: 12px;
   flex-shrink: 0;
 }
 .timeline-counter {
-  font-size: 12px;
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-.timeline-progress {
   flex-shrink: 0;
 }
+.timeline-extras {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.timeline-extras .text-button {
+  padding: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* Too narrow for one row: the event and its extras take a second row under the controls. */
+@container (max-width: 760px) {
+  .timeline-bar {
+    grid-template-columns: auto minmax(80px, 1fr);
+    grid-template-areas:
+      'controls track'
+      'info info';
+  }
+  .timeline-mode {
+    display: none;
+  }
+}
+/* Live status: a dot and a word while the view keeps up with the run, a way back when it does not. */
 .history-live {
   display: inline-flex;
   align-items: center;
@@ -313,34 +387,6 @@
   border-radius: 50%;
   background: currentColor;
 }
-.timeline-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.timeline-controls input[type='range'] {
-  flex: 1;
-  height: 28px;
-  border: 0;
-  padding: 0;
-  background: none;
-  cursor: pointer;
-  margin: 0 14px;
-}
-.timeline-play {
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--action);
-  color: var(--on-action);
-}
-.timeline-play:disabled {
-  color: var(--disabled-text);
-  background: var(--disabled-surface);
-}
 .history-load-state {
   display: flex;
   align-items: center;
@@ -348,7 +394,7 @@
   gap: 10px;
   color: var(--ink-muted);
   font-size: 12px;
-  padding-top: 9px;
+  padding-bottom: 4px;
 }
 .history-load-state .text-button {
   font-size: inherit;
@@ -786,13 +832,8 @@
   padding: 12px 9px;
   font-size: 12px;
 }
-.history-sidebar-toggle {
-  display: none;
-}
-@media (max-width: 1200px) {
-  .run-sidebar {
-    width: 225px;
-  }
+/* The shared layouts (styles.css, ui/DESIGN.md) fold the run list and the inspector there. */
+@media (max-width: 1150px) {
   .run-inspector {
     --inspector-default-width: 330px;
   }
@@ -800,51 +841,12 @@
     font-size: 22px;
   }
 }
-@media (max-width: 950px) {
-  .run-inspector {
-    position: absolute;
-    z-index: 8;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    --inspector-default-width: 350px;
-    box-shadow: -5px 0 20px var(--shadow-panel);
+@media (max-width: 720px) {
+  .history-header {
+    padding: 0 16px;
   }
   .history-header .profile-title {
     gap: 7px;
-  }
-  .history-header h1 {
-    font-size: 21px;
-  }
-}
-@media (max-width: 720px) {
-  .run-sidebar {
-    display: none;
-    position: absolute;
-    left: 0;
-    top: 62px;
-    bottom: 0;
-    z-index: 30;
-    background: var(--canvas);
-    width: 275px;
-    box-shadow: 5px 0 20px var(--shadow-panel);
-  }
-  .run-sidebar.visible {
-    display: flex;
-  }
-  .history-sidebar-toggle {
-    display: inline-flex;
-  }
-  .app-sections {
-    margin-left: 0;
-    gap: 13px;
-  }
-  .app-header {
-    gap: 14px;
-    padding: 0 15px;
-  }
-  .history-header {
-    padding: 0 16px;
   }
   .history-header h1 {
     font-size: 20px;
@@ -853,31 +855,25 @@
     display: none;
   }
   .history-timeline {
-    padding: 12px;
+    padding: 4px 8px;
   }
-  .timeline-caption {
-    gap: 6px;
+  /* 44px touch targets on phones (ui/DESIGN.md). */
+  .timeline-controls .icon-button,
+  .timeline-extras .text-button,
+  .timeline-extras .history-live {
+    min-width: 44px;
+    min-height: 44px;
   }
-  .timeline-caption > div {
-    gap: 8px;
+  .history-timeline input[type='range'] {
+    height: 44px;
   }
-  .timeline-caption strong {
-    font-size: 12px;
+  .history-timeline input[type='range']::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -7px;
   }
-  .timeline-mode {
-    display: none;
-  }
-  .timeline-controls {
-    gap: 1px;
-  }
-  .timeline-controls input[type='range'] {
-    margin: 0 6px;
-  }
-}
-@media (max-width: 450px) {
-  .app-header .local-label,
-  .app-header .brand-rule,
-  .app-header .brand > span:last-child {
-    display: none;
+  .history-timeline input[type='range']::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
   }
 }

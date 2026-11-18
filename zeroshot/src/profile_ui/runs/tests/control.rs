@@ -2,7 +2,7 @@ use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use crate::full_v1_reducer::{Decision, FullV1Reducer, ReductionInput};
 use crate::native_v2_admission::NativeV2Admission;
-use crate::native_v2_supervisor::{durable_history, next_execution, next_node_instance};
+use crate::native_v2_supervisor::{durable_history, next_execution, next_node_instance_for};
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 use openengine_cluster_protocol::{RunSubmission, NodeRuntimeBinding};
 use openengine_cluster_server::admission::VerifiedGraph;
@@ -67,7 +67,8 @@ async fn dispatch_ready(fixture: &Fixture) -> Vec<ExecutionRef> {
         .reduce(ReductionInput {
             initial_input: &stored.admitted.initial_input,
             executions: &executions,
-            next_node_instance: next_node_instance(&executions).assert_value(),
+            next_node_instance: next_node_instance_for(&stored.snapshot, &executions)
+                .assert_value(),
             next_execution: next_execution(&executions).assert_value(),
         })
         .assert_value();
@@ -122,7 +123,7 @@ async fn finish(fixture: &Fixture, reference: ExecutionRef, verdict: Option<&str
             artifacts: Vec::new(),
         },
         None => WorkerOutcome::Verified {
-            output: json!({"reviewResponses":[]}),
+            output: json!({"reviewResponses":[],"reviewContext":"Focused checks passed."}),
             artifacts: Vec::new(),
         },
     };

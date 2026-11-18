@@ -161,6 +161,16 @@ impl DeliveryCheckpointStore {
 
 #[async_trait]
 impl RunCheckpointStore for DeliveryCheckpointStore {
+    async fn suspend(
+        &self,
+        _history: &[DurableExecution],
+        _vectors: &[openengine_cluster_protocol::RunVector],
+    ) -> Result<(), CheckpointError> {
+        // Local continuation history and vectors are already durable in the run ledger.
+        // Disabling snapshots must not prevent a later request from suspending there.
+        Ok(())
+    }
+
     async fn retain_delivery_state(
         &self,
         state: &crate::native_v2_contract::DeliveryCheckpoint,
@@ -570,12 +580,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
 
     async fn restored_conversations(&self) -> Option<ConversationFiles> {
         let selection = self.conversation_restore.as_ref()?;
-        if selection.selection == CheckpointRestoreSelection::Latest {
-            return None;
-        }
-        restore_conversations(selection, self.stopping.clone())
-            .await
-            .ok()
+        restore_checkpoint_conversations(selection, self.stopping.clone()).await
     }
 
     async fn suspend(
@@ -642,6 +647,47 @@ impl RunCheckpointStore for ResticCheckpointStore {
 pub fn discard_lineage(directory: &Path, repository: &Path) -> Result<(), CheckpointError> {
     remove_lineage_catalogs(directory, repository)?;
     remove_if_present(repository)
+}
+
+/// Reject redirected repository roots before local discard changes recovery data.
+pub(crate) fn open_workspace_repository(
+    repository: &Path,
+) -> Result<Option<std::fs::File>, CheckpointError> {
+    match crate::execution::platform::open_directory(repository) {
+        Ok(directory) => Ok(Some(directory)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Local explicit discard keeps delivery receipts needed by a later restart, including
+/// receipts newer than the predecessor's last completed execution.
+pub(crate) fn discard_workspace_lineage(
+    directory: &Path,
+    repository: &Path,
+) -> Result<bool, CheckpointError> {
+    // Validate before removing catalogs too: read_dir follows a symlink/reparse root and
+    // would otherwise delete unrelated entries in its target.
+    let _repository = open_workspace_repository(repository)?;
+    let mut discarded = remove_lineage_catalogs(directory, repository)?;
+    let entries = match std::fs::read_dir(repository) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(discarded),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_name() == "delivery-state.json" {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            remove_if_present(&entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+        discarded = true;
+    }
+    Ok(discarded)
 }
 
 pub(crate) fn discard_recorded_lineage(directory: &Path) -> Result<(), CheckpointError> {
@@ -885,7 +931,21 @@ fn remove_if_present(path: &Path) -> Result<(), CheckpointError> {
     }
 }
 
-fn remove_lineage_catalogs(directory: &Path, repository: &Path) -> Result<(), CheckpointError> {
+fn remove_lineage_catalogs(directory: &Path, repository: &Path) -> Result<bool, CheckpointError> {
+    let mut removed = false;
+    for candidate in lineage_catalogs(directory, repository)? {
+        removed |= candidate.try_exists()?;
+        remove_if_present(&candidate)?;
+    }
+    Ok(removed)
+}
+
+/// Catalogs removed together with this repository. Local discard checks ownership of every
+/// listed run before using the same deletion path as force-stop.
+pub(crate) fn lineage_catalogs(
+    directory: &Path,
+    repository: &Path,
+) -> Result<Vec<PathBuf>, CheckpointError> {
     let expected = std::path::absolute(repository)?;
     let mut candidates = vec![directory.to_owned()];
 
@@ -914,6 +974,7 @@ fn remove_lineage_catalogs(directory: &Path, repository: &Path) -> Result<(), Ch
 
     candidates.sort();
     candidates.dedup();
+    let mut catalogs = Vec::new();
     for candidate in candidates {
         let matches = candidate == directory
             || catalog::read::<StorageConfiguration>(&candidate.join("storage.json"))
@@ -921,10 +982,10 @@ fn remove_lineage_catalogs(directory: &Path, repository: &Path) -> Result<(), Ch
                 .and_then(|configuration| std::path::absolute(configuration.repository).ok())
                 .is_some_and(|configured| configured == expected);
         if matches {
-            remove_if_present(&candidate)?;
+            catalogs.push(candidate);
         }
     }
-    Ok(())
+    Ok(catalogs)
 }
 
 fn stored_snapshot(
@@ -973,8 +1034,14 @@ fn snapshot_path(directory: &Path, snapshot: &SnapshotId) -> PathBuf {
 async fn restore_conversations(
     selection: &CheckpointRestore,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
-) -> Result<ConversationFiles, CheckpointError> {
-    let snapshot = selected_snapshot(selection)?;
+) -> Result<Option<ConversationFiles>, CheckpointError> {
+    let snapshot = match selected_snapshot(selection) {
+        // No pointer or catalog entry means no such checkpoint, so no conversation either.
+        Err(CheckpointError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        snapshot => snapshot?,
+    };
     let (configuration, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)?;
     let repository = restic::Repository::new(
         configuration.program.for_restore()?,
@@ -990,13 +1057,37 @@ async fn restore_conversations(
         .await?;
     let directory = stage.path().join("conversations");
     if !directory.is_dir() {
-        return Err(catalog::invalid("checkpoint has no conversations"));
+        return Ok(None);
     }
     // Drop the independently extracted workspace immediately; it is never installed.
     let workspace = stage.path().join("workspace");
     let _ = filesystem::remove_disposable_tree(&workspace);
     let retained = ConversationFiles::staged(stage);
-    Ok(ConversationFiles::nested(retained, directory))
+    Ok(Some(ConversationFiles::nested(retained, directory)))
+}
+
+/// The conversations a successor starts with. `source` is its predecessor's checkpoint directory
+/// with the successor's selection: a continuation or a selected checkpoint names them itself. A
+/// restart starts with the ones its source started with, or with new ones when its source
+/// recorded none. The choice is recorded in `own`, the successor's checkpoint directory.
+pub(crate) fn successor_conversations(
+    source: CheckpointRestore,
+    own: &Path,
+) -> Result<CheckpointRestore, CheckpointError> {
+    const ORIGIN: &str = "conversation-origin.json";
+    let origin = if source.selection == CheckpointRestoreSelection::Latest {
+        match catalog::read(&source.directory.join(ORIGIN)) {
+            Ok(origin) => origin,
+            Err(CheckpointError(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(source);
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        source
+    };
+    catalog::write_atomic(&own.join(ORIGIN), &origin)?;
+    Ok(origin)
 }
 
 pub(crate) async fn restore_checkpoint_conversations(
@@ -1006,5 +1097,7 @@ pub(crate) async fn restore_checkpoint_conversations(
     if selection.selection == CheckpointRestoreSelection::Latest {
         return None;
     }
-    restore_conversations(selection, stopping).await.ok()
+    restore_conversations(selection, stopping)
+        .await
+        .unwrap_or_else(|_| Some(ConversationFiles::unrestorable()))
 }

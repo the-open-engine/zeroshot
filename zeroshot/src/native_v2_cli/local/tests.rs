@@ -23,6 +23,9 @@ use crate::v2_run_ledger::CreateRun;
 #[path = "preflight_tests.rs"]
 mod preflight_tests;
 
+#[path = "input_size_tests.rs"]
+mod input_size_tests;
+
 fn contract_backend(root: &Path) -> LocalCliBackend {
     LocalCliBackend::new(
         root.to_owned(),
@@ -69,11 +72,16 @@ fn recovery_document(
         resumed_from,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     }
 }
 
-fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> RunStatusResult {
+pub(super) fn contract_status(
+    submission: &RunSubmission,
+    run_id: RunId,
+    failed: bool,
+) -> RunStatusResult {
     RunStatusResult {
         steering: Default::default(),
         run_id,
@@ -185,7 +193,6 @@ fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     }
 }
 
-#[cfg(unix)]
 fn initialize_local_repository(root: &Path) {
     fn git(root: &Path, arguments: &[&str]) {
         let status = std::process::Command::new("git")
@@ -435,7 +442,8 @@ async fn local_recovery_contract_preserves_lineage_and_recoverability() {
     assert!(matches!(
         backend.read_recovery_document(&successor),
         Err(NativeV2CliError::Local(message))
-            if message == "workspace recovery metadata is invalid"
+            if message.contains("workspace recovery record") && message.contains("is invalid")
+                && message.contains(&*backend.recovery_path(&successor).assert_value().to_string_lossy())
     ));
 }
 
@@ -551,10 +559,9 @@ async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_re
             assert!(matches!(error, NativeV2CliError::Local(_)), "{error}");
             let storage = backend.run_storage(&run_id).assert_value();
             assert!(
-                storage.exists(),
-                "checkpoint resume must reach controller launch"
+                !storage.exists(),
+                "a failed fresh launch removes its storage"
             );
-            assert!(!storage.join(BOOTSTRAP_FILE).exists());
             continue;
         }
         assert!(matches!(error, NativeV2CliError::Usage(_)));
@@ -644,16 +651,10 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
     let original_storage = backend.run_storage(&original).assert_value();
-    assert!(original_storage.is_dir());
-    assert!(!original_storage.join(BOOTSTRAP_FILE).exists());
-    assert_eq!(
-        backend
-            .read_recovery_document(&original)
-            .assert_value()
-            .delivery_run_id,
-        Some(original.clone())
-    );
+    assert!(!original_storage.exists());
 
+    // Resume starts from an admitted predecessor and keeps its recovery state.
+    drop(create_contract_run(&backend, &original, &submission).await);
     let recovery = recovery_document(submission, workspace, None);
     backend
         .write_recovery_document(&original, &recovery)
@@ -728,7 +729,7 @@ async fn local_enumeration_and_readiness_fail_closed_without_controller() {
         .write_all(&ready)
         .assert_value();
     assert!(matches!(
-        backend.connect_run(&run_id).await,
+        backend.connect_run(&run_id, true).await,
         Err(NativeV2CliError::Local(message))
             if message.contains("different run identity")
     ));
@@ -756,6 +757,7 @@ fn local_recovery_lineage_is_bounded_and_honors_root_delivery() {
         resumed_from: None,
         delivery_run_id: Some(delivery.clone()),
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     assert_eq!(
@@ -798,15 +800,17 @@ async fn local_stale_state_and_readiness_fail_closed() {
 
     let claim = backend.claim_recovery_workspace(&run_id).assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&run_id)
+        backend
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_some()
     );
     drop(claim);
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 
     let no_ledger = RunId::new("0199f33f-3b44-7d21-9000-000000000072");
@@ -877,6 +881,24 @@ async fn local_stale_state_and_readiness_fail_closed() {
              portable controller I/O failed: restic is unavailable; \
              ZEROSHOT_PREPARATION_TIMEOUT sets its 5 s preparation deadline"
         );
+        // A run that ended, and whose controller exited after its grace, was still started.
+        let ready = serde_json::to_vec(&serde_json::json!({
+            "kind": "zeroshot.portable-controller-ready/v1",
+            "runId": run_id,
+            "socket": paths.socket(),
+            "pid": 1
+        }))
+        .assert_value();
+        private_file(&paths.ready(), FileAccess::CreateNew)
+            .assert_value()
+            .write_all(&ready)
+            .assert_value();
+        assert!(matches!(
+            wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
+                .await
+                .assert_value(),
+            ControllerWait::Ready
+        ));
 
         let mut waiting = tokio::process::Command::new("sh")
             .args(["-c", "read _"])
@@ -1229,7 +1251,7 @@ async fn assert_successor_claim_and_submission_lock_edges(
     assert!(backend.claim_recovery_workspace(&absent_run).is_err());
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&RunId::new("invalid-local-run"))
+            .recovery_workspace_claim_refusal(&RunId::new("invalid-local-run"))
             .is_err()
     );
 
@@ -1407,21 +1429,24 @@ fn local_recovery_claims_are_exclusive_until_released() {
     );
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 
     let claim = backend.claim_recovery_workspace(&run_id).assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&run_id)
+        backend
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_some()
     );
     drop(claim);
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 }
 
@@ -1459,3 +1484,6 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
     child.kill().await.assert_value();
     child.wait().await.assert_value();
 }
+
+#[path = "startup_tests.rs"]
+mod startup_tests;

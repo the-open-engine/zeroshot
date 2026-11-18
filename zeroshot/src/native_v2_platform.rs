@@ -66,6 +66,8 @@ pub type PlatformRunSubmission = RunSubmission;
 
 #[derive(Debug, Error)]
 pub enum NativeV2PlatformError {
+    #[error("run preparation deadline elapsed before admission")]
+    PreparationTimeout,
     #[error("{0}")]
     InvalidRequest(String),
     #[error(transparent)]
@@ -100,6 +102,7 @@ pub struct NativeV2PlatformController {
     control_turns: Arc<Mutex<BTreeMap<RunId, Weak<Mutex<()>>>>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
+    checkpointless_requests: bool,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
     run_sizes: Option<Arc<openengine_cluster_protocol::TargetRunSizesDiscovery>>,
     operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
@@ -166,6 +169,7 @@ impl NativeV2PlatformController {
             control_turns: Arc::default(),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
+            checkpointless_requests: false,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
             run_sizes: None,
             operator_diagnostics: Arc::default(),
@@ -219,6 +223,12 @@ impl NativeV2PlatformController {
         run_sizes: openengine_cluster_protocol::TargetRunSizesDiscovery,
     ) -> Self {
         self.run_sizes = Some(Arc::new(run_sizes));
+        self
+    }
+
+    /// Local successors retain request history in their durable ledger after snapshot discard.
+    pub(crate) fn with_checkpointless_requests(mut self, enabled: bool) -> Self {
+        self.checkpointless_requests = enabled;
         self
     }
 
@@ -286,7 +296,7 @@ impl NativeV2PlatformController {
         self.require_wait_support(&request.submission.runtime)?;
         let environment =
             RunEnvironment::exact_for_submission(&request.submission, BTreeMap::new())?;
-        self.submit_inner(request, environment, RunSourceCredentials::default())
+        self.submit_with_exact_environment(request, environment)
             .await
     }
 
@@ -296,8 +306,30 @@ impl NativeV2PlatformController {
         request: RunSubmitParams,
         environment: RunEnvironment,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
-        self.submit_inner(request, environment, RunSourceCredentials::default())
-            .await
+        self.submit_with_exact_environment_and_source_credentials(
+            request,
+            environment,
+            RunSourceCredentials::default(),
+        )
+        .await
+    }
+
+    /// Local preparation must still be within its budget after submission lookup/validation.
+    pub(crate) async fn submit_with_exact_environment_until(
+        &self,
+        request: RunSubmitParams,
+        environment: RunEnvironment,
+        deadline: tokio::time::Instant,
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
+        self.submit_inner(
+            request,
+            RunSecretEnvelope {
+                environment: Arc::new(environment),
+                source_credentials: RunSourceCredentials::default(),
+            },
+            Some(deadline),
+        )
+        .await
     }
 
     /// Trusted target bootstrap with a checkout/delivery credential kept outside provider
@@ -308,7 +340,7 @@ impl NativeV2PlatformController {
         environment: RunEnvironment,
         github_token: Option<String>,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
-        self.submit_inner(
+        self.submit_with_exact_environment_and_source_credentials(
             request,
             environment,
             RunSourceCredentials {
@@ -328,16 +360,28 @@ impl NativeV2PlatformController {
         environment: RunEnvironment,
         credentials: RunSourceCredentials,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
-        self.submit_inner(request, environment, credentials).await
+        self.submit_inner(
+            request,
+            RunSecretEnvelope {
+                environment: Arc::new(environment),
+                source_credentials: credentials,
+            },
+            None,
+        )
+        .await
     }
 
     async fn submit_inner(
         &self,
         request: RunSubmitParams,
-        environment: RunEnvironment,
-        source_credentials: RunSourceCredentials,
+        secrets: RunSecretEnvelope,
+        preparation_deadline: Option<tokio::time::Instant>,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
+        let RunSecretEnvelope {
+            environment,
+            source_credentials,
+        } = secrets;
         let RunSubmitParams { run_id, submission } = request;
         let harnesses = self.harnesses.as_ref();
         let digest = submission_digest(&submission)?;
@@ -359,6 +403,7 @@ impl NativeV2PlatformController {
             harnesses,
             self.delivery_policy,
         );
+        admission.checkpointless_requests = self.checkpointless_requests;
         if let Some(catalog) = self.run_sizes.as_deref() {
             admission = admission.with_run_sizes(catalog);
         }
@@ -366,6 +411,10 @@ impl NativeV2PlatformController {
             .admit_with_context(submission, admission)
             .await?;
         let environment = environment.for_admitted(&admitted)?;
+        if preparation_deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            return Err(NativeV2PlatformError::PreparationTimeout);
+        }
+        // Admission has begun: let the durable write settle rather than drop its future.
         let created = self
             .ledger
             .create_or_get(CreateRun {
@@ -461,6 +510,7 @@ impl NativeV2PlatformController {
         } = start;
         let run_id = stored.snapshot.run_id.clone();
         let AllocatedCapsule {
+            node_instance_floor,
             vector_seed,
             checkpoints,
             execution_seed,
@@ -468,10 +518,14 @@ impl NativeV2PlatformController {
             loss,
             cleanup,
         } = capsule;
-        if let Err(error) = self
-            .initialize_allocated(&mut stored, execution_seed, vector_seed)
-            .await
-        {
+        let initialized = async {
+            self.reserve_node_instance_floor(&mut stored, node_instance_floor)
+                .await?;
+            self.initialize_allocated(&mut stored, execution_seed, vector_seed)
+                .await
+        }
+        .await;
+        if let Err(error) = initialized {
             // Runtime-loss cleanup preserves the restored workspace and its recovery lineage.
             cleanup
                 .destroy_or_confirm_absent(RunRuntimeExit::RuntimeLost)
@@ -504,6 +558,25 @@ impl NativeV2PlatformController {
             run_id,
             deduped: false,
         })
+    }
+
+    async fn reserve_node_instance_floor(
+        &self,
+        stored: &mut StoredRun,
+        through: u64,
+    ) -> Result<(), NativeV2PlatformError> {
+        if through <= stored.snapshot.node_instance_floor {
+            return Ok(());
+        }
+        stored.snapshot = self
+            .ledger
+            .append(
+                &stored.snapshot.run_id,
+                vec![RunEvent::NodeInstancesReserved { through }],
+            )
+            .await?
+            .snapshot;
+        Ok(())
     }
 
     async fn initialize_allocated(
@@ -787,7 +860,15 @@ impl NativeV2PlatformController {
                 successor.as_str()
             )));
         }
-        Ok(crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params).await?)
+        crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params)
+            .await
+            .map_err(|error| match error {
+                // The ledger refuses a steer by run state: the caller's to correct.
+                RunLedgerError::InvalidEvent(message) => {
+                    NativeV2PlatformError::InvalidRequest(message.to_owned())
+                }
+                error => error.into(),
+            })
     }
 
     pub async fn suspend(
@@ -838,8 +919,22 @@ impl NativeV2PlatformController {
         &self,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, NativeV2PlatformError> {
-        if self.ledger.get(&params.run_id).await?.is_none() {
+        let Some(stored) = self.ledger.get(&params.run_id).await? else {
             return Err(RunLedgerError::RunNotFound.into());
+        };
+        // Without its workspace a suspended attempt could never continue or be answered, yet
+        // would stay suspended. Force-stop ends it and removes what it retains.
+        if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            && self
+                .allocator
+                .workspace_recovery(&params.run_id)
+                .await
+                .successor_run_id
+                .is_none()
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "run is suspended; force-stop it before discarding its workspace".to_owned(),
+            ));
         }
         let discarded = self
             .allocator
@@ -855,6 +950,22 @@ impl NativeV2PlatformController {
     /// Waits until the run's live runtime, if any, has settled its observed outcome, including
     /// the terminal append attempt that follows a published runtime failure. A preparation hands
     /// off to its engine before it finishes, so the engine that replaced it is awaited too.
+    /// Whether a stop signal must leave the run alone. A live engine answers from memory once it
+    /// disposed its runtime for a suspension, so stopping live work never waits for the ledger;
+    /// the ledger is read only when no engine is live.
+    pub(crate) async fn holds_suspension(&self, run_id: &RunId) -> bool {
+        let runtime = self.runtimes.lock().await.get(run_id).cloned();
+        match runtime {
+            Some(RuntimeSlot::Running(engine)) => engine.suspending(),
+            Some(RuntimeSlot::Preparing(_)) => false,
+            None => matches!(
+                self.ledger.get(run_id).await,
+                Ok(Some(stored))
+                    if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+            ),
+        }
+    }
+
     pub(crate) async fn wait_runtime_settled(&self, run_id: &RunId) {
         loop {
             // Read the slot and its preparation state under one lock: a finished preparation

@@ -19,6 +19,7 @@ from ._projection import (
     _inbox,
     _inbox_request,
     _log_event,
+    _named_target,
     _stack_status,
     _status,
     _steer,
@@ -52,6 +53,7 @@ from .runtime import (
 )
 from .stack_errors import StackWaitTimeout
 from .stacks import StackRequest, StackStatus
+from .targets import NamedTarget, TargetRemoveResult
 from .values import JsonValue
 
 _Runtime = UniformRuntime | RuntimePlan
@@ -367,6 +369,43 @@ class Client:
             raise ProtocolError("Zeroshot returned a malformed template catalog")
         return tuple(value)
 
+    async def list_targets(self) -> tuple[NamedTarget, ...]:
+        """List local registrations, including platform, without contacting any target.
+
+        This reads the user's registry independently of this client's run target.
+        """
+        value = await self._native(static=True, local_registry=True).json(
+            ["target", "list", "--json"]
+        )
+        if not isinstance(value, list):
+            raise ProtocolError("Zeroshot returned a malformed target inventory")
+        return tuple(_named_target(item) for item in value)
+
+    async def remove_target(self, name: str) -> TargetRemoveResult:
+        """Remove a local registration, its stored login and resume permissions.
+
+        Args:
+            name: Exact local target name.
+
+        Returns:
+            The native removal receipt.
+
+        Raises:
+            InvalidRequestError: If the name is unknown or is the built-in platform target.
+            TargetError: If local storage cleanup fails.
+            ProtocolError: If the native receipt is malformed.
+        """
+        value = await self._native(static=True, local_registry=True).json(
+            ["target", "remove", "--json", "--", name]
+        )
+        if (
+            not isinstance(value, dict)
+            or value.get("name") != name
+            or value.get("removed") is not True
+        ):
+            raise ProtocolError("Zeroshot returned a malformed target removal receipt")
+        return TargetRemoveResult(name=name, removed=True)
+
     async def get_preset(self, name: str, *, delivery: str | None = None) -> GraphSpec:
         """Read one built-in preset from the bundled executable.
 
@@ -507,12 +546,12 @@ class Client:
         )
         self._opened = True
 
-    def _native(self, *, static: bool = False) -> NativeProcess:
+    def _native(self, *, static: bool = False, local_registry: bool = False) -> NativeProcess:
         if self._closed:
             raise ClientClosedError("the Zeroshot client is closed")
         if not static and isinstance(self.target, DirectTarget) and not self._direct_ready:
             raise RuntimeError("direct target routing has not been prepared")
-        environment, secrets = self._environment()
+        environment, secrets = self._environment(local_registry=local_registry)
         return NativeProcess(
             resolve_binary(),
             cwd=self._workspace or Path.cwd(),
@@ -520,7 +559,9 @@ class Client:
             secrets=secrets,
         )
 
-    def _environment(self) -> tuple[dict[str, str], tuple[str, ...]]:
+    def _environment(
+        self, *, local_registry: bool = False
+    ) -> tuple[dict[str, str], tuple[str, ...]]:
         if self._provided_environment is None:
             environment = dict(os.environ)
             secrets = _ambient_secrets(environment)
@@ -536,7 +577,11 @@ class Client:
             environment["ZEROSHOT_STATE_DIR"] = str(
                 Path(self.target.state_dir).expanduser().resolve()
             )
-        if isinstance(self.target, DirectTarget) and self._direct_directory is not None:
+        if (
+            not local_registry
+            and isinstance(self.target, DirectTarget)
+            and self._direct_directory is not None
+        ):
             environment["ZEROSHOT_CONFIG_DIR"] = self._direct_directory.name
         environment["ZEROSHOT_ERROR_FORMAT"] = "json"
         return environment, secrets
@@ -656,6 +701,16 @@ class Client:
         await self._ready()
         value = await self._native().json(["force-stop", run_id, *self._route_arguments()])
         return _status(value)
+
+    async def _discard_workspace(self, run_id: str) -> bool:
+        await self._ready()
+        value = await self._native().json(["discard-workspace", run_id, *self._route_arguments()])
+        if not isinstance(value, dict) or value.get("runId") != run_id:
+            raise ProtocolError("discard-workspace returned an invalid discarded result")
+        discarded = value.get("discarded")
+        if not isinstance(discarded, bool):
+            raise ProtocolError("discard-workspace returned an invalid discarded result")
+        return discarded
 
 
 class Stack:
@@ -914,26 +969,38 @@ class Run:
             raise ProtocolError("Zeroshot emitted malformed answer result")
         return Run(self._client, value["runId"])
 
-    async def steer(self, text: str) -> RunSteer:
-        """Record standing direction without continuing a suspended run.
+    async def steer(self, text: str, *, mode: Literal["once", "standing"] = "standing") -> RunSteer:
+        """Record direction without continuing a suspended run.
 
         Args:
             text: Nonblank UTF-8 direction, at most 262,144 bytes. Do not include secrets.
+            mode: Standing once per provider conversation, or once per node instance.
 
         Returns:
             The recorded steer, including its vector identity and receipt summary.
 
         Raises:
+            ValueError: If mode is neither once nor standing.
             RunNotFoundError: If the run is no longer retained.
             TargetError: If the run refuses steering or transport fails.
             ProtocolError: If native output is malformed.
         """
+        if mode not in ("once", "standing"):
+            raise ValueError("mode must be once or standing")
         await self._client._ready()
         with tempfile.TemporaryDirectory(prefix="zeroshot-python-steer-") as directory:
             path = Path(directory) / "steer.txt"
             path.write_bytes(text.encode("utf-8"))
             value = await self._client._native().json(
-                ["steer", self.id, "--text-file", str(path), *self._client._route_arguments()]
+                [
+                    "steer",
+                    self.id,
+                    "--text-file",
+                    str(path),
+                    "--mode",
+                    mode,
+                    *self._client._route_arguments(),
+                ]
             )
         if not isinstance(value, dict) or value.get("runId") != self.id:
             raise ProtocolError("Zeroshot emitted malformed steer result")
@@ -985,6 +1052,8 @@ class Run:
             The existing terminal result, or a failed result whose reason is force_stopped.
 
         Raises:
+            RunSuspendedError: If the run is suspended and already has a successor, which a
+                force-stop leaves unchanged.
             RunNotFoundError: If the target no longer retains this run.
             TargetError: If mutation or observation fails.
             ProtocolError: If native output is malformed.
@@ -993,6 +1062,25 @@ class Run:
         if status.result is not None:
             return status.result
         return await self.wait()
+
+    async def discard_workspace(self) -> bool:
+        """Delete this run's retained workspace or local recovery-lineage checkpoints.
+
+        Local runs keep their checkout, ledger, logs and delivery recovery state. Running or
+        resuming lineage members refuse deletion; an uncontinued suspension must be
+        force-stopped first, and an interrupted restore must be completed. A plain local
+        resume still uses the current checkout.
+
+        Returns:
+            Whether retained workspace or checkpoint data was deleted.
+
+        Raises:
+            InvalidRequestError: If the workspace cannot be discarded in its current state.
+            RunNotFoundError: If the target no longer retains this run.
+            TargetError: If the operation fails.
+            ProtocolError: If native output is malformed.
+        """
+        return await self._client._discard_workspace(self.id)
 
 
 def _submission_key() -> str:

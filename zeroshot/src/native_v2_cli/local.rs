@@ -25,13 +25,15 @@ use tokio::process::Command;
 use tokio::time::{Instant, sleep};
 
 use super::oecp::{ChannelSubscription, spawn_attach, spawn_logs, spawn_watch};
-use super::support::{CommitPaths, cleanup_temporary, nonempty_environment, write_and_commit};
+use super::support::nonempty_environment;
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
     CliProfileListResult, LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError,
     PreparedRunRequest, TargetAdd, default_local_state_root,
 };
-use crate::execution::platform::{ControllerChild as Child, FileAccess, private_file};
+use crate::execution::platform::ControllerChild as Child;
+#[cfg(test)]
+use crate::execution::platform::{FileAccess, private_file};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_platform::submission_digest;
 use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
@@ -67,8 +69,11 @@ pub(crate) use delivery_recovery::review_binding_recorder;
 
 #[path = "local/native_forge.rs"]
 pub(super) mod native_forge;
+#[path = "local/recovery_claim.rs"]
+mod recovery_claim;
 #[path = "local/submission.rs"]
 mod submission;
+use recovery_claim::{RECOVERY_CLAIM_HANDOFF, RECOVERY_CLAIM_WAIT};
 
 /// Private process mode intercepted by the shipped binary before public CLI parsing.
 #[doc(hidden)]
@@ -97,6 +102,9 @@ struct LocalRecoveryDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     delivery_receipt: Option<serde_json::Value>,
     submission: RunSubmission,
+    // Recovery policy must not change the admitted submission's replay identity.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    workspace_checkpoints_discarded: bool,
     workspace: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     local_branch: Option<String>,
@@ -165,6 +173,8 @@ pub struct LocalCliBackend {
     git_program: PathBuf,
     ready_timeout: Duration,
     preparation_timeout: Duration,
+    #[cfg(test)]
+    fail_recovery_write: Option<RunId>,
 }
 
 impl LocalCliBackend {
@@ -178,6 +188,8 @@ impl LocalCliBackend {
             preparation_timeout: preparation_timeout(nonempty_environment(
                 PREPARATION_TIMEOUT_ENV,
             ))?,
+            #[cfg(test)]
+            fail_recovery_write: None,
         };
         Ok(backend)
     }
@@ -196,6 +208,8 @@ impl LocalCliBackend {
             git_program,
             ready_timeout: DEFAULT_READY_TIMEOUT,
             preparation_timeout: DEFAULT_PREPARATION_TIMEOUT,
+            #[cfg(test)]
+            fail_recovery_write: None,
         }
     }
 
@@ -229,10 +243,12 @@ impl LocalCliBackend {
         Ok(paths)
     }
 
-    // Control operations alone may recover a controller after confirmed loss.
+    // Force-stop alone may recover a controller here after confirmed loss. Steer and suspend
+    // need a live controller and leave a lost run's recorded state unchanged.
     async fn connect_run(
         &self,
         run_id: &RunId,
+        recover_lost: bool,
     ) -> Result<Arc<PortableControllerTransport>, NativeV2CliError> {
         use crate::native_v2_portable_controller::availability::{
             ControllerAvailability, check_controller, connect_controller,
@@ -254,7 +270,14 @@ impl LocalCliBackend {
             ControllerAvailability::Unavailable {
                 observation: observed,
                 ..
-            } if observed.state == openengine_cluster_protocol::ControllerState::Lost => {}
+            } if observed.state == openengine_cluster_protocol::ControllerState::Lost => {
+                if !recover_lost {
+                    return Err(local_message(format!(
+                        "controller is lost; recorded state is unchanged. Use `zeroshot resume {0}` or `zeroshot force-stop {0}`",
+                        run_id.as_str()
+                    )));
+                }
+            }
             _ => {
                 return Err(local_message(format!(
                     "controller availability is unknown; run {} is still owned or unreachable",
@@ -459,87 +482,111 @@ impl LocalCliBackend {
                     }),
             );
         let storage = self.create_run_storage(&prepared.run_id)?;
-        self.write_recovery_document(
-            &prepared.run_id,
-            &LocalRecoveryDocument {
-                delivery_receipt: delivery_receipt.clone(),
+        let new_submission = resumed_from.is_none();
+        let run_id = prepared.run_id.clone();
+        let result = async {
+            self.write_recovery_document(
+                &prepared.run_id,
+                &LocalRecoveryDocument {
+                    delivery_receipt: delivery_receipt.clone(),
+                    local_branch: prepared.local_branch.clone(),
+                    invoking_workspace: prepared.invoking_workspace.clone(),
+                    request_digest: prepared.request_digest.clone(),
+                    workspace_revision: prepared.workspace_revision.clone(),
+                    submission: prepared.submission.clone(),
+                    workspace_checkpoints_discarded: false,
+                    workspace: prepared.workspace.clone(),
+                    delivery_run_id: Some(prepared.delivery_run_id.clone()),
+                    resumed_from: resumed_from.clone(),
+                    successor_run_id: None,
+                    pending_restore: None,
+                },
+            )?;
+            let workspace_lease = self.workspace_lease(&prepared.workspace)?;
+            let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
+            let bootstrap_path = storage.join(BOOTSTRAP_FILE);
+            let bootstrap = PortableControllerBootstrap {
+                request_resolution,
+                predecessor: resumed_from,
+                delivery_receipt,
                 local_branch: prepared.local_branch.clone(),
-                invoking_workspace: prepared.invoking_workspace.clone(),
-                request_digest: prepared.request_digest.clone(),
-                workspace_revision: prepared.workspace_revision.clone(),
-                submission: prepared.submission.clone(),
-                workspace: prepared.workspace.clone(),
-                delivery_run_id: Some(prepared.delivery_run_id.clone()),
-                resumed_from: resumed_from.clone(),
-                successor_run_id: None,
-                pending_restore: None,
-            },
-        )?;
-        let workspace_lease = self.workspace_lease(&prepared.workspace)?;
-        let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
-        let bootstrap_path = storage.join(BOOTSTRAP_FILE);
-        let bootstrap = PortableControllerBootstrap {
-            request_resolution,
-            predecessor: resumed_from,
-            delivery_receipt,
-            local_branch: prepared.local_branch.clone(),
-            memory_storage: Some(
-                self.state_root
-                    .join("active-memory")
-                    .join("lessons.sqlite3"),
-            ),
-            checkpoint,
-            preparation_timeout: self.preparation_timeout,
-            run_id: prepared.run_id.clone(),
-            delivery_run_id: prepared.delivery_run_id,
-            adopt_existing_delivery,
-            submission: prepared.submission,
-            environment: prepared.environment,
-            native_environment: prepared.native_environment,
-            github_token: prepared.github_token,
-            github_token_file: prepared.github_token_file,
-            delivery_validator: prepared.delivery_validator,
-            git_credentials: prepared.git_credentials,
-            workspace: prepared.workspace,
-            workspace_lease,
-            checkpoint_repository,
-            storage,
-            delivery_policy: DeliveryPolicy::Optional,
-        };
-        write_bootstrap_file(&bootstrap_path, &bootstrap).map_err(local_error)?;
-        let mut child = match self.spawn_controller(&bootstrap_path) {
-            Ok(child) => child,
-            Err(error) => {
-                remove_private_bootstrap(&bootstrap_path);
-                return Err(error.into());
+                memory_storage: Some(
+                    self.state_root
+                        .join("active-memory")
+                        .join("lessons.sqlite3"),
+                ),
+                checkpoint,
+                preparation_timeout: self.preparation_timeout,
+                run_id: prepared.run_id.clone(),
+                delivery_run_id: prepared.delivery_run_id,
+                adopt_existing_delivery,
+                submission: prepared.submission,
+                environment: prepared.environment,
+                native_environment: prepared.native_environment,
+                github_token: prepared.github_token,
+                github_token_file: prepared.github_token_file,
+                delivery_validator: prepared.delivery_validator,
+                git_credentials: prepared.git_credentials,
+                workspace: prepared.workspace,
+                workspace_lease,
+                checkpoint_repository,
+                storage: storage.clone(),
+                delivery_policy: DeliveryPolicy::Optional,
+            };
+            write_bootstrap_file(&bootstrap_path, &bootstrap).map_err(local_error)?;
+            let mut child = match self.spawn_controller(&bootstrap_path) {
+                Ok(child) => child,
+                Err(error) => {
+                    remove_private_bootstrap(&bootstrap_path);
+                    return Err(error.into());
+                }
+            };
+            let started = Instant::now();
+            let wait =
+                wait_for_controller(&mut child, &paths, &prepared.run_id, ready_timeout).await;
+            if matches!(wait, Ok(ControllerWait::Ready)) {
+                return Ok(prepared.run_id);
             }
-        };
-        let started = Instant::now();
-        let wait = wait_for_controller(&mut child, &paths, &prepared.run_id, ready_timeout).await;
-        if matches!(wait, Ok(ControllerWait::Ready)) {
-            return Ok(prepared.run_id);
+            let controller_stopped = matches!(wait, Ok(ControllerWait::Exited(_)))
+                || crate::execution::platform::stop_controller(&mut child)
+                    .await
+                    .is_ok();
+            remove_private_bootstrap(&bootstrap_path);
+            // A stopped controller may still have recorded why it had not become ready.
+            let recorded = take_startup_failure(&paths);
+            let error = match wait {
+                Ok(ControllerWait::Exited(reason)) => {
+                    self.controller_exit_error(reason.or(recorded), started.elapsed())
+                }
+                Ok(ControllerWait::TimedOut) => {
+                    self.preparation_timeout_error(recorded, started.elapsed(), controller_stopped)
+                }
+                Ok(ControllerWait::Ready) => unreachable!("a ready controller returned above"),
+                Err(error) => error,
+            };
+            Err(StartFailure {
+                error,
+                controller_stopped,
+            })
         }
-        let controller_stopped = matches!(wait, Ok(ControllerWait::Exited(_)))
-            || crate::execution::platform::stop_controller(&mut child)
+        .await;
+        if new_submission && let Err(failure) = &result {
+            let handoff = if failure.controller_stopped {
+                Duration::ZERO
+            } else {
+                self.ready_timeout
+            };
+            // Preserve the startup diagnostic above, and retain any live or admitted run.
+            // Cleanup is best effort so it cannot replace the original refusal.
+            if self
+                .successor_claim_is_live_or_admitted(&run_id, &storage, handoff)
                 .await
-                .is_ok();
-        remove_private_bootstrap(&bootstrap_path);
-        // A stopped controller may still have recorded why it had not become ready.
-        let recorded = take_startup_failure(&paths);
-        let error = match wait {
-            Ok(ControllerWait::Exited(reason)) => {
-                self.controller_exit_error(reason.or(recorded), started.elapsed())
+                .is_ok_and(|owned| !owned)
+            {
+                let _ = std::fs::remove_dir_all(&storage);
             }
-            Ok(ControllerWait::TimedOut) => {
-                self.preparation_timeout_error(recorded, started.elapsed(), controller_stopped)
-            }
-            Ok(ControllerWait::Ready) => unreachable!("a ready controller returned above"),
-            Err(error) => error,
-        };
-        Err(StartFailure {
-            error,
-            controller_stopped,
-        })
+        }
+        result
     }
 
     fn controller_exit_error(&self, reason: Option<String>, elapsed: Duration) -> NativeV2CliError {
@@ -667,14 +714,18 @@ impl LocalCliBackend {
         submission_digest: &Sha256Digest,
     ) -> Result<Option<RunId>, NativeV2CliError> {
         let ledger_path = self.run_storage(&run_id)?.join("runs.sqlite3");
-        if !require_existing_ledger(&ledger_path)? {
-            return Ok(None);
+        match require_existing_ledger(&ledger_path) {
+            Ok(true) => {}
+            Ok(false) => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
+            Err(error) => return Err(local_path_error(&ledger_path, error)),
         }
-        let ledger = SqliteRunLedger::open(&ledger_path).map_err(local_error)?;
+        let ledger = SqliteRunLedger::open(&ledger_path)
+            .map_err(|error| local_path_error(&ledger_path, error))?;
         let Some(stored) = ledger
             .get_by_submission_key(submission_key)
             .await
-            .map_err(local_error)?
+            .map_err(|error| local_path_error(&ledger_path, error))?
         else {
             return Ok(None);
         };
@@ -692,17 +743,30 @@ impl LocalCliBackend {
     }
 
     fn local_run_ids(&self) -> Result<Vec<RunId>, NativeV2CliError> {
-        let entries = match std::fs::read_dir(self.state_root.join("runs")) {
+        let path = self.state_root.join("runs");
+        let entries = match std::fs::read_dir(&path) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(local_io(error)),
+            Err(error) => return Err(local_path_error(&path, error)),
         };
-        let mut run_ids = entries
-            .map(|entry| entry.map_err(local_io))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter_map(local_run_id_from_entry)
-            .collect::<Vec<_>>();
+        let mut run_ids = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| local_path_error(&path, error))?;
+            let storage = entry.path();
+            let Some(run_id) = local_run_id_from_entry(entry) else {
+                continue;
+            };
+            // Search permission can expose child metadata without making the directory readable.
+            match std::fs::read_dir(&storage) {
+                Ok(_) => run_ids.push(run_id),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                    ) => {}
+                Err(error) => return Err(local_path_error(&storage, error)),
+            }
+        }
         run_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(run_ids)
     }
@@ -797,7 +861,12 @@ impl LocalCliBackend {
         };
         match result {
             Ok(result) => Ok(Some(result)),
-            Err(NativeV2CliError::Local(_) | NativeV2CliError::LocalRequestTimeout(_)) => Ok(None),
+            // A directory without a ledger is no run: a refused or interrupted start leaves one.
+            Err(
+                NativeV2CliError::Local(_)
+                | NativeV2CliError::LocalRequestTimeout(_)
+                | NativeV2CliError::RunNotFound { .. },
+            ) => Ok(None),
             Err(error) => Err(error),
         }
     }
@@ -848,38 +917,32 @@ impl LocalCliBackend {
         Ok(self.run_storage(run_id)?.join(RECOVERY_CLAIM_FILE))
     }
 
-    fn claim_recovery_workspace(
+    fn recovery_workspace_claim_refusal(
         &self,
         run_id: &RunId,
-    ) -> Result<LocalRecoveryClaim, NativeV2CliError> {
-        let claim = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.recovery_claim_path(run_id)?)
-            .map_err(local_io)?;
-        claim.try_lock_exclusive().map_err(|error| {
-            if error.kind() == fs2::lock_contended_error().kind() {
-                local_message("retained workspace is already being resumed")
-            } else {
-                local_io(error)
-            }
-        })?;
-        Ok(LocalRecoveryClaim(claim))
-    }
-
-    fn recovery_workspace_is_unclaimed(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
+    ) -> Result<Option<String>, NativeV2CliError> {
         let path = self.recovery_claim_path(run_id)?;
         match std::fs::symlink_metadata(&path) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-            _ => Ok(ControllerLease::probe(&path).is_ok_and(|probe| !probe.held)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            _ => {}
         }
+        Ok(match ControllerLease::probe(&path) {
+            Ok(probe) if !probe.held => None,
+            Ok(_) => Some(format!(
+                "its retained workspace is already being resumed (claim {})",
+                path.display()
+            )),
+            Err(error) => Some(format!(
+                "its workspace claim {} could not be checked: {error}",
+                path.display()
+            )),
+        })
     }
 
     /// Releases a successor claim whose controller never admitted the run. `handoff` bounds the
     /// wait for a launcher that may still be starting that controller; it is zero once the
-    /// controller is known to have stopped. A pending restore stays for the next attempt.
+    /// controller is known to have stopped. A pending restore stays for the next attempt unless
+    /// its matching successor was durably admitted, which follows the complete restore.
     async fn reconcile_local_resume_claim(
         &self,
         run_id: &RunId,
@@ -894,6 +957,25 @@ impl LocalCliBackend {
             .successor_claim_is_live_or_admitted(&successor_run_id, &successor_storage, handoff)
             .await?
         {
+            if recovery
+                .pending_restore
+                .as_ref()
+                .is_some_and(|pending| pending.attempt == successor_run_id)
+                && self
+                    .local_successor_was_admitted(
+                        &successor_storage.join("runs.sqlite3"),
+                        &successor_run_id,
+                    )
+                    .await?
+                && self
+                    .read_recovery_document(&successor_run_id)?
+                    .resumed_from
+                    .as_ref()
+                    == Some(run_id)
+            {
+                recovery.pending_restore = None;
+                self.write_recovery_document(run_id, &recovery)?;
+            }
             return Ok(());
         }
         std::fs::remove_dir_all(&successor_storage).map_err(local_io)?;
@@ -954,7 +1036,7 @@ impl LocalCliBackend {
         ledger_path: &Path,
         successor_run_id: &RunId,
     ) -> Result<bool, NativeV2CliError> {
-        if !require_existing_ledger(ledger_path)? {
+        if !require_existing_ledger(ledger_path).map_err(local_io)? {
             return Ok(false);
         }
         let ledger = SqliteRunLedger::open_read_only(ledger_path).map_err(local_error)?;
@@ -977,37 +1059,11 @@ impl LocalCliBackend {
         run_id: &RunId,
         document: &LocalRecoveryDocument,
     ) -> Result<(), NativeV2CliError> {
+        #[cfg(test)]
+        if self.fail_recovery_write.as_ref() == Some(run_id) {
+            return Err(local_message("injected recovery write failure"));
+        }
         document.write(&self.recovery_path(run_id)?)
-    }
-}
-
-impl LocalRecoveryDocument {
-    fn read(path: &Path) -> Result<Self, NativeV2CliError> {
-        let bytes = std::fs::read(path).map_err(local_io)?;
-        openengine_cluster_protocol::bounded_json_from_slice(&bytes)
-            .map_err(|_| local_message("workspace recovery metadata is invalid"))
-    }
-
-    fn write(&self, path: &Path) -> Result<(), NativeV2CliError> {
-        let parent = path
-            .parent()
-            .ok_or_else(|| local_message("workspace recovery path is invalid"))?;
-        let temporary = parent.join(format!(".workspace-recovery-{}.tmp", uuid::Uuid::now_v7()));
-        let bytes = serde_json::to_vec(self)
-            .map_err(|_| local_message("workspace recovery metadata could not be encoded"))?;
-        let result = (|| {
-            let file = private_file(&temporary, FileAccess::CreateNew).map_err(local_io)?;
-            write_and_commit(
-                file,
-                &bytes,
-                CommitPaths {
-                    temporary: &temporary,
-                    destination: path,
-                    parent,
-                },
-            )
-        })();
-        cleanup_temporary(result, &temporary)
     }
 }
 
@@ -1040,16 +1096,10 @@ impl LocalCliBackend {
             Ok(document) => document,
             Err(_) => return Ok(WorkspaceRecovery::default()),
         };
-        let failed = matches!(
-            status.status,
-            openengine_cluster_protocol::RunStatus::Finished {
-                terminal_result: TerminalResult::Failed { .. },
-                ..
-            }
-        );
-        let loss_observed = status.controller.as_ref().is_some_and(|observation| {
-            observation.state == openengine_cluster_protocol::ControllerState::Lost
-        });
+        let unclaimed = self
+            .recovery_workspace_refusal(status, &document)
+            .await?
+            .is_none();
         let request = matches!(
             &status.status,
             openengine_cluster_protocol::RunStatus::Suspended {
@@ -1057,33 +1107,6 @@ impl LocalCliBackend {
                 ..
             }
         );
-        let suspended = match &status.status {
-            openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } => suspension
-                .due_at()
-                .is_none_or(|due| crate::native_v2_runner::current_timestamp() >= due),
-            _ => false,
-        };
-        let stopped_suspension = if matches!(
-            &status.status,
-            openengine_cluster_protocol::RunStatus::Finished {
-                terminal_result: TerminalResult::Failed { reason, .. }, ..
-            } if reason.as_str() == "force_stopped"
-        ) {
-            let ledger =
-                SqliteRunLedger::open_read_only(self.existing_run_paths(&status.run_id)?.ledger())
-                    .map_err(local_error)?;
-            ledger
-                .get(&status.run_id)
-                .await
-                .map_err(local_error)?
-                .is_some_and(|run| run.snapshot.suspension.is_some())
-        } else {
-            false
-        };
-        let unclaimed = !stopped_suspension
-            && (failed || suspended || loss_observed)
-            && document.workspace.is_dir()
-            && self.recovery_workspace_is_unclaimed(&status.run_id)?;
         // With the recovery claim released, a successor that neither runs nor was admitted is
         // an interrupted launch, such as a crash during its restore. The next resume reconciles
         // it before claiming the workspace, so it does not block recovery.
@@ -1169,7 +1192,10 @@ impl LocalCliBackend {
         // reading its phase or successor and through the force reply. Runs without recovery
         // metadata cannot be resumed and need no workspace claim.
         let _claim = if self.recovery_path(&params.run_id)?.is_file() {
-            Some(self.claim_recovery_workspace(&params.run_id)?)
+            Some(
+                self.claim_recovery_workspace_within(&params.run_id, false, RECOVERY_CLAIM_WAIT)
+                    .await?,
+            )
         } else {
             None
         };
@@ -1201,7 +1227,7 @@ impl LocalCliBackend {
                 workspace_recovery: recorded.workspace_recovery,
             });
         }
-        let transport = self.connect_run(&params.run_id).await?;
+        let transport = self.connect_run(&params.run_id, true).await?;
         let pid = read_ready(&paths)
             .ok()
             .filter(|ready| ready.run_id == params.run_id)
@@ -1244,12 +1270,15 @@ fn controller_request_timeout(run_id: &RunId, operation: &str) -> NativeV2CliErr
 fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), NativeV2CliError> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) => {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return Ok(());
-            }
-            return Err(local_io(error));
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            return Ok(());
         }
+        Err(error) => return Err(local_path_error(path, error)),
     };
     let stale = metadata.is_file()
         && !metadata.file_type().is_symlink()
@@ -1258,8 +1287,14 @@ fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), Nati
             .ok()
             .and_then(|modified| modified.elapsed().ok())
             .is_some_and(|age| age >= minimum_age);
-    if stale {
-        std::fs::remove_file(path).map_err(local_io)?;
+    if stale
+        && let Err(error) = std::fs::remove_file(path)
+        && !matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+        )
+    {
+        return Err(local_path_error(path, error));
     }
     Ok(())
 }
@@ -1305,6 +1340,11 @@ async fn wait_for_controller(
             }
         }
         if child.try_wait().map_err(local_io)?.is_some() {
+            // A controller that was ready and has exited ended its run before this launcher
+            // connected; its ledger answers from here on.
+            if read_ready(paths).is_ok_and(|ready| &ready.run_id == run_id) {
+                return Ok(ControllerWait::Ready);
+            }
             return Ok(ControllerWait::Exited(take_startup_failure(paths)));
         }
         if Instant::now() >= deadline {
@@ -1350,6 +1390,10 @@ fn local_error(error: impl std::fmt::Display) -> NativeV2CliError {
 
 fn local_io(error: std::io::Error) -> NativeV2CliError {
     local_message(error.to_string())
+}
+
+fn local_path_error(path: &Path, error: impl std::fmt::Display) -> NativeV2CliError {
+    local_message(format!("{}: {error}", path.display()))
 }
 
 fn local_message(message: impl Into<String>) -> NativeV2CliError {

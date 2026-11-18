@@ -180,11 +180,11 @@ pub(super) fn command(
             command: &mut command,
         })?;
     }
-    install_memory(adapter, invocation, files, &mut command);
     crate::native_v2_capsule::provider_process::apply_execution_environment(
         &mut command.environment,
         invocation,
     )?;
+    install_memory(adapter, invocation, files, &mut command);
     Ok(command)
 }
 
@@ -200,6 +200,8 @@ pub(super) fn install_memory(
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: files.home(),
+                // The plugin stores the steer as a message before it acknowledges.
+                steers: crate::active_memory::hooks::SteerRoute::Extension { stored: true },
             },
             super::memory::install,
         );

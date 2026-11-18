@@ -2,6 +2,38 @@ use openengine_cluster_protocol::RunProfileScope;
 
 use super::*;
 
+#[tokio::test]
+async fn target_management_reports_unsupported_backends_without_success_output() {
+    for json in [false, true] {
+        for (mut arguments, expected) in [
+            (vec!["target", "list"], "target inventory is unavailable"),
+            (
+                vec!["target", "remove", "saved"],
+                "target removal is unavailable",
+            ),
+        ] {
+            if json {
+                arguments.push("--json");
+            }
+            let command = parse_native_v2_args(args(&arguments)).assert_value();
+            let mut output = Vec::new();
+            let error = execute_native_v2_cli(
+                command,
+                &DefaultContractBackend,
+                &mut NeverDetach,
+                &mut output,
+            )
+            .await
+            .assert_error();
+            assert!(matches!(error, NativeV2CliError::Target(message) if message == expected));
+            assert!(
+                output.is_empty(),
+                "unsupported operations must not report success"
+            );
+        }
+    }
+}
+
 async fn execute_json(command: NativeV2CliCommand, backend: &FakeBackend) -> Value {
     let mut output = Vec::new();
     assert_eq!(

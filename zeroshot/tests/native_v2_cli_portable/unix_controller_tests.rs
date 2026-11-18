@@ -13,6 +13,9 @@ use super::{Fixture, process_exists, success};
 #[path = "restic_resume_tests.rs"]
 mod restic_resume_tests;
 
+#[path = "resume_refusal_tests.rs"]
+mod resume_refusal_tests;
+
 #[path = "unix_controller_work_tests.rs"]
 mod work;
 
@@ -53,6 +56,22 @@ impl Run {
 
     fn signal(&self, signal: i32) {
         assert_eq!(unsafe { libc::kill(self.controller, signal) }, 0);
+    }
+
+    /// Stops the controller while it holds no write lock on the ledger. The provider reports a
+    /// turn every 50 ms and each report is a ledger write, so a stop at an arbitrary instant can
+    /// land inside a commit. The stopped controller then keeps the ledger locked: every command
+    /// waits out SQLite's five-second busy timeout before it asks the controller, and `status`
+    /// fails instead of reporting the recorded state. An outside write transaction rules that
+    /// out, because the controller's next write waits for it without holding a lock.
+    fn freeze_between_ledger_writes(&self) {
+        let ledger = rusqlite::Connection::open(self.storage.join("runs.sqlite3")).unwrap();
+        ledger.execute_batch("BEGIN IMMEDIATE").unwrap();
+        self.signal(libc::SIGSTOP);
+        // The signal call returns before every controller thread has stopped. Keep the ledger
+        // until they have, so none of them starts a write after the transaction ends.
+        std::thread::sleep(Duration::from_millis(100));
+        ledger.execute_batch("ROLLBACK").unwrap();
     }
 
     fn wait_closed(&self, limit: Duration) {
@@ -107,8 +126,7 @@ fn unix_controller_stalled_requests_return_without_killing_the_controller() {
     let execution = status["status"]["activeExecutions"][0]["execution"]
         .as_str()
         .unwrap();
-    run.signal(libc::SIGSTOP);
-    let deadline = Instant::now() + Duration::from_secs(14);
+    run.freeze_between_ledger_writes();
     let mut commands = Vec::new();
     for name in [
         "status",
@@ -132,22 +150,26 @@ fn unix_controller_stalled_requests_return_without_killing_the_controller() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        commands.push((name, child));
+        // Slow batch startup must not consume another child's request allowance.
+        commands.push((name, child, Instant::now() + Duration::from_secs(14)));
     }
     while commands
         .iter_mut()
-        .any(|(_, child)| child.try_wait().unwrap().is_none())
+        .any(|(_, child, _)| child.try_wait().unwrap().is_none())
     {
-        if Instant::now() >= deadline {
-            for (_, child) in &mut commands {
+        let expired = commands.iter_mut().find_map(|(name, child, deadline)| {
+            (child.try_wait().unwrap().is_none() && Instant::now() >= *deadline).then_some(*name)
+        });
+        if let Some(name) = expired {
+            for (_, child, _) in &mut commands {
                 let _ = child.kill();
                 child.wait().unwrap();
             }
-            panic!("CLI commands exceeded the controller request deadline");
+            panic!("CLI command {name} exceeded the controller request deadline");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    for (name, child) in commands {
+    for (name, child, _) in commands {
         let output = child.wait_with_output().unwrap();
         if matches!(name, "status" | "list" | "checkpoints") {
             success(&output);

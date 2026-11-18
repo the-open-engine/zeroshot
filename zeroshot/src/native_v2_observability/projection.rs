@@ -24,6 +24,7 @@ pub(super) fn status_from_snapshot(
             .active_executions()
             .map(|node| {
                 Ok(ActiveExecution {
+                    started_at: node.started_recorded_at,
                     execution: opaque_execution(&node.reference)?,
                     node: node.reference.node.clone(),
                     map_indices: node.occurrence.map_indices.clone(),

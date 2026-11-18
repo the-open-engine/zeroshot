@@ -22,7 +22,10 @@ if state.get('move_positions'):
             comment['line'] = len(state['calls'])
 
 def save():
-    path.write_text(json.dumps(state))
+    # The delivery driver polls this file while fixture requests update it.
+    pending = path.with_suffix('.pending')
+    pending.write_text(json.dumps(state))
+    pending.replace(path)
 
 def emit(value):
     save()

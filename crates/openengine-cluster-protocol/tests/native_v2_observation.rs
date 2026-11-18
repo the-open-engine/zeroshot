@@ -35,6 +35,7 @@ fn execution(value: &str) -> ExecutionRef {
 
 fn active(execution_ref: &str, node: &str) -> ActiveExecution {
     ActiveExecution {
+        started_at: None,
         map_indices: Vec::new(),
         execution: execution(execution_ref),
         node: NodeName::new(node).assert_value(),
@@ -204,6 +205,7 @@ fn durable_events_carry_run_and_stable_cursor() {
         "passed": true
     });
     let watch = RunWatchEventNotification {
+        recorded_at: None,
         subscription_id: SubscriptionId::new("watch-1"),
         run_id: RunId::new("run-1"),
         title: title(),
@@ -413,4 +415,48 @@ fn request_suspension_round_trips_with_its_full_contract() {
     let mut wrong = value;
     wrong["reason"] = json!("command");
     assert!(serde_json::from_value::<RunStatus>(wrong).is_err());
+}
+
+#[test]
+fn observation_recording_times_are_optional_exact_and_shared_with_hosted() {
+    for time in [None, Some(1), Some(MAX_SAFE_GENERATION)] {
+        let mut active = json!({"execution":"opaque:1", "node":"worker", "mapIndices":[3]});
+        let mut watch = json!({
+            "subscriptionId":"watch-1", "runId":"run-1", "title":"Timing", "size":"small",
+            "cursor":"v2:2", "status":{"phase":"running", "activeExecutions":[]}
+        });
+        if let Some(time) = time {
+            active["startedAt"] = json!(time);
+            watch["recordedAt"] = json!(time);
+        }
+        watch["status"]["activeExecutions"] = json!([active.clone()]);
+        let execution: ActiveExecution = serde_json::from_value(active.clone()).assert_value();
+        assert_eq!(serde_json::to_value(execution).assert_value(), active);
+        let event: RunWatchEventNotification = serde_json::from_value(watch.clone()).assert_value();
+        assert_eq!(serde_json::to_value(&event).assert_value(), watch);
+        let hosted = openengine_cluster_protocol::HostedRunWatchEventNotification::from(event);
+        assert_eq!(serde_json::to_value(hosted).assert_value(), watch);
+    }
+    for invalid in [
+        json!(0),
+        json!(-1),
+        json!(1.5),
+        json!(true),
+        json!("1"),
+        json!(MAX_SAFE_GENERATION + 1),
+    ] {
+        assert!(
+            serde_json::from_value::<ActiveExecution>(json!({
+                "execution":"opaque:1", "node":"worker", "startedAt": invalid
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<RunWatchEventNotification>(json!({
+                "subscriptionId":"watch-1", "runId":"run-1", "title":"Timing", "size":"small",
+                "cursor":"v2:2", "status":{"phase":"admitted"}, "recordedAt": invalid
+            }))
+            .is_err()
+        );
+    }
 }

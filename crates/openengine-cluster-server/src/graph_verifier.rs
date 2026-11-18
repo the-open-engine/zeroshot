@@ -21,7 +21,12 @@ use crate::worker_registry::{
 pub const FULL_V1_MAX_GRAPH_NODES: u64 = 4_096;
 pub const FULL_V1_MAX_GRAPH_DEPTH: u64 = 64;
 pub const FULL_V1_MAX_GUARD_NODES: u64 = 4_096;
+/// Saturated count states one map, item outcomes one map item and completing branch sets
+/// one join may have in a single check.
 pub const FULL_V1_MAX_GUARD_ASSIGNMENTS: u64 = 65_536;
+/// Search steps one check may take. A backstop far above authored graphs, reported at the
+/// condition being decided; checks do not share it.
+pub const FULL_V1_MAX_GUARD_SEARCH_STEPS: u64 = 1_048_576;
 pub const FULL_V1_MAX_MAP_ITEMS: u64 = 65_536;
 pub const FULL_V1_MAX_ATTEMPTS_PER_NODE: u64 = 100;
 pub const FULL_V1_MAX_NODE_EXECUTIONS: u64 = 65_536;
@@ -96,6 +101,7 @@ fn finalize_verified_with_invariant_probe(
         ));
     }
     let compiled_ir = CompiledGraphIr {
+        networks: graph.networks.clone(),
         profile: graph.profile,
         initial_input: graph.initial_input.clone(),
         policy: graph.policy.clone(),
@@ -290,43 +296,6 @@ impl CompletionPredicate {
         }
     }
 
-    fn evaluate(&self, assignment: &Assignment) -> bool {
-        match self {
-            Self::Always => true,
-            Self::Never => false,
-            Self::Guard(guard) => evaluate_guard(guard, assignment),
-            Self::Shared(predicate) => predicate.evaluate(assignment),
-            Self::CandidateGuard { guard, available } => {
-                openengine_cluster_protocol::evaluate_partial_guard(
-                    guard,
-                    &|selector, labels, _| {
-                        available
-                            .get(&SelectorKey::from(selector))
-                            .filter(|presence| {
-                                assignment.contains_key(&SelectorKey::from(selector))
-                                    && presence.evaluate(assignment)
-                            })
-                            .map(|_| selector_occurrences(selector, labels, assignment))
-                    },
-                ) == openengine_cluster_protocol::GuardTruth::True
-            }
-            Self::Not(predicate) => !predicate.evaluate(assignment),
-            Self::All(predicates) => predicates
-                .iter()
-                .all(|predicate| predicate.evaluate(assignment)),
-            Self::Any(predicates) => predicates
-                .iter()
-                .any(|predicate| predicate.evaluate(assignment)),
-            Self::AtLeast { count, predicates } => {
-                predicates
-                    .iter()
-                    .filter(|predicate| predicate.evaluate(assignment))
-                    .count() as u64
-                    >= *count
-            }
-        }
-    }
-
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
         match self {
             Self::Guard(guard) => guards.push(guard),
@@ -500,7 +469,8 @@ struct Fold {
 
 struct Analyzer<'a> {
     graph: &'a GraphSpec,
-    proof_work: ProofWork,
+    /// Search steps every check of this analysis took together.
+    search_steps: u64,
     nodes: BTreeMap<NodeName, NodeInfo<'a>>,
     authored: Vec<NodeName>,
     dependencies: BTreeMap<NodeName, BTreeSet<NodeName>>,
@@ -531,6 +501,7 @@ macro_rules! emit_diagnostic {
 }
 
 mod analyzer_assignments;
+use analyzer_assignments::ControlProof;
 mod analyzer_bindings;
 mod analyzer_bounds;
 mod analyzer_choice_writes;
@@ -542,7 +513,6 @@ mod analyzer_parallel;
 mod analyzer_parallel_flow;
 mod analyzer_terminal;
 mod assignments;
-use assignments::ProofWork;
 mod choice;
 mod contexts;
 mod diagnostics;

@@ -30,8 +30,21 @@ pub(crate) fn cursor_sequence(cursor: &Cursor) -> Result<u64, RunLedgerError> {
 }
 
 pub(crate) fn validate_create(request: &CreateRun) -> Result<(), RunLedgerError> {
-    bounded_json(&request.admitted, MAX_ADMITTED_RUN_BYTES)
-        .map_err(|_| RunLedgerError::AdmittedRunTooLarge)
+    validate_admitted_run(&request.admitted)
+}
+
+/// The same storage bound applies before a local controller or run directory is created.
+pub(crate) fn validate_admitted_run(
+    admitted: &crate::native_v2_contract::AdmittedRun,
+) -> Result<(), RunLedgerError> {
+    let submission_bytes = json_size(admitted)?;
+    if submission_bytes > MAX_ADMITTED_RUN_BYTES {
+        return Err(RunLedgerError::AdmittedRunTooLarge {
+            submission_bytes,
+            input_bytes: json_size(&admitted.initial_input)?,
+        });
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
@@ -54,12 +67,26 @@ pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
         } => openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES - 1024,
         _ => MAX_EVENT_BYTES,
     };
-    bounded_json(event, maximum).map_err(|_| RunLedgerError::EventTooLarge)
+    let event_bytes = json_size(event)?;
+    if event_bytes > maximum {
+        return Err(match event {
+            RunEvent::NodeStarted {
+                reference, input, ..
+            } => RunLedgerError::NodeInputTooLarge {
+                node: reference.node.clone(),
+                input_bytes: json_size(input)?,
+                event_bytes,
+            },
+            _ => RunLedgerError::EventTooLarge,
+        });
+    }
+    Ok(())
 }
 
-fn bounded_json(value: &impl Serialize, maximum: usize) -> Result<(), ()> {
-    let bytes = serde_json::to_vec(value).map_err(|_| ())?;
-    (bytes.len() <= maximum).then_some(()).ok_or(())
+fn json_size(value: &impl Serialize) -> Result<usize, RunLedgerError> {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .map_err(|_| RunLedgerError::Corrupt)
 }
 
 /// Freeze diagnostics with the primary outcome and include them in terminal events.
@@ -75,14 +102,13 @@ pub(crate) fn prepare_event(snapshot: &RunSnapshot, mut event: RunEvent) -> RunE
         && (context.is_none()
             || (snapshot.primary_graph.is_none()
                 && context.as_ref().is_some_and(|evidence| {
-                    evidence.primary.is_none()
-                        && evidence.recorded.is_empty()
-                        && evidence.verifiers.is_empty()
+                    evidence.recorded.is_empty() && evidence.verifiers.is_empty()
                 })))
         && reason.as_str() != "force_stopped"
     {
         let mut evidence = snapshot.failure_context.clone().unwrap_or_default();
         if let Some(reducer) = context.take() {
+            evidence.primary = reducer.primary.or(evidence.primary);
             for visit in reducer.exhausted_loops {
                 evidence.record_exhausted_loop(visit);
             }
@@ -93,6 +119,22 @@ pub(crate) fn prepare_event(snapshot: &RunSnapshot, mut event: RunEvent) -> RunE
         }
     }
     event
+}
+
+/// Project envelope timing without changing event validation or reducer semantics.
+pub(crate) fn apply_stored_event(
+    snapshot: &mut RunSnapshot,
+    stored: &super::StoredRunEvent,
+) -> Result<(), RunLedgerError> {
+    apply_event(snapshot, &stored.event, cursor_sequence(&stored.cursor)?)?;
+    if let RunEvent::NodeStarted { reference, .. } = &stored.event {
+        snapshot
+            .executions
+            .get_mut(&reference.execution)
+            .ok_or(RunLedgerError::Corrupt)?
+            .started_recorded_at = stored.recorded_at;
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_event(
@@ -130,6 +172,9 @@ fn apply_event_kind(
     sequence: u64,
 ) -> Result<(), RunLedgerError> {
     match event {
+        RunEvent::NodeInstancesReserved { through } => {
+            apply_node_instances_reserved(snapshot, *through)
+        }
         RunEvent::PriorExecution { execution } => apply_prior_execution(snapshot, execution),
         RunEvent::RunStarted => apply_run_started(snapshot),
         RunEvent::NodeStarted {
@@ -222,6 +267,7 @@ fn apply_event_kind(
                     "steer requires an admitted, running or suspended run before its graph ends",
                 ));
             }
+            reserve_vector_instance(snapshot, vector);
             Ok(())
         }
         RunEvent::ForceStopRequested => apply_force_stop(snapshot),
@@ -242,6 +288,35 @@ fn apply_observation_event(
         RunEvent::RunTokenUsageObserved { usage } => add_usage(snapshot, usage.as_ref()),
         _ => Err(RunLedgerError::InvalidEvent("invalid observation event")),
     }
+}
+
+fn apply_node_instances_reserved(
+    snapshot: &mut RunSnapshot,
+    through: u64,
+) -> Result<(), RunLedgerError> {
+    if snapshot.phase != RunPhase::Admitted || through < snapshot.node_instance_floor {
+        return Err(RunLedgerError::InvalidEvent(
+            "invalid node instance reservation",
+        ));
+    }
+    snapshot.node_instance_floor = through;
+    Ok(())
+}
+
+fn reserve_vector_instance(
+    snapshot: &mut RunSnapshot,
+    vector: &openengine_cluster_protocol::RunVector,
+) {
+    use openengine_cluster_protocol::RunVectorContent;
+    let instance = match &vector.content {
+        RunVectorContent::Steer {
+            network: Some(network),
+            ..
+        } => network.origin.node_instance,
+        RunVectorContent::SteerReceipt { node_instance, .. } => *node_instance,
+        _ => return,
+    };
+    snapshot.node_instance_floor = snapshot.node_instance_floor.max(instance);
 }
 
 fn apply_prior_execution(
@@ -296,6 +371,7 @@ fn apply_node_started(
     snapshot.executions.insert(
         reference.execution,
         NodeSnapshot {
+            started_recorded_at: None,
             delivery_state: None,
             reference: reference.clone(),
             occurrence: occurrence.clone(),
@@ -458,6 +534,7 @@ fn diagnostic_execution(
                 ))?;
             node.failure_diagnostic |= kind == FailureDiagnosticKind::Failure;
             Ok(Some(ActiveExecution {
+                started_at: None,
                 execution: node
                     .reference
                     .public_execution()

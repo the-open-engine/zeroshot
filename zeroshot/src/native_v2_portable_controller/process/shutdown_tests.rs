@@ -134,3 +134,91 @@ async fn shutdown_is_not_queued_behind_the_terminal_wait_it_replaces() {
         .assert_value();
     busy.await.assert_value().assert_value();
 }
+
+/// An interrupted `answer` or `resume` leaves a controller no client will ever reach. It must
+/// still release its lease, or the workspace stays blocked for every later run and answer.
+#[tokio::test]
+async fn terminal_server_does_not_wait_forever_for_a_submitter_that_never_connects() {
+    let root = tempfile::tempdir().assert_value();
+    let controller = terminal_controller(root.path()).await;
+    let paths = controller.paths().clone();
+    let server = controller.bind().await.assert_value();
+    let (_stop, stopping) = tokio::sync::watch::channel(false);
+    tokio::time::timeout(
+        UNOBSERVED_TERMINAL_GRACE * 5,
+        server.serve_until_terminal(stopping),
+    )
+    .await
+    .assert_value_with("a controller nobody connected to must stop serving after its grace")
+    .assert_value();
+    let _reclaimed = ControllerLease::acquire(paths.lease()).assert_value();
+}
+
+#[tokio::test]
+async fn shutdown_leaves_a_suspended_run_suspended() {
+    use openengine_cluster_protocol::{NodeName, RunStatus, RunSuspension, UnixTimestampMillis};
+
+    let root = tempfile::tempdir().assert_value();
+    let paths = PortableControllerPaths::new(root.path().join("state"));
+    crate::execution::platform::create_private_directory(paths.storage()).assert_value();
+    let run_id = RunId::new("suspended-shutdown");
+    let ledger = SqliteRunLedger::open(paths.ledger()).assert_value();
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: IdempotencyKey::new("suspended-shutdown").assert_value(),
+            submission_digest: Sha256Digest::new("d".repeat(64)).assert_value(),
+            admitted: crate::native_v2_runner::test_support::admitted(),
+        })
+        .await
+        .assert_value();
+    ledger
+        .append(
+            &run_id,
+            vec![
+                RunEvent::RunStarted,
+                RunEvent::Suspended {
+                    suspension: RunSuspension::Command {
+                        node: NodeName::new("held").assert_value(),
+                        created_at: UnixTimestampMillis::new(1).assert_value(),
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    drop(ledger);
+    let controller = Arc::new(
+        PortableRunController::open_observer(paths.clone(), run_id.clone())
+            .await
+            .assert_value(),
+    );
+    // The stop arrives either before the loop has seen the suspension or while it waits out
+    // its grace for a submitter that never connects.
+    for stop_at_start in [true, false] {
+        let server = controller.clone().bind().await.assert_value();
+        let (stop, stopping) = tokio::sync::watch::channel(stop_at_start);
+        let serving = tokio::spawn(server.serve_until_terminal(stopping));
+        if !stop_at_start {
+            tokio::time::sleep(UNOBSERVED_TERMINAL_GRACE / 2).await;
+            stop.send_replace(true);
+        }
+        tokio::time::timeout(Duration::from_secs(10), serving)
+            .await
+            .assert_value_with("shutdown of a suspended run returns")
+            .assert_value()
+            .assert_value();
+        let status = controller
+            .inner
+            .status(openengine_cluster_protocol::RunStatusParams {
+                run_id: run_id.clone(),
+            })
+            .await
+            .assert_value();
+        assert!(
+            matches!(status.status, RunStatus::Suspended { .. }),
+            "a stop signal force-stopped a suspended run: {:?}",
+            status.status
+        );
+    }
+}

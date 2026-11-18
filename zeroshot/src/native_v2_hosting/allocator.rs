@@ -58,7 +58,6 @@ type FilesystemPreparer =
     fn(&Path, &Path, HostedProcessPool) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable>;
 
 const RECOVERY_DIRECTORY: &str = "workspace-recovery";
-const MAX_RECOVERY_LINEAGE_DEPTH: usize = 64;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -292,6 +291,18 @@ impl ProductionCapsuleAllocator {
         request: &CapsuleBuildRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let paths = CapsuleBuildPaths::new(&self.config.storage_root, pending.run_id);
+        if let Some((source, selection)) = &request.retained_restore {
+            // Recorded before preparation can fail, so that a restart of this run finds it.
+            let root = &self.config.storage_root;
+            let source = CheckpointRestore {
+                directory: checkpoint_directory(root, source),
+                selection: selection.clone(),
+            };
+            let own = checkpoint_directory(root, pending.run_id);
+            let conversations = checkpoints::successor_conversations(source, &own)
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+            let _ = pending.state.conversation_restore.set(conversations);
+        }
         let filesystem = self.prepare_capsule_workspace(&pending, request, &paths)?;
         let PendingCapsule {
             run_id,
@@ -310,12 +321,6 @@ impl ProductionCapsuleAllocator {
         )
         .await?;
         let restored_seed = if let Some((source_run_id, selection)) = &request.retained_restore {
-            if *selection != CheckpointRestoreSelection::Latest {
-                let _ = state.conversation_restore.set(CheckpointRestore {
-                    directory: checkpoint_directory(&self.config.storage_root, source_run_id),
-                    selection: selection.clone(),
-                });
-            }
             let seed = self
                 .restore_retained_workspace(source_run_id, selection.clone(), &filesystem.workspace)
                 .await?;
@@ -423,7 +428,16 @@ impl ProductionCapsuleAllocator {
         let candidate: Arc<dyn crate::native_v2_runner::NodeRunner> = match memory {
             Ok(Some(memory)) => memory.wrap(request.admitted, candidate),
             Ok(None) => Arc::new(candidate),
-            Err(_) => crate::active_memory::runtime::unavailable_memory(Arc::new(candidate)),
+            Err(error) => crate::active_memory::runtime::unavailable_memory(
+                Arc::new(candidate),
+                crate::active_memory::runtime::initialization_diagnostic(
+                    self.config
+                        .memory_storage
+                        .as_deref()
+                        .filter(|_| self.config.memory_backend.is_none()),
+                    &error,
+                ),
+            ),
         };
         let postmortem = candidate.postmortem();
         let workspace_identity = WorkspaceIdentity::capture(&filesystem.workspace)
@@ -461,6 +475,7 @@ impl ProductionCapsuleAllocator {
             }
         }
         Ok(AllocatedCapsule {
+            node_instance_floor: Default::default(),
             runner,
             cleanup,
             loss,
@@ -1399,30 +1414,6 @@ fn complete_reconciled_handoff(
     successor.delivery_run_id = source.delivery_run_id;
     successor.resumed_from = Some(source_run_id);
     write_recovery(successor_path, &successor)
-}
-
-fn retained_delivery_run_id(
-    root: &Path,
-    run_id: &RunId,
-    document: &HostedRecoveryDocument,
-) -> Option<RunId> {
-    let mut lineage_run_id = run_id.clone();
-    let mut lineage = document.clone();
-    for _ in 0..MAX_RECOVERY_LINEAGE_DEPTH {
-        if let Some(delivery_run_id) = lineage.delivery_run_id {
-            return Some(delivery_run_id);
-        }
-        let Some(predecessor) = lineage.resumed_from else {
-            return Some(lineage_run_id);
-        };
-        lineage_run_id = predecessor;
-        let Some(predecessor_document) = read_recovery(&recovery_path(root, &lineage_run_id))
-        else {
-            return Some(lineage_run_id);
-        };
-        lineage = predecessor_document;
-    }
-    None
 }
 
 pub(super) fn production_filesystem(

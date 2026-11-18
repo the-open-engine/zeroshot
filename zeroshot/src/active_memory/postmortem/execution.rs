@@ -91,16 +91,23 @@ async fn run_role(
     mut cancellation: watch::Receiver<bool>,
 ) -> Result<Vec<LessonMutation>, PostmortemError> {
     let result = run_role_batches(execution, role, index, &mut cancellation).await;
-    let status = if result.is_ok() {
-        "completed"
-    } else {
-        "failed"
+    let _ = match &result {
+        Ok(_) => {
+            log(
+                execution.request,
+                format!("Active Memory {} completed", role.name()),
+            )
+            .await
+        }
+        Err(error) => {
+            log_stream(
+                execution.request,
+                SafeLogStream::Error,
+                format!("Active Memory {} failed: {error}", role.name()),
+            )
+            .await
+        }
     };
-    let _ = log(
-        execution.request,
-        format!("Active Memory {} {status}", role.name()),
-    )
-    .await;
     result
 }
 
@@ -117,10 +124,11 @@ async fn run_role_batches(
     index: usize,
     cancellation: &mut watch::Receiver<bool>,
 ) -> Result<Vec<LessonMutation>, PostmortemError> {
-    let inputs = execution
-        .context
-        .inputs(role)
-        .map_err(|()| PostmortemError::Preparation)?;
+    let inputs = execution.context.inputs(role).map_err(|()| {
+        PostmortemError::Unavailable(
+            "specialist input could not be prepared within the context bound",
+        )
+    })?;
     let mut mutations = Vec::new();
     for (round, input) in inputs.iter().enumerate() {
         if inputs.len() > 1 {
@@ -146,17 +154,14 @@ async fn run_role_batches(
             Ok(proposals) => {
                 // A specialist seals one transaction only after ALL batches validate before cutoff.
                 if *cancellation.borrow() || Instant::now() >= execution.deadline {
-                    return Err(PostmortemError::Preparation);
+                    return Err(PostmortemError::Cancelled);
                 }
                 mutations.extend(proposals);
             }
             Err(reason) => {
-                let _ = log(
-                    execution.request,
-                    format!("Active Memory {} findings rejected: {reason}", role.name()),
-                )
-                .await;
-                return Err(PostmortemError::Preparation);
+                return Err(PostmortemError::Detail(format!(
+                    "findings rejected: {reason}"
+                )));
             }
         }
     }
@@ -169,7 +174,7 @@ async fn run_role_inner(
     cancellation: &mut watch::Receiver<bool>,
 ) -> Result<Value, PostmortemError> {
     if *cancellation.borrow() || Instant::now() >= execution.deadline {
-        return Err(PostmortemError::Preparation);
+        return Err(PostmortemError::Cancelled);
     }
     log(
         execution.request,
@@ -187,7 +192,12 @@ async fn run_role_inner(
     .await?;
     match completion.outcome {
         WorkerOutcome::Verifier { output, .. } => Ok(output),
-        _ => Err(PostmortemError::Preparation),
+        WorkerOutcome::Error { code, reason } => Err(PostmortemError::Detail(format!(
+            "provider completed without an answer: {code:?} ({reason:?})"
+        ))),
+        _ => Err(PostmortemError::Unavailable(
+            "provider returned no verifier answer",
+        )),
     }
 }
 
@@ -196,10 +206,11 @@ async fn initial_output(handle: &mut NodeHandle) -> Result<DurableOutput, Postmo
         return Ok(output);
     }
     handle.cancel();
-    if handle.completion().await == Err(NodeRunnerError::CleanupUnconfirmed) {
-        Err(PostmortemError::CleanupUnconfirmed)
-    } else {
-        Err(PostmortemError::Preparation)
+    match handle.completion().await {
+        Err(error) => Err(error.into()),
+        Ok(_) => Err(PostmortemError::Unavailable(
+            "provider durable output was unavailable",
+        )),
     }
 }
 
@@ -210,11 +221,11 @@ async fn start_role(
 ) -> Result<NodeHandle, PostmortemError> {
     let environment = tokio::select! {
         biased;
-        () = wait_cancelled(cancellation) => return Err(PostmortemError::Preparation),
-        result = execution.request.environment.resolve(&invocation.binding) => result.map_err(|_| PostmortemError::Preparation)?,
+        () = wait_cancelled(cancellation) => return Err(PostmortemError::Cancelled),
+        result = execution.request.environment.resolve(&invocation.binding) => result.map_err(|error| PostmortemError::Detail(format!("connection resolution failed: {error}")))?,
     };
     if *cancellation.borrow() || Instant::now() >= execution.deadline {
-        return Err(PostmortemError::Preparation);
+        return Err(PostmortemError::Cancelled);
     }
     let request = NodeRunRequest {
         delivery_state: None,
@@ -224,8 +235,8 @@ async fn start_role(
     };
     tokio::select! {
         biased;
-        () = wait_cancelled(cancellation) => Err(PostmortemError::Preparation),
-        () = tokio::time::sleep_until(execution.deadline) => Err(PostmortemError::Preparation),
+        () = wait_cancelled(cancellation) => Err(PostmortemError::Cancelled),
+        () = tokio::time::sleep_until(execution.deadline) => Err(PostmortemError::TimedOut),
         result = execution.runner.start(request) => result.map_err(PostmortemError::from),
     }
 }
@@ -261,7 +272,9 @@ fn invocation(
         .ok_or(PostmortemError::Preparation)?;
     let input = serde_json::to_string(batch.input).map_err(|_| PostmortemError::Preparation)?;
     if super::context_budget::encoded_size(batch.input) > super::context_budget::MAX_INPUT_BYTES {
-        return Err(PostmortemError::Preparation);
+        return Err(PostmortemError::Unavailable(
+            "specialist input exceeds the context bound",
+        ));
     }
     Ok(NodeInvocation {
         reference: ExecutionRef {
@@ -319,7 +332,7 @@ async fn observe(
     }
     persistence?;
     if interrupted {
-        return Err(PostmortemError::Preparation);
+        return Err(PostmortemError::Cancelled);
     }
     result.map_err(PostmortemError::from)
 }
@@ -367,7 +380,16 @@ fn global_event(role: Role, event: DurableNodeEvent) -> Result<RunEvent, Postmor
 }
 
 pub(super) async fn log(request: &PostmortemRequest, line: String) -> Result<(), PostmortemError> {
-    let line = SafeLogLine::new(line).map_err(|_| PostmortemError::Storage)?;
+    log_stream(request, SafeLogStream::System, line).await
+}
+
+async fn log_stream(
+    request: &PostmortemRequest,
+    stream: SafeLogStream,
+    line: String,
+) -> Result<(), PostmortemError> {
+    let line = SafeLogLine::new(bounded_log_text(line, MAX_SAFE_LOG_BYTES))
+        .map_err(|_| PostmortemError::Storage)?;
     request
         .ledger
         .append(
@@ -375,7 +397,7 @@ pub(super) async fn log(request: &PostmortemRequest, line: String) -> Result<(),
             vec![RunEvent::SafeLog {
                 execution: None,
                 timestamp: current_timestamp(),
-                stream: SafeLogStream::System,
+                stream,
                 line,
                 diagnostic: None,
             }],

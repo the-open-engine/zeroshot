@@ -426,6 +426,48 @@ async fn interrupted_delivery_driver_recovers_app_receipts_before_ci_settlement(
     .await;
 }
 
+#[test]
+fn conversation_fixture_keeps_state_readable_during_response_writes() {
+    let root = tempfile::tempdir().unwrap();
+    let program = fixture(root.path(), &receipt(), "Bot");
+    let probe = root.path().join("read-during-write");
+    openengine_cluster_testkit::fixture::write_executable(
+        &probe,
+        openengine_cluster_testkit::fixture::python3_script(
+            r#"#!/usr/bin/env python3
+import json
+import runpy
+import sys
+from pathlib import Path
+
+program = sys.argv.pop(1)
+state = Path(program + '.state')
+def checked_write(path, text):
+    with path.open('w') as output:
+        # Observe the exact interval after truncation and before the next write.
+        json.loads(state.read_text())
+        return output.write(text)
+Path.write_text = checked_write
+runpy.run_path(program, run_name='__main__')
+"#,
+        ),
+        0o700,
+    )
+    .unwrap();
+    let output = std::process::Command::new(probe)
+        .arg(&program)
+        .args(["api", "repos/acme/project/pulls/17"])
+        .env("GH_TOKEN", "test-token")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(state(&program)["calls"].as_array().unwrap().len(), 1);
+}
+
 #[tokio::test]
 async fn github_checkpoint_failure_blocks_resolution_and_retry_reuses_exact_reply() {
     let root = tempfile::tempdir().unwrap();

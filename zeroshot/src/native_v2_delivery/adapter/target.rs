@@ -103,7 +103,7 @@ impl NativeV2DeliveryAdapter {
             SourceReconciliationOutcome::Unchanged if !baseline_changed => Ok(()),
             SourceReconciliationOutcome::NeedsWork(diagnostic) => Err(recovery::repair(diagnostic)),
             _ => Err(recovery::repair(
-                "the target revision advanced; verify the candidate against reviewBaseRevision \
+                "verify the candidate against reviewBaseRevision \
                  before publication, preserving upstream changes and the requested feature",
             )),
         }

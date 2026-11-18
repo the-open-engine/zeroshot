@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+# A commit that only touches the root README runs the same check as CI's README lane.
+# CI still runs the README documentation contracts on the pull request.
+readme_only="$(git diff --cached --name-only -z | node .github/ci-path-classifier.js 2>/dev/null |
+  sed -n 's/^readme_only=//p')"
+if [ "$readme_only" = "true" ]; then
+  npx --no-install prettier --check README.md
+  exit 0
+fi
+
 cargo fmt --all -- --check
 npm run lint
 npm test

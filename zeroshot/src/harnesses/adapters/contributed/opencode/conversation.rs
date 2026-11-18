@@ -8,6 +8,7 @@ pub(super) fn layout(home: &Path) -> ConversationLayout {
         // `XDG_DATA_HOME` of the private store (see `store::private_environment`).
         storage: home.join("opencode").join("data").join("opencode"),
         select,
+        relocate: None,
     }
 }
 fn select(root: &Path, _id: &str) -> io::Result<Vec<PathBuf>> {

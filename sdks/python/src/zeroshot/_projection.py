@@ -26,11 +26,24 @@ from .runs import (
 )
 from .source import ResolvedGitRemote, ResolvedSource, SourceForgeIdentity
 from .stacks import StackRunStatus, StackStatus
+from .targets import NamedTarget
 from .values import JsonValue
 
 _Phase: TypeAlias = Literal["admitted", "running", "stopping", "suspended", "finished"]
 _Level: TypeAlias = Literal["debug", "info", "error"]
 _MAX_JAVASCRIPT_SAFE_INTEGER = 9_007_199_254_740_991
+
+
+def _named_target(value: object) -> NamedTarget:
+    root = _mapping(value, "named target")
+    return NamedTarget(
+        name=_string(root, "name", "named target"),
+        origin=_string(root, "origin", "named target"),
+        kind=cast(
+            Literal["hosted", "direct"],
+            _enum_string(root, "kind", {"hosted", "direct"}, "named target"),
+        ),
+    )
 
 
 def _status(value: object) -> RunStatus:
@@ -50,6 +63,7 @@ def _status(value: object) -> RunStatus:
             execution=_string(item, "execution", "active execution"),
             node=_string(item, "node", "active execution"),
             map_indices=_map_indices(item),
+            started_at=_optional_timestamp(item, "startedAt", "active execution"),
         )
         for item in _mapping_list(
             native_status.get("activeExecutions", []),
@@ -76,6 +90,7 @@ def _status(value: object) -> RunStatus:
         source=_source(root.get("source")),
         size=_string(root, "size", "run status"),
         cursor=_cursor(root),
+        recorded_at=_optional_timestamp(root, "recordedAt", "watch event"),
         phase=phase,
         active_executions=active,
         steers=tuple(_steer(item) for item in _mapping_list(root.get("steers", []), "steers")),
@@ -265,6 +280,7 @@ def _failure_diagnostic(value: object) -> FailureDiagnostic:
             execution=_string(identity, "execution", "failure diagnostic.execution"),
             node=_string(identity, "node", "failure diagnostic.execution"),
             map_indices=_map_indices(identity),
+            started_at=_optional_timestamp(identity, "startedAt", "failure diagnostic.execution"),
         )
     cursor = diagnostic.get("cursor")
     if cursor is not None and not isinstance(cursor, str):
@@ -301,6 +317,12 @@ def _string(value: Mapping[str, object], name: str, kind: str) -> str:
     if not isinstance(selected, str):
         raise ProtocolError(f"Zeroshot emitted malformed {kind}.{name}")
     return selected
+
+
+def _optional_timestamp(value: Mapping[str, object], name: str, kind: str) -> int | None:
+    if value.get(name) is None:
+        return None
+    return _positive_javascript_safe_integer(value, name, kind)
 
 
 def _positive_javascript_safe_integer(
@@ -546,4 +568,13 @@ def _steer(value: object) -> RunSteer:
         received_executions=_steer_count(entry, "receivedExecutions"),
         executions=_string_list(entry, "executions", "steer"),
         executions_omitted=omitted,
+        mode=cast(
+            Literal["once", "standing"],
+            _enum_string(
+                {"mode": entry.get("mode", "standing")}, "mode", {"once", "standing"}, "steer"
+            ),
+        ),
+        network=None
+        if entry.get("network") is None
+        else cast(dict[str, JsonValue], dict(_mapping(entry["network"], "steer.network"))),
     )

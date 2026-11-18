@@ -149,7 +149,7 @@ async fn watch_reconnects_from_queued_cursor_into_admitted_history() {
     ] {
         let (outcome, output) = execute_durable_command("watch", &backend).await;
         assert_eq!(outcome, CliOutcome::Finished);
-        assert_cursor_calls(&backend.calls(), CursorCallKind::Watch, &cursors);
+        assert_completed_watch_calls(&backend.calls(), &cursors);
         for cursor in ["cloud:1", "cloud:2", "cloud:3"] {
             assert_cursor_once(&output, cursor);
         }

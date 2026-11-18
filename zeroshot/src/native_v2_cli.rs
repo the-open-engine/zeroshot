@@ -99,6 +99,29 @@ pub struct TargetAdd {
     pub direct: bool,
 }
 
+/// Public inventory of local target registrations; never contains authentication material.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NamedTarget {
+    pub name: String,
+    pub origin: String,
+    pub kind: NamedTargetKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamedTargetKind {
+    Hosted,
+    Direct,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetRemoveResult {
+    pub name: String,
+    pub removed: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetServe {
     pub listen: SocketAddr,
@@ -373,6 +396,13 @@ pub enum NativeV2CliCommand {
     },
     Update,
     TargetAdd(TargetAdd),
+    TargetList {
+        json: bool,
+    },
+    TargetRemove {
+        name: String,
+        json: bool,
+    },
     TargetLogin {
         name: String,
     },
@@ -434,6 +464,8 @@ pub enum NativeV2CliCommand {
     Steer {
         run: RunSelector,
         text: SteerText,
+        networks: Vec<openengine_cluster_protocol::NodeName>,
+        mode: openengine_cluster_protocol::SteeringMode,
     },
     Answer {
         run: RunSelector,
@@ -504,7 +536,11 @@ impl NativeV2CliCommand {
     fn is_target_operation(&self) -> bool {
         matches!(
             self,
-            Self::TargetAdd(_) | Self::TargetLogin { .. } | Self::TargetSizes { .. }
+            Self::TargetAdd(_)
+                | Self::TargetLogin { .. }
+                | Self::TargetSizes { .. }
+                | Self::TargetList { .. }
+                | Self::TargetRemove { .. }
         )
     }
 }
@@ -559,6 +595,8 @@ pub enum NativeV2CliError {
     Target(String),
     #[error("local controller operation failed: {0}")]
     Local(String),
+    #[error(transparent)]
+    Ledger(#[from] crate::v2_run_ledger::RunLedgerError),
     #[error("{0}")]
     LocalRequestTimeout(String),
     #[error("Zeroshot OECP request failed: {0}")]
@@ -652,6 +690,18 @@ pub trait NativeV2CliBackend: Send + Sync {
 
     async fn target_add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn target_login(&self, name: &str) -> Result<(), NativeV2CliError>;
+
+    async fn target_list(&self) -> Result<Vec<NamedTarget>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target inventory is unavailable".to_owned(),
+        ))
+    }
+
+    async fn target_remove(&self, _name: &str) -> Result<TargetRemoveResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target removal is unavailable".to_owned(),
+        ))
+    }
 
     async fn target_sizes(
         &self,

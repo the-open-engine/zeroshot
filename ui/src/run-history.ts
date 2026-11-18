@@ -244,6 +244,44 @@ export const humanize = (value: string) =>
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .replace(/^\w/, (c) => c.toUpperCase());
+/** At most `limit` characters of `text`, cut between characters and marked with an ellipsis. */
+export function excerpt(text: string, limit = 60): string {
+  let end = 0,
+    count = 0;
+  for (const character of text) {
+    if (count === limit) return `${text.slice(0, end)}…`;
+    end += character.length;
+    count++;
+  }
+  return text;
+}
+/**
+ * The one-line status of a suspended run. The question is only an excerpt so its deadline stays
+ * readable; the request node's inspector shows it in full.
+ */
+export function suspensionStatus(suspension: RunSummary['suspension']): string {
+  const wait = suspension?.wait,
+    request = suspension?.request;
+  return `Suspended (${suspension?.reason ?? 'command'}) at ${suspension?.node ?? 'checkpoint'}${wait ? ` until ${new Date(wait.dueAt).toISOString()}` : ''}${request ? `: ${excerpt(request.text)} (deadline ${new Date(request.expiresAt).toISOString()})` : ''}`;
+}
+/**
+ * How the question a suspended run waits on stands now. Its own history cannot record that: an
+ * answer, or an answer after the deadline, starts a successor run, and an expiry needs the clock.
+ */
+export function requestStanding(
+  nodes: Readonly<Record<string, WorkflowNodeObservation>>,
+  suspension: RunSummary['suspension'],
+  continued: boolean,
+  now: number
+): Readonly<Record<string, WorkflowNodeObservation>> {
+  const request = suspension?.request;
+  const node = request && nodes[suspension.node];
+  if (!node || node.state !== 'suspended') return nodes;
+  const standing = continued ? 'continued' : now >= request.expiresAt ? 'expired' : 'pending';
+  return Object.assign(Object.create(null), nodes, {
+    [suspension.node]: { ...node, request: standing },
+  });
+}
 export const stateLabel = (state: NodeState) =>
   ({
     idle: 'Not reached',
@@ -434,11 +472,15 @@ export function projectHistory(
     unowned: [],
   };
   let terminal: RunTerminal | undefined;
+  let suspended = false;
   for (let index = 0; index <= Math.min(through, events.length - 1); index++) {
     const event = events[index].event;
     if (event.kind === 'terminal') terminal = event.result;
     else readHistoryEvent(event, index, projection);
+    if (event.kind === 'suspended') suspended = true;
   }
+  // A run that ended suspended runs nothing: its open groups and held-back work wait with it.
+  const held = suspended && !terminal;
   const controls = settleControlVisits(
     document.graph.root,
     projectControlHistory(control, events, through)
@@ -456,16 +498,17 @@ export function projectHistory(
       nodes[node.name] = leafObservation(
         invocations.filter((invocation) => invocation.node === node.name),
         visits,
-        !terminal
+        !terminal,
+        held
       );
     } else if (visits.length) {
-      nodes[node.name] = controlObservation(visits);
+      nodes[node.name] = controlObservation(visits, held);
     } else if (isGroup(node)) {
       // Without a structural record, only active descendants establish a current group state.
       const descendants = new Set(allNodes(node).map((child) => child.name));
       const executions = invocations.filter((invocation) => descendants.has(invocation.node));
       if (executions.some((invocation) => invocation.state === 'running'))
-        nodes[node.name] = { state: 'running', count: executions.length };
+        nodes[node.name] = { state: held ? 'suspended' : 'running', count: executions.length };
       else if (executions.length)
         nodes[node.name] = { state: 'recorded', count: executions.length };
     }
@@ -774,13 +817,18 @@ export function descendantNames(node: GraphNode): Set<string> {
   return new Set([node.name, ...children(node).flatMap((child) => [...descendantNames(child)])]);
 }
 
-function controlObservation(visits: readonly ControlVisit[]): WorkflowNodeObservation {
+function controlObservation(
+  visits: readonly ControlVisit[],
+  /** The run ended suspended: a group still open waits with it. */
+  held = false
+): WorkflowNodeObservation {
   const latest = new Map(visits.map((visit) => [JSON.stringify(visit.mapIndices), visit]));
   const current = [...latest.values()];
   const states = new Set(current.map((visit) => controlState(visit.state)));
-  const state =
+  const found =
     (['running', 'failed', 'skipped', 'recorded'] as const).find((next) => states.has(next)) ??
     'succeeded';
+  const state = held && found === 'running' ? 'suspended' : found;
   const visit = current.reduce((a, b) => (a.updated > b.updated ? a : b));
   return {
     state,
@@ -794,7 +842,9 @@ function leafObservation(
   executions: readonly Invocation[],
   controls: readonly ControlVisit[],
   /** False once the run has ended: nothing waits on a question any more. */
-  live = true
+  live = true,
+  /** The run ended suspended: its running or queued work is held until a successor continues it. */
+  held = false
 ): WorkflowNodeObservation {
   const latest = new Map<string, { state: WorkflowNodeObservation['state']; start: number }>();
   for (const invocation of executions)
@@ -806,7 +856,12 @@ function leafObservation(
       states.has(next)
     ) ?? (latest.size ? 'succeeded' : 'idle');
   // Once the run has ended nothing waits any more: a step still held when it stopped was stopped.
-  const state = !live && current === 'suspended' ? 'skipped' : current;
+  const state =
+    !live && current === 'suspended'
+      ? 'skipped'
+      : held && (current === 'running' || current === 'queued')
+        ? 'suspended'
+        : current;
   const last = executions.at(-1);
   const signals = last?.outcome?.signals;
   // A pending question is what the step is waiting on; show it while the run still waits.
@@ -824,7 +879,7 @@ function leafObservation(
           Object.entries(signals)
             .map(([key, value]) => `${humanize(key)}: ${value}`)
             .join(' · '),
-        queued ? `${queued} queued` : undefined,
+        queued && !held ? `${queued} queued` : undefined,
       ]
         .filter(Boolean)
         .join(' · ') || undefined,

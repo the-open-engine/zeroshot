@@ -216,16 +216,15 @@ async fn start_controller_process(
     let git_credentials = bootstrap.git_credentials.clone();
     let native_environment = bootstrap.native_environment.clone();
     let memory_storage = bootstrap.memory_storage.clone();
-    let version_stopping = stopping.clone();
     let controller = Arc::new(
         PortableRunController::start_with_shutdown(
             bootstrap,
-            async move |admitted| {
+            async move |admitted, preparation| {
                 crate::native_v2_local::check_lane_versions(
                     &admitted.runtime,
                     &native_environment,
                     &workspace,
-                    Some(version_stopping),
+                    Some(preparation),
                 )
                 .await?;
                 crate::native_v2_local::build_local_process_candidate(
@@ -359,6 +358,14 @@ pub struct PortableControllerServer {
     controller: Arc<PortableRunController>,
 }
 
+/// A live submitting CLI connects within moments of readiness. One that was interrupted never
+/// does, and nothing else needs the controller once the run ended or suspended.
+const UNOBSERVED_TERMINAL_GRACE: Duration = if cfg!(test) {
+    Duration::from_secs(3)
+} else {
+    Duration::from_secs(5)
+};
+
 #[derive(Default)]
 struct ServerLifecycle {
     accepted: bool,
@@ -401,7 +408,9 @@ impl PortableControllerServer {
 
     /// Serves one active local run until its durable terminal result exists. If a very short run
     /// finishes before the submitting CLI reaches the socket, one connection is still accepted so
-    /// readiness cannot race normal startup. Later observation reopens the durable ledger.
+    /// readiness cannot race normal startup, but only within a bounded grace: an interrupted
+    /// submitter must not keep the controller and its workspace lease. Later observation reopens
+    /// the durable ledger.
     async fn serve_until_terminal(
         self,
         mut stopping: tokio::sync::watch::Receiver<bool>,
@@ -409,6 +418,7 @@ impl PortableControllerServer {
         let mut lifecycle = ServerLifecycle::default();
         let mut connections = tokio::task::JoinSet::new();
         let (shutdown, _) = tokio::sync::watch::channel(());
+        let mut unobserved = None;
         let stop_requested = {
             // One wait spans every connection, so observers cannot restart its bound.
             let terminal = self.controller.wait_terminal();
@@ -419,7 +429,9 @@ impl PortableControllerServer {
                 }
                 tokio::select! {
                     Ok(()) = async { stopping.wait_for(|requested| *requested).await.map(|_| ()) } => {
-                        break Ok(true);
+                        // An ended or suspended run has no work left to stop, and forcing a
+                        // suspension would discard what it retains.
+                        break Ok(!lifecycle.terminal);
                     }
                     accepted = self.listener.accept() => {
                         let stream = match accepted {
@@ -438,6 +450,13 @@ impl PortableControllerServer {
                             break Err(error);
                         }
                         lifecycle.terminal();
+                        unobserved =
+                            Some(tokio::time::Instant::now() + UNOBSERVED_TERMINAL_GRACE);
+                    }
+                    () = tokio::time::sleep_until(
+                        unobserved.unwrap_or_else(tokio::time::Instant::now),
+                    ), if unobserved.is_some() => {
+                        break Ok(false);
                     }
                 }
             }
@@ -470,12 +489,15 @@ impl PortableControllerServer {
 
 async fn serve_connection(
     controller: Arc<PortableRunController>,
-    stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    stream: super::transport::Server,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
+    let human_steering = super::transport::peer_pid(&stream)
+        .and_then(crate::execution::process::authority::require_human)
+        .is_ok();
     let (reader, writer) = tokio::io::split(stream);
     let _ = openengine_cluster_server::stdio::serve_ndjson_until_shutdown(
-        local_binding(controller),
+        local_binding(controller, human_steering),
         openengine_cluster_server::stdio::NdjsonIo::new(reader, writer, tokio::io::sink()),
         shutdown,
     )
@@ -488,6 +510,7 @@ mod shutdown_tests;
 
 fn local_binding(
     controller: Arc<PortableRunController>,
+    human_steering: bool,
 ) -> ConnectionBinding<PortableRunController, StaticConnectionIdentityResolver, SystemConnectionTime>
 {
     let identity = ConnectionIdentity::new(ConnectionIdentityConfig {
@@ -495,7 +518,10 @@ fn local_binding(
         tenant: TenantId::new("local-run"),
         issued_at_ms: None,
         expires_at_ms: u64::MAX,
-        binding_attributes: BindingAttributes::default(),
+        binding_attributes: BindingAttributes::new(BTreeMap::from([(
+            crate::execution::process::authority::HUMAN_STEERING_ATTRIBUTE.into(),
+            human_steering.to_string(),
+        )])),
     });
     ConnectionBinding::new(
         controller,

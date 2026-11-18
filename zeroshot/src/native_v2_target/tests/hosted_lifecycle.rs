@@ -13,7 +13,7 @@ use super::hosted_authority::*;
 #[tokio::test]
 async fn hosted_lifecycle_stays_platform_owned_from_queue_through_completion() {
     let root = temp_root();
-    let (backend, dialer, server) = hosted_backend(&root, 32).await;
+    let (backend, dialer, server) = hosted_backend(&root, 38).await;
     let run_id = RunId::new("run-hosted");
 
     assert_queued(&backend, &run_id).await;
@@ -116,7 +116,7 @@ where
 }
 
 fn assert_platform_requests(requests: &[CapturedHttpRequest]) {
-    assert_eq!(requests.len(), 32);
+    assert_eq!(requests.len(), 38);
     assert_eq!(
         requests
             .iter()
@@ -132,6 +132,14 @@ fn assert_platform_requests(requests: &[CapturedHttpRequest]) {
     assert!(requests.iter().any(|request| {
         request.path == "/native-v2/runs/run-hosted/watch?from_cursor=cloud%3A1"
     }));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/native-v2/runs/run-hosted/logs")
+            .count(),
+        1,
+        "finished watches read memory logs once through the hosted authority"
+    );
     assert!(requests.iter().any(|request| {
         request.path == "/native-v2/runs/run-hosted/logs?from_cursor=v2%3A2&execution=worker%2F1"
     }));

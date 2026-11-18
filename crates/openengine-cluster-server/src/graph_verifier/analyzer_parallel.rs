@@ -1,13 +1,14 @@
 use super::*;
 
 impl<'a> Analyzer<'a> {
+    /// Reported at the condition a check could not decide: a map's saturated counts exceed
+    /// the finite-check ceiling, or the search passed its backstop.
     pub(super) fn assignment_ceiling(&mut self, path: &[DiagnosticPathSegment]) {
         emit_diagnostic!(
             self,
             GraphDiagnosticCode::CeilingExceeded,
             format!(
-                "control analysis exceeds {FULL_V1_MAX_GUARD_ASSIGNMENTS} states or {} count-cell work units",
-                ProofWork::LIMIT
+                "control analysis of this condition exceeds {FULL_V1_MAX_GUARD_ASSIGNMENTS} count states or {FULL_V1_MAX_GUARD_SEARCH_STEPS} search steps"
             ),
             path.to_vec(),
             Vec::new(),

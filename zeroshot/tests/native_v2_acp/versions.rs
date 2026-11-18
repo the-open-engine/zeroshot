@@ -18,7 +18,7 @@ if [ "${{1-}}" = --version ]; then
   printf '2.1.318 (Claude Code)\n'
   exit 0
 fi
-/usr/bin/cat >/dev/null
+/usr/bin/head -n 1 >/dev/null
 if [ -e {state:?} ]; then response=second; else : > {state:?}; response=first; fi
 printf '%s\n' '{{"type":"system","subtype":"init","session_id":"acp-claude-thread"}}'
 printf '%s%s%s\n' \

@@ -26,8 +26,8 @@ use crate::native_v2_contract::{ExecutionRef, visible_text};
 use crate::native_v2_runner::{AttachReceiveError, LiveOutputSource, ReadOnlyAttach};
 use crate::native_v2_supervisor::{LiveOutputRegistrar, LiveOutputRegistration, LiveOutputUnavailable};
 use crate::v2_run_ledger::{
-    apply_event, cursor_sequence, initial_cursor, NodeState, RunEvent, RunLedger, RunLedgerError,
-    RunPhase, RunSnapshot, SafeLogStream, StoredRunEvent,
+    apply_stored_event, cursor_sequence, initial_cursor, NodeState, RunEvent, RunLedger,
+    RunLedgerError, RunPhase, RunSnapshot, SafeLogStream, StoredRunEvent,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -442,9 +442,10 @@ impl WatchFold<'_> {
     fn apply(&mut self, events: &[StoredRunEvent]) -> Result<(), NativeV2ObservationError> {
         for stored in events {
             let sequence = cursor_sequence(&stored.cursor)?;
-            apply_event(self.projection, &stored.event, sequence)?;
+            apply_stored_event(self.projection, stored)?;
             if sequence > self.after && changes_public_status(&stored.event) {
                 self.pending.push_back(RunWatchEventNotification {
+                    recorded_at: stored.recorded_at,
                     subscription_id: self.subscription_id.clone(),
                     run_id: self.projection.run_id.clone(),
                     title: self.projection.title.clone(),

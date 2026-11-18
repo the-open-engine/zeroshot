@@ -2,6 +2,7 @@ use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
+use super::lifecycle::retained_delivery_run_id;
 use crate::harnesses::{HarnessBuildContext, HarnessHost};
 use crate::native_v2_candidate::test_support::TestDirectory;
 use crate::native_v2_contract::RuntimeLane;

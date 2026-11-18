@@ -20,8 +20,8 @@ fn steer_text_sources_preserve_utf8_and_reject_invalid_or_unreadable_input() {
             "exceeds",
         ),
         (vec![0xff], "UTF-8"),
-        (b" \t\r\n".to_vec(), "non-whitespace"),
-        (b"before\0after".to_vec(), "NUL"),
+        (b" \t\r\n".to_vec(), "steer must contain a non-whitespace"),
+        (b"before\0after".to_vec(), "steer must not contain NUL"),
         (b"before\x1bafter".to_vec(), "control"),
     ] {
         std::fs::write(&path, bytes).assert_value();
@@ -89,7 +89,7 @@ async fn steer_default_backend_refuses_without_output_and_validation_precedes_di
     let backend = FakeBackend::default();
     for (text, diagnostic) in [
         ("direction", "target does not advertise steering"),
-        ("\0", "NUL"),
+        ("\0", "steer must not contain NUL"),
     ] {
         let command = NativeV2CliCommand::Steer {
             run: RunSelector {
@@ -97,6 +97,8 @@ async fn steer_default_backend_refuses_without_output_and_validation_precedes_di
                 run_id: RunId::new("run"),
             },
             text: SteerText::Text(text.into()),
+            networks: vec![],
+            mode: openengine_cluster_protocol::SteeringMode::Standing,
         };
         let mut output = Vec::new();
         let error = execute_native_v2_cli(command, &backend, &mut NeverDetach, &mut output)

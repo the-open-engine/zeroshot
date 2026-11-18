@@ -47,6 +47,33 @@ async fn multiple_requests_and_choice_placement_are_accepted() {
         .assert_value();
 }
 #[tokio::test]
+async fn request_nodes_declare_their_own_signals_and_output() {
+    let mut second = ask();
+    second["name"] = json!("second");
+    second["signals"] = json!({"colour":["blue","red"]});
+    second["output"] = json!({"kind":"record","fields":{
+        "count":{"required":true,"type":{"kind":"integer"}}}});
+    check_nodes(vec![ask(), second, succeed("done")], true)
+        .await
+        .assert_value();
+
+    // The exemption is for request nodes only: any other worker reused with a different contract
+    // is still refused.
+    let mut first = null_verifier("first", "agent.shared@1");
+    let mut other = null_verifier("other", "agent.shared@1");
+    first["signals"] = json!({"verdict":["accepted"]});
+    other["signals"] = json!({"verdict":["accepted","rejected"]});
+    let reused = graph(vec![first, other, succeed("done")]);
+    let nodes = BTreeMap::from([
+        (named("first"), binding("model", None)),
+        (named("other"), binding("model", None)),
+    ]);
+    assert!(matches!(
+        NativeV2Admission.admit(submission(reused, nodes)).await,
+        Err(NativeV2AdmissionError::InconsistentWorkerReuse { .. })
+    ));
+}
+#[tokio::test]
 async fn request_contract_at_profile_and_run_admission() {
     let mut valid = ask();
     valid["timeoutMs"] = json!(crate::native_v2_request::MAX_DEADLINE_MILLIS);

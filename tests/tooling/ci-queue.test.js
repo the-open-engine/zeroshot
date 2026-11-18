@@ -126,3 +126,97 @@ it(
     }
   }
 );
+
+it('compiles the same Windows UI test artifacts before starting the bounded execution host', () => {
+  const steps = ci.jobs['native-check'].steps;
+  const prebuild = steps.find((step) => step.run?.includes('test-windows.ps1 -Ui -BuildOnly'));
+  const execution = steps.find((step) => step.run === './.github/scripts/test-windows-host.ps1');
+  assert.ok(prebuild, 'initial UI test compilation must happen before the host deadline starts');
+  assert.ok(execution, 'Windows tests must retain their independent native execution host');
+  assert.equal(prebuild.if, "runner.os == 'Windows'");
+  assert.equal(execution.if, prebuild.if);
+  assert.ok(steps.indexOf(prebuild) < steps.indexOf(execution));
+
+  const script = fs.readFileSync(path.join(root, 'scripts/test-windows.ps1'), 'utf8');
+  assert.match(script, /param\(\[switch\]\$Ui, \[switch\]\$BuildOnly\)/);
+  const build = script.indexOf('cargo test --workspace @features --jobs 1 --no-run');
+  const buildFailure = script.indexOf('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }');
+  const emptyArtifacts = script.indexOf(
+    "if ($tests.Count -eq 0) { throw 'Cargo produced no workspace test executables' }"
+  );
+  const buildOnly = script.indexOf('if ($BuildOnly) { exit 0 }');
+  const runTests = script.indexOf('foreach ($test in $tests)');
+  const doctests = script.indexOf('cargo test --workspace @features --jobs 1 --doc');
+  assert.ok(build >= 0 && build < buildFailure && buildFailure < emptyArtifacts);
+  assert.ok(emptyArtifacts < buildOnly && buildOnly < runTests && runTests < doctests);
+  assert.match(script, /\$features = if \(\$Ui\) \{ @\('--features', 'zeroshot\/ui'\) \}/);
+
+  const host = fs.readFileSync(path.join(root, '.github/scripts/test-windows-host.ps1'), 'utf8');
+  assert.match(host, /-File \.\/scripts\/test-windows\.ps1 -Ui \*>/);
+  assert.match(host, /Invoke-CimMethod -ClassName Win32_Process -MethodName Create/);
+  assert.match(host, /WaitForExit\(1800000\)/);
+  assert.match(host, /\$process\.Kill\(\$true\)/);
+});
+
+it('preserves Windows prebuild compiler settings without persisting registry credentials', () => {
+  const host = fs.readFileSync(path.join(root, '.github/scripts/test-windows-host.ps1'), 'utf8');
+  const names = new Set(
+    [...host.match(/\$names = @\(([\s\S]*?)\n\)/)[1].matchAll(/'([^']+)'/g)].map(
+      (match) => match[1]
+    )
+  );
+  const buildNames = new RegExp(host.match(/\$_ -match '([^']+)'/)[1], 'i');
+  const carried = (name) => names.has(name) || buildNames.test(name);
+  for (const name of [
+    'PATH',
+    'HOME',
+    'CARGO_HOME',
+    'RUSTUP_HOME',
+    'RUSTUP_TOOLCHAIN',
+    'CARGO_INCREMENTAL',
+    'CARGO_TARGET_DIR',
+    'CARGO_BUILD_JOBS',
+    'CARGO_BUILD_TARGET',
+    'CARGO_TERM_COLOR',
+    'RUSTFLAGS',
+    'CARGO_ENCODED_RUSTFLAGS',
+    'RUSTDOCFLAGS',
+    'CARGO_ENCODED_RUSTDOCFLAGS',
+    'RUSTC',
+    'RUSTDOC',
+    'RUSTC_WRAPPER',
+    'RUSTC_WORKSPACE_WRAPPER',
+    'CARGO_BUILD_RUSTFLAGS',
+    'CARGO_BUILD_RUSTDOCFLAGS',
+    'CARGO_BUILD_RUSTC',
+    'CARGO_BUILD_RUSTDOC',
+    'CARGO_BUILD_RUSTC_WRAPPER',
+    'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER',
+    'CARGO_PROFILE_TEST_DEBUG',
+    'CARGO_PROFILE_DEV_BUILD_OVERRIDE_OPT_LEVEL',
+    'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER',
+    'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS',
+  ]) {
+    assert.equal(carried(name), true, name);
+  }
+  for (const name of [
+    'CARGO_REGISTRY_TOKEN',
+    'CARGO_REGISTRY_CREDENTIAL_PROVIDER',
+    'CARGO_REGISTRIES_PRIVATE_TOKEN',
+    'CARGO_REGISTRIES_PRIVATE_INDEX',
+    'CARGO_REGISTRIES_PRIVATE_CREDENTIAL_PROVIDER',
+    'GITHUB_TOKEN',
+    'CARGO_PROFILE_TEST_REGISTRY_TOKEN',
+    'CARGO_TARGET_SECRET_TOKEN',
+  ]) {
+    assert.equal(carried(name), false, name);
+  }
+  assert.match(
+    host,
+    /\$names \+= @\(\s*\[Environment\]::GetEnvironmentVariables\('Process'\)\.Keys/
+  );
+  assert.match(host, /foreach \(\$name in \$names\)/);
+  assert.match(host, /\[Environment\]::GetEnvironmentVariable\(\$name\)/);
+  assert.match(host, /Environment = \$environment/);
+  assert.match(host, /\$context\.Environment\.GetEnumerator\(\)/);
+});

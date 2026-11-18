@@ -21,6 +21,7 @@ pub struct PortableRuntime {
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     pub runner: Arc<dyn NodeRunner>,
     pub cleanup: Arc<dyn CapsuleCleanup>,
+    pub node_instance_floor: u64,
 }
 
 /// The shared one-run execution boundary used by hosted and standalone controllers.
@@ -156,6 +157,10 @@ impl PortableRunEngine {
         self.supervisor.suspend().await
     }
 
+    pub(crate) fn suspending(&self) -> bool {
+        self.supervisor.suspending()
+    }
+
     pub async fn force_stop(
         &self,
     ) -> Result<(), crate::native_v2_supervisor::NativeV2SupervisorError> {
@@ -237,6 +242,7 @@ impl PortableRuntime {
             runner,
             checkpoints: None,
             execution_seed: Vec::new(),
+            node_instance_floor: Default::default(),
             vector_seed: Vec::new(),
             cleanup: Arc::new(ConfirmedCleanup),
         }
@@ -249,6 +255,7 @@ impl PortableRuntime {
             cleanup,
             checkpoints: None,
             execution_seed: Vec::new(),
+            node_instance_floor: Default::default(),
             vector_seed: Vec::new(),
         }
     }

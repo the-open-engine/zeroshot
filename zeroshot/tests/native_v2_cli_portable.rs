@@ -3,16 +3,114 @@
 #[path = "native_v2_cli_portable/fixture.rs"]
 mod fixture;
 
+#[path = "native_v2_cli_portable/discard_workspace_tests.rs"]
+mod discard_workspace_tests;
 #[path = "native_v2_cli_portable/inspection.rs"]
 mod inspection;
 #[cfg(windows)]
 #[path = "native_v2_cli_portable/restic_resume_tests.rs"]
 mod restic_resume_tests;
+#[cfg(windows)]
+#[path = "native_v2_cli_portable/resume_refusal_tests.rs"]
+mod resume_refusal_tests;
+#[path = "native_v2_cli_portable/startup.rs"]
+mod startup;
+#[cfg(unix)]
+#[path = "native_v2_cli_portable/submission_scan_tests.rs"]
+mod submission_scan_tests;
 use fixture::{Fixture, success};
+
+#[test]
+fn connection_store_errors_name_file_and_location_without_secret_values() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let fixture = Fixture::new();
+    // Let the CLI create the file with native private ownership before damaging its contents.
+    let mut child = fixture
+        .command(&["connection", "set", "openai", "--json-stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"OPENAI_API_KEY":"fixture-key"}"#)
+        .unwrap();
+    success(&child.wait_with_output().unwrap());
+    let path = fixture.root.path("state").join("connections.json");
+    let encoded = "{\n  \"openai\": {\"OPENAI_API_KEY\": 987654321012345}\n}";
+    std::fs::write(&path, encoded).unwrap();
+    for output in [
+        fixture.command(&["connection", "list"]).output().unwrap(),
+        fixture
+            .command(&["connection", "delete", "openai"])
+            .output()
+            .unwrap(),
+        fixture.run("finish", true),
+    ] {
+        assert!(!output.status.success());
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            diagnostic.contains(&path.display().to_string()),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("is malformed at line 2 column 47"),
+            "{diagnostic}"
+        );
+        assert!(!diagnostic.contains("987654321012345"), "{diagnostic}");
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), encoded);
+    assert!(!fixture.workspace.join("mutation.txt").exists());
+}
+
+#[path = "native_v2_cli_portable/tool_activity_tests.rs"]
+mod tool_activity_tests;
 
 #[cfg(unix)]
 #[path = "native_v2_cli_portable/unix_controller_tests.rs"]
 mod unix_controller;
+
+#[test]
+fn unchecked_worker_error_fails_foreground_status_and_logs() {
+    let fixture = Fixture::new();
+    let mut graph: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+    graph["root"]["children"] = serde_json::json!([
+        graph["root"]["children"][0].clone(),
+        {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+    ]);
+    fixture.write("graph.json", &graph);
+    let result = fixture.run("fail", false);
+    assert!(!result.status.success());
+    let receipt: serde_json::Value =
+        serde_json::from_slice(result.stdout.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let status = fixture.json(&["status", id]);
+    let terminal = &status["status"]["terminalResult"];
+    assert_eq!(terminal["status"], "failed");
+    assert_eq!(terminal["reason"], "unhandled");
+    let cause = terminal["context"]["primary"]["message"].as_str().unwrap();
+    assert!(
+        cause.contains("worker") && cause.contains("crash"),
+        "{terminal}"
+    );
+    let logs = fixture.command(&["logs", id]).output().unwrap();
+    success(&logs);
+    let text = String::from_utf8(logs.stdout).unwrap();
+    assert!(
+        text.contains("unhandled") && text.contains("worker") && text.contains("crash"),
+        "{text}"
+    );
+}
 
 #[test]
 fn native_local_run_handles_unicode_paths_correction_and_large_output() {
@@ -192,4 +290,84 @@ fn process_exists(pid: u32) -> bool {
         }
         pending
     }
+}
+
+fn write_large_task(fixture: &Fixture, size: usize) -> usize {
+    let mut graph: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+    let task = serde_json::json!({"kind":"record","fields":{"task":{"type":{"kind":"string"},"required":true}}});
+    graph["initialInput"] = task.clone();
+    graph["root"]["state"] = task.clone();
+    graph["root"]["children"][0]["input"] = task.clone();
+    graph["root"]["children"][0]["inputBindings"] = serde_json::json!([
+        {"target":["task"],"value":{"source":"state","path":["task"]}}
+    ]);
+    graph["root"]["children"][1]["state"] = task;
+    let input = serde_json::json!({"task":"x".repeat(size)});
+    fixture.write("graph.json", &graph);
+    fixture.write("input.json", &input);
+    serde_json::to_vec(&input).unwrap().len()
+}
+
+#[test]
+fn oversized_submissions_report_sizes_before_creating_a_run() {
+    for size in [3_000_000, 9_700_000] {
+        let fixture = Fixture::new();
+        let input_bytes = write_large_task(&fixture, size);
+        let output = fixture
+            .run_command("finish", true)
+            .env("ZEROSHOT_ERROR_FORMAT", "json")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["kind"], "invalid_request");
+        assert_eq!(error["code"], "submission.too_large");
+        let message = error["message"].as_str().unwrap();
+        for detail in [
+            "submission",
+            "input",
+            "2 MiB",
+            "2097152",
+            &input_bytes.to_string(),
+        ] {
+            assert!(message.contains(detail), "{message}");
+        }
+        let runs = fixture.root.path("state/runs");
+        assert!(!runs.exists() || std::fs::read_dir(runs).unwrap().next().is_none());
+    }
+}
+
+#[test]
+fn oversized_node_input_is_visible_in_foreground_status_and_logs() {
+    let fixture = Fixture::new();
+    let input_bytes = write_large_task(&fixture, 1_400_000);
+    let output = fixture.run("finish", false);
+    assert!(!output.status.success());
+    let receipt: serde_json::Value =
+        serde_json::from_slice(output.stdout.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let status = fixture.json(&["status", id]);
+    assert_eq!(
+        status["status"]["terminalResult"]["reason"],
+        "runtime_failed"
+    );
+    let logs = fixture.command(&["logs", id]).output().unwrap();
+    success(&logs);
+    let foreground = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for text in [
+        foreground,
+        status.to_string(),
+        String::from_utf8(logs.stdout).unwrap(),
+    ] {
+        for detail in ["worker", "1 MiB", "1048576", &input_bytes.to_string()] {
+            assert!(text.contains(detail), "missing {detail}: {text}");
+        }
+    }
+    assert!(!fixture.workspace.join("mutation.txt").exists());
 }

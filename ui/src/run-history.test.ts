@@ -9,6 +9,8 @@ import {
   invocationLabel,
   observedRoutes,
   projectHistory,
+  requestStanding,
+  suspensionStatus,
   type HistoryEvent,
   type Outcome,
   type Reference,
@@ -891,4 +893,75 @@ test('inherited questions recorded before their executions still find them', () 
   assert.equal(timedOut.request?.text, 'First?');
   assert.equal(held.request?.text, 'Second?');
   assert.equal(held.state, 'suspended');
+});
+
+test('the status of a suspended run shows a bounded excerpt of its question and keeps the deadline', () => {
+  const expiresAt = Date.parse('2026-12-01T08:00:00Z');
+  const suspension = (text: string) => ({
+    reason: 'request' as const,
+    node: 'approval',
+    createdAt: expiresAt - 1000,
+    request: { id: 'q', text, signals: {}, output: null, expiresAt },
+  });
+  const status = suspensionStatus(suspension('x'.repeat(600_000)));
+  assert.ok(status.length < 200, `${status.length} characters`);
+  assert.equal(
+    status,
+    `Suspended (request) at approval: ${'x'.repeat(60)}… (deadline 2026-12-01T08:00:00.000Z)`
+  );
+  // The cut falls between characters, never inside a surrogate pair.
+  assert.match(suspensionStatus(suspension('🙂'.repeat(100))), new RegExp(`: (🙂){60}… \\(`, 'u'));
+  assert.equal(
+    suspensionStatus(suspension('Approve?')),
+    'Suspended (request) at approval: Approve? (deadline 2026-12-01T08:00:00.000Z)'
+  );
+});
+
+test('a suspended request stands pending until its run continues or its deadline passes', () => {
+  const expiresAt = 2000;
+  const suspension = {
+    reason: 'request' as const,
+    node: 'approval',
+    createdAt: 1000,
+    request: { id: 'q', text: 'Approve?', signals: {}, output: null, expiresAt },
+  };
+  const nodes = {
+    approval: { state: 'suspended' as const },
+    other: { state: 'succeeded' as const },
+  };
+  const standing = (continued: boolean, now: number) =>
+    requestStanding(nodes, suspension, continued, now).approval.request;
+  assert.equal(standing(false, expiresAt - 1), 'pending');
+  assert.equal(standing(false, expiresAt), 'expired');
+  // A successor started by an answer or by a late one: the predecessor cannot tell which.
+  assert.equal(standing(true, expiresAt - 1), 'continued');
+  assert.equal(standing(true, expiresAt + 1), 'continued');
+  assert.equal(requestStanding(nodes, suspension, true, 0).other, nodes.other);
+  assert.equal(requestStanding(nodes, undefined, true, 0), nodes);
+  assert.equal(
+    requestStanding({ approval: { state: 'skipped' } }, suspension, false, 0).approval.request,
+    undefined
+  );
+});
+
+test('a run that ended suspended shows its held-back node and open groups as suspended', () => {
+  const doc = document(
+    sequence('run', { kind: 'loop', name: 'rounds', body: sequence('body', step('a'), step('b')) })
+  );
+  const history = events({ kind: 'run_started' }, start(ref('a')), complete(ref('a')), {
+    kind: 'suspended',
+    suspension: { reason: 'command', node: 'b', createdAt: 1000 },
+  });
+  const controls: ControlRecord[] = [
+    { cursor: 'v2:1', node: 'rounds', mapIndices: [], visitId: 'rounds', state: 'entered' },
+    { cursor: 'v2:3', node: 'b', mapIndices: [], visitId: 'b', state: 'queued' },
+  ];
+  const before = projectHistory(doc, history, 2, controls);
+  assert.equal(before.nodes.rounds.state, 'running');
+  assert.equal(before.nodes.b.state, 'queued');
+  const ended = projectHistory(doc, history, history.length - 1, controls);
+  assert.equal(ended.nodes.rounds.state, 'suspended');
+  assert.equal(ended.nodes.b.state, 'suspended');
+  assert.doesNotMatch(ended.nodes.b.detail ?? '', /queued/);
+  assert.equal(ended.nodes.a.state, 'succeeded');
 });

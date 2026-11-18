@@ -18,6 +18,16 @@ pub enum WorkerRegistryError {
 pub trait WorkerRegistry: Send + Sync {
     /// Resolves one exact stable reference. Implementations must not perform latest-version lookup.
     async fn resolve(&self, worker: &WorkerRef) -> Result<WorkerDescriptor, WorkerRegistryError>;
+
+    /// Resolves the reference used by the node at `path`, the node names from the graph root down
+    /// to that node. A registry whose descriptors depend on the reference alone keeps this default.
+    async fn resolve_node(
+        &self,
+        worker: &WorkerRef,
+        _path: &[String],
+    ) -> Result<WorkerDescriptor, WorkerRegistryError> {
+        self.resolve(worker).await
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -92,7 +102,7 @@ where
     let mut diagnostics = Vec::new();
     for located in nodes {
         let worker = located.worker();
-        match registry.resolve(worker).await {
+        match registry.resolve_node(worker, &located.path).await {
             Ok(descriptor) => {
                 check_descriptor(graph.profile, &located, &descriptor, &mut diagnostics)
             }

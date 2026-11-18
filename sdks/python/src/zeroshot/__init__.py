@@ -120,4 +120,6 @@ from .stacks import (
 from .stacks import (
     StackStatus as StackStatus,
 )
+from .targets import NamedTarget as NamedTarget
+from .targets import TargetRemoveResult as TargetRemoveResult
 from .values import JsonValue as JsonValue

@@ -196,6 +196,9 @@ impl NativeV2CodexAdapter {
             crate::active_memory::hooks::HookInstallation {
                 invocation,
                 home: input.files.home(),
+                // Codex runs in exec mode with no channel for a further user message; its hook
+                // context arrives as a developer message and stays in the thread.
+                steers: crate::active_memory::hooks::SteerRoute::HookContext,
             },
         );
         Ok(command)
@@ -481,6 +484,10 @@ impl NativeV2CodexAdapter {
                 schema_path: schema.path(),
             },
         )?;
+        let network_capability = command
+            .environment
+            .get("ZEROSHOT_STEERING_CAPABILITY")
+            .cloned();
         let native_redactions = self
             .apply_permission_default(
                 crate::harnesses::native_config::PermissionInput {
@@ -499,6 +506,13 @@ impl NativeV2CodexAdapter {
             &mut command.environment,
             turn.invocation,
         )?;
+        if let Some(hooks) = &self.active_memory {
+            hooks.configure_network_environment(
+                &mut command.environment,
+                turn.invocation,
+                network_capability.as_deref().map(Path::new),
+            );
+        }
         retry.extend_redactions(&native_redactions);
         let process = match open_process(files, command, turn.control).await? {
             ProcessOpen::Ready(process) => process,

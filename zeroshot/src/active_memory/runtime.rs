@@ -214,22 +214,46 @@ pub fn attach_postmortem(
     })
 }
 
-pub fn unavailable_memory(inner: Arc<dyn NodeRunner>) -> Arc<dyn NodeRunner> {
-    attach_postmortem(inner, Some(Arc::new(UnavailableMemory)))
+pub fn unavailable_memory(inner: Arc<dyn NodeRunner>, reason: String) -> Arc<dyn NodeRunner> {
+    attach_postmortem(inner, Some(Arc::new(UnavailableMemory(reason))))
 }
 
-struct UnavailableMemory;
+pub(crate) fn initialization_diagnostic(path: Option<&Path>, error: &ActiveMemoryError) -> String {
+    use std::error::Error;
+    let location = path.map_or_else(String::new, |path| format!(" for {}", path.display()));
+    let mut message = format!("Active Memory recall and postmortem unavailable{location}: {error}");
+    if let ActiveMemoryError::Encoding(cause) = error {
+        // Parser messages can quote private stored values, including unrecognized scope tags.
+        message.push_str(&format!(
+            ": {:?} JSON error at line {} column {}",
+            cause.classify(),
+            cause.line(),
+            cause.column(),
+        ));
+    } else {
+        let mut source = error.source();
+        while let Some(cause) = source {
+            message.push_str(&format!(": {cause}"));
+            source = cause.source();
+        }
+    }
+    crate::native_v2_runner::bounded_log_text(message, crate::v2_run_ledger::MAX_SAFE_LOG_BYTES)
+}
+
+struct UnavailableMemory(String);
 
 #[async_trait]
 impl RunPostmortem for UnavailableMemory {
+    fn initialization_error(&self) -> Option<&str> {
+        Some(&self.0)
+    }
+
     async fn run(
         &self,
         _request: PostmortemRequest,
         _cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> Result<PostmortemReport, PostmortemError> {
-        Err(PostmortemError::Unavailable(
-            "Active Memory storage or hook initialization was unavailable",
-        ))
+        Err(PostmortemError::Detail(self.0.clone()))
     }
 }
 
@@ -272,6 +296,10 @@ impl NodeRunner for MemoryNodeRunner {
 #[derive(Default)]
 struct ExposureState {
     sessions: BTreeMap<String, BTreeSet<LessonVersion>>,
+    /// Tool-call lessons given to a conversation whose harness does not keep them, with the
+    /// execution that received them. A later execution starts over, because that conversation
+    /// no longer holds them.
+    unkept: BTreeMap<String, (u64, BTreeSet<LessonVersion>)>,
     supplied: BTreeSet<LessonVersion>,
     unavailable: bool,
     observation_seq: u64,
@@ -314,20 +342,35 @@ impl RunMemorySource {
         });
     }
 
+    /// `unkept` names the execution of a tool call whose harness does not keep what it is given.
     fn select(
         &self,
         session: &str,
-        budget: usize,
+        (budget, unkept): (usize, Option<u64>),
         select: impl FnOnce(usize, &BTreeSet<LessonVersion>) -> RetrievalResult,
     ) -> String {
         let Ok(mut state) = self.state.lock() else {
             return String::new();
         };
-        if !state.sessions.contains_key(session) && state.sessions.len() >= MAX_SESSIONS {
+        let state = &mut *state;
+        let known = match unkept {
+            Some(_) => state.unkept.contains_key(session),
+            None => state.sessions.contains_key(session),
+        };
+        if !known && state.sessions.len().max(state.unkept.len()) >= MAX_SESSIONS {
             state.unavailable = true;
             return String::new();
         }
-        let delivered = state.sessions.entry(session.to_owned()).or_default();
+        let delivered = match unkept {
+            Some(execution) => {
+                let entry = state.unkept.entry(session.to_owned()).or_default();
+                if entry.0 != execution {
+                    *entry = (execution, BTreeSet::new());
+                }
+                &mut entry.1
+            }
+            None => state.sessions.entry(session.to_owned()).or_default(),
+        };
         let result = select(budget, delivered);
         let versions: Vec<_> = result.cards.into_iter().map(|card| card.version).collect();
         delivered.extend(versions.iter().cloned());
@@ -362,18 +405,23 @@ impl ActiveMemorySource for RunMemorySource {
         if !self.repository_enabled {
             return String::new();
         }
-        self.select(&query.session_key, self.hook_budget, |budget, delivered| {
-            self.index.retrieve(&retrieval, budget, delivered)
-        })
+        let unkept = (!query.context_kept).then_some(query.execution_id);
+        self.select(
+            &query.session_key,
+            (self.hook_budget, unkept),
+            |budget, delivered| self.index.retrieve(&retrieval, budget, delivered),
+        )
     }
 
     fn graph_context(&self, node_id: &str, session_key: &str) -> String {
         if !self.graph_enabled || !self.nodes.contains(node_id) {
             return String::new();
         }
-        self.select(session_key, self.node_budget, |budget, delivered| {
-            self.index.graph_guidance(node_id, budget, delivered)
-        })
+        self.select(
+            session_key,
+            (self.node_budget, None),
+            |budget, delivered| self.index.graph_guidance(node_id, budget, delivered),
+        )
     }
 
     fn unavailable(&self, _reason: &str) {

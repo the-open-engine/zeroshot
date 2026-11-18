@@ -170,21 +170,34 @@ impl LocalConnectionStore {
 
     fn read(&self) -> Result<StoredConnections, NativeV2CliError> {
         let path = self.root.join(CONNECTIONS_FILE);
+        let read_error = |error| {
+            local_message(format!(
+                "local connection store {} could not be read: {error}",
+                path.display()
+            ))
+        };
         let metadata = match std::fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(BTreeMap::new());
             }
-            Err(error) => return Err(local_io(error)),
+            Err(error) => return Err(read_error(error)),
         };
         if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(local_message(
-                "local connection store is not a regular file",
-            ));
+            return Err(local_message(format!(
+                "local connection store {} is not a regular file",
+                path.display()
+            )));
         }
-        let file = private_file(&path, FileAccess::Read).map_err(local_io)?;
-        serde_json::from_reader(BufReader::new(file))
-            .map_err(|_| local_message("local connection store is malformed"))
+        let file = private_file(&path, FileAccess::Read).map_err(read_error)?;
+        serde_json::from_reader(BufReader::new(file)).map_err(|error| {
+            local_message(format!(
+                "local connection store {} is malformed at line {} column {}",
+                path.display(),
+                error.line(),
+                error.column()
+            ))
+        })
     }
 
     fn write(&self, connections: &StoredConnections) -> Result<(), NativeV2CliError> {

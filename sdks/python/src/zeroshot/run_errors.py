@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from .client import Run
     from .runs import RunStatus
 
 from .errors import TargetError, ZeroshotError
@@ -80,7 +81,7 @@ class RunSuspendedError(ZeroshotError):
         status: Durable suspended status, including any wait deadline.
     """
 
-    def __init__(self, run: _RunHandle, status: RunStatus) -> None:
+    def __init__(self, run: Run, status: RunStatus) -> None:
         super().__init__(f"run {run.id} suspended at {status.node}")
         self.run = run
         self.status = status

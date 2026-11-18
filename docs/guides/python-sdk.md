@@ -56,6 +56,35 @@ Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspac
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote.
 `run()` submits once and waits; `submit()` returns a durable `Run` handle immediately.
 
+Run input has the same [submission and node-input limits](../getting-started/first-run.md#1-write-the-task)
+as the CLI: 2 MiB for the stored submission and 1 MiB for each node's serialized start record,
+including its input and bookkeeping. A local early size refusal raises `InvalidRequestError` with
+code `submission.too_large`. A node-input overflow fails the admitted run with a size diagnostic.
+
+## Manage named targets
+
+`Client.list_targets()` returns a tuple of typed `NamedTarget` records with `name`, `origin` and
+`kind` (`hosted` or `direct`), including the built-in `platform` target. It shares the local
+registry used by `zeroshot target list` and returns no login data. These operations use the user's
+local registry independently of the client's selected run target, and do not contact a target.
+
+```python
+from zeroshot import Client
+
+
+async def remove_old_target() -> None:
+    async with Client() as client:
+        for target in await client.list_targets():
+            print(target.name, target.origin, target.kind)
+        receipt = await client.remove_target("old-target")
+        print(receipt.name, receipt.removed)
+```
+
+`remove_target()` returns `TargetRemoveResult` after deleting the registration, stored login and
+saved resume permissions. It raises `InvalidRequestError` for `platform` or an unknown name.
+Removal does not stop remote runs. Configure replacements with `zeroshot target add` and, for hosted
+targets, `zeroshot target login`.
+
 ## Use a local Git worktree
 
 Pass `worktree=True` to `run()` or `submit()` to create a retained Git worktree on a managed run
@@ -103,6 +132,12 @@ async def observe(runtime: UniformRuntime) -> None:
 
 A `RunWaitTimeout` carries the still-active run handle, and cancelling the Python task detaches in
 the same way. Neither action stops native work; only `await run.force_stop()` changes run lifetime.
+
+`status.active_executions` entries expose optional `started_at` ledger recording times. Statuses
+yielded by `run.watch()` also expose optional `recorded_at` for the event producing that notification.
+Both use Unix milliseconds, remain `None` when unknown, and are not precise provider measurements.
+Imported history reports its import time rather than its original execution time. Use `cursor` for
+ordering and resumption, and `execution` to distinguish retries and simultaneous mapped executions.
 
 ## Run on a direct target
 
@@ -238,6 +273,12 @@ expose `suspend_requested`, `reason`, `node`, `created_at` and `due_at`. Read th
 with `await run.vectors(after=None, limit=50)` (`RunVectorsPage.vectors`, `next_after`) and read a
 complete entry with `await run.vector(id)`. These methods use the client's selected target.
 
+`await run.discard_workspace()` returns whether retained data was deleted. For a finished local
+run it frees the recovery lineage's checkpoints, including those of failed runs, while keeping
+the checkout, ledger, logs and delivery recovery state. Plain resume still uses the current
+checkout; checkpoint restore is no longer available. Named targets keep their existing retained
+workspace discard behavior.
+
 ## Answer a human request
 
 `await client.inbox(after=None, limit=50)` returns an `InboxPage` with requests and `next_after`.
@@ -253,8 +294,12 @@ inbox reads never apply them. See [Ask a person](ask-a-person.md).
 ## Standing direction
 
 `steer = await run.steer("Prioritize the parser regression.")` records standing direction without
-continuing a suspended run. `RunStatus.steers` exposes excerpts and confirmed receiving executions;
-`omitted_steers` reports the bounded listing's omissions. Each agent conversation receives a steer
-at its next tool call or prompt. `await run.vector(steer.id)` reads its full text, and
+continuing a suspended run. Use `await run.steer(text, mode="once")` to deliver once per node instance;
+`mode="standing"` delivers per provider conversation and remains the default. `RunStatus.steers` from
+`Run.status()` exposes excerpts, message modes, optional network origin metadata and recorded
+receiving executions; statuses streamed by `Run.watch()` omit them. `omitted_steers` reports the
+bounded listing's omissions. Each agent conversation receives a steer at its next tool call or
+prompt, within the [Claude Code limits](observe-and-control.md#steer-a-run).
+`await run.vector(steer.id)` reads its full text, and
 `await run.vectors()` includes `steer` and `steer_receipt` entries. Direction is limited to 262,144
 UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error types report refusals.

@@ -183,3 +183,6 @@ async fn replay_logs(fixture: &LocalFixture, run_id: &str) -> Output {
         .assert_value_with("local logs deadline")
         .assert_value_with("start local logs")
 }
+
+#[path = "native_v2_foreground_failure_cause/memory_tests.rs"]
+mod memory_diagnostics;

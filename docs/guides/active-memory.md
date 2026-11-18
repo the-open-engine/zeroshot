@@ -53,6 +53,16 @@ These settings apply per run, so saved profiles can use different policies. Post
 counts toward the run total. An ordinary postmortem failure appears in the logs and does not change
 the main graph's result.
 
+Initialization failures name the lessons file when applicable and retain the safe underlying
+cause in error logs, including when postmortem is disabled but recall is enabled. Failed
+specialists log their role and cause, followed by one error summary. Confirmed hook configuration
+or carrier failures are reported once per execution; a conversation without tool callbacks is
+not treated as a failure. These auxiliary errors do not become primary graph failure evidence.
+Foreground `run` and `watch` print the latest five memory error records on stderr when observation
+ends. `resume` also checks that stream after its receipt, within the existing five-second log-read
+deadline; longer-running successors can be followed with `watch`. Complete diagnostics remain in
+`zeroshot logs RUN_ID`. Disabling both memory scopes skips store initialization without a warning.
+
 While the postmortem runs, the run stays `running`. `status` and `list` carry the recorded graph
 outcome in `status.graphResult`; `watch` and foreground `run` print it immediately. A log line
 records that outcome and says the postmortem is running. The run finishes after postmortem,
@@ -73,9 +83,11 @@ transfer automatically across graph versions.
 
 Each run reads a snapshot of memory. New lessons become available to future runs. Matching makes
 no model calls. An ID/revision is supplied once per provider conversation; compaction does not reset
-this deduplication. Each matching injection gets its own context limit.
+this deduplication. Copilot does not keep tool-call context in its session, so there a repository
+lesson is supplied once per execution. Each matching injection gets its own context limit.
 
-Repository lessons arrive through harness hooks. Disabled hooks can prevent delivery; scripts that
+Repository lessons arrive at matching tool calls through harness hooks, never inside a tool
+result. Disabled hooks can prevent delivery; scripts that
 hide their file paths can miss matches. Advice cannot change a tool call already issued, and receipt
 of a lesson does not prove the model followed it. See the
 [matching and delivery rules](../reference/active-memory.md#indexing-and-retrieval) for details.
@@ -137,6 +149,7 @@ contracts.
 
 The native tool-call carrier is installed for every agent conversation, including when Active
 Memory is off, so it can deliver standing [steers](../guides/observe-and-control.md#steer-a-run).
-Memory off still leaves its database unopened. Steers come from the run vector record and precede
-memory cards. They are delivered whole and do not count against `nodeInjectionTokens` or
-`hookInjectionTokens`; memory card selection keeps its own limits.
+Memory off still leaves its database unopened. Steers come from the run vector record. At a tool
+call they travel as a user message where the harness has a channel for one, and ahead of the
+memory cards in hook context on Codex. They are delivered whole and do not count against
+`nodeInjectionTokens` or `hookInjectionTokens`; memory card selection keeps its own limits.

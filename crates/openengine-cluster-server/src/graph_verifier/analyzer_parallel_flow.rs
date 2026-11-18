@@ -108,9 +108,14 @@ impl<'a> Analyzer<'a> {
         self.parallel_join_correlations
             .insert(group.name.clone(), correlation);
 
-        let predicates = qualifying.iter().collect::<Vec<_>>();
-        let Some(assignments) = self
-            .assignments_for_completion_predicates(&predicates, &with_field(context.path, "join"))
+        let mut guards = Vec::new();
+        for predicate in &qualifying {
+            predicate.collect_guards(&mut guards);
+        }
+        let Some((scenarios, unreachable)) =
+            self.decide(&guards, &with_field(context.path, "join"), |proof| {
+                completing_sets(proof, &qualifying, required)
+            })
         else {
             // The assignment ceiling diagnostic is sufficient. Keep later passes conservative.
             return Effects {
@@ -119,22 +124,6 @@ impl<'a> Analyzer<'a> {
                 ..merge_parallel_scenarios(branches, required, &[])
             };
         };
-        let scenarios = assignments
-            .iter()
-            .filter_map(|assignment| {
-                let completing = qualifying
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, predicate)| {
-                        predicate.evaluate(assignment).then_some(index)
-                    })
-                    .collect::<BTreeSet<_>>();
-                (u64::try_from(completing.len()).unwrap_or(u64::MAX) >= required)
-                    .then_some(completing)
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
         if scenarios.is_empty() && matches!(group.join, Join::First { .. }) {
             emit_diagnostic!(
                 self,
@@ -145,13 +134,7 @@ impl<'a> Analyzer<'a> {
             );
         }
         let mut merged = merge_parallel_scenarios(branches, required, &scenarios);
-        if assignments.iter().any(|assignment| {
-            (qualifying
-                .iter()
-                .filter(|predicate| predicate.evaluate(assignment))
-                .count() as u64)
-                < required
-        }) {
+        if unreachable {
             merged.exit_failed.insert(group.name.clone());
         }
         // Both reached and impossible joins return normally; controls retain success eligibility.
@@ -181,14 +164,12 @@ impl<'a> Analyzer<'a> {
     ) -> Option<ParallelJoinCorrelation> {
         let required = parallel_required_completions(&group.join, completions.len());
         let branches = if let Join::First { when } = &group.join {
-            // Charge expansion before constructing availability maps or copying any predicates.
-            self.proof_work.charge(guard_cell_count(when))?;
-            self.proof_work.charge(
-                guard_selector_uses(when)
-                    .len()
-                    .checked_add(1)?
-                    .checked_mul(completions.len())?,
-            )?;
+            // A wide guard repeats selectors; each racer needs every distinct use once.
+            let mut seen = BTreeSet::new();
+            let mut uses = guard_selector_uses(when);
+            uses.retain(|(selector, aggregate)| {
+                seen.insert((SelectorKey::from(*selector), *aggregate))
+            });
             let shared_guard = std::sync::Arc::new(when.clone());
             completions
                 .iter()
@@ -199,7 +180,7 @@ impl<'a> Analyzer<'a> {
                         CompletionPredicate::CandidateGuard {
                             guard: shared_guard.clone(),
                             available: std::sync::Arc::new(
-                                self.first_guard_available_on_branch(when, racer, incoming)?,
+                                self.first_guard_available_on_branch(&uses, racer, incoming)?,
                             ),
                         },
                     ]))
@@ -224,16 +205,16 @@ impl<'a> Analyzer<'a> {
         })
     }
 
-    pub(super) fn first_guard_available_on_branch(
+    fn first_guard_available_on_branch(
         &self,
-        when: &Guard,
+        uses: &[(&ControlSelector, bool)],
         racer: &GraphNode,
         incoming: &Flow,
     ) -> Option<BTreeMap<SelectorKey, CompletionPredicate>> {
         let mut owned = BTreeSet::new();
         collect_names(racer, &mut owned);
         let mut available = BTreeMap::new();
-        for (selector, aggregate) in guard_selector_uses(when) {
+        for (selector, aggregate) in uses.iter().copied() {
             let depth = self.map_depth(&selector.name);
             if !aggregate && depth > self.map_depth(racer.name()) {
                 continue;
@@ -297,7 +278,6 @@ impl<'a> Analyzer<'a> {
         let start = names.iter().position(|name| *name == racer)?;
         let mut guards = Vec::new();
         for name in names[start..].iter().filter(|name| **name != target) {
-            self.proof_work.charge(2)?;
             if let Some(presence) =
                 self.candidate_parent_presence(self.nodes.get(*name)?.node, &names)?
             {
@@ -316,15 +296,6 @@ impl Analyzer<'_> {
     ) -> Option<CompletionPredicate> {
         let mut routes = self.choice_routes.borrow_mut();
         if !routes.contains_key(&choice.name) {
-            let cells = choice
-                .branches
-                .as_slice()
-                .iter()
-                .try_fold(0_usize, |sum, branch| {
-                    sum.checked_add(guard_cell_count(&branch.when))
-                })?;
-            self.proof_work
-                .charge(cells.checked_mul(choice.branches.as_slice().len().checked_add(1)?)?)?;
             let mut predicates = choice_branch_completion_predicates(choice);
             predicates.push(choice_otherwise_completion_predicate(choice));
             routes.insert(
@@ -364,17 +335,65 @@ impl Analyzer<'_> {
     }
 }
 
-fn guard_cell_count(guard: &Guard) -> usize {
-    match guard {
-        Guard::In { labels, .. } | Guard::KOfMap { labels, .. } => 1 + labels.values().len(),
-        Guard::KOfN { values, labels, .. } => 1 + values.as_slice().len() + labels.values().len(),
-        Guard::Not { guard } => 1 + guard_cell_count(guard),
-        Guard::All { guards } | Guard::Any { guards } => {
-            1 + guards
-                .as_slice()
-                .iter()
-                .map(guard_cell_count)
-                .sum::<usize>()
+/// Every set of branches that can qualify together with at least `required` members, and
+/// whether some legal outcome qualifies fewer. Promotion guarantees depend on the order of
+/// these sets, so they are listed; the list is bounded by the join's own branches, and
+/// writing it out is search work like any other.
+fn completing_sets(
+    proof: &mut ControlProof,
+    qualifying: &[CompletionPredicate],
+    required: u64,
+) -> Option<(Vec<BTreeSet<usize>>, bool)> {
+    let qualifying = qualifying
+        .iter()
+        .map(|predicate| proof.predicate(predicate))
+        .collect::<Option<Vec<_>>>()?;
+    let enough = proof.diagram.at_least(required, &qualifying)?;
+    let short = proof.diagram.not(enough)?;
+    let unreachable = proof.possible(short)?;
+    // A branch that always qualifies is in every set and one that never does is in none,
+    // so only the others split the outcomes.
+    let (settled, undecided): (Vec<_>, Vec<_>) = qualifying
+        .iter()
+        .copied()
+        .enumerate()
+        .partition(|(_, branch)| matches!(*branch, ALWAYS | NEVER));
+    let always = settled
+        .iter()
+        .filter_map(|(branch, qualifies)| (*qualifies == ALWAYS).then_some(*branch))
+        .collect::<Vec<_>>();
+    let mut sets = Vec::new();
+    // The undecided branches that qualify in the outcomes being split.
+    let mut members = Vec::new();
+    // Legal outcomes still open, the next branch to decide, and how many qualified so far.
+    let mut open = vec![(proof.diagram.and(proof.legal, enough)?, 0, 0)];
+    while let Some((outcomes, next, qualified)) = open.pop() {
+        if outcomes == NEVER {
+            continue;
         }
+        members.truncate(qualified);
+        let Some((branch, qualifies)) = undecided.get(next).copied() else {
+            // Listing a set copies its members; four members weigh one search step.
+            proof
+                .diagram
+                .charge(1 + (always.len() + members.len()) / 4)?;
+            sets.push(always.iter().chain(&members).copied().collect());
+            if sets.len() as u64 > FULL_V1_MAX_GUARD_ASSIGNMENTS {
+                return None;
+            }
+            continue;
+        };
+        proof.diagram.charge(1)?;
+        let failed = proof.diagram.not(qualifies)?;
+        open.push((proof.diagram.and(outcomes, failed)?, next + 1, qualified));
+        // Taken next, so the branch is still the last member when its outcomes are split.
+        open.push((
+            proof.diagram.and(outcomes, qualifies)?,
+            next + 1,
+            qualified + 1,
+        ));
+        members.push(branch);
     }
+    sets.sort();
+    Some((sets, unreachable))
 }

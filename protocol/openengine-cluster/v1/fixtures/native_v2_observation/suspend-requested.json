@@ -11,11 +11,13 @@
     "activeExecutions": [
       {
         "execution": "opaque-verifier-a",
-        "node": "verify-a"
+        "node": "verify-a",
+        "startedAt": 1725000000123
       },
       {
         "execution": "opaque-verifier-b",
-        "node": "verify-b"
+        "node": "verify-b",
+        "startedAt": 1725000000123
       }
     ],
     "phase": "running",

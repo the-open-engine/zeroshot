@@ -199,6 +199,9 @@ pub(super) fn prepare(
         invocation,
     )?;
     let memory = memory_capability(adapter, invocation, files);
+    if let Some(hooks) = &adapter.active_memory {
+        hooks.configure_network_environment(&mut environment, invocation, memory.as_deref());
+    }
     let options = crate::harnesses::native_config::invocation_options(
         invocation,
         "hermes",
@@ -265,8 +268,11 @@ fn memory_capability(
     adapter.active_memory.as_ref().and_then(|memory| {
         match memory.capability_file(invocation, &files.workspace, files.home()) {
             Ok(path) => path,
-            Err(_) => {
-                memory.execution_failed();
+            Err(error) => {
+                memory.carrier_failed(
+                    &invocation.node.reference,
+                    &format!("hook configuration failed: {error}"),
+                );
                 None
             }
         }

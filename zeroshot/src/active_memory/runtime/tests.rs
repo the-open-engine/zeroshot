@@ -2,6 +2,31 @@ use super::*;
 use crate::active_memory::{LessonDraft, LessonEvidence, LessonScope};
 use serde_json::json;
 
+#[test]
+fn initialization_diagnostic_omits_stored_json_values_but_keeps_category_and_location() {
+    let private = "private-stored-value";
+    let mut errors: Vec<_> = [
+        json!(private).to_string(),
+        json!({"scope":{"kind":private}}).to_string(),
+        "{\n".into(),
+        "{]".into(),
+    ]
+    .into_iter()
+    .map(|body| serde_json::from_str::<crate::active_memory::Lesson>(&body).unwrap_err())
+    .collect();
+    errors.push(serde_json::Error::io(std::io::Error::other(private)));
+    for cause in errors {
+        let location = format!("line {} column {}", cause.line(), cause.column());
+        let category = format!("{:?} JSON error", cause.classify());
+        let path = workspace().join("lessons.sqlite3");
+        let diagnostic = initialization_diagnostic(Some(&path), &cause.into());
+        assert!(diagnostic.contains(path.to_str().unwrap()), "{diagnostic}");
+        assert!(diagnostic.contains(&category), "{diagnostic}");
+        assert!(diagnostic.contains(&location), "{diagnostic}");
+        assert!(!diagnostic.contains(private), "{diagnostic}");
+    }
+}
+
 fn repository_lesson() -> crate::active_memory::Lesson {
     LessonDraft {
         id: "runtime-recall".into(),
@@ -58,6 +83,9 @@ fn query(session: &str) -> HookQuery {
         tool_name: "exec_command".into(),
         tool_input: json!({"cmd":"cat guard.rs", "workdir":workspace().join("src")}),
         cwd: workspace(),
+        subagent: false,
+        steers: crate::active_memory::hooks::SteerCarrier::HookContext,
+        context_kept: true,
     }
 }
 
@@ -75,6 +103,44 @@ fn carrier_reuses_workdir_and_deduplicates_within_each_provider_session() {
             .tool_context(&query("two"))
             .contains("Preserve sibling guards")
     );
+    assert_eq!(source.manifest().unwrap().lessons.len(), 1);
+}
+
+// Copilot applies hook context to the turn in progress and writes none of it to its session: a
+// later execution of the same conversation no longer holds the lesson and is given it again.
+#[test]
+fn carrier_that_does_not_keep_context_is_given_a_lesson_again_in_a_later_execution() {
+    let source = source(2048);
+    let unkept = |execution| HookQuery {
+        execution_id: execution,
+        context_kept: false,
+        ..query("one")
+    };
+    assert!(
+        source
+            .tool_context(&unkept(1))
+            .contains("Preserve sibling guards")
+    );
+    assert!(
+        source.tool_context(&unkept(1)).is_empty(),
+        "once per execution"
+    );
+    assert!(
+        source
+            .tool_context(&unkept(2))
+            .contains("Preserve sibling guards")
+    );
+    assert!(source.tool_context(&unkept(2)).is_empty());
+    // A carrier that keeps its context still receives the lesson once per conversation.
+    assert!(
+        source
+            .tool_context(&query("one"))
+            .contains("Preserve sibling guards")
+    );
+    assert!(source.tool_context(&query("one")).is_empty());
+    let mut later = query("one");
+    later.execution_id = 2;
+    assert!(source.tool_context(&later).is_empty());
     assert_eq!(source.manifest().unwrap().lessons.len(), 1);
 }
 
@@ -626,7 +692,7 @@ async fn wrappers_preserve_runner_admission_and_postmortem_opt_out_without_model
             wrapped.start(request.clone()).await,
             Err(NodeRunnerError::InvalidRole)
         ));
-        let unavailable = unavailable_memory(wrapped);
+        let unavailable = unavailable_memory(wrapped, "test memory initialization failed".into());
         let postmortem = unavailable.postmortem().unwrap();
         let (_, cancellation) = tokio::sync::watch::channel(false);
         let run_id = request.invocation.reference.run_id;
@@ -655,7 +721,7 @@ async fn wrappers_preserve_runner_admission_and_postmortem_opt_out_without_model
                 cancellation,
             )
             .await;
-        assert!(matches!(result, Err(PostmortemError::Unavailable(_))));
+        assert!(matches!(result, Err(PostmortemError::Detail(_))));
         unavailable.close_run(&run_id).await;
     }
 }
@@ -727,6 +793,7 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: Default::default(),
             run_id: run,
             text: text.clone(),
         },
@@ -738,7 +805,11 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
     let expected = baseline.tool_context(&original, &tool, &source.workspace);
     assert!(expected.contains("Preserve sibling guards"));
     let (_, delivered) = hooks
-        .tool_delivery(&started, &tool, &source.workspace)
+        .tool_delivery(crate::active_memory::hooks::ToolCall::hook(
+            &started,
+            &tool,
+            &source.workspace,
+        ))
         .await;
     assert!(delivered.context.contains(&text));
     assert!(delivered.context.ends_with(&expected));

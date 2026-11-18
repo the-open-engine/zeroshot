@@ -445,6 +445,26 @@ fn final_contract_cleanup_boundary_reports_each_authority_failure_and_only_falls
 }
 
 #[test]
+fn a_refused_signal_means_nothing_to_signal_only_where_exited_members_refuse_signals() {
+    let missing = io::Error::from_raw_os_error(libc::ESRCH);
+    let refused = io::Error::from_raw_os_error(libc::EPERM);
+    let failed = io::Error::from_raw_os_error(libc::EIO);
+    for exited_members_refuse_signals in [false, true] {
+        assert!(group_has_nothing_to_signal(
+            &missing,
+            exited_members_refuse_signals
+        ));
+        assert!(!group_has_nothing_to_signal(
+            &failed,
+            exited_members_refuse_signals
+        ));
+    }
+    assert!(group_has_nothing_to_signal(&refused, true));
+    // Linux signals exited members, so a refusal there is a member that cannot be stopped.
+    assert!(!group_has_nothing_to_signal(&refused, false));
+}
+
+#[test]
 fn final_contract_worker_boundary_validation_short_circuits_and_preserves_occupancy_errors() {
     use std::cell::Cell;
 

@@ -146,6 +146,10 @@ pub struct RunMetadata {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ActiveExecution {
+    /// Ledger recording time of this execution's `NodeStarted`, in Unix milliseconds.
+    /// Omitted when unknown; not a precise provider start measurement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<UnixTimestampMillis>,
     /// Zero-based map indices, outermost first; empty outside maps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub map_indices: Vec<u64>,
@@ -323,6 +327,11 @@ pub struct RunWatchResult {
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunWatchEventNotification {
+    /// Ledger recording time of the event producing this projection, in Unix milliseconds.
+    /// Cursor alone defines ordering. Imported history carries its import time; old times
+    /// remain unknown rather than estimated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_at: Option<UnixTimestampMillis>,
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
     pub title: RunTitle,

@@ -238,6 +238,135 @@ async fn local_run_and_checkpoint_resume_refuse_old_or_unreadable_cli_before_dis
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn preparation_deadline_refuses_a_late_valid_version_before_fresh_run_admission() {
+    assert_late_version_is_not_admitted(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preparation_deadline_refuses_a_late_valid_version_after_selected_checkpoint_restore() {
+    assert_late_version_is_not_admitted(true).await;
+}
+
+async fn assert_late_version_is_not_admitted(resuming: bool) {
+    let fixture = LocalFixture::new();
+    let predecessor = if resuming {
+        Some(failed_run(&fixture).await)
+    } else {
+        None
+    };
+    let checkpoint = match &predecessor {
+        Some(run) => Some(worker_checkpoint(&fixture, run).await),
+        None => None,
+    };
+    let marker = fixture.repository.join("after-failure.txt");
+    fs::write(&marker, "not in the checkpoint").assert_value();
+    let executable = fixture.root.path("bin/codex");
+    let original = fs::read(&executable).assert_value();
+    let pids = fixture.root.path("late-version-pids");
+    let turns = fixture.root.path("unexpected-turns");
+    openengine_cluster_testkit::fixture::write_executable(
+        &executable,
+        format!(
+            "#!/bin/sh\nif [ \"$*\" != --version ]; then printf turn >> {turns}; exit 91; fi\n\
+             /bin/sleep 6 &\nprintf '%s %s\\n' \"$$\" \"$!\" > {pids}\nwait\n\
+             printf 'codex-cli 0.155.0\\n'\n",
+            turns = shell_literal(turns.to_str().assert_value()),
+            pids = shell_literal(pids.to_str().assert_value()),
+        ),
+        0o700,
+    )
+    .assert_value();
+    let arguments = match (&predecessor, &checkpoint) {
+        (Some(run), Some(checkpoint)) => vec![
+            "resume",
+            run,
+            "--from-checkpoint",
+            checkpoint,
+            "--discard-workspace-changes",
+        ],
+        _ => vec![
+            "run",
+            "--title",
+            "Late valid version",
+            "--graph",
+            fixture.graph.to_str().assert_value(),
+            "--input",
+            fixture.input.to_str().assert_value(),
+            "--runtime-config",
+            fixture.runtime.to_str().assert_value(),
+        ],
+    };
+    let output = timeout(
+        CLI_TIMEOUT,
+        fixture
+            .command(&arguments, "finish")
+            .env("ZEROSHOT_PREPARATION_TIMEOUT", "5")
+            .output(),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "expired preparation admitted a run: {output:?}"
+    );
+    assert!(
+        stderr.contains("preparation deadline") && stderr.contains("ZEROSHOT_PREPARATION_TIMEOUT"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("cleanup could not be confirmed"),
+        "{stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "expired preparation returned an admission receipt"
+    );
+    assert!(!turns.exists(), "expired preparation dispatched a worker");
+    for pid in fs::read_to_string(&pids).assert_value().split_whitespace() {
+        let pid = pid.parse::<u32>().assert_value();
+        assert!(
+            !process_exists(pid),
+            "returned before probe process {pid} cleanup"
+        );
+    }
+    let listed = fixture.json(&["list"], "finish").await;
+    assert_eq!(
+        listed.assert_key("runs").as_array().assert_value().len(),
+        usize::from(resuming)
+    );
+    if let (Some(run), Some(checkpoint)) = (&predecessor, &checkpoint) {
+        assert!(
+            !marker.exists(),
+            "the version check must follow the fast restore"
+        );
+        let status = fixture.json(&["status", run], "finish").await;
+        let recovery = status.assert_key("workspaceRecovery");
+        assert_eq!(recovery.assert_key("recoverable"), true);
+        assert!(recovery.get("successorRunId").is_none());
+        assert_eq!(worker_checkpoint(&fixture, run).await, *checkpoint);
+        openengine_cluster_testkit::fixture::write_executable(&executable, original, 0o700)
+            .assert_value();
+        let receipt = fixture
+            .json(
+                &[
+                    "resume",
+                    run,
+                    "--from-checkpoint",
+                    checkpoint,
+                    "--discard-workspace-changes",
+                ],
+                "finish",
+            )
+            .await;
+        let successor = receipt.assert_key("runId").as_str().assert_value();
+        fixture.wait_succeeded(successor, "finish").await;
+        wait_for_exit(fixture.ready_pid(successor)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn controller_shutdown_cancels_version_probes_before_run_or_checkpoint_resume_admission() {
     let fixture = LocalFixture::new();
     let failed_run_id = failed_run(&fixture).await;

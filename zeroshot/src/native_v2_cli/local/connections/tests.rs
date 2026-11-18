@@ -173,6 +173,96 @@ fn local_store_rejects_org_scope() {
     assert!(!root.0.exists());
 }
 
+#[test]
+fn malformed_store_reports_location_without_disclosing_values_for_every_reader() {
+    let root = TestRoot::new();
+    let store = LocalConnectionStore::new(root.0.clone());
+    set_token(&store, "provider", "stored-secret");
+    let path = root.0.join(CONNECTIONS_FILE);
+    for (encoded, secret) in [
+        (
+            "{\n  \"provider\": {\"OPENAI_API_KEY\": 987654321012345}\n}",
+            "987654321012345",
+        ),
+        (
+            "{\"provider\":\"sk-private-malformed-value\"}",
+            "sk-private-malformed-value",
+        ),
+        (
+            "{\"provider\": {\"OPENAI_API_KEY\": \"stored-secret\"},",
+            "stored-secret",
+        ),
+    ] {
+        std::fs::write(&path, encoded).assert_value();
+        let parser_error =
+            serde_json::from_reader::<_, StoredConnections>(encoded.as_bytes()).assert_error();
+        let expected = format!(
+            "local connection store {} is malformed at line {} column {}",
+            path.display(),
+            parser_error.line(),
+            parser_error.column()
+        );
+        let errors = [
+            store
+                .list(ConnectionListRequest {
+                    scope: ConnectionScope::User,
+                })
+                .assert_error(),
+            store
+                .delete(ConnectionDeleteRequest {
+                    key: key("provider"),
+                    scope: ConnectionScope::User,
+                })
+                .assert_error(),
+            store
+                .set(ConnectionSetRequest {
+                    key: key("other"),
+                    scope: ConnectionScope::User,
+                    values: values(&[("TOKEN", "new-secret")]),
+                })
+                .assert_error(),
+            store
+                .resolve(
+                    &runtime(&["OPENAI_API_KEY"]),
+                    None,
+                    &BTreeMap::from([(
+                        key("provider"),
+                        values(&[("OPENAI_API_KEY", "explicit-secret")]),
+                    )]),
+                )
+                .assert_error(),
+        ];
+        for error in errors {
+            assert!(error.to_string().ends_with(&expected), "{error}");
+            assert!(!format!("{error:?}").contains(secret));
+            assert!(!error.to_string().contains("expected a"));
+        }
+        assert_eq!(std::fs::read_to_string(&path).assert_value(), encoded);
+    }
+}
+
+#[test]
+fn store_read_errors_name_the_file() {
+    let root = TestRoot::new();
+    let store = LocalConnectionStore::new(root.0.clone());
+    let path = root.0.join(CONNECTIONS_FILE);
+    std::fs::create_dir_all(&path).assert_value();
+    let error = store.read().assert_error().to_string();
+    assert!(error.contains(&path.display().to_string()), "{error}");
+    assert!(error.contains("not a regular file"), "{error}");
+
+    // Invalid paths fail metadata lookup on every platform, without requiring permissions.
+    let invalid_root = root.0.join("invalid\0path");
+    let error = LocalConnectionStore::new(invalid_root.clone())
+        .read()
+        .assert_error()
+        .to_string();
+    assert!(
+        error.contains(&invalid_root.join(CONNECTIONS_FILE).display().to_string()),
+        "{error}"
+    );
+}
+
 /// What a save killed after writing and before its rename leaves: the complete store it was
 /// committing, under the producer's temporary name and private file creation.
 fn leave_interrupted_save(root: &Path, connections: &StoredConnections) {

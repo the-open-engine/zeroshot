@@ -118,10 +118,18 @@ async function observedSubmit(context, request) {
 }
 
 async function terminal(client, runId) {
-  return until(async () => {
-    const result = await client.rpc('run/status', { runId });
-    return result.status.phase === 'finished' && result;
-  }, `run ${runId} settlement`);
+  let lastStatus;
+  try {
+    return await until(async () => {
+      lastStatus = await client.rpc('run/status', { runId });
+      return lastStatus.status.phase === 'finished' && lastStatus;
+    }, `run ${runId} settlement`);
+  } catch (error) {
+    const recentLogs = (client.logs.get(runId) || []).slice(-20);
+    process.stderr.write(`Last status: ${JSON.stringify(lastStatus || null).slice(0, 8192)}\n`);
+    process.stderr.write(`Recent logs: ${JSON.stringify(recentLogs).slice(-8192)}\n`);
+    throw error;
+  }
 }
 
 async function successful(context, request) {

@@ -86,6 +86,12 @@ def approval_profile(merge):
         return value
 
     profile["graph"] = rename(profile["graph"])
+    # Native admission refuses request nodes below a parallel or map group: the person reviews
+    # after the code review, in a sequence that keeps the group's state.
+    reviews = next(node for node in walk(profile["graph"]["root"]) if node["name"] == "parallel_reviews")
+    branches = {branch["name"]: branch for branch in reviews.pop("branches")}
+    reviews.pop("join")
+    reviews.update(kind="seq", name="reviews", children=[branches["code"], branches["approval"]])
     question = {"type": {"kind": "string"}, "required": True}
     profile["graph"]["initialInput"]["fields"]["approvalQuestion"] = question
     for node in walk(profile["graph"]["root"]):
@@ -482,15 +488,15 @@ def build_approval(profiles):
                     "A person reviews the patch: the run pauses for an answer, and each answer continues it in a new run.",
                     10, profile_name=APPROVAL)
     first.batch(step("worker", "Added the missing tenant boundary check and regression cases."))
-    first.batch(ask("approval", initial["approvalQuestion"]),
-                review_code("The guard runs before lookup, and public errors do not reveal another tenant's account."))
+    first.batch(review_code("The guard runs before lookup, and public errors do not reveal another tenant's account."))
+    first.batch(ask("approval", initial["approvalQuestion"]))
     second = first.continue_with("security-patch-approval-revised", {"verdict": "rejected"},
                                  "Add a regression test for tenants with no accounts.", 2 * HOUR + 14 * 60000,
                                  "The person rejected the patch with feedback; the repair is asked about again.")
     second.batch(step("review_repair", "Added a regression test for tenants with no accounts."))
     second.values["approvalQuestion"] = "Regression test added for tenants with no accounts. Approve the patch now?"
-    second.batch(ask("approval", second.values["approvalQuestion"]),
-                 review_code("Empty-tenant case is covered and passes."))
+    second.batch(review_code("Empty-tenant case is covered and passes."))
+    second.batch(ask("approval", second.values["approvalQuestion"]))
     third = second.continue_with("security-patch-approval-merged", {"verdict": "accepted"},
                                  "Looks good.", 38 * 60000,
                                  "The person approved the revised patch, and it was delivered.")

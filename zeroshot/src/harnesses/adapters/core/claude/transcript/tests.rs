@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 use super::*;
 use crate::native_v2_capsule::provider_process::ProviderProcessFailureKind;
 
+#[path = "tests/input.rs"]
+mod input_tests;
 #[path = "tests/limits.rs"]
 mod limit_tests;
 #[path = "tests/quota.rs"]
@@ -24,6 +26,111 @@ struct Decoded {
 fn append_event(bytes: &mut Vec<u8>, event: Value) {
     bytes.extend(serde_json::to_vec(&event).assert_value());
     bytes.push(b'\n');
+}
+
+#[tokio::test]
+async fn owned_native_hook_failure_is_redacted_bounded_and_deduplicated() {
+    for helper_named in [false, true] {
+        use std::sync::Arc;
+        use crate::active_memory::hooks::ActiveMemoryHooks;
+        use crate::v2_run_ledger::{RunLedger, RunEvent, SafeLogStream};
+        let admitted = crate::native_v2_runner::test_support::admitted();
+        let run = openengine_cluster_protocol::RunId::new("hook-failure");
+        let ledger = Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+        ledger
+            .create_or_get(crate::v2_run_ledger::CreateRun {
+                run_id: run.clone(),
+                submission_key: openengine_cluster_protocol::IdempotencyKey::new("hook-failure")
+                    .assert_value(),
+                submission_digest: openengine_cluster_protocol::Sha256Digest::new("a".repeat(64))
+                    .assert_value(),
+                admitted,
+            })
+            .await
+            .assert_value();
+        struct Memory;
+        impl crate::active_memory::hooks::ActiveMemorySource for Memory {
+            fn tool_context(&self, _: &crate::active_memory::hooks::HookQuery) -> String {
+                String::new()
+            }
+            fn graph_context(&self, _: &str, _: &str) -> String {
+                String::new()
+            }
+        }
+        let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Memory)).assert_value());
+        hooks.bind_ledger(run, ledger.clone());
+        let reference =
+            crate::native_v2_runner::test_support::request("hook-failure", "worker", (1, 2))
+                .invocation
+                .reference;
+        let mut transcript = ClaudeTranscript::new(vec!["private-hook-token".into()]);
+        let directory = tempfile::tempdir().assert_value();
+        let installed = directory.path().join("zeroshot-original");
+        std::fs::write(&installed, b"installed executable").assert_value();
+        transcript.memory = Some((hooks.clone(), reference.clone(), installed.clone()));
+        std::fs::rename(&installed, directory.path().join("zeroshot-moved")).assert_value();
+        // A failed user-owned hook cannot establish an Active Memory failure.
+        let mut event = json!({"type":"system","subtype":"hook_response","hook_event":"PreToolUse",
+        "outcome":"error","exit_code":127,"stderr":"some user hook failed"});
+        let mut bytes = Vec::new();
+        append_event(&mut bytes, event.clone());
+        transcript.push(&bytes);
+        hooks.finish_steers(reference.execution.get(), true).await;
+        assert!(
+            ledger
+                .snapshot_and_tail(&reference.run_id, None)
+                .await
+                .assert_value()
+                .events
+                .is_empty()
+        );
+        event["stderr"] = if helper_named {
+            json!(format!(
+                "__active-memory-hook failed private-hook-token {}",
+                "界".repeat(8000)
+            ))
+        } else {
+            // Shell startup failures name only the installed path, which no longer exists.
+            json!(format!("sh: 1: {}: not found", installed.display()))
+        };
+        for _ in 0..2 {
+            let mut bytes = Vec::new();
+            append_event(&mut bytes, event.clone());
+            transcript.push(&bytes);
+        }
+        hooks.finish_steers(reference.execution.get(), true).await;
+        let tail = ledger
+            .snapshot_and_tail(&reference.run_id, None)
+            .await
+            .assert_value();
+        let errors: Vec<_> = tail
+            .events
+            .iter()
+            .filter_map(|event| match &event.event {
+                RunEvent::SafeLog {
+                    stream: SafeLogStream::Error,
+                    line,
+                    diagnostic,
+                    ..
+                } => {
+                    assert!(diagnostic.is_none());
+                    Some(line.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("exit 127"));
+        if helper_named {
+            assert!(errors[0].contains("[REDACTED]"));
+        } else {
+            assert!(errors[0].contains(installed.to_string_lossy().as_ref()));
+            assert!(!errors[0].contains("__active-memory-hook"));
+        }
+        assert!(!errors[0].contains("private-hook-token"));
+        assert!(errors[0].len() <= crate::v2_run_ledger::MAX_SAFE_LOG_BYTES);
+        assert!(tail.snapshot.failure_context.is_none());
+    }
 }
 
 #[test]
@@ -1010,4 +1117,64 @@ fn transcripts_without_rate_limit_events_keep_their_existing_output_behavior() {
     let decoded = decode(&bytes, 17, None);
     assert!(decoded.emissions.is_empty());
     assert_eq!(completed_response(decoded.attempt), json!("done"));
+}
+
+#[test]
+fn tool_activity_survives_streamed_commentary() {
+    let mut transcript = ClaudeTranscript::new(Vec::new());
+    let stream = concat!(
+        r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"before"}}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"before"},{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"check-tool"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"tool-result","is_error":false}]}}"#,
+        "\n"
+    );
+    let mut logs = transcript.push(stream.as_bytes());
+    logs.extend(transcript.finish_stream());
+    assert_eq!(logs[0].text, "before");
+    let text = logs
+        .iter()
+        .map(|log| log.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for expected in ["before", "Bash", "tool-1", "check-tool", "tool-result"] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+}
+
+#[test]
+fn tool_activity_success_failure_unknown_and_repeated_events() {
+    for is_error in [Some(false), Some(true), None] {
+        let mut transcript = ClaudeTranscript::new(vec!["secret-key".into()]);
+        let call = json!({"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"call-2","input":{"file_path":"source.rs","credential":"secret-key"}}]}});
+        let mut result = json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-2","content":[{"type":"text","text":"HEAD secret-key".to_owned() + &"界".repeat(9000) + " secret-key TAIL"}]}]}});
+        if let Some(error) = is_error {
+            result["message"]["content"][0]["is_error"] = json!(error);
+        }
+        let mut logs = Vec::new();
+        for event in [&call, &call, &result, &result] {
+            let wire = format!("{event}\n").replace("secret-key", r"\u0073ecret-key");
+            for chunk in wire.as_bytes().chunks(97) {
+                logs.extend(transcript.push(chunk));
+            }
+        }
+        logs.extend(transcript.finish_stream());
+        assert_eq!(logs.len(), 2);
+        for log in &logs {
+            assert!(log.text.len() <= 8192);
+            assert!(log.text.contains("call-2"));
+            assert!(!log.text.contains("secret-key"));
+        }
+        assert!(logs[0].text.contains("source.rs"));
+        assert!(logs[1].text.contains("HEAD"));
+        assert!(logs[1].text.contains("TAIL"));
+        assert!(logs[1].text.contains("[truncated]"));
+        let status = match is_error {
+            Some(true) => "error",
+            Some(false) => "success",
+            None => "unknown",
+        };
+        assert!(logs[1].text.contains(&format!("status={status}")));
+    }
 }

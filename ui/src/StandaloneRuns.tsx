@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronRight, Menu, RefreshCw, Search } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { AppHeader } from './AppHeader';
 import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { workspaceStorageKeys } from './workspace-storage';
 import { RunHistoryView } from './RunHistoryView';
 import { createExampleRunHistory } from './run-history-source';
-import { humanize, type RunSummary } from './run-history';
+import { humanize, suspensionStatus, type RunSummary } from './run-history';
 import type { Bootstrap } from './api';
 import type { WorkspaceServices } from './workspace-services';
 
@@ -21,7 +21,7 @@ const dateLabel = (time?: number | null) =>
     : '';
 const runState = (run: RunSummary) =>
   run.phase === 'suspended'
-    ? `Suspended (${run.suspension?.reason ?? 'command'}) at ${run.suspension?.node ?? 'checkpoint'}${run.suspension?.wait ? ` until ${new Date(run.suspension.wait.dueAt).toISOString()}` : ''}${run.suspension?.request ? `: ${run.suspension.request.text} (deadline ${new Date(run.suspension.request.expiresAt).toISOString()})` : ''}`
+    ? suspensionStatus(run.suspension)
     : run.phase === 'running' && run.suspendRequested
       ? 'Suspension requested'
       : humanize(run.terminal?.status ?? (run.phase === 'finished' ? 'Finished' : run.phase));
@@ -142,6 +142,8 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
     `${run.title} ${run.runId}`.toLowerCase().includes(query.toLowerCase())
   );
   const latest = runs.find((run) => run.historyAvailable);
+  // The list's periodic refresh brings the successor a suspended run gains while its page is open.
+  const listed = (selection?.example ? examples : runs).find((run) => run.runId === selection?.id);
   return (
     <div className="app history-app">
       <AppHeader
@@ -150,18 +152,14 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
         navigate={(section) => {
           if (section === 'profiles') window.location.hash = '';
         }}
-      >
-        <button
-          className="icon-button history-sidebar-toggle"
-          title="Run list"
-          aria-label="Run list"
-          onClick={() => setSidebar(!sidebar)}
-        >
-          <Menu size={18} />
-        </button>
-      </AppHeader>
+        sidebar={{ label: 'Run list', id: 'runs-sidebar', open: sidebar, setOpen: setSidebar }}
+      />
       <div className="app-body">
-        <nav className={`run-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Runs">
+        <nav
+          id="runs-sidebar"
+          className={`page-sidebar run-sidebar ${sidebar ? 'visible' : ''}`}
+          aria-label="Runs"
+        >
           <div className="sidebar-heading">
             <span className="sidebar-title">Runs</span>
             <button
@@ -242,6 +240,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
           source={selection?.example ? exampleSource : history}
           workers={bootstrap.workers ?? []}
           runHref={(id) => runLink(id, selection?.example)}
+          successorRunId={listed?.workspaceRecovery?.successorRunId}
           emptyAction={
             latest && (
               <button className="button" onClick={() => choose(latest)}>

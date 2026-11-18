@@ -124,6 +124,12 @@ async fn fixture() -> CheckoutFixture {
 }
 
 async fn direct(selection: bool) {
+    direct_successor(Some(selection)).await;
+}
+
+/// `None` restarts a submitted run, which selects no conversation; `Some(false)` also restarts
+/// the lost continuation.
+async fn direct_successor(selection: Option<bool>) {
     let fixture = fixture().await;
     let capsule = fixture.allocate().await.assert_value();
     let first_home = fixture
@@ -155,13 +161,17 @@ async fn direct(selection: bool) {
         .await
         .assert_value();
     store.suspend(&history(), &[]).await.assert_value();
-    let selection = if selection {
-        let listed = fixture.checkpoints(&fixture.run_id).await;
-        CheckpointRestoreSelection::Checkpoint {
-            checkpoint_id: listed.checkpoints[0].checkpoint_id.clone(),
+    let restart = selection.is_none();
+    let continued = selection == Some(false);
+    let selection = match selection {
+        Some(true) => {
+            let listed = fixture.checkpoints(&fixture.run_id).await;
+            CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: listed.checkpoints[0].checkpoint_id.clone(),
+            }
         }
-    } else {
-        CheckpointRestoreSelection::Continue
+        Some(false) => CheckpointRestoreSelection::Continue,
+        None => CheckpointRestoreSelection::Latest,
     };
     capsule
         .cleanup
@@ -187,11 +197,54 @@ async fn direct(selection: bool) {
         resumed.checkpoints.as_ref().assert_value().as_ref(),
     )
     .await;
+    if restart {
+        assert!(provider.restored.lock().await.is_empty());
+    } else {
+        assert_eq!(
+            *provider.restored.lock().await,
+            [(ID.to_owned(), next_home, CONTENT.to_owned())]
+        );
+    }
+    let exit = if continued {
+        RunRuntimeExit::RuntimeLost
+    } else {
+        RunRuntimeExit::ForceStopped
+    };
+    resumed
+        .cleanup
+        .destroy_or_confirm_absent(exit)
+        .await
+        .assert_value();
+    if !continued {
+        return;
+    }
+    // The lost continuation's restart starts with the conversation the continuation started with.
+    let restarted = RunId::new("conversation-restart");
+    let again = fixture
+        .allocator
+        .allocate_from_retained(fixture.retained_request(
+            &successor,
+            &restarted,
+            CheckpointRestoreSelection::Latest,
+        ))
+        .await
+        .assert_value();
+    let home = fixture
+        .allocator
+        .run_path(&restarted)
+        .join("runtime/provider-home");
+    let provider = turn(
+        &fixture,
+        &restarted,
+        home.clone(),
+        again.checkpoints.as_ref().assert_value().as_ref(),
+    )
+    .await;
     assert_eq!(
         *provider.restored.lock().await,
-        [(ID.to_owned(), next_home, CONTENT.to_owned())]
+        [(ID.to_owned(), home, CONTENT.to_owned())]
     );
-    resumed
+    again
         .cleanup
         .destroy_or_confirm_absent(RunRuntimeExit::ForceStopped)
         .await
@@ -206,6 +259,11 @@ async fn direct_suspended_successor_restores_conversation_without_workspace_rest
 #[tokio::test]
 async fn direct_selected_checkpoint_restores_conversation_after_session_cleanup() {
     direct(true).await;
+}
+
+#[tokio::test]
+async fn direct_restart_starts_a_new_conversation_and_says_why() {
+    direct_successor(None).await;
 }
 
 // This host implements only the original storage contract. Its implementation deliberately does

@@ -24,6 +24,15 @@
           "minLength": 1,
           "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
           "type": "string"
+        },
+        "startedAt": {
+          "description": "Ledger recording time of this execution's `NodeStarted`, in Unix milliseconds.\nOmitted when unknown; not a precise provider start measurement.",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1757,6 +1766,18 @@
       "properties": {
         "initialInput": {
           "$ref": "#/$defs/PayloadType"
+        },
+        "networks": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SteeringNetwork"
+          },
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "type": "object"
         },
         "policy": {
           "$ref": "#/$defs/PolicyBinding"
@@ -3940,6 +3961,29 @@
       ],
       "type": "object"
     },
+    "NetworkSteer": {
+      "additionalProperties": false,
+      "properties": {
+        "networks": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "origin": {
+          "$ref": "#/$defs/SteerOrigin"
+        }
+      },
+      "required": [
+        "networks",
+        "origin"
+      ],
+      "type": "object"
+    },
     "NodeAddress": {
       "additionalProperties": false,
       "properties": {
@@ -5377,7 +5421,7 @@
       "type": "object"
     },
     "RunResumeFrom": {
-      "description": "A successor restarts a failed graph or continues from a selected checkpoint or suspension.\nCheckpoint continuations, including suspended successors, restore captured node-instance provider\nconversations; restarts start new ones. Suspended local/direct continuations retain workspace files.",
+      "description": "A successor restarts a failed run where it started, or continues from a selected checkpoint or\nsuspension. Checkpoint continuations, including suspended successors, restore captured\nnode-instance provider conversations, and so does the restart of such a successor; the restart\nof a submitted run starts new ones. Suspended local/direct continuations retain workspace files.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -5870,6 +5914,20 @@
         "id": {
           "$ref": "#/$defs/VectorId"
         },
+        "mode": {
+          "$ref": "#/$defs/SteeringMode",
+          "default": "standing"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkSteer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "receivedExecutions": {
           "format": "uint64",
           "minimum": 0,
@@ -5894,6 +5952,10 @@
     "RunSteerParams": {
       "additionalProperties": false,
       "properties": {
+        "mode": {
+          "$ref": "#/$defs/SteeringMode",
+          "default": "standing"
+        },
         "runId": {
           "type": "string"
         },
@@ -6013,6 +6075,20 @@
             "kind": {
               "const": "steer",
               "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/SteeringMode",
+              "default": "standing"
+            },
+            "network": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkSteer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "text": {
               "$ref": "#/$defs/NodeInstructions"
@@ -6266,6 +6342,20 @@
             "kind": {
               "const": "steer",
               "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/SteeringMode",
+              "default": "standing"
+            },
+            "network": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkSteer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "textBytes": {
               "format": "uint",
@@ -6538,6 +6628,15 @@
       "properties": {
         "cursor": {
           "type": "string"
+        },
+        "recordedAt": {
+          "description": "Ledger recording time of the event producing this projection, in Unix milliseconds.\nCursor alone defines ordering. Imported history carries its import time; old times\nremain unknown rather than estimated.",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "runId": {
           "type": "string"
@@ -6827,6 +6926,73 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "SteerOrigin": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "nodeInstance": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "nodeInstance",
+        "execution"
+      ],
+      "type": "object"
+    },
+    "SteeringMode": {
+      "enum": [
+        "once",
+        "standing"
+      ],
+      "type": "string"
+    },
+    "SteeringNetwork": {
+      "additionalProperties": false,
+      "description": "Graph-local participants and explicit publishing authority for a steering network.",
+      "properties": {
+        "members": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "publishers": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "members"
+      ],
       "type": "object"
     },
     "StopMode": {

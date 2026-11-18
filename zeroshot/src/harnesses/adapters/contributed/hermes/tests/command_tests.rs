@@ -458,13 +458,30 @@ impl crate::active_memory::hooks::ActiveMemorySource for MemoryFailures {
     }
 }
 
-#[test]
-fn active_memory_capability_is_private_and_failed_installation_reports_unknown_delivery() {
+#[tokio::test]
+async fn active_memory_capability_is_private_and_failed_installation_reports_unknown_delivery() {
+    use crate::v2_run_ledger::{RunEvent, RunLedger, SafeLogStream};
     let (_directory, adapter, files) = setup("openai");
     let source = Arc::new(MemoryFailures(std::sync::atomic::AtomicUsize::new(0)));
-    let hooks = crate::active_memory::hooks::ActiveMemoryHooks::new(source.clone()).assert_value();
-    let adapter = adapter.with_active_memory(Some(Arc::new(hooks)));
+    let hooks = Arc::new(
+        crate::active_memory::hooks::ActiveMemoryHooks::new(source.clone()).assert_value(),
+    );
+    let adapter = adapter.with_active_memory(Some(hooks.clone()));
     let mut invocation = invocation(&[]);
+    let ledger = Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new());
+    let run = invocation.node.reference.run_id.clone();
+    ledger
+        .create_or_get(crate::v2_run_ledger::CreateRun {
+            run_id: run.clone(),
+            submission_key: openengine_cluster_protocol::IdempotencyKey::new("hermes-hook")
+                .assert_value(),
+            submission_digest: openengine_cluster_protocol::Sha256Digest::new("a".repeat(64))
+                .assert_value(),
+            admitted: crate::native_v2_runner::test_support::admitted(),
+        })
+        .await
+        .assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
     crate::harnesses::native_config::tests::set(
         &mut invocation.node.binding,
         json!({"options":{"agent":{"max_turns":12}}}),
@@ -479,9 +496,47 @@ fn active_memory_capability_is_private_and_failed_installation_reports_unknown_d
     assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 0);
     std::fs::remove_file(&path).assert_value();
     std::fs::create_dir(&path).assert_value();
+    let expected_cause = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .err()
+        .assert_value()
+        .to_string();
     let (_, init) = prepare(&adapter, &files, &[]).assert_value();
     assert!(init["memoryCapability"].is_null());
     assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    hooks
+        .finish_steers(invocation.node.reference.execution.get(), true)
+        .await;
+    // A subsequent native retry must not duplicate the diagnostic for this execution.
+    prepare(&adapter, &files, &[]).assert_value();
+    hooks
+        .finish_steers(invocation.node.reference.execution.get(), true)
+        .await;
+    let tail = ledger.snapshot_and_tail(&run, None).await.assert_value();
+    let errors: Vec<_> = tail
+        .events
+        .iter()
+        .filter_map(|event| match &event.event {
+            RunEvent::SafeLog {
+                stream: SafeLogStream::Error,
+                line,
+                diagnostic,
+                ..
+            } => {
+                assert!(diagnostic.is_none());
+                Some(line.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].contains("hook configuration failed:"),
+        "{errors:?}"
+    );
+    assert!(errors[0].contains(&expected_cause), "{errors:?}");
+    assert!(tail.snapshot.failure_context.is_none());
 }
 
 #[test]
@@ -500,4 +555,43 @@ fn steer_hermes_native_carrier_handles_maximum_text() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn network_capability_survives_hermes_private_initialization_and_scrubs_declared_values() {
+    use crate::active_memory::hooks::ActiveMemoryHooks;
+
+    for publisher in [false, true] {
+        let (_directory, mut adapter, files) = setup("openai");
+        let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
+        hooks.configure_networks(&serde_json::from_value(json!({
+            "team":{"members":["agent"],"publishers":if publisher { vec!["agent"] } else { vec![] }}
+        })).assert_value());
+        adapter.active_memory = Some(hooks);
+        let (command, init) = prepare(
+            &adapter,
+            &files,
+            &[("ZEROSHOT_STEERING_CAPABILITY", "stale-declared-capability")],
+        )
+        .assert_value();
+        let capability = init["memoryCapability"].as_str().assert_value();
+        assert!(std::path::Path::new(capability).is_file());
+        assert!(
+            init["declaredEnvironment"]
+                .get("ZEROSHOT_STEERING_CAPABILITY")
+                .is_none()
+        );
+        assert!(
+            init["nativeEnvironment"]
+                .get("ZEROSHOT_STEERING_CAPABILITY")
+                .is_none()
+        );
+        assert_eq!(
+            command
+                .environment
+                .get("ZEROSHOT_STEERING_CAPABILITY")
+                .map(String::as_str),
+            publisher.then_some(capability)
+        );
+    }
 }

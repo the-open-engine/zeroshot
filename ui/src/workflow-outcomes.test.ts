@@ -57,7 +57,6 @@ test('full worker failure becomes a policy at the exact checkpoint without rewri
       guard: errors(),
       sources: ['work'],
       kind: 'worker-error',
-      boundary: 'run',
     },
   ]);
   assert.equal(analysis.policies[0].guard, document.graph.root.children[1].branches[0].when);
@@ -154,9 +153,6 @@ test('parallel policy association stays after the join and branch-local policies
       ['parallel', 'outcome'],
     ]
   );
-  assert.equal(analysis.policies[0].boundary, 'parallel-branch');
-  assert.equal(analysis.policies[0].parallelName, 'parallel');
-  assert.equal(analysis.policies[1].boundary, 'run');
   const view = projectWorkflow(document);
   const join = view.nodes.find((node) => node.role === 'join')!;
   const finish = view.nodes.find((node) => node.owner === 'done')!;
@@ -230,7 +226,7 @@ test('early terminals inside loops, maps and parallel branches stay distinct and
     assert.equal(analyzeWorkflowOutcomes(document).completions[0].mode, 'early');
     const view = projectWorkflow(document);
     const terminal = view.nodes.find((node) => node.owner === 'done')!;
-    assert.equal(terminal.label, control.kind === 'par' ? 'End branch' : 'Finish run early');
+    assert.equal(terminal.label, 'Finish run early');
     assert.equal(
       view.edges.some((edge) => edge.source === terminal.id),
       false
@@ -344,7 +340,7 @@ test('verifier outcome fusion does not cross another step, sequence scope, paral
     assert.ok(projectWorkflow(doc(root)).nodes.some((node) => node.owner === 'outcome'));
 });
 
-test('terminal-only parallel branches end locally and an unmet join still reaches the following checkpoint', () => {
+test('terminal-only parallel branches end the run without an invented join continuation', () => {
   const parallel: GraphNode = {
     kind: 'par',
     name: 'parallel',
@@ -352,24 +348,27 @@ test('terminal-only parallel branches end locally and an unmet join still reache
     branches: [done('branch_complete'), fail('branch_failed')],
   };
   const document = doc(seq('run', [parallel, work('handle_group_result')]));
-  const view = projectWorkflow(document);
-  const end = view.nodes.find((node) => node.role === 'join')!;
-  assert.ok(end);
-  assert.ok(
-    view.edges.some(
-      (edge) =>
-        edge.source === end.id &&
-        edge.target === view.nodes.find((node) => node.owner === 'handle_group_result')!.id
-    )
-  );
-  for (const terminal of view.nodes.filter((node) => node.role === 'completion')) {
+  for (const collapsed of [new Set<string>(), new Set(['parallel'])]) {
+    const view = projectWorkflow(document, collapsed);
+    const after = view.nodes.find((node) => node.owner === 'handle_group_result')!;
+    assert.ok(after, 'authored unreachable work stays visible');
     assert.equal(
-      view.edges.some((edge) => edge.source === terminal.id),
+      view.nodes.some((node) => node.role === 'join'),
       false
     );
-    assert.match(terminal.detail ?? '', /branch/);
+    assert.equal(
+      view.edges.some((edge) => edge.target === after.id),
+      false
+    );
+    for (const terminal of view.nodes.filter((node) => node.role === 'completion')) {
+      assert.equal(
+        view.edges.some((edge) => edge.source === terminal.id),
+        false
+      );
+      assert.match(terminal.detail ?? '', /run/);
+    }
   }
-  assert.equal(analyzeWorkflowOutcomes(document).completions[0].boundary, 'parallel-branch');
+  assert.equal(analyzeWorkflowOutcomes(document).completions[0].mode, 'early');
 });
 
 test('Choice error projection requires exact first-match route masks', () => {

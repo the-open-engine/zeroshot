@@ -14,6 +14,13 @@ This run leaves the result in your folder instead of opening a pull request.
 
 [![The software-change graph: implementation, parallel acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](../assets/zeroshot-workflow-mobile.svg){ loading=lazy }](../assets/zeroshot-workflow-mobile.svg){ .docs-graph-tall }
 
+The worker prepares documented prerequisites and candidate builds, then passes check results and
+remaining gaps to both reviewers. Acceptance review checks the requested behavior; code review traces
+concrete failure scenarios through affected callers. Reviews require source or execution evidence for
+material defects or unmet explicit requirements. Unavailable checks, unrelated failures and optional
+improvements are advisory. Required fixes return to the worker; Git delivery still enforces the
+repository's required CI and merge policy.
+
 ## Before you start
 
 - zeroshot is [installed](install.md).
@@ -36,6 +43,13 @@ Save it as `input.json`. Replace the task with a small change that fits your pro
   "task": "Add JSON output to the status command and cover it with focused tests."
 }
 ```
+
+The stored submission (graph, runtime settings, input and metadata) must fit within **2 MiB
+(2,097,152 bytes)** of JSON. Larger submissions are refused before a run is created.
+Each node's input plus its start-record bookkeeping must fit within **1 MiB (1,048,576 bytes)**.
+An oversized node input fails the run at that node with a size diagnostic. These are serialized
+UTF-8 byte limits, including JSON escaping. A graph may split input larger than 1 MiB into smaller
+node inputs; the whole submission must still fit within 2 MiB.
 
 ## 2. Pick the agent
 

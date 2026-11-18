@@ -550,6 +550,92 @@ fn optional_checks_never_block_or_fail_delivery() {
     assert!(snapshot.failed_job_ids.is_empty());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn review_feedback_preserves_actual_colored_rustc_errors() {
+    use super::super::ci_diagnostics::{MAX_FAILURE_FEEDBACK_CHARS, MAX_JOB_LOG_TAIL_BYTES};
+
+    for diagnostic in super::super::ci_diagnostics::tests::rustc_diagnostics() {
+        for (noise, jobs) in [(1_600, 1), (1_600, 2), (8_000, 1), (8_000, 2), (8_000, 8)] {
+            let root = tempfile::tempdir().assert_value();
+            let contexts = (91..91 + jobs)
+                .map(|job| {
+                    let mut check = check_run(
+                        &format!("compiler-{job}"),
+                        "COMPLETED",
+                        Some("FAILURE"),
+                        true,
+                    );
+                    check["databaseId"] = json!(job);
+                    check
+                })
+                .collect();
+            let policy = json!([policy_page(
+                "MERGEABLE",
+                "BLOCKED",
+                Some(contexts),
+                (false, None)
+            )]);
+            std::fs::write(root.path().join("policy"), policy.to_string()).assert_value();
+            let raw = format!(
+                "test-token résumé 界🙂\n{diagnostic}{}##[error]Process completed with exit code 1.\n",
+                "ordinary successful output\n".repeat(noise),
+            );
+            assert_eq!(raw.len() > MAX_JOB_LOG_TAIL_BYTES, noise == 8_000);
+            if noise == 1_600 {
+                assert!(raw.len() * 2 > MAX_FAILURE_FEEDBACK_CHARS);
+            }
+            std::fs::write(root.path().join("log"), format!("{raw}cleanup sentinel\n"))
+                .assert_value();
+            let program = root.path().join("gh");
+            write_executable(
+                &program,
+                r#"#!/bin/sh
+case "$*" in
+  'api graphql '*) exec /bin/cat "$HOME/policy" ;;
+  'api repos/acme/project/actions/jobs/'*) exec /bin/cat "$HOME/log" ;;
+  *) exit 1 ;;
+esac
+"#
+                .to_owned(),
+            );
+            let observed = authority(program, root.path())
+                .inspect_review(&review(), SourceDeliveryCredential::token("test-token"))
+                .await
+                .assert_value();
+            let SourceReviewState::Open {
+                checks: SourceChecks::Failed { diagnostic },
+            } = observed.state
+            else {
+                panic!("expected failed required checks");
+            };
+            assert!(diagnostic.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+            assert_eq!(
+                diagnostic.matches("expected expression, found").count(),
+                jobs as usize
+            );
+            assert_eq!(
+                diagnostic.matches("colored-syntax.rs:2:17").count(),
+                jobs as usize
+            );
+            assert_eq!(
+                diagnostic
+                    .matches("Process completed with exit code 1.")
+                    .count(),
+                jobs as usize
+            );
+            assert!(!diagnostic.contains("test-token"));
+            assert!(!diagnostic.contains("cleanup sentinel"));
+            assert!(!diagnostic.contains('\u{fffd}'));
+            assert!(
+                diagnostic
+                    .chars()
+                    .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+            );
+        }
+    }
+}
+
 #[test]
 fn required_check_failures_win_and_preserve_diagnostics() {
     let mut snapshot = classify(policy_page(
@@ -567,7 +653,11 @@ fn required_check_failures_win_and_preserve_diagnostics() {
         &mut snapshot,
         &[(
             91,
-            "setup passed\nAssertionError: validation failed".to_owned(),
+            api::check_log_tail(
+                b"setup passed\nAssertionError: validation failed",
+                SourceDeliveryCredential::token(""),
+                &[],
+            ),
         )],
     );
     let diagnostic = match snapshot.state {
@@ -915,7 +1005,11 @@ fn large_first_log_cannot_hide_other_failed_job_excerpts() {
         .map(|job| {
             (
                 job,
-                format!("{}\nassertion failed in job {job}", "界".repeat(70_000)),
+                api::check_log_tail(
+                    format!("{}\nassertion failed in job {job}", "界".repeat(70_000)).as_bytes(),
+                    SourceDeliveryCredential::token(""),
+                    &[],
+                ),
             )
         })
         .collect::<Vec<_>>();
@@ -1143,7 +1237,7 @@ async fn failed_check_logs_are_enriched_but_transport_failures_remain_typed() {
         "resource not accessible",
     )))
     .assert_value();
-    assert!(unavailable.contains("GitHub job log unavailable"));
+    assert!(unavailable.text.contains("GitHub job log unavailable"));
 
     for status in [401, 429] {
         let error = job_log_excerpt(Err(SourceDeliveryError::api(

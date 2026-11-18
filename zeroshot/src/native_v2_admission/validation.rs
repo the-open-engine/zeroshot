@@ -34,6 +34,7 @@ pub(super) fn validate_executable_bindings(
     context: super::NativeV2AdmissionContext<'_>,
 ) -> Result<(), NativeV2AdmissionError> {
     if !runtime.workspace_checkpoints
+        && !context.checkpointless_requests
         && let Some(node) = declarations
             .iter()
             .find(|node| node.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF)

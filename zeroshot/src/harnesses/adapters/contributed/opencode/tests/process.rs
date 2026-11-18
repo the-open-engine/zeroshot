@@ -513,6 +513,7 @@ impl ActiveMemorySource for RecallMemory {
 fn memory_callback_receipts(
     files: &ProviderExecutionFiles,
     context: String,
+    tools: &'static [&'static str],
 ) -> std::thread::JoinHandle<Vec<Option<u8>>> {
     use std::io::{ErrorKind, Read, Write};
     use std::net::TcpListener;
@@ -532,7 +533,7 @@ fn memory_callback_receipts(
     let workspace = files.workspace.clone();
     std::thread::spawn(move || {
         let mut receipts = Vec::new();
-        for tool in ["read", "nativeproof_record", "nativeproof_record"] {
+        for &tool in tools {
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut stream = loop {
                 match listener.accept() {
@@ -560,7 +561,10 @@ fn memory_callback_receipts(
             assert_eq!(request["token"], capability["token"]);
             assert_eq!(request["event"]["toolName"], tool);
             assert_eq!(request["event"]["cwd"], json!(workspace));
-            assert_eq!(request["event"]["sessionId"], "ses_fixture");
+            assert!(matches!(
+                request["event"]["sessionId"].as_str(),
+                Some("ses_fixture" | "ses_refused")
+            ));
             assert_eq!(
                 request["event"]["input"],
                 if tool == "read" {
@@ -590,66 +594,172 @@ fn memory_callback_receipts(
 }
 
 #[test]
-fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachments() {
-    exercise_steer_native_plugin_context(" recalled-marker".into());
+fn native_plugin_stores_recall_as_a_message_and_leaves_tool_results_unchanged() {
+    exercise_native_plugin_messages(" recalled-marker", "");
 }
 
 #[test]
-fn steer_opencode_carrier_preserves_maximum_text_whole_with_native_attachments() {
-    exercise_steer_native_plugin_context(format!(
+fn steer_opencode_carrier_stores_maximum_text_whole_as_a_message_before_the_recall() {
+    let steer = format!(
         "<steer>\n[id] {}\n</steer>",
         "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES)
-    ));
+    );
+    exercise_native_plugin_messages(" recalled-marker", &steer);
 }
 
-fn exercise_steer_native_plugin_context(context: String) {
-    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(RecallMemory)).assert_value());
-    let directory = TestDirectory::new("opencode-native-memory-plugin");
-    let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n").with_active_memory(Some(hooks));
-    let files =
-        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
-            .assert_value();
-    let mut invocation = invocation(&[]);
-    crate::harnesses::native_config::tests::set(
-        &mut invocation.node.binding,
-        json!({"options":{"permission":{"edit":"deny"}}}),
+#[test]
+fn a_session_write_that_never_settles_does_not_hold_the_tool_call() {
+    let plugin = NativePlugin::new("opencode-native-memory-unsettled");
+    let reply = json!({"context":" recalled-marker","steer":"<steer>\n[id] go\n</steer>"});
+    let receipts = memory_callback_receipts(&plugin.files, reply.to_string(), &["read"]);
+    let source_code = r#"const {default:plugin}=await import(new URL('index.js',process.argv[1]));
+let writes=0;
+const hooks={};
+const ctx={location:{directory:process.argv[2]},tool:{hook:async (name,fn)=>{hooks[name]=fn;}},session:{synthetic:()=>{ writes+=1; return new Promise(()=>{}); }}};
+await plugin.setup(ctx);
+await hooks['execute.after']({tool:'read',sessionID:'ses_fixture',input:{filePath:'README.md'},status:'completed',result:{output:'original'}});
+console.log(JSON.stringify({writes}));"#;
+    let output = node_command()
+        .args(["--input-type=module", "-e", source_code, &plugin.url])
+        .arg(&plugin.files.workspace)
+        .output()
+        .assert_value();
+    let receipts = receipts.join().assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let command = command::command(command::CommandRequest {
-        adapter: &adapter,
-        invocation: &invocation,
-        files: &files,
-        session_id: None,
-    })
-    .assert_value();
-    let config: Value =
-        serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
-    assert_eq!(config["permission"]["edit"], "deny");
-    let plugin_url = owned_plugin(&command, "zeroshot-active-memory");
+    let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
+    // The steer's write did not settle: the hook returned without it and wrote no lesson after it.
+    assert_eq!(returned["writes"], 1);
+    assert_eq!(
+        receipts,
+        vec![None],
+        "a message that was not stored is not acknowledged"
+    );
+}
+
+#[test]
+fn a_failed_tool_call_still_stores_the_steer() {
+    let plugin = NativePlugin::new("opencode-native-memory-failed-tool");
+    let reply = json!({"context":"","steer":"<steer>\n[id] go\n</steer>"});
+    let receipts = memory_callback_receipts(&plugin.files, reply.to_string(), &["read"]);
+    let source_code = r#"const {default:plugin}=await import(new URL('index.js',process.argv[1]));
+const stored=[];
+const hooks={};
+const ctx={location:{directory:process.argv[2]},tool:{hook:async (name,fn)=>{hooks[name]=fn;}},session:{synthetic:async (request)=>{
+  stored.push(request); return {id:'msg_'+stored.length};
+}}};
+await plugin.setup(ctx);
+await hooks['execute.after']({tool:'read',sessionID:'ses_fixture',input:{filePath:'README.md'},status:'error'});
+console.log(JSON.stringify({stored}));"#;
+    let output = node_command()
+        .args(["--input-type=module", "-e", source_code, &plugin.url])
+        .arg(&plugin.files.workspace)
+        .output()
+        .assert_value();
+    let receipts = receipts.join().assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
+    assert_eq!(
+        returned["stored"],
+        json!([{"sessionID":"ses_fixture","text":"<steer>\n[id] go\n</steer>","delivery":"steer","resume":false}])
+    );
+    assert_eq!(receipts, vec![Some(1)]);
+}
+
+/// The memory plugin as a real command installs it, with the files its capability lives in.
+struct NativePlugin {
+    _directory: TestDirectory,
+    // The adapter's hooks own the broker the capability was issued by.
+    _adapter: OpenCodeAdapter,
+    files: ProviderExecutionFiles,
+    url: String,
+}
+
+impl NativePlugin {
+    fn new(name: &str) -> Self {
+        let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(RecallMemory)).assert_value());
+        let directory = TestDirectory::new(name);
+        let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n").with_active_memory(Some(hooks));
+        let files = ProviderExecutionFiles::for_test(
+            directory.path(),
+            HostedProcessScope::WriterExecution(1),
+        )
+        .assert_value();
+        let mut invocation = invocation(&[]);
+        crate::harnesses::native_config::tests::set(
+            &mut invocation.node.binding,
+            json!({"options":{"permission":{"edit":"deny"}}}),
+        );
+        let command = command::command(command::CommandRequest {
+            adapter: &adapter,
+            invocation: &invocation,
+            files: &files,
+            session_id: None,
+        })
+        .assert_value();
+        let config: Value =
+            serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
+        assert_eq!(config["permission"]["edit"], "deny");
+        let url = owned_plugin(&command, "zeroshot-active-memory");
+        Self {
+            _directory: directory,
+            _adapter: adapter,
+            files,
+            url,
+        }
+    }
+}
+
+/// The plugin against a broker that hands `context` and `steer` to each of three tool calls, and
+/// a session client that refuses to store anything for the third.
+fn exercise_native_plugin_messages(context: &str, steer: &str) {
+    let NativePlugin {
+        _directory,
+        _adapter: adapter,
+        files,
+        url: plugin_url,
+    } = NativePlugin::new("opencode-native-memory-plugin");
     // Check the carrier's bytes directly. The production broker's 250 ms receipt deadline may
     // correctly mark an otherwise returned result unavailable when a loaded CI host delays it.
-    let receipts = memory_callback_receipts(&files, context.clone());
-    let source_code = format!(
-        "{PLUGIN_SETUP}\n{}",
-        r#"const after = hooks['tool.execute.after'];
-const builtin = {tool:'read', sessionID:'ses_fixture', input:{filePath:'README.md'}, status:'completed', result:{content:'original', output:'original', metadata:{}}};
-await after(builtin);
-const mcpResult = {content:[
+    let reply = json!({"context":context,"steer":steer}).to_string();
+    let receipts = memory_callback_receipts(
+        &files,
+        reply,
+        &["read", "nativeproof_record", "nativeproof_record"],
+    );
+    // Like OpenCode 2, `session.synthetic` rejects when it cannot store a message.
+    let source_code = r#"const {default:plugin}=await import(new URL('index.js',process.argv[1]));
+const stored=[];
+const hooks={};
+const ctx={location:{directory:process.argv[2]},tool:{hook:async (name,fn)=>{hooks[name]=fn;}},session:{synthetic:async (request)=>{
+  if (request.sessionID==='ses_refused') throw new Error('Session.NotFoundError');
+  stored.push(request); return {id:'msg_'+stored.length};
+}}};
+await plugin.setup(ctx);
+const after=hooks['execute.after'];
+const first={tool:'read',sessionID:'ses_fixture',input:{filePath:'README.md'},status:'completed',result:{content:'original',output:'original',metadata:{}}};
+const builtin=structuredClone(first.result);
+await after(first);
+const mcpResult={content:[
   {type:'text',text:'original MCP text',annotations:{priority:0.5}},
   {type:'image',mimeType:'image/png',data:'AAAA'},
   {type:'resource',resource:{uri:'file:///native.pdf',mimeType:'application/pdf',blob:'AA=='}},
   {type:'resource_link',uri:'file:///native.txt',name:'native attachment'}
 ],output:'MCP extension output',structuredContent:{result:{count:2}},metadata:{native:true},_meta:{native:'unchanged'},isError:false};
-const before = structuredClone(mcpResult);
-const mcp = {tool:'nativeproof_record', sessionID:'ses_fixture', input:{marker:'mcp-fixture'}, status:'completed', result:mcpResult};
-await after(mcp);
-const unsupported = {tool:'nativeproof_record', sessionID:'ses_fixture', input:{marker:'mcp-fixture'}, status:'completed', result:{metadata:{}}};
-await after(unsupported);
-const failed = {tool:'read', sessionID:'ses_fixture', input:{filePath:'README.md'}, status:'error'};
-await after(failed);
-console.log(JSON.stringify({builtin:builtin.result, mcp:mcp.result, before, unsupported:unsupported.result}));"#
-    );
+const before=structuredClone(mcpResult);
+const second={tool:'nativeproof_record',sessionID:'ses_fixture',input:{marker:'mcp-fixture'},status:'completed',result:mcpResult};
+await after(second);
+await after({tool:'nativeproof_record',sessionID:'ses_refused',input:{marker:'mcp-fixture'},status:'error'});
+console.log(JSON.stringify({output:first.result,builtin,mcp:second.result,before,stored}));"#;
     let output = node_command()
-        .args(["--input-type=module", "-e", &source_code, &plugin_url])
+        .args(["--input-type=module", "-e", source_code, &plugin_url])
         .arg(&files.workspace)
         .output()
         .assert_value();
@@ -660,22 +770,20 @@ console.log(JSON.stringify({builtin:builtin.result, mcp:mcp.result, before, unsu
         String::from_utf8_lossy(&output.stderr)
     );
     let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
-    assert_eq!(returned["builtin"]["content"], format!("original{context}"));
-    assert_eq!(returned["builtin"]["output"], "original");
-    let before = &returned["before"];
-    let contents = returned["mcp"]["content"].as_array().assert_value();
-    assert_eq!(&contents[..4], before["content"].as_array().assert_value());
-    assert_eq!(contents[4], json!({"type":"text","text":context}));
-    for field in [
-        "output",
-        "structuredContent",
-        "metadata",
-        "_meta",
-        "isError",
-    ] {
-        assert_eq!(returned["mcp"][field], before[field]);
-    }
-    assert_eq!(returned["unsupported"], json!({"metadata":{}}));
+    // Nothing is placed inside a tool result, which a model may refuse to follow.
+    assert_eq!(returned["output"], returned["builtin"]);
+    assert_eq!(returned["mcp"], returned["before"]);
+    // Each text is a message of its own, stored without starting a model turn, the steer first.
+    let message = |text: &str| json!({"sessionID":"ses_fixture","text":text,"delivery":"steer","resume":false});
+    let expected: Vec<Value> = [steer, context]
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .map(message)
+        .collect();
+    let stored = returned["stored"].as_array().assert_value();
+    assert_eq!(stored.len(), 2 * expected.len());
+    assert_eq!(&stored[..expected.len()], expected.as_slice());
+    assert_eq!(&stored[expected.len()..], expected.as_slice());
     assert!(
         std::path::Path::new(&files.scratch_text().assert_value())
             .join("zeroshot-plugins")
@@ -687,7 +795,7 @@ console.log(JSON.stringify({builtin:builtin.result, mcp:mcp.result, before, unsu
     assert_eq!(
         receipts,
         vec![Some(1), Some(1), None],
-        "builtin and MCP results must acknowledge context; unsupported results must not"
+        "stored messages are acknowledged; a session that stores nothing acknowledges nothing"
     );
 }
 

@@ -2,6 +2,9 @@ use super::*;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 use crate::v2_run_ledger::sqlite_crash;
 
+#[path = "timing_tests.rs"]
+mod timing;
+
 fn seed(path: &Path) {
     let connection = Connection::open(path).unwrap();
     connection
@@ -190,6 +193,8 @@ fn steer_queries_supply_nullable_recorded_time_for_the_shared_replay_decoder() {
     let event = vector_event(
         &run,
         RunVectorContent::Steer {
+            mode: Default::default(),
+            network: None,
             text: "keep going".into(),
         },
     )

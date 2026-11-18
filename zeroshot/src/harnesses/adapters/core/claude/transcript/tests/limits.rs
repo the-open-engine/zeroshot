@@ -64,10 +64,19 @@ fn accepts_records_larger_than_the_old_per_record_limit() {
         decoded
             .emissions
             .iter()
+            .filter(|emission| emission.stream == LiveOutputStream::Output)
             .map(|emission| emission.text.as_str())
             .collect::<String>(),
         assistant_text
     );
+    let tool_logs = decoded
+        .emissions
+        .iter()
+        .filter(|emission| emission.stream == LiveOutputStream::System)
+        .collect::<Vec<_>>();
+    assert_eq!(tool_logs.len(), 1);
+    assert!(tool_logs[0].text.contains("tool-1"));
+    assert!(tool_logs[0].text.contains("[truncated]"));
 }
 
 #[test]

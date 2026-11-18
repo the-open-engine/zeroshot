@@ -480,7 +480,8 @@ pub trait NodeRunner: Send + Sync {
         self.capture_conversations(run_id).await
     }
 
-    /// Restored history identifies eligible node instances; ordinary restarts supply no history.
+    /// Restored history identifies eligible node instances; a restart at the graph root supplies
+    /// none.
     async fn restore_conversations(
         &self,
         _history: &[crate::full_v1_reducer::DurableExecution],

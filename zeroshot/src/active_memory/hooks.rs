@@ -31,25 +31,54 @@ pub struct HookQuery {
     pub tool_name: String,
     pub tool_input: Value,
     pub cwd: PathBuf,
+    /// A native subagent's tool call; context returned to it never reaches this conversation.
+    pub subagent: bool,
+    pub steers: SteerCarrier,
+    /// Whether memory context returned at a tool call stays in the conversation. Copilot applies
+    /// it to the turn in progress and writes none of it to its session, so a later execution of
+    /// the same conversation is given a matching lesson again.
+    pub context_kept: bool,
 }
 
-/// Complete callback context and the steers awaiting a carrier acknowledgement.
+/// How a steer reaches a conversation at a tool call. A steer is the operator's own words: where
+/// the harness has a channel for user messages it travels there, never inside a tool result.
+/// A conversation that was handed a steer either way is not given it again.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SteerCarrier {
+    /// Inside the tool call's hook context. The carrier's acknowledgement is the hand-over.
+    #[default]
+    HookContext,
+    /// As a user message the carrier stores in the conversation before it acknowledges (OpenCode).
+    StoredMessage,
+    /// As a user message whose arrival in the conversation the harness reports in its event
+    /// stream; the adapter confirms the hand-over then (Claude Code, Copilot, Pi).
+    ShownMessage,
+}
+
+/// What one tool call hands over: memory context, and the steers selected for it. `steer` holds
+/// their framed text when they travel as a message of their own instead of inside `context`.
 #[derive(Default)]
 pub struct HookDelivery {
     pub context: String,
     pub steers: Vec<openengine_cluster_protocol::VectorId>,
+    pub steer: String,
 }
 
 /// The host owns the immutable index, relevance budget, session deduplication and supplied receipts.
 /// Returned strings must contain complete cards and stay within the configured context budget.
 pub trait ActiveMemorySource: Send + Sync {
+    fn enabled(&self) -> bool {
+        true
+    }
+
     fn tool_delivery(&self, query: &HookQuery) -> HookDelivery {
         HookDelivery {
             context: self.tool_context(query),
-            steers: Vec::new(),
+            ..HookDelivery::default()
         }
     }
     fn acknowledged(&self, _query: &HookQuery, _delivery: &HookDelivery) {}
+    fn unacknowledged(&self, _query: &HookQuery, _delivery: &HookDelivery) {}
 
     fn tool_context(&self, query: &HookQuery) -> String;
     fn graph_context(&self, node_id: &str, session_key: &str) -> String;
@@ -65,6 +94,60 @@ pub struct ActiveMemoryHooks {
 pub(crate) struct HookInstallation<'a> {
     pub invocation: &'a DriverInvocation,
     pub home: &'a Path,
+    pub steers: SteerRoute,
+}
+
+/// Where the broker sends the steers a tool call selects.
+#[derive(Clone, Default)]
+pub(crate) enum SteerRoute {
+    /// Inside the hook context it returns.
+    #[default]
+    HookContext,
+    /// Beside the memory context, to the adapter's extension, which sends each as a message of
+    /// its own. `stored` says its acknowledgement follows the harness storing the steer;
+    /// otherwise the adapter confirms the steer with `ActiveMemoryHooks::steer_shown`.
+    Extension { stored: bool },
+    /// To the adapter, which writes them into the conversation and confirms each with
+    /// `ActiveMemoryHooks::steer_shown`.
+    Adapter(tokio::sync::mpsc::UnboundedSender<String>),
+}
+
+impl SteerRoute {
+    pub(super) fn carrier(&self) -> SteerCarrier {
+        match self {
+            Self::HookContext => SteerCarrier::HookContext,
+            Self::Extension { stored: true } => SteerCarrier::StoredMessage,
+            Self::Extension { stored: false } | Self::Adapter(_) => SteerCarrier::ShownMessage,
+        }
+    }
+}
+
+#[cfg(test)]
+impl<'a> ToolCall<'a> {
+    /// A tool call of a carrier that takes everything as hook context and keeps it.
+    pub(crate) fn hook(
+        invocation: &'a DriverInvocation,
+        input: &'a Value,
+        workspace: &'a Path,
+    ) -> Self {
+        Self {
+            invocation,
+            input,
+            workspace,
+            steers: SteerCarrier::HookContext,
+            context_kept: true,
+        }
+    }
+}
+
+/// A tool call an adapter observes in process, with what its harness does with the answer.
+pub(crate) struct ToolCall<'a> {
+    pub invocation: &'a DriverInvocation,
+    pub input: &'a Value,
+    pub workspace: &'a Path,
+    pub steers: SteerCarrier,
+    /// See `HookQuery::context_kept`.
+    pub context_kept: bool,
 }
 
 impl ActiveMemoryHooks {
@@ -105,7 +188,8 @@ impl ActiveMemoryHooks {
     }
     /// Settles an execution or releases unconfirmed prompt offers before a native retry.
     pub(crate) async fn finish_steers(&self, execution: u64, success: bool) {
-        self.broker.retire(execution);
+        self.broker.retire(execution).await;
+        self.source.report_failure(execution).await;
         self.source.finish(execution, success).await;
     }
     pub(crate) async fn steer_prompt(
@@ -121,6 +205,67 @@ impl ActiveMemoryHooks {
         match supplemental.host_context {
             Some(context) => DriverInvocation::prepend_host_context(prompt, &context),
             None => prompt,
+        }
+    }
+
+    pub(crate) fn configure_networks(
+        &self,
+        networks: &std::collections::BTreeMap<
+            openengine_cluster_protocol::NodeName,
+            openengine_cluster_protocol::SteeringNetwork,
+        >,
+    ) {
+        self.source.configure_networks(networks);
+    }
+
+    pub(crate) fn publishing_authorized(&self, invocation: &DriverInvocation) -> bool {
+        !auxiliary_invocation(invocation)
+            && self
+                .source
+                .publishing_authorized(&invocation.node.reference.node)
+    }
+
+    /// The same host-owned capability supports publication in every native lane.
+    pub(crate) fn configure_network_command(
+        &self,
+        command: &mut ProcessSessionCommand,
+        invocation: &DriverInvocation,
+        home: &Path,
+    ) -> io::Result<()> {
+        let capability = if self.publishing_authorized(invocation) {
+            self.capability_file(invocation, &command.workspace.current_dir, home)?
+        } else {
+            None
+        };
+        self.configure_network_environment(
+            &mut command.environment,
+            invocation,
+            capability.as_deref(),
+        );
+        Ok(())
+    }
+
+    /// Reuse the native carrier's file rather than replacing its live token.
+    pub(crate) fn configure_network_environment(
+        &self,
+        environment: &mut std::collections::BTreeMap<String, String>,
+        invocation: &DriverInvocation,
+        capability: Option<&Path>,
+    ) {
+        environment.retain(|name, _| {
+            if cfg!(windows) {
+                !name.eq_ignore_ascii_case("ZEROSHOT_STEERING_CAPABILITY")
+            } else {
+                name != "ZEROSHOT_STEERING_CAPABILITY"
+            }
+        });
+        if self.publishing_authorized(invocation)
+            && let Some(path) = capability
+        {
+            environment.insert(
+                "ZEROSHOT_STEERING_CAPABILITY".into(),
+                path.to_string_lossy().into_owned(),
+            );
         }
     }
 
@@ -158,8 +303,9 @@ impl ActiveMemoryHooks {
         &self,
         command: &mut ProcessSessionCommand,
         installation: HookInstallation<'_>,
-        install: fn(&mut ProcessSessionCommand, &Path) -> io::Result<()>,
+        install: impl FnOnce(&mut ProcessSessionCommand, &Path) -> io::Result<()>,
     ) {
+        self.configure_network_environment(&mut command.environment, installation.invocation, None);
         let result = self
             .capability_file(
                 installation.invocation,
@@ -167,12 +313,24 @@ impl ActiveMemoryHooks {
                 installation.home,
             )
             .and_then(|capability| match capability {
-                Some(path) => install(command, &path),
+                Some(path) => {
+                    self.configure_network_environment(
+                        &mut command.environment,
+                        installation.invocation,
+                        Some(&path),
+                    );
+                    self.broker
+                        .route(installation.invocation, installation.steers);
+                    install(command, &path)
+                }
                 None => Ok(()),
             });
-        if result.is_err() {
-            self.source
-                .unavailable("Active Memory hook configuration was unavailable");
+        if let Err(error) = result {
+            self.source.failure(
+                installation.invocation.node.reference.execution.get(),
+                installation.invocation.node.reference.node.as_str(),
+                &format!("hook configuration failed: {error}"),
+            );
         }
     }
 
@@ -205,6 +363,15 @@ impl ActiveMemoryHooks {
         );
     }
 
+    pub(crate) fn carrier_failed(
+        &self,
+        reference: &crate::native_v2_contract::ExecutionRef,
+        reason: &str,
+    ) {
+        self.source
+            .failure(reference.execution.get(), reference.node.as_str(), reason);
+    }
+
     #[cfg(test)]
     pub(crate) fn tool_context(
         &self,
@@ -219,22 +386,31 @@ impl ActiveMemoryHooks {
         native::bounded_context(self.source.tool_context(&query))
     }
 
-    pub(crate) async fn tool_delivery(
-        &self,
-        invocation: &DriverInvocation,
-        input: &Value,
-        workspace: &Path,
-    ) -> (HookQuery, HookDelivery) {
-        let query = broker::HookScope::new(invocation, workspace).query(input);
-        let delivery = if auxiliary_invocation(invocation) {
+    pub(crate) async fn tool_delivery(&self, call: ToolCall<'_>) -> (HookQuery, HookDelivery) {
+        let mut query = broker::HookScope::new(call.invocation, call.workspace).query(call.input);
+        query.steers = call.steers;
+        query.context_kept = call.context_kept;
+        let delivery = if auxiliary_invocation(call.invocation) {
             HookDelivery::default()
         } else {
             self.source.delivery(&query).await
         };
         (query, delivery)
     }
+    /// Acknowledges a delivery made in process, as the broker does once its carrier answered.
+    #[cfg(test)]
     pub(crate) async fn acknowledge(&self, query: &HookQuery, delivery: &HookDelivery) {
         self.source.receipt(query, delivery).await;
+    }
+    /// Gives up a delivery made in process, as the broker does when its carrier did not answer.
+    #[cfg(test)]
+    pub(crate) async fn discard_delivery(&self, query: &HookQuery, delivery: &HookDelivery) {
+        self.source.discard(query, delivery).await;
+    }
+    /// Confirms a steer message sent at a tool call: the harness showed `text` in the
+    /// conversation of `execution`. Text that is no such message is ignored.
+    pub(crate) async fn steer_shown(&self, execution: u64, text: &str) {
+        self.source.shown(execution, text).await;
     }
 }
 
@@ -256,6 +432,15 @@ fn auxiliary_invocation(invocation: &DriverInvocation) -> bool {
 /// operation to continue. The private file contains only a callback capability, never model keys.
 pub fn run_hook_helper(capability_path: &Path) -> io::Result<()> {
     broker::run_helper(capability_path)
+}
+
+/// Publish through an execution capability; request fields never establish sender authority.
+/// Unlike the informational native hook, publication failures are explicit.
+pub fn publish_network(
+    capability_path: &Path,
+    params: openengine_cluster_protocol::NetworkSteerParams,
+) -> io::Result<openengine_cluster_protocol::RunSteerResult> {
+    broker::publish_network(capability_path, params)
 }
 
 pub(crate) use native::command_handler;

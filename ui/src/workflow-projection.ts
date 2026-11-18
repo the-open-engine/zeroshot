@@ -206,9 +206,11 @@ function structurallyContinues(node: GraphNode, ancestors = new Set<GraphNode>()
   if (node.kind === 'seq') return children.every((child) => structurallyContinues(child, next));
   if (node.kind === 'choice')
     return !children.length || children.some((child) => structurallyContinues(child, next));
-  // Parallel consumes terminal branches and reports an unmet join as a group
-  // result. A terminal branch never becomes a run terminal by presentation.
-  if (node.kind === 'par') return true;
+  if (node.kind === 'par')
+    return parallelCanReachJoin(
+      node,
+      children.map((child) => structurallyContinues(child, next))
+    );
   if (node.kind === 'loop') return !children.length || structurallyContinues(children[0], next);
   // Empty input bypasses even a terminal-only map body.
   if (node.kind === 'map') return true;
@@ -278,6 +280,51 @@ function decisionReadsVerifier(
   );
 }
 
+/** Branches the canvas folds into their checkpoint (standard error routes), by choice. */
+function hiddenRoutes(outcomes: ReturnType<typeof analyzeWorkflowOutcomes>) {
+  const hidden = new Map<string, Set<number>>();
+  for (const policy of outcomes.policies) {
+    const branches = hidden.get(policy.choiceName) ?? new Set<number>();
+    branches.add(policy.branchIndex);
+    hidden.set(policy.choiceName, branches);
+  }
+  return hidden;
+}
+
+/** A choice whose every branch is folded away draws only its fallback, in place. */
+function foldsAway(node: GraphNode, hidden: ReadonlyMap<string, Set<number>>) {
+  return (
+    node.kind === 'choice' &&
+    list(node.branches).length > 0 &&
+    hidden.get(node.name)?.size === list(node.branches).length &&
+    nodeLike(node.otherwise)
+  );
+}
+
+/**
+ * Groups the canvas can draw, expanded or folded: everything but sequences, routes that fold away
+ * and whatever lies in a folded-away branch. A decision that shares its verifier's card when
+ * expanded still has a card of its own when folded, so it counts. One walk over the tree.
+ */
+export function drawableGroups(document: Document): Set<string> {
+  const hidden = hiddenRoutes(analyzeWorkflowOutcomes(document));
+  const found = new Set<string>();
+  const walk = (node: GraphNode, ancestors: Set<GraphNode>) => {
+    if (ancestors.has(node) || ancestors.size > 64) return;
+    const next = new Set(ancestors).add(node);
+    if (groups.has(node.kind) && node.kind !== 'seq' && !foldsAway(node, hidden))
+      found.add(node.name);
+    if (node.kind === 'choice') {
+      list(node.branches).forEach((branch, index) => {
+        if (nodeLike(branch?.node) && !hidden.get(node.name)?.has(index)) walk(branch.node, next);
+      });
+      if (nodeLike(node.otherwise)) walk(node.otherwise, next);
+    } else childrenOf(node).forEach((child) => walk(child, next));
+  };
+  walk(document.graph.root, new Set());
+  return found;
+}
+
 /** Project the authored tree into workflow structure; never normalize or mutate it. */
 /**
  * The graph nodes the canvas gives a card or a region of their own when everything is expanded.
@@ -309,34 +356,18 @@ export function projectWorkflow(
   collapsed: Set<string> = new Set()
 ): WorkflowProjection {
   const outcomes = analyzeWorkflowOutcomes(document);
-  const hiddenBranches = new Map<string, Set<number>>();
-  for (const policy of outcomes.policies) {
-    const branches = hiddenBranches.get(policy.choiceName) ?? new Set<number>();
-    branches.add(policy.branchIndex);
-    hiddenBranches.set(policy.choiceName, branches);
-  }
+  const hiddenBranches = hiddenRoutes(outcomes);
   const finalCompletions = new Set(
     outcomes.completions
       .filter((completion) => completion.mode === 'final')
       .map((completion) => completion.name)
   );
-  const branchTerminals = new Set<string>();
-  function collectBranchTerminals(node: GraphNode, ancestors: Set<GraphNode>, inParallel = false) {
-    if (ancestors.has(node) || ancestors.size > 64) return;
-    if (inParallel && ['succeed', 'fail'].includes(node.kind)) branchTerminals.add(node.name);
-    const next = new Set(ancestors).add(node);
-    childrenOf(node).forEach((child) =>
-      collectBranchTerminals(child, next, inParallel || node.kind === 'par')
-    );
-  }
-  collectBranchTerminals(document.graph.root, new Set());
   return new WorkflowProjectionBuilder(
     document,
     collapsed,
     outcomes,
     hiddenBranches,
-    finalCompletions,
-    branchTerminals
+    finalCompletions
   ).project();
 }
 
@@ -349,8 +380,7 @@ class WorkflowProjectionBuilder {
     private readonly collapsed: Set<string>,
     private readonly outcomes: ReturnType<typeof analyzeWorkflowOutcomes>,
     private readonly hiddenBranches: Map<string, Set<number>>,
-    private readonly finalCompletions: Set<string>,
-    private readonly branchTerminals: Set<string>
+    private readonly finalCompletions: Set<string>
   ) {}
 
   project(): WorkflowProjection {
@@ -415,13 +445,7 @@ class WorkflowProjectionBuilder {
     const next = new Set(ancestors).add(node);
     // These routes remain authored controls and editable policies at the same
     // checkpoint. Removing their presentation does not move state or bindings.
-    if (
-      node.kind === 'choice' &&
-      list(node.branches).length > 0 &&
-      this.hiddenBranches.get(node.name)?.size === list(node.branches).length &&
-      nodeLike(node.otherwise)
-    )
-      return this.visit(node.otherwise, next);
+    if (foldsAway(node, this.hiddenBranches)) return this.visit(node.otherwise, next);
     if (groups.has(node.kind) && this.collapsed.has(node.name)) {
       const loop = node.kind === 'loop' ? loopLabels(node) : undefined;
       const description = loop
@@ -559,24 +583,16 @@ class WorkflowProjectionBuilder {
       fragments.map((fragment) => fragment.exits.length > 0)
     );
     let exits: Exit[] = [];
-    {
+    if (reachableJoin) {
       const join = this.addNode(
         node,
         'join',
-        reachableJoin ? joinLabel(node) : 'Parallel group ends',
-        !reachableJoin
-          ? 'Terminal branches cannot satisfy this join; handle its group result.'
-          : node.join?.kind === 'first'
-            ? 'The rule may finish without a matching branch; handle its group result.'
-            : undefined
+        joinLabel(node),
+        node.join?.kind === 'first'
+          ? 'The rule may finish without a matching branch; handle its group result.'
+          : undefined
       );
       for (const fragment of fragments) this.connect(fragment.exits, join, node);
-      if (!reachableJoin)
-        this.edge(fork, join, {
-          owner: node.name,
-          secondary: true,
-          label: 'Branches settle · join not reached',
-        });
       ids.push(join);
       exits = [{ source: join }];
     }
@@ -696,16 +712,13 @@ class WorkflowProjectionBuilder {
   private visitDefault(node: GraphNode): Fragment {
     const known = ['step', 'verifier', 'succeed', 'fail'].includes(node.kind);
     const terminal = node.kind === 'succeed' || node.kind === 'fail';
-    const branchTerminal = this.branchTerminals.has(node.name);
     const detail =
       node.kind === 'succeed'
-        ? branchTerminal
-          ? 'End this branch; the parallel join determines what follows'
-          : this.finalCompletions.has(node.name)
-            ? 'Return the configured run result'
-            : 'Finish the whole run here'
+        ? this.finalCompletions.has(node.name)
+          ? 'Return the configured run result'
+          : 'Finish the whole run here'
         : node.kind === 'fail'
-          ? `${branchTerminal ? 'Stop this branch' : 'Stop run'}${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
+          ? `Stop run${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
           : node.kind === 'verifier'
             ? 'Verifier'
             : node.kind === 'step'
@@ -713,11 +726,9 @@ class WorkflowProjectionBuilder {
               : 'Advanced node · inspect its contract';
     const label =
       node.kind === 'succeed'
-        ? branchTerminal
-          ? 'End branch'
-          : this.finalCompletions.has(node.name)
-            ? 'Complete'
-            : 'Finish run early'
+        ? this.finalCompletions.has(node.name)
+          ? 'Complete'
+          : 'Finish run early'
         : nodeTitle(node.name);
     const id = this.addNode(node, terminal ? 'completion' : 'activity', label, detail);
     return {

@@ -1,3 +1,5 @@
+use crate::harnesses::adapters::core::tool_activity::{ToolIdentity, ToolEntry, error_status};
+use crate::native_v2_capsule::provider_process::text::ProviderText;
 use serde_json::{Value, json};
 use openengine_cluster_protocol::TokenCount;
 use crate::native_v2_contract::TokenUsageDelta;
@@ -19,6 +21,12 @@ pub(super) async fn receive(
     match kind {
         "assistant.usage" => usage(rpc, data).await,
         "assistant.message" => assistant_message(rpc, data).await,
+        "user.message" => {
+            if let Some(content) = data["content"].as_str() {
+                rpc.user_message_shown(content).await;
+            }
+            Ok(())
+        }
         "session.error" => session_error(data),
         "tool.execution_start" => tool_started(rpc, data).await,
         "permission.requested" => permission(rpc, data),
@@ -37,37 +45,72 @@ fn session_error(data: &Value) -> Result<(), NodeRunnerError> {
     Err(failure(message))
 }
 
-async fn tool_started(rpc: &CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {
+async fn tool_started(rpc: &mut CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {
     let name = data["toolName"]
         .as_str()
         .ok_or_else(|| failure("Copilot tool name is invalid"))?;
-    emit(
-        rpc,
-        LiveOutputStream::System,
-        &format!("Copilot tool: {name}"),
-    )
-    .await
-}
-
-async fn tool_completed(rpc: &CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {
-    if data["success"].as_bool() == Some(false) {
-        let detail = data["error"]["message"]
-            .as_str()
-            .unwrap_or("unknown tool failure");
-        emit(
+    let mut name = name.to_owned();
+    if let Some(server) = data["mcpServerName"].as_str() {
+        name = format!(
+            "{server}.{} ({name})",
+            data["mcpToolName"].as_str().unwrap_or("unknown")
+        );
+    }
+    let identity = ToolIdentity {
+        name,
+        id: data["toolCallId"].as_str().map(str::to_owned),
+    };
+    if let Some(identity) = rpc.tools.record(identity, false) {
+        emit_tool(
             rpc,
-            LiveOutputStream::Error,
-            &format!("Copilot tool failed: {detail}"),
+            ToolEntry::call("Copilot", identity, data["arguments"].clone()),
+            LiveOutputStream::System,
         )
         .await?;
     }
     Ok(())
 }
 
+async fn tool_completed(rpc: &mut CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {
+    let identity = ToolIdentity {
+        name: data["toolName"].as_str().unwrap_or("unknown").into(),
+        id: data["toolCallId"].as_str().map(str::to_owned),
+    };
+    if let Some(identity) = rpc.tools.record(identity, true) {
+        let status = error_status(data["success"].as_bool().map(|success| !success));
+        emit_tool(
+            rpc,
+            ToolEntry::completed(
+                "Copilot",
+                identity,
+                status,
+                json!({"result":data["result"],"error":data["error"]}),
+            ),
+            if data["success"].as_bool() == Some(false) {
+                LiveOutputStream::Error
+            } else {
+                LiveOutputStream::System
+            },
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn emit_tool(
+    rpc: &CopilotRpc<'_>,
+    entry: ToolEntry,
+    stream: LiveOutputStream,
+) -> Result<(), NodeRunnerError> {
+    let text = entry.render(&ProviderText::new(&rpc.redactions));
+    rpc.control.emit(LiveOutput::new(stream, text)?).await
+}
+
 fn known_event(kind: &str) -> bool {
     matches!(
         kind,
         "assistant.message"
+            | "user.message"
             | "assistant.usage"
             | "session.error"
             | "permission.requested"

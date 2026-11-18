@@ -1,3 +1,6 @@
+use crate::harnesses::adapters::core::tool_activity::{
+    ToolActivity, ToolIdentity, ToolEntry, error_status,
+};
 use crate::native_v2_capsule::{
     provider_json_lines::{ProviderJsonLine, ProviderJsonLines, parse_provider_json},
     provider_process::{
@@ -66,9 +69,31 @@ pub(super) struct ClaudeTranscript {
     oversized_records: usize,
     permission_denials: PermissionDenials,
     pending: ProviderText,
+    tools: ToolActivity,
+    /// Tells the turn's stdin side what stdout shows of it; closed when stdout ends.
+    input: Option<tokio::sync::mpsc::UnboundedSender<super::input::TurnSignal>>,
+    memory: Option<(
+        std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>,
+        crate::native_v2_contract::ExecutionRef,
+        std::path::PathBuf,
+    )>,
 }
 
 impl ClaudeTranscript {
+    pub(super) fn reporting_input(
+        mut self,
+        input: tokio::sync::mpsc::UnboundedSender<super::input::TurnSignal>,
+    ) -> Self {
+        self.input = Some(input);
+        self
+    }
+
+    fn signal(&self, signal: super::input::TurnSignal) {
+        if let Some(input) = &self.input {
+            let _ = input.send(signal);
+        }
+    }
+
     pub(super) fn new(redactions: Vec<String>) -> Self {
         Self {
             lines: ProviderJsonLines::new(),
@@ -87,7 +112,22 @@ impl ClaudeTranscript {
             oversized_records: 0,
             permission_denials: PermissionDenials::default(),
             pending: ProviderText::new(&redactions),
+            tools: ToolActivity::default(),
+            input: None,
+            memory: None,
         }
+    }
+
+    pub(super) fn set_memory(
+        &mut self,
+        hooks: Option<std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
+        invocation: &crate::native_v2_runner::DriverInvocation,
+        executable: Option<std::path::PathBuf>,
+    ) {
+        self.memory = hooks
+            .filter(|_| !invocation.auxiliary)
+            .zip(executable)
+            .map(|(hooks, executable)| (hooks, invocation.node.reference.clone(), executable));
     }
 }
 
@@ -103,6 +143,8 @@ impl ProviderTranscript for ClaudeTranscript {
             .finish()
             .map_or_else(Vec::new, |record| self.accept_records([record]));
         self.pending.finish(&mut emissions);
+        // Stdout has ended, so nothing more can be reported: let stdin close.
+        self.input = None;
         emissions
     }
 
@@ -256,9 +298,16 @@ impl ClaudeTranscript {
             self.malformed_records = self.malformed_records.saturating_add(1);
             return;
         };
+        if event_type == "user" && object.get("isReplay").and_then(Value::as_bool) == Some(true) {
+            // Replay acknowledges stdin delivery; ordinary user records contain native tool results.
+            if let Some(text) = object.get("message").and_then(replayed_text) {
+                self.signal(super::input::TurnSignal::Replayed(text));
+            }
+            return;
+        }
         if !matches!(
             event_type,
-            "system" | "stream_event" | "assistant" | "rate_limit_event" | "result"
+            "system" | "stream_event" | "assistant" | "user" | "rate_limit_event" | "result"
         ) {
             return;
         }
@@ -285,8 +334,12 @@ impl ClaudeTranscript {
             "system" => self.parse_system(object, emissions),
             "stream_event" => self.parse_stream_event(object, emissions),
             "assistant" => self.parse_assistant(object, emissions),
+            "user" => self.parse_tool_results(object, emissions),
             "rate_limit_event" => self.parse_rate_limit_event(object, emissions),
-            "result" => self.parse_result(object, emissions),
+            "result" => {
+                self.parse_result(object, emissions);
+                self.signal(super::input::TurnSignal::Result);
+            }
             _ => {}
         }
     }
@@ -296,6 +349,7 @@ impl ClaudeTranscript {
         event: &serde_json::Map<String, Value>,
         emissions: &mut Vec<ClaudeEmission>,
     ) {
+        self.observe_memory_hook(event);
         if event.get("subtype").and_then(Value::as_str) != Some("api_retry") {
             return;
         }
@@ -324,6 +378,38 @@ impl ClaudeTranscript {
             emissions,
             &format!("Claude API retry {attempt}/{maximum}: {error}"),
         );
+    }
+
+    fn observe_memory_hook(&self, event: &serde_json::Map<String, Value>) {
+        let Some((hooks, reference, executable)) = &self.memory else {
+            return;
+        };
+        if event.get("subtype").and_then(Value::as_str) != Some("hook_response")
+            || event.get("hook_event").and_then(Value::as_str) != Some("PreToolUse")
+            || event.get("outcome").and_then(Value::as_str) != Some("error")
+        {
+            return;
+        }
+        let detail = ["stderr", "output"]
+            .into_iter()
+            .filter_map(|key| event.get(key).and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("; ");
+        // Other native hooks remain user-owned. Require evidence naming our executable/helper,
+        // rather than attributing every PreToolUse failure or absent callback to Active Memory.
+        let owned = detail.contains("__active-memory-hook")
+            || detail.contains(executable.to_string_lossy().as_ref());
+        if owned {
+            hooks.carrier_failed(
+                reference,
+                &self.pending.redact(&format!(
+                    "native hook failed (exit {}): {detail}",
+                    event
+                        .get("exit_code")
+                        .map_or_else(|| "unknown".into(), Value::to_string)
+                )),
+            );
+        }
     }
 
     fn parse_rate_limit_event(
@@ -465,9 +551,7 @@ impl ClaudeTranscript {
             self.authentication_rejected = true;
         }
         self.record_assistant_usage(event, message);
-        if self.visible_text_emitted {
-            return;
-        }
+        let visible_text_emitted = self.visible_text_emitted;
         let Some(content) = message.get("content").and_then(Value::as_array) else {
             return;
         };
@@ -475,12 +559,67 @@ impl ClaudeTranscript {
             let Some(block) = block.as_object() else {
                 continue;
             };
-            if block.get("type").and_then(Value::as_str) == Some("text") {
+            if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                let identity = ToolIdentity {
+                    name: block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .into(),
+                    id: block.get("id").and_then(Value::as_str).map(str::to_owned),
+                };
+                if let Some(identity) = self.tools.record(identity, false) {
+                    self.pending.boundary(emissions);
+                    ToolEntry::call(
+                        "Claude",
+                        identity,
+                        block.get("input").cloned().unwrap_or(Value::Null),
+                    )
+                    .emit(&self.pending, emissions);
+                }
+            }
+            if !visible_text_emitted && block.get("type").and_then(Value::as_str) == Some("text") {
                 if let Some(text) = block.get("text").and_then(Value::as_str) {
                     self.pending.push(emissions, LiveOutputStream::Output, text);
                     self.pending.boundary(emissions);
                     self.visible_text_emitted = true;
                 }
+            }
+        }
+    }
+
+    fn parse_tool_results(
+        &mut self,
+        event: &serde_json::Map<String, Value>,
+        emissions: &mut Vec<ClaudeEmission>,
+    ) {
+        let Some(content) = event
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array)
+        else {
+            return;
+        };
+        for block in content {
+            if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                continue;
+            }
+            let identity = ToolIdentity {
+                name: "unknown".into(),
+                id: block
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            };
+            if let Some(identity) = self.tools.record(identity, true) {
+                self.pending.boundary(emissions);
+                ToolEntry::completed(
+                    "Claude",
+                    identity,
+                    error_status(block.get("is_error").and_then(Value::as_bool)),
+                    block.get("content").cloned().unwrap_or(Value::Null),
+                )
+                .emit(&self.pending, emissions);
             }
         }
     }
@@ -675,6 +814,21 @@ fn format_resets_at(value: &Value) -> Option<String> {
             })
             .unwrap_or_else(|_| value.to_string()),
     )
+}
+
+/// The text of a user message as it was written to stdin.
+fn replayed_text(message: &Value) -> Option<String> {
+    match message.get("content")? {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => Some(
+            blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect(),
+        ),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

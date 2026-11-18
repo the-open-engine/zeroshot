@@ -28,7 +28,12 @@ fn retry_progress_includes_stream_error_message_and_preserves_failure() {
         let mut decoder = CodexOutputDecoder::new();
         let emissions = decoder.push(bytes.as_bytes());
         assert_eq!(emissions.len(), 1);
-        assert_eq!(emissions[0].log(), (LiveOutputStream::System, expected));
+        let mut logs = Vec::new();
+        emissions[0].emit(&ProviderText::new(&[]), &mut logs);
+        assert_eq!(
+            (logs[0].stream, logs[0].text.as_str()),
+            (LiveOutputStream::System, expected)
+        );
         let output = decoder.finish();
         assert!(output.final_message().is_err());
         assert!(
@@ -420,30 +425,38 @@ fn projects_provider_items_to_semantic_attach_messages() {
         )
         .as_bytes(),
     );
-    let messages = emissions
-        .iter()
-        .map(|emission| emission.log().1)
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        messages,
-        [
-            "Codex reasoning updated: checking tests",
-            "Codex reasoning started",
-            "Codex command completed: cargo test [completed] exit=0\nok",
-            "Codex command started: unknown command",
-            "Codex file change completed: update src/lib.rs",
-            "Codex file change updated: unknown changes",
-            "Codex tool completed: github.get_pr result={\"number\":7}",
-            "Codex tool completed: github.merge_pr error=policy blocked",
-            "Codex web search started: Rust coverage",
-            "Codex web search updated: unknown query",
-            "Codex plan updated: done: inspect, pending: test",
-            "Codex plan started: empty",
-            "Codex activity error: unknown error",
-            "Codex activity updated: future_activity",
-        ]
-    );
+    let mut logs = Vec::new();
+    for emission in emissions {
+        emission.emit(&ProviderText::new(&[]), &mut logs);
+    }
+    let messages = logs.iter().map(|log| log.text.as_str()).collect::<Vec<_>>();
+    for expected in [
+        "Codex reasoning updated: checking tests",
+        "Codex reasoning started",
+        "Codex plan updated: done: inspect, pending: test",
+        "Codex plan started: empty",
+        "Codex activity error: unknown error",
+        "Codex activity updated: future_activity",
+    ] {
+        assert!(messages.contains(&expected), "{messages:?}");
+    }
+    let text = messages.join("\n");
+    for expected in [
+        "command_execution",
+        "cargo test",
+        "exit=0",
+        "src/lib.rs",
+        "update",
+        "github.get_pr",
+        "number",
+        "github.merge_pr",
+        "policy blocked",
+        "Rust coverage",
+    ] {
+        assert!(text.contains(expected), "{text}");
+    }
+    assert!(!text.contains("unknown changes"));
+    assert!(!text.contains("unknown query"));
 }
 
 #[test]
@@ -462,7 +475,7 @@ fn settled_and_failed_decoders_ignore_trailing_data_and_keep_actionable_detail()
     assert_eq!(settled.finish().failure_message(), None);
 
     let mut failed = CodexOutputDecoder::new();
-    assert!(failed.accept_line(ProviderJsonLine::Oversized).is_none());
+    assert!(failed.accept_line(ProviderJsonLine::Oversized).is_empty());
     assert!(failed.push(b" \n").is_empty());
     assert!(
         failed
@@ -497,4 +510,181 @@ fn settled_and_failed_decoders_ignore_trailing_data_and_keep_actionable_detail()
     merged.merge_failure_detail("first".to_owned());
     merged.merge_failure_detail("second".to_owned());
     assert_eq!(merged.failure_message(), Some("first; second"));
+}
+
+#[test]
+fn tool_activity_keeps_identity_and_omits_cumulative_updates() {
+    let mut decoder = CodexOutputDecoder::new();
+    let mut logs = Vec::new();
+    for (phase, status, output) in [
+        ("started", "in_progress", ""),
+        ("updated", "in_progress", "partial-output"),
+        ("completed", "completed", "tool-result"),
+    ] {
+        let event = json!({"type":format!("item.{phase}"),"item":{"id":"tool-1","type":"command_execution","command":"check-tool","status":status,"aggregated_output":output,"exit_code":0}});
+        for emission in decoder.push(format!("{event}\n").as_bytes()) {
+            emission.emit(&ProviderText::new(&[]), &mut logs);
+        }
+    }
+    assert_eq!(logs.len(), 2, "one call and one completion");
+    let text = logs
+        .iter()
+        .map(|log| log.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for expected in ["tool-1", "check-tool", "tool-result"] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+    assert!(!text.contains("partial-output"));
+}
+
+#[test]
+fn tool_activity_flushes_an_unterminated_completion_without_inventing_status() {
+    let event = json!({"type":"item.completed","item":{"id":"tool-eof",
+        "type":"command_execution","command":"check-eof","aggregated_output":"eof-result"}});
+    let mut decoder = CodexOutputDecoder::new();
+    assert!(decoder.push(event.to_string().as_bytes()).is_empty());
+    let mut logs = Vec::new();
+    for emission in decoder.finish_stream() {
+        emission.emit(&ProviderText::new(&[]), &mut logs);
+    }
+    assert_eq!(logs.len(), 2);
+    assert!(logs[0].text.contains("check-eof"));
+    assert!(logs[1].text.contains("id=tool-eof status=unknown"));
+    assert!(logs[1].text.contains("eof-result"));
+    assert!(decoder.finish_stream().is_empty());
+}
+
+#[test]
+fn tool_activity_preserves_collab_calls_and_agent_results_without_duplicates() {
+    for tool in ["spawn_agent", "send_input", "wait", "close_agent"] {
+        for status in [Some("completed"), Some("failed"), None] {
+            let mut item = json!({"id":"collab-call", "type":"collab_tool_call", "tool":tool,
+                "sender_thread_id":"parent-thread", "receiver_thread_ids":["child-thread"],
+                "prompt":"inspect-critical.rs", "agents_states":{
+                    "child-thread":{"status":"completed", "message":"child-result"}}});
+            if let Some(status) = status {
+                item["status"] = json!(status);
+            }
+            let mut decoder = CodexOutputDecoder::new();
+            let mut logs = Vec::new();
+            for phase in ["started", "started", "updated", "completed", "completed"] {
+                let mut snapshot = item.clone();
+                if phase != "completed" {
+                    snapshot["status"] = json!("in_progress");
+                    snapshot["agents_states"] = json!({});
+                }
+                if phase == "updated" {
+                    snapshot["prompt"] = json!("ignored-cumulative");
+                }
+                let event = json!({"type":format!("item.{phase}"), "item":snapshot});
+                for emission in decoder.push(format!("{event}\n").as_bytes()) {
+                    emission.emit(&ProviderText::new(&[]), &mut logs);
+                }
+            }
+            assert_eq!(logs.len(), 2, "{tool}: one call and one completion");
+            assert!(
+                logs[0]
+                    .text
+                    .starts_with(&format!("Codex tool call: {tool} id=collab-call "))
+            );
+            for expected in ["parent-thread", "child-thread", "inspect-critical.rs"] {
+                assert!(
+                    logs[0].text.contains(expected),
+                    "{tool}: missing {expected}"
+                );
+            }
+            assert!(logs[1].text.starts_with(&format!(
+                "Codex tool completed: {tool} id=collab-call status={}\n",
+                status.unwrap_or("unknown")
+            )));
+            for expected in ["child-thread", "child-result", "\"status\":\"completed\""] {
+                assert!(
+                    logs[1].text.contains(expected),
+                    "{tool}: missing {expected}"
+                );
+            }
+            assert!(
+                logs.iter()
+                    .all(|log| !log.text.contains("ignored-cumulative"))
+            );
+        }
+    }
+}
+
+#[test]
+fn tool_activity_preserves_web_actions_with_query_fallback() {
+    for action in [
+        Some(json!({"type":"search", "queries":["first-query", "second-query"]})),
+        Some(json!({"type":"open_page", "url":"https://example.test/page"})),
+        Some(
+            json!({"type":"find_in_page", "url":"https://example.test/page", "pattern":"full-pattern"}),
+        ),
+        Some(json!({"type":"other"})),
+        None,
+        Some(Value::Null),
+    ] {
+        let mut item = json!({"id":"web-call", "type":"web_search", "query":"summary-query ..."});
+        if let Some(action) = &action {
+            item["action"] = action.clone();
+        }
+        let mut decoder = CodexOutputDecoder::new();
+        let mut logs = Vec::new();
+        // Completion-only snapshots must retain the full action in both entries too.
+        for _ in 0..2 {
+            let event = json!({"type":"item.completed", "item":item});
+            for emission in decoder.push(format!("{event}\n").as_bytes()) {
+                emission.emit(&ProviderText::new(&[]), &mut logs);
+            }
+        }
+        assert_eq!(logs.len(), 2);
+        for log in logs {
+            assert!(log.text.contains("id=web-call status=unknown"));
+            let payload: Value =
+                serde_json::from_str(log.text.split_once('\n').assert_value().1).assert_value();
+            assert_eq!(payload["query"], "summary-query ...");
+            assert_eq!(payload["action"], action.clone().unwrap_or(Value::Null));
+        }
+    }
+}
+
+#[test]
+fn tool_activity_bounds_inputs_and_results_for_all_codex_tool_items() {
+    let secret = "credential-\"\n界";
+    for kind in [
+        "command_execution",
+        "file_change",
+        "mcp_tool_call",
+        "collab_tool_call",
+        "web_search",
+    ] {
+        for status in ["completed", "failed"] {
+            let payload = format!("HEAD {secret} {} {secret} TAIL", "é界".repeat(9000));
+            let item = json!({"id":"native-item", "type":kind, "command":payload,
+                "changes":[{"kind":"update","path":payload}], "query":payload,
+                "action":{"type":"search", "queries":[payload]},
+                "sender_thread_id":"parent-thread", "receiver_thread_ids":["child-thread"],
+                "prompt":payload, "agents_states":{
+                    "child-thread":{"status":"completed", "message":payload}},
+                "server":"mcp", "tool":"lookup", "arguments":{"query":payload},
+                "aggregated_output":payload, "result":{"content":payload},
+                "error":{"message":payload}, "status":status, "exit_code":1});
+            let mut decoder = CodexOutputDecoder::new();
+            let mut logs = Vec::new();
+            for phase in ["started", "started", "updated", "completed", "completed"] {
+                let event = json!({"type":format!("item.{phase}"),"item":item});
+                for emission in decoder.push(format!("{event}\n").as_bytes()) {
+                    emission.emit(&ProviderText::new(&[secret.into()]), &mut logs);
+                }
+            }
+            assert_eq!(logs.len(), 2);
+            for log in logs {
+                assert!(log.text.len() <= 8192);
+                for expected in ["native-item", "HEAD", "TAIL", "[truncated]", "[REDACTED]"] {
+                    assert!(log.text.contains(expected), "{kind}: {expected}");
+                }
+                assert!(!log.text.contains("credential-"));
+            }
+        }
+    }
 }

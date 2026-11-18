@@ -11,7 +11,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 
 use super::{
     AppendResult, CreateRun, CreateRunOutcome, LedgerClock, RunEvent, RunLedger, RunLedgerError,
-    RunSummary, SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, batch_recorded_at,
+    RunSummary, SnapshotAndTail, StoredRun, StoredRunEvent, apply_stored_event, batch_recorded_at,
     cursor_for, cursor_sequence, prepare_event, system_clock, validate_create, MAX_REPLAY_BYTES,
     MAX_REPLAY_EVENTS,
 };
@@ -511,12 +511,12 @@ impl PendingAppend<'_, '_> {
     fn one_event(&mut self, event: RunEvent) -> Result<StoredRunEvent, RunLedgerError> {
         let event = prepare_event(&self.stored.snapshot, event);
         self.sequence = next_sequence(self.sequence)?;
-        apply_event(&mut self.stored.snapshot, &event, self.sequence)?;
         let stored = StoredRunEvent {
             cursor: cursor_for(self.sequence),
             recorded_at: Some(self.recorded_at),
             event,
         };
+        apply_stored_event(&mut self.stored.snapshot, &stored)?;
         insert_event(self.transaction, self.run_id, self.sequence, &stored)?;
         Ok(stored)
     }
@@ -639,7 +639,7 @@ fn load_by_id(
         )
         .optional()
         .map_err(sqlite_error)?;
-    row.map(|(cursor, json)| decode_stored(run_id, cursor, &json))
+    row.map(|(cursor, json)| decode_stored(connection, run_id, cursor, &json))
         .transpose()
 }
 
@@ -664,18 +664,19 @@ fn load_by_submission(
         .optional()
         .map_err(sqlite_error)?;
     row.map(|(run_id, digest, cursor, json)| {
-        let stored = decode_stored(&RunId::new(run_id.clone()), cursor, &json)?;
+        let stored = decode_stored(connection, &RunId::new(run_id.clone()), cursor, &json)?;
         Ok((run_id, digest, stored))
     })
     .transpose()
 }
 
 fn decode_stored(
+    connection: &Connection,
     expected_run_id: &RunId,
     cursor: i64,
     json: &str,
 ) -> Result<StoredRun, RunLedgerError> {
-    let stored: StoredRun = openengine_cluster_protocol::bounded_json_from_str(json)
+    let mut stored: StoredRun = openengine_cluster_protocol::bounded_json_from_str(json)
         .map_err(|_| RunLedgerError::Corrupt)?;
     validate_stored_size(&stored)?;
     let cursor = u64::try_from(cursor).map_err(|_| RunLedgerError::Corrupt)?;
@@ -684,7 +685,44 @@ fn decode_stored(
     {
         return Err(RunLedgerError::Corrupt);
     }
+    restore_active_start_times(connection, &mut stored.snapshot)?;
     Ok(stored)
+}
+
+/// Older snapshots retain start cursors but not times. Read only those exact indexed rows,
+/// without scanning history or rewriting retained state, including on read-only connections.
+fn restore_active_start_times(
+    connection: &Connection,
+    snapshot: &mut super::RunSnapshot,
+) -> Result<(), RunLedgerError> {
+    if !snapshot
+        .active_executions()
+        .any(|node| node.started_recorded_at.is_none())
+        || !has_recorded_at_column(connection)?
+    {
+        return Ok(());
+    }
+    let mut statement = connection
+        .prepare_cached(
+            "SELECT recorded_at_ms FROM v2_run_events WHERE run_id = ?1 AND sequence = ?2",
+        )
+        .map_err(sqlite_error)?;
+    for node in snapshot.executions.values_mut().filter(|node| {
+        matches!(node.state, super::NodeState::Active) && node.started_recorded_at.is_none()
+    }) {
+        let sequence = i64::try_from(cursor_sequence(&node.started_at)?)
+            .map_err(|_| RunLedgerError::Corrupt)?;
+        node.started_recorded_at = statement
+            .query_row(params![snapshot.run_id.as_str(), sequence], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+            .optional()
+            .map_err(sqlite_error)?
+            .flatten()
+            .map(decode_recorded_at)
+            .transpose()?;
+    }
+    Ok(())
 }
 
 fn validate_stored_size(stored: &StoredRun) -> Result<(), RunLedgerError> {

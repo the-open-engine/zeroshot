@@ -114,6 +114,19 @@ elif args[:2] == ["template", "show"]:
         "name": args[2],
         "delivery": option("--delivery"),
     }))
+elif args[:2] == ["target", "list"]:
+    print(os.environ.get("FAKE_TARGET_INVENTORY", json.dumps([
+        {"name":"platform", "origin":"https://api.app.zeroshot.sh", "kind":"hosted"},
+        {"name":"vm", "origin":"http://127.0.0.1:8080", "kind":"direct"},
+    ])))
+elif args[:2] == ["target", "remove"]:
+    name = args[-1]
+    if name == "platform":
+        fail("invalid_request", "request.invalid",
+             'built-in target "platform" cannot be removed', {})
+    if name == "missing":
+        fail("invalid_request", "request.invalid", 'target "missing" not found', {})
+    print(os.environ.get("FAKE_TARGET_REMOVAL", json.dumps({"name":name, "removed":True})))
 elif args[:2] == ["target", "add"] or args[:2] == ["target", "setup"]:
     pass
 elif args[:2] == ["stack", "validate"]:
@@ -180,7 +193,8 @@ elif args and args[0] == "steer":
     text = entry["text"]
     print(json.dumps({"runId":args[1],"steer":{"id":"steer-1","createdAt":1000,
         "textBytes":len(text.encode()),"excerpt":text.encode()[:1024].decode("utf-8", "ignore"),
-        "receivedExecutions":0,"executions":[]}}))
+        "receivedExecutions":0,"executions":[],
+        "mode":args[args.index("--mode")+1] if "--mode" in args else "standing"}}))
 elif args and args[0] == "suspend":
     status = {"phase":"running","activeExecutions":[],"suspendRequested":True}
     print(json.dumps(projection(args[1], status, "v2:1")))
@@ -280,6 +294,14 @@ elif args and args[0] == "logs":
     if option("--execution") is not None:
         event["execution"] = option("--execution")
     print(json.dumps(event))
+elif args and args[0] == "discard-workspace":
+    if args[1] == "missing":
+        fail("run_not_found", "run.not_found", "run not found", {})
+    if args[1] == "running":
+        fail("invalid_request", "request.invalid", "run is running; use force-stop first", {})
+    print(os.environ.get("FAKE_DISCARD_RESULT", json.dumps({
+        "runId": args[1], "discarded": args[1] != "empty",
+    })))
 elif args and args[0] == "force-stop":
     print(json.dumps(projection(
         args[1],
