@@ -173,6 +173,7 @@ impl PortableRunController {
             )
             .await?
             .with_harness_registry(crate::harnesses::HarnessRegistry::local())
+            .with_checkpointless_requests(bootstrap.predecessor.is_some())
             .with_run_sizes(crate::native_v2_hosting::host_run_sizes()),
         );
         let receipt = inner
@@ -354,11 +355,12 @@ async fn prepare_controller_start(
     require_absolute(&bootstrap.workspace)?;
     let harnesses = crate::harnesses::HarnessRegistry::local();
     let sizes = crate::native_v2_hosting::host_run_sizes();
-    let admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+    let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
         &harnesses,
         bootstrap.delivery_policy,
     )
     .with_run_sizes(&sizes);
+    admission.checkpointless_requests = bootstrap.predecessor.is_some();
     let admitted = NativeV2Admission
         .admit_with_context(bootstrap.submission.clone(), admission)
         .await?;

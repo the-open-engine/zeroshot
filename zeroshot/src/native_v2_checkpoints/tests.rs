@@ -11,6 +11,44 @@ use crate::full_v1_reducer::{ExecutionId, HistoryPosition, NodeInstanceId, Struc
 #[path = "restore_tests.rs"]
 mod restore_tests;
 
+#[test]
+fn workspace_discard_rejects_redirected_roots_before_removing_catalogs() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("checkpoints");
+    fs::create_dir(&directory).unwrap();
+    fs::write(directory.join("index.json"), "[]").unwrap();
+    let outside = root.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("sentinel"), "unrelated").unwrap();
+    let repository = root.path().join("repository");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, &repository).unwrap();
+    #[cfg(windows)]
+    assert!(
+        std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(&repository)
+            .arg(&outside)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(discard_workspace_lineage(&directory, &repository).is_err());
+    assert_eq!(
+        fs::read_to_string(outside.join("sentinel")).unwrap(),
+        "unrelated"
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("index.json")).unwrap(),
+        "[]"
+    );
+    #[cfg(unix)]
+    fs::remove_file(repository).unwrap();
+    #[cfg(windows)]
+    fs::remove_dir(repository).unwrap();
+}
+
 struct Fixture {
     _root: tempfile::TempDir,
     directory: PathBuf,

@@ -197,6 +197,7 @@ async fn suspended_run(
         resumed_from: None,
         delivery_run_id: Some(run.clone()),
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     backend

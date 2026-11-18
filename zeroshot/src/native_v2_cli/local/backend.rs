@@ -16,12 +16,16 @@ fn local_restore_selection(
     recovery: &LocalRecoveryDocument,
     discard_workspace_changes: bool,
 ) -> Result<Option<CheckpointRestoreSelection>, NativeV2CliError> {
+    if !recovery.workspace_checkpoints_enabled()
+        && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
+    {
+        return Err(NativeV2CliError::Usage(
+            "run has no checkpoints (workspaceCheckpoints is false); use a plain resume to keep \
+             the current checkout"
+                .to_owned(),
+        ));
+    }
     if let Some(RunResumeFrom::Checkpoint { checkpoint_id }) = from {
-        if !recovery.submission.runtime.workspace_checkpoints {
-            return Err(local_message(
-                "workspace checkpoint restore is unavailable because workspaceCheckpoints is false",
-            ));
-        }
         let selection = CheckpointRestoreSelection::Checkpoint {
             checkpoint_id: checkpoint_id.clone(),
         };
@@ -72,6 +76,111 @@ fn restore_command(run_id: &RunId, selection: &CheckpointRestoreSelection) -> St
 }
 
 impl LocalCliBackend {
+    async fn discard_local_checkpoints(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
+        use openengine_cluster_protocol::RunStatus;
+        // Resume publishes under this lock but prepares outside it under a per-run claim.
+        // Hold every lineage member's claim and stopped-controller lease through deletion.
+        let _submission_lock = self.acquire_submission_lock().await?;
+        let (_paths, _directory) = self.recorded_storage(run_id)?;
+        let source = self.read_recovery_document(run_id)?;
+        let root = self.delivery_run_id(run_id, &source)?;
+        let repository = self.checkpoint_repository(&root)?;
+        let _repository =
+            crate::native_v2_supervisor::checkpoints::open_workspace_repository(&repository)
+                .map_err(local_error)?;
+        let directory = self.paths(&root)?.storage().join("checkpoints");
+        let mut pending = vec![root.clone(), run_id.clone()];
+        pending.extend(self.local_checkpoint_catalog_runs(&directory, &repository)?);
+        let mut lineage = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id.as_str().to_owned()) {
+                continue;
+            }
+            let (paths, directory) = self.recorded_storage(&id)?;
+            let refusal = || {
+                NativeV2CliError::Usage(format!(
+                    "run {} is still running or being resumed; use force-stop before discarding checkpoints",
+                    id.as_str()
+                ))
+            };
+            let claim = self
+                .claim_recovery_workspace_within(&id, false, RECOVERY_CLAIM_HANDOFF)
+                .await
+                .map_err(|_| refusal())?;
+            self.reconcile_local_resume_claim(&id, Duration::ZERO)
+                .await?;
+            let status = self
+                .read_recorded_status(RunStatusParams { run_id: id.clone() })
+                .await?;
+            let recovery = self.read_recovery_document(&id)?;
+            if self.delivery_run_id(&id, &recovery)? != root {
+                return Err(local_message(
+                    "checkpoint catalog disagrees with recovery lineage",
+                ));
+            }
+            match status.status {
+                RunStatus::Finished { .. } => {}
+                RunStatus::Suspended { .. } if recovery.successor_run_id.is_some() => {}
+                RunStatus::Suspended { .. } => {
+                    return Err(NativeV2CliError::Usage(
+                        "run is suspended; force-stop it before discarding its workspace"
+                            .to_owned(),
+                    ));
+                }
+                _ => return Err(refusal()),
+            }
+            if let Some(pending) = &recovery.pending_restore {
+                return Err(NativeV2CliError::Usage(format!(
+                    "run {} has an interrupted checkpoint restore; repeat `{}` before discarding checkpoints",
+                    id.as_str(),
+                    restore_command(&id, &pending.selection)
+                )));
+            }
+            self.confirm_loss_for_resume(&id).await?;
+            let lease = ControllerLease::acquire(paths.lease()).map_err(|_| refusal())?;
+            pending.extend(recovery.successor_run_id.clone());
+            lineage.push((id, recovery, claim, lease, directory));
+        }
+        // Commit the effective policy for every member before removing any recovery data.
+        // Partial writes leave all checkpoints intact; retries finish these writes even when
+        // an interrupted deletion has already removed the last checkpoint byte.
+        for (id, recovery, _claim, _lease, _directory) in &mut lineage {
+            if recovery.workspace_checkpoints_enabled() {
+                recovery.workspace_checkpoints_discarded = true;
+                self.write_recovery_document(id, recovery)?;
+            }
+        }
+        crate::native_v2_supervisor::checkpoints::discard_workspace_lineage(&directory, &repository)
+            .map_err(local_error)
+    }
+
+    fn local_checkpoint_catalog_runs(
+        &self,
+        directory: &Path,
+        repository: &Path,
+    ) -> Result<Vec<RunId>, NativeV2CliError> {
+        let mut runs = Vec::new();
+        for catalog in
+            crate::native_v2_supervisor::checkpoints::lineage_catalogs(directory, repository)
+                .map_err(local_error)?
+        {
+            let id = catalog
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| local_message("checkpoint catalog has no owning run"))?;
+            let id = RunId::new(id);
+            if self.paths(&id)?.storage().join("checkpoints") != catalog {
+                return Err(local_message(
+                    "checkpoint catalog is outside local run storage",
+                ));
+            }
+            runs.push(id);
+        }
+        Ok(runs)
+    }
+
     async fn resume_local(
         &self,
         params: openengine_cluster_protocol::RunResumeParams,
@@ -333,7 +442,7 @@ impl LocalCliBackend {
         }
         if recovery.pending_restore.take().is_some() {
             // Readiness follows the complete restore and durable admission. If this write fails,
-            // the admitted successor still owns the claim and the record is never replayed.
+            // reconciliation can prove completion from that matching successor's admission.
             let _ = self.write_recovery_document(&params.run_id, &recovery);
         }
         let successor = self.read_recovery_document(&params.successor_run_id)?;
@@ -359,6 +468,7 @@ impl LocalCliBackend {
         let mut native_environment =
             native_forge::capture_native_environment(&self.current_directory)?;
         let mut submission = recovery.submission.clone();
+        submission.runtime.workspace_checkpoints = recovery.workspace_checkpoints_enabled();
         native_forge::materialize_local_access(
             &mut submission,
             native_forge::NativeContext {
@@ -874,12 +984,14 @@ impl NativeV2CliBackend for LocalCliBackend {
     async fn run_discard_workspace(
         &self,
         target: Option<&str>,
-        _params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
+        params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
     ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
         require_local(target)?;
-        Err(local_message(
-            "local workspaces are user-owned and cannot be discarded by Zeroshot",
-        ))
+        let discarded = self.discard_local_checkpoints(&params.run_id).await?;
+        Ok(openengine_cluster_protocol::RunDiscardWorkspaceResult {
+            run_id: params.run_id,
+            discarded,
+        })
     }
 }
 
@@ -901,6 +1013,10 @@ mod checkpoint_compatibility_tests;
 #[cfg(test)]
 #[path = "backend/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "backend/discard_tests.rs"]
+mod discard_tests;
 
 #[cfg(test)]
 #[path = "backend/request_tests.rs"]

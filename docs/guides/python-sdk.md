@@ -273,6 +273,12 @@ expose `suspend_requested`, `reason`, `node`, `created_at` and `due_at`. Read th
 with `await run.vectors(after=None, limit=50)` (`RunVectorsPage.vectors`, `next_after`) and read a
 complete entry with `await run.vector(id)`. These methods use the client's selected target.
 
+`await run.discard_workspace()` returns whether retained data was deleted. For a finished local
+run it frees the recovery lineage's checkpoints, including those of failed runs, while keeping
+the checkout, ledger, logs and delivery recovery state. Plain resume still uses the current
+checkout; checkpoint restore is no longer available. Named targets keep their existing retained
+workspace discard behavior.
+
 ## Answer a human request
 
 `await client.inbox(after=None, limit=50)` returns an `InboxPage` with requests and `next_after`.

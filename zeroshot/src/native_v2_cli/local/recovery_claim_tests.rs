@@ -44,6 +44,7 @@ fn resume_claim_fixture(name: &str, submission_key: &str) -> ResumeClaimFixture 
                 delivery_run_id: Some(run_id.clone()),
                 resumed_from: None,
                 successor_run_id: Some(successor_run_id.clone()),
+                workspace_checkpoints_discarded: false,
                 pending_restore: None,
             },
         )
