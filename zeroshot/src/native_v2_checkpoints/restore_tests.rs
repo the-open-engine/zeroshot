@@ -1,4 +1,5 @@
 use super::*;
+use openengine_cluster_testkit::assertions::AssertError;
 
 const PROBE: &str =
     "native_v2_supervisor::checkpoints::tests::restore_tests::restore_after_restic_move_probe";
@@ -149,7 +150,7 @@ async fn restore_after_restic_move_probe() {
         serde_json::from_slice::<serde_json::Value>(&expected).assert_value()
     );
     if mode != "fallback" {
-        fs::remove_file(&original).assert_value();
+        remove_used_executable(&original);
     }
     if mode == "override" {
         // If restore wrongly runs the still-existing stored program, process startup fails.
@@ -223,4 +224,97 @@ async fn restore_after_restic_move_probe() {
         );
     }
     println!("restore probe completed");
+}
+
+fn remove_used_executable(path: &Path) {
+    // Windows can briefly retain a used image after its process tree has exited. Wait only
+    // for sharing/access errors; the old path must disappear before discovery is tested.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    remove_executable_with(|| fs::remove_file(path), deadline, cfg!(windows))
+        .unwrap_or_else(|error| panic!("cannot remove used executable {path:?}: {error}"));
+}
+
+fn remove_executable_with(
+    mut remove: impl FnMut() -> std::io::Result<()>,
+    deadline: std::time::Instant,
+    windows: bool,
+) -> std::io::Result<()> {
+    loop {
+        match remove() {
+            Err(error)
+                if windows
+                    && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+                    && std::time::Instant::now() < deadline =>
+            {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                std::thread::sleep(remaining.min(std::time::Duration::from_millis(10)));
+            }
+            result => return result,
+        }
+    }
+}
+
+#[test]
+fn restore_fixture_retries_windows_image_locks_before_removing_the_old_executable() {
+    for code in [5, 32, 33] {
+        let mut attempts = 0;
+        remove_executable_with(
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(std::io::Error::from_raw_os_error(code))
+                } else {
+                    Ok(())
+                }
+            },
+            std::time::Instant::now() + std::time::Duration::from_secs(60),
+            true,
+        )
+        .assert_value();
+        assert_eq!(attempts, 2);
+    }
+}
+
+#[test]
+fn restore_fixture_preserves_permanent_expired_and_non_windows_removal_errors() {
+    for (windows, code, expired) in [(true, 2, false), (true, 32, true), (false, 32, false)] {
+        let mut attempts = 0;
+        let now = std::time::Instant::now();
+        let deadline = if expired {
+            now
+        } else {
+            now + std::time::Duration::from_secs(60)
+        };
+        let error = remove_executable_with(
+            || {
+                attempts += 1;
+                Err(std::io::Error::from_raw_os_error(code))
+            },
+            deadline,
+            windows,
+        )
+        .assert_error();
+        assert_eq!(error.raw_os_error(), Some(code));
+        assert_eq!(attempts, 1);
+    }
+}
+
+#[test]
+fn restore_fixture_reports_the_final_removal_error_after_a_transient_lock() {
+    let mut attempts = 0;
+    let error = remove_executable_with(
+        || {
+            attempts += 1;
+            Err(std::io::Error::from_raw_os_error(if attempts == 1 {
+                32
+            } else {
+                2
+            }))
+        },
+        std::time::Instant::now() + std::time::Duration::from_secs(60),
+        true,
+    )
+    .assert_error();
+    assert_eq!(error.raw_os_error(), Some(2));
+    assert_eq!(attempts, 2);
 }
