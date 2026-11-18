@@ -86,6 +86,8 @@ pub struct PostmortemReport {
 pub enum PostmortemError {
     #[error("{0}")]
     Unavailable(&'static str),
+    #[error("{0}")]
+    Detail(String),
     #[error("postmortem provider cleanup could not be confirmed")]
     CleanupUnconfirmed,
     #[error("postmortem could not be prepared")]
@@ -103,13 +105,18 @@ impl From<NodeRunnerError> for PostmortemError {
         if error == NodeRunnerError::CleanupUnconfirmed {
             Self::CleanupUnconfirmed
         } else {
-            Self::Preparation
+            Self::Detail(error.to_string())
         }
     }
 }
 
 #[async_trait]
 pub trait RunPostmortem: Send + Sync {
+    /// A preparation failure also disables recall, even when after-run work is opted out.
+    fn initialization_error(&self) -> Option<&str> {
+        None
+    }
+
     /// Cancellation must stop new work and drain already-started provider cleanup before return.
     async fn run(
         &self,

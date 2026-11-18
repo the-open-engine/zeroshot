@@ -170,3 +170,31 @@ def test_oversized_request_stream_is_a_protocol_error_and_stops_the_child(
     if os.name != "nt":
         with pytest.raises(ProcessLookupError):
             os.kill(int(pid_path.read_text()), 0)
+
+
+def test_submission_size_refusal_preserves_invalid_request_code(tmp_path: Path) -> None:
+    error = native_process(tmp_path)._error(
+        json.dumps(
+            {
+                "schema": "zeroshot.error/v1",
+                "kind": "invalid_request",
+                "code": "submission.too_large",
+                "message": (
+                    "submission is 3001000 bytes (input: 3000011 bytes), "
+                    "exceeding the 2 MiB (2097152 bytes) submission limit"
+                ),
+                "path": None,
+                "node": None,
+                "details": {
+                    "submissionBytes": 3001000,
+                    "inputBytes": 3000011,
+                    "limitBytes": 2097152,
+                },
+            }
+        ).encode(),
+        1,
+    )
+    assert isinstance(error, InvalidRequestError)
+    assert error.code == "submission.too_large"
+    assert error.details["inputBytes"] == 3000011
+    assert "2097152" in str(error)

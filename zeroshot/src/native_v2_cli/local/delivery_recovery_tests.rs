@@ -125,6 +125,7 @@ async fn confirmed_review_survives_failed_delivery_and_a_crash_without_a_settled
                     resumed_from: None,
                     delivery_run_id: Some(run.clone()),
                     successor_run_id: None,
+                    workspace_checkpoints_discarded: false,
                     pending_restore: None,
                 },
             )
@@ -245,6 +246,7 @@ async fn local_resume_recovers_the_owned_review_across_successors_without_delive
                     resumed_from: predecessor,
                     delivery_run_id: Some(first.clone()),
                     successor_run_id: None,
+                    workspace_checkpoints_discarded: false,
                     pending_restore: None,
                 },
             )

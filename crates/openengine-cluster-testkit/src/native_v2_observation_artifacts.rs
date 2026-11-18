@@ -150,11 +150,13 @@ fn status() -> RunStatusResult {
             graph_result: None,
             active_executions: vec![
                 ActiveExecution {
+                    started_at: Some(UnixTimestampMillis::new(1_725_000_000_123).assert_value()),
                     map_indices: Vec::new(),
                     execution: execution("opaque-verifier-a"),
                     node: NodeName::new("verify-a").assert_value(),
                 },
                 ActiveExecution {
+                    started_at: Some(UnixTimestampMillis::new(1_725_000_000_123).assert_value()),
                     map_indices: Vec::new(),
                     execution: execution("opaque-verifier-b"),
                     node: NodeName::new("verify-b").assert_value(),
@@ -178,6 +180,7 @@ fn watch_fixture() -> Value {
             at_cursor: cursor(7),
         },
         "event": RunWatchEventNotification {
+            recorded_at: Some(UnixTimestampMillis::new(1_725_000_000_999).assert_value()),
             subscription_id: SubscriptionId::new("watch-1"),
             run_id: run_id(),
             title: title(),

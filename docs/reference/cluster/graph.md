@@ -26,7 +26,8 @@ separate from verification.
 ## Graph wire format
 
 `GraphSpec` has the required camel-case fields `profile`, `initialInput`, `policy`, and `root`.
-Every graph node is tagged by `kind`. Node payloads reject unknown fields.
+Every graph node is tagged by `kind`. Node payloads reject unknown fields. The optional `networks`
+object declares peer communication permissions; omission or `{}` grants none.
 
 | `kind`     | Contract                                                                                                                                                   |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -38,7 +39,7 @@ Every graph node is tagged by `kind`. Node payloads reject unknown fields.
 | `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
 | `map`      | Declared state, body, structured array selector `over`, positive concurrent-item limit `maxItems`, promoted paths                                          |
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
-| `fail`     | Finite-enum reason; `unhandled` is reserved for a future compiler's implicit sink                                                                          |
+| `fail`     | Finite-enum reason; `unhandled` is reserved for runtime handling of unchecked worker errors                                                                |
 
 Parallel joins are `all`, `any`, `quorum { count }`, or `first { when }`. The closed worker error
 channel is `timeout`, `crash`, `malformed`, and `refusal`. Choice reachability/exhaustiveness, loop
@@ -49,6 +50,16 @@ request deadline from creation: omission means 7 days, with a maximum of 30 days
 node deadlines accept the `PositiveInteger` wire range.
 Built-in graphs omit deadlines for every node; provider processes have no separate execution
 deadline. Custom graphs may still declare a node deadline.
+
+After a step or verifier uses its crash retry attempts, a final worker error ends its path as a
+`fail` with reason `unhandled` unless a guard anywhere in the graph reads that node's `error`
+selector. The failure context names the node and error code. Error reads in a choice condition,
+loop `until`, or `first` join `when` count, including selectors inside `all`, `any`, `not`,
+`k_of_n`, and `k_of_map`. This is a graph-wide rule: the guard need not execute or match the
+particular error label. A node with an error read retains authored routing, and an optional step
+can use such a guard to continue after errors. There is no additional graph field or validation
+requirement. Like an authored `fail`, propagation follows the enclosing group's terminal semantics.
+
 Normal-success continuation requires every branch for `all`, one branch for `any`/`first`, and
 `count` branches for `quorum`. Quorum flow and promotion guarantees range over every valid
 size-`count` completing branch set. A set is valid only when its branch-completion predicates are
@@ -133,6 +144,40 @@ and loops retain control of recovery; there is no global abort, cooldown, waitin
 automatic resumption. After usage becomes available,
 [resume the failed run](../../guides/observe-and-control.md#restart-or-resume-a-failed-run) using its
 retained workspace or an available checkpoint.
+
+## Peer networks
+
+`GraphSpec.networks` maps network names to `members` and `publishers` sets. Names use the same
+bounded identifier type as node names. A network must have at least one member. Every publisher
+must also be a member, and every listed
+node must name an executable graph node with an agent runtime binding. A network declaration
+applies to all instances of that logical node, including mapped instances. Omitted `publishers`
+defaults to an empty set, granting receive-only access.
+
+```json
+{
+  "networks": {
+    "review": {
+      "members": ["builder", "reviewer"],
+      "publishers": ["builder"]
+    }
+  }
+}
+```
+
+This fragment belongs beside `profile`, `initialInput`, `policy` and `root` in the graph. Admission
+rejects unknown node references and publishers outside their network's member set. The default is
+deny: undeclared networks grant no publication or message-delivery access. Only authorized
+publishers receive publication instructions and a host-owned execution capability. Other members
+receive attributed peer messages; nodes outside the member set receive neither those messages
+nor publication context.
+
+A publisher may address several networks in one message. Membership overlap yields one delivery
+per recipient, and the originating node instance stays excluded across provider sessions and
+successors. Other mapped instances of the same logical node can receive it. The message's `once`
+mode consumes one receipt per recipient node instance; `standing` consumes one receipt per
+provider conversation. Message publication supplements private agent context without changing
+authored instructions, routing, bindings or scheduling. See [Send a peer message](../../guides/observe-and-control.md#send-a-peer-message).
 
 ## Data and control separation
 
@@ -248,17 +293,18 @@ optional descendants.
 
 The full-graph profile has fixed ceilings:
 
-| Bound                         | Maximum |
-| ----------------------------- | ------: |
-| Graph nodes                   |   4,096 |
-| Graph depth                   |      64 |
-| Guard nodes                   |   4,096 |
-| Assignments per finite check  |  65,536 |
-| Concurrent map items          |  65,536 |
-| Attempts per executable node  |     100 |
-| One-run executable node count |  65,536 |
-| Total loop-body entries       |  65,536 |
-| Run execution concurrency     |  65,536 |
+| Bound                         |   Maximum |
+| ----------------------------- | --------: |
+| Graph nodes                   |     4,096 |
+| Graph depth                   |        64 |
+| Guard nodes                   |     4,096 |
+| Count states per map check    |    65,536 |
+| Search steps per check        | 1,048,576 |
+| Concurrent map items          |    65,536 |
+| Attempts per executable node  |       100 |
+| One-run executable node count |    65,536 |
+| Total loop-body entries       |    65,536 |
+| Run execution concurrency     |    65,536 |
 
 Completed-item replay retains scoped runtime facts and promoted values rather than full caller
 state per item. Probe results are released before decision replay; collections still require every
@@ -282,10 +328,25 @@ Aggregate checks preserve each item's joint outcomes and conditional presence. S
 bodies can complete without executable visits, so analysis assumes no cardinality bound from
 concurrency or leaf-work ceilings. The verifier clips
 joint label counts at the largest queried threshold, so common `k_of_map(..., 1)` checks reach a
-fixed set of states independent of input length. One verification admits at most 65,536 assignment
-states and 8,388,608 count-cell operations. Each assignment transition charges its copied selector
-and count cells before allocation. Excess analysis reports `ceiling_exceeded` at the relevant
-node/guard; there is no user budget or timeout setting.
+fixed set of states independent of input length.
+
+The verifier decides each condition by search, not by listing every combination of how the nodes
+it depends on can end. A check reads only the controls that its condition and their join, loop and
+map rules mention. Labels a check cannot tell apart count as one, and controls no rule connects add
+to the work instead of multiplying it, so another reviewer or signal costs its own size.
+
+Inside one map, the parts of an item that no rule ties together are folded into saturated counts
+separately and meet only in the number of items, so a guard that reads several independent
+reviewers of one map also costs the sum of their sizes. What a rule does tie together is still
+listed jointly, for example the branches of an `any`, `quorum` or `first` join, and so are the
+items of a map nested in another map's item. A part whose states depend on the exact number of
+items for more than 64 items is folded with the rest of its item. Each part may have at most
+65,536 distinct count states.
+
+One check may take 1,048,576 search steps, a backstop far above authored graphs that checks do
+not share. A join lists every set of branches it can complete with, and writing those sets out
+counts toward its steps. A check that passes either bound reports `ceiling_exceeded` at the
+choice, join or guard it was deciding; there is no user budget or timeout setting.
 
 Graph-bearing JSON decoding first checks a fixed 512-container envelope for structural arrays,
 payload nesting and transport wrappers. The graph verifier separately checks authored depth 64.
@@ -309,7 +370,7 @@ within 1,024 bytes: the count is left out when it does not fit, and `.../` repla
 segments that do not fit:
 
 ```text
-graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis exceeds 65536 states or 8388608 count-cell work units (and 1 more diagnostic)
+graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis of this condition exceeds 65536 count states or 1048576 search steps (and 1 more diagnostic)
 ```
 
 `StructuralBounds` carries a termination witness, a positive executable-visit upper limit,

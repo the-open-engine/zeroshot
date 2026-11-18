@@ -477,6 +477,8 @@ mod versions;
 mod checkpoint_seed;
 #[path = "tests/checkpoints.rs"]
 mod checkpoint_tests;
+#[path = "tests/identity_floor.rs"]
+mod identity_floor;
 
 #[path = "tests/postmortem.rs"]
 mod postmortem_tests;
@@ -486,3 +488,6 @@ mod suspension_tests;
 
 #[path = "tests/concurrency.rs"]
 mod concurrency;
+
+#[path = "tests/input_sizes.rs"]
+mod input_sizes;

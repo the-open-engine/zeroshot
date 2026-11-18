@@ -23,6 +23,7 @@ fn params() -> RunSteerParams {
     RunSteerParams {
         run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000071"),
         text: "  Keep\t方向\r\nexactly.  ".into(),
+        mode: openengine_cluster_protocol::SteeringMode::Standing,
     }
 }
 
@@ -132,6 +133,8 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
                 run_id: params.run_id.clone(),
             },
             text: SteerText::File(path),
+            networks: vec![],
+            mode: openengine_cluster_protocol::SteeringMode::Standing,
         },
         &backend,
         &mut NeverDetach,
@@ -158,7 +161,6 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
         openengine_cluster_protocol::HostedRunStatus::Target(RunStatus::Suspended { .. })
     ));
     assert_eq!(status.steering.steers, [recorded.steer]);
-
     let mut recovery = LocalRecoveryDocument {
         submission,
         workspace: root.path().into(),
@@ -170,6 +172,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
         resumed_from: None,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     backend
@@ -181,8 +184,10 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
         .await
         .assert_value();
     assert_eq!(before.len(), 2);
-    assert!(before.iter().all(|vector| matches!(&vector.content,
-        openengine_cluster_protocol::RunVectorContent::Steer { text } if text == &params.text)));
+    assert!(
+        before.iter().all(|vector| matches!(&vector.content,
+        openengine_cluster_protocol::RunVectorContent::Steer { text, .. } if text == &params.text))
+    );
     let successor = RunId::new("0199f33f-3b44-7d21-9000-000000000072");
     recovery.successor_run_id = Some(successor.clone());
     backend
@@ -449,6 +454,7 @@ async fn steer_local_concurrent_steers_share_the_recovery_claim() {
                 resumed_from: None,
                 delivery_run_id: None,
                 successor_run_id: None,
+                workspace_checkpoints_discarded: false,
                 pending_restore: None,
             },
         )

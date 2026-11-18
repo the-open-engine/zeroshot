@@ -46,7 +46,7 @@ if [ "$*" = --version ]; then
   printf '2.1.318 (Claude Code)\n'
   exit 0
 fi
-cat >/dev/null
+head -n 1 >/dev/null
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"session-1","structured_output":{"response":"done"}}'
 "#,
     );

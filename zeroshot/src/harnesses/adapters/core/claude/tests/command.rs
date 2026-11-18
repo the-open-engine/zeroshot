@@ -187,8 +187,8 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         let arguments = workspace.read("initial.args");
         let expected_prefix = format!(
             concat!(
-                "--print\n--input-format\ntext\n--output-format\nstream-json\n",
-                "--verbose\n--include-partial-messages\n--model\n{}\n--json-schema\n",
+                "--print\n--input-format\nstream-json\n--replay-user-messages\n--output-format\nstream-json\n",
+                "--verbose\n--include-partial-messages\n--include-hook-events\n--model\n{}\n--json-schema\n",
             ),
             model
         );
@@ -206,7 +206,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         assert!(arguments.contains("--effort\nmax\n--dangerously-skip-permissions\n"));
         assert!(!arguments.contains("--setting-sources"));
         assert!(!arguments.contains("perform the node task"));
-        let prompt = workspace.read("initial.prompt");
+        let prompt = prompt_text(&workspace.read("initial.prompt"));
         assert_tool_delivery(&prompt);
         assert!(prompt.contains("Authored instructions:\nExercise the Claude adapter."));
         assert!(prompt.contains("Input JSON:\n\"perform the node task\""));
@@ -294,8 +294,8 @@ async fn native_tool_selection_survives_correction_and_reused_session() {
         assert!(args.contains("--tools\nRead,Grep,Glob\n"), "{args}");
         assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
     }
-    assert_tool_delivery(&workspace.read("initial.prompt"));
-    assert_tool_delivery(&workspace.read("resumed.prompt"));
+    assert_tool_delivery(&prompt_text(&workspace.read("initial.prompt")));
+    assert_tool_delivery(&prompt_text(&workspace.read("resumed.prompt")));
     let NodeRuntimeBinding::Agent {
         harness_config,
         session_scope,
@@ -413,7 +413,9 @@ fn native_settings_and_owned_memory_hook_share_one_inline_layer() {
         },
         deadline: None,
     };
-    super::super::memory::install(&mut command, Path::new("/owned/capability")).assert_value();
+    let capability = Path::new("/owned/capability");
+    let installed_executable =
+        super::super::memory::install(&mut command, capability).assert_value();
     assert_eq!(
         command
             .argv
@@ -426,6 +428,10 @@ fn native_settings_and_owned_memory_hook_share_one_inline_layer() {
     assert_eq!(settings["permissions"]["deny"], json!(["Write"]));
     assert_eq!(settings["unknownNativeKey"], true);
     assert!(settings["hooks"]["PreToolUse"].is_array());
+    assert_eq!(
+        settings["hooks"]["PreToolUse"][0]["hooks"][0],
+        crate::active_memory::hooks::native::command_handler_at(capability, &installed_executable)
+    );
 }
 
 #[test]

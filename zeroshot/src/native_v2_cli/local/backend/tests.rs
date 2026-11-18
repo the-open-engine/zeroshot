@@ -395,8 +395,7 @@ async fn local_backend_contract_delegates_storage_and_rejects_remote_routes() {
                 },
             )
             .await,
-        Err(NativeV2CliError::Local(message))
-            if message.contains("user-owned")
+        Err(NativeV2CliError::RunNotFound { .. })
     ));
     assert!(
         backend
@@ -534,6 +533,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
                 resumed_from: None,
                 delivery_run_id: Some(original.clone()),
                 successor_run_id: None,
+                workspace_checkpoints_discarded: false,
                 pending_restore: None,
             },
         )
@@ -610,6 +610,7 @@ async fn local_resume_claimability_fails_closed_before_controller_effects() {
         resumed_from: None,
         delivery_run_id: Some(original_run_id.clone()),
         successor_run_id: Some(run_id("0199f33f-3b44-7d21-9000-000000000053")),
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     backend
@@ -685,19 +686,22 @@ async fn local_resume_claimability_fails_closed_before_controller_effects() {
         before
     );
     std::fs::remove_file(&recovery.workspace).assert_value();
-    recovery.submission.runtime.workspace_checkpoints = false;
-    backend
-        .write_recovery_document(&status.run_id, &recovery)
-        .assert_value();
-    let message = backend
-        .claimable_recovery_document(&status, false)
-        .await
-        .assert_error()
-        .to_string();
-    assert!(
-        message.contains("no longer exists") && !message.contains("--from-checkpoint"),
-        "{message}"
-    );
+    for (enabled, discarded) in [(false, false), (true, true)] {
+        recovery.submission.runtime.workspace_checkpoints = enabled;
+        recovery.workspace_checkpoints_discarded = discarded;
+        backend
+            .write_recovery_document(&status.run_id, &recovery)
+            .assert_value();
+        let message = backend
+            .claimable_recovery_document(&status, false)
+            .await
+            .assert_error()
+            .to_string();
+        assert!(
+            message.contains("no longer exists") && !message.contains("--from-checkpoint"),
+            "{message}"
+        );
+    }
 }
 
 #[tokio::test]

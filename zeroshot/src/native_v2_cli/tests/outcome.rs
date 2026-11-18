@@ -567,9 +567,13 @@ async fn named_target_resume_leaves_gh_token_to_the_target_without_opt_in() {
         .await
         .assert_value();
     let calls = backend.calls();
-    let [_, Call::Resume { params, .. }] = calls.as_slice() else {
+    let [_, Call::Resume { params, .. }, logs] = calls.as_slice() else {
         panic!("resume call was not recorded");
     };
+    assert_eq!(
+        logs,
+        &memory_log_call(Some("docker"), params.successor_run_id.as_str())
+    );
     assert!(params.connections.is_empty());
     assert_eq!(params.github_token, None);
     assert!(accessed.lock().assert_value().is_empty());
@@ -752,11 +756,16 @@ async fn resume_keeps_local_trusted_authority_and_scopes_named_github_fallback()
                 params,
                 ..
             },
+            logs,
         ] = calls.as_slice()
         else {
             panic!("resume call was not recorded");
         };
         assert_eq!(actual_target.as_deref(), target);
+        assert_eq!(
+            logs,
+            &memory_log_call(target, params.successor_run_id.as_str())
+        );
         if let Some(name) = &name {
             let expected_token = if field == Some("GH_TOKEN") {
                 "github-connection-token"

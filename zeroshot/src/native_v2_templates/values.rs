@@ -15,7 +15,8 @@ use super::{
     delivery_mode, enum_label, field_name, field_path, node_name, non_empty, static_value,
     BuiltinTemplateError, TemplateDelivery, ACCEPTANCE_FEEDBACK_FIELD, CODE_FEEDBACK_FIELD,
     DELIVERY_FEEDBACK_FIELD, DESCRIPTION_FIELD, DIAGNOSTIC_MESSAGE_FIELD, ISSUE_NUMBER_FIELD,
-    TASK_FIELD, TITLE_FIELD, PHASE_FIELD, CONTINUE_ITEMS_FIELD, verdict_labels,
+    TASK_FIELD, TITLE_FIELD, PHASE_FIELD, CONTINUE_ITEMS_FIELD, REVIEW_CONTEXT_FIELD,
+    verdict_labels,
 };
 
 pub(super) fn graph(
@@ -23,6 +24,7 @@ pub(super) fn graph(
     root: GraphNode,
 ) -> Result<GraphSpec, BuiltinTemplateError> {
     Ok(GraphSpec {
+        networks: BTreeMap::new(),
         profile: GraphProfile::Full,
         initial_input,
         policy: PolicyBinding {
@@ -129,11 +131,15 @@ pub(super) fn review_responses_type() -> Result<PayloadType, BuiltinTemplateErro
 }
 
 pub(super) fn software_worker_output_type() -> Result<PayloadType, BuiltinTemplateError> {
-    record_type(vec![("reviewResponses", review_responses_type()?, true)])
+    record_type(vec![
+        ("reviewResponses", review_responses_type()?, true),
+        (REVIEW_CONTEXT_FIELD, PayloadType::String, true),
+    ])
 }
 
 pub(super) fn review_input_type() -> Result<PayloadType, BuiltinTemplateError> {
     record_type(vec![
+        (REVIEW_CONTEXT_FIELD, PayloadType::String, true),
         ("reviewResponses", review_responses_type()?, true),
         (TASK_FIELD, PayloadType::String, true),
         (DELIVERY_FEEDBACK_FIELD, PayloadType::String, true),
@@ -164,6 +170,10 @@ pub(super) fn software_state(
     delivery: TemplateDelivery,
 ) -> Result<PayloadType, BuiltinTemplateError> {
     let mut fields = BTreeMap::from([
+        (
+            field_name(REVIEW_CONTEXT_FIELD)?,
+            required(PayloadType::String),
+        ),
         (
             field_name("reviewResponses")?,
             required(review_responses_type()?),

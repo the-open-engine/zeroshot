@@ -144,6 +144,8 @@ pub struct NativeV2AdmissionContext<'a> {
     pub source: Option<&'a crate::source_code_provider::SourceCodeProviderRegistry>,
     pub delivery_policy: DeliveryPolicy,
     pub run_sizes: Option<&'a openengine_cluster_protocol::TargetRunSizesDiscovery>,
+    /// Host-owned continuation history permits requests after workspace snapshots are disabled.
+    pub checkpointless_requests: bool,
 }
 
 impl<'a> NativeV2AdmissionContext<'a> {
@@ -157,6 +159,7 @@ impl<'a> NativeV2AdmissionContext<'a> {
             source: None,
             delivery_policy,
             run_sizes: None,
+            checkpointless_requests: false,
         }
     }
 
@@ -206,8 +209,7 @@ impl NativeV2Admission {
         if graph.profile != GraphProfile::Full {
             return Err(NativeV2AdmissionError::UnsupportedGraphProfile);
         }
-        let declarations = executable_declarations(&graph.root);
-        validate_executable_bindings(&declarations, runtime, context)?;
+        let declarations = validate_graph_bindings(graph, runtime, context)?;
         wait::validate_position(&graph.root, false)?;
         validate_delivery_concurrency(&graph.root)?;
         comment::validate_comment_profile(graph)?;
@@ -466,8 +468,7 @@ fn prepare_submission(
     validate_run_environment(&runtime, environment.as_ref())?;
     validate_graph_input(&graph, &initial_input)?;
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
-    let declarations = executable_declarations(&graph.root);
-    validate_executable_bindings(&declarations, &runtime, context)?;
+    let declarations = validate_graph_bindings(&graph, &runtime, context)?;
     wait::validate_position(&graph.root, false)?;
     runtime.max_concurrency = Some(
         openengine_cluster_protocol::PositiveInteger::new(runtime.effective_max_concurrency())
@@ -520,7 +521,9 @@ pub use source_access::{delivery_credential_destinations, materialize_delivery_a
 pub(crate) use comment::{resolve_comment_input_at, admitted_comment_input, comment_node};
 mod concurrency;
 mod loop_limits;
+mod networks;
 mod validation;
+use networks::validate_graph_bindings;
 use concurrency::validate_delivery_concurrency;
 pub(crate) use validation::{sole_delivery_node, writer_nodes};
 use validation::{

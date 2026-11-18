@@ -130,6 +130,9 @@ impl From<RunListResult> for HostedRunListResult {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct HostedRunWatchEventNotification {
+    /// Same ledger recording time as the target notification; omitted when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_at: Option<crate::UnixTimestampMillis>,
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
     pub title: RunTitle,
@@ -144,6 +147,7 @@ pub struct HostedRunWatchEventNotification {
 impl From<RunWatchEventNotification> for HostedRunWatchEventNotification {
     fn from(event: RunWatchEventNotification) -> Self {
         Self {
+            recorded_at: event.recorded_at,
             subscription_id: event.subscription_id,
             run_id: event.run_id,
             title: event.title,

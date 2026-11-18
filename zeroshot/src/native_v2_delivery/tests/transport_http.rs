@@ -89,6 +89,8 @@ struct Request {
 }
 
 fn serve_connection(mut stream: TcpStream, root: &Path, faults: &TransportFaults) {
+    // macOS inherits the listener's nonblocking mode; request reads must wait for fragments.
+    stream.set_nonblocking(false).assert_value();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .assert_value();
@@ -283,4 +285,54 @@ fn respond(stream: &mut TcpStream, status: &str, headers: &str, body: &[u8]) {
     )
     .assert_value();
     stream.write_all(body).assert_value();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::{self, RecvTimeoutError};
+
+    #[test]
+    fn fragmented_requests_on_nonblocking_connections_complete() {
+        let listener = TcpListener::bind("127.0.0.1:0").assert_value();
+        let mut client = TcpStream::connect(listener.local_addr().assert_value()).assert_value();
+        client
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .assert_value();
+        let (connection, _) = listener.accept().assert_value();
+        // Emulate macOS inheriting the fixture listener's nonblocking mode on Linux too.
+        connection.set_nonblocking(true).assert_value();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            started_tx.send(()).assert_value();
+            serve_connection(connection, Path::new("."), &TransportFaults::default());
+            finished_tx.send(()).assert_value();
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(10))
+            .assert_value();
+
+        for fragment in [
+            b"POST /remote.git/git-receive-pack HTTP/1.1\r\n".as_slice(),
+            b"Host: localhost\r\nContent-Length: 4\r\n\r\n00".as_slice(),
+        ] {
+            client.write_all(fragment).assert_value();
+            assert!(
+                matches!(
+                    finished_rx.recv_timeout(Duration::from_millis(100)),
+                    Err(RecvTimeoutError::Timeout)
+                ),
+                "the fixture must wait for the complete request"
+            );
+        }
+        client.write_all(b"00").assert_value();
+        let mut response = String::new();
+        client.read_to_string(&mut response).assert_value();
+        worker.join().assert_value();
+        finished_rx
+            .recv_timeout(Duration::from_secs(10))
+            .assert_value();
+        assert!(response.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+    }
 }

@@ -13,6 +13,12 @@ struct SlowPages {
     reads: Mutex<Vec<Option<Cursor>>>,
     fail_next_read: AtomicBool,
     timeout_next_receipt: AtomicBool,
+    publication: Option<Arc<PublicationGate>>,
+}
+#[derive(Default)]
+struct PublicationGate {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
 }
 #[async_trait::async_trait]
 impl RunLedger for SlowPages {
@@ -49,6 +55,13 @@ impl RunLedger for SlowPages {
             // The production receipt deadline must cancel this first publication. Its
             // offer remains due, independently of scheduling or SQLite write speed.
             std::future::pending::<()>().await;
+        }
+        if let Some(gate) = &self.publication
+            && matches!(events.first(), Some(RunEvent::Vector { vector })
+                if matches!(vector.content, RunVectorContent::Steer { network: Some(_), .. }))
+        {
+            gate.entered.notify_one();
+            gate.release.notified().await;
         }
         self.ledger.append(run, events).await
     }
@@ -97,6 +110,7 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
         reads: Mutex::default(),
         fail_next_read: AtomicBool::new(false),
         timeout_next_receipt: AtomicBool::new(true),
+        publication: None,
     });
     ledger
         .create_or_get(CreateRun {
@@ -120,6 +134,8 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             vector_event(
                 &run,
                 RunVectorContent::Steer {
+                    mode: Default::default(),
+                    network: None,
                     text: format!(
                         "{i:03}{}",
                         "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES - 3)
@@ -148,11 +164,11 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
     tokio::time::timeout(Duration::from_secs(30), async {
         while received.len() < expected.len() {
             let (query, delivery) = hooks
-                .tool_delivery(
+                .tool_delivery(crate::active_memory::hooks::ToolCall::hook(
                     &first,
                     &serde_json::json!({"tool_name":"Read"}),
                     std::path::Path::new("/workspace"),
-                )
+                ))
                 .await;
             let mut position = 0;
             let mut previous = None;
@@ -177,7 +193,7 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             }
             let forced_timeout =
                 !delivery.steers.is_empty() && ledger.timeout_next_receipt.load(Ordering::SeqCst);
-            hooks.acknowledge(&query, &delivery, true).await;
+            hooks.acknowledge(&query, &delivery).await;
             // Acknowledgement can time out without publication, or while an already
             // started SQLite write drains. Read durable receipts through that same
             // connection before advancing; a repeated offer is valid until then.
@@ -222,11 +238,11 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             .any(|cursor| cursor.as_str() != "v2:0")
     );
     let (_, delivery) = hooks
-        .tool_delivery(
+        .tool_delivery(crate::active_memory::hooks::ToolCall::hook(
             &first,
             &serde_json::json!({"tool_name":"Read"}),
             std::path::Path::new("/workspace"),
-        )
+        ))
         .await;
     assert!(delivery.context.is_empty());
     // A new conversation needs every standing steer in its prompt, even though a full scan
@@ -303,15 +319,12 @@ async fn steer_restored_conversation_keeps_receipts_until_its_provider_home_is_r
     {
         *session_scope = crate::execution::SessionScope::NodeInstance;
     }
-    let direction = steering::record(
+    let direction = crate::active_memory::hooks::tests::record_steer(
         ledger.as_ref(),
-        openengine_cluster_protocol::RunSteerParams {
-            run_id: run.clone(),
-            text: "Standing direction".into(),
-        },
+        &run,
+        "Standing direction",
     )
-    .await
-    .assert_value();
+    .await;
     ledger
         .append(
             &run,
@@ -406,6 +419,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "before-snapshot".into(),
         },
@@ -418,6 +432,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            mode: Default::default(),
             run_id: run.clone(),
             text: "after-snapshot".into(),
         },
@@ -466,11 +481,91 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     assert!(context.contains("after-snapshot"));
 }
 
-// Copilot applies hook context to the turn in progress and writes none of it to its session, so
-// a steer shown that way must also reach the conversation's next prompt, and a successor that
-// restores the conversation before then must not inherit the receipt.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steer_unkept_at_a_tool_call_reaches_the_next_prompt_once_and_is_inherited_only_after_it() {
+async fn network_timeout_keeps_the_started_write_fenced_until_retirement_drains() {
+    use crate::active_memory::hooks::publish_network;
+    let (ledger, run) = steer_record().await;
+    let gate = Arc::new(PublicationGate::default());
+    let ledger = Arc::new(SlowPages {
+        ledger,
+        reads: Mutex::default(),
+        fail_next_read: AtomicBool::new(false),
+        timeout_next_receipt: AtomicBool::new(false),
+        publication: Some(gate.clone()),
+    });
+    let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
+    let worker = NodeName::new("worker").assert_value();
+    let network = NodeName::new("alpha").assert_value();
+    hooks.configure_networks(&BTreeMap::from([(
+        network.clone(),
+        SteeringNetwork {
+            members: BTreeSet::from([worker.clone()]),
+            publishers: BTreeSet::from([worker]),
+        },
+    )]));
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut sender = invocation();
+    hooks
+        .prepare_steers(&mut sender, false)
+        .await
+        .assert_value();
+    let home = tempfile::tempdir().assert_value();
+    let path = hooks
+        .capability_file(&sender, home.path(), home.path())
+        .assert_value()
+        .assert_value();
+    let capability: crate::active_memory::hooks::broker::Capability =
+        serde_json::from_slice(&std::fs::read(&path).assert_value()).assert_value();
+    let params = NetworkSteerParams {
+        run_id: run.clone(),
+        text: "delayed-note".into(),
+        mode: SteeringMode::Once,
+        networks: vec![network],
+    };
+    let publication = tokio::task::spawn_blocking(move || publish_network(&path, params));
+    tokio::time::timeout(Duration::from_secs(2), gate.entered.notified())
+        .await
+        .assert_value();
+    let error = publication.await.assert_value().unwrap_err();
+    assert!(error.to_string().contains("outcome is unknown"));
+    let callback = tokio::task::spawn_blocking(move || {
+        crate::active_memory::hooks::tests::callback(
+            &capability,
+            &capability.token,
+            serde_json::json!({"tool_name":"Read"}),
+        )
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), callback)
+            .await
+            .assert_value()
+            .assert_value()
+            .is_empty()
+    );
+    let finishing_hooks = hooks.clone();
+    let mut finishing = tokio::spawn(async move { finishing_hooks.finish_steers(2, false).await });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), &mut finishing)
+            .await
+            .is_err()
+    );
+    assert!(!finishing.is_finished());
+    gate.release.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), finishing)
+        .await
+        .assert_value()
+        .assert_value();
+    let status = steering::status(ledger.as_ref(), &run).await.assert_value();
+    assert_eq!(status.steers.len(), 1);
+    assert_eq!(status.steers[0].excerpt, "delayed-note");
+}
+
+// Copilot takes a steer as a user message sent into the turn in progress and reports it when it
+// enters the conversation. Only then is it handed over. From then on a successor inherits the
+// receipt, and the conversation is not given the steer again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_sent_as_a_message_is_received_when_shown_and_delivered_once() {
+    use crate::active_memory::hooks::{SteerCarrier, ToolCall};
     let (ledger, run) = steer_record().await;
     let hooks = ActiveMemoryHooks::empty().assert_value();
     hooks.bind_ledger(run.clone(), ledger.clone());
@@ -488,15 +583,29 @@ async fn steer_unkept_at_a_tool_call_reaches_the_next_prompt_once_and_is_inherit
         openengine_cluster_protocol::RunSteerParams {
             run_id: run.clone(),
             text: "Standing direction".into(),
+            mode: openengine_cluster_protocol::SteeringMode::Standing,
         },
     )
     .await
     .assert_value();
     let tool = serde_json::json!({"tool_name":"Read"});
-    let workspace = std::path::Path::new("/workspace");
-    let (query, delivery) = hooks.tool_delivery(&first, &tool, workspace).await;
-    assert!(delivery.context.contains("Standing direction"));
-    hooks.acknowledge(&query, &delivery, false).await;
+    let message = |invocation| ToolCall {
+        invocation,
+        input: &tool,
+        workspace: std::path::Path::new("/workspace"),
+        steers: SteerCarrier::ShownMessage,
+        context_kept: false,
+    };
+    let (query, delivery) = hooks.tool_delivery(message(&first)).await;
+    assert!(delivery.context.is_empty(), "the steer is no hook context");
+    assert_eq!(delivery.steers.len(), 1);
+    // A message speaks as its sender and asks once more, after the text, to be followed.
+    assert!(delivery.steer.starts_with(MESSAGE_PREAMBLE));
+    assert!(
+        delivery
+            .steer
+            .ends_with(&format!("] Standing direction\n{MESSAGE_CLOSING}</steer>"))
+    );
     let received = || async {
         steering::status(ledger.as_ref(), &run)
             .await
@@ -504,48 +613,89 @@ async fn steer_unkept_at_a_tool_call_reaches_the_next_prompt_once_and_is_inherit
             .steers[0]
             .received_executions
     };
-    assert_eq!(received().await, 1);
-    // The turn in progress has it: no later tool call of this execution repeats it.
-    let (_, again) = hooks.tool_delivery(&first, &tool, workspace).await;
-    assert!(again.steers.is_empty());
-    assert!(hooks.capture_steers()[&instance].receipts.is_empty());
-    hooks.finish_steers(execution, true).await;
+    // The carrier taking the answer is not the hand-over.
+    hooks.acknowledge(&query, &delivery).await;
+    assert_eq!(received().await, 0);
+    // The message is on its way: no later tool call of this execution sends it again.
+    let (_, again) = hooks.tool_delivery(message(&first)).await;
+    assert!(again.steers.is_empty() && again.steer.is_empty());
     assert!(hooks.capture_steers()[&instance].receipts.is_empty());
 
-    let mut revisit = first.clone();
-    revisit.host_context = None;
-    revisit.node.reference.execution =
-        crate::native_v2_contract::ExecutionId::new(3).assert_value();
-    let execution = hooks
-        .prepare_steers(&mut revisit, false)
-        .await
-        .assert_value();
+    hooks.steer_shown(execution, &delivery.steer).await;
+    assert_eq!(received().await, 1);
+    // The message is part of the conversation: a successor that restores it inherits the receipt,
+    // also when the turn that took the message fails afterwards.
+    assert_eq!(hooks.capture_steers()[&instance].receipts.len(), 1);
+    hooks.finish_steers(execution, false).await;
+    assert_eq!(hooks.capture_steers()[&instance].receipts.len(), 1);
+
+    let mut later = first.clone();
+    later.host_context = None;
+    later.node.reference.execution = crate::native_v2_contract::ExecutionId::new(3).assert_value();
+    let execution = hooks.prepare_steers(&mut later, false).await.assert_value();
+    assert!(later.host_context.is_none(), "once is the bound");
+    let (_, at_tool_call) = hooks.tool_delivery(message(&later)).await;
+    assert!(at_tool_call.steers.is_empty());
+    hooks.finish_steers(execution, true).await;
+    assert_eq!(received().await, 1);
+}
+
+// A message is void once a new native launch starts: the steer is due again and travels with the
+// prompt, whose receipt is the hand-over.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_message_that_was_never_shown_is_due_again_at_the_next_prompt() {
+    use crate::active_memory::hooks::{SteerCarrier, ToolCall};
+    let (ledger, run) = steer_record().await;
+    let hooks = ActiveMemoryHooks::empty().assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut first = invocation();
+    let execution = hooks.prepare_steers(&mut first, false).await.assert_value();
+    steering::record(
+        ledger.as_ref(),
+        openengine_cluster_protocol::RunSteerParams {
+            mode: Default::default(),
+            run_id: run.clone(),
+            text: "Standing direction".into(),
+        },
+    )
+    .await
+    .assert_value();
+    let tool = serde_json::json!({"tool_name":"Read"});
+    let message = |invocation| ToolCall {
+        invocation,
+        input: &tool,
+        workspace: std::path::Path::new("/workspace"),
+        steers: SteerCarrier::ShownMessage,
+        context_kept: true,
+    };
+    let (_, delivery) = hooks.tool_delivery(message(&first)).await;
+    assert_eq!(delivery.steers.len(), 1);
+    let received = || async {
+        steering::status(ledger.as_ref(), &run)
+            .await
+            .assert_value()
+            .steers[0]
+            .received_executions
+    };
+    // Sent is not shown: nothing is received yet.
+    assert_eq!(received().await, 0);
+    // A retried native launch of the same execution: the earlier message never arrived.
+    first.host_context = None;
+    assert_eq!(
+        hooks.prepare_steers(&mut first, false).await,
+        Some(execution)
+    );
     assert!(
-        revisit
+        first
             .host_context
             .as_ref()
             .assert_value()
             .contains("Standing direction")
     );
-    // A prompt the provider refused keeps nothing either.
-    hooks.finish_steers(execution, false).await;
-    assert!(hooks.capture_steers()[&instance].receipts.is_empty());
-    revisit.host_context = None;
-    let execution = hooks
-        .prepare_steers(&mut revisit, false)
-        .await
-        .assert_value();
-    assert!(revisit.host_context.is_some());
-    hooks.finish_steers(execution, true).await;
-    assert_eq!(hooks.capture_steers()[&instance].receipts.len(), 1);
-
-    let mut later = revisit.clone();
-    later.host_context = None;
-    later.node.reference.execution = crate::native_v2_contract::ExecutionId::new(4).assert_value();
-    let execution = hooks.prepare_steers(&mut later, false).await.assert_value();
-    assert!(later.host_context.is_none());
-    let (_, at_tool_call) = hooks.tool_delivery(&later, &tool, workspace).await;
-    assert!(at_tool_call.steers.is_empty());
+    // The prompt carried it, so it counts as received while the turn still runs. Text that only
+    // resembles the lost message adds nothing.
+    assert_eq!(received().await, 1);
+    hooks.steer_shown(execution, &delivery.steer).await;
     hooks.finish_steers(execution, true).await;
     assert_eq!(received().await, 1);
 }

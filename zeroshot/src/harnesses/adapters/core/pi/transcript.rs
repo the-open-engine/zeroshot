@@ -4,6 +4,9 @@
 //! response value itself is taken from the authoritative final assistant message. Only the last
 //! assistant message is the node's response: Pi can emit several per run.
 
+use crate::harnesses::adapters::core::tool_activity::{
+    ToolActivity, ToolIdentity, ToolEntry, error_status,
+};
 use crate::native_v2_capsule::{
     provider_json_lines::{ProviderJsonLine, ProviderJsonLines, parse_provider_json},
     provider_process::{
@@ -42,6 +45,10 @@ pub(crate) struct PiTranscript {
     /// Malformed counts or overflow make the turn total permanently incomplete.
     usage_invalid: bool,
     output: ProviderText,
+    tools: ToolActivity,
+    /// Receives the text of each user message Pi puts into the conversation: the prompt, and
+    /// any message an extension sent while the turn ran.
+    user_messages: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 impl PiTranscript {
@@ -54,7 +61,17 @@ impl PiTranscript {
             current_usage: None,
             usage_invalid: false,
             output: ProviderText::new(&redactions),
+            tools: ToolActivity::default(),
+            user_messages: None,
         }
+    }
+
+    pub(super) fn reporting_user_messages(
+        mut self,
+        user_messages: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Self {
+        self.user_messages = Some(user_messages);
+        self
     }
 }
 
@@ -193,19 +210,24 @@ impl PiTranscript {
                 }
             }
             "message_start" => {
+                let role = value
+                    .get("message")
+                    .and_then(|message| message.get("role"))
+                    .and_then(Value::as_str);
                 // A new assistant message is a new model request whose usage starts over, so the
                 // previous message's latest usage becomes part of the turn total. A `message_end`
                 // normally commits it already; this also covers a stream that omitted one.
-                if value
-                    .get("message")
-                    .and_then(|message| message.get("role"))
-                    .and_then(Value::as_str)
-                    == Some("assistant")
-                {
+                if role == Some("assistant") {
                     self.commit_usage();
                     // The last assistant message is the node's answer, so a message that starts
                     // after one already settled must not leave that earlier text in place.
                     self.terminal = None;
+                }
+                if role == Some("user")
+                    && let Some(user_messages) = &self.user_messages
+                    && let Some(text) = value.get("message").and_then(message_text)
+                {
+                    let _ = user_messages.send(text);
                 }
             }
             "message_update" => {
@@ -217,6 +239,38 @@ impl PiTranscript {
             "message_end" => {
                 self.output.boundary(emissions);
                 self.record_message_end(value);
+            }
+            "tool_execution_start" | "tool_execution_end" => {
+                self.output.boundary(emissions);
+                let completed = kind == "tool_execution_end";
+                let identity = ToolIdentity {
+                    name: value
+                        .get("toolName")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .into(),
+                    id: value
+                        .get("toolCallId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                };
+                if let Some(identity) = self.tools.record(identity, completed) {
+                    let entry = if completed {
+                        ToolEntry::completed(
+                            "Pi",
+                            identity,
+                            error_status(value.get("isError").and_then(Value::as_bool)),
+                            value.get("result").cloned().unwrap_or(Value::Null),
+                        )
+                    } else {
+                        ToolEntry::call(
+                            "Pi",
+                            identity,
+                            value.get("args").cloned().unwrap_or(Value::Null),
+                        )
+                    };
+                    entry.emit(&self.output, emissions);
+                }
             }
             "compaction_start" => {
                 self.output.emit(
@@ -341,6 +395,11 @@ fn parse_usage(value: &Value) -> Option<TokenUsageDelta> {
 
 /// Live assistant text of one message, concatenated in content order.
 fn assistant_text(message: &Value) -> Option<String> {
+    message_text(message)
+}
+
+/// The text of one message, concatenated in content order.
+fn message_text(message: &Value) -> Option<String> {
     let content = message.get("content")?;
     let blocks = match content {
         Value::Array(blocks) => blocks,

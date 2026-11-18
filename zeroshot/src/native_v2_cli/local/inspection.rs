@@ -24,7 +24,7 @@ impl LocalCliBackend {
         let paths = self.existing_run_paths(id)?;
         let directory =
             crate::execution::platform::open_directory(paths.storage()).map_err(local_io)?;
-        if !require_existing_ledger(&paths.ledger())? {
+        if !require_existing_ledger(&paths.ledger()).map_err(local_io)? {
             return Err(NativeV2CliError::RunNotFound {
                 run_id: id.as_str().to_owned(),
             });
@@ -340,7 +340,7 @@ impl LocalCliBackend {
                     "; restore the original workspace at that path before resuming; \
                      suspended runs do not support checkpoint restoration"
                         .to_owned()
-                } else if document.submission.runtime.workspace_checkpoints {
+                } else if document.workspace_checkpoints_enabled() {
                     format!(
                         "; to restore a checkpoint, \
                      create a new empty folder at that path, then run `zeroshot resume {} \

@@ -55,6 +55,8 @@ struct HeldRole {
 
 #[derive(Default)]
 struct Driver {
+    fail_before_start: std::sync::atomic::AtomicBool,
+    fail_without_answer: std::sync::atomic::AtomicBool,
     outputs: StdMutex<BTreeMap<String, Value>>,
     hold: StdMutex<Option<HeldRole>>,
     held: tokio::sync::Notify,
@@ -73,9 +75,20 @@ struct Driver {
 impl SessionFactory for Driver {
     async fn open(
         &self,
-        _: &NodeInvocation,
+        invocation: &NodeInvocation,
         _: &ResolvedEnvironment,
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
+        if invocation
+            .reference
+            .node
+            .as_str()
+            .starts_with("active_memory_")
+            && self.fail_before_start.load(Ordering::SeqCst)
+        {
+            return Err(NodeRunnerError::DriverDetail(
+                "native session initialization refused".into(),
+            ));
+        }
         Ok(Arc::new(CountingSession {
             closed: self.closed.clone(),
         }))
@@ -114,6 +127,11 @@ impl NodeDriver for Driver {
             });
         }
         check_dispatch(&invocation);
+        if self.fail_without_answer.load(Ordering::SeqCst) {
+            return Err(NodeRunnerError::DriverDetail(
+                "provider stderr: model not available".into(),
+            ));
+        }
         self.globals.fetch_add(1, Ordering::SeqCst);
         let concurrent = if name == "active_memory_repository_maintenance" {
             self.concurrent_store.lock().assert_value().take()
@@ -360,7 +378,7 @@ impl Fixture {
 
     async fn maintenance_rejected(&self) -> bool {
         self.ledger.snapshot_and_tail(&self.run_id,None).await.assert_value().events.iter().any(|event| {
-            matches!(&event.event,RunEvent::SafeLog {line,..} if line.as_str().contains("maintenance findings rejected"))
+            matches!(&event.event,RunEvent::SafeLog {line,..} if line.as_str().contains("maintenance failed: findings rejected"))
         })
     }
 }

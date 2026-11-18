@@ -193,7 +193,8 @@ elif args and args[0] == "steer":
     text = entry["text"]
     print(json.dumps({"runId":args[1],"steer":{"id":"steer-1","createdAt":1000,
         "textBytes":len(text.encode()),"excerpt":text.encode()[:1024].decode("utf-8", "ignore"),
-        "receivedExecutions":0,"executions":[]}}))
+        "receivedExecutions":0,"executions":[],
+        "mode":args[args.index("--mode")+1] if "--mode" in args else "standing"}}))
 elif args and args[0] == "suspend":
     status = {"phase":"running","activeExecutions":[],"suspendRequested":True}
     print(json.dumps(projection(args[1], status, "v2:1")))
@@ -293,6 +294,14 @@ elif args and args[0] == "logs":
     if option("--execution") is not None:
         event["execution"] = option("--execution")
     print(json.dumps(event))
+elif args and args[0] == "discard-workspace":
+    if args[1] == "missing":
+        fail("run_not_found", "run.not_found", "run not found", {})
+    if args[1] == "running":
+        fail("invalid_request", "request.invalid", "run is running; use force-stop first", {})
+    print(os.environ.get("FAKE_DISCARD_RESULT", json.dumps({
+        "runId": args[1], "discarded": args[1] != "empty",
+    })))
 elif args and args[0] == "force-stop":
     print(json.dumps(projection(
         args[1],

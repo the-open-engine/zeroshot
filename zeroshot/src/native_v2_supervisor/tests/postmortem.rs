@@ -117,6 +117,30 @@ async fn ordinary_postmortem_failure_or_panic_preserves_primary_outcome_and_does
             ));
         }
         assert_eq!(postmortem.calls.load(Ordering::SeqCst), 1);
+        let tail = harness
+            .ledger
+            .snapshot_and_tail(&harness.supervisor.run_id, None)
+            .await
+            .assert_value();
+        let errors: Vec<_> = tail
+            .events
+            .iter()
+            .filter_map(|event| match &event.event {
+                RunEvent::SafeLog {
+                    stream: SafeLogStream::Error,
+                    line,
+                    diagnostic,
+                    ..
+                } => {
+                    assert!(diagnostic.is_none());
+                    Some(line.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("postmortem skipped or failed:"));
+        assert!(tail.snapshot.failure_context.is_none());
     }
 }
 
@@ -290,13 +314,11 @@ async fn postmortem_skips_rejected_source_credentials_or_model_but_runs_after_cr
             assert!(!result_logs[0].contains("postmortem is running"));
             let mut logs = failure_logs::public_subscription(&harness).await;
             let records = logs.read_available().await.assert_value();
-            assert!(
-                records
-                    .iter()
-                    .any(|record| record.record.message.as_str().contains(&format!(
-                        "postmortem skipped: source node worker ended with {reason}"
-                    )))
-            );
+            assert!(records.iter().any(|record| record.record.level
+                == openengine_cluster_protocol::LogLevel::Error
+                && record.record.message.as_str().contains(&format!(
+                    "postmortem skipped: source node worker ended with {reason}"
+                ))));
         }
     }
 }

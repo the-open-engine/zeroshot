@@ -17,8 +17,13 @@ Official local builds include every adapter below. Install each native CLI separ
 
 Each adapter owns its CLI version range. Local `run`, checkpoint `resume` and ACP sessions check
 all agent lanes before any node starts, using the captured launch search path and native environment.
-Each distinct executable is probed once with a 60-second deadline. An older, incompatible or unreadable
-version is refused with the lane, executable, reported version, supported range and installation step.
+Each distinct executable is probed once. Local probes use the earlier of their own 60-second limit
+and the controller's remaining preparation budget (`ZEROSHOT_PREPARATION_TIMEOUT`, 600 seconds by
+default), shared with checkpoint restoration and runtime composition. Expiry cancels preparation,
+confirms helper process-tree cleanup and refuses admission, even after a successful late response.
+Workspace replacement finishes once begun; the CLI's extra stop grace allows cleanup only.
+ACP retains an independent 60-second limit per probe. An older, incompatible or unreadable version
+is refused with the lane, executable, reported version, supported range and installation step.
 
 | Harness    | Minimum | First unsupported release | Basis                                                                     |
 | ---------- | ------- | ------------------------- | ------------------------------------------------------------------------- |
@@ -134,7 +139,12 @@ authoritative response validation, bounded corrections, reusable sessions, live 
 that reports uncertainty when totals are incomplete.
 
 Install the native Active Memory hook, plugin or bridge in the adapter. Shared memory owns recall
-budgets, receipts and maintenance; missing acknowledgement means unknown delivery evidence.
+budgets, receipts and maintenance; missing acknowledgement means unknown delivery evidence. Declare
+how the harness takes a steer at a tool call (`SteerRoute`): as a user message through its own
+message channel where it has one, confirmed with `ActiveMemoryHooks::steer_shown` when the harness
+reports the message in the conversation, and inside hook context only otherwise. Place neither a
+steer nor a lesson inside a tool result, and say whether the harness keeps tool-call context in its
+session (`HookQuery::context_kept`).
 
 Run focused fixtures and shared registry/session tests. The ignored contract in
 `harnesses/live_tests.rs` requires a disposable test repository and explicit `ZEROSHOT_LIVE_HARNESS`,
@@ -202,7 +212,9 @@ same `ZEROSHOT_LIVE_*` settings as the shared live contract. The local CLI's ign
 contract with each supported CLI/provider lane; the owner also checks suspended hosted runs after
 installing conversation storage support on that host.
 
-Authored node `instructions` accept up to 262,144 UTF-8 bytes. Steering uses the same bound and the
-existing native tool-call carrier on every agent conversation, whether Active Memory is on or off.
-The host supplies the shared carrier frame bound to each adapter; adapters retain installation and
-acknowledgement ownership.
+Authored node `instructions` accept up to 262,144 UTF-8 bytes. Steering uses the same bound. The
+native tool-call carrier on every agent conversation, whether Active Memory is on or off, picks a
+steer up at a tool call. From there it travels as a user message through Claude Code's stream-json
+stdin, Copilot's `session.send` in `immediate` mode, Pi's steering queue or a stored OpenCode
+session message, and inside hook context on Codex and Hermes. The host supplies the shared carrier
+frame bound to each adapter; adapters retain installation and acknowledgement ownership.

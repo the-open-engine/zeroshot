@@ -19,6 +19,7 @@ from zeroshot import (
     Preset,
     ProtocolError,
     RunFailedError,
+    RunNotFoundError,
     RunRequest,
     RunResult,
     RuntimePlan,
@@ -398,6 +399,54 @@ def test_unknown_options_fail_before_submission(fake_native: Path, tmp_path: Pat
 
     asyncio.run(exercise())
     assert read_invocations(fake_native) == []
+
+
+@pytest.mark.parametrize("target_name", [None, "platform", "vm"])
+def test_discard_workspace_routes_results_and_errors(
+    fake_native: Path, tmp_path: Path, target_name: str | None
+) -> None:
+    target = LocalTarget(tmp_path) if target_name is None else HostedTarget(target_name)
+
+    async def exercise() -> None:
+        async with Client(target=target) as client:
+            assert await client.get_run("retained").discard_workspace() is True
+            assert await client.get_run("empty").discard_workspace() is False
+            with pytest.raises(InvalidRequestError, match="force-stop"):
+                await client.get_run("running").discard_workspace()
+            with pytest.raises(RunNotFoundError):
+                await client.get_run("missing").discard_workspace()
+
+    asyncio.run(exercise())
+    calls = [
+        i["args"] for i in read_invocations(fake_native) if i["args"][0] == "discard-workspace"
+    ]
+    route = [] if target_name is None else ["--target", target_name]
+    assert calls == [
+        ["discard-workspace", run_id, *route]
+        for run_id in ("retained", "empty", "running", "missing")
+    ]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        '{"runId": "retained"}',
+        '{"runId": "retained", "discarded": 1}',
+        '{"runId": "retained", "discarded": "false"}',
+        '{"runId": "other", "discarded": true}',
+    ],
+)
+def test_discard_workspace_rejects_malformed_native_result(
+    fake_native: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: str
+) -> None:
+    monkeypatch.setenv("FAKE_DISCARD_RESULT", result)
+
+    async def exercise() -> None:
+        async with Client(target=LocalTarget(tmp_path)) as client:
+            with pytest.raises(ProtocolError, match="discarded"):
+                await client.get_run("retained").discard_workspace()
+
+    asyncio.run(exercise())
 
 
 def test_direct_target_uses_the_same_client_and_durable_run_surface(fake_native: Path) -> None:
@@ -1152,10 +1201,13 @@ def test_steer_preserves_text_and_uses_run_route(
             assert steer.text_bytes == 262144
             assert len(steer.excerpt.encode()) == 1024
             assert steer.executions == ()
+            assert steer.mode == "standing"
+            assert steer.network is None
 
     asyncio.run(exercise())
     call = next(item for item in read_invocations(fake_native) if item["args"][0] == "steer")
     assert call["text"] == text
+    assert call["args"][call["args"].index("--mode") + 1] == "standing"
     assert ("--target" in call["args"]) == (target_kind != "local")
     assert not Path(call["args"][call["args"].index("--text-file") + 1]).exists()
 
@@ -1186,5 +1238,29 @@ def test_steer_vectors_preserve_kinds_receipts_and_maximum_full_text(
             assert page.vectors[1].content["execution"] == "execution-1"
             direction = await run.vector(page.vectors[0].id)
             assert direction.content["text"] == "é" * 131072
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("mode", ["once", "standing"])
+def test_steer_dispatches_explicit_mode(fake_native: Path, mode: str) -> None:
+    async def exercise() -> None:
+        async with Client() as client:
+            steer = await client.get_run("original").steer("direction", mode=mode)
+            assert steer.mode == mode
+
+    asyncio.run(exercise())
+    call = next(item for item in read_invocations(fake_native) if item["args"][0] == "steer")
+    assert call["args"][call["args"].index("--mode") + 1] == mode
+
+
+@pytest.mark.parametrize("mode", ["", "ONCE", "other", None, ["once"]])
+def test_steer_rejects_invalid_mode_before_dispatch(fake_native: Path, mode: object) -> None:
+    async def exercise() -> None:
+        async with Client() as client:
+            before = read_invocations(fake_native)
+            with pytest.raises(ValueError, match="mode must be once or standing"):
+                await client.get_run("original").steer("direction", mode=mode)
+            assert read_invocations(fake_native) == before
 
     asyncio.run(exercise())

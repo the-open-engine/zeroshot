@@ -16,6 +16,8 @@ use unix as native;
 #[cfg(windows)]
 use windows as native;
 
+#[cfg(unix)]
+pub(crate) use native::retained_descriptor;
 pub(crate) use native::validate_private_file;
 #[cfg(windows)]
 pub(crate) use native::private_inherited_file;
@@ -37,6 +39,28 @@ impl FileAccess {
     fn repairs_security(self) -> bool {
         matches!(self, Self::ReadWrite | Self::CreateNew)
     }
+}
+
+/// Create one native private directory or validate the existing directory without repairing it.
+pub(crate) fn ensure_private_directory(path: &Path) -> io::Result<()> {
+    match create_private_directory(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    validate_private_file(&open_directory(path)?)
+}
+
+pub(crate) fn lock_is_contended(error: &io::Error) -> bool {
+    if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_IO_PENDING as i32)
+    }
+    #[cfg(not(windows))]
+    false
 }
 
 pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> {

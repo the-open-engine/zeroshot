@@ -115,6 +115,7 @@ mod queued_handoff {
             forge_field: Some(GITHUB_TOKEN_ENV),
             github_git_token: "test-token".to_owned(),
             token_from_environment: false,
+            diagnostic_secrets: Vec::new(),
         }
     }
 

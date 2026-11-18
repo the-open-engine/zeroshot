@@ -60,6 +60,7 @@ fn verifier_results_replace_prior_results_by_node_and_full_map_path_and_remain_b
     let mut context = FailureContext::default();
     let make = |execution: &str, indices: Vec<u64>, message: &str| FailureDiagnostic {
         execution: Some(openengine_cluster_protocol::ActiveExecution {
+            started_at: None,
             execution: openengine_cluster_protocol::ExecutionRef::new(execution).assert_value(),
             node: "assessor".parse().assert_value(),
             map_indices: indices,

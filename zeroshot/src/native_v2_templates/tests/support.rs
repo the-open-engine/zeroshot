@@ -18,6 +18,8 @@ use crate::native_v2_contract::{CodexProvider, DeclaredConnections, ModelId};
 
 use super::super::*;
 
+pub(super) const REVIEW_CONTEXT: &str = "Shared candidate prepared; focused checks passed.";
+
 pub(super) const CHANGE_TITLE: &str = "fix: repair checkout";
 pub(super) const CHANGE_DESCRIPTION: &str = "Repair the checkout flow.";
 pub(super) const REPAIRED_CHANGE_TITLE: &str = "fix: stabilize checkout";
@@ -115,7 +117,7 @@ pub(super) fn accepted_review_history(delivery: TemplateDelivery) -> Vec<Durable
                 node_instance: 2,
                 node: "acceptance",
                 settled_at: 2,
-                input: json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]}),
+                input: default_review_input(),
             },
             ACCEPTED_LABEL,
             "requirements met",
@@ -123,6 +125,10 @@ pub(super) fn accepted_review_history(delivery: TemplateDelivery) -> Vec<Durable
         ),
         settled_review(3, "code", ACCEPTED_LABEL, "implementation sound"),
     ]
+}
+
+pub(super) fn default_review_input() -> serde_json::Value {
+    json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[],"reviewContext":REVIEW_CONTEXT})
 }
 
 pub(super) fn change_manifest() -> serde_json::Value {
@@ -174,7 +180,7 @@ pub(super) fn settled_agent(spec: SettledExecutionSpec<'_>) -> DurableExecution 
     settled_execution(
         spec,
         WorkerOutcome::Verified {
-            output: json!({"reviewResponses":[]}),
+            output: json!({"reviewResponses":[],"reviewContext":REVIEW_CONTEXT}),
             artifacts: Vec::new(),
         },
     )
@@ -209,7 +215,7 @@ pub(super) fn settled_review(
             node_instance: execution,
             node,
             settled_at: execution,
-            input: json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]}),
+            input: default_review_input(),
         },
         verdict,
         diagnostic,

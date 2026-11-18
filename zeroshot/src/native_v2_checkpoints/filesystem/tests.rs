@@ -164,6 +164,54 @@ async fn cancellation_during_snapshot_copy_leaves_no_published_tree() {
     );
 }
 
+#[tokio::test]
+async fn cancellation_after_metadata_leaves_only_the_prior_snapshot() {
+    struct StopDuringMetadata(tokio::sync::watch::Sender<bool>);
+
+    impl serde::Serialize for StopDuringMetadata {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.0.send_replace(true);
+            serializer.serialize_unit()
+        }
+    }
+
+    let fixture = Fixture::new();
+    fs::write(fixture.workspace.join("source"), "prior snapshot").assert_value();
+    let prior = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    fs::write(fixture.workspace.join("source"), "later edits").assert_value();
+    let workspace = fixture.workspace.clone();
+    let snapshots = fixture.snapshots.clone();
+    let (request, stopping) = tokio::sync::watch::channel(false);
+    let operation = super::SnapshotOperation::current(Some(stopping));
+    let error = tokio::task::spawn_blocking(move || {
+        super::capture_with(
+            &workspace,
+            &snapshots,
+            &StopDuringMetadata(request),
+            &operation,
+        )
+    })
+    .await
+    .assert_value()
+    .unwrap_err();
+
+    assert!(crate::native_v2_supervisor::checkpoints::CheckpointError(error).was_stopped());
+    let entries = fs::read_dir(&fixture.snapshots)
+        .assert_value()
+        .map(|entry| entry.assert_value().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(entries, vec![std::ffi::OsString::from(prior.as_str())]);
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("source")).assert_value(),
+        "later edits"
+    );
+    restore(&fixture.snapshots, &prior, &fixture.workspace).assert_value();
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("source")).assert_value(),
+        "prior snapshot"
+    );
+}
+
 fn add_submodule(directory: &Path, source: &Path, name: &str) {
     git(
         directory,

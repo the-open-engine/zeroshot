@@ -373,6 +373,8 @@ fn mapped_parallel_multicontrol_correlation_graph() -> GraphSpec {
 mod core_tests;
 #[path = "map_regressions/incoming_control.rs"]
 mod incoming_control;
+#[path = "map_regressions/nested_scope.rs"]
+mod nested_scope;
 #[path = "map_regressions/outcome_presence.rs"]
 mod outcome_presence;
 

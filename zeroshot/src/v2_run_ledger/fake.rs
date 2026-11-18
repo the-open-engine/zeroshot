@@ -8,7 +8,7 @@ use openengine_cluster_protocol::{Cursor, IdempotencyKey, RunId};
 
 use super::{
     AppendResult, CreateRun, CreateRunOutcome, LedgerClock, RunEvent, RunLedger, RunLedgerError,
-    RunSummary, SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, batch_recorded_at,
+    RunSummary, SnapshotAndTail, StoredRun, StoredRunEvent, apply_stored_event, batch_recorded_at,
     cursor_for, cursor_sequence, prepare_event, system_clock, validate_create, MAX_REPLAY_BYTES,
     MAX_REPLAY_EVENTS,
 };
@@ -272,12 +272,13 @@ fn append_locked(
     for event in events {
         let event = prepare_event(&snapshot, event);
         sequence = sequence.checked_add(1).ok_or(RunLedgerError::Storage)?;
-        apply_event(&mut snapshot, &event, sequence)?;
-        stored_events.push(StoredRunEvent {
+        let stored = StoredRunEvent {
             cursor: cursor_for(sequence),
             recorded_at,
             event,
-        });
+        };
+        apply_stored_event(&mut snapshot, &stored)?;
+        stored_events.push(stored);
     }
     // The fake commits only after the whole batch validates, matching the durable adapter.
     for (offset, stored) in stored_events.iter().enumerate() {

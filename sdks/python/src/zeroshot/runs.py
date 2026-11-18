@@ -56,11 +56,14 @@ class ActiveExecution:
         execution: Opaque selector accepted by log filtering.
         node: Executable graph node name.
         map_indices: Zero-based map path, outermost first; empty outside maps.
+        started_at: Ledger recording time of NodeStarted in Unix milliseconds, or None when
+            unknown. This is not a precise provider start measurement.
     """
 
     execution: str
     node: str
     map_indices: tuple[int, ...] = ()
+    started_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -177,8 +180,11 @@ class RunStatus:
         created_at: Suspension time in Unix epoch milliseconds.
         due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
         request: Human request contract when suspended for a request.
-        steers: Standing directions with confirmed receiving executions.
+        steers: Human and peer messages with recorded receiving executions.
         omitted_steers: Older directions omitted by the bounded status listing.
+        recorded_at: Ledger recording time of the event producing a watch notification, in Unix
+            milliseconds. None for status responses and old events without timing. Imported
+            history carries its import time, not the original execution time. Cursor defines order.
     """
 
     run_id: str
@@ -199,6 +205,7 @@ class RunStatus:
     request: HumanRequest | None = None
     steers: tuple[RunSteer, ...] = ()
     omitted_steers: int = 0
+    recorded_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -267,16 +274,19 @@ class LogEvent:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RunSteer:
-    """A recorded direction and its confirmed receiving executions.
+    """A steering message with recorded receiving executions.
 
     Args:
         id: Vector entry identity, usable with Run.vector().
         created_at: Recording time in Unix epoch milliseconds.
         text_bytes: Full UTF-8 text length.
         excerpt: First 1,024 bytes, cut at a character boundary.
-        received_executions: Total confirmed receiving executions.
+        received_executions: Total recorded receiving executions.
         executions: Up to 64 most recent execution references.
         executions_omitted: Whether earlier receiving executions were omitted.
+        mode: Once per node instance or standing guidance for each provider conversation.
+        network: Network names and originating node, instance and execution.
+            None for human direction.
     """
 
     id: str
@@ -286,6 +296,8 @@ class RunSteer:
     received_executions: int
     executions: tuple[str, ...]
     executions_omitted: bool = False
+    mode: Literal["once", "standing"] = "standing"
+    network: dict[str, JsonValue] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

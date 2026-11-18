@@ -264,7 +264,12 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
     assert_eq!(fixture.invocation_count(), 1);
     let logs = fixture.output(&["logs", next], "finish").await;
     assert_success(&logs, "expiry logs");
-    assert_eq!(String::from_utf8_lossy(&logs.stdout).matches("Node approval failed: timeout").count(), 1);
+    assert_eq!(
+        String::from_utf8_lossy(&logs.stdout)
+            .matches("Node approval failed: timeout")
+            .count(),
+        1
+    );
     let vectors = fixture.json(&["vectors", next], "finish").await;
     assert_eq!(vectors["vectors"][0]["kind"], "request");
     assert!(
@@ -285,9 +290,7 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
         2
     );
 }
-#[tokio::test(flavor = "multi_thread")]
-async fn request_suspension_waits_for_a_slow_checkpoint() {
-    let mut fixture = LocalFixture::new().with_request(None);
+fn with_slow_checkpoint(mut fixture: LocalFixture) -> (LocalFixture, PathBuf) {
     let delayed = fixture.root.path("checkpoint-delayed");
     let wrapper = fixture.root.path("slow-restic");
     openengine_cluster_testkit::fixture::write_executable(
@@ -304,7 +307,11 @@ done
 exec {restic} "$@"
 "#,
             mutation = shell_literal(
-                fixture.repository.join("local-mutation.txt").to_str().assert_value(),
+                fixture
+                    .repository
+                    .join("local-mutation.txt")
+                    .to_str()
+                    .assert_value(),
             ),
             delayed = shell_literal(delayed.to_str().assert_value()),
             restic = shell_literal(restic_selector::test_restic().to_str().assert_value()),
@@ -316,6 +323,36 @@ exec {restic} "$@"
         .harness_environment
         .insert("ZEROSHOT_RESTIC".to_owned(), wrapper.display().to_string());
 
+    (fixture, delayed)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn terminal_outcomes_wait_for_slow_checkpoints() {
+    for (mode, reason) in [("hold-fail", Some("worker_failed")), ("hold", None)] {
+        let fixture = LocalFixture::new();
+        let fixture = if reason.is_none() {
+            fixture.with_second_worker()
+        } else {
+            fixture
+        };
+        let (fixture, delayed) = with_slow_checkpoint(fixture);
+        let run = fixture.submit_detached(mode).await;
+        fixture.wait_running(&run).await;
+        let started = Instant::now();
+        fs::write(fixture.repository.join("release-turn"), "go").assert_value();
+        if let Some(reason) = reason {
+            fixture.wait_terminal(&run, mode, reason).await;
+        } else {
+            fixture.wait_succeeded(&run, mode).await;
+        }
+        assert!(delayed.exists(), "the final checkpoint must be delayed");
+        assert!(started.elapsed() > CLI_TIMEOUT);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn request_suspension_waits_for_a_slow_checkpoint() {
+    let (fixture, delayed) = with_slow_checkpoint(LocalFixture::new().with_request(None));
     let run = fixture.submit_detached("hold").await;
     fixture.wait_running(&run).await;
     let started = Instant::now();
@@ -444,7 +481,10 @@ async fn request_answers_continue_the_checkpoint_conversation_without_replaying_
     let run = fixture.submit_detached("finish").await;
     fixture.wait_suspended(&run).await;
     wait_for_exit(fixture.ready_pid(&run)).await;
-    assert_eq!(conversations::worker_calls(&fixture), ["fresh local-thread"]);
+    assert_eq!(
+        conversations::worker_calls(&fixture),
+        ["fresh local-thread"]
+    );
     conversations::new_provider_home(&mut fixture);
 
     let answer = fixture.root.path("answer.json");
@@ -697,6 +737,7 @@ async fn a_lost_answer_successor_restarts_with_the_conversation_it_started_with(
     // Its restart begins after the answer with the conversation the lost run started with.
     let restarted = resume_lost(&fixture, lost, "finish").await;
     fixture.wait_suspended(&restarted).await;
+    wait_for_exit(fixture.ready_pid(&restarted)).await;
     assert_eq!(
         conversations::worker_calls(&fixture),
         [

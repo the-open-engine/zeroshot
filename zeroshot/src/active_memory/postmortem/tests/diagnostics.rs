@@ -1,6 +1,65 @@
 use super::*;
 
 #[tokio::test]
+async fn role_startup_and_unanswered_provider_failures_keep_the_cause_without_primary_evidence() {
+    use crate::v2_run_ledger::SafeLogStream;
+    for before_start in [true, false] {
+        let fixture = fixture(Default::default(), None, true).await;
+        fixture
+            .driver
+            .fail_before_start
+            .store(before_start, Ordering::SeqCst);
+        fixture
+            .driver
+            .fail_without_answer
+            .store(!before_start, Ordering::SeqCst);
+        fixture.drive().await;
+        let stored = fixture
+            .ledger
+            .snapshot_and_tail(&fixture.run_id, None)
+            .await
+            .assert_value();
+        let errors: Vec<_> = stored
+            .events
+            .iter()
+            .filter_map(|event| match &event.event {
+                RunEvent::SafeLog {
+                    stream: SafeLogStream::Error,
+                    line,
+                    diagnostic,
+                    ..
+                } => {
+                    assert!(diagnostic.is_none());
+                    Some(line.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        let cause = if before_start {
+            "native session initialization refused"
+        } else {
+            "provider stderr: model not available"
+        };
+        for role in super::super::plan::Role::ALL {
+            assert!(
+                errors
+                    .iter()
+                    .any(|line| line.contains(role.name()) && line.contains(cause)),
+                "{errors:?}"
+            );
+        }
+        assert_eq!(
+            errors
+                .iter()
+                .filter(|line| line.contains("postmortem completed:"))
+                .count(),
+            1
+        );
+        assert!(stored.snapshot.failure_context.is_none());
+    }
+}
+
+#[tokio::test]
 async fn rejected_discovery_reports_the_gate_without_publishing_proposal_text() {
     for (field, replacement, diagnostic) in [
         ("node_id", json!("invented_node"), "unknown executed node"),

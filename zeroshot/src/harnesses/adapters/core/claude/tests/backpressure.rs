@@ -7,7 +7,7 @@ async fn cancellation_wins_after_durable_output_closes_and_reaps_the_process() {
         &workspace,
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 (sleep 30; printf survived > survivor.txt) &
 printf '%s' "$!" > child.pid
 while [ ! -e emit-output ]; do sleep 0.01; done

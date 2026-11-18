@@ -216,16 +216,15 @@ async fn start_controller_process(
     let git_credentials = bootstrap.git_credentials.clone();
     let native_environment = bootstrap.native_environment.clone();
     let memory_storage = bootstrap.memory_storage.clone();
-    let version_stopping = stopping.clone();
     let controller = Arc::new(
         PortableRunController::start_with_shutdown(
             bootstrap,
-            async move |admitted| {
+            async move |admitted, preparation| {
                 crate::native_v2_local::check_lane_versions(
                     &admitted.runtime,
                     &native_environment,
                     &workspace,
-                    Some(version_stopping),
+                    Some(preparation),
                 )
                 .await?;
                 crate::native_v2_local::build_local_process_candidate(
@@ -490,12 +489,15 @@ impl PortableControllerServer {
 
 async fn serve_connection(
     controller: Arc<PortableRunController>,
-    stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    stream: super::transport::Server,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
+    let human_steering = super::transport::peer_pid(&stream)
+        .and_then(crate::execution::process::authority::require_human)
+        .is_ok();
     let (reader, writer) = tokio::io::split(stream);
     let _ = openengine_cluster_server::stdio::serve_ndjson_until_shutdown(
-        local_binding(controller),
+        local_binding(controller, human_steering),
         openengine_cluster_server::stdio::NdjsonIo::new(reader, writer, tokio::io::sink()),
         shutdown,
     )
@@ -508,6 +510,7 @@ mod shutdown_tests;
 
 fn local_binding(
     controller: Arc<PortableRunController>,
+    human_steering: bool,
 ) -> ConnectionBinding<PortableRunController, StaticConnectionIdentityResolver, SystemConnectionTime>
 {
     let identity = ConnectionIdentity::new(ConnectionIdentityConfig {
@@ -515,7 +518,10 @@ fn local_binding(
         tenant: TenantId::new("local-run"),
         issued_at_ms: None,
         expires_at_ms: u64::MAX,
-        binding_attributes: BindingAttributes::default(),
+        binding_attributes: BindingAttributes::new(BTreeMap::from([(
+            crate::execution::process::authority::HUMAN_STEERING_ATTRIBUTE.into(),
+            human_steering.to_string(),
+        )])),
     });
     ConnectionBinding::new(
         controller,

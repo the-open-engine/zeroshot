@@ -8,6 +8,7 @@
 #[path = "command.rs"]
 mod command;
 mod conversation;
+mod input;
 pub(crate) mod memory;
 mod native_config;
 #[path = "permissions.rs"]
@@ -149,7 +150,7 @@ impl ClaudeAdapter {
         &self,
         turn: &ClaudeTurn<'_>,
         input: ClaudeCommandInput<'_>,
-    ) -> Result<ProcessSessionCommand, NodeRunnerError> {
+    ) -> Result<(ProcessSessionCommand, Option<PathBuf>), NodeRunnerError> {
         let invocation = turn.invocation;
         let NodeRuntimeBinding::Agent { model, effort, .. } = &invocation.node.binding else {
             return Err(NodeRunnerError::DriverDetail(
@@ -214,19 +215,26 @@ impl ClaudeAdapter {
             },
             deadline: None,
         };
+        let mut hook_executable = None;
         if let Some(memory) = &self.active_memory {
             memory.configure_with(
                 &mut command,
                 crate::active_memory::hooks::HookInstallation {
                     invocation,
                     home: input.files.home(),
-                    context_budget: Some(memory::INLINE_CONTEXT_BYTES),
-                    standing: true,
+                    // The hook returns memory only; a steer goes to stdin as a user message.
+                    steers: input.steers.map_or(
+                        crate::active_memory::hooks::SteerRoute::HookContext,
+                        crate::active_memory::hooks::SteerRoute::Adapter,
+                    ),
                 },
-                memory::install,
+                |command, capability| {
+                    hook_executable = Some(memory::install(command, capability)?);
+                    Ok(())
+                },
             );
         }
-        Ok(command)
+        Ok((command, hook_executable))
     }
 
     fn process_environment(
@@ -345,34 +353,45 @@ impl ClaudeAdapter {
             }
             None => prompt,
         };
-        let mut process = match self
-            .open_turn_process(turn, state.resume_id.as_deref(), files)
-            .await?
-        {
+        let (steers, steer_messages) = tokio::sync::mpsc::unbounded_channel();
+        let (command, hook_executable) = self.command(
+            turn,
+            ClaudeCommandInput {
+                resume_id: state.resume_id.as_deref(),
+                files: &files,
+                steers: Some(steers),
+            },
+        )?;
+        let mut process = match self.open_turn_process(turn, files, command).await? {
             ClaudeProcessStart::Ready(process) => process,
             ClaudeProcessStart::Failed(attempt) => return Ok(attempt),
         };
-        let transcript = ClaudeTranscript::new(provider_redactions(
+        let (signals, turn_signals) = tokio::sync::mpsc::unbounded_channel();
+        let mut transcript = ClaudeTranscript::new(provider_redactions(
             &turn.invocation.environment,
             &self.local_environment,
-        ));
-        turn_process::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
-            .await
+        ))
+        .reporting_input(signals);
+        transcript.set_memory(self.active_memory.clone(), turn.invocation, hook_executable);
+        let prompt = input::user_message(&prompt);
+        let input = turn_process::TurnInput {
+            prompt: &prompt,
+            live: Some(input::live(input::LiveTurn {
+                steers: steer_messages,
+                signals: turn_signals,
+                hooks: self.active_memory.clone(),
+                execution: turn.invocation.node.reference.execution.get(),
+            })),
+        };
+        turn_process::finish_live_process(&mut process, input, transcript, turn.control).await
     }
 
     async fn open_turn_process(
         &self,
         turn: &ClaudeTurn<'_>,
-        resume_id: Option<&str>,
         files: std::sync::Arc<ProviderExecutionFiles>,
+        mut command: ProcessSessionCommand,
     ) -> Result<ClaudeProcessStart, NodeRunnerError> {
-        let mut command = self.command(
-            turn,
-            ClaudeCommandInput {
-                resume_id,
-                files: &files,
-            },
-        )?;
         if let Some(start) = self
             .require_supported_version(files.clone(), &command, turn)
             .await?
@@ -457,6 +476,8 @@ enum ClaudeTurnAdvance {
 struct ClaudeCommandInput<'a> {
     resume_id: Option<&'a str>,
     files: &'a ProviderExecutionFiles,
+    /// Where the broker hands steers selected at this launch's tool calls.
+    steers: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 #[cfg(test)]

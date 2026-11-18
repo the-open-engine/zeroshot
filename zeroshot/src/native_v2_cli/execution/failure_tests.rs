@@ -70,14 +70,24 @@ async fn error_log_read_ends_at_its_deadline_or_ctrl_c() {
         tokio::pin!(detach);
         let started = tokio::time::Instant::now();
 
-        let failure =
-            RunFailure::read(&backend, None, RunId::new("run-local"), detach.as_mut()).await;
+        let failure = RunFailure::read(
+            &backend,
+            Some("cloud"),
+            RunId::new("run-local"),
+            detach.as_mut(),
+        )
+        .await;
 
         assert_eq!(started.elapsed(), Duration::from_secs(waited));
         assert_eq!(
+            failure.incomplete_memory_notice(true).as_deref(),
+            Some("Active Memory log check incomplete; see zeroshot logs run-local --target cloud")
+        );
+        assert!(failure.incomplete_memory_notice(false).is_none());
+        assert_eq!(
             failure.to_string(),
             "run finished unsuccessfully\nThe run log could not be read completely.\n\
-             Full run log: zeroshot logs run-local"
+             Full run log: zeroshot logs run-local --target cloud"
         );
     }
 }
@@ -175,6 +185,25 @@ fn error_log(cursor: &str, level: &str, message: &str) -> RunLogEventNotificatio
 }
 
 #[test]
+fn auxiliary_memory_errors_stay_separate_from_similarly_named_primary_errors() {
+    let mut failure = RunFailure::read_for_test(RunId::new("run-local"), None);
+    failure
+        .log_event(error_log(
+            "v2:1",
+            "error",
+            "Active Memory postmortem failed",
+        ))
+        .expect("auxiliary error");
+    let mut primary = error_log("v2:2", "error", "Active Memory worker input is invalid");
+    primary.execution =
+        Some(openengine_cluster_protocol::ExecutionRef::new("opaque").expect("primary execution"));
+    failure.log_event(primary).expect("primary error");
+    let report = failure.to_string();
+    assert!(report.contains("Active Memory worker input is invalid"));
+    assert!(!report.contains("postmortem failed"));
+}
+
+#[test]
 fn failure_report_keeps_only_the_latest_bounded_error_records() {
     let mut failure = RunFailure::read_for_test(RunId::new("run-local"), None);
     for index in 0..7 {
@@ -245,4 +274,13 @@ fn foreground_failure_reports_verifier_results_loop_rounds_and_nested_paths_as_r
     assert!(failure.contains("assessor[1][2]: readiness=revise; missing test (log v2:7)"));
     assert!(failure.contains("Loop refinement[1] exhausted after 3 completed iterations"));
     assert!(!failure.contains("Recorded failures:"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn completed_memory_log_reads_do_not_warn() {
+    let backend = FakeBackend::default();
+    let detach = std::future::pending();
+    tokio::pin!(detach);
+    let logs = RunFailure::read(&backend, None, RunId::new("run-local"), detach.as_mut()).await;
+    assert!(logs.incomplete_memory_notice(true).is_none());
 }

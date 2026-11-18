@@ -1,18 +1,18 @@
 //! Claude Code's native tool hook settings.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::active_memory::hooks::command_handler;
+use crate::active_memory::hooks::native::{command_handler_at, hook_executable};
 use crate::execution::process::ProcessSessionCommand;
 
-/// Claude Code 2.1.317 shows at most 10,000 characters of hook context inline and replaces
-/// larger output with a file preview. Steers that do not fit wait for the next prompt.
-pub(crate) const INLINE_CONTEXT_BYTES: usize = 9_000;
-
-pub(crate) fn install(command: &mut ProcessSessionCommand, capability: &Path) -> io::Result<()> {
+pub(crate) fn install(
+    command: &mut ProcessSessionCommand,
+    capability: &Path,
+) -> io::Result<PathBuf> {
+    let executable = hook_executable()?;
     let mut settings = serde_json::json!({
-        "hooks":{"PreToolUse":[{"hooks":[command_handler(capability)?]}]}
+        "hooks":{"PreToolUse":[{"hooks":[command_handler_at(capability, &executable)]}]}
     });
     // A single --settings layer composes native overrides with the required owned hook.
     // Native user/project hooks remain in their own configuration layers.
@@ -36,12 +36,12 @@ pub(crate) fn install(command: &mut ProcessSessionCommand, capability: &Path) ->
                 } else {
                     command.argv[index] = format!("--settings={combined}");
                 }
-                return Ok(());
+                return Ok(executable);
             }
         }
     }
     command
         .argv
         .extend(["--settings".to_owned(), serde_json::to_string(&settings)?]);
-    Ok(())
+    Ok(executable)
 }

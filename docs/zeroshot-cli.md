@@ -32,14 +32,14 @@ Commands:
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
-  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+  steer              Send direction to agents or publish guidance to authorized graph networks
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
   resume             Start a successor from a failed or suspended run's retained workspace
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
   export-workspace   Download a retained workspace or selected checkpoint as a tar archive
-  discard-workspace  Permanently delete an abandoned retained target workspace
+  discard-workspace  Delete a retained target workspace or a finished local run's checkpoints
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
 
@@ -1534,7 +1534,7 @@ Options:
 ### `zeroshot steer`
 
 ```text
-Broadcast standing direction to every agent conversation in a running or suspended run
+Send direction to agents or publish guidance to authorized graph networks
 
 Usage: zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>
 
@@ -1554,6 +1554,14 @@ Options:
 
       --text-stdin
           Read UTF-8 direction from standard input
+
+      --network <NAME>
+          Broadcast to this authorized graph-local network; repeat for several networks
+
+      --mode <MODE>
+          Once per recipient node instance, or standing across fresh conversations. Defaults to once for network messages and standing for human direction
+
+          [possible values: once, standing]
 
   -h, --help
           Print help
@@ -1813,7 +1821,9 @@ Options:
 ### `zeroshot discard-workspace`
 
 ```text
-Permanently delete an abandoned retained target workspace
+Delete a retained target workspace or a finished local run's checkpoints.
+
+Locally, frees space retained by failed runs across their recovery lineage without reading or changing the checkout, ledger or logs. Delivery recovery state is kept. Running runs must be force-stopped first; interrupted restores must be resumed first. Local checkpoints never expire automatically. Plain resume keeps the current checkout.
 
 Usage: zeroshot discard-workspace [OPTIONS] <RUN_ID>
 
@@ -1826,7 +1836,7 @@ Options:
           Use this named target. If omitted, use the local controller
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ### `zeroshot version`
@@ -1867,14 +1877,14 @@ Commands:
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
   suspend            Request suspension at the next checkpoint and print status immediately
-  steer              Broadcast standing direction to every agent conversation in a running or suspended run
+  steer              Send direction to agents or publish guidance to authorized graph networks
   answer             Answer a suspended request from a JSON file and start its successor
   inbox              Read pending requests or show the request made by one run. Reads never apply expiry
   vectors            Read one page of the run vector record, or show an entry in full
   resume             Start a successor from a failed or suspended run's retained workspace
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
   export-workspace   Download a retained workspace or selected checkpoint as a tar archive
-  discard-workspace  Permanently delete an abandoned retained target workspace
+  discard-workspace  Delete a retained target workspace or a finished local run's checkpoints
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
 ```

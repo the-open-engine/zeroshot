@@ -76,7 +76,7 @@ async fn detached_controller_uses_codex_configured_gateway_environment_without_a
         "-d",
     ];
     let output = timeout(
-        CLI_TIMEOUT,
+        SUSPENSION_TIMEOUT,
         fixture
             .command_with_inline(&arguments, "finish", false)
             .output(),
@@ -461,7 +461,7 @@ test -z "${UNDECLARED_SECRET+x}"
 test -z "${OPENAI_API_KEY+x}"
 cat "$CLAUDE_CONFIG_DIR/settings.json" >> config-capture
 printf '%s\n' "$@" >> harness-args
-cat > prompt-capture
+head -n 1 > prompt-capture
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"local-session"}'
 if test -f first-turn; then
   printf '%s%s\n' '{"type":"result","subtype":"success","is_error":false,' \
@@ -473,7 +473,7 @@ fi
 "#;
 
 async fn assert_succeeded(fixture: &LocalFixture, run_id: &str) {
-    let deadline = Instant::now() + CLI_TIMEOUT;
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
     loop {
         let status = fixture.json(&["status", run_id], "finish").await;
         if status["status"]["phase"] == "finished" {

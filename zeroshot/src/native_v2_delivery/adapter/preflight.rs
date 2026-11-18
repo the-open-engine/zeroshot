@@ -40,6 +40,8 @@ pub(super) struct DeliveryState {
     // Diagnostic evidence only; never grants reconciliation or withdrawal authority.
     pub(super) publication: Option<SourceReviewReceipt>,
     pub(super) intended_push: Option<String>,
+    // Controller-local only: resume gives the retained candidate a fresh attempt.
+    pub(super) last_rejected_push: Option<(String, String, [u8; 32])>,
     pub(super) pending_head: Option<head::PendingHead>,
     pub(super) review_base_revision: Option<String>,
     pub(super) feedback_versions: BTreeMap<String, String>,
@@ -55,6 +57,46 @@ impl DeliveryState {
 }
 
 impl NativeV2DeliveryAdapter {
+    pub(super) fn remember_push_rejection(
+        &self,
+        push: &SourcePushRequest,
+        error: &SourceDeliveryError,
+    ) -> Result<(), DeliveryStop> {
+        if error.cleanup_unconfirmed()
+            || error.authentication_failed()
+            || error.policy_rejected()
+            || error.retryable_operation()
+        {
+            return Ok(());
+        }
+        let SourceDeliveryError::Command(failure) = error else {
+            return Ok(());
+        };
+        let Some((reason, summary)) =
+            failure.push_rejection(&push.head_branch, &push.head_revision)
+        else {
+            return Ok(());
+        };
+        let rejected = (push.head_branch.clone(), push.head_revision.clone(), reason);
+        let previous = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last_rejected_push
+            .replace(rejected.clone());
+        if previous.as_ref() == Some(&rejected) {
+            return Err(DeliveryStop::failure(
+                WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+                format!(
+                    "Forge rejected revision `{}` on branch `{}` twice for the same reason: \
+                     \"{summary}\". Local work was preserved; resume the run once the cause is removed.\n{error}",
+                    push.head_revision, push.head_branch,
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn include_terminal_reviews(&self) -> bool {
         self.config.local_branch.is_none() || self.delivery_state().known_review().is_some()
     }

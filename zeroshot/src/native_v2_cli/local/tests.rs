@@ -23,6 +23,9 @@ use crate::v2_run_ledger::CreateRun;
 #[path = "preflight_tests.rs"]
 mod preflight_tests;
 
+#[path = "input_size_tests.rs"]
+mod input_size_tests;
+
 fn contract_backend(root: &Path) -> LocalCliBackend {
     LocalCliBackend::new(
         root.to_owned(),
@@ -69,6 +72,7 @@ fn recovery_document(
         resumed_from,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     }
 }
@@ -189,7 +193,6 @@ fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     }
 }
 
-#[cfg(unix)]
 fn initialize_local_repository(root: &Path) {
     fn git(root: &Path, arguments: &[&str]) {
         let status = std::process::Command::new("git")
@@ -556,10 +559,9 @@ async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_re
             assert!(matches!(error, NativeV2CliError::Local(_)), "{error}");
             let storage = backend.run_storage(&run_id).assert_value();
             assert!(
-                storage.exists(),
-                "checkpoint resume must reach controller launch"
+                !storage.exists(),
+                "a failed fresh launch removes its storage"
             );
-            assert!(!storage.join(BOOTSTRAP_FILE).exists());
             continue;
         }
         assert!(matches!(error, NativeV2CliError::Usage(_)));
@@ -649,16 +651,10 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
     let original_storage = backend.run_storage(&original).assert_value();
-    assert!(original_storage.is_dir());
-    assert!(!original_storage.join(BOOTSTRAP_FILE).exists());
-    assert_eq!(
-        backend
-            .read_recovery_document(&original)
-            .assert_value()
-            .delivery_run_id,
-        Some(original.clone())
-    );
+    assert!(!original_storage.exists());
 
+    // Resume starts from an admitted predecessor and keeps its recovery state.
+    drop(create_contract_run(&backend, &original, &submission).await);
     let recovery = recovery_document(submission, workspace, None);
     backend
         .write_recovery_document(&original, &recovery)
@@ -761,6 +757,7 @@ fn local_recovery_lineage_is_bounded_and_honors_root_delivery() {
         resumed_from: None,
         delivery_run_id: Some(delivery.clone()),
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     assert_eq!(
@@ -1487,3 +1484,6 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
     child.kill().await.assert_value();
     child.wait().await.assert_value();
 }
+
+#[path = "startup_tests.rs"]
+mod startup_tests;

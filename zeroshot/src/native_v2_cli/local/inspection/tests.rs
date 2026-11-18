@@ -65,6 +65,7 @@ async fn missing_suspended_workspace_does_not_suggest_checkpoint_resume() {
             delivery_run_id: None,
             successor_run_id: None,
             pending_restore: None,
+            workspace_checkpoints_discarded: false,
         };
         assert!(document.submission.runtime.workspace_checkpoints);
         std::fs::create_dir(&document.workspace).unwrap();
@@ -436,6 +437,7 @@ async fn steer_and_suspend_leave_a_lost_run_as_recorded() {
             openengine_cluster_protocol::RunSteerParams {
                 run_id: lost.id.clone(),
                 text: "direction".into(),
+                mode: openengine_cluster_protocol::SteeringMode::Standing,
             },
         )
         .await

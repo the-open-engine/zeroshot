@@ -52,7 +52,7 @@ async fn failure_only_choice_does_not_expand_unread_pending_outputs() {
 }
 
 #[tokio::test]
-async fn failure_only_choice_keeps_actual_guard_validation_and_assignment_ceiling() {
+async fn failure_only_choice_keeps_actual_guard_validation() {
     let mut nonexhaustive = pending_writes_before_failure_only_choice();
     nonexhaustive["root"]["children"][7]
         .as_object_mut()
@@ -77,18 +77,15 @@ async fn failure_only_choice_keeps_actual_guard_validation_and_assignment_ceilin
         GraphDiagnosticCode::ChoiceExhaustiveness,
     )
     .await;
-    let mut over_budget = pending_writes_before_failure_only_choice();
+    // Seven independent error controls (5^7 joint outcomes) are decided one control at a time.
+    let mut seven_controls = pending_writes_before_failure_only_choice();
     let mut guards = (0..6)
         .map(|i| errors(&format!("prepare_{i}")))
         .collect::<Vec<_>>();
     guards.push(errors("final_writer"));
-    over_budget["root"]["children"][7]["branches"][0]["when"] =
+    seven_controls["root"]["children"][7]["branches"][0]["when"] =
         json!({"kind":"any","guards":guards});
-    assert_graph_rejected_with(
-        &serde_json::from_value(over_budget).assert_value(),
-        GraphDiagnosticCode::CeilingExceeded,
-    )
-    .await;
+    assert_graph_accepted(&serde_json::from_value(seven_controls).assert_value()).await;
 }
 
 #[tokio::test]

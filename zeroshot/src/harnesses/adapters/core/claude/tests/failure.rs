@@ -207,7 +207,7 @@ async fn unsuccessful_result_returns_redacted_detail_without_duplicate_output() 
         "claude-error-result",
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"error-session"}'
 printf '%s%s\n' \
   '{"type":"result","subtype":"success","is_error":true,' \
@@ -239,7 +239,7 @@ async fn missing_terminal_result_preserves_process_and_stderr_detail() {
         "claude-missing-result-detail",
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf '%s%s\n' \
   '{"type":"stream_event","event":{"type":"content_block_delta",' \
   '"delta":{"type":"thinking_delta","thinking":"finished work"}}}'
@@ -263,7 +263,7 @@ async fn missing_terminal_result_with_successful_exit_preserves_stderr_detail() 
         "claude-missing-result-successful-exit-detail",
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf '%s%s\n' \
   '{"type":"stream_event","event":{"type":"content_block_delta",' \
   '"delta":{"type":"thinking_delta","thinking":"finished work"}}}'
@@ -284,7 +284,7 @@ async fn preterminal_session_conflict_records_authoritative_result_usage() {
         &workspace,
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-one"}'
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-two"}'
 printf '%s%s%s%s\n' \
@@ -394,7 +394,7 @@ async fn changed_session_across_retry_attempts_emits_a_specific_failure() {
         &workspace,
         r#"
 set -eu
-cat >/dev/null
+head -n 1 >/dev/null
 if [ -e first-attempt ]; then
   : > second-attempt
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-two"}'
@@ -424,7 +424,7 @@ async fn correction_requires_a_provider_session_identifier() {
     write_claude_script(
         &workspace,
         concat!(
-            "set -eu\ncat >/dev/null\n",
+            "set -eu\nhead -n 1 >/dev/null\n",
             "printf '%s%s\\n' \\\n",
             "  '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,' \\\n",
             "  '\"result\":\"done\"}'\n",
@@ -444,7 +444,7 @@ async fn reusable_session_requires_a_provider_session_identifier() {
     write_claude_script(
         &workspace,
         concat!(
-            "set -eu\ncat >/dev/null\n",
+            "set -eu\nhead -n 1 >/dev/null\n",
             "printf '%s%s\\n' \\\n",
             "  '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,' \\\n",
             "  '\"result\":\"{\\\"response\\\":\\\"done\\\"}\"}'\n",

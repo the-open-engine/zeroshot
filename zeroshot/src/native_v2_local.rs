@@ -404,11 +404,17 @@ pub fn build_local_process_candidate(
         .ok()
         .and_then(|memory| memory.as_ref())
         .map(|memory| memory.hooks.clone());
+    let failure = prepared.as_ref().err().map(|error| {
+        crate::active_memory::runtime::initialization_diagnostic(request.memory_storage, error)
+    });
     let runner = build_local_candidate_config(request, false, hooks)?;
     Ok(match prepared {
         Ok(Some(memory)) => memory.wrap(admitted, runner),
         Ok(None) => Arc::new(runner),
-        Err(_) => crate::active_memory::runtime::unavailable_memory(Arc::new(runner)),
+        Err(_) => crate::active_memory::runtime::unavailable_memory(
+            Arc::new(runner),
+            failure.expect("failed preparation has a diagnostic"),
+        ),
     })
 }
 
@@ -650,7 +656,7 @@ pub(crate) async fn check_lane_versions(
     runtime: &RuntimePlan,
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
-    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    preparation: Option<crate::native_v2_portable_controller::RuntimePreparation>,
 ) -> Result<(), LocalCompositionError> {
     check_lane_executables(runtime, native_environment, working_directory)?;
     let registry = crate::harnesses::HarnessRegistry::local();
@@ -676,7 +682,8 @@ pub(crate) async fn check_lane_versions(
                         native: &native,
                         search_path: &search_path,
                         workspace: working_directory,
-                        stopping: stopping.clone(),
+                        stopping: preparation.as_ref().map(|control| control.stopping.clone()),
+                        preparation_deadline: preparation.as_ref().map(|control| control.deadline),
                     },
                 )
                 .await

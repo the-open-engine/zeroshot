@@ -11,7 +11,7 @@ use tokio::process::{Child, Command};
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
-// Suspension includes checkpoint I/O and runtime cleanup, beyond a single CLI request.
+// Checkpoint I/O and runtime cleanup can outlast an individual CLI request.
 const SUSPENSION_TIMEOUT: Duration = Duration::from_secs(120);
 const DECLARED_KEY: &str = "local-declared-key";
 
@@ -214,9 +214,13 @@ impl LocalFixture {
     }
 
     pub(super) async fn output(&self, args: &[&str], mode: &str) -> Output {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let budget = match args.first().copied() {
+            Some("run" | "resume" | "answer" | "force-stop") => SUSPENSION_TIMEOUT,
+            _ => CLI_TIMEOUT,
+        };
+        let deadline = Instant::now() + budget;
         loop {
-            let started = timeout(CLI_TIMEOUT, self.command(args, mode).output())
+            let started = timeout_at(deadline, self.command(args, mode).output())
                 .await
                 .assert_value_with(&format!("local CLI deadline: {args:?}"));
             match started {
@@ -270,7 +274,7 @@ impl LocalFixture {
             self.runtime.to_str().assert_value_with("runtime path"),
         ];
         timeout(
-            CLI_TIMEOUT,
+            SUSPENSION_TIMEOUT,
             self.command_with_inline(&arguments, "finish", false)
                 .output(),
         )
@@ -281,7 +285,8 @@ impl LocalFixture {
 
     pub(super) async fn json(&self, args: &[&str], mode: &str) -> Value {
         let output = self.output(args, mode).await;
-        assert_success(&output, "local CLI JSON command");
+        let command = args.first().copied().unwrap_or("<empty>");
+        assert_success(&output, &format!("local CLI JSON command `{command}`"));
         serde_json::from_slice(&output.stdout).assert_value_with("local CLI JSON output")
     }
 
@@ -375,7 +380,7 @@ impl LocalFixture {
     }
 
     pub(super) async fn wait_running(&self, run_id: &str) -> Value {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let deadline = Instant::now() + SUSPENSION_TIMEOUT;
         loop {
             if let Some(status) = self.available_status(run_id, "block").await {
                 if status.assert_key("status").assert_key("phase") == "running"
@@ -394,25 +399,26 @@ impl LocalFixture {
     }
 
     pub(super) async fn wait_terminal(&self, run_id: &str, mode: &str, reason: &str) -> Value {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+        let mut last_status = None;
         loop {
             if let Some(status) = self.available_status(run_id, mode).await {
-                if terminal_result(&status)
-                    .is_some_and(|terminal| terminal.assert_key("reason") == reason)
-                {
+                if let Some(terminal) = terminal_result(&status) {
+                    assert_eq!(terminal.assert_key("reason"), reason, "{status}");
                     return status;
                 }
+                last_status = Some(status);
             }
             assert!(
                 Instant::now() < deadline,
-                "run did not finish with reason {reason}"
+                "run did not finish with reason {reason}; last status: {last_status:?}"
             );
             sleep(Duration::from_millis(30)).await;
         }
     }
 
     pub(super) async fn wait_succeeded(&self, run_id: &str, mode: &str) -> Value {
-        let deadline = Instant::now() + CLI_TIMEOUT;
+        let deadline = Instant::now() + SUSPENSION_TIMEOUT;
         let mut last_status = None;
         loop {
             if let Some(status) = self.available_status(run_id, mode).await {
@@ -682,10 +688,10 @@ printf 'declared-only\n' > "$PWD/environment-proof.txt"
 cat >/dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"local-thread"}'
 printf '%s\n' '{"type":"turn.started"}'
-if test "${FAKE_CODEX_MODE-}" = hold; then
+if test "${FAKE_CODEX_MODE-}" = hold || test "${FAKE_CODEX_MODE-}" = hold-fail; then
   while ! test -f "$PWD/release-turn"; do sleep 0.05; done
 fi
-if test "${FAKE_CODEX_MODE-}" = fail; then
+if test "${FAKE_CODEX_MODE-}" = fail || test "${FAKE_CODEX_MODE-}" = hold-fail; then
   printf '%s\n' '{"type":"turn.failed","error":{"message":"injected failure"}}'
   exit 1
 fi

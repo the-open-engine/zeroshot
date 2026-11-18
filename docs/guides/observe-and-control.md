@@ -77,6 +77,17 @@ Local inspection (`status`, `list`, `checkpoints`, `vectors`, `watch`, `logs` an
 retained history without taking recovery ownership or writing to the run directory. Finished and
 suspended runs need no controller and retain their usual exit codes.
 
+Each `status.activeExecutions` entry can include `startedAt`, the ledger recording time of that
+execution's `NodeStarted`. Watch notifications also include optional `recordedAt` for the event
+that produced the notification. Match the opaque `execution` selector across active sets to identify
+starts and settlements, including retries and simultaneous map items. Status remains a summary;
+completed execution timing is available through watch replay and the history API.
+
+These times are Unix milliseconds recorded by the ledger, not precise provider start/stop
+measurements. Events in one append transaction share a time, and `cursor` alone defines ordering
+and reconnection boundaries. Missing times in older ledgers stay omitted. Imported history carries
+its import time, not the time the original work ran. Log `timestamp` retains its producer meaning.
+
 For an unfinished local run whose controller does not answer, `status` and each `list` entry keep
 the recorded status and add an optional entry beside it:
 
@@ -155,6 +166,14 @@ empty path). Indices supplement execution identity without changing its opaque s
 Successful terminal results keep their existing representation.
 
 ## Resume event and log streams
+
+Codex, Claude, Copilot and Pi record native tool calls and completions in both logs and node
+transcripts by default, including tool identity, available call IDs, arguments, reported status
+and result excerpts. Missing status remains unknown. Known credentials are redacted before each
+entry is shortened. Each complete call entry and each completion entry is limited to 8 KiB,
+including its header and any visible truncation marker; large payloads retain their head and tail.
+Intermediate cumulative updates are omitted. These limits apply only to logs, so storage grows
+with tool count; they do not limit provider inputs, agent-visible results or total run storage.
 
 `watch` follows status events; `logs` follows safe provider and controller log records. Both accept
 an opaque cursor and resume strictly after it:
@@ -324,7 +343,14 @@ storage and advertise `openengine.workspace-checkpoints/v1`. They retain that re
 failed recovery lineage and delete it after a successful run. Force-stopping a local run also
 deletes the repository, together with the checkpoints listed by every run in its recovery lineage,
 so neither the original run nor its successors list checkpoints that can no longer be restored.
-Other lineages keep theirs. Platform exposes recovery through
+Local checkpoints never expire automatically. To free the space kept by a finished failed local
+run, use `zeroshot discard-workspace RUN_ID`. It deletes checkpoint data and lists for the whole
+recovery lineage while keeping the checkout, run directory, ledger, logs and delivery recovery
+state. A second call reports `discarded: false`. Plain resume still uses the current checkout,
+with workspace checkpoints disabled; checkpoint selection and `--discard-workspace-changes`
+are refused. A running or resuming lineage must be force-stopped first. An uncontinued suspension
+must also be force-stopped, and an interrupted restore must be completed by repeating its resume.
+Other lineages keep theirs. Named-target behavior is unchanged. Platform exposes recovery through
 authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
 original capsule is removed. Platform resolves declared connections from their original references.
 Direct-target resume reuses the original source connection authorization and resolves fresh values;
@@ -405,25 +431,26 @@ zeroshot steer RUN_ID --text-file direction.txt --target NAME
 printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin
 ```
 
-Supply exactly one text source. An admitted, running or suspended run accepts standing direction.
+Supply exactly one text source. An admitted, running or suspended run accepts direction.
 Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
-Every agent conversation, including reviewers, receives each steer at its next tool call or in its
-next prompt, whichever comes first, and once only except on Copilot, Pi and OpenCode as described
-below. It cannot revise a tool call already issued. On Claude
-Code, a tool call carries steers only while the returned context, Active Memory included, stays
-within 9,000 bytes, because Claude Code passes at most 10,000 characters inline; a larger steer, and
-any steer recorded after it, waits for that conversation's next prompt, where it arrives whole, so
-it may not arrive during the current turn. Tool
-calls made by Claude Code subagents never receive steers; the node's own conversation gets them at
-its next tool call or prompt. On Copilot, Pi and OpenCode a steer shown at a tool call does not
-stand in the conversation: Copilot applies it to the turn in progress without keeping it, and Pi
-and OpenCode show it inside a tool result, which a model may refuse to follow. Such a conversation
-receives the steer once more, with its next prompt. Direction
-takes precedence over authored instructions as guidance; permissions, output contracts, routing,
-runtime bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
-Steers stand for the rest of the run and its successors. Continued conversations keep receipts;
+With the default standing mode, every agent conversation, including reviewers, receives each steer
+at its next tool call or in its next prompt, whichever comes first. It cannot revise a tool call
+already issued. At a tool call the steer arrives as a user message of its own on Claude Code,
+Copilot, Pi and OpenCode: the harness hands it to the model after the tool call in progress and
+keeps it in the conversation. It is never placed inside a tool result, which a model may refuse to
+follow. Codex has no such channel and receives the steer with the tool call's hook context, which
+it keeps. A steer of any permitted size arrives whole either way. Subagents do not receive steers:
+on Claude Code a message sent while a subagent works reaches the node's own conversation when the
+subagent returns. A message the harness never shows in the conversation is not counted as
+received, and the steer is delivered with that conversation's next prompt instead. A steer that
+reached a conversation is not delivered to it a second time, in either mode. A small model can
+take a large message that arrives while it works for tool output and ignore it; steer again if a
+direction was not followed. Once messages are consumed per node instance. Direction takes
+precedence over authored instructions as guidance; permissions, output contracts, routing, runtime
+bindings, graph hashes and limits remain unchanged. Delivery works with Active Memory off.
+Standing steers last for the rest of the run and its successors. Continued conversations keep receipts;
 new conversations receive the standing direction. A lost acknowledgement can cause repeat delivery.
 
 Text must be nonblank UTF-8, at most 262,144 bytes, with no NUL or control characters except tab,
@@ -431,9 +458,12 @@ newline and carriage return. Text is stored and shown as given: **do not put sec
 
 Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
-byte lengths, character-safe excerpts and receiving execution references. A prompt receipt appears
-when the turn carrying the steer starts, a tool-call receipt once the carrier acknowledges. If that
-turn fails, the conversation's next prompt carries the steer again, also in a successor.
+byte lengths, character-safe excerpts and receiving execution references. A standing prompt receipt
+is recorded when the turn carrying the steer starts and stays provisional until the turn succeeds; a
+failed turn offers the steer in the next prompt, including in a successor. A once prompt receipt is
+recorded after successful provider completion. A tool-call receipt appears when the harness shows
+the message in the conversation, or on Codex when its hook has returned. A receipt records that
+the conversation holds the steer, not that the model followed it.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:
 
@@ -443,4 +473,47 @@ zeroshot vectors show RUN_ID STEER_ID
 ```
 
 The record includes `steer` and `steer_receipt` entries in event order. Add `--target NAME` to these
-commands for a direct target advertising steering and run vectors.
+commands for a direct target advertising steering and run vectors. Tool-call receipts record a
+message the harness showed (on Codex, acknowledged hook context), while once prompt receipts record
+successful provider completion. Standing prompt receipts may be provisional, as described above.
+
+### Send a peer message
+
+A graph can declare [networks](../reference/cluster/graph.md#peer-networks) for selected agents.
+An authorized publisher sends a message from its own running local execution:
+
+```console
+zeroshot steer "$ZEROSHOT_RUN_ID" --network review "The parser fix is ready for review."
+zeroshot steer "$ZEROSHOT_RUN_ID" --network review --network implementers --mode standing \
+  "Keep the Windows path in scope."
+```
+
+Repeat `--network` to address several networks. The command accepts the same text, file and stdin
+sources as human steering. Each recipient receives the message once even when it belongs to
+several selected networks. All mapped instances of a member node participate, including other
+instances of the publishing node. The originating instance never receives its own message,
+even after a retry, a fresh provider conversation or a resume.
+
+Network messages default to `--mode once`: each recipient node instance receives one confirmed
+delivery, and that receipt survives fresh provider conversations and successors. Use `--mode standing`
+to keep guidance for the rest of the run and its successors. Fresh conversations receive it again.
+Human steering without `--network` keeps its standing default; `--mode once` selects a one-off
+human direction.
+
+Publishers receive their authorized network names and publication instructions in private context.
+The host supplies an execution-scoped capability and records the origin itself; environment labels
+do not grant publication access. Members outside the publisher set can receive messages but cannot
+send them. The CLI and local RPC reject agent calls to the human broadcast form, including calls
+with cleared execution labels or another local run as their destination. A caller outside the
+authorized execution cannot publish a network message. Native execution permissions, including
+OS account access, remain in effect.
+
+Pending messages enter a recipient's next prompt or arrive at its next tool call, on the same
+carriers as human steering and never inside a tool result. Sequential recipients
+receive them once they start. A failed record read leaves the message pending for the next delivery
+point. Publication never starts an agent, restarts a recipient
+or wakes a suspended run. Peer messages carry their source as context;
+they do not override authored instructions or grant permissions. Network destinations, mode and
+origin remain in the vector record alongside the text and delivery receipts. Lost acknowledgements
+can cause repeat delivery before the host confirms receipt. If publication reports an unknown
+outcome, inspect the run vectors before sending the message again.

@@ -146,9 +146,17 @@ pub(super) fn primary_graph_events(
     primary: PrimaryGraphCompletion,
 ) -> Result<Vec<RunEvent>, RunLedgerError> {
     let (stream, mut message) = match &primary.result {
-        TerminalResult::Failed { reason, .. } => (
+        TerminalResult::Failed { reason, context } => (
             SafeLogStream::Error,
-            format!("Run failed: {}", reason.as_str()),
+            match context
+                .as_ref()
+                .and_then(|context| context.primary.as_ref())
+            {
+                Some(cause) if reason.as_str() == "unhandled" => {
+                    format!("Run failed: unhandled: {}", cause.message.as_str())
+                }
+                _ => format!("Run failed: {}", reason.as_str()),
+            },
         ),
         TerminalResult::Succeeded { .. } => (SafeLogStream::System, "Run succeeded".to_owned()),
     };
@@ -205,7 +213,7 @@ pub(crate) fn terminal_failure_events(
     Ok(events)
 }
 
-fn error_log(
+pub(super) fn error_log(
     execution: Option<crate::full_v1_reducer::ExecutionId>,
     message: String,
     diagnostic: Option<FailureDiagnosticKind>,

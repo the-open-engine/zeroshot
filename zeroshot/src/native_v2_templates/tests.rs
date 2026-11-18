@@ -21,6 +21,9 @@ use support::*;
 #[path = "tests/continuity.rs"]
 mod continuity;
 
+#[path = "tests/unhandled.rs"]
+mod unhandled;
+
 #[test]
 fn built_in_templates_have_no_terminals_inside_parallel_branches() {
     for template in BuiltinGraphTemplate::all() {
@@ -275,7 +278,7 @@ async fn rejected_parallel_reviews_dispatch_repair_with_both_diagnostics() {
 }
 
 fn crashed_parallel_review_history() -> Vec<DurableExecution> {
-    let review_input = json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]});
+    let review_input = default_review_input();
     vec![
         settled_worker(),
         settled_review(
@@ -316,7 +319,7 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
         Decision::Dispatch { occurrence, attempt, input, .. }
             if occurrence.node.as_str() == "code"
                 && attempt.get() == MAX_AGENT_VERIFIER_ATTEMPTS
-                && input == &json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]})
+                && input == &default_review_input()
     )));
     assert!(reduction.terminal.is_none());
 
@@ -326,7 +329,7 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
             node_instance: 3,
             node: "code",
             settled_at: 5,
-            input: json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]}),
+            input: default_review_input(),
         },
         ACCEPTED_LABEL,
         "implementation sound",
@@ -363,7 +366,7 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
 #[tokio::test]
 async fn repeatedly_crashed_parallel_review_fails_after_the_retry_limit() {
     let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
-    let review_input = json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]});
+    let review_input = default_review_input();
     let mut history = crashed_parallel_review_history();
     history.push(settled_failure_attempt(
         SettledExecutionSpec {
@@ -389,7 +392,7 @@ async fn repeatedly_crashed_parallel_review_fails_after_the_retry_limit() {
 #[tokio::test]
 async fn accepted_second_review_round_ignores_stale_sibling_verdicts() {
     let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
-    let review_input = json!({"task":"repair checkout","deliveryFeedback":"","reviewResponses":[]});
+    let review_input = default_review_input();
     let mut history = vec![
         settled_worker(),
         settled_review(2, "acceptance", ACCEPTED_LABEL, "requirements met"),
@@ -508,32 +511,34 @@ async fn merge_delivery_repairs_recoverable_outcomes_then_returns_the_receipt() 
 
 #[tokio::test]
 async fn delivery_infrastructure_failure_never_dispatches_code_repair() {
-    let (verified, initial_input) = verified_software_template(TemplateDelivery::Merge).await;
-    let mut history = accepted_review_history(TemplateDelivery::Merge);
-    history.push(settled_failure(
-        SettledExecutionSpec {
-            execution: 4,
-            node_instance: 4,
-            node: DELIVERY_NODE,
-            settled_at: 4,
-            input: delivery_input(),
-        },
-        WorkerErrorCode::Crash,
-    ));
+    for code in [WorkerErrorCode::Crash, WorkerErrorCode::Refusal] {
+        let (verified, initial_input) = verified_software_template(TemplateDelivery::Merge).await;
+        let mut history = accepted_review_history(TemplateDelivery::Merge);
+        history.push(settled_failure(
+            SettledExecutionSpec {
+                execution: 4,
+                node_instance: 4,
+                node: DELIVERY_NODE,
+                settled_at: 4,
+                input: delivery_input(),
+            },
+            code,
+        ));
 
-    let reduction = reduce(&verified, &initial_input, &history);
-    assert_eq!(
-        reduction.terminal,
-        Some(TerminalProjection::Failed {
-            context: None,
-            reason: "delivery_failed".parse().assert_value()
-        })
-    );
-    assert!(reduction.decisions.iter().all(|decision| !matches!(
-        decision,
-        Decision::Dispatch { occurrence, .. }
-            if occurrence.node.as_str() == "worker"
-    )));
+        let reduction = reduce(&verified, &initial_input, &history);
+        assert_eq!(
+            reduction.terminal,
+            Some(TerminalProjection::Failed {
+                context: None,
+                reason: "delivery_failed".parse().assert_value()
+            })
+        );
+        assert!(reduction.decisions.iter().all(|decision| !matches!(
+            decision,
+            Decision::Dispatch { occurrence, .. }
+                if occurrence.node.as_str() == "worker"
+        )));
+    }
 }
 
 async fn assert_recoverable_delivery(recoverable: &str) {
@@ -590,8 +595,7 @@ fn assert_review_repair_preserves_delivery_feedback(
     history: &mut Vec<DurableExecution>,
     delivery_feedback: &str,
 ) {
-    let review_input =
-        json!({"task":"repair checkout","deliveryFeedback":delivery_feedback,"reviewResponses":[]});
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":delivery_feedback,"reviewResponses":[],"reviewContext":REVIEW_CONTEXT});
     let reviews = reduce(verified, initial_input, history);
     assert_dispatch(&reviews, "acceptance", &review_input);
     assert_dispatch(&reviews, "code", &review_input);
@@ -651,7 +655,7 @@ fn assert_repaired_reviews_then_merge(
     assert_dispatched_together(&repaired, &["acceptance", "code"]);
     let review_input = json!({
         "task":"repair checkout",
-        "deliveryFeedback":delivery_feedback,"reviewResponses":[]
+        "deliveryFeedback":delivery_feedback,"reviewResponses":[],"reviewContext":REVIEW_CONTEXT
     });
     assert_dispatch(&repaired, "acceptance", &review_input);
     assert_dispatch(&repaired, "code", &review_input);
