@@ -273,10 +273,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   check reads only the selectors its condition and their join, loop and execution rules mention,
   labels it cannot tell apart share one class, and controls no rule connects add to the work
   instead of multiplying it. Never list joint outcomes of unrelated nodes or share a work budget
-  between checks: whether one condition is valid must not depend on the rest of the graph. A map
-  item's joint outcomes are still listed per check and folded into saturated joint counts (65,536
-  count states per map); one check may take 1,048,576 search steps, a backstop reported at the
-  condition being decided.
+  between checks: whether one condition is valid must not depend on the rest of the graph. Parts
+  of a map item that no rule ties together are folded into saturated counts separately and meet
+  only in the item count (`count_layers`); tied parts, the items of a map nested in another
+  item, and an item with a part that takes more than 64 item counts to settle are listed jointly
+  (65,536 count states per part). One check may take 1,048,576 search steps, a backstop reported
+  at the condition being decided.
   Joins settle at the earliest actual history prefix proving success or impossibility, and use
   actual settled outcomes and completed candidate facts. Pending candidates remain
   potential contributors; missing foreign facts and unfinished loop outcomes stay unknown.

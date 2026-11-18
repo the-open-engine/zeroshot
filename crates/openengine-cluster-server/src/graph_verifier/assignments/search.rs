@@ -21,6 +21,49 @@ pub(in crate::graph_verifier) struct Scope {
     first: u32,
     variables: Vec<(u32, Option<Gate>)>,
     masks: BTreeMap<NodeName, u32>,
+    /// The check's own scope, as opposed to one item of an enclosing map.
+    root: bool,
+}
+
+/// One item condition walked through the item's variables. `narrowed[i]` is the single
+/// condition every legal outcome is left with before variable `i`, where there is one, and
+/// `forced[i]` the single value legal outcomes give variable `i`, where there is one.
+struct Passage {
+    narrowed: Vec<Option<Ref>>,
+    forced: Vec<Option<usize>>,
+    /// One value per variable created since the item began. Forced variables hold their
+    /// value; the others are scratch for the part being listed.
+    values: Vec<usize>,
+}
+
+/// A run of an item's variables that no rule ties to the rest, with the selectors read
+/// through it and their count states. Its variable exists once the states are known.
+struct Part {
+    range: std::ops::Range<usize>,
+    counts: CountStates,
+    variable: u32,
+}
+
+/// One map's items folded: the nodes of the item condition that read enclosing controls, the
+/// item conditions those leave, the parts, and per condition the states the parts reach by
+/// number of items. `count` picks that number where it matters.
+struct Folded {
+    enclosing: Vec<Ref>,
+    conditions: Vec<Ref>,
+    parts: Vec<Part>,
+    layers: Vec<CountLayers>,
+    width: usize,
+    count: Option<u32>,
+}
+
+impl Part {
+    fn new(range: std::ops::Range<usize>, keys: Vec<SelectorKey>) -> Self {
+        Self {
+            range,
+            counts: CountStates::new(keys),
+            variable: 0,
+        }
+    }
 }
 
 impl Scope {
@@ -53,6 +96,73 @@ impl Scope {
     }
 }
 
+/// Splits an item's variables where every item condition has narrowed to one condition, and
+/// keeps together what one selector is read through. A variable that each condition forces
+/// to one value ties nothing together: whoever reads it finds that value filled in.
+fn parts(body: &ScopePlan<'_>, item: &Scope, passages: &[(Ref, Passage)]) -> Vec<Part> {
+    let positions = item
+        .variables
+        .iter()
+        .enumerate()
+        .map(|(position, (variable, _))| (*variable, position))
+        .collect::<BTreeMap<_, _>>();
+    let varies = |position: &usize| {
+        passages
+            .iter()
+            .any(|(_, passage)| passage.forced[*position].is_none())
+    };
+    // reach[p]: the last position that some selector read at `p` is also read through.
+    let mut reach = (0..item.variables.len()).collect::<Vec<_>>();
+    // The first varying position each selector is read at, or its own when none varies.
+    let mut homes = BTreeMap::<usize, Vec<SelectorKey>>::new();
+    for key in &body.keys {
+        let reader = &item.controls[key];
+        let gate = reader.gate.as_ref().map(|(gate, _)| *gate);
+        let read = [
+            Some(reader.variable),
+            gate,
+            item.masks.get(&key.name).copied(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|variable| positions[&variable])
+        .filter(varies);
+        let (low, high) = read.fold((None, None), |(low, high), position| {
+            (
+                Some(low.map_or(position, |low: usize| low.min(position))),
+                Some(high.map_or(position, |high: usize| high.max(position))),
+            )
+        });
+        if let (Some(low), Some(high)) = (low, high) {
+            reach[low] = reach[low].max(high);
+        }
+        let home = low.unwrap_or(positions[&reader.variable]);
+        homes.entry(home).or_default().push(key.clone());
+    }
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut read_through = 0;
+    for (position, reach) in reach.into_iter().enumerate() {
+        read_through = read_through.max(reach);
+        let end = position + 1;
+        let narrowed = passages
+            .iter()
+            .all(|(_, passage)| passage.narrowed[end].is_some());
+        if end < item.variables.len() && (read_through >= end || !narrowed) {
+            continue;
+        }
+        let keys = homes
+            .range(start..end)
+            .flat_map(|(_, keys)| keys.iter().cloned())
+            .collect::<Vec<_>>();
+        if !keys.is_empty() {
+            parts.push(Part::new(start..end, keys));
+        }
+        start = end;
+    }
+    parts
+}
+
 struct Status {
     emits: bool,
     executed: bool,
@@ -77,6 +187,7 @@ impl Search<'_, '_> {
             first: self.diagram.variables(),
             variables: Vec::new(),
             masks: BTreeMap::new(),
+            root: plan.owner.is_none(),
         };
         let mut names = plan.local.iter().collect::<Vec<_>>();
         names.sort_by_key(|(name, _)| self.inputs.nodes.get(*name).map(|info| info.ordinal));
@@ -217,100 +328,232 @@ impl Search<'_, '_> {
         Some(())
     }
 
-    /// A nested map contributes one variable: the saturated counts its items can add up to.
-    /// The counts depend on enclosing controls only through the distinct conditions those
-    /// controls leave for one item, so each such condition is folded once.
+    /// A map contributes the saturated counts its items can add up to. The counts depend on
+    /// enclosing controls only through the distinct conditions those controls leave for one
+    /// item, so each such condition is folded once. Parts of an item that no rule ties
+    /// together are folded on their own and meet only in the number of items.
     fn map(&mut self, map: &MapNode, body: &ScopePlan<'_>, scope: &mut Scope) -> Option<()> {
-        let keys = body.keys.iter().cloned().collect::<Vec<_>>();
         let item = self.scope(body, &scope.controls)?;
+        let folded = self.folded(body, &item, scope.root)?;
+        let mut relation = self.relation(&folded, item.legal)?;
+        if let Some(correlation) = self.inputs.execution_correlations.get(&map.name) {
+            let present = self
+                .diagram
+                .predicate(&scope.controls, &correlation.presence)?;
+            let mut absent = vec![self.members(&folded.parts, |_, state| state == 0)?];
+            absent.resize(folded.width, NEVER);
+            let absent = self.counted(folded.count, absent)?;
+            relation = self.diagram.choose(present, relation, absent)?;
+        }
+        scope.rules.push(relation);
+        scope
+            .variables
+            .extend(folded.count.map(|count| (count, None)));
+        for part in folded.parts {
+            scope.variables.push((part.variable, None));
+            for key in &part.counts.keys {
+                let controls = part.counts.states.iter().map(|state| state[key].clone());
+                let reader = Reader {
+                    gate: None,
+                    variable: part.variable,
+                    controls: controls.collect(),
+                };
+                scope.controls.insert(key.clone(), reader);
+            }
+        }
+        Some(())
+    }
+
+    /// Folds one item under every condition its enclosing controls leave for it, and gives
+    /// the count states their variables.
+    fn folded(&mut self, body: &ScopePlan<'_>, item: &Scope, split: bool) -> Option<Folded> {
         let enclosing = self.diagram.above(item.legal, item.first)?;
         let mut left = BTreeSet::from([item.legal]);
         for node in &enclosing {
             left.extend(self.diagram.branches(*node).iter().copied());
         }
         left.retain(|node| self.diagram.variable_of(*node) >= item.first);
-        // State zero is the map without a contributing item.
-        let mut states = vec![empty_outcome(&keys)];
-        let mut known = BTreeMap::from([(states[0].clone(), 0)]);
-        let mut reachable = BTreeMap::new();
+        // Parts are looked for in the check's own scope only. One level up, an inner map's
+        // count variable and parts would be one part of the outer item again.
+        let mut passages = Vec::new();
         for node in left {
-            let outcomes = self.rows(node, &item, &keys)?;
-            let counts = aggregate_assignments_from_outcomes(
-                AggregateCounts {
-                    keys: &keys,
-                    outcomes: &outcomes,
-                    count_limits: self.inputs.count_limits,
-                },
-                &mut self.diagram,
-            )?;
-            let mut members = BTreeSet::new();
-            for state in counts {
-                let next = states.len();
-                members.insert(*known.entry(state.clone()).or_insert_with(|| {
-                    states.push(state);
-                    next
-                }));
+            passages.push((node, self.passage(node, item, split)?));
+        }
+        let whole = || {
+            let keys = body.keys.iter().cloned().collect();
+            vec![Part::new(0..item.variables.len(), keys)]
+        };
+        let mut parts = match split {
+            true => parts(body, item, &passages),
+            false => whole(),
+        };
+        let layers = match self.fold(item, &mut passages, &mut parts)? {
+            Some(layers) => layers,
+            // A part depends on the exact number of items for too long: fold the item whole.
+            // One part alone never depends on that number, so the second attempt settles.
+            None => {
+                parts = whole();
+                self.fold(item, &mut passages, &mut parts)??
             }
-            reachable.insert(node, members);
+        };
+        // Item conditions whose parts depend on the number of items share a count variable.
+        let width = layers.iter().map(Vec::len).max()?;
+        let count = match width {
+            1 => None,
+            _ => Some(self.diagram.variable(width)?),
+        };
+        for part in &mut parts {
+            part.variable = self.diagram.variable(part.counts.states.len())?;
         }
-        let variable = self.diagram.variable(states.len())?;
+        Some(Folded {
+            enclosing,
+            conditions: passages.into_iter().map(|(node, _)| node).collect(),
+            parts,
+            layers,
+            width,
+            count,
+        })
+    }
+
+    /// Holds where the enclosing controls leave an item condition and the parts are in
+    /// states that condition reaches with some number of items.
+    fn relation(&mut self, folded: &Folded, legal: Ref) -> Option<Ref> {
         let mut related = BTreeMap::new();
-        for (node, members) in reachable {
-            let member = (0..states.len()).map(|state| constant(members.contains(&state)));
-            related.insert(node, self.diagram.test(variable, member)?);
+        for (node, entries) in folded.conditions.iter().zip(&folded.layers) {
+            // The count variable only picks an entry of the condition that applies, so
+            // values past that condition's last entry are never taken.
+            let mut reached = Vec::with_capacity(folded.width);
+            for entry in entries {
+                let members = |part: usize, state: usize| entry[part].contains(&state);
+                reached.push(self.members(&folded.parts, members)?);
+            }
+            reached.resize(folded.width, NEVER);
+            related.insert(*node, self.counted(folded.count, reached)?);
         }
-        for node in enclosing {
+        for node in &folded.enclosing {
             let branches = self
                 .diagram
-                .branches(node)
+                .branches(*node)
                 .iter()
                 .map(|branch| related[branch])
                 .collect::<Vec<_>>();
-            let tested = self.diagram.variable_of(node);
-            related.insert(node, self.diagram.test(tested, branches)?);
+            let tested = self.diagram.variable_of(*node);
+            related.insert(*node, self.diagram.test(tested, branches)?);
         }
-        let mut relation = related[&item.legal];
-        if let Some(correlation) = self.inputs.execution_correlations.get(&map.name) {
-            let present = self
-                .diagram
-                .predicate(&scope.controls, &correlation.presence)?;
-            let absent = (0..states.len()).map(|state| constant(state == 0));
-            let absent = self.diagram.test(variable, absent)?;
-            relation = self.diagram.choose(present, relation, absent)?;
-        }
-        scope.rules.push(relation);
-        scope.variables.push((variable, None));
-        for key in keys {
-            let controls = states.iter().map(|state| state[&key].clone()).collect();
-            let reader = Reader {
-                gate: None,
-                variable,
-                controls,
-            };
-            scope.controls.insert(key, reader);
-        }
-        Some(())
+        Some(related[&legal])
     }
 
-    /// The distinct outcomes one item shows its map under `condition`: every legal joint
-    /// value of the item's own variables, read through `keys`.
+    /// Holds where every part is in a state `contains` accepts.
+    fn members(&mut self, parts: &[Part], contains: impl Fn(usize, usize) -> bool) -> Option<Ref> {
+        let mut members = Vec::with_capacity(parts.len());
+        for (index, part) in parts.iter().enumerate() {
+            let states = part.counts.states.len();
+            self.diagram.charge(1 + states / 16)?;
+            let member = (0..states).map(|state| constant(contains(index, state)));
+            members.push(self.diagram.test(part.variable, member)?);
+        }
+        self.diagram.all(members)
+    }
+
+    /// Holds where the number of items, as far as it matters, selects a condition that holds.
+    fn counted(&mut self, count: Option<u32>, reached: Vec<Ref>) -> Option<Ref> {
+        match count {
+            Some(count) => self.diagram.test(count, reached),
+            None => reached.first().copied(),
+        }
+    }
+
+    /// Walks one item condition through the item's variables, or only sets up the values
+    /// for listing the item whole.
+    fn passage(&mut self, condition: Ref, item: &Scope, walk: bool) -> Option<Passage> {
+        let slots = item.slot(self.diagram.variables());
+        self.diagram.charge(1 + slots / 16)?;
+        let mut passage = Passage {
+            narrowed: vec![Some(condition)],
+            forced: Vec::new(),
+            values: vec![0; slots],
+        };
+        if !walk {
+            return Some(passage);
+        }
+        let mut open = BTreeSet::from([condition]);
+        open.remove(&NEVER);
+        for (variable, _) in &item.variables {
+            let mut below = BTreeSet::new();
+            let mut live = BTreeSet::new();
+            for node in &open {
+                self.diagram
+                    .charge(1 + self.diagram.domain(*variable) / 16)?;
+                for index in 0..self.diagram.domain(*variable) {
+                    let next = self.diagram.follow(*node, *variable, index);
+                    if next != NEVER {
+                        below.insert(next);
+                        live.insert(index);
+                    }
+                }
+            }
+            let forced = live.first().copied().filter(|_| live.len() == 1);
+            passage.values[item.slot(*variable)] = forced.unwrap_or(0);
+            passage.forced.push(forced);
+            // No legal outcome at all narrows to the condition that never holds.
+            passage.narrowed.push(match below.len() {
+                0 => Some(NEVER),
+                1 => below.first().copied(),
+                _ => None,
+            });
+            open = below;
+        }
+        Some(passage)
+    }
+
+    /// The count states each item condition lets the parts reach, by number of items. The
+    /// inner `None` says the parts are not worth folding apart.
+    fn fold(
+        &mut self,
+        item: &Scope,
+        passages: &mut [(Ref, Passage)],
+        parts: &mut [Part],
+    ) -> Option<Option<Vec<CountLayers>>> {
+        let mut folded = Vec::with_capacity(passages.len());
+        for (_, passage) in passages {
+            let mut outcomes = Vec::with_capacity(parts.len());
+            for part in parts.iter() {
+                outcomes.push(self.rows(item, part, passage)?);
+            }
+            let mut read = parts
+                .iter_mut()
+                .zip(outcomes)
+                .map(|(part, outcomes)| PartOutcomes::new(&mut part.counts, outcomes))
+                .collect::<Vec<_>>();
+            let layers = count_layers(&mut read, self.inputs.count_limits, &mut self.diagram)?;
+            let Some(layers) = layers else {
+                return Some(None);
+            };
+            folded.push(layers);
+        }
+        Some(Some(folded))
+    }
+
+    /// The distinct outcomes one item shows its map through one part: every legal joint
+    /// value of the part's variables under the item condition, read through its selectors.
     fn rows(
         &mut self,
-        condition: Ref,
         item: &Scope,
-        keys: &[SelectorKey],
+        part: &Part,
+        passage: &mut Passage,
     ) -> Option<Vec<Assignment>> {
-        let mut values = vec![0; item.slot(self.diagram.variables())];
+        let keys = &part.counts.keys;
         let mut rows = BTreeSet::new();
-        // Depth-first over the item's variables: the condition left and the next value to try.
-        let mut stack = vec![(condition, 0)];
+        // Depth-first over the part's variables: the condition left and the next value to try.
+        let mut stack = vec![(passage.narrowed[part.range.start]?, 0)];
         while let Some((node, next)) = stack.last().copied() {
             if node == NEVER {
                 stack.pop();
                 continue;
             }
-            let Some((variable, gate)) = item.variables.get(stack.len() - 1) else {
-                let mut row = item.outcome(keys, &values);
+            let position = part.range.start + stack.len() - 1;
+            let Some((variable, gate)) = item.variables[..part.range.end].get(position) else {
+                let mut row = item.outcome(keys, &passage.values);
                 normalize_outcome_labels(
                     std::slice::from_mut(&mut row),
                     self.inputs.label_classes,
@@ -324,7 +567,7 @@ impl Search<'_, '_> {
                 continue;
             };
             // A node that does not emit leaves its label variables without effect.
-            let silent = item.silent(gate.as_ref(), &values);
+            let silent = item.silent(gate.as_ref(), &passage.values);
             if next
                 == if silent {
                     1
@@ -339,13 +582,18 @@ impl Search<'_, '_> {
             if let Some(top) = stack.last_mut() {
                 top.1 += 1;
             }
-            values[item.slot(*variable)] = next;
+            passage.values[item.slot(*variable)] = next;
             let below = if silent {
                 node
             } else {
                 self.diagram.follow(node, *variable, next)
             };
             stack.push((below, 0));
+        }
+        // Other parts read this part's forced variables: leave those at their value.
+        for position in part.range.clone() {
+            let forced = passage.forced.get(position).copied().flatten();
+            passage.values[item.slot(item.variables[position].0)] = forced.unwrap_or(0);
         }
         Some(rows.into_iter().collect())
     }

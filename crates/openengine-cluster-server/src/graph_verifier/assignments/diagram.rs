@@ -3,7 +3,7 @@
 //! A diagram is one condition over the controls it reads. Equal sub-conditions are stored
 //! once, so conditions over unrelated controls add their sizes instead of multiplying them.
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::FULL_V1_MAX_GUARD_SEARCH_STEPS;
 
@@ -268,23 +268,59 @@ impl Diagram {
         count: u64,
         conditions: &[Ref],
     ) -> Option<Ref> {
-        let total = conditions.len();
-        let count = usize::try_from(count).unwrap_or(usize::MAX);
-        if count > total {
-            return Some(NEVER);
-        }
-        // held[needed]: at least `needed` of the conditions folded so far hold. Folding starts
-        // from the last condition for the same reason `all` starts from the deepest.
-        let mut held = vec![NEVER; count + 1];
-        held[0] = ALWAYS;
-        for (folded, condition) in conditions.iter().rev().enumerate() {
-            // Thresholds the remaining conditions cannot lift to `count` are never read.
-            let lowest = count.saturating_sub(total - folded - 1).max(1);
-            for needed in (lowest..=count.min(folded + 1)).rev() {
-                held[needed] = self.choose(*condition, held[needed - 1], held[needed])?;
+        // Equal conditions hold together, so each counts once with its multiplicity. One that
+        // always holds lowers the count; one that never holds drops out.
+        let mut count = usize::try_from(count).unwrap_or(usize::MAX);
+        let mut known = HashMap::<Ref, usize>::new();
+        let mut weighted = Vec::<(Ref, usize)>::new();
+        for condition in conditions {
+            match *condition {
+                ALWAYS => count = count.saturating_sub(1),
+                NEVER => {}
+                condition => match known.entry(condition) {
+                    Entry::Occupied(position) => weighted[*position.get()].1 += 1,
+                    Entry::Vacant(position) => {
+                        position.insert(weighted.len());
+                        weighted.push((condition, 1));
+                    }
+                },
             }
         }
-        Some(held[count])
+        // possible[i]: how many of the conditions from `i` on can hold together at most.
+        let mut possible = vec![0_usize; weighted.len() + 1];
+        for (position, (_, weight)) in weighted.iter().enumerate().rev() {
+            possible[position] = possible[position + 1] + weight;
+        }
+        if count == 0 || count > possible[0] {
+            return Some(constant(count == 0));
+        }
+        // needs[i]: the counts the conditions from `i` on may still have to supply.
+        let mut needs = vec![BTreeSet::from([count])];
+        for (position, (_, weight)) in weighted.iter().enumerate() {
+            let mut next = BTreeSet::new();
+            for need in &needs[position] {
+                next.extend([*need, need.saturating_sub(*weight)]);
+            }
+            next.retain(|need| *need > 0 && *need <= possible[position + 1]);
+            self.charge(next.len())?;
+            needs.push(next);
+        }
+        // Folding starts from the last condition for the same reason `all` starts from the
+        // deepest. `held` maps a count to "the conditions folded so far supply it".
+        let mut held = BTreeMap::new();
+        for (position, (condition, weight)) in weighted.iter().enumerate().rev() {
+            let supplied = |need: usize| match need {
+                0 => ALWAYS,
+                need => held.get(&need).copied().unwrap_or(NEVER),
+            };
+            let mut folded = BTreeMap::new();
+            for need in &needs[position] {
+                let then = supplied(need.saturating_sub(*weight));
+                folded.insert(*need, self.choose(*condition, then, supplied(*need))?);
+            }
+            held = folded;
+        }
+        Some(held.get(&count).copied().unwrap_or(NEVER))
     }
 }
 

@@ -337,7 +337,8 @@ impl Analyzer<'_> {
 
 /// Every set of branches that can qualify together with at least `required` members, and
 /// whether some legal outcome qualifies fewer. Promotion guarantees depend on the order of
-/// these sets, so they are listed; the list is bounded by the join's own branches.
+/// these sets, so they are listed; the list is bounded by the join's own branches, and
+/// writing it out is search work like any other.
 fn completing_sets(
     proof: &mut ControlProof,
     qualifying: &[CompletionPredicate],
@@ -350,27 +351,48 @@ fn completing_sets(
     let enough = proof.diagram.at_least(required, &qualifying)?;
     let short = proof.diagram.not(enough)?;
     let unreachable = proof.possible(short)?;
+    // A branch that always qualifies is in every set and one that never does is in none,
+    // so only the others split the outcomes.
+    let (settled, undecided): (Vec<_>, Vec<_>) = qualifying
+        .iter()
+        .copied()
+        .enumerate()
+        .partition(|(_, branch)| matches!(*branch, ALWAYS | NEVER));
+    let always = settled
+        .iter()
+        .filter_map(|(branch, qualifies)| (*qualifies == ALWAYS).then_some(*branch))
+        .collect::<Vec<_>>();
     let mut sets = Vec::new();
-    // Legal outcomes still open, the next branch to decide, and the branches qualified so far.
-    let mut open = vec![(proof.diagram.and(proof.legal, enough)?, 0, BTreeSet::new())];
-    while let Some((outcomes, next, members)) = open.pop() {
+    // The undecided branches that qualify in the outcomes being split.
+    let mut members = Vec::new();
+    // Legal outcomes still open, the next branch to decide, and how many qualified so far.
+    let mut open = vec![(proof.diagram.and(proof.legal, enough)?, 0, 0)];
+    while let Some((outcomes, next, qualified)) = open.pop() {
         if outcomes == NEVER {
             continue;
         }
-        let Some(branch) = qualifying.get(next) else {
-            sets.push(members);
+        members.truncate(qualified);
+        let Some((branch, qualifies)) = undecided.get(next).copied() else {
+            // Listing a set copies its members; four members weigh one search step.
+            proof
+                .diagram
+                .charge(1 + (always.len() + members.len()) / 4)?;
+            sets.push(always.iter().chain(&members).copied().collect());
             if sets.len() as u64 > FULL_V1_MAX_GUARD_ASSIGNMENTS {
                 return None;
             }
             continue;
         };
-        let failed = proof.diagram.not(*branch)?;
-        let without = proof.diagram.and(outcomes, failed)?;
-        let with = proof.diagram.and(outcomes, *branch)?;
-        let mut joined = members.clone();
-        joined.insert(next);
-        open.push((without, next + 1, members));
-        open.push((with, next + 1, joined));
+        proof.diagram.charge(1)?;
+        let failed = proof.diagram.not(qualifies)?;
+        open.push((proof.diagram.and(outcomes, failed)?, next + 1, qualified));
+        // Taken next, so the branch is still the last member when its outcomes are split.
+        open.push((
+            proof.diagram.and(outcomes, qualifies)?,
+            next + 1,
+            qualified + 1,
+        ));
+        members.push(branch);
     }
     sets.sort();
     Some((sets, unreachable))
