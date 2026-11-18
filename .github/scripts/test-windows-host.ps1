@@ -24,7 +24,22 @@ if ($State) {
 $State = Join-Path $env:RUNNER_TEMP ('zeroshot-tests-' + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $State | Out-Null
 $environment = @{}
-foreach ($name in @('PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'CARGO_HOME', 'RUSTUP_HOME', 'RUSTUP_TOOLCHAIN', 'RUNNER_TRACKING_ID')) {
+# WMI does not inherit the invoking shell's environment. Reuse the prebuilt test profile,
+# without copying Cargo registry credentials into the persisted host context.
+$names = @(
+    'PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP',
+    'CARGO_HOME', 'RUSTUP_HOME', 'RUSTUP_TOOLCHAIN', 'RUNNER_TRACKING_ID',
+    'CARGO_INCREMENTAL', 'CARGO_TARGET_DIR', 'CARGO_BUILD_JOBS', 'CARGO_BUILD_TARGET', 'CARGO_TERM_COLOR',
+    'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTDOCFLAGS', 'CARGO_ENCODED_RUSTDOCFLAGS',
+    'RUSTC', 'RUSTDOC', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER',
+    'CARGO_BUILD_RUSTFLAGS', 'CARGO_BUILD_RUSTDOCFLAGS', 'CARGO_BUILD_RUSTC', 'CARGO_BUILD_RUSTDOC',
+    'CARGO_BUILD_RUSTC_WRAPPER', 'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER'
+)
+$names += @(
+    [Environment]::GetEnvironmentVariables('Process').Keys |
+    Where-Object { $_ -match '^CARGO_PROFILE_[A-Z0-9_]+_(OPT_LEVEL|DEBUG|SPLIT_DEBUGINFO|STRIP|DEBUG_ASSERTIONS|OVERFLOW_CHECKS|LTO|PANIC|INCREMENTAL|CODEGEN_UNITS|RPATH)$|^CARGO_TARGET_[A-Z0-9_]+_(LINKER|RUNNER|RUSTFLAGS)$' }
+)
+foreach ($name in $names) {
     $value = [Environment]::GetEnvironmentVariable($name)
     if ($null -ne $value) { $environment[$name] = $value }
 }

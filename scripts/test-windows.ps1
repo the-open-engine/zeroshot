@@ -1,4 +1,4 @@
-param([switch]$Ui)
+param([switch]$Ui, [switch]$BuildOnly)
 $ErrorActionPreference = 'Stop'
 $features = if ($Ui) { @('--features', 'zeroshot/ui') } else { @() }
 
@@ -17,6 +17,7 @@ $tests = @($artifacts | Where-Object {
     $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable
 })
 if ($tests.Count -eq 0) { throw 'Cargo produced no workspace test executables' }
+if ($BuildOnly) { exit 0 }
 
 $failed = $false
 foreach ($test in $tests) {
