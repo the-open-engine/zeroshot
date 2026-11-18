@@ -2236,6 +2236,9 @@ read-only calls keep the short request deadline. Wait for suspended controllers 
 Worker-start markers and run-success polling use the lifecycle budget too; marker failures include
 the last run status and reject an unexpectedly settled run. Explicit probe-cancellation bounds stay short.
 Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.
+Mapped peer-network regressions confirm exact durable publications before releasing recipient tools.
+An unknown publication response requires observation, never a retry; lost-reply probes retain every
+delivery, exclusion and receipt assertion without extending production broker deadlines.
 
 ```bash
 cargo fmt --all -- --check
