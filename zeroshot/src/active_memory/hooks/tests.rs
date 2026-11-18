@@ -20,7 +20,7 @@ fn native_installers() -> [NativeInstaller; 3] {
     use crate::harnesses::adapters::core::{claude, codex, pi};
     [
         codex::memory::install,
-        claude::memory::install,
+        |command, path| claude::memory::install(command, path).map(|_| ()),
         pi::memory::install,
     ]
 }
@@ -1134,7 +1134,11 @@ async fn a_steer_at_a_tool_call_goes_to_the_adapter_whole_and_is_delivered_once(
         home: directory.path(),
         steers: SteerRoute::Adapter(adapter),
     };
-    let cap = Arc::new(installed_capability(&hooks, installation, install));
+    let cap = Arc::new(installed_capability(
+        &hooks,
+        installation,
+        |command, path| install(command, path).map(|_| ()),
+    ));
     let tool = cap.clone();
     tokio::task::spawn_blocking(move || {
         let subagent = json!({"tool_name":"Read","agent_id":"a456838012fb65c82"});
@@ -1207,7 +1211,9 @@ async fn a_steer_message_that_is_never_shown_returns_with_the_next_prompt() {
         home: directory.path(),
         steers: SteerRoute::Adapter(adapter),
     };
-    let cap = installed_capability(&hooks, installation, install);
+    let cap = installed_capability(&hooks, installation, |command, path| {
+        install(command, path).map(|_| ())
+    });
     tokio::task::spawn_blocking(move || {
         for _ in 0..2 {
             assert_eq!(
@@ -1298,4 +1304,122 @@ async fn a_large_steer_reaches_a_hook_context_carrier_whole_at_a_tool_call() {
     assert!(context.contains(&large));
     assert!(context.ends_with(MEMORY));
     assert_eq!(received(ledger.as_ref(), &run).await, [1]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn confirmed_hook_failures_report_once_per_execution_and_absence_stays_silent() {
+    use crate::v2_run_ledger::{RunEvent, SafeLogStream};
+    let (ledger, run) = steer_record().await;
+    let hooks = Arc::new(ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value());
+    hooks.bind_ledger(run, ledger.clone());
+    let invocation = invocation();
+    let id = invocation.node.reference.execution.get();
+    let cap = hooks
+        .broker
+        .capability(&invocation, Path::new("/workspace"))
+        .assert_value();
+    // Receiving context then closing without its receipt is confirmed carrier failure.
+    for _ in 0..2 {
+        let (context, stream) = callback_response(&cap, &cap.token, json!({"tool_name":"Read"}));
+        assert!(!context.is_empty());
+        drop(stream);
+        callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+    }
+    hooks.finish_steers(id, true).await;
+    hooks.carrier_failed(
+        &invocation.node.reference,
+        "a repeated configuration failure",
+    );
+    hooks.finish_steers(id, false).await;
+    hooks.finish_steers(id + 1, true).await; // No callback is not a failure.
+    let tail = ledger
+        .snapshot_and_tail(
+            &openengine_cluster_protocol::RunId::new("memory-hooks"),
+            None,
+        )
+        .await
+        .assert_value();
+    let errors: Vec<_> = tail
+        .events
+        .iter()
+        .filter_map(|event| match &event.event {
+            RunEvent::SafeLog {
+                stream: SafeLogStream::Error,
+                line,
+                diagnostic,
+                ..
+            } => {
+                assert!(diagnostic.is_none());
+                Some(line.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].contains("did not acknowledge context"),
+        "{errors:?}"
+    );
+    assert!(tail.snapshot.failure_context.is_none());
+    let silent = ActiveMemoryHooks::empty().assert_value();
+    silent.bind_ledger(
+        openengine_cluster_protocol::RunId::new("memory-hooks"),
+        ledger.clone(),
+    );
+    silent.carrier_failed(&invocation.node.reference, "memory is disabled");
+    silent.finish_steers(id, true).await;
+    let unchanged = ledger
+        .snapshot_and_tail(
+            &openengine_cluster_protocol::RunId::new("memory-hooks"),
+            None,
+        )
+        .await
+        .assert_value();
+    assert_eq!(unchanged.events.len(), tail.events.len());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn confirmed_hook_failures_drain_pending_receipts_before_reporting() {
+    use crate::v2_run_ledger::{RunEvent, SafeLogStream};
+    let (ledger, run) = steer_record().await;
+    let hooks = ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let invocation = invocation();
+    let cap = hooks
+        .broker
+        .capability(&invocation, Path::new("/workspace"))
+        .assert_value();
+    let (context, peer) = callback_response(&cap, &cap.token, json!({"tool_name":"Read"}));
+    assert!(context.contains("[lesson@1]"));
+    // Retire while the peer still holds the complete response without acknowledging it.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        hooks.finish_steers(invocation.node.reference.execution.get(), true),
+    )
+    .await
+    .assert_value();
+    let tail = ledger.snapshot_and_tail(&run, None).await.assert_value();
+    let errors: Vec<_> = tail
+        .events
+        .iter()
+        .filter_map(|event| match &event.event {
+            RunEvent::SafeLog {
+                stream: SafeLogStream::Error,
+                line,
+                diagnostic,
+                ..
+            } => {
+                assert!(diagnostic.is_none());
+                Some(line.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].contains("did not acknowledge context"),
+        "{errors:?}"
+    );
+    assert!(tail.snapshot.failure_context.is_none());
+    drop(peer);
 }

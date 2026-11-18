@@ -53,6 +53,16 @@ These settings apply per run, so saved profiles can use different policies. Post
 counts toward the run total. An ordinary postmortem failure appears in the logs and does not change
 the main graph's result.
 
+Initialization failures name the lessons file when applicable and retain the safe underlying
+cause in error logs, including when postmortem is disabled but recall is enabled. Failed
+specialists log their role and cause, followed by one error summary. Confirmed hook configuration
+or carrier failures are reported once per execution; a conversation without tool callbacks is
+not treated as a failure. These auxiliary errors do not become primary graph failure evidence.
+Foreground `run` and `watch` print the latest five memory error records on stderr when observation
+ends. `resume` also checks that stream after its receipt, within the existing five-second log-read
+deadline; longer-running successors can be followed with `watch`. Complete diagnostics remain in
+`zeroshot logs RUN_ID`. Disabling both memory scopes skips store initialization without a warning.
+
 While the postmortem runs, the run stays `running`. `status` and `list` carry the recorded graph
 outcome in `status.graphResult`; `watch` and foreground `run` print it immediately. A log line
 records that outcome and says the postmortem is running. The run finishes after postmortem,

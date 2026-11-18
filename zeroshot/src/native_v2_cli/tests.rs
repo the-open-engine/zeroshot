@@ -102,6 +102,21 @@ fn notifying_detach() -> (EdgeDetachSignal, NotifyingOutput) {
     )
 }
 
+fn memory_log_call(target: Option<&str>, run_id: &str) -> Call {
+    Call::Logs {
+        target: target.map(str::to_owned),
+        run_id: run_id.to_owned(),
+        from_cursor: None,
+        execution: None,
+    }
+}
+
+fn assert_completed_watch_calls(calls: &[Call], expected: &[Option<&str>]) {
+    let (logs, watches) = calls.split_last().assert_value();
+    assert_eq!(logs, &memory_log_call(Some("prod"), "run-public"));
+    assert_cursor_calls(watches, CursorCallKind::Watch, expected);
+}
+
 fn assert_cursor_calls(calls: &[Call], kind: CursorCallKind, expected: &[Option<&str>]) {
     assert_eq!(calls.len(), expected.len());
     for (call, expected_cursor) in calls.iter().zip(expected) {
@@ -663,6 +678,7 @@ async fn run_follows_by_default_and_forwards_per_run_intent_unchanged() {
                 run_id: "run-public".to_owned(),
                 from_cursor: None,
             },
+            memory_log_call(Some("prod"), "run-public"),
         ]
     );
     let lines = String::from_utf8(output).assert_value();
@@ -826,11 +842,7 @@ async fn watch_reconnects_after_transport_failure_from_the_last_emitted_cursor()
     let backend = FakeBackend::with_reconnecting_watch();
     let (outcome, output) = execute_durable_command("watch", &backend).await;
     assert_eq!(outcome, CliOutcome::Finished);
-    assert_cursor_calls(
-        &backend.calls(),
-        CursorCallKind::Watch,
-        &[None, Some("v2:1")],
-    );
+    assert_completed_watch_calls(&backend.calls(), &[None, Some("v2:1")]);
     assert_cursor_once(&output, "v2:1");
     assert_cursor_once(&output, "v2:2");
 }
@@ -868,11 +880,13 @@ async fn restarted_client_reconnects_with_public_run_id_only() {
                 run_id: "run-public".to_owned(),
                 from_cursor: None,
             },
+            memory_log_call(Some("prod"), "run-public"),
             Call::Watch {
                 target: Some("prod".to_owned()),
                 run_id: "run-public".to_owned(),
                 from_cursor: None,
             },
+            memory_log_call(Some("prod"), "run-public"),
         ]
     );
 }

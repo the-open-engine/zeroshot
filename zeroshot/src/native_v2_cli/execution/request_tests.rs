@@ -85,7 +85,7 @@ impl NativeV2CliBackend for RequestBackend {
         _: Option<&str>,
         _: RunLogsParams,
     ) -> Result<Self::Logs, NativeV2CliError> {
-        unreachable!()
+        Err(NativeV2CliError::Usage("no test logs".to_owned()))
     }
     async fn run_attach(
         &self,
@@ -170,6 +170,7 @@ async fn answer(
             false,
         ),
         &CliExecutionContext::new(backend, &|_| None),
+        &mut crate::native_v2_cli::NeverDetach,
         &mut output,
     )
     .await;
@@ -318,6 +319,7 @@ async fn default_resume_of_a_request_names_the_successor_before_answer() {
                 forward_github_token: false,
             },
             &CliExecutionContext::new(&backend, &|_| panic!("credentials resolved")),
+            &mut crate::native_v2_cli::NeverDetach,
             &mut output,
         )
         .await

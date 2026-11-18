@@ -120,6 +120,7 @@ enum BrokerRequest {
 struct ScopeState {
     scope: HookScope,
     live: AtomicBool,
+    callback: Arc<tokio::sync::Mutex<()>>,
     publication: Arc<tokio::sync::Mutex<()>>,
 }
 #[derive(Default)]
@@ -209,6 +210,7 @@ impl Broker {
             Arc::new(ScopeState {
                 scope: HookScope::new(invocation, workspace),
                 live: AtomicBool::new(true),
+                callback: Arc::default(),
                 publication: Arc::default(),
             }),
         );
@@ -255,6 +257,7 @@ impl Broker {
         // Started writes keep their owned fence even when the requesting socket times out.
         for scope in retired {
             let _drained = scope.publication.lock().await;
+            let _callback = scope.callback.lock().await;
         }
     }
 }
@@ -300,23 +303,37 @@ fn return_callback(
     source: &super::steering::DeliverySource,
     request: Request,
 ) -> io::Result<()> {
-    let scope = scopes
-        .lock()
-        .map_err(|_| io::Error::other("memory scope lock unavailable"))?
-        .live
-        .get(&request.token)
-        .cloned();
-    let scope = scope.filter(|scope| scope.live.load(Ordering::Acquire));
-    let query = scope
+    // Claim the callback under the same lock as retirement, and hold its fence through the
+    // bounded context/receipt exchange and failure bookkeeping. The broker serves one at a time.
+    let callback = {
+        let scopes = scopes
+            .lock()
+            .map_err(|_| io::Error::other("memory scope lock unavailable"))?;
+        match scopes.live.get(&request.token) {
+            Some(scope) if scope.live.load(Ordering::Acquire) => Some((
+                scope.clone(),
+                scope
+                    .callback
+                    .clone()
+                    .try_lock_owned()
+                    .map_err(|_| io::Error::other("memory callback already active"))?,
+            )),
+            _ => None,
+        }
+    };
+    let query = callback
         .as_ref()
-        .map(|scope| scope.scope.query(&request.event))
+        .map(|(scope, _fence)| scope.scope.query(&request.event))
         .filter(|query| !query.tool_name.is_empty());
     let mut delivery = query
         .as_ref()
         .map(|query| source.tool_delivery(query))
         .unwrap_or_default();
     delivery.context = native::bounded_context(delivery.context);
-    let route = scope.map(|scope| scope.scope.route()).unwrap_or_default();
+    let route = callback
+        .as_ref()
+        .map(|(scope, _fence)| scope.scope.route())
+        .unwrap_or_default();
     let reply = match &route {
         SteerRoute::HookContext => delivery.context.clone(),
         // The adapter writes the steer into the conversation; its hook returns memory only.
@@ -336,11 +353,14 @@ fn return_callback(
             json!({"context":delivery.context,"steer":delivery.steer}).to_string()
         }
     };
-    let returned = return_context(stream, &reply, source);
+    let returned = return_context(stream, &reply);
     if let Some(query) = query {
-        if returned {
+        if matches!(returned, Ok(true)) {
             source.acknowledged(&query, &delivery);
         } else {
+            if let Err(reason) = returned {
+                source.failure(query.execution_id, &query.node_id, reason);
+            }
             source.unacknowledged(&query, &delivery);
         }
     }
@@ -439,13 +459,12 @@ fn helper_output(path: &Path, input: impl Read) -> io::Result<(Value, Option<Tcp
     ))
 }
 
-fn return_context(stream: &mut TcpStream, context: &str, source: &dyn ActiveMemorySource) -> bool {
+fn return_context(stream: &mut TcpStream, context: &str) -> Result<bool, &'static str> {
     if write_frame(stream, context.as_bytes()).is_err() {
-        source.unavailable("Active Memory callback context could not be returned");
-        return false;
+        return Err("callback context could not be returned");
     }
     if context.is_empty() {
-        return false;
+        return Ok(false);
     }
     // A successful socket write alone does not prove the helper returned its output.
     // The existing read timeout bounds this carrier receipt, including cancelled helpers.
@@ -455,10 +474,9 @@ fn return_context(stream: &mut TcpStream, context: &str, source: &dyn ActiveMemo
         .is_err()
         || acknowledgement != [1]
     {
-        source.unavailable("Active Memory callback carrier did not acknowledge context");
-        return false;
+        return Err("callback carrier did not acknowledge context");
     }
-    true
+    Ok(true)
 }
 
 fn read_capability(path: &Path) -> io::Result<Capability> {

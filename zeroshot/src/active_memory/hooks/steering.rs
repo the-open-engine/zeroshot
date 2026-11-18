@@ -14,6 +14,10 @@ use super::{ActiveMemorySource, HookDelivery, HookQuery, SteerCarrier};
 
 pub(super) struct EmptySource;
 impl ActiveMemorySource for EmptySource {
+    fn enabled(&self) -> bool {
+        false
+    }
+
     fn tool_context(&self, _: &HookQuery) -> String {
         String::new()
     }
@@ -234,6 +238,7 @@ impl Conversation {
 pub(super) struct DeliverySource {
     memory: Arc<dyn ActiveMemorySource>,
     record: Mutex<Option<Record>>,
+    failures: Mutex<BTreeMap<u64, Option<String>>>,
     conversations: Mutex<BTreeMap<u64, Conversation>>,
     publication: tokio::sync::Mutex<()>,
     restored: Mutex<BTreeMap<u64, SteeringReceipts>>,
@@ -386,6 +391,7 @@ impl DeliverySource {
         Self {
             memory,
             record: Mutex::new(None),
+            failures: Mutex::default(),
             conversations: Mutex::default(),
             restored: Mutex::default(),
             publication: tokio::sync::Mutex::new(()),
@@ -521,6 +527,49 @@ impl DeliverySource {
                 runtime: tokio::runtime::Handle::current(),
                 index: Arc::default(),
             });
+        }
+    }
+    pub(super) fn failure(&self, execution: u64, node: &str, reason: &str) {
+        self.memory.unavailable(reason);
+        if !self.memory.enabled() {
+            return;
+        }
+        if let Ok(mut failures) = self.failures.lock() {
+            failures.entry(execution).or_insert_with(|| Some(
+                crate::native_v2_runner::bounded_log_text(
+                    format!("Active Memory hook unavailable for {node} (execution {execution}): {reason}"),
+                    crate::v2_run_ledger::MAX_SAFE_LOG_BYTES,
+                )
+            ));
+        }
+    }
+
+    pub(super) async fn report_failure(&self, execution: u64) {
+        let Some(record) = self.record() else {
+            return;
+        };
+        let line = self
+            .failures
+            .lock()
+            .ok()
+            .and_then(|mut failures| failures.get_mut(&execution).and_then(Option::take));
+        if let Some(line) = line.and_then(|line| crate::v2_run_ledger::SafeLogLine::new(line).ok())
+        {
+            // Reporting must not hold native cleanup indefinitely if storage is unavailable.
+            let _ = tokio::time::timeout(
+                DEADLINE,
+                record.ledger.append(
+                    &record.run,
+                    vec![RunEvent::SafeLog {
+                        execution: None,
+                        timestamp: crate::native_v2_runner::current_timestamp(),
+                        stream: crate::v2_run_ledger::SafeLogStream::Error,
+                        line,
+                        diagnostic: None,
+                    }],
+                ),
+            )
+            .await;
         }
     }
     pub(super) fn restore(&self, instance: u64, receipts: SteeringReceipts) {

@@ -235,7 +235,8 @@ where
             input,
             forward_github_token,
         } => {
-            return execute_answer((run, input, forward_github_token), context, output).await;
+            return execute_answer((run, input, forward_github_token), context, signal, output)
+                .await;
         }
         NativeV2CliCommand::InboxList { target, params } => {
             write_json(
@@ -261,7 +262,7 @@ where
             return Ok(CliOutcome::Completed);
         }
         NativeV2CliCommand::Resume(run) => {
-            return execute_resume(run, context, output).await;
+            return execute_resume(run, context, signal, output).await;
         }
         NativeV2CliCommand::ExportWorkspace(command) => {
             return export_workspace::execute(command, backend, signal, output).await;
@@ -283,13 +284,15 @@ where
     execute_run_subscription(command, backend, signal, output).await
 }
 
-async fn execute_resume<B, W>(
+async fn execute_resume<B, S, W>(
     command: RunResumeCommand,
     context: &CliExecutionContext<'_, B>,
+    signal: &mut S,
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError>
 where
     B: NativeV2CliBackend,
+    S: DetachSignal,
     W: Write,
 {
     let run = &command.run;
@@ -405,6 +408,16 @@ where
         )
         .await?;
     write_json(output, &result)?;
+    let detach = signal.wait();
+    tokio::pin!(detach);
+    RunFailure::read(
+        context.backend,
+        run.target.as_deref(),
+        result.run_id,
+        detach.as_mut(),
+    )
+    .await
+    .report_memory(false);
     Ok(CliOutcome::Completed)
 }
 
@@ -648,11 +661,20 @@ where
         }
         outcome => outcome,
     };
+    // Auxiliary memory errors never populate the primary failure context. Read their existing
+    // log stream for successful runs too, including recall-only runs and resumed controllers.
+    let logs = if matches!(outcome, CliOutcome::Finished | CliOutcome::Failed) {
+        let logs = RunFailure::read(backend, target, run_id.clone(), detach.as_mut()).await;
+        logs.report_memory(true);
+        Some(logs)
+    } else {
+        None
+    };
     if outcome == CliOutcome::Failed {
         let failure = if let Some(failure) = observed.context {
             RunFailure::from_context(run_id, target, failure)
         } else {
-            RunFailure::read(backend, target, run_id, detach).await
+            logs.expect("finished run logs were read")
         };
         return Err(NativeV2CliError::RunFailed(Box::new(failure)));
     }
@@ -941,9 +963,10 @@ fn request_error(message: impl Into<String>) -> NativeV2CliError {
     }
 }
 
-async fn execute_answer<B: NativeV2CliBackend, W: Write>(
+async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
     command: (RunSelector, std::path::PathBuf, bool),
     context: &CliExecutionContext<'_, B>,
+    signal: &mut S,
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError> {
     let (run, input, forward_github_token) = command;
@@ -1000,6 +1023,7 @@ async fn execute_answer<B: NativeV2CliBackend, W: Write>(
             forward_github_token,
         },
         context,
+        signal,
         output,
     )
     .await;

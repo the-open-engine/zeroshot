@@ -301,6 +301,21 @@ impl NativeV2Supervisor {
         }
         let mut stored = self.load().await?;
         logging::record_run_version(self.ledger.as_ref(), &mut stored).await?;
+        if stored.snapshot.terminal.is_none()
+            && let Some(reason) = self
+                .postmortem
+                .as_ref()
+                .and_then(|work| work.initialization_error())
+        {
+            stored.snapshot = self
+                .ledger
+                .append(
+                    &self.run_id,
+                    vec![logging::error_log(None, reason.to_owned(), None)?],
+                )
+                .await?
+                .snapshot;
+        }
         *initialized = true;
         Ok(Some(stored))
     }

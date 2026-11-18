@@ -67,6 +67,10 @@ pub struct HookDelivery {
 /// The host owns the immutable index, relevance budget, session deduplication and supplied receipts.
 /// Returned strings must contain complete cards and stay within the configured context budget.
 pub trait ActiveMemorySource: Send + Sync {
+    fn enabled(&self) -> bool {
+        true
+    }
+
     fn tool_delivery(&self, query: &HookQuery) -> HookDelivery {
         HookDelivery {
             context: self.tool_context(query),
@@ -185,6 +189,7 @@ impl ActiveMemoryHooks {
     /// Settles an execution or releases unconfirmed prompt offers before a native retry.
     pub(crate) async fn finish_steers(&self, execution: u64, success: bool) {
         self.broker.retire(execution).await;
+        self.source.report_failure(execution).await;
         self.source.finish(execution, success).await;
     }
     pub(crate) async fn steer_prompt(
@@ -298,7 +303,7 @@ impl ActiveMemoryHooks {
         &self,
         command: &mut ProcessSessionCommand,
         installation: HookInstallation<'_>,
-        install: fn(&mut ProcessSessionCommand, &Path) -> io::Result<()>,
+        install: impl FnOnce(&mut ProcessSessionCommand, &Path) -> io::Result<()>,
     ) {
         self.configure_network_environment(&mut command.environment, installation.invocation, None);
         let result = self
@@ -320,9 +325,12 @@ impl ActiveMemoryHooks {
                 }
                 None => Ok(()),
             });
-        if result.is_err() {
-            self.source
-                .unavailable("Active Memory hook configuration was unavailable");
+        if let Err(error) = result {
+            self.source.failure(
+                installation.invocation.node.reference.execution.get(),
+                installation.invocation.node.reference.node.as_str(),
+                &format!("hook configuration failed: {error}"),
+            );
         }
     }
 
@@ -353,6 +361,15 @@ impl ActiveMemoryHooks {
         self.source.unavailable(
             "Active Memory delivery could not be confirmed for a failed provider execution",
         );
+    }
+
+    pub(crate) fn carrier_failed(
+        &self,
+        reference: &crate::native_v2_contract::ExecutionRef,
+        reason: &str,
+    ) {
+        self.source
+            .failure(reference.execution.get(), reference.node.as_str(), reason);
     }
 
     #[cfg(test)]
