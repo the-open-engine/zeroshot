@@ -144,6 +144,8 @@ pub struct NativeV2AdmissionContext<'a> {
     pub source: Option<&'a crate::source_code_provider::SourceCodeProviderRegistry>,
     pub delivery_policy: DeliveryPolicy,
     pub run_sizes: Option<&'a openengine_cluster_protocol::TargetRunSizesDiscovery>,
+    /// Host-owned continuation history permits requests after workspace snapshots are disabled.
+    pub checkpointless_requests: bool,
 }
 
 impl<'a> NativeV2AdmissionContext<'a> {
@@ -157,6 +159,7 @@ impl<'a> NativeV2AdmissionContext<'a> {
             source: None,
             delivery_policy,
             run_sizes: None,
+            checkpointless_requests: false,
         }
     }
 

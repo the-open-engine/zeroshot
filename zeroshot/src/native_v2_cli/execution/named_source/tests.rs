@@ -464,6 +464,9 @@ async fn explicit_github_shorthand_retains_source_connection_without_matching_lo
 
 #[tokio::test]
 async fn unsupported_forge_capability_is_rejected_before_source_credential_reads() {
+    if run_without_installed_forge_credentials() {
+        return;
+    }
     use crate::source_code_provider::SourceCapability;
 
     let root = initialized_repository("unsupported-source-capability");
@@ -506,6 +509,56 @@ async fn unsupported_forge_capability_is_rejected_before_source_credential_reads
                 .contains("source-value-must-remain-unread")
         );
     }
+}
+
+fn run_without_installed_forge_credentials() -> bool {
+    const CHILD: &str = "ZEROSHOT_TEST_SOURCE_CAPABILITY_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        return false;
+    }
+    let root = TestDirectory::new("isolated-forge-credentials");
+    for program in ["gh", "glab"] {
+        #[cfg(unix)]
+        openengine_cluster_testkit::fixture::write_executable(
+            &root.0.join(program),
+            "#!/bin/sh\nprintf called > \"$0.called\"\ncat >/dev/null\nexit 1\n",
+            0o700,
+        )
+        .assert_value();
+        #[cfg(windows)]
+        std::fs::write(
+            root.0.join(format!("{program}.cmd")),
+            "@echo off\r\n> \"%~f0.called\" echo called\r\nmore >nul\r\nexit /b 1\r\n",
+        )
+        .assert_value();
+    }
+    let mut paths = vec![root.0.clone()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let test_name = std::thread::current().name().assert_value().to_owned();
+    let output = std::process::Command::new(std::env::current_exe().assert_value())
+        .args(["--exact", &test_name, "--nocapture", "--test-threads=1"])
+        .current_dir(&root.0)
+        .env(CHILD, "1")
+        .env("PATH", std::env::join_paths(paths).assert_value())
+        .output()
+        .assert_value();
+    assert!(
+        output.status.success(),
+        "isolated source capability test failed: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for program in ["gh", "glab"] {
+        let suffix = if cfg!(windows) {
+            ".cmd.called"
+        } else {
+            ".called"
+        };
+        assert!(root.0.join(format!("{program}{suffix}")).is_file());
+    }
+    true
 }
 
 fn private_source_command(root: &Path, repository: RunRepository) -> RunCommand {

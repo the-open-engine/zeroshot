@@ -39,6 +39,7 @@ fn recovery(root: &TestDirectory, checkpoints: bool) -> LocalRecoveryDocument {
         resumed_from: None,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     }
 }
