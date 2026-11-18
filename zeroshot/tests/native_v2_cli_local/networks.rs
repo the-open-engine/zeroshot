@@ -144,7 +144,10 @@ def publish(name, text, args=(), override=None, target_run=None, stdin=None):
     if override: environment.update(override)
     result = subprocess.run([os.environ['NETWORK_CLI'],'steer',target_run or run,*args,*([text] if text is not None else [])],
         env=environment,input=stdin,text=True,capture_output=True,timeout=10)
-    save(name, {'status':result.returncode,'stdout':result.stdout,'stderr':result.stderr})
+    publication = {'status':result.returncode,'stdout':result.stdout,'stderr':result.stderr}
+    save(name, publication)
+    if result.returncode and not name.startswith('deny-'):
+        raise AssertionError('network publication '+name+' failed: '+json.dumps(publication))
     return result.returncode
 
 response = None
