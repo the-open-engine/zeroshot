@@ -88,6 +88,7 @@ impl Fixture {
         )
         .unwrap();
         fs::write(directory.join("index.json"), "[]").unwrap();
+        crate::execution::platform::private_directory(&self.repository).unwrap();
         fs::create_dir_all(self.repository.join("repository/data")).unwrap();
         fs::write(
             self.repository.join("repository/data/pack"),

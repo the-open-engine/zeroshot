@@ -309,8 +309,9 @@ jobs:
         shell: bash
         run: >-
           ZEROSHOT_RESTIC="$ZEROSHOT_RESTIC_TEST"
-          cargo test --package zeroshot --lib
-          native_v2_supervisor::checkpoints:: -- --nocapture
+          cargo test --package zeroshot --lib --
+          native_v2_supervisor::checkpoints::
+          native_v2_cli::local::backend::discard_tests:: --nocapture
 
       - name: Run workspace tests
         if: runner.os != 'Windows'
