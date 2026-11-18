@@ -187,7 +187,21 @@ fn first_failure(value: &str) -> Option<usize> {
     let mut offset = 0;
     let mut fallback = None;
     for line in value.split_inclusive('\n') {
-        let lower = line.to_ascii_lowercase();
+        let mut lower = line.to_ascii_lowercase();
+        if lower.contains("\x1b[") {
+            lower = ansi_visible_chars(&lower).map(|(_, c)| c).collect();
+        }
+        // Only matching ignores styling. Excerpt selection and redaction need
+        // positions in the original UTF-8 log, including every escape sequence.
+        let raw_offset = |failure| {
+            if lower.len() == line.len() {
+                Some(offset + failure)
+            } else {
+                ansi_visible_chars(line)
+                    .nth(lower[..failure].chars().count())
+                    .map(|(index, _)| offset + index)
+            }
+        };
         let failure = [
             "panicked at",
             "panic: ",
@@ -202,7 +216,7 @@ fn first_failure(value: &str) -> Option<usize> {
         .filter_map(|marker| lower.find(marker))
         .min();
         if let Some(failure) = failure {
-            return Some(offset + failure);
+            return raw_offset(failure);
         }
         // Passing negative tests can emit generic errors. Prefer concrete
         // failure evidence anywhere in the log before using their first match.
@@ -211,11 +225,30 @@ fn first_failure(value: &str) -> Option<usize> {
                 .iter()
                 .filter_map(|marker| lower.find(marker))
                 .min()
-                .map(|failure| offset + failure);
+                .and_then(raw_offset);
         }
         offset += line.len();
     }
     fallback
+}
+
+fn ansi_visible_chars(value: &str) -> impl Iterator<Item = (usize, char)> + '_ {
+    let mut chars = value.char_indices().peekable();
+    std::iter::from_fn(move || {
+        while let Some((offset, character)) = chars.next() {
+            if character == '\x1b' && chars.next_if(|(_, c)| *c == '[').is_some() {
+                // CSI parameters/intermediates end at the first final byte.
+                for (_, character) in chars.by_ref() {
+                    if ('@'..='~').contains(&character) {
+                        break;
+                    }
+                }
+            } else {
+                return Some((offset, character));
+            }
+        }
+        None
+    })
 }
 
 fn log_prefix(value: &str, maximum_bytes: usize, maximum_chars: usize) -> &str {
@@ -240,3 +273,6 @@ fn log_suffix(value: &str, maximum_bytes: usize, maximum_chars: usize) -> &str {
         .unwrap_or(value.len());
     &value[start..]
 }
+
+#[cfg(test)]
+pub(super) mod tests;
