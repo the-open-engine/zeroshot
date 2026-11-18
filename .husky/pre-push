@@ -24,7 +24,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       ;;
   esac
   [ "$local_sha" = "$zero" ] && continue
-  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+  if [ "$remote_sha" != "$zero" ]; then
+    if ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+      full_suite=true
+      continue
+    fi
     base="$remote_sha"
   else
     base="$(git merge-base "$local_sha" origin/main 2>/dev/null || true)"

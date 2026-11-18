@@ -242,9 +242,7 @@ it(
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-ci-paths-'));
     t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
     // Git hooks export checkout/index locations. Never carry those into the fixture.
-    const environment = Object.fromEntries(
-      Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
-    );
+    const environment = gitFixtureEnvironment();
     fs.mkdirSync(path.join(repo, '.github'));
     fs.copyFileSync(classifierPath, path.join(repo, '.github/ci-path-classifier.js'));
     const git = (...args) => {
@@ -377,3 +375,132 @@ it(
     }
   }
 );
+
+function gitFixtureEnvironment() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
+  );
+}
+
+const zero = '0'.repeat(40);
+const readmeCheck = 'npx --no-install prettier --check README.md';
+const fullCommit = 'cargo fmt --all -- --check\nnpm run lint\nnpm test';
+const unixOnly = { skip: process.platform === 'win32' };
+
+function fixture(t) {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-git-hooks-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const environment = gitFixtureEnvironment();
+  const bin = path.join(repo, 'bin');
+  fs.mkdirSync(bin);
+  for (const command of ['cargo', 'npm', 'npx']) {
+    fs.writeFileSync(
+      path.join(bin, command),
+      `#!/bin/sh\nprintf '%s' '${command}'\nprintf ' %s' "$@"\nprintf '\\n'\n`,
+      { mode: 0o755 }
+    );
+  }
+  const env = { ...environment, PATH: `${bin}${path.delimiter}${environment.PATH}`, CI: '' };
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', env });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git('init');
+  git('config', 'user.name', 'Hook fixture');
+  git('config', 'user.email', 'hooks@example.invalid');
+  git('config', 'core.hooksPath', '/dev/null');
+  fs.mkdirSync(path.join(repo, '.github'));
+  fs.copyFileSync(
+    path.join(projectRoot, '.github/ci-path-classifier.js'),
+    path.join(repo, '.github/ci-path-classifier.js')
+  );
+  fs.writeFileSync(path.join(repo, 'README.md'), 'Before\n');
+  fs.writeFileSync(path.join(repo, 'runtime.rs'), '// Original code\n');
+  git('add', '.github', 'README.md', 'runtime.rs');
+  git('commit', '-m', 'Initial source');
+  const original = git('rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(repo, 'runtime.rs'), '// Changed code\n');
+  git('commit', '-am', 'Change code');
+  const main = git('rev-parse', 'HEAD');
+  git('update-ref', 'refs/remotes/origin/main', main);
+  fs.writeFileSync(path.join(repo, 'README.md'), 'After\n');
+  git('commit', '-am', 'Change README');
+  const head = git('rev-parse', 'HEAD');
+  return {
+    repo,
+    git,
+    original,
+    main,
+    head,
+    push: (remote, localRef = 'refs/heads/topic', remoteRef = 'refs/heads/topic') =>
+      `${localRef} ${head} ${remoteRef} ${remote}\n`,
+    run: (hook, input = '') =>
+      spawnSync('sh', [path.join(projectRoot, '.husky', hook)], {
+        cwd: repo,
+        encoding: 'utf8',
+        env,
+        input,
+      }),
+  };
+}
+
+function assertChecks(result, expected) {
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), expected);
+}
+
+it('runs all push checks when an existing remote commit is unavailable', unixOnly, (t) => {
+  const f = fixture(t);
+  const missingRemote = 'f'.repeat(40);
+  assertChecks(f.run('pre-push', f.push(missingRemote)), 'npm test');
+  assertChecks(f.run('pre-push', f.push(f.main) + f.push(missingRemote)), 'npm test');
+});
+
+it('uses known remote history and limits merge-base fallback to new branches', unixOnly, (t) => {
+  const f = fixture(t);
+  assertChecks(f.run('pre-push', f.push(f.main)), readmeCheck);
+  assertChecks(f.run('pre-push', f.push(f.original)), 'npm test');
+  assertChecks(f.run('pre-push', f.push(zero)), readmeCheck);
+});
+
+it('runs all push checks for empty or unresolvable history', unixOnly, (t) => {
+  const f = fixture(t);
+  assertChecks(f.run('pre-push', f.push(f.head)), 'npm test');
+  assertChecks(f.run('pre-push'), 'npm test');
+  f.git('update-ref', '-d', 'refs/remotes/origin/main');
+  assertChecks(f.run('pre-push', f.push(zero)), 'npm test');
+});
+
+it('keeps direct main pushes and release tags blocked', unixOnly, (t) => {
+  const f = fixture(t);
+  for (const [localRef, remoteRef, error] of [
+    ['refs/heads/topic', 'refs/heads/main', /Direct pushes to main are blocked/],
+    ['refs/tags/v8.1.0', 'refs/tags/v8.1.0', /Version tags are created only/],
+    [
+      'refs/tags/zeroshot-python-v8.1.0.post1',
+      'refs/tags/zeroshot-python-v8.1.0.post1',
+      /Version tags are created only/,
+    ],
+  ]) {
+    const result = f.run('pre-push', f.push(zero, localRef, remoteRef));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, error);
+    assert.equal(result.stdout, '');
+  }
+});
+
+it('uses the README shortcut only for staged root-README-only commits', unixOnly, (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(path.join(f.repo, 'README.md'), 'Staged README\n');
+  f.git('add', 'README.md');
+  assertChecks(f.run('pre-commit'), readmeCheck);
+  fs.writeFileSync(path.join(f.repo, 'runtime.rs'), '// Staged code\n');
+  f.git('add', 'runtime.rs');
+  assertChecks(f.run('pre-commit'), fullCommit);
+});
+
+it('runs all commit checks when the staged diff is empty', unixOnly, (t) => {
+  const f = fixture(t);
+  assertChecks(f.run('pre-commit'), fullCommit);
+});
