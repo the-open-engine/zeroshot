@@ -1572,9 +1572,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   authoritative merged revision. When a required check fails, bounded repair diagnostics include
   supporting failed checks and labelled job excerpts retaining early failure context and the
   final summary within both capture and per-job feedback bounds. Panic, assertion and traceback
-  contexts take priority over generic error/fatal fallback lines. GitHub excludes cleanup after
-  the last error annotation; truncated excerpts explicitly mark omitted output and keep a tail
-  fallback when no failure marker is recognized. Shared GitHub/GitLab log redaction covers forge
+  contexts take priority over generic error/fatal fallback lines. Failure matching ignores ANSI
+  CSI styling while retaining original raw byte offsets for redaction and both excerpt budgets.
+  GitHub excludes cleanup after the last error annotation; truncated excerpts explicitly mark
+  omitted output and keep a tail fallback when no failure marker is recognized. Shared GitHub/GitLab log redaction covers forge
   and separate Git credentials, including encoded authentication and SSH key lines, before excerpt selection.
   The host carries its complete effective feedback-redaction set, including captured native Git
   credentials without node connections, into successful log reads and bounded API failure diagnostics.

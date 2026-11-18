@@ -654,11 +654,64 @@ async fn shared_feedback_preserves_early_failures_in_multiple_uncut_logs() {
 }
 
 #[tokio::test]
+async fn shared_feedback_preserves_colored_rustc_errors() {
+    use crate::source_code_provider::adapters::core::ci_diagnostics::tests::rustc_diagnostics;
+
+    for diagnostic in rustc_diagnostics() {
+        for (noise, jobs) in [(8_000, 1), (8_000, 2), (24_000, 1), (24_000, 8)] {
+            let fixture = ci_fixture(Some(json!(true)), Some("failed")).await;
+            {
+                let mut state = fixture.state.lock().unwrap();
+                state.job_pages.insert(
+                    1,
+                    (91..91 + jobs)
+                        .map(|id| failed_job(id, "compiler", "build", Some("script_failure")))
+                        .collect(),
+                );
+                for job in 91..91 + jobs {
+                    let raw = format!(
+                        "test-private-token 界🙂\n{diagnostic}{}final exit code 1\n",
+                        "noise\n".repeat(noise),
+                    );
+                    assert_eq!(raw.len() > 64 * 1024, noise == 24_000);
+                    if noise == 8_000 {
+                        assert!(raw.len() * 2 > 64 * 1024);
+                    }
+                    state.job_logs.insert(job, raw.into_bytes());
+                }
+            }
+            let diagnostic = failure_diagnostic(&fixture).await;
+            assert!(diagnostic.chars().count() <= 64 * 1024);
+            assert_eq!(
+                diagnostic.matches("expected expression, found").count(),
+                jobs as usize
+            );
+            assert_eq!(
+                diagnostic.matches("colored-syntax.rs:2:17").count(),
+                jobs as usize
+            );
+            assert_eq!(
+                diagnostic.matches("final exit code 1").count(),
+                jobs as usize
+            );
+            assert!(!diagnostic.contains("test-private-token"));
+            assert!(!diagnostic.contains('\u{fffd}'));
+            assert!(
+                diagnostic
+                    .chars()
+                    .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn redacted_failure_markers_retain_context_through_capture_and_aggregation() {
     for (username, marker) in [
         ("ordinary-user", "assertion failed: causal detail"),
         ("assertion", "assertion failed: causal detail"),
         ("error", "error: unresolved symbol"),
+        ("error", "error\x1b[0m\x1b[1m: unresolved symbol"),
     ] {
         for native in [false, true] {
             for (noise, jobs) in [(24_000, 1), (8_000, 2)] {
