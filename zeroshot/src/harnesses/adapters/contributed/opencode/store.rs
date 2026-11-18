@@ -8,14 +8,15 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::Value;
 
 use crate::execution::driver::WorkspaceCapability;
-use crate::execution::process::{LocalProcessRunner, ProcessSessionCommand};
+use crate::execution::process::{ProcessRunnerError, ProcessSessionCommand};
 use crate::execution::WorkspaceAccessMode;
 use crate::native_v2_capsule::provider_process::{
-    ProviderExecutionFiles, require_process_cleanup, send_process_input,
+    ProviderExecutionFiles, open_provider_process, require_process_cleanup, send_process_input,
 };
 use crate::native_v2_runner::{DriverControl, DriverInvocation, NodeRunnerError};
 
@@ -55,7 +56,7 @@ fn private_path(home: &Path, name: &str) -> Result<String, NodeRunnerError> {
 pub(super) struct TransferRequest<'a> {
     pub(super) adapter: &'a OpenCodeAdapter,
     pub(super) invocation: &'a DriverInvocation,
-    pub(super) files: &'a ProviderExecutionFiles,
+    pub(super) files: &'a Arc<ProviderExecutionFiles>,
     pub(super) control: &'a DriverControl,
 }
 
@@ -175,7 +176,7 @@ fn store_environment(
 
 struct StoreProcessRequest<'a> {
     adapter: &'a OpenCodeAdapter,
-    files: &'a ProviderExecutionFiles,
+    files: &'a Arc<ProviderExecutionFiles>,
     control: &'a DriverControl,
     environment: &'a BTreeMap<String, String>,
     arguments: &'a [&'a str],
@@ -213,13 +214,8 @@ async fn run_store_process(
         },
         deadline: Some(tokio::time::Instant::now() + STORE_DEADLINE),
     };
-    let mut process = match LocalProcessRunner::new()
-        .open(command, control.cancellation())
-        .await
-    {
-        Ok(process) => process,
-        Err(_) => return Err(failure_error(control, failure)),
-    };
+    let opened = open_provider_process(Arc::clone(files), command, control).await;
+    let mut process = launched(opened, control, failure)?;
     // An input failure still drains and reaps the process before the node fails.
     let input_failed = match input {
         Some(input) => send_process_input(&mut process, input).await.is_err(),
@@ -246,6 +242,19 @@ async fn run_store_process(
         return Err(NodeRunnerError::DriverDetail(failure.to_owned()));
     }
     Ok(if capture { Some(buffer) } else { None })
+}
+
+/// A launch that may have started a process keeps its fatal error. Launch details stay out of the
+/// failure because the command environment can carry credentials.
+pub(super) fn launched<T>(
+    opened: Result<Result<T, ProcessRunnerError>, NodeRunnerError>,
+    control: &DriverControl,
+    failure: &'static str,
+) -> Result<T, NodeRunnerError> {
+    match opened? {
+        Ok(process) => Ok(process),
+        Err(_) => Err(failure_error(control, failure)),
+    }
 }
 
 fn failure_error(control: &DriverControl, failure: &'static str) -> NodeRunnerError {

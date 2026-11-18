@@ -111,3 +111,33 @@ async fn a_failed_export_fails_the_node_without_its_output() {
     assert!(!message.contains("leaked-secret"));
     assert!(!adapter.config.workspace.join("run-env").exists());
 }
+
+#[tokio::test]
+async fn a_store_launch_keeps_unconfirmed_cleanup_and_hides_launch_details() {
+    use crate::execution::process::ProcessRunnerError;
+    use crate::native_v2_runner::NodeRunnerError;
+    use super::super::store::launched;
+
+    let (cancel, control, _durable) = crate::native_v2_runner::test_support::control();
+    assert_eq!(launched(Ok(Ok(7)), &control, "failure"), Ok(7));
+    for fatal in [
+        NodeRunnerError::CleanupUnconfirmed,
+        NodeRunnerError::Cancelled,
+    ] {
+        assert_eq!(
+            launched::<u8>(Err(fatal.clone()), &control, "failure"),
+            Err(fatal)
+        );
+    }
+    let refused = Ok(Err(ProcessRunnerError::Launch("leaked-secret".to_owned())));
+    assert_eq!(
+        launched::<u8>(refused, &control, "failure"),
+        Err(NodeRunnerError::DriverDetail("failure".to_owned()))
+    );
+    cancel.send(true).assert_value();
+    let refused = Ok(Err(ProcessRunnerError::Launch("leaked-secret".to_owned())));
+    assert_eq!(
+        launched::<u8>(refused, &control, "failure"),
+        Err(NodeRunnerError::Cancelled)
+    );
+}
