@@ -12,6 +12,8 @@ pub enum CapsuleAllocationUnavailable {
     Runtime,
     #[error("source checkout failed: repository access, branch, or revision is unavailable")]
     SourceCheckout,
+    #[error("context repository checkout failed; inspect the operator diagnostic")]
+    ContextCheckout,
     #[error("environment setup failed; inspect the preparation log")]
     EnvironmentSetup,
     #[error("environment startup failed; inspect the preparation log")]
@@ -24,6 +26,7 @@ impl CapsuleAllocationUnavailable {
         match self {
             Self::Runtime => "runtime_unavailable",
             Self::SourceCheckout => "source_checkout_unavailable",
+            Self::ContextCheckout => "context_checkout_unavailable",
             Self::EnvironmentSetup => "environment_setup_failed",
             Self::EnvironmentStartup => "environment_startup_failed",
         }

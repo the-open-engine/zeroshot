@@ -319,6 +319,7 @@ fn request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: run_id(),
         submission: RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Target authority test").assert_value(),
             graph: graph_fixture("worker", json!({"kind": "null"})),
@@ -1139,6 +1140,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
             .assert_value(),
     );
     let admitted = crate::native_v2_contract::AdmittedRun {
+        context_sources: Vec::new(),
         title: RunTitle::new("Steering target").assert_value(),
         graph: serde_json::from_str(include_str!(
             "../../../protocol/openengine-cluster/v1/fixtures/graph/canonical/base.json"

@@ -141,6 +141,7 @@ async fn checkpoint_scratch_gc_failure_does_not_reject_confirmed_runtime_cleanup
 
 pub(super) fn submission(key: &str) -> RunSubmission {
     RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Portable controller test").assert_value_with("title"),
         graph: full_graph(vec![success_node()]),

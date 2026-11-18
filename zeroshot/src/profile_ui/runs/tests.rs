@@ -376,6 +376,7 @@ impl Fixture {
                 submission_key: IdempotencyKey::new("test-history").assert_value(),
                 submission_digest: Sha256Digest::new("a".repeat(64)).assert_value(),
                 admitted: AdmittedRun {
+                    context_sources: Vec::new(),
                     environment: None,
                     title: RunTitle::new("Inspect retained changes").assert_value(),
                     graph,

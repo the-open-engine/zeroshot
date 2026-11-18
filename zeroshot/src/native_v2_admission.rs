@@ -324,6 +324,7 @@ impl NativeV2Admission {
             runtime,
             environment,
             source,
+            context_sources,
             submission_key,
         } = submission;
         let prepared = prepare_submission(
@@ -338,6 +339,12 @@ impl NativeV2Admission {
             },
             context,
         )?;
+        openengine_cluster_protocol::validate_context_sources(
+            prepared.environment.as_ref(),
+            &context_sources,
+            source.as_ref(),
+        )
+        .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
         validate_source_delivery_with_registry(source.as_ref(), &prepared.graph, context.source)?;
         comment::resolve_comment_input_at(
             &prepared.graph.root,
@@ -356,6 +363,7 @@ impl NativeV2Admission {
             runtime: prepared.runtime,
             environment: prepared.environment,
             source,
+            context_sources,
         })
     }
 
@@ -495,6 +503,14 @@ pub(crate) fn validate_run_environment(
     if let Some(environment) = environment {
         environment
             .validate()
+            .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
+        environment
+            .validate_context_git_environment(
+                runtime
+                    .nodes()
+                    .values()
+                    .flat_map(|binding| binding.declared_connections().environment_names()),
+            )
             .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
     }
     validation::validate_declared_environment(runtime, environment)

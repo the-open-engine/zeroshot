@@ -244,6 +244,7 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
         )
     };
     admit(RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Hosted permissions").assert_value(),
         graph: full_graph(vec![node, success_node()]),

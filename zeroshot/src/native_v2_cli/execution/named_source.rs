@@ -28,6 +28,104 @@ struct RevisionSelection<'a> {
     git_credentials: Option<&'a GitTransportCredentials>,
 }
 
+pub(super) async fn resolve_context_sources(
+    run: &RunCommand,
+    request: &mut crate::native_v2_cli::PreparedRunRequest,
+    token: Option<&str>,
+) -> Result<(), NativeV2CliError> {
+    if run.target.is_none() || run.validate_only {
+        return Ok(());
+    }
+    let Some(environment) = request.intent.environment.as_ref() else {
+        return Ok(());
+    };
+    if environment.context_repositories.is_empty() {
+        return Ok(());
+    }
+    let root = match &run.cwd {
+        Some(root) => root.clone(),
+        None => {
+            std::env::current_dir().map_err(|_| source_error("invoking folder is unavailable"))?
+        }
+    };
+    for repository in &environment.context_repositories {
+        let pin = resolve_context_repository(&root, repository, request, token)
+            .await
+            .map_err(|error| {
+                NativeV2CliError::Usage(format!(
+                    "context repository {} could not be resolved: {error}",
+                    repository.repository
+                ))
+            })?;
+        request.context_sources.push(pin);
+    }
+    openengine_cluster_protocol::validate_context_sources(
+        Some(environment),
+        &request.context_sources,
+        request.source.as_ref().map(|source| &source.resolved),
+    )
+    .map_err(|error| NativeV2CliError::Usage(error.to_string()))
+}
+
+async fn resolve_context_repository(
+    root: &Path,
+    repository: &openengine_cluster_protocol::ContextRepository,
+    request: &crate::native_v2_cli::PreparedRunRequest,
+    token: Option<&str>,
+) -> Result<ResolvedSource, NativeV2CliError> {
+    let source = request
+        .source
+        .as_ref()
+        .ok_or_else(|| source_error("context repositories require a source repository"))?;
+    repository
+        .validate_source(&source.resolved)
+        .map_err(|error| source_error(&error.to_string()))?;
+    let remote = repository
+        .remote_url()
+        .map_err(|error| source_error(&error.to_string()))?;
+    let (transport, _private) = selection_transport(root, remote.as_str())?;
+    let credential = crate::native_v2_delivery::transport::source_credential(
+        token.unwrap_or(""),
+        request.git_credentials.as_ref(),
+    );
+    let branch = match &repository.branch {
+        Some(branch) => branch.clone(),
+        None => SourceBranchId::new(
+            transport
+                .default_branch(credential)
+                .await
+                .map_err(|error| source_error(&error.to_string()))?,
+        )
+        .map_err(|error| source_error(&error.to_string()))?,
+    };
+    let revision = transport
+        .read_ref(branch.as_str(), credential)
+        .await
+        .map_err(|error| source_error(&error.to_string()))?
+        .ok_or_else(|| source_error("remote branch does not exist or is inaccessible"))?;
+    let connection = request
+        .source
+        .as_ref()
+        .and_then(|source| source.resolved.remote.as_ref())
+        .and_then(|remote| remote.connection.clone());
+    Ok(ResolvedSource {
+        repository: SourceRepositoryId::new(
+            repository
+                .repository_path()
+                .map_err(|error| source_error(&error.to_string()))?,
+        )
+        .map_err(|error| source_error(&error.to_string()))?,
+        branch,
+        revision: SourceRevisionId::new(revision)
+            .map_err(|error| source_error(&error.to_string()))?,
+        remote: Some(ResolvedGitRemote {
+            url: remote,
+            forge: None,
+            connection,
+        }),
+    })
+}
+
 pub(super) struct NamedSourceResolution {
     pub(super) source: NamedRunSource,
     pub(super) git_credentials: Option<GitTransportCredentials>,
@@ -460,24 +558,7 @@ async fn remote_tip(
     } else {
         remote_location(selection.root, location).await?.to_string()
     };
-    let native = crate::native_v2_local::capture_local_native_environment(selection.root)
-        .map_err(|_| source_error("could not capture native Git context"))?;
-    let private =
-        tempfile::tempdir().map_err(|_| source_error("could not prepare private Git context"))?;
-    let transport = crate::native_v2_delivery::transport::GitTransport::new(
-        crate::native_v2_delivery::transport::GitTransportConfig {
-            git_program: std::env::var_os("ZEROSHOT_TARGET_GIT_PROGRAM")
-                .unwrap_or_else(|| "git".into())
-                .into(),
-            workspace: selection.root.to_owned(),
-            home_directory: private.path().to_owned(),
-            private_directory: private.path().to_owned(),
-            identity: None,
-            local_environment: Some(native),
-            deadline: GIT_TIMEOUT,
-        },
-        remote,
-    );
+    let (transport, _private) = selection_transport(selection.root, &remote)?;
     let credential = crate::native_v2_delivery::transport::source_credential(
         selection.token.unwrap_or(""),
         selection.git_credentials,
@@ -495,6 +576,37 @@ async fn remote_tip(
         })?;
     SourceRevisionId::new(revision)
         .map_err(|_| source_error("remote branch returned an invalid Git revision"))
+}
+
+fn selection_transport(
+    root: &Path,
+    remote: &str,
+) -> Result<
+    (
+        crate::native_v2_delivery::transport::GitTransport,
+        tempfile::TempDir,
+    ),
+    NativeV2CliError,
+> {
+    let native = crate::native_v2_local::capture_local_native_environment(root)
+        .map_err(|_| source_error("could not capture native Git context"))?;
+    let private =
+        tempfile::tempdir().map_err(|_| source_error("could not prepare private Git context"))?;
+    let transport = crate::native_v2_delivery::transport::GitTransport::new(
+        crate::native_v2_delivery::transport::GitTransportConfig {
+            git_program: std::env::var_os("ZEROSHOT_TARGET_GIT_PROGRAM")
+                .unwrap_or_else(|| "git".into())
+                .into(),
+            workspace: root.to_owned(),
+            home_directory: private.path().to_owned(),
+            private_directory: private.path().to_owned(),
+            identity: None,
+            local_environment: Some(native),
+            deadline: GIT_TIMEOUT,
+        },
+        remote,
+    );
+    Ok((transport, private))
 }
 
 async fn git_at(root: &Path, args: &[&str]) -> Result<String, ()> {

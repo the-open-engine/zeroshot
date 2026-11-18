@@ -403,6 +403,7 @@ impl FailReason {
                 | "environment_setup_failed"
                 | "environment_startup_failed"
                 | "environment_preparation_timeout"
+                | "context_checkout_unavailable"
         ) {
             Err(FailReasonError)
         } else {
@@ -446,7 +447,7 @@ impl JsonSchema for FailReason {
             "maxLength": 128,
             "pattern": concat!(
                 "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|",
-                "environment_startup_failed|environment_preparation_timeout)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                "environment_startup_failed|environment_preparation_timeout|context_checkout_unavailable)$)[A-Za-z_][A-Za-z0-9_.-]*$"
             )
         })
     }

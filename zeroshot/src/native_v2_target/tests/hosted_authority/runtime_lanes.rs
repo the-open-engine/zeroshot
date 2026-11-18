@@ -558,6 +558,7 @@ async fn old_hosted_target_refuses_profile_git_source_and_resume_credentials_bef
         hosted_authority_with(HostedCapability::Git(None)).await;
     let request = generic_git_request(true, false);
     let profile = openengine_cluster_protocol::RunProfileRunRequest {
+        context_sources: Vec::new(),
         run_id: request.run_id,
         profile: openengine_cluster_protocol::RunProfileSelector {
             scope: RunProfileScope::User,

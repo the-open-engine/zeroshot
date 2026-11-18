@@ -1173,6 +1173,7 @@ impl LocalCliBackend {
         let status = self.status_local(RunStatusParams { run_id }).await?;
         Ok(RunForceResult {
             steering: Default::default(),
+            context_sources: status.context_sources,
             run_id: status.run_id,
             title: status.title,
             source: status.source,
@@ -1217,6 +1218,7 @@ impl LocalCliBackend {
         {
             return Ok(RunForceResult {
                 steering: Default::default(),
+                context_sources: recorded.context_sources,
                 run_id: recorded.run_id,
                 title: recorded.title,
                 source: recorded.source,

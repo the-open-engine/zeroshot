@@ -129,6 +129,7 @@ fn resolved_source() -> ResolvedSource {
 
 fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -> RunSubmission {
     RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Admission test").assert_value(),
         graph,
@@ -365,6 +366,7 @@ async fn rejects_inconsistent_worker_reuse() {
 async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models() {
     let graph = graph(vec![null_step("work", "agent.work@1"), succeed("done")]);
     let codex_runtime = RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Opaque Codex model").assert_value(),
         graph: graph.clone(),
@@ -723,5 +725,7 @@ mod input_loop_limits;
 #[path = "tests/requests.rs"]
 mod requests;
 
+#[path = "tests/context.rs"]
+mod context;
 #[path = "tests/networks.rs"]
 mod networks_tests;

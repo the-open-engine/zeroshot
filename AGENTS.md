@@ -1769,6 +1769,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the link is removed with it; an untrusted `/tmp` or any link failure keeps the full path.
 - An optional top-level run `environment` carries public setup/startup scripts, nonsecret variables,
   and explicit hook connection references. Profiles and runtime plans have no environment field.
+  Its optional `contextRepositories` lists at most sixteen same-forge read-only Git repositories;
+  clients pin the ordered list into `contextSources` before target submission using source authority.
+  Admission requires exact list/pin correspondence, including host-selected environments, and excludes
+  the primary source. Allocation fetches full history at the pins outside the workspace under
+  `ZEROSHOT_CONTEXT/<repository path>` before startup, on every allocation/restore. Supervisor-owned
+  checkouts and credential-free exact-path Git trust configuration are readable by hooks/agents but
+  never writable by their identities. A supervisor-owned Linux access ACL on the context root grants
+  only the allocated run UID traversal/read access; the shared run GID grants none. Repository
+  identity validation rejects percent escapes, and node connections cannot override `ZEROSHOT_CONTEXT`.
+  Context files never enter workspace checkpoints or delivery;
+  retained cleanup discards them. Shared private invocation context supplies paths, revisions and
+  experiment-copy guidance without changing authored instructions or hashes. Local runs reject them.
   The CLI accepts `--environment FILE` or `--no-environment`; hosts may resolve an omitted definition
   before acceptance, while an explicit empty object selects the base environment. Core stores no
   saved environment catalog and has no resource discovery or local environment UI. Hosted
@@ -1782,6 +1794,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Startup services retain a separate run-owned process marker and stop at run cleanup. Checkpoints
   retain files, graph state and supported node-instance conversations, but no services or Docker state; users reconstruct
   services idempotently and keep live database state outside file checkpoint guarantees.
+  Runs with context repositories reject `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_PARAMETERS`, and
+  `GIT_CONFIG_COUNT` in run variables and hook/node connections, case-insensitively, before
+  preparation. They would replace or reset the supervisor's exact-path Git trust. Runs without
+  context repositories retain caller-owned Git configuration.
   Local runs reject hooks and use the invoking environment. Direct Docker setup modifies its
   operator-owned target container, shared by that target's runs; separate target containers are
   needed for independent OS dependency sets. Platform supplies its own disposable execution placement.
