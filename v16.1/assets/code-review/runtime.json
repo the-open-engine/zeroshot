@@ -1,0 +1,124 @@
+{
+  "harness": "claude",
+  "provider": "anthropic",
+  "size": "medium",
+  "workspaceCheckpoints": false,
+  "nodes": {
+    "triage": {
+      "kind": "agent",
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "unit_broad_a": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "unit_broad_b": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "unit_depth": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "unit_design": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_logic": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_state": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_contracts": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_errors": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_claims": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "finalize_unit": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "finalize_rest": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "report": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "deliver": {
+      "kind": "comment_delivery",
+      "connections": {
+        "github": ["GH_TOKEN"]
+      }
+    }
+  }
+}
