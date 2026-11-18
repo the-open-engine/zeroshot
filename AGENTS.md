@@ -2327,6 +2327,8 @@ python -m mkdocs build --strict
   canonical tag. Every released commit must retain a Conventional Commit squash title ending in
   `(#PR)` and a nonempty release summary. Generation uses the exact release source, and publication
   persists the Markdown as an immutable release asset for byte-exact recovery.
+  Historical summary recovery and compatibility callouts are bound to exact immutable commit hashes.
+  Callouts appear only when their commit is in the release range, including for minor releases.
 - It publishes native archives/checksums, `ghcr.io/the-open-engine/zeroshot-target`, and
   `@the-open-engine-company/zeroshot`, then invokes Python revision `1`.
 - Python revision `1` always produces its GitHub wheel release. PyPI publication is fail-closed by
