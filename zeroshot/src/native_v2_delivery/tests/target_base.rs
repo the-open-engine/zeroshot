@@ -160,6 +160,81 @@ async fn push_publishes_the_admitted_candidate_without_integrating_target_drift(
 }
 
 #[tokio::test]
+async fn unchanged_target_with_unpushed_source_requires_review_without_claiming_advancement() {
+    for mode in [
+        DeliveryMode::PullRequest,
+        DeliveryMode::PullRequestV2,
+        DeliveryMode::Merge,
+        DeliveryMode::MergeV3,
+    ] {
+        let mut repo = TempRepo::candidate();
+        let target_revision = repo.base.clone();
+        fs::write(repo.workspace.join("README.md"), "local-only work\n").assert_value();
+        commit_all(&repo.workspace, "local-only commit");
+        repo.base = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+        fs::write(repo.workspace.join("result.txt"), "worker feature\n").assert_value();
+        let (authority, adapter) = scripted_adapter(
+            &repo,
+            Script::NoCi,
+            3,
+            DeliveryLineage::original("unchanged-target"),
+        );
+        let request = || DeliveryRunRequest {
+            repo: &repo,
+            attempts: 3,
+            mode,
+            run_id: "unchanged-target",
+            refresh: None,
+        };
+
+        let review = run_with_adapter(request(), adapter.clone()).await;
+
+        assert_delivery_signal(&review.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        let diagnostic = outcome_diagnostic(&review.outcome);
+        assert!(
+            !diagnostic.contains("the target revision advanced"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("verify the candidate against reviewBaseRevision"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains(&format!("sourceRevision: {}", repo.base)),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains(&format!("reviewBaseRevision: {target_revision}")),
+            "{diagnostic}"
+        );
+        assert!(!authority.pushed.load(Ordering::SeqCst));
+        assert!(authority.review_requests().is_empty());
+        assert_eq!(
+            git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+            repo.base
+        );
+
+        let published = run_with_adapter(request(), adapter).await;
+
+        assert_delivery_signal(&published.outcome, mode.success_outcome());
+        assert_eq!(authority.target_reconciliations.load(Ordering::SeqCst), 2);
+        assert_eq!(authority.review_requests().len(), 1);
+        assert_eq!(
+            git_output(&repo.remote, &["rev-parse", "main"]),
+            target_revision
+        );
+        assert_eq!(
+            git_output(&repo.workspace, &["show", "HEAD:README.md"]),
+            "local-only work"
+        );
+        assert_eq!(
+            git_output(&repo.workspace, &["show", "HEAD:result.txt"]),
+            "worker feature"
+        );
+    }
+}
+
+#[tokio::test]
 async fn updated_target_workflow_is_integrated_and_reviewed_before_first_push() {
     for mode in [
         DeliveryMode::PullRequest,
