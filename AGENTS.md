@@ -310,6 +310,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Static aggregate proofs check private qualification before exporting retained controls, preserve
   presence and success/failure refinement in every compressed label class, saturate higher counts at
   authored thresholds, and expand each distinct first-join selector once per racer.
+  Implicit aggregate dependencies retain their actual enclosing map scope; controls preceding the
+  outer map stay shared rather than varying per item.
   Aggregate guards can use nested map facts when an enclosing map dominates their scope.
   The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
   actual traversal to find ready work; static write/retention witnesses remain private to admission.
