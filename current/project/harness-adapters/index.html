@@ -2336,8 +2336,13 @@
 </table>
 <p>Each adapter owns its CLI version range. Local <code>run</code>, checkpoint <code>resume</code> and ACP sessions check
 all agent lanes before any node starts, using the captured launch search path and native environment.
-Each distinct executable is probed once with a 60-second deadline. An older, incompatible or unreadable
-version is refused with the lane, executable, reported version, supported range and installation step.</p>
+Each distinct executable is probed once. Local probes use the earlier of their own 60-second limit
+and the controller's remaining preparation budget (<code>ZEROSHOT_PREPARATION_TIMEOUT</code>, 600 seconds by
+default), shared with checkpoint restoration and runtime composition. Expiry cancels preparation,
+confirms helper process-tree cleanup and refuses admission, even after a successful late response.
+Workspace replacement finishes once begun; the CLI's extra stop grace allows cleanup only.
+ACP retains an independent 60-second limit per probe. An older, incompatible or unreadable version
+is refused with the lane, executable, reported version, supported range and installation step.</p>
 <table>
 <thead>
 <tr>
@@ -2589,7 +2594,7 @@ frame bound to each adapter; adapters retain installation and acknowledgement ow
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-17">17 November 2026</time>
+    Last updated <time datetime="2026-11-18">18 November 2026</time>
   </span>
 
     
