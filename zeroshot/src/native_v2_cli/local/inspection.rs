@@ -272,6 +272,97 @@ impl LocalCliBackend {
         }))
     }
 
+    /// Shared eligibility checks keep inspection's boolean and resume's diagnostic in agreement.
+    pub(super) async fn recovery_workspace_refusal(
+        &self,
+        status: &RunStatusResult,
+        document: &LocalRecoveryDocument,
+    ) -> Result<Option<String>, NativeV2CliError> {
+        let failed = matches!(
+            status.status,
+            openengine_cluster_protocol::RunStatus::Finished {
+                terminal_result: TerminalResult::Failed { .. },
+                ..
+            }
+        );
+        let loss_observed = status.controller.as_ref().is_some_and(|observation| {
+            observation.state == openengine_cluster_protocol::ControllerState::Lost
+        });
+        let suspended = match &status.status {
+            openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } => suspension
+                .due_at()
+                .is_none_or(|due| crate::native_v2_runner::current_timestamp() >= due),
+            _ => false,
+        };
+        let stopped_suspension = if matches!(
+            &status.status,
+            openengine_cluster_protocol::RunStatus::Finished {
+                terminal_result: TerminalResult::Failed { reason, .. }, ..
+            } if reason.as_str() == "force_stopped"
+        ) {
+            let ledger =
+                SqliteRunLedger::open_read_only(self.existing_run_paths(&status.run_id)?.ledger())
+                    .map_err(local_error)?;
+            ledger
+                .get(&status.run_id)
+                .await
+                .map_err(local_error)?
+                .is_some_and(|run| run.snapshot.suspension.is_some())
+        } else {
+            false
+        };
+        if stopped_suspension {
+            return Ok(Some("its suspension was force-stopped".to_owned()));
+        }
+        if !(failed || suspended || loss_observed) {
+            use openengine_cluster_protocol::RunStatus;
+            return Ok(Some(match &status.status {
+                RunStatus::Admitted {} => "it has not started".to_owned(),
+                RunStatus::Running { .. } => "it is still running".to_owned(),
+                RunStatus::Stopping { .. } => "it is still stopping".to_owned(),
+                RunStatus::Finished { .. } => "it succeeded".to_owned(),
+                RunStatus::Suspended { suspension, .. } => match suspension.due_at() {
+                    Some(due) => format!("its wait is due at {}", due.get()),
+                    None => "it is not ready to continue".to_owned(),
+                },
+            }));
+        }
+        let workspace = document.workspace.display();
+        match std::fs::metadata(&document.workspace) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return Ok(Some(format!(
+                    "its workspace path {workspace} is not a folder"
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let hint = if matches!(status.status, RunStatus::Suspended { .. }) {
+                    "; restore the original workspace at that path before resuming; \
+                     suspended runs do not support checkpoint restoration"
+                        .to_owned()
+                } else if document.workspace_checkpoints_enabled() {
+                    format!(
+                        "; to restore a checkpoint, \
+                     create a new empty folder at that path, then run `zeroshot resume {} \
+                     --from-checkpoint CHECKPOINT_ID --discard-workspace-changes`",
+                        status.run_id.as_str()
+                    )
+                } else {
+                    String::new()
+                };
+                return Ok(Some(format!(
+                    "its workspace folder {workspace} no longer exists{hint}"
+                )));
+            }
+            Err(error) => {
+                return Ok(Some(format!(
+                    "its workspace folder {workspace} could not be accessed: {error}"
+                )));
+            }
+        }
+        self.recovery_workspace_claim_refusal(&status.run_id)
+    }
+
     /// Explicit controls may recover a confirmed dead controller. Inspection never calls this.
     pub(super) async fn confirm_loss_for_resume(&self, id: &RunId) -> Result<(), NativeV2CliError> {
         let status = self
@@ -295,16 +386,30 @@ impl LocalCliBackend {
             return Ok(());
         }
         let paths = self.existing_run_paths(id)?;
-        if matches!(check_controller_with_timeout(&paths, id, DEFAULT_READY_TIMEOUT).await,
-            ControllerAvailability::Unavailable { observation: observed, .. }
-                if observed.state == openengine_cluster_protocol::ControllerState::Lost)
-        {
-            // Recovery acquires and verifies the existing lease before any ledger write.
-            let controller = PortableRunController::confirm_loss(paths, id.clone())
-                .await
-                .map_err(local_error)?;
-            drop(controller);
-            return Ok(());
+        match check_controller_with_timeout(&paths, id, DEFAULT_READY_TIMEOUT).await {
+            ControllerAvailability::Responding(_, status) => {
+                let reason = match status.status {
+                    RunStatus::Admitted {} => "it has not started",
+                    RunStatus::Running { .. } => "it is still running",
+                    RunStatus::Stopping { .. } => "it is still stopping",
+                    _ => "its controller has not durably settled",
+                };
+                return Err(NativeV2CliError::Usage(format!(
+                    "run cannot be resumed: {reason}"
+                )));
+            }
+            ControllerAvailability::Unavailable {
+                observation: observed,
+                ..
+            } if observed.state == openengine_cluster_protocol::ControllerState::Lost => {
+                // Recovery acquires and verifies the existing lease before any ledger write.
+                let controller = PortableRunController::confirm_loss(paths, id.clone())
+                    .await
+                    .map_err(local_error)?;
+                drop(controller);
+                return Ok(());
+            }
+            _ => {}
         }
         Err(local_message(format!(
             "controller availability is unknown; run {} is still owned or unreachable",

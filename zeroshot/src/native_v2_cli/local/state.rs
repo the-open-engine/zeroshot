@@ -6,7 +6,7 @@ use tokio::process::Command;
 
 use crate::execution::platform::{FileAccess, private_file};
 use super::super::support::{CommitPaths, cleanup_temporary, write_and_commit};
-use super::{LocalRecoveryDocument, NativeV2CliError, local_io, local_message, local_path_error};
+use super::{LocalRecoveryDocument, NativeV2CliError, local_io, local_message};
 
 pub(super) fn validate_local_run_id(run_id: &RunId) -> Result<(), NativeV2CliError> {
     is_canonical_uuid_v7(run_id)
@@ -131,9 +131,23 @@ impl LocalRecoveryDocument {
     }
 
     pub(super) fn read(path: &Path) -> Result<Self, NativeV2CliError> {
-        let bytes = std::fs::read(path).map_err(|error| local_path_error(path, error))?;
-        openengine_cluster_protocol::bounded_json_from_slice(&bytes)
-            .map_err(|_| local_message("workspace recovery metadata is invalid"))
+        let bytes = std::fs::read(path).map_err(|error| {
+            let reason = if error.kind() == std::io::ErrorKind::NotFound {
+                "is missing"
+            } else {
+                "could not be read"
+            };
+            local_message(format!(
+                "workspace recovery record {} {reason}: {error}",
+                path.display()
+            ))
+        })?;
+        openengine_cluster_protocol::bounded_json_from_slice(&bytes).map_err(|_| {
+            local_message(format!(
+                "workspace recovery record {} is invalid",
+                path.display()
+            ))
+        })
     }
 
     pub(super) fn write(&self, path: &Path) -> Result<(), NativeV2CliError> {

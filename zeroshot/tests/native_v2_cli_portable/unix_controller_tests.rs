@@ -13,6 +13,9 @@ use super::{Fixture, process_exists, success};
 #[path = "restic_resume_tests.rs"]
 mod restic_resume_tests;
 
+#[path = "resume_refusal_tests.rs"]
+mod resume_refusal_tests;
+
 #[path = "unix_controller_work_tests.rs"]
 mod work;
 

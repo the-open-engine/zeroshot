@@ -917,12 +917,26 @@ impl LocalCliBackend {
         Ok(self.run_storage(run_id)?.join(RECOVERY_CLAIM_FILE))
     }
 
-    fn recovery_workspace_is_unclaimed(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
+    fn recovery_workspace_claim_refusal(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<String>, NativeV2CliError> {
         let path = self.recovery_claim_path(run_id)?;
         match std::fs::symlink_metadata(&path) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-            _ => Ok(ControllerLease::probe(&path).is_ok_and(|probe| !probe.held)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            _ => {}
         }
+        Ok(match ControllerLease::probe(&path) {
+            Ok(probe) if !probe.held => None,
+            Ok(_) => Some(format!(
+                "its retained workspace is already being resumed (claim {})",
+                path.display()
+            )),
+            Err(error) => Some(format!(
+                "its workspace claim {} could not be checked: {error}",
+                path.display()
+            )),
+        })
     }
 
     /// Releases a successor claim whose controller never admitted the run. `handoff` bounds the
@@ -1082,16 +1096,10 @@ impl LocalCliBackend {
             Ok(document) => document,
             Err(_) => return Ok(WorkspaceRecovery::default()),
         };
-        let failed = matches!(
-            status.status,
-            openengine_cluster_protocol::RunStatus::Finished {
-                terminal_result: TerminalResult::Failed { .. },
-                ..
-            }
-        );
-        let loss_observed = status.controller.as_ref().is_some_and(|observation| {
-            observation.state == openengine_cluster_protocol::ControllerState::Lost
-        });
+        let unclaimed = self
+            .recovery_workspace_refusal(status, &document)
+            .await?
+            .is_none();
         let request = matches!(
             &status.status,
             openengine_cluster_protocol::RunStatus::Suspended {
@@ -1099,33 +1107,6 @@ impl LocalCliBackend {
                 ..
             }
         );
-        let suspended = match &status.status {
-            openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } => suspension
-                .due_at()
-                .is_none_or(|due| crate::native_v2_runner::current_timestamp() >= due),
-            _ => false,
-        };
-        let stopped_suspension = if matches!(
-            &status.status,
-            openengine_cluster_protocol::RunStatus::Finished {
-                terminal_result: TerminalResult::Failed { reason, .. }, ..
-            } if reason.as_str() == "force_stopped"
-        ) {
-            let ledger =
-                SqliteRunLedger::open_read_only(self.existing_run_paths(&status.run_id)?.ledger())
-                    .map_err(local_error)?;
-            ledger
-                .get(&status.run_id)
-                .await
-                .map_err(local_error)?
-                .is_some_and(|run| run.snapshot.suspension.is_some())
-        } else {
-            false
-        };
-        let unclaimed = !stopped_suspension
-            && (failed || suspended || loss_observed)
-            && document.workspace.is_dir()
-            && self.recovery_workspace_is_unclaimed(&status.run_id)?;
         // With the recovery claim released, a successor that neither runs nor was admitted is
         // an interrupted launch, such as a crash during its restore. The next resume reconciles
         // it before claiming the workspace, so it does not block recovery.

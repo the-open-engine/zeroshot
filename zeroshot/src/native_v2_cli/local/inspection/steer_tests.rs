@@ -484,8 +484,9 @@ async fn steer_local_concurrent_steers_share_the_recovery_claim() {
         .assert_value();
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&params.run_id)
+            .recovery_workspace_claim_refusal(&params.run_id)
             .assert_value()
+            .is_none()
     );
     assert!(
         backend
@@ -529,9 +530,10 @@ async fn steer_local_concurrent_steers_share_the_recovery_claim() {
         .claim_recovery_workspace(&params.run_id)
         .assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&params.run_id)
+        backend
+            .recovery_workspace_claim_refusal(&params.run_id)
             .assert_value()
+            .is_some()
     );
     let error = backend.run_steer(None, params.clone()).await.assert_error();
     assert!(
