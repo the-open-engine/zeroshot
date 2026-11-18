@@ -200,6 +200,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
   transport failure makes maintenance evidence unknown; a steer has no receipt and is offered again.
+  A receipt write runs in a task of its own and is never abandoned at the callback deadline: the
+  callback waits within its bound, while a started append keeps the conversation's reservation
+  until the ledger reports its outcome. A committed write records the receipt; a confirmed failure
+  releases the steer to be offered again. Once is held per node instance, Standing per provider
+  conversation. Snapshots reference a pending receipt, which counts only once committed.
   Native callback installation shares the updater's installed-executable path normalization, so
   Linux controllers keep delivering after an atomic executable replacement.
   Callback frames have absolute I/O deadlines
