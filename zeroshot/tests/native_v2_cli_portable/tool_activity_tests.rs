@@ -133,9 +133,21 @@ fn core_tool_activity_reaches_durable_cli_logs_and_node_transcript_data() {
                 transcript.contains(expected),
                 "{harness}: transcript missing {expected}"
             );
+            if harness == "pi" {
+                assert_eq!(logs.matches(expected).count(), 1, "logs: {expected}");
+                assert_eq!(
+                    transcript.matches(expected).count(),
+                    1,
+                    "transcript: {expected}"
+                );
+            }
         }
         assert!(!transcript.contains("fixture-key"));
         assert!(!transcript.contains(NUMERIC_CREDENTIAL));
+        if harness == "pi" {
+            assert_eq!(logs.matches("id=reused-native-id ").count(), 4);
+            assert_eq!(transcript.matches("id=reused-native-id ").count(), 4);
+        }
         if harness == "codex" {
             for expected in [
                 "spawn_agent id=collab-native-ok status=completed",

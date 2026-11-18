@@ -219,6 +219,8 @@ impl PiTranscript {
                 // normally commits it already; this also covers a stream that omitted one.
                 if role == Some("assistant") {
                     self.commit_usage();
+                    // Pi may reuse native tool IDs in a later model step.
+                    self.tools = ToolActivity::default();
                     // The last assistant message is the node's answer, so a message that starts
                     // after one already settled must not leave that earlier text in place.
                     self.terminal = None;

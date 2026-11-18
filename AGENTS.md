@@ -398,7 +398,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `harnesses::adapters::core::tool_activity` into existing durable text logs and node transcripts.
   Each complete entry, including identity/status framing and truncation markers, is at most 8 KiB
   with head/tail excerpts. Redact decoded strings before JSON rendering and serialized payloads
-  before truncation; deduplicate native IDs per phase and omit cumulative updates. Missing native
+  before truncation; deduplicate native IDs per phase and omit cumulative updates. Pi scopes this
+  deduplication to each assistant-message start; user/tool-result messages retain it. Missing native
   status stays unknown. These are log-only per-entry bounds, independent of Active Memory and
   provider response/outcome handling. Claude replayed user records acknowledge prompt delivery;
   ordinary user records still carry native tool completions.

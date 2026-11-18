@@ -129,9 +129,11 @@ if (process.argv.includes('--version')) {
         emit(result);
         emit(result);
       } else if (harness === 'pi') {
+        emit({ type: 'message_start', message: { role: 'assistant' } });
+        emit({ type: 'message_end', message: { role: 'assistant', stopReason: 'toolUse' } });
         const call = {
           type: 'tool_execution_start',
-          toolCallId: id,
+          toolCallId: 'reused-native-id',
           toolName: 'fixture-shell',
           args: input(id),
         };
@@ -139,12 +141,12 @@ if (process.argv.includes('--version')) {
         emit(call);
         emit({
           type: 'tool_execution_update',
-          toolCallId: id,
+          toolCallId: 'reused-native-id',
           partialResult: 'ignored-cumulative',
         });
         const result = {
           type: 'tool_execution_end',
-          toolCallId: id,
+          toolCallId: 'reused-native-id',
           toolName: 'fixture-shell',
           result: { content: [{ type: 'text', text: output(id) }], details: { credential } },
           isError: failed,
@@ -210,6 +212,7 @@ if (process.argv.includes('--version')) {
         structured_output: { response: null },
       });
     } else if (harness === 'pi') {
+      emit({ type: 'message_start', message: { role: 'assistant' } });
       emit({
         type: 'message_update',
         assistantMessageEvent: { type: 'text_delta', delta: response },
