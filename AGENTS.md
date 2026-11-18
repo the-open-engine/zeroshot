@@ -2264,7 +2264,8 @@ python -m mkdocs build --strict
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
   CLI subprocess tests. Windows uses
   `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job and prints Cargo's
-  rendered compiler diagnostics while collecting executable metadata; the CI-only
+  rendered compiler diagnostics while collecting executable metadata. Test and doctest compilation
+  use one Cargo job to bound concurrent metadata mappings on hosted Windows; the CI-only
   `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
