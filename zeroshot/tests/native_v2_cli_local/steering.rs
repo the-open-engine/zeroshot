@@ -91,8 +91,12 @@ async fn steer_live_controller_keeps_delivering_after_atomic_executable_replacem
         serde_json::from_slice(&fs::read(&fixture.runtime).assert_value()).assert_value();
     runtime["workspaceCheckpoints"] = json!(false);
     write_json(&fixture.runtime, &runtime);
-    // Replace only this fixture's installation, leaving the shared candidate untouched.
-    fixture.executable = fixture.root.path("installed-zeroshot");
+    // Hosted TMPDIR can be a symlink. Exercise a linked installation in every run.
+    let installation = fixture.root.path("installation");
+    fs::create_dir(&installation).assert_value();
+    let link = fixture.root.path("installation-link");
+    std::os::unix::fs::symlink(&installation, &link).assert_value();
+    fixture.executable = link.join("installed-zeroshot");
     fs::copy(env!("CARGO_BIN_EXE_zeroshot"), &fixture.executable).assert_value();
     let run = fixture.submit_detached("steer-replace").await;
     steer_held(&fixture).await;
@@ -107,9 +111,12 @@ async fn steer_live_controller_keeps_delivering_after_atomic_executable_replacem
 
     let staged = fixture.root.path("replacement-zeroshot");
     fs::copy(env!("CARGO_BIN_EXE_zeroshot"), &staged).assert_value();
-    fs::rename(staged, &fixture.executable).assert_value();
-    let mut deleted = fixture.executable.as_os_str().to_owned();
+    // Linux reports the resolved installation path through /proc.
+    let mut deleted = fs::canonicalize(&fixture.executable)
+        .assert_value()
+        .into_os_string();
     deleted.push(" (deleted)");
+    fs::rename(staged, &fixture.executable).assert_value();
     assert_eq!(
         fs::read_link(format!("/proc/{controller}/exe")).assert_value(),
         PathBuf::from(deleted)
