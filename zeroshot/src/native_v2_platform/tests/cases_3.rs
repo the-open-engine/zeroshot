@@ -1,5 +1,29 @@
 use super::*;
 
+#[tokio::test(start_paused = true)]
+async fn preparation_deadline_expiring_during_submission_never_creates_or_allocates_a_run() {
+    let harness = harness(Behavior::Complete).await;
+    let request = request(Value::Null);
+    let environment = exact_test_environment(&request).assert_value();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let turn = harness.controller.submission_turn.lock().await;
+    let submission =
+        harness
+            .controller
+            .submit_with_exact_environment_until(request, environment, deadline);
+    tokio::pin!(submission);
+    assert!(futures_util::poll!(&mut submission).is_pending());
+    tokio::time::advance(Duration::from_secs(2)).await;
+    drop(turn);
+    assert!(matches!(
+        submission.await,
+        Err(NativeV2PlatformError::PreparationTimeout)
+    ));
+    assert!(harness.ledger.list().await.assert_value().is_empty());
+    assert_eq!(harness.allocator.allocation_count(), 0);
+    assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 0);
+}
+
 async fn assert_active_submission_conflicts(
     controller: &NativeV2PlatformController,
     ledger: &FakeRunLedger,

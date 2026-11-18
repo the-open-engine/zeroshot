@@ -201,20 +201,24 @@ async fn probe_deadline_refuses_a_stalled_command_even_after_a_valid_version() {
     openengine_cluster_testkit::fixture::write_executable(&path, script, 0o700).assert_value();
     #[cfg(windows)]
     std::fs::write(&path, script).assert_value();
-    let command = ProcessSessionCommand {
-        program: path.to_string_lossy().into_owned(),
-        argv: vec!["--version".to_owned()],
-        environment: environment(root.path()),
-        workspace: WorkspaceCapability {
-            current_dir: root.path().to_owned(),
-            mode: WorkspaceAccessMode::ReadWrite,
-        },
-        deadline: Some(tokio::time::Instant::now() + Duration::from_millis(500)),
-    };
-    let (_, failure) = tokio::time::timeout(Duration::from_secs(20), probe(command, None))
+    let (_request, stopping) = tokio::sync::watch::channel(false);
+    let runtime = plan("codex", &["openai"]);
+    let native = environment(root.path());
+    let check = check_lane_versions(
+        &runtime,
+        &native,
+        root.path(),
+        Some(crate::native_v2_portable_controller::RuntimePreparation {
+            deadline: tokio::time::Instant::now() + Duration::from_millis(500),
+            stopping,
+        }),
+    );
+    let failure = tokio::time::timeout(Duration::from_secs(20), check)
         .await
-        .assert_value();
-    assert!(failure.assert_value().contains("timed out"));
+        .assert_value()
+        .assert_error()
+        .to_string();
+    assert!(failure.contains("timed out"), "{failure}");
 }
 
 #[test]

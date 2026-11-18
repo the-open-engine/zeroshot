@@ -101,7 +101,7 @@ async fn successor_preparation_inherits_every_vector_and_only_suspended_executio
         let prepared_runtime = prepare_runtime(
             &prepared,
             &bootstrap,
-            async |_| Ok::<_, std::io::Error>(PortableRuntime::new(Arc::new(NeverDispatched))),
+            async |_, _| Ok::<_, std::io::Error>(PortableRuntime::new(Arc::new(NeverDispatched))),
             tokio::time::Instant::now() + bootstrap.preparation_timeout,
         )
         .await
