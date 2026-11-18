@@ -529,10 +529,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   before it is written of the bootstrap's credentials and of every captured shell value except
   short or known-public ones, including certificate trust paths so unreadable files stay named;
   the waiting CLI consumes it and appends it to its startup error.
-  Preparation before readiness, including a checkpoint restore, has one finite deadline: 600 s, or
-  `ZEROSHOT_PREPARATION_TIMEOUT` whole seconds from 1 to 86400. The controller stops a restore
+  Preparation before readiness, including checkpoint restoration, version validation and runtime
+  composition, shares one absolute deadline from controller start: 600 s, or
+  `ZEROSHOT_PREPARATION_TIMEOUT` whole seconds from 1 to 86400. Expiry cancels preparation and
+  confirms helper process-tree cleanup before returning; recheck the deadline before admission,
+  including after successful work that finished late and after submission lookup/validation,
+  immediately before durable run creation. Begun admission writes still settle. The controller stops a restore
   that is still extracting there; workspace replacement, once begun, runs to completion so it is
-  never stopped halfway on purpose. The CLI waits a short stop grace longer, then stops the
+  never stopped halfway on purpose; expired preparation then refuses admission. The CLI waits a
+  short stop grace longer for cleanup only, then stops the
   controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
   their separate short bound.
   A later local submission or resume scavenges orphaned bootstrap files after the bounded controller handoff
@@ -1016,7 +1021,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   allowlists and upgrade steps. Local runs and checkpoint resumes probe every distinct lane executable
   after workspace restoration and before runtime composition/admission; ACP probes before creating a
   session. Shared version probes use the existing process runner, captured search path and native
-  environment, a 60-second deadline and bounded output, including npm Windows command shims.
+  environment and bounded output, including npm Windows command shims. Local probes use the earlier
+  of the shared controller preparation deadline and their own 60-second limit; ACP retains an
+  independent 60-second limit per probe.
   Controller shutdown cancels in-flight probes and awaits confirmed process-tree cleanup before
   returning the startup failure; a cancelled probe cannot admit even a valid reported version.
   Truncated version output remains available only for classification; omit it from diagnostics so
