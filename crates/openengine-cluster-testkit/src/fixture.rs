@@ -130,81 +130,83 @@ pub fn python3_script(source: &str) -> String {
     }
 }
 
-/// Writes a Unix executable and waits out writable descriptors inherited by concurrent forks.
+/// Writes a Unix executable outside the test runner's descriptor table.
 ///
-/// The lock handoff closes the `fork`/`CLOEXEC` window that can otherwise make an immediate spawn
-/// fail with `ETXTBSY`.
+/// Reaping the writer prevents concurrent test forks from retaining a writable descriptor when
+/// another test immediately executes the fixture.
 #[cfg(unix)]
 pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>, mode: u32) -> io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::PermissionsExt as _;
+    use std::process::{Command, Stdio};
 
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
-    file.write_all(contents.as_ref())?;
-    file.set_permissions(std::fs::Permissions::from_mode(mode))?;
-    finish_executable_write(file, path)
-}
-
-#[cfg(unix)]
-fn finish_executable_write(file: std::fs::File, path: &Path) -> io::Result<()> {
-    fs2::FileExt::lock_exclusive(&file)?;
-    drop(file);
-
-    let file = std::fs::File::open(path)?;
-    fs2::FileExt::lock_shared(&file)
+    let mut writer = Command::new("/bin/sh")
+        .args(["-c", "umask 077; exec /bin/cat > \"$1\"", "fixture-writer"])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let written = writer
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("fixture writer has no input"))?
+        .write_all(contents.as_ref());
+    let output = writer.wait_with_output()?;
+    written?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "fixture writer failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
 
-    #[test]
-    fn duplicated_writer_holds_the_lock_handoff_until_it_closes() {
-        let directory = TemporaryDirectory::for_test("executable-lock-handoff");
-        let path = directory.path("fixture");
-        let writer = std::fs::File::create(&path).expect("create executable fixture");
-        let inherited_writer = writer.try_clone().expect("duplicate executable writer");
-        let waiting_path = path.clone();
-        let (finished, result) = mpsc::channel();
-        let waiter = std::thread::spawn(move || {
-            finished
-                .send(finish_executable_write(writer, &waiting_path))
-                .expect("report lock handoff result");
-        });
+    struct StopSpawning<'a>(&'a AtomicBool);
 
-        let probe = std::fs::File::open(&path).expect("open lock probe");
-        loop {
-            match fs2::FileExt::try_lock_shared(&probe) {
-                Ok(()) => {
-                    fs2::FileExt::unlock(&probe).expect("unlock probe");
-                    match result.try_recv() {
-                        Ok(finished) => {
-                            panic!("lock handoff finished before taking its lock: {finished:?}")
-                        }
-                        Err(mpsc::TryRecvError::Empty) => std::thread::yield_now(),
-                        Err(mpsc::TryRecvError::Disconnected) => {
-                            panic!("lock handoff result sender disconnected")
-                        }
-                    }
-                }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
-                Err(error) => panic!("probe lock failed: {error}"),
-            }
+    impl Drop for StopSpawning<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
         }
-        assert!(matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
 
-        drop(inherited_writer);
-        result
-            .recv()
-            .expect("receive lock handoff result")
-            .expect("lock handoff should succeed");
-        waiter.join().expect("join lock handoff waiter");
+    #[test]
+    fn executables_run_immediately_while_other_threads_spawn() {
+        let directory = TemporaryDirectory::for_test("executable 'concurrent fork");
+        let path = directory.path("fixture");
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let _stop = StopSpawning(&stop);
+            for _ in 0..2 {
+                scope.spawn(|| {
+                    while !stop.load(Ordering::Relaxed) {
+                        assert!(
+                            std::process::Command::new("/bin/sh")
+                                .args(["-c", ":"])
+                                .status()
+                                .expect("spawn concurrent process")
+                                .success()
+                        );
+                    }
+                });
+            }
+            for value in 0..32 {
+                write_executable(&path, format!("#!/bin/sh\nprintf '%s' '{value}'\n"), 0o700)
+                    .expect("publish executable fixture");
+                let output = std::process::Command::new(&path)
+                    .output()
+                    .expect("execute freshly written fixture");
+                assert!(output.status.success(), "{output:?}");
+                assert_eq!(output.stdout, value.to_string().as_bytes());
+            }
+        });
     }
 }
 
