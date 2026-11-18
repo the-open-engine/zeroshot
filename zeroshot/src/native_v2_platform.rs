@@ -100,6 +100,7 @@ pub struct NativeV2PlatformController {
     control_turns: Arc<Mutex<BTreeMap<RunId, Weak<Mutex<()>>>>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
+    checkpointless_requests: bool,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
     run_sizes: Option<Arc<openengine_cluster_protocol::TargetRunSizesDiscovery>>,
     operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
@@ -166,6 +167,7 @@ impl NativeV2PlatformController {
             control_turns: Arc::default(),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
+            checkpointless_requests: false,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
             run_sizes: None,
             operator_diagnostics: Arc::default(),
@@ -219,6 +221,12 @@ impl NativeV2PlatformController {
         run_sizes: openengine_cluster_protocol::TargetRunSizesDiscovery,
     ) -> Self {
         self.run_sizes = Some(Arc::new(run_sizes));
+        self
+    }
+
+    /// Local successors retain request history in their durable ledger after snapshot discard.
+    pub(crate) fn with_checkpointless_requests(mut self, enabled: bool) -> Self {
+        self.checkpointless_requests = enabled;
         self
     }
 
@@ -359,6 +367,7 @@ impl NativeV2PlatformController {
             harnesses,
             self.delivery_policy,
         );
+        admission.checkpointless_requests = self.checkpointless_requests;
         if let Some(catalog) = self.run_sizes.as_deref() {
             admission = admission.with_run_sizes(catalog);
         }

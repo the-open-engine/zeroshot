@@ -234,6 +234,8 @@ mod cases_3;
 mod cases_4;
 #[path = "full_v1_reducer/map_collections.rs"]
 mod map_collections;
+#[path = "full_v1_reducer/nested_scope.rs"]
+mod nested_scope;
 #[path = "full_v1_reducer/trace.rs"]
 mod trace;
 

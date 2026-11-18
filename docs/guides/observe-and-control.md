@@ -343,7 +343,14 @@ storage and advertise `openengine.workspace-checkpoints/v1`. They retain that re
 failed recovery lineage and delete it after a successful run. Force-stopping a local run also
 deletes the repository, together with the checkpoints listed by every run in its recovery lineage,
 so neither the original run nor its successors list checkpoints that can no longer be restored.
-Other lineages keep theirs. Platform exposes recovery through
+Local checkpoints never expire automatically. To free the space kept by a finished failed local
+run, use `zeroshot discard-workspace RUN_ID`. It deletes checkpoint data and lists for the whole
+recovery lineage while keeping the checkout, run directory, ledger, logs and delivery recovery
+state. A second call reports `discarded: false`. Plain resume still uses the current checkout,
+with workspace checkpoints disabled; checkpoint selection and `--discard-workspace-changes`
+are refused. A running or resuming lineage must be force-stopped first. An uncontinued suspension
+must also be force-stopped, and an interrupted restore must be completed by repeating its resume.
+Other lineages keep theirs. Named-target behavior is unchanged. Platform exposes recovery through
 authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
 original capsule is removed. Platform resolves declared connections from their original references.
 Direct-target resume reuses the original source connection authorization and resolves fresh values;

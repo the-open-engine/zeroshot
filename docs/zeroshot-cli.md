@@ -39,7 +39,7 @@ Commands:
   resume             Start a successor from a failed or suspended run's retained workspace
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
   export-workspace   Download a retained workspace or selected checkpoint as a tar archive
-  discard-workspace  Permanently delete an abandoned retained target workspace
+  discard-workspace  Delete a retained target workspace or a finished local run's checkpoints
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
 
@@ -1821,7 +1821,9 @@ Options:
 ### `zeroshot discard-workspace`
 
 ```text
-Permanently delete an abandoned retained target workspace
+Delete a retained target workspace or a finished local run's checkpoints.
+
+Locally, frees space retained by failed runs across their recovery lineage without reading or changing the checkout, ledger or logs. Delivery recovery state is kept. Running runs must be force-stopped first; interrupted restores must be resumed first. Local checkpoints never expire automatically. Plain resume keeps the current checkout.
 
 Usage: zeroshot discard-workspace [OPTIONS] <RUN_ID>
 
@@ -1834,7 +1836,7 @@ Options:
           Use this named target. If omitted, use the local controller
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ### `zeroshot version`
@@ -1882,7 +1884,7 @@ Commands:
   resume             Start a successor from a failed or suspended run's retained workspace
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
   export-workspace   Download a retained workspace or selected checkpoint as a tar archive
-  discard-workspace  Permanently delete an abandoned retained target workspace
+  discard-workspace  Delete a retained target workspace or a finished local run's checkpoints
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
 ```

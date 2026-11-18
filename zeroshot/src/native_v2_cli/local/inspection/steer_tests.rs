@@ -172,6 +172,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
         resumed_from: None,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     backend
@@ -453,6 +454,7 @@ async fn steer_local_concurrent_steers_share_the_recovery_claim() {
                 resumed_from: None,
                 delivery_run_id: None,
                 successor_run_id: None,
+                workspace_checkpoints_discarded: false,
                 pending_restore: None,
             },
         )

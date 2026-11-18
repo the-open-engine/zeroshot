@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 pub(super) struct Fixture {
     pub(super) root: TemporaryDirectory,
     pub(super) workspace: PathBuf,
+    launch_directory: Option<PathBuf>,
     path: std::ffi::OsString,
 }
 
@@ -39,6 +40,7 @@ impl Fixture {
         let fixture = Self {
             root,
             workspace,
+            launch_directory: None,
             path: std::env::join_paths(paths).unwrap(),
         };
         for args in [
@@ -118,7 +120,7 @@ impl Fixture {
         let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
         command
             .args(args)
-            .current_dir(&self.workspace)
+            .current_dir(self.launch_directory.as_ref().unwrap_or(&self.workspace))
             .env_clear()
             .env("PATH", &self.path)
             .env("ZEROSHOT_STATE_DIR", self.root.path("state"))
@@ -179,6 +181,9 @@ impl Fixture {
             self.write("input.json", &json!({"blob":"x".repeat(256 * 1024)}));
         }
         let mut command = self.command(&["run", "--title", "Native portability fixture"]);
+        if self.launch_directory.is_some() {
+            command.arg("--cwd").arg(&self.workspace);
+        }
         for (option, file) in [
             ("--graph", "graph.json"),
             ("--input", "input.json"),
@@ -201,6 +206,13 @@ impl Fixture {
 
     pub(super) fn write(&self, file: &str, value: &Value) {
         std::fs::write(self.root.path(file), serde_json::to_vec(value).unwrap()).unwrap();
+    }
+
+    pub(super) fn outside_workspace(mut self) -> Self {
+        // Instrumented CLI/controller processes write profiles in their launch directory.
+        // Keep those test artifacts outside byte-for-byte checkout assertions.
+        self.launch_directory = Some(self.root.path(""));
+        self
     }
 
     pub(super) fn start_blocked(&self) -> (String, u32) {

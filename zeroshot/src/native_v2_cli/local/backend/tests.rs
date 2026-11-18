@@ -395,8 +395,7 @@ async fn local_backend_contract_delegates_storage_and_rejects_remote_routes() {
                 },
             )
             .await,
-        Err(NativeV2CliError::Local(message))
-            if message.contains("user-owned")
+        Err(NativeV2CliError::RunNotFound { .. })
     ));
     assert!(
         backend
@@ -534,6 +533,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
                 resumed_from: None,
                 delivery_run_id: Some(original.clone()),
                 successor_run_id: None,
+                workspace_checkpoints_discarded: false,
                 pending_restore: None,
             },
         )
@@ -594,6 +594,7 @@ fn local_resume_claimability_fails_closed_before_controller_effects() {
         resumed_from: None,
         delivery_run_id: Some(original_run_id.clone()),
         successor_run_id: Some(run_id("0199f33f-3b44-7d21-9000-000000000053")),
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     backend

@@ -702,6 +702,16 @@ class Client:
         value = await self._native().json(["force-stop", run_id, *self._route_arguments()])
         return _status(value)
 
+    async def _discard_workspace(self, run_id: str) -> bool:
+        await self._ready()
+        value = await self._native().json(["discard-workspace", run_id, *self._route_arguments()])
+        if not isinstance(value, dict) or value.get("runId") != run_id:
+            raise ProtocolError("discard-workspace returned an invalid discarded result")
+        discarded = value.get("discarded")
+        if not isinstance(discarded, bool):
+            raise ProtocolError("discard-workspace returned an invalid discarded result")
+        return discarded
+
 
 class Stack:
     """Durable hosted stack handle bound to one Client target.
@@ -1052,6 +1062,25 @@ class Run:
         if status.result is not None:
             return status.result
         return await self.wait()
+
+    async def discard_workspace(self) -> bool:
+        """Delete this run's retained workspace or local recovery-lineage checkpoints.
+
+        Local runs keep their checkout, ledger, logs and delivery recovery state. Running or
+        resuming lineage members refuse deletion; an uncontinued suspension must be
+        force-stopped first, and an interrupted restore must be completed. A plain local
+        resume still uses the current checkout.
+
+        Returns:
+            Whether retained workspace or checkpoint data was deleted.
+
+        Raises:
+            InvalidRequestError: If the workspace cannot be discarded in its current state.
+            RunNotFoundError: If the target no longer retains this run.
+            TargetError: If the operation fails.
+            ProtocolError: If native output is malformed.
+        """
+        return await self._client._discard_workspace(self.id)
 
 
 def _submission_key() -> str:

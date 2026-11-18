@@ -310,6 +310,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Static aggregate proofs check private qualification before exporting retained controls, preserve
   presence and success/failure refinement in every compressed label class, saturate higher counts at
   authored thresholds, and expand each distinct first-join selector once per racer.
+  Implicit aggregate dependencies retain their actual enclosing map scope; controls preceding the
+  outer map stay shared rather than varying per item.
   Aggregate guards can use nested map facts when an enclosing map dominates their scope.
   The reducer has no future-state projection adapters. Its bounded loop-history probes only replay
   actual traversal to find ready work; static write/retention witnesses remain private to admission.
@@ -805,7 +807,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   different signals and outputs: admission resolves this worker per node, and every other worker
   reference keeps one contract per graph. It always suspends with reason `request`,
   carrying its question, contract, identity and deadline, and permits the same placements and no
-  stack profiles. It requires workspace checkpoints, no instructions and one attempt. Ordinary
+  stack profiles. Fresh submissions require workspace checkpoints; local successors may keep
+  snapshots disabled after explicit discard because their ledger retains request continuation
+  history and vectors. They can suspend and accept later answers without recreating snapshots.
+  It requires no instructions and one attempt. Ordinary
   resume refuses it before credential resolution and reports recovery unavailable. Interrupted
   answer launches still reconcile unadmitted successor claims before accepting another answer. `answer`
   validates its complete verifier result before successor admission and continues on the retained
@@ -1219,6 +1224,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   confirmed runtime cleanup it reuses `discard_lineage` to remove every catalog naming the shared
   repository, predecessor and successor alike, before the repository. A catalog removal failure
   keeps the repository and reports cleanup unavailable. Other lineages are untouched.
+  Local recovery document parsing, atomic writes and effective checkpoint policy live in
+  `native_v2_cli/local/state.rs`.
+  Explicit local `discard-workspace` accepts a finished lineage under the submission lock,
+  holding every member's recovery claim and stopped-controller lease. It refuses active/resuming
+  members, uncontinued suspensions and unfinished restores without reading the checkout. Matching
+  durable successor admission reconciles a restore marker left by an interrupted launcher; a live
+  controller alone never proves restore completion. It removes catalogs and Restic data but keeps
+  `delivery-state.json`, ledgers and logs. Native no-follow
+  directory validation rejects redirected repository roots before cleanup. Recovery records
+  durably disable checkpoints before deleting data, preserving admitted submissions for replay;
+  plain resume applies that policy to its successor and keeps the current checkout and delivery state.
+  The Python run handle exposes the same routed operation as `discard_workspace() -> bool`.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
@@ -2156,10 +2173,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - New Rust APIs must respect the four-parameter Clippy ceiling; use request structs rather than
   raising or bypassing the limit.
 - Unix tests that create executable fixtures use
-  `openengine_cluster_testkit::fixture::write_executable`; its lock handoff covers writable
-  descriptors inherited by concurrent process spawns.
+  `openengine_cluster_testkit::fixture::write_executable`; its isolated writer is reaped before
+  use so parallel test forks cannot inherit writable executable descriptors.
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
+- Portable CLI/SDK boundary tests use the repository `.venv` when available, otherwise Python 3
+  on PATH, and import the dependency-free SDK source against the just-built CLI.
 - `.opcore.json` owns the full-source Opcore policy. PR quick checks run checksum-pinned Opcore Fast
   before queue admission. The reusable `.github/workflows/opcore.yml` checks the actual merge candidate
   with Fast and Cargo with warnings denied in merge-group/manual full CI. Both Fast passes skip
@@ -2252,8 +2271,8 @@ python -m mkdocs build --strict
   so the intentional write failure cannot corrupt collected profiles.
   Local CLI fixture repositories exclude `*.profraw` through their shared Git exclude file,
   keeping profiles from environment-cleared instrumented processes out of delivery and status.
-  Conversation fixtures launch outside their explicit `--cwd` workspace so those profiles also
-  stay out of checkpoint contents and storage-growth measurements.
+  Conversation and checkout-preservation fixtures launch outside their explicit `--cwd` workspace
+  so those profiles also stay out of checkpoints, byte comparisons and storage-growth measurements.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.
