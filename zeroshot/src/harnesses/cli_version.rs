@@ -62,6 +62,7 @@ pub(crate) struct LocalCliContext<'a> {
     pub(crate) search_path: &'a str,
     pub(crate) workspace: &'a Path,
     pub(crate) stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    pub(crate) preparation_deadline: Option<tokio::time::Instant>,
 }
 
 impl HarnessCliVersion {
@@ -100,6 +101,7 @@ impl HarnessCliVersion {
             search_path,
             workspace,
             stopping,
+            preparation_deadline,
         } = context;
         let mut environment = (self.local_environment)(native);
         for name in ["LANG", "LC_ALL", "TERM", "TMPDIR"] {
@@ -112,6 +114,9 @@ impl HarnessCliVersion {
             environment.insert("HOME".to_owned(), home.clone());
         }
         let redactions = redaction_values(environment.values().map(String::as_str));
+        let probe_deadline = tokio::time::Instant::now() + CHECK_BUDGET;
+        let deadline =
+            preparation_deadline.map_or(probe_deadline, |until| until.min(probe_deadline));
         let command = ProcessSessionCommand {
             program: executable.to_string_lossy().into_owned(),
             argv: self.arguments.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -120,9 +125,12 @@ impl HarnessCliVersion {
                 current_dir: workspace.to_owned(),
                 mode: WorkspaceAccessMode::ReadWrite,
             },
-            deadline: Some(tokio::time::Instant::now() + CHECK_BUDGET),
+            deadline: Some(deadline),
         };
-        let (reported, failure) = probe(command, stopping).await;
+        let (reported, mut failure) = probe(command, stopping).await;
+        if tokio::time::Instant::now() >= deadline {
+            failure.get_or_insert_with(|| "CLI version probe timed out".to_owned());
+        }
         if failure.is_none() && reported.accepted_version(self).is_some() {
             return Ok(());
         }

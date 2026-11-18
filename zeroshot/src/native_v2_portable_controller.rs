@@ -120,12 +120,19 @@ impl PortableControllerPaths {
 /// Default bound on controller preparation, including a checkpoint restore, before readiness.
 pub const DEFAULT_PREPARATION_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// One controller's remaining preparation budget and cooperative cleanup request.
+#[derive(Clone)]
+pub(crate) struct RuntimePreparation {
+    pub(crate) deadline: tokio::time::Instant,
+    pub(crate) stopping: tokio::sync::watch::Receiver<bool>,
+}
+
 pub struct PortableControllerBootstrap {
     pub predecessor: Option<RunId>,
     pub request_resolution: Option<openengine_cluster_protocol::RequestResolution>,
     pub delivery_receipt: Option<serde_json::Value>,
     pub checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
-    /// Bounds preparation work measured from controller start; a checkpoint restore stops here.
+    /// Bounds all preparation from controller start, including restoration and version probes.
     pub preparation_timeout: Duration,
     pub run_id: RunId,
     pub delivery_run_id: RunId,
@@ -187,6 +194,10 @@ pub struct PortableControllerReady {
 
 #[derive(Debug, Error)]
 pub enum PortableControllerError {
+    #[error(
+        "portable controller reached the preparation deadline; increase ZEROSHOT_PREPARATION_TIMEOUT to allow more preparation time"
+    )]
+    PreparationTimeout(#[source] Option<Box<PortableControllerError>>),
     #[error("portable controller stopped during preparation")]
     Shutdown,
     #[error("portable controller path must be absolute")]

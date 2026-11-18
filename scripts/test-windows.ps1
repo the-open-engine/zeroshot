@@ -4,7 +4,8 @@ $features = if ($Ui) { @('--features', 'zeroshot/ui') } else { @() }
 
 # Cargo's Windows Job forbids breakaway. Build first, then launch tests outside that Job
 # so detached controllers can exercise their actual lifetime and restrictive-Job behavior.
-$artifacts = @(cargo test --workspace @features --no-run --message-format=json | ForEach-Object {
+# One compiler job limits concurrent metadata mappings on hosted Windows.
+$artifacts = @(cargo test --workspace @features --jobs 1 --no-run --message-format=json | ForEach-Object {
     $message = $_ | ConvertFrom-Json
     if ($message.reason -eq 'compiler-message' -and $message.message.rendered) {
         Write-Host $message.message.rendered
@@ -28,5 +29,5 @@ foreach ($test in $tests) {
     }
 }
 
-cargo test --workspace @features --doc
+cargo test --workspace @features --jobs 1 --doc
 if ($failed -or $LASTEXITCODE -ne 0) { exit 1 }
