@@ -2193,6 +2193,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
   because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
   reflect unsupported parsing; the Windows native CI lane still runs those scripts.
+- Local pre-commit and pre-push hooks share the CI classifier's root-README-only shortcut.
+  Empty or unavailable push history runs the full tooling suite. Only new branches may use the
+  merge base with `origin/main`; a missing existing remote commit must never use that fallback.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
   every public boundary.
 - Add focused tests beside the owning crate/module.
