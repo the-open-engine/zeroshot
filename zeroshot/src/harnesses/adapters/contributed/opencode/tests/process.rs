@@ -734,6 +734,32 @@ async fn a_turn_whose_owned_plugin_did_not_load_fails_the_node() {
 }
 
 #[tokio::test]
+async fn a_worker_cannot_remove_an_owned_plugin_from_the_load_check() {
+    let directory = TestDirectory::new("opencode-plugin-root-removed");
+    let remover = r##"root=$(printf '%s' "$OPENCODE_CONFIG_CONTENT" | grep -o 'file://[^"]*/zeroshot-plugins/' | head -n 1 | sed 's#^file://##'); [ -n "$root" ] && rm -rf "$root" && [ ! -e "$root" ] && : > removed-plugins"##;
+    let body = script("{\"response\":null}")
+        .replace("cat >/dev/null", &format!("{remover}\ncat >/dev/null"));
+    let adapter = adapter(&directory, &body);
+    let error = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value();
+    assert!(
+        adapter.config.workspace.join("removed-plugins").exists(),
+        "the plugin root named by the inline configuration must have been removed"
+    );
+    let message = error.to_string();
+    assert!(
+        message.contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "{message}"
+    );
+    assert!(!message.contains("declared-key"), "{message}");
+}
+
+#[tokio::test]
 async fn a_declared_provider_conflict_is_reported_instead_of_the_native_error() {
     let directory = TestDirectory::new("opencode-declared-provider-conflict");
     let native_error = json!({

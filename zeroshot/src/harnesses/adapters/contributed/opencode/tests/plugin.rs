@@ -100,9 +100,8 @@ fn plugin_directories_refuse_planted_links() {
     assert_eq!(std::fs::read_dir(&victim).assert_value().count(), 0);
 }
 
-#[cfg(unix)]
 #[test]
-fn expected_marker_does_not_follow_a_planted_link() {
+fn install_writes_no_expected_list_below_the_home() {
     let root = tempfile::tempdir().assert_value();
     let home = root.path().join("home");
     let tmp = root.path().join("tmp");
@@ -115,23 +114,37 @@ fn expected_marker_does_not_follow_a_planted_link() {
         "export default {};",
     )
     .assert_value();
-
-    let victim_file = root.path().join("victim_file");
-    std::fs::write(&victim_file, b"untouched").assert_value();
-    let marker = home
-        .join("zeroshot-plugins")
-        .join("expected")
-        .join("zeroshot-active-memory");
-    std::fs::remove_file(&marker).assert_value();
-    std::os::unix::fs::symlink(&victim_file, &marker).assert_value();
     assert!(
-        super::super::plugin::install(
-            &mut command(&tmp),
-            &home,
-            "zeroshot-active-memory",
-            "export default {};",
-        )
-        .is_err()
+        !home.join("zeroshot-plugins").join("expected").exists(),
+        "the load check must not depend on anything below the home"
     );
-    assert_eq!(std::fs::read(&victim_file).assert_value(), b"untouched");
+}
+
+#[test]
+fn owned_plugins_come_from_the_inline_configuration() {
+    let root = tempfile::tempdir().assert_value();
+    let home = root.path().join("home");
+    let tmp = root.path().join("tmp");
+    std::fs::create_dir(&home).assert_value();
+    std::fs::create_dir(&tmp).assert_value();
+    let mut with_config = command(&tmp);
+    with_config.environment.insert(
+        "OPENCODE_CONFIG_CONTENT".to_owned(),
+        r#"{"plugins":["file:///elsewhere/zeroshot-plugins/foreign/","not a url"]}"#.to_owned(),
+    );
+    for id in ["zeroshot-provider-auth", "zeroshot-active-memory"] {
+        super::super::plugin::install(&mut with_config, &home, id, "export default {};")
+            .assert_value();
+    }
+    assert_eq!(
+        super::super::plugin::owned(&with_config, &home),
+        vec![
+            "zeroshot-active-memory".to_owned(),
+            "zeroshot-provider-auth".to_owned()
+        ]
+    );
+    assert_eq!(
+        super::super::plugin::owned(&command(&tmp), &home),
+        Vec::<String>::new()
+    );
 }

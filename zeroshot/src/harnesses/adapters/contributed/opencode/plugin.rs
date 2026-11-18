@@ -1,4 +1,4 @@
-//! Append an owned file plugin without replacing native configuration or plugin discovery.
+//! Owned OpenCode 2 plugin directories and their per-turn load check.
 
 use std::io;
 use std::path::Path;
@@ -28,16 +28,6 @@ pub(super) fn install(
     let source = source.replace("LOADED_MARKER", &serde_json::to_string(&marker)?);
     write_provider_file(&plugin_dir, "package.json", br#"{"type":"module"}"#)?;
     write_provider_file(&plugin_dir, "index.js", source.as_bytes())?;
-    let expected = root.join("expected");
-    owned_directory(&expected, home)?;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    options.open(expected.join(id))?;
     let plugin = url::Url::from_directory_path(&plugin_dir)
         .map_err(|_| io::Error::other("OpenCode plugin path is invalid"))?;
     let mut config: Value = serde_json::from_str(
@@ -89,6 +79,41 @@ fn owned_directory(path: &Path, home: &Path) -> io::Result<()> {
     Ok(())
 }
 
+pub(super) fn owned(command: &ProcessSessionCommand, home: &Path) -> Vec<String> {
+    let Some(content) = command.environment.get("OPENCODE_CONFIG_CONTENT") else {
+        return Vec::new();
+    };
+    let Ok(config) = serde_json::from_str::<Value>(content) else {
+        return Vec::new();
+    };
+    let Some(plugins) = config.get("plugins").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let root = home.join("zeroshot-plugins");
+    let mut ids = Vec::new();
+    for entry in plugins {
+        let Some(text) = entry.as_str() else {
+            continue;
+        };
+        let Ok(url) = url::Url::parse(text) else {
+            continue;
+        };
+        let Ok(path) = url.to_file_path() else {
+            continue;
+        };
+        if path.parent() != Some(root.as_path()) {
+            continue;
+        }
+        let Some(id) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        ids.push(id.to_owned());
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 pub(super) fn reset(home: &Path, scratch: &Path) -> io::Result<()> {
     remove_dir_all_if_exists(&home.join("zeroshot-plugins").join("expected"))?;
     remove_dir_all_if_exists(&scratch.join("zeroshot-plugins"))
@@ -118,23 +143,16 @@ pub(super) fn conflict(scratch: &Path) -> Option<String> {
     Some(SUMMARY.to_owned())
 }
 
-pub(super) fn missing(home: &Path, scratch: &Path) -> Option<String> {
-    let expected = home.join("zeroshot-plugins").join("expected");
-    let mut names = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&expected) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                names.push(name.to_owned());
-            }
-        }
-    }
-    names.sort();
-    names.into_iter().find(|name| {
-        !scratch
-            .join("zeroshot-plugins")
-            .join(format!("{name}.loaded"))
-            .exists()
-    })
+pub(super) fn missing(owned: &[String], scratch: &Path) -> Option<String> {
+    owned
+        .iter()
+        .find(|id| {
+            !scratch
+                .join("zeroshot-plugins")
+                .join(format!("{id}.loaded"))
+                .exists()
+        })
+        .cloned()
 }
 
 fn remove_dir_all_if_exists(path: &Path) -> io::Result<()> {

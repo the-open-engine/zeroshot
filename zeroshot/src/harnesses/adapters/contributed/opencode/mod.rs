@@ -239,6 +239,7 @@ impl OpenCodeAdapter {
             files: &turn.files,
             session_id: expected.as_deref(),
         })?;
+        let owned = plugin::owned(&command, turn.files.home());
         let mut redactions = self.redactions(&turn.invocation.environment);
         if let Some(secrets) = &login {
             redactions.extend(secrets.iter().cloned());
@@ -259,7 +260,7 @@ impl OpenCodeAdapter {
                         return Err(NodeRunnerError::DriverDetail(message));
                     }
                 }
-                if let Some(id) = plugin::missing(turn.files.home(), &scratch) {
+                if let Some(id) = plugin::missing(&owned, &scratch) {
                     if matches!(result, Ok(ProviderAttempt::Complete(_))) {
                         return Err(NodeRunnerError::DriverDetail(format!(
                             "OpenCode plugin {id} did not load"
