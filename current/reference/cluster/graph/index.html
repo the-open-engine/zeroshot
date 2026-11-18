@@ -2857,12 +2857,18 @@ fixed set of states independent of input length.</p>
 <p>The verifier decides each condition by search, not by listing every combination of how the nodes
 it depends on can end. A check reads only the controls that its condition and their join, loop and
 map rules mention. Labels a check cannot tell apart count as one, and controls no rule connects add
-to the work instead of multiplying it, so another reviewer or signal costs its own size. Inside one
-map, a check still lists the joint outcomes of one item that it reads and folds them into saturated
-counts: at most 65,536 distinct count states per map. One check may take 1,048,576 search steps, a
-backstop far above authored graphs that checks do not share. A check that passes either bound
-reports <code>ceiling_exceeded</code> at the choice, join or guard it was deciding; there is no user budget or
-timeout setting.</p>
+to the work instead of multiplying it, so another reviewer or signal costs its own size.</p>
+<p>Inside one map, the parts of an item that no rule ties together are folded into saturated counts
+separately and meet only in the number of items, so a guard that reads several independent
+reviewers of one map also costs the sum of their sizes. What a rule does tie together is still
+listed jointly, for example the branches of an <code>any</code>, <code>quorum</code> or <code>first</code> join, and so are the
+items of a map nested in another map's item. A part whose states depend on the exact number of
+items for more than 64 items is folded with the rest of its item. Each part may have at most
+65,536 distinct count states.</p>
+<p>One check may take 1,048,576 search steps, a backstop far above authored graphs that checks do
+not share. A join lists every set of branches it can complete with, and writing those sets out
+counts toward its steps. A check that passes either bound reports <code>ceiling_exceeded</code> at the
+choice, join or guard it was deciding; there is no user budget or timeout setting.</p>
 <p>Graph-bearing JSON decoding first checks a fixed 512-container envelope for structural arrays,
 payload nesting and transport wrappers. The graph verifier separately checks authored depth 64.</p>
 <p>Nested parallel outcomes use joint retained-branch witnesses during analysis. The required winner
@@ -2948,7 +2954,7 @@ potential contributors until actual outcomes settle the join.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-17">17 November 2026</time>
+    Last updated <time datetime="2026-11-18">18 November 2026</time>
   </span>
 
     
