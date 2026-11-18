@@ -294,6 +294,14 @@ elif args and args[0] == "logs":
     if option("--execution") is not None:
         event["execution"] = option("--execution")
     print(json.dumps(event))
+elif args and args[0] == "discard-workspace":
+    if args[1] == "missing":
+        fail("run_not_found", "run.not_found", "run not found", {})
+    if args[1] == "running":
+        fail("invalid_request", "request.invalid", "run is running; use force-stop first", {})
+    print(os.environ.get("FAKE_DISCARD_RESULT", json.dumps({
+        "runId": args[1], "discarded": args[1] != "empty",
+    })))
 elif args and args[0] == "force-stop":
     print(json.dumps(projection(
         args[1],

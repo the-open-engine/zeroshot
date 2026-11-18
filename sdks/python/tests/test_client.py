@@ -19,6 +19,7 @@ from zeroshot import (
     Preset,
     ProtocolError,
     RunFailedError,
+    RunNotFoundError,
     RunRequest,
     RunResult,
     RuntimePlan,
@@ -398,6 +399,54 @@ def test_unknown_options_fail_before_submission(fake_native: Path, tmp_path: Pat
 
     asyncio.run(exercise())
     assert read_invocations(fake_native) == []
+
+
+@pytest.mark.parametrize("target_name", [None, "platform", "vm"])
+def test_discard_workspace_routes_results_and_errors(
+    fake_native: Path, tmp_path: Path, target_name: str | None
+) -> None:
+    target = LocalTarget(tmp_path) if target_name is None else HostedTarget(target_name)
+
+    async def exercise() -> None:
+        async with Client(target=target) as client:
+            assert await client.get_run("retained").discard_workspace() is True
+            assert await client.get_run("empty").discard_workspace() is False
+            with pytest.raises(InvalidRequestError, match="force-stop"):
+                await client.get_run("running").discard_workspace()
+            with pytest.raises(RunNotFoundError):
+                await client.get_run("missing").discard_workspace()
+
+    asyncio.run(exercise())
+    calls = [
+        i["args"] for i in read_invocations(fake_native) if i["args"][0] == "discard-workspace"
+    ]
+    route = [] if target_name is None else ["--target", target_name]
+    assert calls == [
+        ["discard-workspace", run_id, *route]
+        for run_id in ("retained", "empty", "running", "missing")
+    ]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        '{"runId": "retained"}',
+        '{"runId": "retained", "discarded": 1}',
+        '{"runId": "retained", "discarded": "false"}',
+        '{"runId": "other", "discarded": true}',
+    ],
+)
+def test_discard_workspace_rejects_malformed_native_result(
+    fake_native: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: str
+) -> None:
+    monkeypatch.setenv("FAKE_DISCARD_RESULT", result)
+
+    async def exercise() -> None:
+        async with Client(target=LocalTarget(tmp_path)) as client:
+            with pytest.raises(ProtocolError, match="discarded"):
+                await client.get_run("retained").discard_workspace()
+
+    asyncio.run(exercise())
 
 
 def test_direct_target_uses_the_same_client_and_durable_run_surface(fake_native: Path) -> None:

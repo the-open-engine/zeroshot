@@ -200,6 +200,11 @@ the Python await also detaches without stopping it. `Run.force_stop()` is the on
 changes run lifetime. Each `LogEvent.timestamp` is the positive, JavaScript-safe Unix epoch
 millisecond captured at the producer and preserved unchanged by durable replay.
 
+`await run.discard_workspace()` uses the client's target and returns whether retained data was
+deleted. For a finished local run it frees the recovery lineage's checkpoints while preserving
+the checkout, ledger, logs and delivery recovery state. Plain resume keeps using the current
+checkout. Named targets discard their retained workspace as before.
+
 ## Environment values
 
 With `environment=None`, submission values come from `os.environ`. An explicit mapping replaces

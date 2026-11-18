@@ -72,6 +72,7 @@ fn recovery_document(
         resumed_from,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     }
 }
@@ -751,6 +752,7 @@ fn local_recovery_lineage_is_bounded_and_honors_root_delivery() {
         resumed_from: None,
         delivery_run_id: Some(delivery.clone()),
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     assert_eq!(

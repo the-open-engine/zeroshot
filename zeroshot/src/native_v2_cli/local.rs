@@ -25,13 +25,15 @@ use tokio::process::Command;
 use tokio::time::{Instant, sleep};
 
 use super::oecp::{ChannelSubscription, spawn_attach, spawn_logs, spawn_watch};
-use super::support::{CommitPaths, cleanup_temporary, nonempty_environment, write_and_commit};
+use super::support::nonempty_environment;
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
     CliProfileListResult, LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError,
     PreparedRunRequest, TargetAdd, default_local_state_root,
 };
-use crate::execution::platform::{ControllerChild as Child, FileAccess, private_file};
+use crate::execution::platform::ControllerChild as Child;
+#[cfg(test)]
+use crate::execution::platform::{FileAccess, private_file};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_platform::submission_digest;
 use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
@@ -100,6 +102,9 @@ struct LocalRecoveryDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     delivery_receipt: Option<serde_json::Value>,
     submission: RunSubmission,
+    // Recovery policy must not change the admitted submission's replay identity.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    workspace_checkpoints_discarded: bool,
     workspace: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     local_branch: Option<String>,
@@ -168,6 +173,8 @@ pub struct LocalCliBackend {
     git_program: PathBuf,
     ready_timeout: Duration,
     preparation_timeout: Duration,
+    #[cfg(test)]
+    fail_recovery_write: Option<RunId>,
 }
 
 impl LocalCliBackend {
@@ -181,6 +188,8 @@ impl LocalCliBackend {
             preparation_timeout: preparation_timeout(nonempty_environment(
                 PREPARATION_TIMEOUT_ENV,
             ))?,
+            #[cfg(test)]
+            fail_recovery_write: None,
         };
         Ok(backend)
     }
@@ -199,6 +208,8 @@ impl LocalCliBackend {
             git_program,
             ready_timeout: DEFAULT_READY_TIMEOUT,
             preparation_timeout: DEFAULT_PREPARATION_TIMEOUT,
+            #[cfg(test)]
+            fail_recovery_write: None,
         }
     }
 
@@ -483,6 +494,7 @@ impl LocalCliBackend {
                     request_digest: prepared.request_digest.clone(),
                     workspace_revision: prepared.workspace_revision.clone(),
                     submission: prepared.submission.clone(),
+                    workspace_checkpoints_discarded: false,
                     workspace: prepared.workspace.clone(),
                     delivery_run_id: Some(prepared.delivery_run_id.clone()),
                     resumed_from: resumed_from.clone(),
@@ -915,7 +927,8 @@ impl LocalCliBackend {
 
     /// Releases a successor claim whose controller never admitted the run. `handoff` bounds the
     /// wait for a launcher that may still be starting that controller; it is zero once the
-    /// controller is known to have stopped. A pending restore stays for the next attempt.
+    /// controller is known to have stopped. A pending restore stays for the next attempt unless
+    /// its matching successor was durably admitted, which follows the complete restore.
     async fn reconcile_local_resume_claim(
         &self,
         run_id: &RunId,
@@ -930,6 +943,25 @@ impl LocalCliBackend {
             .successor_claim_is_live_or_admitted(&successor_run_id, &successor_storage, handoff)
             .await?
         {
+            if recovery
+                .pending_restore
+                .as_ref()
+                .is_some_and(|pending| pending.attempt == successor_run_id)
+                && self
+                    .local_successor_was_admitted(
+                        &successor_storage.join("runs.sqlite3"),
+                        &successor_run_id,
+                    )
+                    .await?
+                && self
+                    .read_recovery_document(&successor_run_id)?
+                    .resumed_from
+                    .as_ref()
+                    == Some(run_id)
+            {
+                recovery.pending_restore = None;
+                self.write_recovery_document(run_id, &recovery)?;
+            }
             return Ok(());
         }
         std::fs::remove_dir_all(&successor_storage).map_err(local_io)?;
@@ -1013,37 +1045,11 @@ impl LocalCliBackend {
         run_id: &RunId,
         document: &LocalRecoveryDocument,
     ) -> Result<(), NativeV2CliError> {
+        #[cfg(test)]
+        if self.fail_recovery_write.as_ref() == Some(run_id) {
+            return Err(local_message("injected recovery write failure"));
+        }
         document.write(&self.recovery_path(run_id)?)
-    }
-}
-
-impl LocalRecoveryDocument {
-    fn read(path: &Path) -> Result<Self, NativeV2CliError> {
-        let bytes = std::fs::read(path).map_err(|error| local_path_error(path, error))?;
-        openengine_cluster_protocol::bounded_json_from_slice(&bytes)
-            .map_err(|_| local_message("workspace recovery metadata is invalid"))
-    }
-
-    fn write(&self, path: &Path) -> Result<(), NativeV2CliError> {
-        let parent = path
-            .parent()
-            .ok_or_else(|| local_message("workspace recovery path is invalid"))?;
-        let temporary = parent.join(format!(".workspace-recovery-{}.tmp", uuid::Uuid::now_v7()));
-        let bytes = serde_json::to_vec(self)
-            .map_err(|_| local_message("workspace recovery metadata could not be encoded"))?;
-        let result = (|| {
-            let file = private_file(&temporary, FileAccess::CreateNew).map_err(local_io)?;
-            write_and_commit(
-                file,
-                &bytes,
-                CommitPaths {
-                    temporary: &temporary,
-                    destination: path,
-                    parent,
-                },
-            )
-        })();
-        cleanup_temporary(result, &temporary)
     }
 }
 
