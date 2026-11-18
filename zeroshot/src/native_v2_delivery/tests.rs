@@ -1360,6 +1360,7 @@ fn delivery_submission(
         pull_request_feedback,
     };
     RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Delivery test").assert_value(),
         graph,

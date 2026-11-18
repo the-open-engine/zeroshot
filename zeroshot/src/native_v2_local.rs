@@ -95,7 +95,7 @@ pub enum LocalCompositionError {
     #[error("local run identity could not be assigned")]
     RunIdentity,
     #[error(
-        "setup and startup require a Docker target; local runs use the invoking machine environment"
+        "setup, startup and context repositories require a Docker target; local runs use the invoking machine environment"
     )]
     PreparationRequiresTarget,
     #[error(transparent)]
@@ -265,6 +265,7 @@ pub(crate) fn local_submission(
         runtime: intent.runtime.clone(),
         environment: intent.environment.clone(),
         source,
+        context_sources: Vec::new(),
         submission_key: intent.submission_key.clone(),
     }
 }
@@ -273,7 +274,8 @@ pub(crate) fn validate_local_environment(
     environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<(), LocalCompositionError> {
     if environment.is_some_and(|environment| {
-        environment.setup.is_some()
+        !environment.context_repositories.is_empty()
+            || environment.setup.is_some()
             || environment.startup.is_some()
             || !environment.connections.is_empty()
     }) {

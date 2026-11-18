@@ -38,6 +38,7 @@ async fn software_fixture() -> Fixture {
     let initial_input = json!({"task":"Implement atomic quota reservation with regression tests"});
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Inspect control flow").assert_value(),
             graph,

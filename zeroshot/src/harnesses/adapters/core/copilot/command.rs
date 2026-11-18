@@ -263,6 +263,7 @@ fn reserved_process_environment_for_platform(name: &str, windows: bool) -> bool 
         "TMPDIR",
         "TEMP",
         "TMP",
+        "ZEROSHOT_CONTEXT",
         "COPILOT_HOME",
         "COPILOT_AUTO_UPDATE",
         "COPILOT_DISABLE_KEYTAR",
@@ -347,7 +348,10 @@ fn extend_declared_environment(
         {
             continue;
         }
-        if reserved_process_environment(name) {
+        if reserved_process_environment(name)
+            || (name.eq_ignore_ascii_case("GIT_CONFIG_GLOBAL")
+                && environment.contains_key("ZEROSHOT_CONTEXT"))
+        {
             return Err(super::rpc::failure(
                 "Copilot environment overrides reserved runtime configuration",
             ));

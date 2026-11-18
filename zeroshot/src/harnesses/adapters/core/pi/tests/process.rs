@@ -697,3 +697,35 @@ async fn dispatch_metadata_reaches_pi_child_and_overrides_declared_copies() {
         std::fs::read_to_string(directory.child("workspace/execution-context")).assert_value();
     assert_execution_environment(&capture, &visit.node.reference, visit.dispatch, "step");
 }
+
+#[tokio::test]
+async fn caller_git_config_reaches_the_native_pi_process() {
+    let directory = TestDirectory::new("pi-caller-git-config-process");
+    let body = script(&[COMPLETED_TURN]).replace(
+        "cat > /dev/null",
+        "test \"$GIT_CONFIG_GLOBAL\" = /dev/null || exit 43\ncat > /dev/null",
+    );
+    let adapter = scripted_adapter(&directory, &body);
+    for connection in [false, true] {
+        let mut turn = scripted_invocation();
+        if connection {
+            turn.node.binding = agent_binding(
+                "opaque",
+                None,
+                SessionScope::Execution,
+                &["GIT_CONFIG_GLOBAL"],
+            );
+            turn.environment = resolved(
+                &["GIT_CONFIG_GLOBAL"],
+                &[("GIT_CONFIG_GLOBAL", "/dev/null")],
+            );
+        } else {
+            turn.environment = turn.environment.with_variables(&BTreeMap::from([(
+                environment_name("GIT_CONFIG_GLOBAL"),
+                "/dev/null".to_owned(),
+            )]));
+        }
+        let (outcome, _) = run_invocation(&adapter, turn, false).await;
+        assert!(outcome.is_ok(), "{outcome:?}");
+    }
+}

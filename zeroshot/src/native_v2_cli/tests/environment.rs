@@ -791,6 +791,7 @@ async fn preparation_hooks_require_a_target_during_validation_and_submission() {
     for definition in [
         json!({"setup":"echo install"}),
         json!({"startup":"npm ci"}),
+        json!({"contextRepositories":[{"repository":"acme/library"}]}),
         json!({"connections":{"registry":["NPM_TOKEN"]}}),
     ] {
         std::fs::write(&path, serde_json::to_vec(&definition).assert_value()).assert_value();
@@ -811,7 +812,10 @@ async fn preparation_hooks_require_a_target_during_validation_and_submission() {
                 continue;
             }
             let expected = result.assert_error().to_string();
-            assert!(expected.contains("setup and startup require a Docker target"));
+            assert!(
+                expected
+                    .contains("setup, startup and context repositories require a Docker target")
+            );
             let NativeV2CliCommand::Run(run) = &mut command else {
                 unreachable!()
             };

@@ -41,6 +41,7 @@ pub(crate) async fn interrupted_delivery_state(
         runtime.workspace_checkpoints = false;
         let admitted = NativeV2Admission
             .admit(crate::native_v2_contract::RunSubmission {
+                context_sources: Vec::new(),
                 environment: None,
                 title: RunTitle::new("Interrupted delivery").assert_value(),
                 graph: full_graph(vec![git_delivery_node(), success_node()]),

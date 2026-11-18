@@ -165,6 +165,7 @@ async fn admit_fixture(
     runtime["globalAgents"] = json!({"postmortem":{"enabled":enabled,"sourceNode":"worker"}});
     NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             title: RunTitle::new("Production memory live control").assert_value(),
             graph: worker_verifier_graph(&worker, &verifier),
             initial_input: Value::Null,

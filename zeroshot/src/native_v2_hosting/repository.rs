@@ -44,6 +44,32 @@ pub(super) async fn install_repository(
     install_before_deadline(request, Instant::now() + GIT_TIMEOUT, CHECKOUT_RETRY_DELAY).await
 }
 
+pub(super) async fn install_context_repository(
+    request: RepositoryInstall<'_>,
+) -> Result<(), RepositoryInstallError> {
+    pristine_workspace(request.workspace)?;
+    let writer = request
+        .process_pool
+        .identity(HostedProcessScope::Writer)
+        .map_err(|_| RepositoryInstallError::Workspace("writer identity is unavailable"))?;
+    let git = GitProcess {
+        program: request.git_program,
+        token: request.github_token,
+        identity: Some(writer),
+        git_credentials: request.git_credentials,
+        private_directory: request.private_directory,
+        remote: request.source,
+        deadline: Instant::now() + GIT_TIMEOUT,
+    };
+    git.transport(request.workspace)?
+        .checkout_context(
+            request.resolved.revision.as_str(),
+            source_credential(git.token.unwrap_or(""), git.git_credentials),
+        )
+        .await
+        .map_err(RepositoryInstallError::Source)
+}
+
 async fn install_before_deadline(
     request: RepositoryInstall<'_>,
     deadline: Instant,
@@ -275,6 +301,26 @@ pub(super) enum RepositoryInstallError {
 }
 
 impl RepositoryInstallError {
+    pub(super) fn record_context_diagnostic(
+        &self,
+        run_id: &RunId,
+        repository: &str,
+        store: &OperatorDiagnosticStore,
+    ) {
+        store.record(NewOperatorDiagnostic {
+            run_id: run_id.clone(),
+            code: "context_checkout_unavailable",
+            operation: "context.checkout",
+            exit_status: None,
+            stdout: String::new(),
+            stderr: format!(
+                "context repository {repository}: {}",
+                self.operator_stderr()
+            ),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        });
+    }
     fn permits_retry(&self, attempt: u32, remaining: Duration, delay: Duration) -> bool {
         attempt < MAX_CHECKOUT_ATTEMPTS
             && matches!(self, Self::Git(failure) if !failure.cleanup_unconfirmed)

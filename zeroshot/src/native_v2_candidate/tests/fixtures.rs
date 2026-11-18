@@ -191,6 +191,7 @@ pub(super) fn shipping_graph(kind: RuntimePlanKind) -> GraphSpec {
 pub(super) async fn admitted(kind: RuntimePlanKind) -> AdmittedRun {
     NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Candidate config").assert_value_with("title"),
             graph: shipping_graph(kind),

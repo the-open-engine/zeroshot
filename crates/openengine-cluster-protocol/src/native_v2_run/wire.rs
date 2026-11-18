@@ -194,6 +194,8 @@ pub struct RunSubmission {
     pub environment: Option<super::RuntimeEnvironment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_sources: Vec<ResolvedSource>,
     pub submission_key: IdempotencyKey,
 }
 
@@ -204,6 +206,10 @@ impl RunSubmission {
         self.source
             .as_ref()
             .is_some_and(|source| source.requires_git_transport())
+            || self
+                .context_sources
+                .iter()
+                .any(ResolvedSource::requires_git_transport)
     }
 
     /// Exact fields required by nodes, preparation, and the admitted source transport.

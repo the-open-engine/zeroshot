@@ -145,10 +145,16 @@ def publish(name, text, args=(), override=None, target_run=None, stdin=None):
     result = subprocess.run([os.environ['NETWORK_CLI'],'steer',target_run or run,*args,*([text] if text is not None else [])],
         env=environment,input=stdin,text=True,capture_output=True,timeout=10)
     publication = {'status':result.returncode,'stdout':result.stdout,'stderr':result.stderr}
+    unknown = 'network publication outcome is unknown; inspect run vectors before retrying'
+    # Exercise a lost response after the real CLI has recorded the publication, without retrying it.
+    if scenario == 'lost-publication-reply' and node == 'talker' and result.returncode == 0:
+        publication = {'status':1,'stdout':'','stderr':unknown}
     save(name, publication)
-    if result.returncode and not name.startswith('deny-'):
+    if publication['status'] and node == 'talker' and publication['stderr'].strip().endswith(unknown):
+        return None  # The host must confirm all four durable publications before releasing our tools.
+    if publication['status'] and not name.startswith('deny-'):
         raise AssertionError('network publication '+name+' failed: '+json.dumps(publication))
-    return result.returncode
+    return publication['status']
 
 response = None
 if scenario == 'rollback' and node == 'chooser':
@@ -180,10 +186,11 @@ elif node == 'talker':
     (root/('network-ready-'+instance)).touch()
     wait(lambda: len(list(root.glob('network-ready-*'))) == 2)
     assert publish('publish-once',None,('--network','alpha','--network','beta','--text-stdin'),
-        stdin='mapped-once-'+instance) == 0
-    assert publish('publish-standing','mapped-standing-'+instance,('--network','alpha','--network','beta','--mode','standing')) == 0
+        stdin='mapped-once-'+instance) in (0, None)
+    assert publish('publish-standing','mapped-standing-'+instance,('--network','alpha','--network','beta','--mode','standing')) in (0, None)
     (root/('network-published-'+instance)).touch()
     wait(lambda: len(list(root.glob('network-published-*'))) == 2)
+    wait(lambda: (root/'network-publications-confirmed').exists())
 elif node in ('receiver','outsider') and scenario == 'deny':
     assert publish('deny-network','forbidden-'+node,('--network','alpha')) != 0
     assert publish('deny-spoof','forbidden-spoof-'+node,('--network','alpha'),
@@ -369,8 +376,56 @@ async fn networks_sequential_default_once_standing_and_overlap_keep_sender_and_o
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn networks_map_peers_deliver_at_live_hooks_once_per_sibling_and_future_member_without_waking()
  {
-    let fixture = network_fixture("parallel", true);
+    assert_mapped_network_delivery("parallel").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn networks_map_peers_confirm_lost_publication_replies_without_republishing() {
+    assert_mapped_network_delivery("lost-publication-reply").await;
+}
+
+async fn assert_mapped_network_delivery(scenario: &str) {
+    let fixture = network_fixture(scenario, true);
     let run = fixture.submit_detached("networks").await;
+    // Broker deadlines bound the response, not the already-started durable write. In particular,
+    // coverage can lose a response while its publication succeeds. Observe it; never retry it.
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+    let published = loop {
+        let status = fixture.json(&["status", &run], "networks").await;
+        let steers = status["steers"].as_array().cloned().unwrap_or_default();
+        if steers.len() == 4 {
+            break steers;
+        }
+        assert!(terminal_result(&status).is_none(), "{status}");
+        assert!(
+            Instant::now() < deadline,
+            "publications not recorded: {status}"
+        );
+        sleep(Duration::from_millis(30)).await;
+    };
+    let identities = network_captures(&fixture, &run, ("talker", 0), "identity");
+    assert_eq!(identities.len(), 2);
+    for identity in identities {
+        let identity: Value = serde_json::from_str(&identity).assert_value();
+        for mode in ["once", "standing"] {
+            let text = format!("mapped-{mode}-{}", identity["nodeInstance"]);
+            assert!(
+                published.iter().any(|steer| {
+                    steer["excerpt"] == text
+                        && steer["textBytes"] == text.len()
+                        && steer["mode"] == mode
+                        && steer["network"]
+                            == json!({"networks":["alpha","beta"],"origin":identity})
+                }),
+                "missing exact publication for {identity}/{mode}: {published:?}"
+            );
+        }
+    }
+    fs::write(
+        fixture.repository.join("network-publications-confirmed"),
+        "go",
+    )
+    .assert_value();
     fixture.wait_succeeded(&run, "networks").await;
     wait_for_exit(fixture.ready_pid(&run)).await;
     let prompts = network_captures(&fixture, &run, ("talker", 0), "prompt");
@@ -379,17 +434,32 @@ async fn networks_map_peers_deliver_at_live_hooks_once_per_sibling_and_future_me
         2,
         "only the two authored mapped instances may start"
     );
-    let messages = network_captures(&fixture, &run, ("talker", 0), "publish-once")
-        .into_iter()
-        .map(|publication| {
-            let publication: Value = serde_json::from_str(&publication).assert_value();
-            let result: Value =
-                serde_json::from_str(publication["stdout"].as_str().assert_value()).assert_value();
-            result["steer"]["excerpt"]
-                .as_str()
-                .assert_value()
-                .to_owned()
-        })
+    for kind in ["publish-once", "publish-standing"] {
+        let replies = network_captures(&fixture, &run, ("talker", 0), kind);
+        assert_eq!(replies.len(), 2);
+        for reply in replies {
+            let reply: Value = serde_json::from_str(&reply).assert_value();
+            if scenario == "lost-publication-reply" {
+                assert_eq!(reply["status"], 1);
+            }
+            if reply["status"] == 0 {
+                let result: Value =
+                    serde_json::from_str(reply["stdout"].as_str().assert_value()).assert_value();
+                assert_eq!(result["runId"], run);
+                assert!(published.contains(&result["steer"]), "{result}");
+            } else {
+                assert_eq!(reply["status"], 1);
+                assert_eq!(reply["stdout"], "");
+                assert!(reply["stderr"].as_str().assert_value().trim().ends_with(
+                    "network publication outcome is unknown; inspect run vectors before retrying"
+                ));
+            }
+        }
+    }
+    let messages = published
+        .iter()
+        .filter(|steer| steer["mode"] == "once")
+        .map(|steer| steer["excerpt"].as_str().assert_value().to_owned())
         .collect::<Vec<_>>();
     assert_eq!(messages.len(), 2);
     for prompt in prompts {

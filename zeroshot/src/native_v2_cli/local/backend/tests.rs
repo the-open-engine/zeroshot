@@ -36,6 +36,7 @@ fn prepared_request(run_id: RunId) -> PreparedRunRequest {
     }))
     .assert_value();
     PreparedRunRequest {
+        context_sources: Vec::new(),
         git_credentials: None,
 
         cwd: None,

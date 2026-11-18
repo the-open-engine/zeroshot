@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{DeclaredConnections, EnvironmentVariableName, NativeV2RunValueError};
 
+mod context;
+pub use context::{ContextRepository, validate_context_sources};
+
 pub const MAX_RUNTIME_SCRIPT_BYTES: usize = 64 * 1024;
 pub const MAX_RUNTIME_VARIABLE_BYTES: usize = 256 * 1024;
 
@@ -14,6 +17,10 @@ pub const MAX_RUNTIME_VARIABLE_BYTES: usize = 256 * 1024;
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RuntimeEnvironment {
+    /// Read-only repositories pinned by the submitting client, in checkout order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 16))]
+    pub context_repositories: Vec<ContextRepository>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -27,6 +34,7 @@ pub struct RuntimeEnvironment {
 
 impl RuntimeEnvironment {
     pub fn validate(&self) -> Result<(), NativeV2RunValueError> {
+        context::validate_repositories(&self.context_repositories)?;
         for script in [&self.setup, &self.startup].into_iter().flatten() {
             if script.len() > MAX_RUNTIME_SCRIPT_BYTES || script.contains('\0') {
                 return Err(NativeV2RunValueError(
@@ -58,6 +66,11 @@ impl RuntimeEnvironment {
                 ));
             }
         }
+        self.validate_context_git_environment(
+            self.variables
+                .keys()
+                .chain(self.connections.environment_names()),
+        )?;
         if self
             .connections
             .environment_names()
@@ -65,6 +78,30 @@ impl RuntimeEnvironment {
         {
             return Err(NativeV2RunValueError(
                 "environment variables and connections must have distinct names",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Context checkouts require the target's exact-path Git trust configuration.
+    /// Higher-precedence caller settings could replace it or reset `safe.directory`.
+    pub fn validate_context_git_environment<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a EnvironmentVariableName>,
+    ) -> Result<(), NativeV2RunValueError> {
+        if !self.context_repositories.is_empty()
+            && names.into_iter().any(|name| {
+                [
+                    "GIT_CONFIG_GLOBAL",
+                    "GIT_CONFIG_PARAMETERS",
+                    "GIT_CONFIG_COUNT",
+                ]
+                .iter()
+                .any(|reserved| name.as_str().eq_ignore_ascii_case(reserved))
+            })
+        {
+            return Err(NativeV2RunValueError(
+                "context repositories require target-owned Git trust; remove GIT_CONFIG_GLOBAL, GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT overrides",
             ));
         }
         Ok(())
@@ -78,6 +115,7 @@ fn reserved_variable(name: &str) -> bool {
             | "PATH"
             | "TMPDIR"
             | "ZEROSHOT_TOOLS"
+            | "ZEROSHOT_CONTEXT"
             | "CODEX_HOME"
             | "CLAUDE_CONFIG_DIR"
             | "COPILOT_HOME"

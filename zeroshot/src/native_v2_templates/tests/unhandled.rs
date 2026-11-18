@@ -68,6 +68,7 @@ async fn documented_review_loop_stops_on_an_unchecked_worker_error_in_round_one(
     let initial_input = json!({"task":"repair checkout"});
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Documented review loop").assert_value(),
             graph,
