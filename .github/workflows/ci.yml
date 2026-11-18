@@ -320,6 +320,10 @@ jobs:
           cargo test --workspace
           cargo test --package zeroshot --features ui
 
+      - name: Compile Windows workspace tests before starting the execution host
+        if: runner.os == 'Windows'
+        run: ./scripts/test-windows.ps1 -Ui -BuildOnly
+
       - name: Run Windows workspace tests
         if: runner.os == 'Windows'
         run: ./.github/scripts/test-windows-host.ps1

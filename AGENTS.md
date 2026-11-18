@@ -400,7 +400,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `harnesses::adapters::core::tool_activity` into existing durable text logs and node transcripts.
   Each complete entry, including identity/status framing and truncation markers, is at most 8 KiB
   with head/tail excerpts. Redact decoded strings before JSON rendering and serialized payloads
-  before truncation; deduplicate native IDs per phase and omit cumulative updates. Missing native
+  before truncation; deduplicate native IDs per phase and omit cumulative updates. Pi scopes this
+  deduplication to each assistant-message start; user/tool-result messages retain it. Missing native
   status stays unknown. These are log-only per-entry bounds, independent of Active Memory and
   provider response/outcome handling. Claude replayed user records acknowledge prompt delivery;
   ordinary user records still carry native tool completions.
@@ -2273,9 +2274,13 @@ python -m mkdocs build --strict
   CLI subprocess tests. Windows uses
   `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job and prints Cargo's
   rendered compiler diagnostics while collecting executable metadata. Test and doctest compilation
-  use one Cargo job to bound concurrent metadata mappings on hosted Windows; the CI-only
-  `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
-  hosted process and filesystem boundary tests as root against its built test binary.
+  use one Cargo job to bound concurrent metadata mappings on hosted Windows. CI first calls that
+  script with `-Ui -BuildOnly`, then starts `.github/scripts/test-windows-host.ps1` outside the
+  hosted runner's Job. The host reuses those artifacts under the same compiler, profile and target
+  settings, without forwarding registry credentials. Its thirty-minute deadline covers test execution
+  and doctests rather than the initial UI test compilation. Local script use still builds and runs
+  the complete selected suite. Linux also executes hosted process and filesystem boundary tests as
+  root against its built test binary.
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
   root boundary tests on native changes, enforces coverage floors, and publishes LCOV to Coveralls.
   External publication is best effort and runs only with an actual LCOV report; measurement, tests
