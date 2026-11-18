@@ -1379,6 +1379,12 @@
           "description": "Durable cursor after the force request was recorded.",
           "type": "string"
         },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "controller": {
           "anyOf": [
             {
@@ -1835,6 +1841,12 @@
       "properties": {
         "atCursor": {
           "type": "string"
+        },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
         },
         "controller": {
           "anyOf": [
@@ -2518,6 +2530,12 @@
       "additionalProperties": false,
       "description": "One durable public status projection. `cursor` is stable run history, not a connection-local\nsequence; clients resume strictly after it.",
       "properties": {
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "cursor": {
           "type": "string"
         },
