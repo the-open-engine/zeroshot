@@ -2358,6 +2358,15 @@ do not qualify as lessons.</p>
 <p>These settings apply per run, so saved profiles can use different policies. Postmortem model usage
 counts toward the run total. An ordinary postmortem failure appears in the logs and does not change
 the main graph's result.</p>
+<p>Initialization failures name the lessons file when applicable and retain the safe underlying
+cause in error logs, including when postmortem is disabled but recall is enabled. Failed
+specialists log their role and cause, followed by one error summary. Confirmed hook configuration
+or carrier failures are reported once per execution; a conversation without tool callbacks is
+not treated as a failure. These auxiliary errors do not become primary graph failure evidence.
+Foreground <code>run</code> and <code>watch</code> print the latest five memory error records on stderr when observation
+ends. <code>resume</code> also checks that stream after its receipt, within the existing five-second log-read
+deadline; longer-running successors can be followed with <code>watch</code>. Complete diagnostics remain in
+<code>zeroshot logs RUN_ID</code>. Disabling both memory scopes skips store initialization without a warning.</p>
 <p>While the postmortem runs, the run stays <code>running</code>. <code>status</code> and <code>list</code> carry the recorded graph
 outcome in <code>status.graphResult</code>; <code>watch</code> and foreground <code>run</code> print it immediately. A log line
 records that outcome and says the postmortem is running. The run finishes after postmortem,
@@ -2460,7 +2469,7 @@ memory cards in hook context on Codex. They are delivered whole and do not count
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-17">17 November 2026</time>
+    Last updated <time datetime="2026-11-18">18 November 2026</time>
   </span>
 
     
