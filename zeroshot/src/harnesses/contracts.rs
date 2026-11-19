@@ -107,6 +107,8 @@ pub(crate) struct ProviderAccessContract {
     pub(crate) connection_key: &'static str,
     pub(crate) required_fields: &'static [&'static str],
     pub(crate) accepted_field_sets: &'static [&'static [&'static str]],
+    #[cfg(feature = "workspace")]
+    pub(crate) gateway_protocols: Option<&'static [&'static str]>,
 }
 
 impl ProviderAccessContract {
@@ -121,6 +123,22 @@ impl ProviderAccessContract {
             connection_key,
             required_fields,
             accepted_field_sets,
+            #[cfg(feature = "workspace")]
+            gateway_protocols: None,
+        }
+    }
+
+    pub(crate) const fn selectable_gateway() -> Self {
+        use crate::native_v2_capsule::gateway;
+
+        const FIELDS: &[&str] = &[gateway::BASE_URL, gateway::API_KEY, gateway::API];
+        Self {
+            native_local: false,
+            connection_key: "gateway",
+            required_fields: FIELDS,
+            accepted_field_sets: &[FIELDS],
+            #[cfg(feature = "workspace")]
+            gateway_protocols: Some(&gateway::SUPPORTED_APIS),
         }
     }
 }

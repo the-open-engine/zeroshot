@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::WorkspaceError;
+use crate::native_v2_capsule::gateway;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,11 +35,20 @@ pub(super) fn lanes(
         .into_iter()
         .map(|lane| {
             let access = harnesses.access(&lane).map_err(invalid)?;
-            Ok(json!({
+            let mut entry = json!({
                 "harness":lane.harness_name(), "provider":lane.provider_name(),
                 "connectionKey":access.connection_key, "requiredFields":access.required_fields,
                 "acceptedFieldSets":access.accepted_field_sets,
-            }))
+            });
+            if let Some(protocols) = access.gateway_protocols {
+                entry["fieldOptions"] = json!({
+                    (gateway::API): {
+                        "description": "Wire protocol spoken by the gateway endpoint.",
+                        "allowedValues": protocols,
+                    }
+                });
+            }
+            Ok(entry)
         })
         .collect()
 }

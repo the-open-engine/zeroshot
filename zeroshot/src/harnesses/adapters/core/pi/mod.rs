@@ -22,6 +22,7 @@ mod session;
 mod session_id;
 #[path = "transcript.rs"]
 mod transcript;
+use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::turn as turn_process;
 
 use std::collections::BTreeMap;
@@ -64,7 +65,7 @@ fn schema_dialect(
         }
         PiProvider::OpenAi | PiProvider::OpenRouter => ProviderSchemaDialect::OpenAiStrict,
         PiProvider::Gateway => match declared_api(resolved, command::GATEWAY_API)?.as_str() {
-            "anthropic-messages" => ProviderSchemaDialect::Standard,
+            gateway::ANTHROPIC_MESSAGES => ProviderSchemaDialect::Standard,
             _ => ProviderSchemaDialect::OpenAiStrict,
         },
     })
