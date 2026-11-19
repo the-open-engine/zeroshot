@@ -102,6 +102,13 @@ Unix epoch milliseconds, not the time the controller died. The entry is omitted 
 answers and for finished or suspended runs. `checkpoints` also includes it when applicable. These three commands
 exit 0 after a successful read, including when controller availability is lost or unknown.
 
+For a fatal runtime error, a local controller tries to retain its original cause in a private, redacted note
+of at most 4 KiB outside the ledger. Later `status` calls show that note on stderr, even if the
+ledger cannot be read, and leave it unchanged. The ledger still determines the run's status;
+the note cannot establish a terminal result or controller ownership. Storage failures can also
+prevent this best-effort report. `list` returns readable runs and warns on stderr with the ID
+and read error of each run it skips. Directories without a ledger are ignored.
+
 Local controller requests wait at most 10 seconds for an answer. This includes the status checks
 before `resume` and `checkpoints`, and the initial exchanges for `watch`, `logs` and `attach`.
 `list` checks controllers with bounded concurrency under one shared deadline. Runs that could not

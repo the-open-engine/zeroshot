@@ -27,7 +27,8 @@ use super::{
 mod shutdown;
 #[path = "process/startup_failure.rs"]
 mod startup_failure;
-use startup_failure::{record_startup_failure, startup_paths, startup_redactions};
+use startup_failure::{record_startup_failure, startup_paths};
+pub(crate) use startup_failure::{LocalRuntimeFailureReport, read_runtime_failure, startup_redactions};
 pub use startup_failure::{record_unloaded_startup_failure, take_startup_failure};
 
 const BOOTSTRAP_MAX_BYTES: u64 = 4 * 1024 * 1024;
@@ -195,9 +196,17 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
     let server = start_controller_process(bootstrap, shutdown.requested.clone())
         .await
         .inspect_err(|error| record_startup_failure(&paths, error, &redactions))?;
-    server
+    let controller = server.controller.clone();
+    let result = server
         .serve_until_terminal(shutdown.requested.clone())
-        .await
+        .await;
+    if let Err(error) = &result {
+        controller
+            .inner
+            .report_local_runtime_failure(&startup_failure::error_chain(error))
+            .await;
+    }
+    result
 }
 
 async fn start_controller_process(
