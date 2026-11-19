@@ -34,6 +34,8 @@ mod management_tests;
 mod outcome_tests;
 #[path = "tests/parser.rs"]
 mod parser_tests;
+#[path = "tests/resume_runtime.rs"]
+mod resume_runtime_tests;
 #[path = "tests/review.rs"]
 mod review_tests;
 
