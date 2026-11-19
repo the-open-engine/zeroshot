@@ -320,18 +320,24 @@ impl LocalCliBackend {
         Ok(())
     }
 
+    fn read_resume_recovery_document(
+        &self,
+        run_id: &RunId,
+    ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
+        // An unavailable recovery record is an eligibility refusal at this boundary.
+        self.read_recovery_document(run_id)
+            .map_err(|error| match error {
+                NativeV2CliError::Local(message) => NativeV2CliError::Usage(message),
+                error => error,
+            })
+    }
+
     async fn claimable_recovery_document(
         &self,
         status: &RunStatusResult,
         recoverable: bool,
     ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
-        // An unavailable recovery record is an eligibility refusal at this boundary.
-        let recovery =
-            self.read_recovery_document(&status.run_id)
-                .map_err(|error| match error {
-                    NativeV2CliError::Local(message) => NativeV2CliError::Usage(message),
-                    error => error,
-                })?;
+        let recovery = self.read_resume_recovery_document(&status.run_id)?;
         if !recoverable {
             let reason = self
                 .recovery_workspace_refusal(status, &recovery)
@@ -1073,7 +1079,8 @@ impl NativeV2CliBackend for LocalCliBackend {
         github_token: bool,
     ) -> Result<(), NativeV2CliError> {
         require_local(run.target.as_deref())?;
-        let recovery = self.read_recovery_document(&run.run_id)?;
+        let (_paths, _directory) = self.recorded_storage(&run.run_id)?;
+        let recovery = self.read_resume_recovery_document(&run.run_id)?;
         let environment = native_forge::capture_native_environment(&self.current_directory)?;
         admit_resume_runtime(&recovery, runtime, &environment, github_token).await?;
         Ok(())
@@ -1086,7 +1093,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         runtime: &openengine_cluster_protocol::RunResumeRuntime,
     ) -> Result<openengine_cluster_protocol::RunConnectionRequirements, NativeV2CliError> {
         require_local(target)?;
-        let mut submission = self.read_recovery_document(run_id)?.submission;
+        let mut submission = self.read_resume_recovery_document(run_id)?.submission;
         submission.runtime =
             crate::native_v2_runtime_config::resolve(runtime.clone(), &submission.graph);
         Ok(submission

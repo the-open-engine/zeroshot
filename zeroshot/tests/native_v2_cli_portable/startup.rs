@@ -2,6 +2,8 @@
 
 #[path = "resume_runtime_tests.rs"]
 mod resume_runtime;
+#[path = "resume_runtime_refusal_tests.rs"]
+mod resume_runtime_refusal;
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
