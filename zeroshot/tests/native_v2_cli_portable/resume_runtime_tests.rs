@@ -1,6 +1,23 @@
 use super::{Fixture, success};
 use serde_json::{Value, json};
 use std::fs;
+use std::time::{Duration, Instant};
+
+fn await_success(fixture: &Fixture, id: &str) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = fixture.json(&["status", id]);
+        if status["status"]["phase"] == "finished" {
+            assert_eq!(
+                status["status"]["terminalResult"]["status"], "succeeded",
+                "{status}"
+            );
+            return;
+        }
+        assert!(Instant::now() < deadline, "{status}");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
 
 fn fixture() -> Fixture {
     let fixture = Fixture::new().outside_workspace();
@@ -115,10 +132,7 @@ fn resume_runtime_replaces_both_file_forms_and_preserves_checkpoint_outputs() {
         success(&output);
         let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
         let successor = receipt["runId"].as_str().unwrap();
-        assert_eq!(
-            fixture.json(&["status", successor])["status"]["terminalResult"]["status"],
-            "succeeded"
-        );
+        await_success(&fixture, successor);
         let recovery: Value = serde_json::from_slice(
             &fs::read(
                 fixture
@@ -307,10 +321,7 @@ fn resume_runtime_uses_the_harness_restored_from_the_selected_snapshot() {
         success(&resumed);
         let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
         let successor = receipt["runId"].as_str().unwrap();
-        assert_eq!(
-            fixture.json(&["status", successor])["status"]["terminalResult"]["status"],
-            "succeeded"
-        );
+        await_success(&fixture, successor);
         assert!(
             bin.join(if cfg!(windows) { "codex.cmd" } else { "codex" })
                 .is_file()
