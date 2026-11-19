@@ -507,14 +507,14 @@ where
     }
     async fn replacement_resume_requirements(
         &self,
-        target: Option<&str>,
-        run_id: &openengine_cluster_protocol::RunId,
+        run: &super::RunSelector,
         runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        _github_token: bool,
     ) -> Result<RunConnectionRequirements, NativeV2CliError> {
         self.connector
             .replacement_workspace_recovery_requirements(
-                require_named_target(target)?,
-                run_id,
+                require_named_target(run.target.as_deref())?,
+                &run.run_id,
                 runtime,
             )
             .await

@@ -401,7 +401,11 @@ where
     let requirements = if let Some(runtime) = runtime.as_ref() {
         context
             .backend
-            .replacement_resume_requirements(run.target.as_deref(), &run.run_id, runtime)
+            .replacement_resume_requirements(
+                &run,
+                runtime,
+                run.target.is_none() && read_github_token(context.environment)?.is_some(),
+            )
             .await?
     } else {
         requirements

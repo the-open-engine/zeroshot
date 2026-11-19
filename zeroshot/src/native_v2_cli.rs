@@ -943,9 +943,9 @@ pub trait NativeV2CliBackend: Send + Sync {
     }
     async fn replacement_resume_requirements(
         &self,
-        _target: Option<&str>,
-        _run_id: &RunId,
+        _run: &RunSelector,
         runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        _github_token: bool,
     ) -> Result<RunConnectionRequirements, NativeV2CliError> {
         Ok(crate::native_v2_runtime_config::requirements(runtime))
     }

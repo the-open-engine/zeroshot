@@ -1088,14 +1088,16 @@ impl NativeV2CliBackend for LocalCliBackend {
 
     async fn replacement_resume_requirements(
         &self,
-        target: Option<&str>,
-        run_id: &RunId,
+        run: &RunSelector,
         runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        github_token: bool,
     ) -> Result<openengine_cluster_protocol::RunConnectionRequirements, NativeV2CliError> {
-        require_local(target)?;
-        let mut submission = self.read_resume_recovery_document(run_id)?.submission;
+        require_local(run.target.as_deref())?;
+        let recovery = self.read_resume_recovery_document(&run.run_id)?;
+        let environment = native_forge::capture_native_environment(&self.current_directory)?;
+        let mut submission = recovery.submission.clone();
         submission.runtime =
-            crate::native_v2_runtime_config::resolve(runtime.clone(), &submission.graph);
+            admit_resume_runtime(&recovery, runtime, &environment, github_token).await?;
         Ok(submission
             .connection_requirements()
             .into_iter()
