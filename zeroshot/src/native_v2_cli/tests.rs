@@ -437,6 +437,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
             .is_err()
     );
     let resume = RunResumeParams {
+        runtime: None,
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,

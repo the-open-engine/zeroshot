@@ -166,6 +166,15 @@ where
         self.backend().run_checkpoints(self.context(), params).await
     }
 
+    pub async fn run_resume_requirements(
+        &self,
+        params: openengine_cluster_protocol::RunResumeRequirementsParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, BackendError> {
+        self.backend()
+            .run_resume_requirements(self.context(), params)
+            .await
+    }
+
     pub async fn run_resume(
         &self,
         params: RunResumeParams,

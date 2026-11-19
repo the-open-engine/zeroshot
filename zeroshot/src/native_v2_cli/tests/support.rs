@@ -130,7 +130,7 @@ pub(in crate::native_v2_cli) enum Call {
     },
     Resume {
         target: Option<String>,
-        params: RunResumeParams,
+        params: Box<RunResumeParams>,
         discard_workspace_changes: bool,
     },
     Checkpoints {
@@ -1133,7 +1133,7 @@ impl NativeV2CliBackend for FakeBackend {
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         self.calls.lock().assert_value().push(Call::Resume {
             target: target.map(str::to_owned),
-            params: params.clone(),
+            params: Box::new(params.clone()),
             discard_workspace_changes,
         });
         Ok(openengine_cluster_protocol::RunResumeResult {

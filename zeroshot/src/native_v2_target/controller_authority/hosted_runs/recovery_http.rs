@@ -139,6 +139,12 @@ impl TargetHttpControlAuthority {
         target: &TargetRecord,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, TargetAuthorityError> {
+        if let Some(runtime) = &params.runtime {
+            crate::native_v2_target::TargetControlAuthority::validate_resume_runtime(
+                self, target, runtime,
+            )
+            .await?;
+        }
         if matches!(
             params.from,
             Some(

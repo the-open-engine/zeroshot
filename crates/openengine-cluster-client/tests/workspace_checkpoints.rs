@@ -65,6 +65,7 @@ async fn typed_client_lists_and_resumes_using_the_returned_checkpoint_identity()
     assert_eq!(checkpoint.node.as_str(), "write");
     let successor = client
         .run_resume(RunResumeParams {
+            runtime: None,
             run_id: result.run_id,
             successor_run_id: RunId::new("successor"),
             from: Some(RunResumeFrom::Checkpoint {
@@ -81,4 +82,58 @@ async fn typed_client_lists_and_resumes_using_the_returned_checkpoint_identity()
         .assert_value();
     assert_eq!(successor.run_id, RunId::new("successor"));
     assert_eq!(successor.resumed_from, RunId::new("prior"));
+}
+
+struct RuntimeReplacementTransport;
+
+#[async_trait]
+impl JsonRpcTransport for RuntimeReplacementTransport {
+    async fn request(&self, request: String) -> Result<String, TransportError> {
+        let request: Value = serde_json::from_str(&request).assert_value();
+        let result = if request["method"] == "run/resume_requirements" {
+            assert_eq!(request["params"]["runId"], "prior");
+            assert_eq!(
+                request["params"]["runtime"]["runtime"]["model"],
+                "replacement-model"
+            );
+            json!({"connections":{"setup":["SETUP_TOKEN"]}})
+        } else {
+            assert_eq!(request["method"], "run/resume");
+            assert_eq!(request["params"]["runtime"]["kind"], "uniform");
+            assert_eq!(
+                request["params"]["runtime"]["runtime"]["model"],
+                "replacement-model"
+            );
+            json!({"runId":"successor","resumedFrom":"prior"})
+        };
+        Ok(json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string())
+    }
+}
+
+#[tokio::test]
+async fn typed_client_queries_fixed_requirements_and_carries_runtime_replacement() {
+    let client = ClusterClient::new(RuntimeReplacementTransport);
+    let result = client
+        .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+            run_id: RunId::new("prior"), runtime:serde_json::from_value(json!({"kind":"uniform","runtime":{"harness":"codex","provider":"openai","model":"replacement-model"}})).assert_value(),
+        })
+        .await
+        .assert_value();
+    assert_eq!(
+        serde_json::to_value(result).assert_value(),
+        json!({"connections":{"setup":["SETUP_TOKEN"]}})
+    );
+    let mut params: RunResumeParams =
+        serde_json::from_value(json!({"runId":"prior","successorRunId":"successor"}))
+            .assert_value();
+    params.runtime = Some(
+        serde_json::from_value(json!({"kind":"uniform","runtime":{
+            "harness":"codex","provider":"openai","model":"replacement-model"
+        }}))
+        .assert_value(),
+    );
+    assert_eq!(
+        client.run_resume(params).await.assert_value().run_id,
+        RunId::new("successor")
+    );
 }

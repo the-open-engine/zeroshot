@@ -295,6 +295,36 @@ where
     S: DetachSignal,
     W: Write,
 {
+    let mut runtime = command
+        .runtime
+        .as_ref()
+        .map(|source| match source {
+            super::RunRuntime::Exact(path) => submission::read_json("runtime config", path)
+                .map(|runtime| openengine_cluster_protocol::RunResumeRuntime::Exact { runtime }),
+            super::RunRuntime::Uniform(path) => {
+                submission::read_json("uniform runtime config", path).map(|runtime| {
+                    openengine_cluster_protocol::RunResumeRuntime::Uniform { runtime }
+                })
+            }
+        })
+        .transpose()?;
+    if let Some(runtime) = runtime.as_mut() {
+        let placement = if command.run.target.is_some() {
+            crate::native_v2_candidate::ProviderAccessPlacement::Contained
+        } else {
+            crate::native_v2_candidate::ProviderAccessPlacement::Local
+        };
+        crate::native_v2_runtime_config::materialize_access(runtime, placement)
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        context
+            .backend
+            .validate_resume_runtime(
+                &command.run,
+                runtime,
+                command.run.target.is_none() && read_github_token(context.environment)?.is_some(),
+            )
+            .await?;
+    }
     let run = &command.run;
     let status = context
         .backend
@@ -360,9 +390,17 @@ where
             status.workspace_recovery.connection_requirements,
         )
         .await?;
+    let requirements = if let Some(runtime) = runtime.as_ref() {
+        context
+            .backend
+            .replacement_resume_requirements(run.target.as_deref(), &run.run_id, runtime)
+            .await?
+    } else {
+        requirements
+    };
     let scope = GitHubTokenScope::new(run.target.is_some(), command.forward_github_token);
-    // Only direct targets return retained requirements, and they need exactly the original values,
-    // so a withheld GH_TOKEN would fail later without naming the flag.
+    // Direct targets require the effective authorized declarations. Name the forwarding
+    // flag before selecting credentials when those declarations include GH_TOKEN.
     if scope == GitHubTokenScope::Withheld
         && requirements
             .values()
@@ -394,6 +432,7 @@ where
         .run_resume(
             run.target.as_deref(),
             RunResumeParams {
+                runtime,
                 run_id: run.run_id,
                 successor_run_id: RunId::new(uuid::Uuid::now_v7().to_string()),
                 from: command.from,
@@ -1017,6 +1056,7 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
     };
     let mut result = execute_resume(
         RunResumeCommand {
+            runtime: None,
             run,
             from: Some(from),
             discard_workspace_changes: false,

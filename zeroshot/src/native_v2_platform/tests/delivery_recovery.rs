@@ -160,6 +160,7 @@ async fn dead_controller_reconciles_delivery_before_successor_claim_and_generati
             .assert_value();
         let result = controller
             .resume(RunResumeParams {
+                runtime: None,
                 run_id: submitted.run_id,
                 successor_run_id: successor.clone(),
                 from: None,

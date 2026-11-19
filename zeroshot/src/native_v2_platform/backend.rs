@@ -162,6 +162,29 @@ impl ClusterBackend for NativeV2PlatformController {
             .map_err(platform_backend_error)
     }
 
+    async fn run_resume_requirements(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunResumeRequirementsParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, BackendError> {
+        let source = self
+            .recoverable_resume_source(&params.run_id)
+            .await
+            .map_err(platform_backend_error)?;
+        let submission = crate::native_v2_runtime_config::replacement_submission(
+            &source.admitted,
+            params.runtime,
+            source.submission_key,
+        )
+        .map_err(|error| platform_backend_error(error.into()))?;
+        let connections = submission
+            .connection_requirements()
+            .into_iter()
+            .map(|(key, fields)| (key, fields.into_iter().collect()))
+            .collect();
+        Ok(openengine_cluster_protocol::RunResumeRequirementsResult { connections })
+    }
+
     async fn run_resume(
         &self,
         _context: &ConnectionContext,

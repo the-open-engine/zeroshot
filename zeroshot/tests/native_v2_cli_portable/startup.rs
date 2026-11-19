@@ -1,4 +1,7 @@
-//! Failed fresh submissions remove only storage that was never admitted.
+//! Fresh and resumed controller startup preserves admitted run state.
+
+#[path = "resume_runtime_tests.rs"]
+mod resume_runtime;
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;

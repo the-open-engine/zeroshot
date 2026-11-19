@@ -217,6 +217,17 @@ async fn missing_codex_usage_starts_a_new_conversation_and_logs_the_reason() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn selected_local_checkpoint_restores_conversation_without_provider_files() {
+    selected_checkpoint_conversation(None).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resume_runtime_preserves_native_conversation_after_model_change() {
+    for uniform in [false, true] {
+        selected_checkpoint_conversation(Some(uniform)).await;
+    }
+}
+
+async fn selected_checkpoint_conversation(replacement: Option<bool>) {
     let mut fixture = fixture();
     let run = fixture.submit_detached("checkpoint-fail").await;
     // Wait for controller cleanup without repeatedly launching an instrumented status process.
@@ -238,18 +249,40 @@ async fn selected_local_checkpoint_restores_conversation_without_provider_files(
         .as_str()
         .assert_value();
     new_provider_home(&mut fixture);
-    let resumed = fixture
-        .json(
-            &[
-                "resume",
-                &run,
-                "--from-checkpoint",
-                checkpoint,
-                "--discard-workspace-changes",
-            ],
-            "finish",
-        )
-        .await;
+    let mut args = vec![
+        "resume",
+        &run,
+        "--from-checkpoint",
+        checkpoint,
+        "--discard-workspace-changes",
+    ];
+    let replacement_path = fixture.root.path("replacement.json");
+    let replacement_path = replacement_path.to_str().assert_value();
+    if let Some(uniform) = replacement {
+        let runtime = if uniform {
+            json!({"harness":"codex","provider":"openai","model":"replacement-model",
+                "sessionScope":"node_instance","activeMemory":{"repository":false,"graph":false},
+                "globalAgents":{"postmortem":{"enabled":false}},
+                "connections":{"openai":["OPENAI_API_KEY","FAKE_CODEX_MODE"]}})
+        } else {
+            let mut runtime: Value =
+                serde_json::from_slice(&fs::read(&fixture.runtime).assert_value()).assert_value();
+            for binding in runtime["nodes"].as_object_mut().assert_value().values_mut() {
+                binding["model"] = json!("replacement-model");
+            }
+            runtime
+        };
+        write_json(Path::new(replacement_path), &runtime);
+        args.extend([
+            if uniform {
+                "--uniform-runtime-config"
+            } else {
+                "--runtime-config"
+            },
+            replacement_path,
+        ]);
+    }
+    let resumed = fixture.json(&args, "finish").await;
     let successor = resumed["runId"].as_str().assert_value();
     fixture.wait_succeeded(successor, "finish").await;
     wait_for_exit(fixture.ready_pid(successor)).await;
@@ -260,6 +293,12 @@ async fn selected_local_checkpoint_restores_conversation_without_provider_files(
         String::from_utf8_lossy(&fixture.output(&["logs", &run], "finish").await.stdout),
         String::from_utf8_lossy(&fixture.output(&["logs", successor], "finish").await.stdout)
     );
+    if replacement.is_some() {
+        assert_eq!(
+            fs::read_to_string(fixture.repository.join("replacement-model-used")).assert_value(),
+            "replacement-model\n"
+        );
+    }
     assert_private_and_discarded(&fixture, &run, successor).await;
 }
 
@@ -368,6 +407,9 @@ if test "$ZEROSHOT_NODE_NAME" = check; then
 fi
 resumed=false
 for arg in "$@"; do if test "$arg" = resume; then resumed=true; fi; done
+for arg in "$@"; do
+  if test "$arg" = replacement-model; then printf '%s\n' "$arg" >> "$PWD/replacement-model-used"; fi
+done
 session="$CODEX_HOME/sessions/2026/11/14/rollout-local-thread.jsonl"
 if test "$resumed" = true; then
   printf '%s\n' 'resume local-thread' >> "$PWD/conversation-calls"

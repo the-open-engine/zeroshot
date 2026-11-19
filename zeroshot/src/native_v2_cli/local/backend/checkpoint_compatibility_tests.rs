@@ -6,6 +6,7 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 fn params(from: Option<RunResumeFrom>) -> openengine_cluster_protocol::RunResumeParams {
     openengine_cluster_protocol::RunResumeParams {
+        runtime: None,
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
@@ -41,6 +42,66 @@ fn recovery(root: &TestDirectory, checkpoints: bool) -> LocalRecoveryDocument {
         successor_run_id: None,
         workspace_checkpoints_discarded: false,
         pending_restore: None,
+    }
+}
+
+#[tokio::test]
+async fn resume_runtime_bounds_effective_delivery_defaults_and_preserves_native_token_access() {
+    use crate::native_v2_candidate::test_support::{full_graph, git_delivery_node, success_node};
+    use openengine_cluster_protocol::{DeclaredConnections, NodeName, NodeRuntimeBinding};
+    use serde_json::json;
+
+    let root = TestDirectory::new("resume-size");
+    let mut recovery = recovery(&root, true);
+    let mut graph =
+        serde_json::to_value(full_graph(vec![git_delivery_node(), success_node()])).assert_value();
+    let state =
+        json!({"kind":"record","fields":{"padding":{"type":{"kind":"string"},"required":true}}});
+    graph["initialInput"] = state.clone();
+    graph["root"]["state"] = state;
+    recovery.submission.graph = serde_json::from_value(graph).assert_value();
+    recovery.submission.initial_input = json!({"padding":""});
+    recovery.submission.runtime.nodes.insert(
+        NodeName::new("deliver").assert_value(),
+        NodeRuntimeBinding::GitDelivery {
+            connections: DeclaredConnections::empty(),
+            pull_request_feedback: Default::default(),
+        },
+    );
+    let admitted = crate::native_v2_admission::NativeV2Admission
+        .admit(recovery.submission.clone())
+        .await
+        .unwrap();
+    let overhead = serde_json::to_vec(&admitted).assert_value().len();
+    recovery.submission.initial_input =
+        json!({"padding":"x".repeat(crate::v2_run_ledger::MAX_ADMITTED_RUN_BYTES - overhead)});
+    let config = openengine_cluster_protocol::RunResumeRuntime::Exact {
+        runtime: recovery.submission.runtime.clone(),
+    };
+    let error = admit_resume_runtime(&recovery, &config, &BTreeMap::new(), false)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("exceeding the 2 MiB"), "{error}");
+    // Native GitHub authority deliberately keeps this binding empty. Its unchanged definition
+    // fits exactly; adding an unnecessary connection would incorrectly reject that valid run.
+    for (environment, github_token) in [
+        (BTreeMap::new(), true),
+        (
+            BTreeMap::from([(
+                crate::native_v2_delivery::GITHUB_TOKEN_FILE_ENV.to_owned(),
+                "owned-token-file".to_owned(),
+            )]),
+            false,
+        ),
+    ] {
+        let runtime = admit_resume_runtime(&recovery, &config, &environment, github_token)
+            .await
+            .unwrap();
+        assert!(
+            runtime.nodes()[&NodeName::new("deliver").assert_value()]
+                .declared_connections()
+                .is_empty()
+        );
     }
 }
 

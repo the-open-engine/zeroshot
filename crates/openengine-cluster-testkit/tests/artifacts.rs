@@ -167,6 +167,11 @@ async fn openrpc_vector_parameters_resolve_in_the_generated_schema() {
             "/$defs/RunVectorsParams/properties/after",
         ),
         ("run/vector", "id", "/$defs/VectorId"),
+        (
+            "run/resume",
+            "runtime",
+            "/$defs/RunResumeParams/properties/runtime",
+        ),
     ] {
         let method = openrpc
             .assert_key("methods")
@@ -284,6 +289,11 @@ async fn openrpc_recovery_methods_match_the_authoritative_schema() {
             "RunCheckpointsParams",
             "RunCheckpointsResult",
         ),
+        (
+            "run/resume_requirements",
+            "RunResumeRequirementsParams",
+            "RunResumeRequirementsResult",
+        ),
         ("run/resume", "RunResumeParams", "RunResumeResult"),
         (
             "run/discard_workspace",
@@ -323,11 +333,19 @@ async fn openrpc_recovery_methods_match_the_authoritative_schema() {
                 required.contains(&serde_json::Value::String(name.clone())),
                 "OpenRPC required flag drifted for {method_name}.{name}"
             );
-            assert_eq!(
-                parameter.assert_key("schema"),
-                property_schema,
-                "OpenRPC schema drifted for {method_name}.{name}"
-            );
+            if matches!(method_name, "run/resume" | "run/resume_requirements") && name == "runtime"
+            {
+                assert_eq!(
+                    parameter.assert_key("schema"),
+                    &serde_json::json!({"$ref":format!("schema.json#/$defs/{params_type}/properties/runtime")})
+                );
+            } else {
+                assert_eq!(
+                    parameter.assert_key("schema"),
+                    property_schema,
+                    "OpenRPC schema drifted for {method_name}.{name}"
+                );
+            }
         }
 
         let result_reference = method

@@ -911,21 +911,27 @@ class Run:
         )
         return _status(value)
 
-    async def resume(self) -> Run:
-        """Continue this attempt in a successor with fresh native sessions.
+    async def resume(self, *, runtime: _Runtime | None = None) -> Run:
+        """Continue this attempt, optionally replacing its runtime configuration.
+
+        Args:
+            runtime: Complete replacement runtime. None retains the saved configuration.
+                Native conversations use the harness's restoration and fresh-session fallback.
 
         Returns:
             The successor run handle.
         """
         await self._client._ready()
-        value = await self._client._native().json(
-            [
-                "resume",
-                self.id,
-                *self._client._route_arguments(),
-                *self._client._forwarding_arguments(),
-            ]
-        )
+        arguments = [
+            "resume",
+            self.id,
+            *self._client._route_arguments(),
+            *self._client._forwarding_arguments(),
+        ]
+        with tempfile.TemporaryDirectory(prefix="zeroshot-resume-") as directory:
+            if runtime is not None:
+                self._client._append_runtime(arguments, runtime, Path(directory))
+            value = await self._client._native().json(arguments)
         if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
             raise ProtocolError("Zeroshot emitted malformed resume result")
         return Run(self._client, value["runId"])

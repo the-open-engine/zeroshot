@@ -635,3 +635,5 @@ impl NodeDriver for CandidateNodeLane {
         }
     }
 }
+
+pub(crate) use provider_access::materialize_provider_binding;

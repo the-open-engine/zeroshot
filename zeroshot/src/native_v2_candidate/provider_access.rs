@@ -127,3 +127,11 @@ fn fallback_fields(
 #[cfg(test)]
 #[path = "provider_access/tests.rs"]
 mod tests;
+
+pub(crate) fn materialize_provider_binding(
+    binding: &mut NodeRuntimeBinding,
+    lane: RuntimeLane,
+    placement: ProviderAccessPlacement,
+) -> Result<(), crate::harnesses::HarnessError> {
+    materialize_binding(binding, lane, placement, &HarnessRegistry::local())
+}

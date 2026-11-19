@@ -213,3 +213,57 @@ fn hosted_recovery_routes_do_not_change_the_strict_hosted_runs_v1_shape() {
     .assert_value();
     assert!(extensions.hosted_workspace_recovery.is_some());
 }
+
+#[test]
+fn resume_runtime_forms_are_explicit_and_validate_like_run_configuration() {
+    let base = json!({"runId":"prior", "successorRunId":"next"});
+    for runtime in [
+        json!({"kind":"exact","runtime":{"harness":"codex","provider":"openai","nodes":{}}}),
+        json!({"kind":"uniform","runtime":{"harness":"claude","provider":"anthropic","model":"corrected","effort":"high","harnessConfig":{"args":["--tools","Read"]},"connections":{"anthropic":["ANTHROPIC_API_KEY"]}}}),
+    ] {
+        let mut request = base.clone();
+        request["runtime"] = runtime;
+        assert_contract::<RunResumeParams>(request.clone(), true);
+        let decoded: RunResumeParams = serde_json::from_value(request).assert_value();
+        assert!(decoded.runtime.is_some());
+    }
+    for runtime in [
+        json!({"kind":"uniform","runtime":{"harness":"codex","provider":"openai"}}),
+        json!({"kind":"uniform","runtime":{"harness":"codex","provider":"openai","model":"corrected","maxConcurrency":65537}}),
+        json!({"kind":"uniform","runtime":{"harness":"codex","provider":"openai","model":"corrected","contextWindow":0}}),
+        json!({"kind":"exact","runtime":{"harness":"codex","provider":"openai","nodes":{}},"graph":{}}),
+    ] {
+        let mut request = base.clone();
+        request["runtime"] = runtime;
+        assert_contract::<RunResumeParams>(request, false);
+    }
+}
+
+#[test]
+fn resume_runtime_discovery_uses_a_separate_frozen_marker() {
+    let document = TargetDiscoveryDocument::direct(TargetAuthentication::None)
+        .with_workspace_recovery()
+        .with_resume_runtime();
+    let wire = serde_json::to_value(&document).assert_value();
+    assert_eq!(
+        wire["extensions"]["workspace_recovery"],
+        json!({"kind":WORKSPACE_RECOVERY_KIND})
+    );
+    assert_eq!(
+        wire["extensions"]["resume_runtime"],
+        json!({"kind":openengine_cluster_protocol::RESUME_RUNTIME_KIND})
+    );
+    #[derive(serde::Deserialize)]
+    struct LegacyExtensions {
+        workspace_recovery: openengine_cluster_protocol::TargetWorkspaceRecoveryDiscovery,
+    }
+    let legacy: LegacyExtensions =
+        serde_json::from_value(wire["extensions"].clone()).assert_value();
+    assert_eq!(legacy.workspace_recovery.kind, WORKSPACE_RECOVERY_KIND);
+    assert!(
+        serde_json::from_value::<openengine_cluster_protocol::TargetResumeRuntimeDiscovery>(
+            json!({"kind":openengine_cluster_protocol::RESUME_RUNTIME_KIND,"fields":[]})
+        )
+        .is_err()
+    );
+}

@@ -437,6 +437,18 @@ pub trait ClusterBackend: Send + Sync + 'static {
         ))
     }
 
+    async fn run_resume_requirements(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunResumeRequirementsParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support runtime replacement",
+            None,
+        ))
+    }
+
     async fn run_resume(
         &self,
         _context: &ConnectionContext,

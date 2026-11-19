@@ -413,6 +413,17 @@ where
         self.call(RUN_CHECKPOINTS_METHOD, params).await
     }
 
+    pub async fn run_resume_requirements(
+        &self,
+        params: openengine_cluster_protocol::RunResumeRequirementsParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, ClientError> {
+        self.call(
+            openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD,
+            params,
+        )
+        .await
+    }
+
     pub async fn run_resume(
         &self,
         params: RunResumeParams,

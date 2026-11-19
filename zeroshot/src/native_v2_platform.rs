@@ -637,6 +637,7 @@ impl NativeV2PlatformController {
     ) -> Result<RunResumeResult, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
         let RunResumeParams {
+            runtime,
             from,
             run_id,
             successor_run_id,
@@ -742,16 +743,29 @@ impl NativeV2PlatformController {
                 )));
             }
         }
-        // Reconcile before claiming/moving the workspace or creating a successor. A hard exit
-        // may leave acknowledged ledger receipts newer than the last workspace boundary.
-        if let Some(state) = source.snapshot.delivery_checkpoint()? {
-            self.allocator
-                .retain_delivery_state(&run_id, &state)
-                .await?;
-        }
         let (submission_key, submission_digest) =
             retained_submission_identity(&run_id, &successor_run_id)?;
         let mut admitted = source.admitted.clone();
+        if let Some(runtime) = runtime {
+            let submission = crate::native_v2_runtime_config::replacement_submission(
+                &admitted,
+                runtime,
+                submission_key.clone(),
+            )?;
+            self.validate_harnesses(&submission.runtime)?;
+            let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+                &self.harnesses,
+                self.delivery_policy,
+            );
+            admission.checkpointless_requests = self.checkpointless_requests;
+            if let Some(catalog) = self.run_sizes.as_deref() {
+                admission = admission.with_run_sizes(catalog);
+            }
+            admitted = NativeV2Admission
+                .admit_with_context(submission, admission)
+                .await?;
+            crate::v2_run_ledger::validate_admitted_run(&admitted)?;
+        }
         if let Some(catalog) = self.run_sizes.as_deref() {
             crate::native_v2_admission::resolve_runtime_size(&mut admitted.runtime, catalog)?;
         }
@@ -766,6 +780,13 @@ impl NativeV2PlatformController {
             commit_identity,
             commit_co_author,
         })?;
+        // Reconcile before claiming/moving the workspace or creating a successor. A hard exit
+        // may leave acknowledged ledger receipts newer than the last workspace boundary.
+        if let Some(state) = source.snapshot.delivery_checkpoint()? {
+            self.allocator
+                .retain_delivery_state(&run_id, &state)
+                .await?;
+        }
         let controller_claim = self.allocator.claim_controller(&successor_run_id).await?;
         let stored = self
             .create_resume_successor(CreateRun {

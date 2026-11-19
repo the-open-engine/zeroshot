@@ -337,6 +337,7 @@ async fn failed_reservation_returns_no_resume_receipt_and_settles_preparation() 
     let result = tokio::time::timeout(
         Duration::from_secs(2),
         controller.resume(RunResumeParams {
+            runtime: None,
             from: None,
             run_id: source_id,
             successor_run_id: successor.clone(),
@@ -392,6 +393,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
 
     controller
         .resume(RunResumeParams {
+            runtime: None,
             from: None,
             run_id: source_run_id,
             successor_run_id: successor_run_id.clone(),
@@ -662,6 +664,7 @@ async fn assert_recoverable_source_resume(
     let successor_run_id = RunId::new("source-authorized-successor");
     controller
         .resume(RunResumeParams {
+            runtime: None,
             run_id: submitted.run_id,
             successor_run_id: successor_run_id.clone(),
             from: None,
@@ -818,5 +821,206 @@ async fn submitted_commit_attribution_reaches_allocation_but_not_node_environmen
                 "{environment:?}"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn resume_runtime_readmits_replacement_before_allocation_and_preserves_definition() {
+    for uniform in [false, true] {
+        let harness = harness(Behavior::Complete).await;
+        let mut submitted = request(Value::Null);
+        submitted.submission.source = Some(serde_json::from_value(json!({
+            "repository":"owner/repo","branch":"main","revision":"1111111111111111111111111111111111111111",
+            "remote":{"url":"https://gitlab.com/owner/repo.git","connection":"source","forge":{"provider":"source.gitlab","repository":"owner/repo"}}
+        })).assert_value());
+        crate::native_v2_admission::materialize_delivery_access(&mut submitted.submission)
+            .assert_value();
+        submitted.submission.environment = Some(
+            serde_json::from_value(json!({
+                "connections":{"setup":["SETUP_TOKEN"]}
+            }))
+            .assert_value(),
+        );
+        seed_failed_source_run(&submitted, &harness.ledger).await;
+        let predecessor = harness
+            .ledger
+            .get(&submitted.run_id)
+            .await
+            .assert_value()
+            .assert_value();
+        let allocator = Arc::new(SourceRecoveryAllocator {
+            runtime: FakeAllocator::new(harness.driver.clone(), harness.cleanup.clone()),
+            resumed_credentials: StdMutex::new(Vec::new()),
+            resumed_commit_attributions: StdMutex::new(Vec::new()),
+        });
+        let controller = NativeV2PlatformController::new(harness.ledger.clone(), allocator.clone())
+            .await
+            .assert_value();
+        let mut replacement = serde_json::to_value(&predecessor.admitted.runtime).assert_value();
+        replacement["nodes"]["worker"]["model"] = json!("replacement-model");
+        replacement["nodes"]["worker"]["effort"] = json!("high");
+        replacement["nodes"]["worker"]["connections"] = json!({"replacement":["NODE_TOKEN"]});
+        replacement["nodes"]
+            .as_object_mut()
+            .assert_value()
+            .remove("worker");
+        let mut params = RunResumeParams {
+            runtime: Some(
+                serde_json::from_value(json!({"kind":"exact","runtime":replacement}))
+                    .assert_value(),
+            ),
+            run_id: submitted.run_id.clone(),
+            successor_run_id: RunId::new("runtime-successor"),
+            from: None,
+            connections: BTreeMap::from([
+                (
+                    ConnectionKey::new("gitlab").assert_value(),
+                    StaticConnectionValues::new(BTreeMap::from([(
+                        EnvironmentVariableName::new("GITLAB_TOKEN").assert_value(),
+                        "fresh-delivery-token".to_owned(),
+                    )]))
+                    .assert_value(),
+                ),
+                (
+                    ConnectionKey::new("source").assert_value(),
+                    StaticConnectionValues::new(BTreeMap::from([
+                        (
+                            EnvironmentVariableName::new("GIT_USERNAME").assert_value(),
+                            "fresh-source-user".to_owned(),
+                        ),
+                        (
+                            EnvironmentVariableName::new("GIT_PASSWORD").assert_value(),
+                            "fresh-source-password".to_owned(),
+                        ),
+                    ]))
+                    .assert_value(),
+                ),
+                (
+                    ConnectionKey::new("replacement").assert_value(),
+                    test_connection_values("fresh-runtime-token"),
+                ),
+                (
+                    ConnectionKey::new("setup").assert_value(),
+                    StaticConnectionValues::new(BTreeMap::from([(
+                        EnvironmentVariableName::new("SETUP_TOKEN").assert_value(),
+                        "fresh-setup-token".to_owned(),
+                    )]))
+                    .assert_value(),
+                ),
+            ]),
+            connection_resolver: None,
+            github_token: None,
+            git_credentials: None,
+            commit_identity: None,
+            commit_co_author: None,
+        };
+        assert!(controller.resume(params.clone()).await.is_err());
+        assert!(
+            harness
+                .ledger
+                .get(&params.successor_run_id)
+                .await
+                .assert_value()
+                .is_none()
+        );
+        assert!(
+            allocator
+                .resumed_credentials
+                .lock()
+                .assert_value()
+                .is_empty()
+        );
+        params.runtime = Some(if uniform {
+            serde_json::from_value(json!({"kind":"uniform","runtime":{
+                "harness":"claude","provider":"anthropic","size":"small","model":"replacement-model","effort":"high",
+                "connections":{"replacement":["NODE_TOKEN"]},"activeMemory":{"repository":false,"graph":false},"globalAgents":{"postmortem":{"enabled":false}}
+            }})).assert_value()
+        } else {
+            let mut runtime = predecessor.admitted.runtime.clone();
+            if let NodeRuntimeBinding::GitDelivery { connections, .. } = runtime
+                .nodes
+                .get_mut(&NodeName::new("deliver").assert_value())
+                .assert_value()
+            {
+                *connections = DeclaredConnections::empty();
+            }
+            runtime.harness = openengine_cluster_protocol::HarnessId::new("claude").assert_value();
+            runtime.provider =
+                openengine_cluster_protocol::ProviderId::new("anthropic").assert_value();
+            let binding = runtime
+                .nodes
+                .get_mut(&NodeName::new("worker").assert_value())
+                .assert_value();
+            *binding = serde_json::from_value(json!({"kind":"agent","model":"replacement-model","effort":"high","connections":{"replacement":["NODE_TOKEN"]}})).assert_value();
+            openengine_cluster_protocol::RunResumeRuntime::Exact { runtime }
+        });
+        let fixed = ClusterBackend::run_resume_requirements(
+            &controller,
+            &ConnectionContext::default(),
+            openengine_cluster_protocol::RunResumeRequirementsParams {
+                run_id: submitted.run_id.clone(),
+                runtime: params.runtime.clone().assert_value(),
+            },
+        )
+        .await
+        .assert_value();
+        let requirements = serde_json::to_value(fixed).assert_value();
+        assert_eq!(requirements["connections"]["setup"], json!(["SETUP_TOKEN"]));
+        assert_eq!(
+            requirements["connections"]["gitlab"],
+            json!(["GITLAB_TOKEN"])
+        );
+        assert_eq!(
+            requirements["connections"]["source"],
+            json!(["GIT_PASSWORD", "GIT_USERNAME"])
+        );
+        controller.resume(params.clone()).await.assert_value();
+        assert!(matches!(
+            terminal(&controller, &params.successor_run_id).await,
+            TerminalResult::Succeeded { .. }
+        ));
+        let successor = harness
+            .ledger
+            .get(&params.successor_run_id)
+            .await
+            .assert_value()
+            .assert_value();
+        assert_eq!(successor.admitted.graph, predecessor.admitted.graph);
+        assert_eq!(
+            successor.admitted.initial_input,
+            predecessor.admitted.initial_input
+        );
+        assert_eq!(
+            successor.admitted.environment,
+            predecessor.admitted.environment
+        );
+        assert_eq!(successor.admitted.source, predecessor.admitted.source);
+        let effective = serde_json::to_value(&successor.admitted.runtime).assert_value();
+        assert_eq!(effective["harness"], "claude");
+        assert_eq!(effective["provider"], "anthropic");
+        assert_eq!(effective["nodes"]["worker"]["model"], "replacement-model");
+        assert_eq!(effective["nodes"]["worker"]["effort"], "high");
+        assert_eq!(
+            effective["nodes"]["deliver"]["connections"],
+            json!({"gitlab":["GITLAB_TOKEN"]})
+        );
+        assert_eq!(
+            harness
+                .ledger
+                .get(&submitted.run_id)
+                .await
+                .assert_value()
+                .assert_value()
+                .admitted,
+            predecessor.admitted
+        );
+        assert_eq!(
+            harness.driver.environments()[0],
+            BTreeMap::from([("NODE_TOKEN".to_owned(), "fresh-runtime-token".to_owned())])
+        );
+        assert_eq!(
+            harness.driver.environments()[1],
+            BTreeMap::from([("GITLAB_TOKEN".to_owned(), "fresh-delivery-token".to_owned())])
+        );
     }
 }

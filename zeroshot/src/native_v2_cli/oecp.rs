@@ -495,6 +495,30 @@ where
             .map_err(protocol_error)
     }
 
+    async fn validate_resume_runtime(
+        &self,
+        run: &super::RunSelector,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        _github_token: bool,
+    ) -> Result<(), NativeV2CliError> {
+        self.connector
+            .validate_resume_runtime(require_named_target(run.target.as_deref())?, runtime)
+            .await
+    }
+    async fn replacement_resume_requirements(
+        &self,
+        target: Option<&str>,
+        run_id: &openengine_cluster_protocol::RunId,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        self.connector
+            .replacement_workspace_recovery_requirements(
+                require_named_target(target)?,
+                run_id,
+                runtime,
+            )
+            .await
+    }
     async fn authorize_resume_connection_requirements(
         &self,
         target: Option<&str>,
@@ -697,6 +721,12 @@ where
         _discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let target = require_named_target(target)?;
+        if let Some(runtime) = &params.runtime {
+            self.connector
+                .validate_resume_runtime(target, runtime)
+                .await?;
+        }
+
         if matches!(
             params.from,
             Some(
@@ -715,7 +745,8 @@ where
             return Ok(result);
         }
         self.connector
-            .prepare_workspace_recovery_resume(target, &params)?;
+            .prepare_workspace_recovery_resume(target, &params)
+            .await?;
         let transport = if matches!(
             params.from.as_ref(),
             Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { .. })

@@ -1141,6 +1141,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   construction and snapshot cleanup, and refuses selected checkpoint restoration before credential
   resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
   not workspace writers. Executable steps remain conservative potential writers.
+- Resume accepts optional exact or uniform runtime replacement through `RunResumeParams.runtime`.
+  `UniformRuntimePlan` lives in the protocol; `native_v2_runtime_config` shares expansion with run.
+  Re-admit against the unchanged graph before workspace restoration; model/config changes do not
+  add conversation compatibility rules. Targets advertise the separate fieldless
+  `openengine.resume-runtime/v1` marker. A local predecessor's checkpoint policy authorizes restore;
+  its replacement policy controls future captures. Local admission measures the effective delivery
+  declarations under the same native token policy as preparation; filesystem executable checks
+  retain their existing placement against the current or restored checkout. Direct targets resolve effective declarations,
+  including unchanged source/environment and source-bound delivery defaults, through read-only
+  `run/resume_requirements`. Clients check the
+  response against original authorization plus caller-authored replacement declarations before
+  reading credentials. Canonical forge connection names may reuse only an already authorized token
+  field; source connection keys remain fixed. Query and resume share effective submission and
+  contained runtime preparation, so raw RPC replacements retain target policy and provider defaults.
+  Omission retains saved runtime and authorization behavior; authorization files need no migration.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. Default resume of a failed run restarts it where it started on the
   retained workspace: a submitted run at the graph root, a successor at the boundary it began at;
