@@ -16,8 +16,8 @@ It does not install dependencies or start applications, services or browsers.
 ```text
 triage                 summary and at most six review units
 discover (parallel)
-  per unit:            two broad reviews, a depth review, a design review
-  whole change:        logic, state, contracts, error paths, claims
+  per unit:            two broad reviews, a design review
+  whole change:        contracts, claims
 finalize (parallel)
   per unit:            merge, try to disprove and rewrite the unit's findings
   remaining files:     the same for findings outside every unit
@@ -26,12 +26,13 @@ deliver                native comment publication
 ```
 
 Triage summarizes the change and splits its files into review units of a size one reviewer can
-examine carefully, keeping files that must be read together in the same unit. Four reviewers then
-examine every unit: two independent broad reviews, a depth review that builds a concrete failing
-scenario for each defect, and a design review that compares the code with the rest of the
-codebase. At the same time, five reviewers each hunt one kind of failure across the whole change.
-The claims reviewer also checks every acceptance criterion in the linked issues, unless the PR or
-the caller declares a partial implementation.
+examine carefully, keeping files that must be read together in the same unit. Three reviewers then
+examine every unit: two independent broad reviews and a design review that compares the code with
+the rest of the codebase. At the same time, two reviewers each hunt one kind of failure across the
+whole change: broken contracts between the changed code and its callers, and claims in the PR,
+documentation and tests that disagree with the code. The claims reviewer also checks every
+acceptance criterion in the linked issues, unless the PR or the caller declares a partial
+implementation.
 
 For every unit, a finalizer merges duplicate findings for the unit's files, tries to disprove each
 one against the real callers, guards and configuration, and rewrites the survivors with exact line
@@ -41,7 +42,7 @@ agent has settled. The native header records the captured revisions once.
 
 Every agent is read-only: it inspects the checkout and the diff of the admitted head against its
 merge base with the captured base revision, without changing tracked files. A change with N units
-runs 5N + 8 agent executions. A crashed agent is retried once. Any other agent failure stops the run before publication. Additional review units wait for map
+runs 4N + 5 agent executions. A crashed agent is retried once. Any other agent failure stops the run before publication. Additional review units wait for map
 capacity. Finding
 problems is a successful review.
 
@@ -53,7 +54,7 @@ Codex's message-only usage failures retain crash retries; see the
 ## Prepare the runtime and credentials
 
 The supplied [runtime plan](../assets/code-review/runtime.json) splits the agents across Claude
-Code and Codex, so that each unit and the whole change are reviewed by both model families. Save it
+Code and Codex, so that each unit is reviewed by both model families. Save it
 as `runtime.json` and pass it through `--runtime-config`. It needs a Claude Code and a Codex login.
 Model choices remain in the caller's runtime plan rather than the graph, so a plan with other
 models, or a uniform runtime through `--uniform-runtime-config`, works as well.
@@ -62,6 +63,10 @@ The supplied plan sets `workspaceCheckpoints: false` for local reviews, skipping
 and the Restic dependency. History, structured outputs, logs and comment receipts remain durable.
 A failed run can restart against its retained checkout, but cannot resume from a workspace snapshot.
 Set the same field in a uniform runtime file to use this policy with `--uniform-runtime-config`.
+
+The supplied plan also turns off [Active Memory](active-memory.md): reviews neither read nor
+collect lessons, and no postmortem runs after the review. Remove the `activeMemory` and
+`globalAgents` sections from your copy to use the defaults again.
 
 Comment delivery uses the `github` connection's `GH_TOKEN`, as for `pr-review`. Publication
 credentials belong to the native node and are not declared on the review agents.

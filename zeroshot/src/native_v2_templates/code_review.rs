@@ -26,35 +26,19 @@ const UNIT_REVIEW_PROMPT: &str =
     prompt!("intro", "standards", "unit_review", "reporting", "severity");
 
 /// Reviewers of every unit and their instructions. The two broad reviews run independently.
-const UNIT_REVIEWERS: [(&str, &str); 4] = [
+const UNIT_REVIEWERS: [(&str, &str); 3] = [
     ("unit_broad_a", UNIT_REVIEW_PROMPT),
     ("unit_broad_b", UNIT_REVIEW_PROMPT),
-    (
-        "unit_depth",
-        prompt!("intro", "unit_depth", "reporting", "severity"),
-    ),
     (
         "unit_design",
         prompt!("intro", "unit_design", "reporting", "severity"),
     ),
 ];
 /// Reviewers of the whole change, each hunting one kind of failure.
-const HUNTERS: [(&str, &str); 5] = [
-    (
-        "hunt_logic",
-        prompt!("intro", "hunt_logic", "hunt", "reporting", "severity"),
-    ),
-    (
-        "hunt_state",
-        prompt!("intro", "hunt_state", "hunt", "reporting", "severity"),
-    ),
+const HUNTERS: [(&str, &str); 2] = [
     (
         "hunt_contracts",
         prompt!("intro", "hunt_contracts", "hunt", "reporting", "severity"),
-    ),
-    (
-        "hunt_errors",
-        prompt!("intro", "hunt_errors", "hunt", "reporting", "severity"),
     ),
     (
         "hunt_claims",
@@ -280,7 +264,7 @@ fn unit_map(
     }))
 }
 
-/// The map for a unit reviewer: `unit_depth` runs in `units_depth`.
+/// The map for a unit reviewer: `unit_design` runs in `units_design`.
 fn map_name(node: &str) -> String {
     format!("units{}", node.trim_start_matches("unit"))
 }

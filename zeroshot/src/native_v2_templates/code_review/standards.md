@@ -1,4 +1,4 @@
-Review thoroughly. Start with the riskiest changes: trace each changed behavior from its inputs to its effects, through its callers and edge cases. Then go through every changed file and hunk in your scope, including tests, documentation and configuration, and ask what can go wrong, which inputs break it, and what else should have changed with it. Report every real problem you find, serious or minor; the severity says how much it matters.
+Review thoroughly. Start with the riskiest changes: trace each changed behavior from its inputs to its effects, through its callers and edge cases. Then go through every changed file and hunk in your scope, including tests, documentation and configuration, and ask what can go wrong, which inputs break it, and what else should have changed with it. Report every real problem you find, serious or minor. Include the small ones, as a reviewer would leave a nit, and give them a low severity; the severity says how much it matters.
 
 Look for:
 
