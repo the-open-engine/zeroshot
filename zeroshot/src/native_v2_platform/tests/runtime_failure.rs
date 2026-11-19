@@ -283,6 +283,17 @@ struct FailureHarness {
 
 impl FailureHarness {
     async fn new(point: FailurePoint, permanent: bool, lose_reads: bool) -> Self {
+        Self::with_report(point, permanent, lose_reads, None).await
+    }
+
+    async fn with_report(
+        point: FailurePoint,
+        permanent: bool,
+        lose_reads: bool,
+        report: Option<
+            Arc<crate::native_v2_portable_controller::process::LocalRuntimeFailureReport>,
+        >,
+    ) -> Self {
         let inner = Arc::new(FakeRunLedger::new());
         let ledger = Arc::new(FaultLedger::new(
             inner.clone(),
@@ -298,6 +309,10 @@ impl FailureHarness {
             .await
             .assert_value_with("fault-injection controller startup")
             .with_operator_diagnostics(Arc::new(OperatorDiagnosticStore::new(Some(output))));
+        let controller = match report {
+            Some(report) => controller.with_local_runtime_failure_report(report),
+            None => controller,
+        };
         let receipt = submit_test_request(&controller, request(Value::Null))
             .await
             .assert_value_with("run admitted before fault");
@@ -641,6 +656,49 @@ async fn failed_cleanup_keeps_failure_visible_without_claiming_a_durable_termina
     harness.assert_recovery_diagnostic(
         &crate::native_v2_supervisor::RuntimeCleanupUnavailable.to_string(),
     );
+}
+
+#[tokio::test]
+async fn local_failure_note_preserves_the_cause_through_cleanup_and_reporting_failures() {
+    use crate::native_v2_portable_controller::{
+        PortableControllerPaths,
+        process::{LocalRuntimeFailureReport, read_runtime_failure},
+    };
+
+    for writable in [true, false] {
+        let root = tempfile::tempdir().assert_value();
+        let paths = PortableControllerPaths::new(root.path().join("report"));
+        if writable {
+            crate::execution::platform::create_private_directory(paths.storage()).assert_value();
+        }
+        let report = Arc::new(LocalRuntimeFailureReport::new(paths.clone(), Vec::new()));
+        let harness =
+            FailureHarness::with_report(FailurePoint::Completion, false, false, Some(report)).await;
+        harness.cleanup.fail_next();
+        harness.release_fault();
+        harness.failed().await;
+        assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
+        assert!(harness.retained().await.snapshot.terminal.is_none());
+        harness.assert_storage_diagnostic();
+        harness.assert_recovery_diagnostic(
+            &crate::native_v2_supervisor::RuntimeCleanupUnavailable.to_string(),
+        );
+        harness
+            .controller
+            .report_local_runtime_failure("later process exit failure")
+            .await;
+        if writable {
+            assert_eq!(
+                read_runtime_failure(&paths).assert_value(),
+                sqlite_failure().to_string()
+            );
+        } else {
+            assert!(
+                !paths.storage().exists(),
+                "reporting must not create alternate storage"
+            );
+        }
+    }
 }
 
 const HELD_PEER_OUTPUT: &str = "peer output held during supervisor panic";

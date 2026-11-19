@@ -96,6 +96,11 @@ impl PortableControllerPaths {
         self.storage.join("controller.startup-failure.txt")
     }
 
+    /// Retained supplemental runtime diagnostic; inspection never consumes it.
+    pub(crate) fn runtime_failure(&self) -> PathBuf {
+        self.storage.join("controller.failure.txt")
+    }
+
     #[must_use]
     pub fn ledger(&self) -> PathBuf {
         self.storage.join("runs.sqlite3")
