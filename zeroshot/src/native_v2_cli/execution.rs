@@ -284,17 +284,10 @@ where
     execute_run_subscription(command, backend, signal, output).await
 }
 
-async fn execute_resume<B, S, W>(
-    command: RunResumeCommand,
+async fn prepare_resume_runtime<B: NativeV2CliBackend>(
+    command: &RunResumeCommand,
     context: &CliExecutionContext<'_, B>,
-    signal: &mut S,
-    output: &mut W,
-) -> Result<CliOutcome, NativeV2CliError>
-where
-    B: NativeV2CliBackend,
-    S: DetachSignal,
-    W: Write,
-{
+) -> Result<Option<openengine_cluster_protocol::RunResumeRuntime>, NativeV2CliError> {
     let mut runtime = command
         .runtime
         .as_ref()
@@ -325,6 +318,21 @@ where
             )
             .await?;
     }
+    Ok(runtime)
+}
+
+async fn execute_resume<B, S, W>(
+    command: RunResumeCommand,
+    context: &CliExecutionContext<'_, B>,
+    signal: &mut S,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    B: NativeV2CliBackend,
+    S: DetachSignal,
+    W: Write,
+{
+    let runtime = prepare_resume_runtime(&command, context).await?;
     let run = &command.run;
     let status = context
         .backend

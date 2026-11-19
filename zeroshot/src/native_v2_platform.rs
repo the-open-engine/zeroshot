@@ -745,31 +745,9 @@ impl NativeV2PlatformController {
         }
         let (submission_key, submission_digest) =
             retained_submission_identity(&run_id, &successor_run_id)?;
-        let mut admitted = source.admitted.clone();
-        if let Some(runtime) = runtime {
-            let submission = crate::native_v2_runtime_config::replacement_submission(
-                &admitted,
-                runtime,
-                submission_key.clone(),
-            )?;
-            self.validate_harnesses(&submission.runtime)?;
-            let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
-                &self.harnesses,
-                self.delivery_policy,
-            );
-            admission.checkpointless_requests = self.checkpointless_requests;
-            if let Some(catalog) = self.run_sizes.as_deref() {
-                admission = admission.with_run_sizes(catalog);
-            }
-            admitted = NativeV2Admission
-                .admit_with_context(submission, admission)
-                .await?;
-            crate::v2_run_ledger::validate_admitted_run(&admitted)?;
-        }
-        if let Some(catalog) = self.run_sizes.as_deref() {
-            crate::native_v2_admission::resolve_runtime_size(&mut admitted.runtime, catalog)?;
-        }
-        self.validate_harnesses(&admitted.runtime)?;
+        let admitted = self
+            .admit_resume_runtime(&source.admitted, runtime, submission_key.clone())
+            .await?;
         let secrets = resume_secret_envelope(ResumeSecretRequest {
             admitted: &admitted,
             successor_run_id: &successor_run_id,
@@ -821,6 +799,40 @@ impl NativeV2PlatformController {
             run_id: successor_run_id,
             resumed_from: run_id,
         })
+    }
+
+    async fn admit_resume_runtime(
+        &self,
+        saved: &AdmittedRun,
+        runtime: Option<openengine_cluster_protocol::RunResumeRuntime>,
+        submission_key: openengine_cluster_protocol::IdempotencyKey,
+    ) -> Result<AdmittedRun, NativeV2PlatformError> {
+        let mut admitted = saved.clone();
+        if let Some(runtime) = runtime {
+            let submission = crate::native_v2_runtime_config::replacement_submission(
+                &admitted,
+                runtime,
+                submission_key,
+            )?;
+            self.validate_harnesses(&submission.runtime)?;
+            let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+                &self.harnesses,
+                self.delivery_policy,
+            );
+            admission.checkpointless_requests = self.checkpointless_requests;
+            if let Some(catalog) = self.run_sizes.as_deref() {
+                admission = admission.with_run_sizes(catalog);
+            }
+            admitted = NativeV2Admission
+                .admit_with_context(submission, admission)
+                .await?;
+            crate::v2_run_ledger::validate_admitted_run(&admitted)?;
+        }
+        if let Some(catalog) = self.run_sizes.as_deref() {
+            crate::native_v2_admission::resolve_runtime_size(&mut admitted.runtime, catalog)?;
+        }
+        self.validate_harnesses(&admitted.runtime)?;
+        Ok(admitted)
     }
 
     async fn recoverable_resume_source(
