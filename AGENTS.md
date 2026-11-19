@@ -844,9 +844,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   extra marker fields fail discovery while unknown extension keys remain ignored.
 - `code-review` reuses the `pr-review` input type and review continuation, so `--task-from`,
   comparison preparation and comment publication are unchanged. Triage returns a summary and at most
-  six units (maps allow eight concurrent items). Per-unit maps run two broad, a depth and a design
-  reviewer beside five whole-change hunters (logic, state, contracts, errors, claims); the claims
-  hunter checks linked issue acceptance criteria. Per-unit and remaining-file finalizers merge, try to
+  six units (maps allow eight concurrent items). Per-unit maps run two broad and a design reviewer
+  beside two whole-change hunters (contracts, claims); the claims hunter checks linked issue
+  acceptance criteria. Per-unit and remaining-file finalizers merge, try to
   disprove and rewrite `{file,startLine,endLine,severity,title,body}` findings, and a report agent
   renders one Markdown comment. Every agent is a read-only verifier with two attempts and no deadline.
   One choice per agent or map keeps each guard's control space under the verifier ceiling; any
@@ -854,7 +854,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   prompt parser. Inspectors do not install dependencies or start applications, services or browsers.
   The report stays under 12,000 characters and 48,000 UTF-8 bytes to leave room for the publisher header. The supplied runtime splits agents across Claude Code and Codex;
   model choices remain caller-authored. Its supplied local runtime sets `workspaceCheckpoints: false`
-  to skip file snapshots and Restic while preserving durable history and comment receipts. Uniform
+  to skip file snapshots and Restic while preserving durable history and comment receipts, and
+  disables Active Memory recall, collection and postmortem; the catalog keeps the memory opt-out. Uniform
   runtimes can select the same policy; named targets require the field enabled or omitted.
 - Built-in template selection defaults to PR delivery for `software-change`, comment delivery for
   `pr-review`, `code-review` and `issue-review`, and no delivery for the other templates. Explicit supported delivery choices override

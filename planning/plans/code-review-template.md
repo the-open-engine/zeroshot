@@ -1,7 +1,8 @@
 # Code-review built-in template
 
-Status: implemented in this branch's pull request, 2026-11-04. The sections describe the code as
-built.
+Status: implemented in this branch's pull request, 2026-11-04, and updated to the tuned reviewer
+set on 2026-11-19 (see [Tuned reviewer set](#tuned-reviewer-set)). The sections describe the code
+as built.
 
 Authority: the user's request to ship the multi-reviewer review graph from the
 `benchmarks/reviewbench` branch as a built-in template that matches `pr-review` in input and
@@ -34,8 +35,8 @@ through the existing comment delivery. Users select it with `--template code-rev
 run
 ├─ triage            summary and at most 6 review units; the maps allow 8
 ├─ discover (par)
-│  ├─ map units → unit_broad_a, unit_broad_b, unit_depth, unit_design
-│  └─ hunt_logic, hunt_state, hunt_contracts, hunt_errors, hunt_claims
+│  ├─ map units → unit_broad_a, unit_broad_b, unit_design
+│  └─ hunt_contracts, hunt_claims
 ├─ finalize (par)    map units → finalize_unit, plus finalize_rest
 ├─ report            final findings → Markdown body
 └─ deliver → done {receipt}
@@ -52,14 +53,13 @@ run
   `report` and `deliver`, following `after_agent` and `reproduction_error` in `pr_review.rs`. The
   source graph tolerated reviewer failures only because its benchmark imposed deadlines.
 - The checks run as a chain of one choice per map or agent, in graph order, each failing with its
-  own reason such as `units_design_failed` or `hunt_errors_failed`. A single choice over all nine
-  reviewers exceeds the verifier's ceiling of 65,536 control assignments.
+  own reason such as `units_design_failed` or `hunt_claims_failed`. A single choice over the nine
+  reviewers of the first version exceeded the verifier's ceiling of 65,536 control assignments.
 
 | Node                           | Instructions       | Role                                                 |
 | ------------------------------ | ------------------ | ---------------------------------------------------- |
 | `triage`                       | `triage.md`        | Summarize the change and split it into units         |
 | `unit_broad_a`, `unit_broad_b` | `unit_review.md`   | Two independent broad reviews of each unit           |
-| `unit_depth`                   | `unit_depth.md`    | Depth review of each unit                            |
 | `unit_design`                  | `unit_design.md`   | Design review of each unit                           |
 | `hunt_*`                       | `hunt_*.md`        | One failure class across the whole change            |
 | `finalize_unit`                | `finalize.md`      | Merge, try to disprove and rewrite a unit's findings |
@@ -111,8 +111,10 @@ with the new node names:
   currently reject checkpoint opt-out. Uniform runtimes accept the same field.
 - `report` uses `gpt-6.1-sol` at `medium`.
 - `deliver` is `comment_delivery` with `github: [GH_TOKEN]`.
-- It has no API-key or `IS_SANDBOX` connections, no Codex catalog pin, and no `activeMemory` or
-  `postmortem` settings.
+- It has no API-key or `IS_SANDBOX` connections and no Codex catalog pin.
+- `activeMemory.repository` and `activeMemory.graph` are `false` and
+  `globalAgents.postmortem.enabled` is `false`, as in the benchmark configuration. The catalog
+  default keeps this opt-out; it drops only `size` and `workspaceCheckpoints`.
 
 ## Tests
 
@@ -151,6 +153,24 @@ with the new node names:
 Run the full lanes in `CLAUDE.md`, plus `python -m mkdocs build --strict`. Never run
 `zeroshot run` without explicit user permission: a live run posts a PR comment and spends API
 credits.
+
+## Tuned reviewer set
+
+On 2026-11-19 the template followed the tuned benchmark graph on `benchmarks/reviewbench-fast`:
+
+- Removed `unit_depth`, `hunt_logic`, `hunt_state` and `hunt_errors` with their prompt files.
+  `hunt_claims` stays, because it is the only check of `context.linkedIssues` and the benchmark has
+  no linked issues to measure it.
+- Ported three tuned passages: small findings are reported with a low severity
+  (`standards.md`), finding bodies take two to four plain sentences (`reporting.md`), and the
+  finalizer merges findings by root cause and removes one only for a listed reason, keeping it
+  when unsure (`finalize_steps.md`).
+- The supplied runtime runs `unit_broad_a` and `hunt_contracts` at `medium` effort and disables
+  Active Memory and postmortem. It sets no Codex service tier: any harness argument would turn off
+  the local permission bypass, and named targets reject the bypass flags.
+- Still fail closed and without deadlines. Not marked breaking: saved profiles keep their stored
+  graph, and only per-node runtime files written for the removed nodes need those bindings
+  deleted.
 
 ## Out of scope
 

@@ -212,6 +212,16 @@ fn code_review_preserves_the_supplied_agent_plan_and_native_delivery() {
     assert_eq!(template["runtime"]["harness"], supplied["harness"]);
     assert_eq!(template["runtime"]["provider"], supplied["provider"]);
     assert_eq!(
+        template["runtime"]["activeMemory"]
+            .as_object()
+            .map(|memory| (memory["repository"].clone(), memory["graph"].clone())),
+        Some((json!(false), json!(false)))
+    );
+    assert_eq!(
+        template["runtime"]["globalAgents"]["postmortem"]["enabled"],
+        false
+    );
+    assert_eq!(
         template["requirements"]["openai"],
         json!(["OPENAI_API_KEY"])
     );
