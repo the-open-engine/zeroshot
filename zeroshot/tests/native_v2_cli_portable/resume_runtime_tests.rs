@@ -261,6 +261,17 @@ fn resume_runtime_uses_the_harness_restored_from_the_selected_snapshot() {
         fs::create_dir(&bin).unwrap();
         for entry in fs::read_dir(fixture.root.path("bin space-é")).unwrap() {
             let entry = entry.unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                openengine_cluster_testkit::fixture::write_executable(
+                    &bin.join(entry.file_name()),
+                    fs::read(entry.path()).unwrap(),
+                    entry.metadata().unwrap().permissions().mode(),
+                )
+                .unwrap();
+            }
+            #[cfg(windows)]
             fs::copy(entry.path(), bin.join(entry.file_name())).unwrap();
         }
         // Keep the fixture harness as the only Codex executable, including on provisioned hosts.
