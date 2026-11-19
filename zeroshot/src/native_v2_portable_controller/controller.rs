@@ -178,6 +178,12 @@ impl PortableRunController {
                 bootstrap.delivery_policy,
             )
             .await?
+            .with_local_runtime_failure_report(Arc::new(
+                super::process::LocalRuntimeFailureReport::new(
+                    prepared.paths.clone(),
+                    super::process::startup_redactions(&bootstrap),
+                ),
+            ))
             .with_harness_registry(crate::harnesses::HarnessRegistry::local())
             .with_checkpointless_requests(bootstrap.predecessor.is_some())
             .with_run_sizes(crate::native_v2_hosting::host_run_sizes()),

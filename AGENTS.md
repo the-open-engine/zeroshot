@@ -1304,6 +1304,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Inspection never binds a controller, claims recovery, repairs permissions or rewrites readiness.
   When the recorded read fails, inspection still returns a responding controller's status and
   follows its streams; without that answer the read error stands.
+  Local runtime failures retain their first cause outside the ledger in a best-effort private,
+  redacted 4 KiB note, captured at the engine failure source before cleanup. Later status inspection
+  reads it without mutation and emits supplemental stderr diagnostics even when the ledger read
+  fails; neither public status nor controller authority comes from the note. Local listing warns
+  with the run ID and a bounded, control-safe read error for skipped runs; directories without
+  ledgers remain ignored.
   Recorded reads exit 0; unavailable watch/logs/attach replay through their captured durable head
   and exit 1 naming resume and force-stop. Only those controls confirm original lease ownership
   and process absence before recording runtime_lost. Finished stream exit semantics stay unchanged.

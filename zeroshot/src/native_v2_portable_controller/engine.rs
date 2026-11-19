@@ -41,6 +41,7 @@ pub struct PortableRunEngineBootstrap {
     pub delivery_policy: DeliveryPolicy,
     pub observability: NativeV2Observability,
     pub(crate) operator_diagnostics: Arc<OperatorDiagnosticStore>,
+    pub(crate) local_runtime_failure_report: Option<Arc<super::process::LocalRuntimeFailureReport>>,
 }
 
 impl PortableRunEngine {
@@ -57,6 +58,7 @@ impl PortableRunEngine {
             delivery_policy,
             observability,
             operator_diagnostics,
+            local_runtime_failure_report,
         } = bootstrap;
         let postmortem = runtime.runner.postmortem();
         let supervisor = Arc::new(
@@ -104,6 +106,9 @@ impl PortableRunEngine {
                 Ok(_) => observability.runtime_finished(&run_id),
                 Err(cause) => {
                     // Preserve the known cause before cleanup, persistence, or stderr can block.
+                    if let Some(report) = &local_runtime_failure_report {
+                        report.record(&cause);
+                    }
                     let mut details = format!("supervisor.drive: {cause}");
                     record_runtime_failure(
                         &operator_diagnostics,

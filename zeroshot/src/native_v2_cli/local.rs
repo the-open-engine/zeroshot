@@ -862,11 +862,20 @@ impl LocalCliBackend {
         match result {
             Ok(result) => Ok(Some(result)),
             // A directory without a ledger is no run: a refused or interrupted start leaves one.
+            Err(NativeV2CliError::RunNotFound { .. }) => Ok(None),
             Err(
-                NativeV2CliError::Local(_)
-                | NativeV2CliError::LocalRequestTimeout(_)
-                | NativeV2CliError::RunNotFound { .. },
-            ) => Ok(None),
+                error @ (NativeV2CliError::Local(_) | NativeV2CliError::LocalRequestTimeout(_)),
+            ) => {
+                use std::io::Write;
+                let error = crate::native_v2_runner::bounded_log_text(error.to_string(), 4 * 1024)
+                    .replace(['\n', '\t'], " ");
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "zeroshot: warning: skipping local run {}: {error}",
+                    run_id.as_str()
+                );
+                Ok(None)
+            }
             Err(error) => Err(error),
         }
     }
@@ -893,6 +902,7 @@ impl LocalCliBackend {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
+        self.report_runtime_failure(&params.run_id);
         let retry = params.clone();
         match self.status_once(params).await {
             Ok(mut result) => {

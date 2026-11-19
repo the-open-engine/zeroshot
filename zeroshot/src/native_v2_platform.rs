@@ -106,6 +106,8 @@ pub struct NativeV2PlatformController {
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
     run_sizes: Option<Arc<openengine_cluster_protocol::TargetRunSizesDiscovery>>,
     operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
+    local_runtime_failure_report:
+        Option<Arc<crate::native_v2_portable_controller::process::LocalRuntimeFailureReport>>,
 }
 
 #[derive(Clone)]
@@ -173,6 +175,7 @@ impl NativeV2PlatformController {
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
             run_sizes: None,
             operator_diagnostics: Arc::default(),
+            local_runtime_failure_report: None,
         };
         controller.reconcile_persisted_runs().await?;
         Ok(controller)
@@ -238,6 +241,21 @@ impl NativeV2PlatformController {
     ) -> Self {
         self.operator_diagnostics = diagnostics;
         self
+    }
+
+    pub(crate) fn with_local_runtime_failure_report(
+        mut self,
+        report: Arc<crate::native_v2_portable_controller::process::LocalRuntimeFailureReport>,
+    ) -> Self {
+        self.local_runtime_failure_report = Some(report);
+        self
+    }
+
+    pub(crate) async fn report_local_runtime_failure(&self, cause: &str) {
+        if let Some(report) = &self.local_runtime_failure_report {
+            report.record(cause);
+            report.wait_written().await;
+        }
     }
 
     /// Reconciles durable nonterminal truth before this controller can serve any OECP method.
@@ -548,6 +566,7 @@ impl NativeV2PlatformController {
             delivery_policy: self.delivery_policy,
             observability: self.observability.clone(),
             operator_diagnostics: self.operator_diagnostics.clone(),
+            local_runtime_failure_report: self.local_runtime_failure_report.clone(),
         });
         self.runtimes
             .lock()
