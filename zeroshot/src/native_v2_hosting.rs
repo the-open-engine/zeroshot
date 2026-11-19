@@ -331,22 +331,50 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
 fn prepare_contained_submission(
     submission: &mut openengine_cluster_protocol::RunSubmission,
 ) -> Result<(), TargetAuthorityError> {
-    if !submission.runtime.workspace_checkpoints {
-        return Err(TargetAuthorityError::invalid(
-            "this target does not support disabling workspace checkpoints",
-        ));
-    }
+    validate_contained_runtime(&submission.runtime)?;
     if submission.source.is_none() {
         return Err(TargetAuthorityError::invalid(
             "contained runs require a resolved Git source",
         ));
     }
-    crate::harnesses::HarnessRegistry::core()
-        .validate_runtime(&submission.runtime)
-        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     crate::native_v2_admission::materialize_delivery_access(submission)
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     materialize_contained_provider_access(&mut submission.runtime)
+        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
+}
+
+fn validate_contained_runtime(runtime: &RuntimePlan) -> Result<(), TargetAuthorityError> {
+    if !runtime.workspace_checkpoints {
+        return Err(TargetAuthorityError::invalid(
+            "this target does not support disabling workspace checkpoints",
+        ));
+    }
+    if runtime.nodes().values().any(|binding| {
+        matches!(
+            binding,
+            openengine_cluster_protocol::NodeRuntimeBinding::Script { .. }
+        )
+    }) {
+        return Err(TargetAuthorityError::invalid(
+            "script bindings currently require local execution",
+        ));
+    }
+    crate::harnesses::HarnessRegistry::core()
+        .validate_runtime(runtime)
+        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
+}
+
+pub(crate) fn prepare_contained_resume_runtime(
+    runtime: &mut openengine_cluster_protocol::RunResumeRuntime,
+) -> Result<(), TargetAuthorityError> {
+    let plan = match runtime {
+        openengine_cluster_protocol::RunResumeRuntime::Exact { runtime } => runtime.clone(),
+        openengine_cluster_protocol::RunResumeRuntime::Uniform { runtime } => {
+            runtime.clone().into_runtime_plan(Default::default())
+        }
+    };
+    validate_contained_runtime(&plan)?;
+    crate::native_v2_runtime_config::materialize_access(runtime, ProviderAccessPlacement::Contained)
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
 }
 

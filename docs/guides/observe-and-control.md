@@ -272,6 +272,14 @@ with:
 zeroshot resume RUN_ID
 ```
 
+Pass `--runtime-config FILE` or `--uniform-runtime-config FILE` to replace the successor's runtime
+settings, including models, effort, harness configuration, connections and harness/provider selection.
+Omitting both keeps the saved runtime. Zeroshot validates the replacement against the unchanged graph
+and execution environment before restoring files or starting agents; the graph, input, source,
+delivery lineage and selected checkpoint's completed prerequisites stay the same. Credentials are
+resolved freshly. Native conversation restoration continues an existing conversation when supported,
+including after a model change, with the existing fresh-session fallback when restoration fails.
+
 A run you submitted restarts at the root of its graph. A successor restarts at the point it began
 at: after the answer for the successor of an answered request, after the held node for the
 successor of a suspended run, and at the selected node for a checkpoint successor. An answered

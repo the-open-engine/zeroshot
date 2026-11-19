@@ -8,13 +8,10 @@ use std::path::Path;
 use std::pin::Pin;
 
 use openengine_cluster_protocol::{
-    ActiveMemoryConfig, DeclaredConnections, GlobalAgentsConfig, GraphProfile, GraphSpec,
-    IdempotencyKey, ModelId, NodeName, MAX_MODEL_CONTEXT_WINDOW, MAX_MODEL_MAX_TOKENS,
-    MIN_MODEL_CONTEXT_WINDOW, MIN_MODEL_MAX_TOKENS, NodeRuntimeBinding, ReasoningEffort,
-    RunConnectionValues, RunSize, RunSubmitResult, RunConnectionRequirements, RuntimePlan,
-    SessionScope, StaticConnectionValues, deserialize_optional_model_limit,
+    GraphProfile, GraphSpec, UniformRuntimePlan, IdempotencyKey, NodeRuntimeBinding,
+    RunConnectionValues, RunSubmitResult, RunConnectionRequirements, RuntimePlan,
+    StaticConnectionValues,
 };
-use serde::{Deserialize, Deserializer};
 
 use super::super::{
     BuiltinGraphTemplate, CliOutcome, NativeV2CliBackend, NativeV2CliCommand, NativeV2CliError,
@@ -22,7 +19,7 @@ use super::super::{
     TemplateDelivery,
 };
 use super::{CliExecutionContext, write_json};
-use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, executable_runtime_roles};
+use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 
 #[path = "submission/profiles.rs"]
@@ -738,185 +735,35 @@ fn apply_template_runtime(
     Ok(runtime)
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct UniformRuntimePlan {
-    harness: openengine_cluster_protocol::HarnessId,
-    provider: openengine_cluster_protocol::ProviderId,
-    #[serde(default)]
-    size: Option<RunSize>,
-    #[serde(
-        default,
-        deserialize_with = "openengine_cluster_protocol::RuntimePlan::deserialize_max_concurrency"
-    )]
-    max_concurrency: Option<openengine_cluster_protocol::PositiveInteger>,
-    #[serde(default = "default_workspace_checkpoints")]
-    workspace_checkpoints: bool,
-    model: ModelId,
-    #[serde(default)]
-    effort: Option<ReasoningEffort>,
-    #[serde(default, deserialize_with = "deserialize_context_window")]
-    context_window: Option<u32>,
-    #[serde(default)]
-    harness_config: Option<openengine_cluster_protocol::HarnessConfiguration>,
-    #[serde(default, deserialize_with = "deserialize_max_tokens")]
-    max_tokens: Option<u32>,
-    #[serde(default)]
-    session_scope: Option<SessionScope>,
-    #[serde(default)]
-    connections: Option<DeclaredConnections>,
-    #[serde(default)]
-    active_memory: ActiveMemoryConfig,
-    #[serde(default)]
-    global_agents: GlobalAgentsConfig,
+trait UniformRuntimeMaterialize {
+    fn materialize(
+        self,
+        graph: &GraphSpec,
+        feedback: crate::native_v2_contract::PullRequestFeedback,
+        template: Option<BuiltinGraphTemplate>,
+    ) -> Result<RuntimePlan, NativeV2CliError>;
 }
-
-const fn default_workspace_checkpoints() -> bool {
-    true
-}
-
-fn deserialize_context_window<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_optional_model_limit(
-        deserializer,
-        "contextWindow",
-        MIN_MODEL_CONTEXT_WINDOW,
-        MAX_MODEL_CONTEXT_WINDOW,
-    )
-}
-
-fn deserialize_max_tokens<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_optional_model_limit(
-        deserializer,
-        "maxTokens",
-        MIN_MODEL_MAX_TOKENS,
-        MAX_MODEL_MAX_TOKENS,
-    )
-}
-
-impl UniformRuntimePlan {
+impl UniformRuntimeMaterialize for UniformRuntimePlan {
     fn materialize(
         self,
         graph: &GraphSpec,
         pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
         template: Option<BuiltinGraphTemplate>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
-        let harness = self.harness.clone();
-        let mut nodes = BTreeMap::new();
-        let mode = crate::native_v2_admission::delivery_mode(&graph.root);
-        for (name, delivery) in executable_runtime_roles(&graph.root) {
-            if is_wait_node(&graph.root, &name) {
-                nodes.insert(name, NodeRuntimeBinding::Request {});
-                continue;
-            }
-            if is_comment_node(&graph.root, &name) {
-                nodes.insert(
-                    name,
-                    NodeRuntimeBinding::CommentDelivery {
-                        connections: DeclaredConnections::empty(),
-                    },
-                );
-                continue;
-            }
-            let binding = self.binding(
-                (&name, mode.filter(|_| delivery)),
-                template,
-                pull_request_feedback,
-            )?;
-            nodes.insert(name, binding);
-        }
-        self.into_runtime_plan(harness, nodes)
-    }
-
-    fn binding(
-        &self,
-        (name, delivery): (&NodeName, Option<crate::native_v2_delivery::DeliveryMode>),
-        template: Option<BuiltinGraphTemplate>,
-        pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
-    ) -> Result<NodeRuntimeBinding, NativeV2CliError> {
-        if let Some(mode) = delivery {
-            return git_delivery_binding(pull_request_feedback, mode);
-        }
-        Ok(NodeRuntimeBinding::Agent {
-            lane: None,
-            model: self.model.clone(),
-            effort: self.effort,
-            harness_config: self.harness_config.clone(),
-            context_window: self.context_window,
-            max_tokens: self.max_tokens,
-            session_scope: self.session_scope.unwrap_or_else(|| {
-                template.map_or(SessionScope::Execution, |template| {
-                    template.default_session_scope(name.as_str())
-                })
-            }),
-            connections: self
-                .connections
-                .clone()
-                .unwrap_or_else(DeclaredConnections::empty),
-        })
-    }
-
-    fn into_runtime_plan(
-        self,
-        harness: openengine_cluster_protocol::HarnessId,
-        nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-    ) -> Result<RuntimePlan, NativeV2CliError> {
-        Ok(RuntimePlan {
-            max_concurrency: self.max_concurrency,
-            harness,
-            provider: self.provider,
-            size: self.size,
-            workspace_checkpoints: self.workspace_checkpoints,
-            active_memory: self.active_memory,
-            global_agents: self.global_agents,
-            nodes,
-        })
-    }
-}
-
-fn is_wait_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeName) -> bool {
-    if root.name() == name
-        && let openengine_cluster_protocol::GraphNode::Verifier(node) = root
-    {
-        return [
-            crate::native_v2_wait::WAIT_WORKER_REF,
-            crate::native_v2_request::ASK_WORKER_REF,
-        ]
-        .contains(&node.worker.as_str());
-    }
-    openengine_cluster_server::graph_verifier::graph_node_children(root)
-        .into_iter()
-        .any(|child| is_wait_node(child, name))
-}
-
-fn is_comment_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeName) -> bool {
-    let mut pending = vec![root];
-    while let Some(node) = pending.pop() {
-        if node.name() == name
-            && let openengine_cluster_protocol::GraphNode::Verifier(node) = node
+        let scope = self.session_scope;
+        let mut runtime =
+            crate::native_v2_runtime_config::expand_uniform(self, graph, pull_request_feedback);
+        if scope.is_none()
+            && let Some(template) = template
         {
-            return node.worker.as_str()
-                == crate::native_v2_comment_delivery::COMMENT_DELIVERY_WORKER_REF;
+            for (name, binding) in runtime.nodes_mut() {
+                if let NodeRuntimeBinding::Agent { session_scope, .. } = binding {
+                    *session_scope = template.default_session_scope(name.as_str());
+                }
+            }
         }
-        pending.extend(openengine_cluster_server::graph_verifier::graph_node_children(node));
+        Ok(runtime)
     }
-    false
-}
-
-fn git_delivery_binding(
-    pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
-    _mode: crate::native_v2_delivery::DeliveryMode,
-) -> Result<NodeRuntimeBinding, NativeV2CliError> {
-    let connections = DeclaredConnections::empty();
-    Ok(NodeRuntimeBinding::GitDelivery {
-        connections,
-        pull_request_feedback,
-    })
 }
 
 fn insert_template_binding(

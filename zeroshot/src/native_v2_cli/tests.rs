@@ -34,6 +34,8 @@ mod management_tests;
 mod outcome_tests;
 #[path = "tests/parser.rs"]
 mod parser_tests;
+#[path = "tests/resume_runtime.rs"]
+mod resume_runtime_tests;
 #[path = "tests/review.rs"]
 mod review_tests;
 
@@ -437,6 +439,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
             .is_err()
     );
     let resume = RunResumeParams {
+        runtime: None,
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,

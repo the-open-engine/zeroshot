@@ -43,6 +43,7 @@ const EXPECTED_METHODS: &[&str] = &[
     "inbox/show",
     "run/vector",
     "run/checkpoints",
+    "run/resume_requirements",
     "run/resume",
     "run/discard_workspace",
 ];
@@ -77,6 +78,7 @@ const EXPECTED_UNARY: &[&str] = &[
     "inbox/show",
     "run/vector",
     "run/checkpoints",
+    "run/resume_requirements",
     "run/resume",
     "run/discard_workspace",
 ];
@@ -248,6 +250,12 @@ async fn default_backend_fails_closed_for_every_supported_unary_extension() {
         ("inbox/show", json!({"runId":"run-1"})),
         ("run/status", json!({"runId": "run-1"})),
         ("run/force", json!({"runId": "run-1"})),
+        (
+            "run/resume_requirements",
+            json!({"runId":"run-1","runtime":{"kind":"uniform","runtime":{
+                "harness":"codex","provider":"openai","model":"fixture-model"
+            }}}),
+        ),
         (
             "run/resume",
             json!({"runId": "run-1", "successorRunId": "run-2"}),

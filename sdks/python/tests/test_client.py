@@ -1264,3 +1264,29 @@ def test_steer_rejects_invalid_mode_before_dispatch(fake_native: Path, mode: obj
             assert read_invocations(fake_native) == before
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("target_kind", ["local", "direct", "hosted"])
+@pytest.mark.parametrize("uniform", [False, True])
+def test_resume_replaces_runtime_files(fake_native: Path, target_kind: str, uniform: bool) -> None:
+    async def scenario() -> None:
+        target = {
+            "local": LocalTarget(),
+            "direct": DirectTarget("https://target.example"),
+            "hosted": HostedTarget("prod"),
+        }[target_kind]
+        selected = (
+            runtime()
+            if uniform
+            else RuntimePlan({"harness": "codex", "provider": "openai", "nodes": {}})
+        )
+        async with Client(target=target) as client:
+            assert (await client.get_run("original").resume(runtime=selected)).id == "successor"
+        record = next(
+            entry for entry in read_invocations(fake_native) if entry["args"][0] == "resume"
+        )
+        option = "--uniform-runtime-config" if uniform else "--runtime-config"
+        assert record[option] == selected.to_dict()
+        assert not Path(record["args"][record["args"].index(option) + 1]).exists()
+
+    asyncio.run(scenario())

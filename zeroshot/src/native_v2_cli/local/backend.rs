@@ -1,4 +1,7 @@
 use super::*;
+use crate::native_v2_cli::RunSelector;
+use crate::native_v2_contract::RuntimePlan;
+use std::collections::BTreeMap;
 use crate::native_v2_supervisor::checkpoints::{
     CheckpointRestore, CheckpointRestoreSelection, remove_restore_stage,
 };
@@ -73,6 +76,41 @@ fn restore_command(run_id: &RunId, selection: &CheckpointRestoreSelection) -> St
         "zeroshot resume {}{selection} --discard-workspace-changes",
         run_id.as_str()
     )
+}
+
+async fn admit_resume_runtime(
+    recovery: &LocalRecoveryDocument,
+    runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    native_environment: &BTreeMap<String, String>,
+    github_token: bool,
+) -> Result<RuntimePlan, NativeV2CliError> {
+    let mut submission = recovery.submission.clone();
+    submission.runtime =
+        crate::native_v2_runtime_config::resolve(runtime.clone(), &submission.graph);
+    native_forge::materialize_local_access(
+        &mut submission,
+        native_forge::NativeContext {
+            environment: native_environment,
+            directory: &recovery.workspace,
+        },
+        github_token,
+    )?;
+    let harnesses = crate::harnesses::HarnessRegistry::local();
+    let sizes = crate::native_v2_hosting::host_run_sizes();
+    let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+        &harnesses,
+        crate::native_v2_admission::DeliveryPolicy::Optional,
+    )
+    .with_run_sizes(&sizes);
+    admission.checkpointless_requests = true;
+    let admitted = crate::native_v2_admission::NativeV2Admission
+        .admit_with_context(submission, admission)
+        .await
+        .map_err(NativeV2CliError::InvalidRun)?;
+    crate::v2_run_ledger::validate_admitted_run(&admitted)?;
+    // Startup checks filesystem-dependent executables against the workspace actually used:
+    // the current checkout for plain resume, or the restored checkpoint for selected resume.
+    Ok(admitted.runtime)
 }
 
 impl LocalCliBackend {
@@ -186,6 +224,17 @@ impl LocalCliBackend {
         params: openengine_cluster_protocol::RunResumeParams,
         discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        if let Some(runtime) = &params.runtime {
+            self.validate_resume_runtime(
+                &RunSelector {
+                    target: None,
+                    run_id: params.run_id.clone(),
+                },
+                runtime,
+                params.github_token.is_some(),
+            )
+            .await?;
+        }
         if params.commit_identity.is_some() || params.commit_co_author.is_some() {
             return Err(local_message(
                 "local runs keep the default delivery commit identity and credit no co-author",
@@ -234,8 +283,10 @@ impl LocalCliBackend {
             let claim = self
                 .claim_recovery_workspace_within(&params.run_id, false, RECOVERY_CLAIM_HANDOFF)
                 .await?;
-            self.retain_predecessor_delivery(&params.run_id, &recovery)
-                .await?;
+            if params.runtime.is_none() {
+                self.retain_predecessor_delivery(&params.run_id, &recovery)
+                    .await?;
+            }
             (recovery, claim)
         };
         self.start_local_successor(params, recovery, discard_workspace_changes)
@@ -269,18 +320,24 @@ impl LocalCliBackend {
         Ok(())
     }
 
+    fn read_resume_recovery_document(
+        &self,
+        run_id: &RunId,
+    ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
+        // An unavailable recovery record is an eligibility refusal at this boundary.
+        self.read_recovery_document(run_id)
+            .map_err(|error| match error {
+                NativeV2CliError::Local(message) => NativeV2CliError::Usage(message),
+                error => error,
+            })
+    }
+
     async fn claimable_recovery_document(
         &self,
         status: &RunStatusResult,
         recoverable: bool,
     ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
-        // An unavailable recovery record is an eligibility refusal at this boundary.
-        let recovery =
-            self.read_recovery_document(&status.run_id)
-                .map_err(|error| match error {
-                    NativeV2CliError::Local(message) => NativeV2CliError::Usage(message),
-                    error => error,
-                })?;
+        let recovery = self.read_resume_recovery_document(&status.run_id)?;
         if !recoverable {
             let reason = self
                 .recovery_workspace_refusal(status, &recovery)
@@ -413,6 +470,10 @@ impl LocalCliBackend {
             .checkpoint_selection(&params, &recovery, discard_workspace_changes)?
             .unzip();
         let prepared = self.prepare_successor(&params, &recovery).await?;
+        if params.runtime.is_some() {
+            self.retain_predecessor_delivery(&params.run_id, &recovery)
+                .await?;
+        }
         if checkpoint.is_none() {
             // Remote I/O runs under the recovery claim only, outside the shared submission lock.
             crate::native_v2_local::check_forge_access(&prepared, &self.state_root)
@@ -483,15 +544,25 @@ impl LocalCliBackend {
         let mut native_environment =
             native_forge::capture_native_environment(&self.current_directory)?;
         let mut submission = recovery.submission.clone();
-        submission.runtime.workspace_checkpoints = recovery.workspace_checkpoints_enabled();
-        native_forge::materialize_local_access(
-            &mut submission,
-            native_forge::NativeContext {
-                environment: &native_environment,
-                directory: &recovery.workspace,
-            },
-            params.github_token.is_some(),
-        )?;
+        if let Some(runtime) = &params.runtime {
+            submission.runtime = admit_resume_runtime(
+                recovery,
+                runtime,
+                &native_environment,
+                params.github_token.is_some(),
+            )
+            .await?;
+        } else {
+            submission.runtime.workspace_checkpoints = recovery.workspace_checkpoints_enabled();
+            native_forge::materialize_local_access(
+                &mut submission,
+                native_forge::NativeContext {
+                    environment: &native_environment,
+                    directory: &recovery.workspace,
+                },
+                params.github_token.is_some(),
+            )?;
+        }
         let store = LocalConnectionStore::new(self.state_root.clone());
         let mut connections = params.connections.clone();
         native_forge::fill_missing(
@@ -999,6 +1070,39 @@ impl NativeV2CliBackend for LocalCliBackend {
         .map_err(local_error)?;
         result.controller = status.controller;
         Ok(result)
+    }
+
+    async fn validate_resume_runtime(
+        &self,
+        run: &RunSelector,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        github_token: bool,
+    ) -> Result<(), NativeV2CliError> {
+        require_local(run.target.as_deref())?;
+        let (_paths, _directory) = self.recorded_storage(&run.run_id)?;
+        let recovery = self.read_resume_recovery_document(&run.run_id)?;
+        let environment = native_forge::capture_native_environment(&self.current_directory)?;
+        admit_resume_runtime(&recovery, runtime, &environment, github_token).await?;
+        Ok(())
+    }
+
+    async fn replacement_resume_requirements(
+        &self,
+        run: &RunSelector,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        github_token: bool,
+    ) -> Result<openengine_cluster_protocol::RunConnectionRequirements, NativeV2CliError> {
+        require_local(run.target.as_deref())?;
+        let recovery = self.read_resume_recovery_document(&run.run_id)?;
+        let environment = native_forge::capture_native_environment(&self.current_directory)?;
+        let mut submission = recovery.submission.clone();
+        submission.runtime =
+            admit_resume_runtime(&recovery, runtime, &environment, github_token).await?;
+        Ok(submission
+            .connection_requirements()
+            .into_iter()
+            .map(|(key, fields)| (key, fields.into_iter().collect()))
+            .collect())
     }
 
     async fn run_resume(

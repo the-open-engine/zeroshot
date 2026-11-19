@@ -664,6 +664,7 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
     let error = backend
         .start_local_successor(
             RunResumeParams {
+                runtime: None,
                 git_credentials: None,
                 commit_identity: None,
                 commit_co_author: None,

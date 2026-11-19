@@ -6,6 +6,7 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 fn params(from: Option<RunResumeFrom>) -> openengine_cluster_protocol::RunResumeParams {
     openengine_cluster_protocol::RunResumeParams {
+        runtime: None,
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
@@ -41,6 +42,211 @@ fn recovery(root: &TestDirectory, checkpoints: bool) -> LocalRecoveryDocument {
         successor_run_id: None,
         workspace_checkpoints_discarded: false,
         pending_restore: None,
+    }
+}
+
+#[tokio::test]
+async fn resume_runtime_requirements_include_shared_delivery_credentials() {
+    use crate::native_v2_candidate::test_support::{full_graph, git_delivery_node, success_node};
+    use crate::native_v2_delivery::DeliveryMode;
+    use openengine_cluster_protocol::RunResumeRuntime;
+    use serde_json::json;
+
+    for mode in [DeliveryMode::PullRequest, DeliveryMode::Merge] {
+        for uniform in [false, true] {
+            let root = TestDirectory::new("resume-credentials");
+            let backend = LocalCliBackend::new(
+                root.child("state"),
+                PathBuf::from("zeroshot"),
+                root.path().to_owned(),
+                PathBuf::from("git"),
+            );
+            let mut recovery = recovery(&root, false);
+            std::fs::create_dir(&recovery.workspace).assert_value();
+            let mut delivery = git_delivery_node();
+            delivery["worker"] = json!(mode.worker_ref());
+            delivery["output"] = serde_json::to_value(
+                crate::native_v2_delivery::contract::delivery_result_schema(mode).assert_value(),
+            )
+            .assert_value();
+            delivery["signals"] = json!({
+                "delivery": crate::native_v2_delivery::delivery_signal_labels(mode).assert_value()
+            });
+            recovery.submission.graph = full_graph(vec![
+                json!({
+                    "kind":"step", "name":"worker", "worker":"agent.work@1",
+                    "instructions":"Continue the work.",
+                    "input":{"kind":"null"}, "output":{"kind":"null"},
+                    "inputBindings":[], "writeBindings":[], "timeoutMs":1000, "attempts":1
+                }),
+                delivery,
+                success_node(),
+            ]);
+            recovery.submission.source = Some(
+                serde_json::from_value(json!({
+                    "repository":"team/project", "branch":"main", "revision":"a".repeat(40),
+                    "remote":{"url":"https://gitlab.com/team/project.git", "forge":{
+                        "provider":"source.gitlab", "repository":"team/project",
+                        "baseUrl":"https://gitlab.com"
+                    }}
+                }))
+                .assert_value(),
+            );
+            let replacement: RunResumeRuntime = serde_json::from_value(json!({
+                "kind":"uniform", "runtime":{
+                    "harness":"codex", "provider":"openai", "model":"corrected-model",
+                    "workspaceCheckpoints":false,
+                    "connections":{"gitlab":["OPENAI_API_KEY"]}
+                }
+            }))
+            .assert_value();
+            recovery.submission.runtime = crate::native_v2_runtime_config::resolve(
+                replacement.clone(),
+                &recovery.submission.graph,
+            );
+            let replacement = if uniform {
+                replacement
+            } else {
+                RunResumeRuntime::Exact {
+                    runtime: recovery.submission.runtime.clone(),
+                }
+            };
+            let mut request = params(None);
+            request.runtime = Some(replacement.clone());
+            backend.create_run_storage(&request.run_id).assert_value();
+            backend
+                .write_recovery_document(&request.run_id, &recovery)
+                .assert_value();
+            let recovery_path = backend.recovery_path(&request.run_id).assert_value();
+            let original = std::fs::read(&recovery_path).assert_value();
+            let requirements = backend
+                .replacement_resume_requirements(
+                    &RunSelector {
+                        target: None,
+                        run_id: request.run_id.clone(),
+                    },
+                    &replacement,
+                    false,
+                )
+                .await
+                .assert_value();
+            assert_eq!(
+                serde_json::to_value(&requirements).assert_value(),
+                json!({"gitlab":["GITLAB_TOKEN", "OPENAI_API_KEY"]})
+            );
+            // Select exactly the advertised fields, as the CLI does from the caller's environment.
+            request.connections = requirements
+                .into_iter()
+                .map(|(key, fields)| {
+                    let values = fields
+                        .into_iter()
+                        .map(|field| (field, "fresh-fixture-value".to_owned()))
+                        .collect();
+                    (
+                        key,
+                        openengine_cluster_protocol::StaticConnectionValues::new(values)
+                            .assert_value(),
+                    )
+                })
+                .collect();
+            let prepared = backend
+                .prepare_successor(&request, &recovery)
+                .await
+                .assert_value();
+            assert_eq!(prepared.environment.bootstrap_values(), request.connections);
+            assert_eq!(prepared.submission.graph, recovery.submission.graph);
+            assert_eq!(prepared.submission.source, recovery.submission.source);
+            assert_eq!(std::fs::read(recovery_path).assert_value(), original);
+            assert!(
+                !backend
+                    .paths(&request.successor_run_id)
+                    .assert_value()
+                    .storage()
+                    .exists()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn resume_runtime_bounds_effective_delivery_defaults_and_preserves_native_token_access() {
+    use crate::native_v2_candidate::test_support::{full_graph, git_delivery_node, success_node};
+    use openengine_cluster_protocol::{DeclaredConnections, NodeName, NodeRuntimeBinding};
+    use serde_json::json;
+
+    let root = TestDirectory::new("resume-size");
+    let mut recovery = recovery(&root, true);
+    let mut graph =
+        serde_json::to_value(full_graph(vec![git_delivery_node(), success_node()])).assert_value();
+    let state =
+        json!({"kind":"record","fields":{"padding":{"type":{"kind":"string"},"required":true}}});
+    graph["initialInput"] = state.clone();
+    graph["root"]["state"] = state;
+    recovery.submission.graph = serde_json::from_value(graph).assert_value();
+    recovery.submission.initial_input = json!({"padding":""});
+    recovery.submission.runtime.nodes.insert(
+        NodeName::new("deliver").assert_value(),
+        NodeRuntimeBinding::GitDelivery {
+            connections: DeclaredConnections::empty(),
+            pull_request_feedback: Default::default(),
+        },
+    );
+    let admitted = crate::native_v2_admission::NativeV2Admission
+        .admit(recovery.submission.clone())
+        .await
+        .unwrap();
+    let overhead = serde_json::to_vec(&admitted).assert_value().len();
+    recovery.submission.initial_input =
+        json!({"padding":"x".repeat(crate::v2_run_ledger::MAX_ADMITTED_RUN_BYTES - overhead)});
+    let config = openengine_cluster_protocol::RunResumeRuntime::Exact {
+        runtime: recovery.submission.runtime.clone(),
+    };
+    let error = admit_resume_runtime(&recovery, &config, &BTreeMap::new(), false)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("exceeding the 2 MiB"), "{error}");
+    // Native GitHub authority deliberately keeps this binding empty. Its unchanged definition
+    // fits exactly; adding an unnecessary connection would incorrectly reject that valid run.
+    for (environment, github_token) in [
+        (BTreeMap::new(), true),
+        (
+            BTreeMap::from([(
+                crate::native_v2_delivery::GITHUB_TOKEN_FILE_ENV.to_owned(),
+                "owned-token-file".to_owned(),
+            )]),
+            false,
+        ),
+    ] {
+        let runtime = admit_resume_runtime(&recovery, &config, &environment, github_token)
+            .await
+            .unwrap();
+        assert!(
+            runtime.nodes()[&NodeName::new("deliver").assert_value()]
+                .declared_connections()
+                .is_empty()
+        );
+        if github_token {
+            let backend = backend(&root);
+            let run_id = params(None).run_id;
+            backend.create_run_storage(&run_id).assert_value();
+            backend
+                .write_recovery_document(&run_id, &recovery)
+                .assert_value();
+            assert!(
+                backend
+                    .replacement_resume_requirements(
+                        &RunSelector {
+                            target: None,
+                            run_id
+                        },
+                        &config,
+                        true,
+                    )
+                    .await
+                    .assert_value()
+                    .is_empty()
+            );
+        }
     }
 }
 

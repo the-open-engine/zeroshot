@@ -242,6 +242,7 @@ async fn direct_request_discovery_inbox_and_expiry_resume_use_the_controller_led
         .assert_value();
     assert_eq!(show.request.text, "Approve?");
     let params = RunResumeParams {
+        runtime: None,
         run_id: ids[2].clone(),
         successor_run_id: other_run_id(),
         from: Some(
