@@ -4,6 +4,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::execution::{driver::WorkspaceCapability, process::ProcessSessionCommand};
+use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{
     ProviderExecutionFiles, agent_workspace_access, effort_token, extend_declared_environment,
     merge_local_environment, write_provider_file,
@@ -393,11 +394,11 @@ fn gateway_mode(invocation: &DriverInvocation) -> Result<&'static str, NodeRunne
         .iter()
         .map(|(name, value)| (name.as_str().to_owned(), value.to_owned()))
         .collect::<BTreeMap<_, _>>();
-    crate::native_v2_capsule::gateway::connection(&values)?;
-    match values.get("GATEWAY_API").map(String::as_str) {
-        Some("openai-responses") => Ok("codex_responses"),
-        Some("openai-completions") => Ok("chat_completions"),
-        Some("anthropic-messages") => Ok("anthropic_messages"),
+    gateway::connection(&values)?;
+    match values.get(gateway::API).map(String::as_str) {
+        Some(gateway::OPENAI_RESPONSES) => Ok("codex_responses"),
+        Some(gateway::OPENAI_COMPLETIONS) => Ok("chat_completions"),
+        Some(gateway::ANTHROPIC_MESSAGES) => Ok("anthropic_messages"),
         _ => Err(failure("Hermes gateway requires a supported GATEWAY_API")),
     }
 }

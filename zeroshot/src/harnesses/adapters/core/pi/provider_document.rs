@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::native_v2_capsule::gateway;
+use crate::native_v2_capsule::gateway::{self, SUPPORTED_APIS};
 use crate::native_v2_runner::{NodeRunnerError, ResolvedEnvironment};
 
 /// Pi's provider file inside the private agent directory.
@@ -57,14 +57,6 @@ pub(super) const OPENAI: ProviderOverride = ProviderOverride {
     provider: "openai",
     api_key_field: "OPENAI_API_KEY",
 };
-
-/// Wire protocols Pi can be asked to speak. The caller names one; Zeroshot never guesses it from
-/// the model identifier, because an identifier is opaque and provider-owned.
-pub(super) const SUPPORTED_APIS: [&str; 3] = [
-    "openai-responses",
-    "openai-completions",
-    "anthropic-messages",
-];
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum PiProviderDocumentError {

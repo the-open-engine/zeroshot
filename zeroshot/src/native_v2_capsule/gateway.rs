@@ -1,4 +1,4 @@
-//! Connection fields shared by the Codex and Claude gateway lanes.
+//! Shared gateway connection fields and selectable wire protocols.
 
 use std::collections::BTreeMap;
 
@@ -8,6 +8,13 @@ use crate::native_v2_runner::NodeRunnerError;
 
 pub(crate) const BASE_URL: &str = "GATEWAY_BASE_URL";
 pub(crate) const API_KEY: &str = "GATEWAY_API_KEY";
+pub(crate) const API: &str = "GATEWAY_API";
+
+pub(crate) const OPENAI_RESPONSES: &str = "openai-responses";
+pub(crate) const OPENAI_COMPLETIONS: &str = "openai-completions";
+pub(crate) const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
+pub(crate) const SUPPORTED_APIS: [&str; 3] =
+    [OPENAI_RESPONSES, OPENAI_COMPLETIONS, ANTHROPIC_MESSAGES];
 
 pub(crate) fn connection(
     values: &BTreeMap<String, String>,

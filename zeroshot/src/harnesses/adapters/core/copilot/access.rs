@@ -30,11 +30,6 @@ pub(super) fn provider_access(provider: CopilotProvider) -> ProviderAccessContra
             &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"],
             &[&["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]],
         ),
-        CopilotProvider::Gateway => ProviderAccessContract::new(
-            false,
-            "gateway",
-            &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"],
-            &[&["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"]],
-        ),
+        CopilotProvider::Gateway => ProviderAccessContract::selectable_gateway(),
     }
 }

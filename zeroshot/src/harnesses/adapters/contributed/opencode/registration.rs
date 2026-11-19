@@ -100,12 +100,7 @@ fn access(provider: &str) -> Result<ProviderAccessContract, HarnessError> {
             &["COPILOT_GITHUB_TOKEN"],
             &[&["COPILOT_GITHUB_TOKEN"]],
         )),
-        "gateway" => Ok(ProviderAccessContract::new(
-            false,
-            "gateway",
-            &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"],
-            &[&["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"]],
-        )),
+        "gateway" => Ok(ProviderAccessContract::selectable_gateway()),
         "opencode" | "opencode-go" => Ok(ProviderAccessContract::new(
             true,
             "opencode",

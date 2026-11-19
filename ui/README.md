@@ -47,7 +47,9 @@ a graph does not demand GitHub before the run's source or comment destination is
 
 The `setupLanes` array comes from the same harness registry. Each entry contains `harness`, `provider`,
 `connectionKey`, `requiredFields`, and `acceptedFieldSets`; a host can offer compatible providers and
-request access without maintaining a parallel provider table. `workspace::profile_setup({runtime})`
+request access without maintaining a parallel provider table. Selectable gateway lanes also expose
+`fieldOptions.GATEWAY_API` with a description and the ordered `allowedValues` a host can offer.
+`workspace::profile_setup({runtime})`
 returns `{runtime, requirements}` after applying native contained-provider access defaults. It reads no
 secrets and never saves or runs a profile. Authored custom connections and alternative credential
 forms remain intact. `profile_setup_with_harnesses` uses the host-selected registry for validation and
