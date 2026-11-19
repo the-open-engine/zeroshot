@@ -2303,8 +2303,8 @@ It does not install dependencies or start applications, services or browsers.</p
 <h2 id="what-the-graph-does">What the graph does<a class="headerlink" href="#what-the-graph-does" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>triage                 summary and at most six review units
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>discover (parallel)
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  per unit:            two broad reviews, a depth review, a design review
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  whole change:        logic, state, contracts, error paths, claims
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  per unit:            two broad reviews, a design review
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  whole change:        contracts, claims
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>finalize (parallel)
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  per unit:            merge, try to disprove and rewrite the unit's findings
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  remaining files:     the same for findings outside every unit
@@ -2312,12 +2312,13 @@ It does not install dependencies or start applications, services or browsers.</p
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>deliver                native comment publication
 </code></pre></div>
 <p>Triage summarizes the change and splits its files into review units of a size one reviewer can
-examine carefully, keeping files that must be read together in the same unit. Four reviewers then
-examine every unit: two independent broad reviews, a depth review that builds a concrete failing
-scenario for each defect, and a design review that compares the code with the rest of the
-codebase. At the same time, five reviewers each hunt one kind of failure across the whole change.
-The claims reviewer also checks every acceptance criterion in the linked issues, unless the PR or
-the caller declares a partial implementation.</p>
+examine carefully, keeping files that must be read together in the same unit. Three reviewers then
+examine every unit: two independent broad reviews and a design review that compares the code with
+the rest of the codebase. At the same time, two reviewers each hunt one kind of failure across the
+whole change: broken contracts between the changed code and its callers, and claims in the PR,
+documentation and tests that disagree with the code. The claims reviewer also checks every
+acceptance criterion in the linked issues, unless the PR or the caller declares a partial
+implementation.</p>
 <p>For every unit, a finalizer merges duplicate findings for the unit's files, tries to disprove each
 one against the real callers, guards and configuration, and rewrites the survivors with exact line
 ranges. Another finalizer does the same for findings outside every unit. The report agent orders
@@ -2325,7 +2326,7 @@ the final findings by severity and writes the comment. The native publisher post
 agent has settled. The native header records the captured revisions once.</p>
 <p>Every agent is read-only: it inspects the checkout and the diff of the admitted head against its
 merge base with the captured base revision, without changing tracked files. A change with N units
-runs 5N + 8 agent executions. A crashed agent is retried once. Any other agent failure stops the run before publication. Additional review units wait for map
+runs 4N + 5 agent executions. A crashed agent is retried once. Any other agent failure stops the run before publication. Additional review units wait for map
 capacity. Finding
 problems is a successful review.</p>
 <p>A confirmed Claude usage quota refusal bypasses crash retries. Its failure context preserves
@@ -2334,7 +2335,7 @@ Codex's message-only usage failures retain crash retries; see the
 <a href="../../reference/cluster/graph/">native failure signals</a>.</p>
 <h2 id="prepare-the-runtime-and-credentials">Prepare the runtime and credentials<a class="headerlink" href="#prepare-the-runtime-and-credentials" title="Permanent link">&para;</a></h2>
 <p>The supplied <a href="../../assets/code-review/runtime.json">runtime plan</a> splits the agents across Claude
-Code and Codex, so that each unit and the whole change are reviewed by both model families. Save it
+Code and Codex, so that each unit is reviewed by both model families. Save it
 as <code>runtime.json</code> and pass it through <code>--runtime-config</code>. It needs a Claude Code and a Codex login.
 Model choices remain in the caller's runtime plan rather than the graph, so a plan with other
 models, or a uniform runtime through <code>--uniform-runtime-config</code>, works as well.</p>
@@ -2342,6 +2343,9 @@ models, or a uniform runtime through <code>--uniform-runtime-config</code>, work
 and the Restic dependency. History, structured outputs, logs and comment receipts remain durable.
 A failed run can restart against its retained checkout, but cannot resume from a workspace snapshot.
 Set the same field in a uniform runtime file to use this policy with <code>--uniform-runtime-config</code>.</p>
+<p>The supplied plan also turns off <a href="../active-memory/">Active Memory</a>: reviews neither read nor
+collect lessons, and no postmortem runs after the review. Remove the <code>activeMemory</code> and
+<code>globalAgents</code> sections from your copy to use the defaults again.</p>
 <p>Comment delivery uses the <code>github</code> connection's <code>GH_TOKEN</code>, as for <code>pr-review</code>. Publication
 credentials belong to the native node and are not declared on the review agents.</p>
 <h2 id="run-the-review">Run the review<a class="headerlink" href="#run-the-review" title="Permanent link">&para;</a></h2>
@@ -2386,7 +2390,7 @@ PR base branch, for example <code>origin/main</code>. <code>--task-from</code> s
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-13">13 November 2026</time>
+    Last updated <time datetime="2026-11-19">19 November 2026</time>
   </span>
 
     
