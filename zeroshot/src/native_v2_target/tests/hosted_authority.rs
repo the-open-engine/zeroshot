@@ -309,7 +309,7 @@ fn controller_response(
 
 fn hosted_discovery(origin: &str) -> String {
     json!({
-        "kind": "zeroshot.native-v2-target/v2",
+        "kind": "zeroshot.native-v2-target/v3",
         "authentication": "hosted_oauth",
         "runPath": "/native-v2/run",
         "sessionPath": "/native-v2/oecp-session",
@@ -351,7 +351,7 @@ fn hosted_discovery(origin: &str) -> String {
                 }
             },
             "hosted_runs": {
-                "kind": "zeroshot.hosted-runs/v1",
+                "kind": "zeroshot.hosted-runs/v2",
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
             },
@@ -642,3 +642,6 @@ impl TargetCredentialStore for RotatingCredentialStore {
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+#[path = "hosted_authority/wire_contract.rs"]
+mod wire_contract;

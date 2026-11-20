@@ -227,7 +227,7 @@ async fn serve_hosted_auth(mut stream: TcpStream, origin: &str) -> io::Result<()
     let request = read_request(&mut stream).await?;
     let body = match (request.method.as_str(), request.path.as_str()) {
         ("GET", HOSTED_DISCOVERY_PATH) => json!({
-            "kind":"zeroshot.native-v2-target/v2",
+            "kind":"zeroshot.native-v2-target/v3",
             "authentication":"hosted_oauth",
             "runPath":"/native-v2/run",
             "sessionPath":"/native-v2/oecp-session",
@@ -249,7 +249,7 @@ async fn serve_hosted_auth(mut stream: TcpStream, origin: &str) -> io::Result<()
             },
             "extensions":{
                 "hosted_runs":{
-                    "kind":"zeroshot.hosted-runs/v1",
+                    "kind":"zeroshot.hosted-runs/v2",
                     "base_url":origin,
                     "route_templates":{
                         "list":"/native-v2/runs",

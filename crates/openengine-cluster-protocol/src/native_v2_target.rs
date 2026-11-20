@@ -34,9 +34,9 @@ pub const TARGET_SESSION_PATH: &str = "/native-v2/oecp-session";
 pub const TARGET_OECP_PATH: &str = "/native-v2/oecp";
 pub const TARGET_PRIVATE_BOOTSTRAP_PATH: &str = "/native-v2/private-bootstrap";
 pub const TARGET_OPERATOR_DIAGNOSTICS_PATH_PREFIX: &str = "/native-v2/operator-diagnostics/";
-pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v2";
+pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v3";
 pub const TARGET_CONTROLLER_AUDIENCE: &str = "controller";
-pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v1";
+pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v2";
 pub const RUN_HISTORY_KIND: &str = "zeroshot.run-history/v1";
 pub const CONNECTIONS_KIND: &str = "zeroshot.connections/v1";
 pub const STATIC_CONNECTION_KIND: &str = "static";
@@ -488,7 +488,7 @@ pub struct TargetHostedRunsDiscovery {
 
 pub const HOSTED_RUN_CONTROLS_KIND: &str = "openengine.hosted-run-controls/v1";
 
-/// Optional POST routes relative to `hosted_runs.base_url`; the v1 run routes stay frozen.
+/// Optional POST routes relative to `hosted_runs.base_url`; the hosted run routes stay frozen.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetHostedRunControlsDiscovery {

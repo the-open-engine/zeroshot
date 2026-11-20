@@ -26,7 +26,7 @@
   },
   "info": {
     "title": "Open Engine Cluster Protocol",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "methods": [
     {
@@ -37,7 +37,7 @@
           "name": "protocolVersion",
           "required": true,
           "schema": {
-            "const": "openengine.cluster/v1",
+            "const": "openengine.cluster/v2",
             "type": "string"
           }
         }

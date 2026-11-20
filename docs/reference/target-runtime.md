@@ -6,6 +6,26 @@ description: 'Target discovery, local harness configuration, permissions and wor
 
 [Targets](../concepts/targets.md) covers choosing and connecting a target.
 
+## Wire compatibility
+
+Clients and targets must implement the same current wire contract. OECP initialization requires
+`openengine.cluster/v2`; target discovery requires `zeroshot.native-v2-target/v3`; hosted run
+observation requires `zeroshot.hosted-runs/v2`. These are wire identifiers, independent of package
+versions. The discovery URL, HTTP routes and JSON-RPC method names are unchanged.
+
+An incompatible client or target stops at discovery or initialization, before submitting or
+observing a run. Upgrade the Zeroshot client and target together to releases implementing these
+identifiers. Hosted gateway operators must update the gateway's discovery and protocol dependencies
+as part of the same rollout. An incompatibility is final for that operation: submissions are not
+automatically retried. Existing runs keep executing and compatible clients can observe them.
+
+This contract retains active execution `startedAt` and watch notification `recordedAt` as Unix
+milliseconds when known. Historical unknown times remain omitted. Released v16.0.0 clients use the
+previous contract and receive an early incompatibility error; they cannot observe current targets.
+Python users must upgrade the `the-open-engine-zeroshot` wheel, which carries the native client.
+Updating Python projection code alone does not upgrade its wire reader. MCP tool definitions and shared skills do not change;
+services using a native client must upgrade that client with their target.
+
 ## Discovery and sizes
 
 Targets advertise their enabled harness/provider pairs through the
@@ -242,7 +262,7 @@ outer discovery extension alongside the existing `hosted_runs` extension:
 
 `TargetWorkspaceExportDiscovery` is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
-`zeroshot.hosted-runs/v1` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
+`zeroshot.hosted-runs/v2` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
 kind above; an absent or unfamiliar kind disables it without a fallback operation.
 
 The route uses the same-origin `hosted_runs.base_url`, including any installation path prefix,
