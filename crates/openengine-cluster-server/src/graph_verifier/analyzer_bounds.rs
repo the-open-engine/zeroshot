@@ -15,6 +15,7 @@ impl Analyzer<'_> {
             GraphNode::Choice(group) => self.fold_choice(group),
             GraphNode::Map(group) => self.fold_map(group),
             GraphNode::Loop(group) => self.fold_loop(group, &path),
+            GraphNode::Profile(profile) => self.fold_node(profile.body.as_deref()?),
         }
     }
 

@@ -9,8 +9,8 @@ use openengine_cluster_protocol::{
     DiagnosticPathSegment, DiagnosticSeverity, EnumLabel, FieldName, FieldPath, GraphDiagnostic,
     GraphDiagnosticCode, GraphNode, GraphProfile, GraphSpec, Guard, InputBinding, Join, LoopNode,
     MapNode, NodeName, NodeOutputChannel, NodeOutputSelector, NonEmptyVec, ParNode, PayloadType,
-    PositiveInteger, SeqNode, StepNode, StructuralBounds, TerminationWitness, VerifierNode,
-    WriteBinding,
+    PositiveInteger, ProfileNode, SeqNode, StepNode, StructuralBounds, TerminationWitness,
+    VerifierNode, WriteBinding,
 };
 
 use crate::admission::{GraphVerifier, VerificationError, VerifiedGraph};
@@ -123,7 +123,15 @@ fn finalize_verified_with_invariant_probe(
 struct NodeInfo<'a> {
     node: &'a GraphNode,
     path: Vec<DiagnosticPathSegment>,
+    scope_start: usize,
     ordinal: usize,
+}
+
+impl NodeInfo<'_> {
+    /// Ancestry visible to the node's guard and assignment proofs.
+    fn scope_path(&self) -> &[DiagnosticPathSegment] {
+        self.path.get(self.scope_start..).unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Default)]

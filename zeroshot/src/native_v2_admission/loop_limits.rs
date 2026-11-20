@@ -13,6 +13,10 @@ pub(super) fn bind_input_limits(
         GraphNode::Par(group) => bind_many(group.branches.as_mut_slice(), initial_input),
         GraphNode::Loop(group) => bind_loop(group, initial_input),
         GraphNode::Map(group) => bind_input_limits(&mut group.body, initial_input),
+        GraphNode::Profile(profile) => match profile.body.as_deref_mut() {
+            Some(body) => bind_input_limits(body, initial_input),
+            None => Ok(()),
+        },
         GraphNode::Step(_)
         | GraphNode::Verifier(_)
         | GraphNode::Succeed(_)

@@ -25,6 +25,7 @@ impl<'history> Engine<'history> {
             | GraphNode::Par(_)
             | GraphNode::Loop(_)
             | GraphNode::Map(_) => self.eval_group_node(node, context, traversal),
+            GraphNode::Profile(profile) => self.eval_profile(profile, context, traversal),
             GraphNode::Succeed(_) | GraphNode::Fail(_) => {
                 self.eval_terminal_node(node, context, traversal)
             }
@@ -33,15 +34,16 @@ impl<'history> Engine<'history> {
         record_completed(node, context, traversal, &status);
         self.trace_finish(trace, &status, context);
         // Implicit failures have no authored terminal node to expose their enclosing outcome.
-        if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_))
-            || matches!(
-                &status,
-                Status::Terminal {
-                    projection: TerminalProjection::Failed { reason, .. },
-                    ..
-                } if reason.as_str() == "unhandled"
-            )
-        {
+        if matches!(
+            node,
+            GraphNode::Profile(_) | GraphNode::Succeed(_) | GraphNode::Fail(_)
+        ) || matches!(
+            &status,
+            Status::Terminal {
+                projection: TerminalProjection::Failed { reason, .. },
+                ..
+            } if reason.as_str() == "unhandled"
+        ) {
             self.trace_terminal(trace, &status)?;
         }
         Ok(status)
@@ -95,6 +97,50 @@ impl<'history> Engine<'history> {
             GraphNode::Loop(group) => self.eval_loop(group, context, traversal),
             GraphNode::Map(group) => self.eval_map(group, context, traversal),
             _ => Err(ReducerError::InconsistentHistory),
+        }
+    }
+
+    fn eval_profile(
+        &mut self,
+        profile: &openengine_cluster_protocol::ProfileNode,
+        context: &mut Context,
+        traversal: Traversal<'_>,
+    ) -> Result<Status, ReducerError> {
+        let body = profile
+            .body
+            .as_deref()
+            .ok_or(ReducerError::InconsistentHistory)?;
+        let input = profile
+            .initial_input
+            .as_ref()
+            .ok_or(ReducerError::InconsistentHistory)?;
+        let mut state = project_payload(input, &context.state)?;
+        if let Some(state_type) = body.state() {
+            state_type.materialize_missing_fields(&mut state);
+        }
+        let mut local = Context::new(state);
+        let result = self.eval(
+            body,
+            &mut local,
+            Traversal {
+                item: None,
+                ..traversal
+            },
+        )?;
+        context
+            .work
+            .merge(&local.work)
+            .map_err(|_| ReducerError::ProbeLoopLimit)?;
+        match result {
+            Status::Terminal {
+                position,
+                projection: TerminalProjection::Succeeded { .. },
+            } => {
+                self.continue_decision(&profile.name, traversal.mode);
+                Ok(Status::Continue { position })
+            }
+            Status::Continue { .. } => Err(ReducerError::InconsistentHistory),
+            other => Ok(other),
         }
     }
 

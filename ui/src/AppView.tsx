@@ -308,6 +308,18 @@ function AppDialogs({ model }: { model: AppModel }) {
   );
 }
 
+function SavedProfileOptions({ names }: { names: readonly string[] }) {
+  return names.length > 0 && (
+    <optgroup label="Saved profiles">
+      {names.map((name) => (
+        <option key={name} value={`profile:${name}`}>
+          {name}
+        </option>
+      ))}
+    </optgroup>
+  );
+}
+
 function WorkflowActionContent({ model }: { model: AppModel }) {
   const {
     modal,
@@ -355,6 +367,7 @@ function WorkflowActionContent({ model }: { model: AppModel }) {
                                   : labels[kind]}
                     </option>
                   ))}
+                <SavedProfileOptions names={model.profileNames} />
                 {bootstrap?.workers
                   ?.filter((w) => ['git_delivery', 'comment_delivery'].includes(w.runtimeKind))
                   .map((w) => (
@@ -536,6 +549,7 @@ function BodyContent({ model }: { model: AppModel }) {
                   {labels[kind]}
                 </option>
               ))}
+              <SavedProfileOptions names={model.profileNames} />
             </select>
           </Field>
           {modalError && (
@@ -887,6 +901,7 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
                 close={() => setInspector(false)}
                 schema={bootstrap?.runtimeSchema}
                 workers={bootstrap?.workers ?? []}
+                profileNames={model.profileNames}
                 replaceBody={bodyDialog}
                 wrapBody={wrap}
                 selectNode={reveal}

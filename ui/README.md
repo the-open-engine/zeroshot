@@ -79,6 +79,11 @@ Resource descriptors never enter the saved runtime plan.
 Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
 not profile authoring. Plain local UI has no environment catalog or management page.
 
+The local editor offers saved profiles when adding a workflow activity. The draft stores the
+selected profile's name, and validation resolves the current saved graph. The source profile
+continues to have its own editor entry. A recorded run shows the resolved nodes in a collapsible
+group labeled with the source profile name.
+
 Local profile lists return readable metadata in `profiles` and malformed entries in optional `problems`,
 with each entry's name, default status and diagnostic. The sidebar shows these problems alongside
 usable profiles. Graph/runtime schemas are checked when a profile is opened; unrelated saves and
