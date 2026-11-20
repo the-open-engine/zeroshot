@@ -222,6 +222,29 @@ printf 'teardown\n' >> hook-order
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn local_controller_sigterm_allows_teardown_past_the_base_shutdown_limit() {
+    let fixture = LocalFixture::new().with_hook_worker("exec sleep 300");
+    let run = fixture
+        .submit_with_hooks(&json!({
+            "startup": "sleep 300 & printf '%s\n' \"$!\" > service.pid",
+            "teardown": "sleep 32\nkill -0 \"$(cat service.pid)\"\nprintf 'done\n' > teardown.done"
+        }))
+        .await;
+    fixture.wait_running(&run).await;
+    let controller = fixture.ready_pid(&run);
+    let service = fixture
+        .hook_file("service.pid")
+        .trim()
+        .parse()
+        .assert_value();
+    signal(controller, libc::SIGTERM).assert_value_with("terminate test controller");
+    fixture.wait_terminal(&run, "finish", "force_stopped").await;
+    assert_eq!(fixture.hook_file("teardown.done"), "done\n");
+    wait_for_exit(service).await;
+    wait_for_exit(controller).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn local_resume_reuses_saved_hooks_and_assigns_a_fresh_run_id() {
     let fixture =
         LocalFixture::new().with_hook_worker("printf 'worker\\n' >> hook-order\nprintf 'null\\n'");

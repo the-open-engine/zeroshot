@@ -13,11 +13,9 @@ impl LocalCliBackend {
         request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
     ) -> Result<T, NativeV2CliError> {
         let has_teardown = self.read_recovery_document(run_id).is_ok_and(|recovery| {
-            recovery
-                .submission
-                .environment
-                .and_then(|environment| environment.teardown)
-                .is_some_and(|script| !script.trim().is_empty())
+            crate::native_v2_portable_controller::has_local_teardown(
+                recovery.submission.environment.as_ref(),
+            )
         });
         let budget = if has_teardown {
             DEFAULT_READY_TIMEOUT

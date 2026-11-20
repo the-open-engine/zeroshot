@@ -23,6 +23,12 @@ use process::{HookProcess, HookShell, StartupStatus};
 const PREPARATION_PHASE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 pub(crate) const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 
+pub(crate) fn has_local_teardown(definition: Option<&RuntimeEnvironment>) -> bool {
+    definition
+        .and_then(|definition| definition.teardown.as_deref())
+        .is_some_and(|script| !script.trim().is_empty())
+}
+
 pub(super) struct EnvironmentHooks {
     shell: HookShell,
     workspace_identity: WorkspaceIdentity,
