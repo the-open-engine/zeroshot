@@ -132,7 +132,10 @@ fn native_v2_method(name: &str) -> Option<Value> {
             json!({"paramStructure":"by-name", "params":[
                 {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
                 {"name":"text","required":true,"schema":{"$ref":"schema.json#/$defs/NodeInstructions"}},
-                {"name":"mode","required":false,"schema":mode}
+                {"name":"mode","required":false,"schema":mode},
+                {"name":"node","required":false,"schema":{
+                    "$ref":"schema.json#/$defs/RunSteerParams/properties/node"
+                }}
             ], "result":{"name":"runSteerResult","schema":{"$ref":"schema.json#/$defs/RunSteerResult"}}})
         }
         openengine_cluster_protocol::RUN_SUSPEND_METHOD => {

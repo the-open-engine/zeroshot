@@ -921,6 +921,9 @@ struct RunSteerArgs {
     /// Read UTF-8 direction from standard input.
     #[arg(long)]
     text_stdin: bool,
+    /// Direct human guidance to this exact agent node name, including future instances.
+    #[arg(long, value_name = "NAME", conflicts_with = "networks")]
+    node: Option<String>,
     /// Broadcast to this authorized graph-local network; repeat for several networks.
     #[arg(long = "network", value_name = "NAME")]
     networks: Vec<String>,

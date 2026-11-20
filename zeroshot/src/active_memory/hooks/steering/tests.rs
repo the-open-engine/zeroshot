@@ -155,6 +155,7 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             vector_event(
                 &run,
                 RunVectorContent::Steer {
+                    node: None,
                     mode: Default::default(),
                     network: None,
                     text: format!(
@@ -439,6 +440,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "before-snapshot".into(),
@@ -452,6 +454,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "after-snapshot".into(),
@@ -602,6 +605,7 @@ async fn steer_sent_as_a_message_is_received_when_shown_and_delivered_once() {
     steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             run_id: run.clone(),
             text: "Standing direction".into(),
             mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -674,6 +678,7 @@ async fn steer_message_that_was_never_shown_is_due_again_at_the_next_prompt() {
     steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "Standing direction".into(),

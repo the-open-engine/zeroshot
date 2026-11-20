@@ -14,6 +14,7 @@ async fn assert_large_status(ledger: &dyn RunLedger, run: &RunId) {
         steering::record(
             ledger,
             RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: run.clone(),
                 text: format!(

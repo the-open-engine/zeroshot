@@ -783,6 +783,13 @@
             "$ref": "schema.json#/$defs/SteeringMode",
             "default": "standing"
           }
+        },
+        {
+          "name": "node",
+          "required": false,
+          "schema": {
+            "$ref": "schema.json#/$defs/RunSteerParams/properties/node"
+          }
         }
       ],
       "result": {

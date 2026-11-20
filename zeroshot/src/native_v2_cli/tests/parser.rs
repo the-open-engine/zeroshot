@@ -1190,6 +1190,7 @@ fn steer_parser_requires_exactly_one_text_source() {
         assert_eq!(
             parse_native_v2_args(args(&argv)).assert_value(),
             NativeV2CliCommand::Steer {
+                node: None,
                 run: RunSelector {
                     run_id: RunId::new("run-1"),
                     target: Some("prod".into())
@@ -1205,6 +1206,51 @@ fn steer_parser_requires_exactly_one_text_source() {
         vec!["steer", "run-1", "text", "--text-stdin"],
         vec!["steer", "run-1", "--text-file", "a", "--text-stdin"],
     ] {
+        assert!(parse_native_v2_args(args(&argv)).is_err());
+    }
+}
+
+#[test]
+fn steer_parser_targets_one_agent_node() {
+    let command = parse_native_v2_args(args(&[
+        "steer",
+        "run-1",
+        "--node",
+        "e2e_tester",
+        "direction",
+    ]))
+    .assert_value();
+    assert!(
+        matches!(command, NativeV2CliCommand::Steer { node: Some(node),
+        mode: openengine_cluster_protocol::SteeringMode::Standing, .. }
+        if node.as_str() == "e2e_tester")
+    );
+    let command = parse_native_v2_args(args(&[
+        "steer",
+        "run-1",
+        "--node",
+        "worker",
+        "--mode",
+        "once",
+        "--text-stdin",
+        "--target",
+        "prod",
+    ]))
+    .assert_value();
+    assert!(
+        matches!(command, NativeV2CliCommand::Steer { node: Some(node),
+        mode: openengine_cluster_protocol::SteeringMode::Once, text: SteerText::Stdin, .. }
+        if node.as_str() == "worker")
+    );
+    for options in [
+        vec!["--node", "worker", "--network", "team"],
+        vec!["--network", "team", "--node", "worker"],
+        vec!["--node", "bad/name"],
+        vec!["--node", ""],
+        vec!["--node", "worker", "--node", "other"],
+    ] {
+        let mut argv = vec!["steer", "run-1", "direction"];
+        argv.extend(options);
         assert!(parse_native_v2_args(args(&argv)).is_err());
     }
 }

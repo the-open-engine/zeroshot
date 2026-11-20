@@ -48,6 +48,57 @@ async fn internal_submission_and_oecp_listing_share_the_same_public_run_identity
 }
 
 #[tokio::test]
+async fn steer_node_target_admission_rejects_non_agents_before_recording() {
+    let harness = harness(Behavior::Hang).await;
+    let receipt = submit_test_request(&harness.controller, request(Value::Null))
+        .await
+        .assert_value();
+    harness.driver.wait_started().await;
+    for node in ["unknown", "Worker", "deliver"] {
+        let error = harness
+            .controller
+            .steer(openengine_cluster_protocol::RunSteerParams {
+                run_id: receipt.run_id.clone(),
+                text: "denied".into(),
+                node: Some(NodeName::new(node).assert_value()),
+                mode: Default::default(),
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(error, NativeV2PlatformError::InvalidRequest(_)));
+        assert!(error.to_string().contains("agent"));
+    }
+    assert!(
+        crate::v2_run_ledger::steering::all(harness.controller.ledger.as_ref(), &receipt.run_id)
+            .await
+            .assert_value()
+            .is_empty()
+    );
+    let recorded = harness
+        .controller
+        .steer(openengine_cluster_protocol::RunSteerParams {
+            run_id: receipt.run_id.clone(),
+            text: "worker direction".into(),
+            node: Some(NodeName::new("worker").assert_value()),
+            mode: Default::default(),
+        })
+        .await
+        .assert_value();
+    assert_eq!(
+        recorded.steer.node.as_ref().assert_value().as_str(),
+        "worker"
+    );
+    harness
+        .controller
+        .force(RunForceParams {
+            run_id: receipt.run_id.clone(),
+        })
+        .await
+        .assert_value();
+    terminal(&harness.controller, &receipt.run_id).await;
+}
+
+#[tokio::test]
 async fn steer_target_list_omits_direction_while_status_keeps_bounded_summaries() {
     let harness = harness(Behavior::Hang).await;
     let receipt = submit_test_request(&harness.controller, request(Value::Null))
@@ -60,6 +111,7 @@ async fn steer_target_list_omits_direction_while_status_keeps_bounded_summaries(
             &harness.controller,
             &context,
             openengine_cluster_protocol::RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: receipt.run_id.clone(),
                 text: "Standing direction belongs in status and vector reads".into(),
