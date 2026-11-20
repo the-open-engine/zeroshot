@@ -1,5 +1,125 @@
 use super::*;
 
+#[tokio::test]
+async fn queued_check_rejections_use_complete_raw_enqueue_responses() {
+    let rejected = serde_json::json!({"data":{"enqueuePullRequest":null},"errors":[{
+        "type":"UNPROCESSABLE","path":["enqueuePullRequest"],
+        "message":"Required status check \"Build / Linux (🚀)\" is queued."}]});
+    for token in [
+        "test-token",
+        "queued",
+        "UNPROCESSABLE",
+        "enqueuePullRequest",
+    ] {
+        let mut command = shell("printf '%s' \"$1\"; exit 1");
+        command.args(["fixture", &rejected.to_string()]);
+        let failure = command_json(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token(token),
+            Some("enqueuePullRequest"),
+        )
+        .await
+        .expect_err("queued required check");
+        assert_eq!(
+            failure.rejection,
+            Some(MutationRejection::RequiredCheckQueued)
+        );
+        assert_eq!(failure.error.api_status(), None);
+        assert!(!failure.error.retryable_operation());
+        assert!(!failure.error.to_string().contains(token));
+    }
+
+    let mut cases = Vec::new();
+    for message in [
+        "Required status check \"semantic\" failed.",
+        "Required status check \"\" is queued.",
+        "Required status check \"semantic\" is queued. Policy refused",
+        "Policy refused: Required status check \"semantic\" is queued.",
+    ] {
+        let mut body = rejected.clone();
+        body["errors"][0]["message"] = serde_json::json!(message);
+        cases.push((body, Some(MutationRejection::Policy)));
+    }
+    let mut mixed = rejected.clone();
+    mixed["errors"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "type":"UNPROCESSABLE","path":["enqueuePullRequest"],"message":"Policy refused"
+        }));
+    cases.push((mixed, Some(MutationRejection::Policy)));
+    for field in ["type", "path", "data"] {
+        let mut body = rejected.clone();
+        match field {
+            "type" => body["errors"][0]["type"] = serde_json::json!("FORBIDDEN"),
+            "path" => {
+                body["errors"][0]["path"] =
+                    serde_json::json!(["enqueuePullRequest", "mergeQueueEntry"])
+            }
+            _ => body["data"]["enqueuePullRequest"] = serde_json::json!({"mergeQueueEntry":null}),
+        }
+        cases.push((body, None));
+    }
+    for (body, expected) in cases {
+        let mut command = shell("printf '%s' \"$1\"; exit 1");
+        command.args(["Required status check", &body.to_string()]);
+        let failure = command_json(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token("test-token"),
+            Some("enqueuePullRequest"),
+        )
+        .await
+        .expect_err("nonrecoverable rejection");
+        assert_eq!(failure.rejection, expected, "{body}");
+    }
+    // The same words cannot turn an incomplete or non-enqueue response into a retry.
+    for (source, deadline) in [
+        (
+            "printf '%s' \"$1\"; exec /bin/sleep 30",
+            Duration::from_millis(100),
+        ),
+        (
+            "printf '%s' \"$1\"; /bin/dd if=/dev/zero bs=65536 count=32 2>/dev/null; exit 1",
+            Duration::from_secs(2),
+        ),
+        (
+            "printf '%s' \"$1\"; printf '\\377'; exit 1",
+            Duration::from_secs(2),
+        ),
+    ] {
+        let mut command = shell(source);
+        command.args(["fixture", &rejected.to_string()]);
+        let failure = command_json(
+            command,
+            deadline,
+            SourceDeliveryCredential::token("test-token"),
+            Some("enqueuePullRequest"),
+        )
+        .await
+        .expect_err("incomplete response");
+        assert_eq!(failure.rejection, None);
+    }
+    let mut other = rejected.clone();
+    other["data"] = serde_json::json!({"mergePullRequest":null});
+    other["errors"][0]["path"] = serde_json::json!(["mergePullRequest"]);
+    let mut command = shell("printf '%s' \"$1\"; exit 1");
+    command.args(["fixture", &other.to_string()]);
+    assert_eq!(
+        command_json(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token("test-token"),
+            Some("mergePullRequest")
+        )
+        .await
+        .expect_err("different mutation")
+        .rejection,
+        Some(MutationRejection::Policy)
+    );
+}
+
 fn shell(source: &str) -> Command {
     let mut command = Command::new("/bin/sh");
     command

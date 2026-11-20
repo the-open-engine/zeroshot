@@ -213,6 +213,7 @@ pub(super) async fn command_status(
 pub(super) enum MutationRejection {
     Policy,
     Conversation,
+    RequiredCheckQueued,
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +326,17 @@ fn rejected_mutation(
         .all(|error| error["message"].as_str().is_some_and(conversation_message));
     Some(if conversations {
         MutationRejection::Conversation
+    } else if mutation == "enqueuePullRequest"
+        && value["errors"].as_array()?.iter().all(|error| {
+            error["message"].as_str().is_some_and(|message| {
+                message
+                    .strip_prefix("Required status check \"")
+                    .and_then(|name| name.strip_suffix("\" is queued."))
+                    .is_some_and(|name| !name.is_empty())
+            })
+        })
+    {
+        MutationRejection::RequiredCheckQueued
     } else {
         MutationRejection::Policy
     })

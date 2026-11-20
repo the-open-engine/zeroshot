@@ -81,7 +81,8 @@ pub(super) async fn enqueue(
             || effect.settled.as_ref().is_some_and(|result| {
                 result.is_ok()
                     || matches!(result, Err(failure) if failure.error.cleanup_unconfirmed()
-                    || uncertain_submission(&failure.error) && !failure.error.retryable_operation())
+                    || uncertain_submission(&failure.error) && !failure.error.retryable_operation()
+                        && failure.rejection != Some(api::MutationRejection::RequiredCheckQueued))
             })
         {
             return effect.settle().await.map(|_| ());
