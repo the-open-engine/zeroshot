@@ -1,6 +1,9 @@
 //! The allocator owns one hook task through both preparation and runtime cleanup.
 mod process;
 
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 

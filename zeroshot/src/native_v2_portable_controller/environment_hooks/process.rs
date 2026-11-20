@@ -17,6 +17,9 @@ use crate::native_v2_platform::{CapsuleAllocationUnavailable, CapsuleCleanupUnav
 
 use super::{HookStop, PREPARATION_PHASE_TIMEOUT};
 
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests;
+
 const BASH: &str = "/bin/bash";
 // The wrapper stays alive to keep native services under the process supervisor's ownership. The
 // authored Bash sees null stdin, leaving the wrapper's lifetime channel exclusively to the host.
