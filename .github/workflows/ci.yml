@@ -487,6 +487,10 @@ jobs:
         run: |
           cargo test --locked --package zeroshot --lib --features ui -- native_v2_cli::local::backend::discard_tests workspace_discard_rejects_redirected_roots interrupted_delivery_rechecks
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable discard_workspace_tests
+      - name: Run macOS private checkpoint diagnostic and capture log regressions
+        run: |
+          cargo test --locked --package zeroshot --lib --features ui -- native_v2_supervisor::checkpoints::restic::tests native_v2_supervisor::tests::checkpoint_tests
+          cargo test --locked --package zeroshot --features ui --test native_v2_cli_local fixture::restic_diagnostics
       - name: Run native macOS controller termination regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unix_controller

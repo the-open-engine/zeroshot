@@ -89,6 +89,23 @@ struct CapsuleBuildRequest<'a> {
     retained_restore: Option<(&'a RunId, CheckpointRestoreSelection)>,
 }
 
+impl CapsuleBuildRequest<'_> {
+    fn checkpoint_redactions(&self) -> Vec<String> {
+        let connections = self.preparation.environment.bootstrap_values();
+        let git_secret = self.git_credentials.map(|credentials| match credentials {
+            GitTransportCredentials::Https { password, .. } => password.as_str(),
+            GitTransportCredentials::Ssh { private_key, .. } => private_key.as_str(),
+        });
+        crate::native_v2_capsule::provider_process::redaction_values(
+            connections
+                .values()
+                .flat_map(|values| values.as_map().values().map(String::as_str))
+                .chain(self.github_token)
+                .chain(git_secret),
+        )
+    }
+}
+
 struct WorkspacePreparation<'a> {
     run_id: &'a RunId,
     checkpoint_source: Option<&'a RunId>,
@@ -97,6 +114,7 @@ struct WorkspacePreparation<'a> {
     admitted: &'a AdmittedRun,
     state: &'a ProductionCapsuleState,
     process_pool: HostedProcessPool,
+    redactions: &'a [String],
 }
 
 struct CapsuleBuildPaths {
@@ -291,6 +309,7 @@ impl ProductionCapsuleAllocator {
         pending: PendingCapsule<'_>,
         request: &CapsuleBuildRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let redactions = request.checkpoint_redactions();
         let paths = CapsuleBuildPaths::new(&self.config.storage_root, pending.run_id);
         if let Some((source, selection)) = &request.retained_restore {
             // Recorded before preparation can fail, so that a restart of this run finds it.
@@ -323,7 +342,11 @@ impl ProductionCapsuleAllocator {
         .await?;
         let restored_seed = if let Some((source_run_id, selection)) = &request.retained_restore {
             let seed = self
-                .restore_retained_workspace(source_run_id, selection.clone(), &filesystem.workspace)
+                .restore_retained_workspace(
+                    (source_run_id, selection.clone()),
+                    &filesystem.workspace,
+                    &redactions,
+                )
                 .await?;
             transfer_retained_workspace_to_writer(&filesystem.workspace, active_process_pool)?;
             seed
@@ -341,6 +364,7 @@ impl ProductionCapsuleAllocator {
                 admitted: request.admitted,
                 state: &state,
                 process_pool: active_process_pool,
+                redactions: &redactions,
             })
             .await?;
         self.install_context_sources(request, &filesystem, active_process_pool)
@@ -562,6 +586,7 @@ impl ProductionCapsuleAllocator {
                     )),
                 )
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+                .with_redactions(request.redactions.to_vec())
                 .with_conversation_restore(request.state.conversation_restore.get().cloned()),
             ),
             execution_seed: Vec::new(),
@@ -664,9 +689,9 @@ impl ProductionCapsuleAllocator {
 
     async fn restore_retained_workspace(
         &self,
-        source_run_id: &RunId,
-        selection: CheckpointRestoreSelection,
+        (source_run_id, selection): (&RunId, CheckpointRestoreSelection),
         workspace: &Path,
+        redactions: &[String],
     ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, CapsuleAllocationUnavailable> {
         if selection == CheckpointRestoreSelection::Continue {
             return Ok(Vec::new());
@@ -679,12 +704,16 @@ impl ProductionCapsuleAllocator {
             return Ok(Vec::new());
         }
         self.validate_retained_checkpoint(source_run_id, selection.clone())?;
-        checkpoints::restore(
+        checkpoints::restore_with(
             &CheckpointRestore {
                 directory,
                 selection,
             },
             workspace,
+            checkpoints::RestoreOptions {
+                redactions,
+                ..Default::default()
+            },
         )
         .await
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)

@@ -7,6 +7,9 @@ use serde_json::{Value, json};
 
 mod fixture {
     include!("native_v2_cli_local/fixture.rs");
+    mod restic_diagnostics {
+        include!("native_v2_cli_local/restic_diagnostics.rs");
+    }
     mod requests {
         include!("native_v2_cli_local/requests.rs");
     }

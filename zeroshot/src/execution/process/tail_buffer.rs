@@ -1,16 +1,16 @@
-pub(super) struct TailBuffer {
+pub(crate) struct TailBuffer {
     bytes: Vec<u8>,
     capacity: usize,
     truncated: bool,
 }
 
-pub(super) struct TailSnapshot {
+pub(crate) struct TailSnapshot {
     pub bytes: Vec<u8>,
     pub truncated: bool,
 }
 
 impl TailBuffer {
-    pub(super) fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         Self {
             bytes: Vec::with_capacity(capacity),
             capacity,
@@ -18,7 +18,7 @@ impl TailBuffer {
         }
     }
 
-    pub(super) fn append(&mut self, value: &[u8]) {
+    pub(crate) fn append(&mut self, value: &[u8]) {
         if value.len() >= self.capacity {
             self.truncated |= !self.bytes.is_empty() || value.len() > self.capacity;
             self.bytes.clear();
@@ -37,7 +37,7 @@ impl TailBuffer {
         self.bytes.extend_from_slice(value);
     }
 
-    pub(super) fn snapshot(&self) -> TailSnapshot {
+    pub(crate) fn snapshot(&self) -> TailSnapshot {
         TailSnapshot {
             bytes: self.bytes.clone(),
             truncated: self.truncated,

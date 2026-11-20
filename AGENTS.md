@@ -254,6 +254,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for a node start record, including input and bookkeeping. Local submissions apply the same
   admitted-definition check before creating run storage or a controller. Oversized node starts
   fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
+- Restic failures retain at most 4 KiB of redacted, control-safe stderr in owner-private reports
+  under the checkpoint repository's `diagnostics/`; public errors carry only a relative report
+  location. Capture and restore use the host's bootstrap/connection redactions, independently of
+  the cleared controller environment, plus the repository password. Reuse the shared process tail
+  buffer and private shell-value redaction rules. The supervisor attaches its run-log sink to
+  checkpoint stores; log each new capture's start and successful completion. Snapshot reuse
+  adds no capture messages.
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
 - The reducer inventories error selectors across all choice, loop and first-join guards once per

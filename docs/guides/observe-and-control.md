@@ -332,6 +332,9 @@ A local checkpoint resume restores the snapshot before any agent starts. That pr
 up to 10 minutes. For larger workspaces or slower disks, set `ZEROSHOT_PREPARATION_TIMEOUT` to a
 whole number of seconds from 1 to 86400 before `zeroshot resume`. When a restore fails, or its
 extraction reaches that deadline, the error names the step that stopped and its elapsed time.
+Restic operations normally have a 15-minute limit each. During restore, the remaining preparation
+deadline replaces that limit, including when it allows more than 15 minutes; it is shared across
+the preparation work rather than restarted for each operation.
 Replacing the workspace files, once started, is allowed to finish. If it is still running 30 seconds
 after the deadline, the resume is stopped with an error that names the deadline. Either way the run
 stays recoverable.
@@ -346,8 +349,16 @@ snapshot on a plain resume; complete such an interrupted restore with
 `zeroshot resume RUN_ID --discard-workspace-changes`, which installs the same snapshot again.
 
 Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
-storage and advertise `openengine.workspace-checkpoints/v1`. They retain that repository only for a
-failed recovery lineage and delete it after a successful run. Force-stopping a local run also
+storage and advertise `openengine.workspace-checkpoints/v1`. Run logs mark the start and completion
+of each new workspace capture; reusing an unchanged snapshot adds no capture messages. Restic
+failures keep the operation and failure stage or exit status in the ordinary error. When available,
+that error points to an owner-private report under `diagnostics/` in the checkpoint repository.
+Reports retain at most 4 KiB of redacted, control-safe stderr, including output received before a
+timeout. Child output stays out of run logs and hosted responses. Local and direct-target owners
+can read the report on the machine holding the repository.
+
+They retain that repository only for a failed recovery lineage and delete it after a successful
+run. Force-stopping a local run also
 deletes the repository, together with the checkpoints listed by every run in its recovery lineage,
 so neither the original run nor its successors list checkpoints that can no longer be restored.
 Local checkpoints never expire automatically. To free the space kept by a finished failed local

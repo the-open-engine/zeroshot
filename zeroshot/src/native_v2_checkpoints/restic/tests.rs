@@ -95,6 +95,8 @@ async fn restic_discovery_and_child_failures_are_bounded_and_sanitized() {
     assert!(error.to_string().starts_with("restic cat failed ("));
     assert!(error.to_string().contains("19"));
     assert!(!error.to_string().contains("private child diagnostic"));
+    let report = saved_report(&repository, &error);
+    assert!(report.contains("private child diagnostic"));
 
     std::fs::remove_file(&repository.program.executable).assert_value();
     let error = repository
@@ -103,6 +105,148 @@ async fn restic_discovery_and_child_failures_are_bounded_and_sanitized() {
         .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::NotFound);
     assert_eq!(error.to_string(), "restic cat start failed (NotFound)");
+}
+
+fn saved_report(repository: &Repository, error: &io::Error) -> String {
+    let error = error.to_string();
+    let location = error
+        .split_once("; private diagnostic: ")
+        .expect("failure must name its private diagnostic")
+        .1
+        .strip_suffix(" in checkpoint repository")
+        .unwrap();
+    let path = Path::new(location);
+    assert!(path.is_relative());
+    assert_eq!(path.parent(), Some(Path::new("diagnostics")));
+    let path = repository.root.join(path);
+    let mut file = platform::private_file(&path, FileAccess::Read).assert_value();
+    let mut report = String::new();
+    file.read_to_string(&mut report).assert_value();
+    assert!(report.len() <= MAX_STDERR_BYTES);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
+    report
+}
+
+#[tokio::test]
+async fn private_stderr_report_drains_bounds_redacts_and_sanitizes() {
+    // Force an overlapping, short ambient redaction in an isolated process; never mutate the
+    // test runner's environment while other checkpoint tests are using it.
+    const PROBE: &str = "ZEROSHOT_RESTIC_PRIVATE_REPORT_PROBE";
+    if std::env::var(PROBE).as_deref() != Ok("1") {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "native_v2_supervisor::checkpoints::restic::tests::private_stderr_report_drains_bounds_redacts_and_sanitizes",
+                "--nocapture",
+            ])
+            .env(PROBE, "1")
+            .env("NODE_USE_ENV_PROXY", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        return;
+    }
+    let root = tempfile::tempdir().assert_value();
+    let repository = Repository::new(
+        ResticProgram::fake(root.path()).assert_value(),
+        root.path().join("state"),
+    )
+    .with_redactions(vec!["bootstrap-only-credential".to_owned()]);
+    repository.prepare_paths().assert_value();
+    std::fs::write(
+        repository.password_path(),
+        format!("{}\n", "a1".repeat(PASSWORD_BYTES)),
+    )
+    .unwrap();
+    let password = std::fs::read_to_string(repository.password_path()).assert_value();
+    let password = password.trim();
+    let mut bytes = vec![b'x'; MAX_STDERR_BYTES * 1_000];
+    bytes.extend_from_slice(
+        format!("\nTHE REASON: {password} bootstrap-only-credential\x1b[31m\r\0\n").as_bytes(),
+    );
+    let expected_tail = bytes[bytes.len() - MAX_STDERR_BYTES..].to_vec();
+    let mut tail = TailBuffer::new(MAX_STDERR_BYTES);
+    retain_stderr(std::io::Cursor::new(bytes), &mut tail)
+        .await
+        .assert_value();
+    assert_eq!(tail.snapshot().bytes, expected_tail);
+    assert!(tail.snapshot().truncated);
+    let path = repository
+        .save_failure(&tail)
+        .expect("private report saved");
+    let error = io::Error::other(format!(
+        "failed; private diagnostic: {} in checkpoint repository",
+        path.display()
+    ));
+    let report = saved_report(&repository, &error);
+    assert!(report.contains("THE REASON: [REDACTED]"));
+    assert!(!report.contains(password));
+    assert!(!report.contains("bootstrap-only-credential"));
+    assert!(
+        !report
+            .chars()
+            .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\t'))
+    );
+
+    // A retained tail can start in the middle of a credential.
+    let mut tail = TailBuffer::new(MAX_STDERR_BYTES);
+    tail.append(password.as_bytes());
+    tail.append(&vec![b'x'; MAX_STDERR_BYTES - password.len() + 7]);
+    let path = repository.save_failure(&tail).unwrap();
+    let report = std::fs::read_to_string(repository.root.join(path)).unwrap();
+    assert!(!report.contains(password));
+    assert!(
+        report.starts_with("stderr (truncated tail): [REDACTED]"),
+        "unexpected redacted framing: {:?}",
+        report.chars().take(100).collect::<String>()
+    );
+    assert!(!report.contains(&password[7..]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exit_three_retains_cause_and_failed_diagnostic_write_preserves_failure() {
+    for writable in [true, false] {
+        let root = tempfile::tempdir().assert_value();
+        let repository = scripted_repository(
+            root.path(),
+            "#!/bin/sh\nprintf '%s' 'recognizable Restic cause' >&2\nexit 3\n",
+        );
+        repository.prepare_paths().assert_value();
+        if !writable {
+            std::fs::write(repository.root.join("diagnostics"), "blocked").unwrap();
+        }
+        let error = repository
+            .run(root.path(), &arguments(["backup"]))
+            .await
+            .unwrap_err();
+        let public = error.to_string();
+        assert!(public.starts_with("restic backup failed (exit status: 3)"));
+        assert!(!public.contains("recognizable Restic cause"));
+        assert!(!public.contains(&repository.root.display().to_string()));
+        if writable {
+            assert!(saved_report(&repository, &error).contains("recognizable Restic cause"));
+        } else {
+            assert_eq!(public, "restic backup failed (exit status: 3)");
+        }
+    }
 }
 
 #[test]
@@ -299,6 +443,7 @@ exec /usr/bin/awk 'BEGIN {{
     let repository = scripted_repository(root.path(), &script);
     let result = repository.backup(root.path(), None).await.assert_value();
     assert_eq!(result.as_str(), id);
+    assert!(!repository.root.join("diagnostics").exists());
 }
 
 #[cfg(unix)]
@@ -320,7 +465,13 @@ async fn timed_out_child_is_reaped_and_timeout_does_not_leak_stderr() {
         .await
         .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-    assert_eq!(error.to_string(), "restic backup timed out");
+    assert!(
+        error
+            .to_string()
+            .starts_with("restic backup timed out; private diagnostic: ")
+    );
+    assert!(!error.to_string().contains("private timeout credential"));
+    assert!(saved_report(&repository, &error).contains("private timeout credential"));
     let pid = std::fs::read_to_string(pid).assert_value();
     let result = std::process::Command::new("/bin/kill")
         .args(["-0", &pid])
@@ -330,4 +481,66 @@ async fn timed_out_child_is_reaped_and_timeout_does_not_leak_stderr() {
         !result.success(),
         "Restic child still running after timeout"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cancelled_child_keeps_confirmed_stop_and_drains_its_tree() {
+    let root = tempfile::tempdir().assert_value();
+    let pid_path = root.path().join("pid");
+    let script = format!(
+        "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nprintf '%s' 'private cancellation cause' >&2\nexec /bin/sleep 60\n",
+        pid_path.display()
+    );
+    let (stop, stopping) = tokio::sync::watch::channel(false);
+    let repository = scripted_repository(root.path(), &script).with_stop_request(Some(stopping));
+    let args = arguments(["backup"]);
+    let operation = repository.run_with_timeout(root.path(), &args, Duration::from_secs(5));
+    tokio::pin!(operation);
+    tokio::select! {
+        result = &mut operation => panic!("operation ended before cancellation: {result:?}"),
+        () = async {
+            while !pid_path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        } => {}
+    }
+    stop.send_replace(true);
+    let error = super::super::CheckpointError(operation.await.unwrap_err());
+    assert!(error.was_stopped());
+    assert_eq!(
+        error.to_string(),
+        "workspace checkpoint is unavailable: controller is stopping"
+    );
+    let pid: libc::pid_t = std::fs::read_to_string(pid_path).unwrap().parse().unwrap();
+    assert_ne!(unsafe { libc::kill(pid, 0) }, 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exit_three_keeps_private_cause_regression() {
+    let root = tempfile::tempdir().assert_value();
+    let repository = scripted_repository(
+        root.path(),
+        "#!/bin/sh\nprintf '%s' 'recognizable Restic cause' >&2\nexit 3\n",
+    );
+    let error = repository
+        .run(root.path(), &arguments(["backup"]))
+        .await
+        .unwrap_err();
+    let public = error.to_string();
+    assert!(public.starts_with("restic backup failed (exit status: 3)"));
+    assert!(!public.contains("recognizable Restic cause"));
+    assert!(
+        public.contains("private diagnostic: diagnostics/"),
+        "{public}"
+    );
+    let reports = std::fs::read_dir(repository.root.join("diagnostics"))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(reports.len(), 1);
+    let report = std::fs::read_to_string(reports[0].path()).unwrap();
+    assert!(report.len() <= 4096);
+    assert!(report.contains("recognizable Restic cause"));
 }
