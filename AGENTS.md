@@ -1598,7 +1598,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   empty snapshot cannot authorize repair. A complete GraphQL `UNPROCESSABLE` rejection rooted exactly
   at a null enqueue mutation adds no uncertainty; partial, nested, truncated, or unconfirmed responses
   remain unknown. Classification uses protocol bytes before credential redaction and never invents
-  an HTTP status. Permanent forge policy failures remain execution errors. Before a merge
+  an HTTP status. A definitive enqueue rejection reporting only queued required checks returns
+  through pending-check polling; fresh exact-head policy validation permits a new submission on
+  the same authority while retaining earlier uncertainty and successful admissions. Permanent
+  forge policy failures remain execution errors. Before a merge
   delivery returns repair, refusal, error, or cancellation, trusted authority confirms withdrawal
   of queued/auto-merge effects or the exact already-merged revision. Failed withdrawal never
   authorizes agent repair. Authorities that schedule deferred merges must override
