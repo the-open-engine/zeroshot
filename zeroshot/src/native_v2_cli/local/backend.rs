@@ -5,6 +5,31 @@ use crate::native_v2_supervisor::checkpoints::{
 use crate::v2_run_ledger::RunLedgerError;
 use openengine_cluster_protocol::{NOT_FOUND, RunResumeFrom};
 
+impl LocalCliBackend {
+    pub(super) async fn controller_cleanup_request<T>(
+        &self,
+        run_id: &RunId,
+        operation: &str,
+        request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
+    ) -> Result<T, NativeV2CliError> {
+        let has_teardown = self.read_recovery_document(run_id).is_ok_and(|recovery| {
+            recovery
+                .submission
+                .environment
+                .and_then(|environment| environment.teardown)
+                .is_some_and(|script| !script.trim().is_empty())
+        });
+        let budget = if has_teardown {
+            DEFAULT_READY_TIMEOUT
+                + crate::native_v2_portable_controller::TEARDOWN_TIMEOUT
+                + CONTROLLER_STOP_GRACE
+        } else {
+            DEFAULT_READY_TIMEOUT
+        };
+        request_with_budget(run_id, operation, budget, request).await
+    }
+}
+
 /// Chooses the snapshot a local successor restores, if any. Plain resume keeps the user-owned
 /// checkout as it is. Replacing it needs `--discard-workspace-changes`: to roll back to a selected
 /// checkpoint, or to complete an interrupted restore of the latest snapshot, which earlier plain
@@ -852,7 +877,7 @@ impl NativeV2CliBackend for LocalCliBackend {
             });
         }
         let transport = self.connect_run(&params.run_id, false).await?;
-        controller_request(
+        self.controller_cleanup_request(
             &params.run_id,
             "suspend (it may still take effect; check status)",
             async {

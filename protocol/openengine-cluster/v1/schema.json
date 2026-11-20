@@ -6768,11 +6768,11 @@
     },
     "RuntimeEnvironment": {
       "additionalProperties": false,
-      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public run configuration, never secrets.",
+      "description": "Setup and startup prepare each attempt before graph execution. Local execution can also run\nteardown during orderly cleanup. Values here are public run configuration, never secrets.",
       "properties": {
         "connections": {
           "$ref": "#/$defs/DeclaredConnections",
-          "description": "Exact connection fields available to setup and startup, separate from node credentials."
+          "description": "Exact connection fields available to environment scripts, separate from node credentials."
         },
         "contextRepositories": {
           "description": "Read-only repositories pinned by the submitting client, in checkout order.",
@@ -6789,6 +6789,13 @@
           ]
         },
         "startup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teardown": {
+          "description": "Local-only cleanup script, run after preparation begins even if the attempt fails.",
           "type": [
             "string",
             "null"

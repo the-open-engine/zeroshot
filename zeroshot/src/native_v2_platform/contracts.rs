@@ -195,6 +195,11 @@ pub trait ExclusiveControllerClaim: Send + Sync {}
 
 #[async_trait]
 pub trait CapsuleAllocator: Send + Sync {
+    /// Whether the allocator runs an environment teardown script as part of cleanup.
+    fn supports_environment_teardown(&self) -> bool {
+        false
+    }
+
     /// Independent opt-in for human requests; requires suspension-capable checkpoint storage.
     fn supports_request_ask(&self) -> bool {
         false

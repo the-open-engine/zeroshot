@@ -2,6 +2,8 @@
 
 pub(crate) mod availability;
 mod controller;
+mod environment_hooks;
+pub(crate) use environment_hooks::TEARDOWN_TIMEOUT;
 mod engine;
 mod lease;
 pub(crate) mod process;

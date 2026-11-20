@@ -26,6 +26,7 @@ use crate::v2_run_ledger::RunLedger;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 
 use super::engine::PortableRuntime;
+use super::environment_hooks::{EnvironmentHooks, HookCleanup};
 use super::process::PortableControllerServer;
 use super::process::{
     clear_stale_endpoint, require_absolute, validate_existing_ledger_path,
@@ -165,12 +166,18 @@ impl PortableRunController {
         prepared.stopping = stopping;
         let prepared_runtime =
             prepare_runtime(&prepared, &bootstrap, runtime_factory, preparation_deadline).await?;
-        let allocator = Arc::new(SingleRunAllocator::new(
+        let mut allocator = SingleRunAllocator::new(
             bootstrap.run_id.clone(),
             prepared_runtime.runtime,
             prepared.lease.clone(),
             prepared.paths.storage().join("checkpoints"),
-        ));
+        );
+        allocator.hooks = EnvironmentHooks::for_run(
+            &bootstrap,
+            prepared_runtime.workspace_identity.as_ref(),
+            prepared_runtime.workspace_lease.as_ref(),
+        );
+        let allocator = Arc::new(allocator);
         let inner = Arc::new(
             NativeV2PlatformController::new_with_delivery_policy(
                 prepared.ledger.clone(),
@@ -373,6 +380,8 @@ async fn prepare_controller_start(
     bootstrap: &PortableControllerBootstrap,
 ) -> Result<PreparedControllerStart, PortableControllerError> {
     require_absolute(&bootstrap.workspace)?;
+    crate::native_v2_local::validate_local_environment(bootstrap.submission.environment.as_ref())
+        .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     let harnesses = crate::harnesses::HarnessRegistry::local();
     let sizes = crate::native_v2_hosting::host_run_sizes();
     let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
@@ -780,6 +789,7 @@ struct SingleRunAllocator {
     checkpoint_directory: PathBuf,
     run_id: RunId,
     runtime: Mutex<Option<PortableRuntime>>,
+    hooks: Option<Arc<EnvironmentHooks>>,
     lease: Arc<ControllerLease>,
     loss_sender: watch::Sender<bool>,
     loss_receiver: watch::Receiver<bool>,
@@ -797,6 +807,7 @@ impl SingleRunAllocator {
             checkpoint_directory,
             run_id,
             runtime: Mutex::new(runtime),
+            hooks: None,
             lease,
             loss_sender,
             loss_receiver,
@@ -816,6 +827,10 @@ impl SingleRunAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SingleRunAllocator {
+    fn supports_environment_teardown(&self) -> bool {
+        true
+    }
+
     fn supports_request_ask(&self) -> bool {
         true
     }
@@ -838,12 +853,22 @@ impl CapsuleAllocator for SingleRunAllocator {
         request: crate::native_v2_platform::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         self.require_run(request.run_id)?;
+        if let Some(hooks) = &self.hooks {
+            hooks.prepare(&request, self.loss_receiver.clone()).await?;
+        }
         let runtime = self
             .runtime
             .lock()
             .await
             .take()
             .ok_or(CapsuleAllocationUnavailable::Runtime)?;
+        let cleanup = match &self.hooks {
+            Some(hooks) => Arc::new(HookCleanup {
+                hooks: hooks.clone(),
+                inner: runtime.cleanup,
+            }),
+            None => runtime.cleanup,
+        };
         Ok(AllocatedCapsule {
             node_instance_floor: runtime.node_instance_floor,
             checkpoints: runtime.checkpoints,
@@ -851,7 +876,7 @@ impl CapsuleAllocator for SingleRunAllocator {
             vector_seed: runtime.vector_seed,
             runner: runtime.runner,
             loss: self.loss_receiver.clone(),
-            cleanup: runtime.cleanup,
+            cleanup,
         })
     }
 
@@ -872,6 +897,9 @@ impl CapsuleAllocator for SingleRunAllocator {
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         if run_id != &self.run_id {
             return Err(CapsuleCleanupUnavailable);
+        }
+        if let Some(hooks) = &self.hooks {
+            hooks.cleanup().await?;
         }
         if let Some(runtime) = self.runtime.lock().await.take() {
             runtime.cleanup.destroy_or_confirm_absent(exit).await?;
