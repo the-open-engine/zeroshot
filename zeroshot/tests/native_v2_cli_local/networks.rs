@@ -325,20 +325,11 @@ async fn recorded_network_publications(
     }
 }
 
-fn assert_network_publication(
-    steer: &Value,
-    text: &str,
-    mode: &str,
-    networks: &[&str],
-    origin: &Value,
-) {
+fn assert_network_publication(steer: &Value, text: &str, mode: &str, network: Value) {
     assert_eq!(steer["excerpt"], text);
     assert_eq!(steer["textBytes"], text.len());
     assert_eq!(steer["mode"], mode);
-    assert_eq!(
-        steer["network"],
-        json!({"networks": networks, "origin": origin})
-    );
+    assert_eq!(steer["network"], network);
 }
 
 async fn confirm_sender_publications(
@@ -358,7 +349,12 @@ async fn confirm_sender_publications(
             "identity",
         ))
         .assert_value();
-        assert_network_publication(&published[index], text, mode, networks, &origin);
+        assert_network_publication(
+            &published[index],
+            text,
+            mode,
+            json!({"networks": networks, "origin": origin}),
+        );
         fs::write(
             fixture
                 .repository
@@ -501,8 +497,7 @@ async fn confirm_mapped_publications(fixture: &LocalFixture, run: &str) -> Vec<V
                 &published[published.len() - 1],
                 &text,
                 mode,
-                &["alpha", "beta"],
-                &identity,
+                json!({"networks": ["alpha", "beta"], "origin": identity}),
             );
         }
     }
