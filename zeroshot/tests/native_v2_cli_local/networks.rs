@@ -311,12 +311,11 @@ async fn confirm_sender_publications(
     fixture: &LocalFixture,
     run: &str,
     iteration: u64,
-    networks: &[&str],
-    expected: &[(&str, &str)],
+    expected: &[(&str, &str, &[&str])],
 ) {
     // The broker can lose a response while the durable write succeeds. Release the sender
     // only after observing each intended record, without requesting another publication.
-    for (index, &(mode, text)) in expected.iter().enumerate() {
+    for (index, &(mode, text, networks)) in expected.iter().enumerate() {
         let published = recorded_network_publications(fixture, run, index + 1).await;
         let origin: Value = serde_json::from_str(&network_capture(
             fixture,
@@ -339,12 +338,12 @@ async fn confirm_sender_publications(
 }
 
 async fn confirm_sequential_publications(fixture: &LocalFixture, run: &str, iteration: u64) {
+    let networks = ["alpha", "beta"];
     confirm_sender_publications(
         fixture,
         run,
         iteration,
-        &["alpha", "beta"],
-        &[("once", ONCE), ("standing", STANDING)],
+        &[("once", ONCE, &networks), ("standing", STANDING, &networks)],
     )
     .await;
 }

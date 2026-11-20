@@ -194,8 +194,7 @@ async fn submit_authority_run(fixture: &LocalFixture) -> String {
         fixture,
         &run,
         0,
-        &["alpha"],
-        &[("once", "authorized-network-marker")],
+        &[("once", "authorized-network-marker", &["alpha"])],
     )
     .await;
     network_wait(fixture, &run, "authority-held").await;
