@@ -1307,6 +1307,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#wire-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wire compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#discovery-and-sizes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2315,6 +2326,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#wire-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wire compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#discovery-and-sizes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2463,6 +2485,22 @@
 
 <h1 id="target-runtime-contracts">Target runtime contracts<a class="headerlink" href="#target-runtime-contracts" title="Permanent link">&para;</a></h1>
 <p><a href="../../concepts/targets/">Targets</a> covers choosing and connecting a target.</p>
+<h2 id="wire-compatibility">Wire compatibility<a class="headerlink" href="#wire-compatibility" title="Permanent link">&para;</a></h2>
+<p>Clients and targets must implement the same current wire contract. OECP initialization requires
+<code>openengine.cluster/v2</code>; target discovery requires <code>zeroshot.native-v2-target/v3</code>; hosted run
+observation requires <code>zeroshot.hosted-runs/v2</code>. These are wire identifiers, independent of package
+versions. The discovery URL, HTTP routes and JSON-RPC method names are unchanged.</p>
+<p>An incompatible client or target stops at discovery or initialization, before submitting or
+observing a run. Upgrade the Zeroshot client and target together to releases implementing these
+identifiers. Hosted gateway operators must update the gateway's discovery and protocol dependencies
+as part of the same rollout. An incompatibility is final for that operation: submissions are not
+automatically retried. Existing runs keep executing and compatible clients can observe them.</p>
+<p>This contract retains active execution <code>startedAt</code> and watch notification <code>recordedAt</code> as Unix
+milliseconds when known. Historical unknown times remain omitted. Released v16.0.0 clients use the
+previous contract and receive an early incompatibility error; they cannot observe current targets.
+Python users must upgrade the <code>the-open-engine-zeroshot</code> wheel, which carries the native client.
+Updating Python projection code alone does not upgrade its wire reader. MCP tool definitions and shared skills do not change;
+services using a native client must upgrade that client with their target.</p>
 <h2 id="discovery-and-sizes">Discovery and sizes<a class="headerlink" href="#discovery-and-sizes" title="Permanent link">&para;</a></h2>
 <p>Targets advertise their enabled harness/provider pairs through the
 <code>openengine.runtime-harnesses/v1</code> discovery extension. The CLI checks every selected lane before
@@ -2654,7 +2692,7 @@ outer discovery extension alongside the existing <code>hosted_runs</code> extens
 </code></pre></div>
 <p><code>TargetWorkspaceExportDiscovery</code> is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
-<code>zeroshot.hosted-runs/v1</code> or <code>openengine.hosted-workspace-recovery/v1</code>. Export requires the exact
+<code>zeroshot.hosted-runs/v2</code> or <code>openengine.hosted-workspace-recovery/v1</code>. Export requires the exact
 kind above; an absent or unfamiliar kind disables it without a fallback operation.</p>
 <p>The route uses the same-origin <code>hosted_runs.base_url</code>, including any installation path prefix,
 just like hosted recovery routes. It must contain exactly one <code>{run_id}</code> path segment, no other
@@ -2703,7 +2741,7 @@ contract, not a new OECP method. The generated protocol schema includes its requ
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-11">11 November 2026</time>
+    Last updated <time datetime="2026-11-20">20 November 2026</time>
   </span>
 
     
