@@ -418,28 +418,31 @@ impl Repository {
                 format!("{error}; its process cleanup is unconfirmed"),
             ))
         };
-        outcome.map_err(|error| {
-            // Preserve the typed confirmed-stop marker used by the supervisor.
-            if error
-                .get_ref()
-                .is_some_and(|cause| cause.is::<super::CheckpointStopped>())
-            {
-                return error;
-            }
-            match self.save_failure(&stderr_tail) {
-                Some(path) => io::Error::new(
-                    error.kind(),
-                    format!(
-                        "{error}; private diagnostic: {} in checkpoint repository",
-                        path.display()
-                    ),
+        let error = match outcome {
+            Ok(output) => return Ok(output),
+            Err(error) => error,
+        };
+        // Preserve the typed confirmed-stop marker used by the supervisor.
+        if error
+            .get_ref()
+            .is_some_and(|cause| cause.is::<super::CheckpointStopped>())
+        {
+            return Err(error);
+        }
+        let report = self.save_failure(&stderr_tail).await;
+        Err(match report {
+            Some(path) => io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; private diagnostic: {} in checkpoint repository",
+                    path.display()
                 ),
-                None => error,
-            }
+            ),
+            None => error,
         })
     }
 
-    fn save_failure(&self, tail: &TailBuffer) -> Option<PathBuf> {
+    async fn save_failure(&self, tail: &TailBuffer) -> Option<PathBuf> {
         let tail = tail.snapshot();
         if tail.bytes.is_empty() {
             return None;
@@ -479,15 +482,23 @@ impl Repository {
         let relative =
             PathBuf::from("diagnostics").join(format!("restic-{}.txt", uuid::Uuid::now_v7()));
         let path = self.root.join(&relative);
-        let result = (|| {
-            let mut file = platform::private_file(&path, FileAccess::CreateNew)?;
-            file.write_all(report.as_bytes())?;
-            file.sync_all()
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&path);
-            return None;
+        let file = platform::private_file(&path, FileAccess::CreateNew).ok()?;
+        let temporary = tempfile::TempPath::try_from_path(path).ok()?;
+        let temporary = tempfile::NamedTempFile::from_parts(file, temporary);
+        let mut writer = temporary.as_file().try_clone().ok()?;
+        // Freeze redactions and open the private report while this future still owns storage.
+        // On cancellation its guard unlinks the file; detached writes use only the open handle
+        // and cannot reread deleted credentials or recreate a discarded repository.
+        let writing = tokio::task::spawn_blocking(move || {
+            writer.write_all(report.as_bytes())?;
+            writer.sync_all()
+        });
+        tokio::select! {
+            result = writing => result.ok()?.ok()?,
+            // Reporting is optional: a late stop keeps the original operation/cleanup error.
+            () = crate::execution::process::wait_for_stop_request(self.stopping.clone()) => return None,
         }
+        temporary.keep().ok()?;
         Some(relative)
     }
 

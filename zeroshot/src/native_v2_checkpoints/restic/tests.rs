@@ -190,6 +190,7 @@ async fn private_stderr_report_drains_bounds_redacts_and_sanitizes() {
     assert!(tail.snapshot().truncated);
     let path = repository
         .save_failure(&tail)
+        .await
         .expect("private report saved");
     let error = io::Error::other(format!(
         "failed; private diagnostic: {} in checkpoint repository",
@@ -209,7 +210,7 @@ async fn private_stderr_report_drains_bounds_redacts_and_sanitizes() {
     let mut tail = TailBuffer::new(MAX_STDERR_BYTES);
     tail.append(password.as_bytes());
     tail.append(&vec![b'x'; MAX_STDERR_BYTES - password.len() + 7]);
-    let path = repository.save_failure(&tail).unwrap();
+    let path = repository.save_failure(&tail).await.unwrap();
     let report = std::fs::read_to_string(repository.root.join(path)).unwrap();
     assert!(!report.contains(password));
     assert!(
@@ -247,6 +248,397 @@ async fn exit_three_retains_cause_and_failed_diagnostic_write_preserves_failure(
             assert_eq!(public, "restic backup failed (exit status: 3)");
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn private_failure_report_waits_for_blocking_pool_without_stalling_async_work() {
+    let root = tempfile::tempdir().assert_value();
+    let repository = scripted_repository(
+        root.path(),
+        "#!/bin/sh\nprintf '%s' 'deferred private cause' >&2\nexit 3\n",
+    );
+    repository.prepare_paths().assert_value();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .assert_value();
+    let (entered, ready) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let blocker = runtime.spawn_blocking(move || {
+        entered.send(()).unwrap();
+        let _ = held.recv_timeout(Duration::from_secs(10));
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (deferred, error) = runtime.block_on(async {
+        let args = arguments(["backup"]);
+        let failure = repository.run(root.path(), &args);
+        tokio::pin!(failure);
+        // The only blocking worker is occupied. The async timer must still run while the
+        // report waits for that worker, and the original operation must finish after release.
+        let result = tokio::time::timeout(Duration::from_secs(1), &mut failure).await;
+        let deferred = result.is_err();
+        release.send(()).unwrap();
+        let error = match result {
+            Ok(result) => result.unwrap_err(),
+            Err(_) => failure.await.unwrap_err(),
+        };
+        blocker.await.unwrap();
+        (deferred, error)
+    });
+    assert!(deferred, "private report bypassed the blocking pool");
+    assert!(
+        error
+            .to_string()
+            .starts_with("restic backup failed (exit status: 3)")
+    );
+    assert!(!error.to_string().contains("deferred private cause"));
+    assert!(saved_report(&repository, &error).contains("deferred private cause"));
+}
+
+#[test]
+fn late_stop_skips_optional_private_report_and_allows_discard() {
+    let root = tempfile::tempdir().assert_value();
+    let (stop, stopping) = tokio::sync::watch::channel(false);
+    let repository = Repository::new(
+        ResticProgram::fake(root.path()).assert_value(),
+        root.path().join("state"),
+    )
+    .with_stop_request(Some(stopping));
+    repository.prepare_paths().assert_value();
+    let mut tail = TailBuffer::new(MAX_STDERR_BYTES);
+    tail.append(b"late-stop cause");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .assert_value();
+    let (entered, ready) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let blocker = runtime.spawn_blocking(move || {
+        entered.send(()).unwrap();
+        let _ = held.recv_timeout(Duration::from_secs(10));
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let skipped_before_release = runtime.block_on(async {
+        let saving = repository.save_failure(&tail);
+        tokio::pin!(saving);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), &mut saving)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_dir(repository.root.join("diagnostics"))
+                .unwrap()
+                .count(),
+            1
+        );
+        stop.send_replace(true);
+        let after_stop = tokio::time::timeout(Duration::from_millis(300), &mut saving).await;
+        let skipped = matches!(&after_stop, Ok(None));
+        if skipped {
+            assert_eq!(
+                std::fs::read_dir(repository.root.join("diagnostics"))
+                    .unwrap()
+                    .count(),
+                0
+            );
+            super::super::discard_lineage(&root.path().join("catalog"), &repository.root).unwrap();
+            assert!(!repository.root.exists());
+        }
+        release.send(()).unwrap();
+        if after_stop.is_err() {
+            let _ = saving.await;
+        }
+        blocker.await.unwrap();
+        tokio::task::spawn_blocking(|| {}).await.unwrap();
+        skipped
+    });
+    assert!(
+        skipped_before_release,
+        "late stop waited for the optional report writer"
+    );
+    assert!(
+        !repository.root.exists(),
+        "late report recreated discarded storage"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn late_stop_preserves_restic_failure_after_confirmed_child_cleanup() {
+    let root = tempfile::tempdir().assert_value();
+    let pid_path = root.path().join("pid");
+    let (stop, stopping) = tokio::sync::watch::channel(false);
+    let repository = scripted_repository(
+        root.path(),
+        &format!(
+            "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nprintf '%s' 'late-stop cause' >&2\nexit 3\n",
+            pid_path.display(),
+        ),
+    )
+    .with_stop_request(Some(stopping));
+    repository.prepare_paths().assert_value();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .assert_value();
+    let (entered, ready) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let blocker = runtime.spawn_blocking(move || {
+        entered.send(()).unwrap();
+        let _ = held.recv_timeout(Duration::from_secs(10));
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (completed_before_release, error) = runtime.block_on(async {
+        let args = arguments(["backup"]);
+        let failure = repository.run(root.path(), &args);
+        tokio::pin!(failure);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), &mut failure)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_dir(repository.root.join("diagnostics"))
+                .unwrap()
+                .count(),
+            1
+        );
+        let pid: libc::pid_t = std::fs::read_to_string(&pid_path).unwrap().parse().unwrap();
+        assert_ne!(
+            unsafe { libc::kill(pid, 0) },
+            0,
+            "reporting started before child cleanup"
+        );
+        stop.send_replace(true);
+        let after_stop = tokio::time::timeout(Duration::from_millis(300), &mut failure).await;
+        let completed = after_stop.is_ok();
+        release.send(()).unwrap();
+        let error = match after_stop {
+            Ok(result) => result.unwrap_err(),
+            Err(_) => failure.await.unwrap_err(),
+        };
+        blocker.await.unwrap();
+        tokio::task::spawn_blocking(|| {}).await.unwrap();
+        (completed, error)
+    });
+    assert!(
+        completed_before_release,
+        "late stop waited for the optional report writer"
+    );
+    assert_eq!(error.to_string(), "restic backup failed (exit status: 3)");
+    assert!(!super::super::CheckpointError(error).was_stopped());
+    assert_eq!(
+        std::fs::read_dir(repository.root.join("diagnostics"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn private_failure_report_freezes_password_before_deferred_write() {
+    let root = tempfile::tempdir().assert_value();
+    let repository = Repository::new(
+        ResticProgram::fake(root.path()).assert_value(),
+        root.path().join("state"),
+    );
+    repository.prepare_paths().assert_value();
+    // Avoid incidental masking by the one-character ambient redaction used in CI.
+    let password = "az".repeat(PASSWORD_BYTES);
+    std::fs::write(repository.password_path(), &password).assert_value();
+    let mut tail = TailBuffer::new(MAX_STDERR_BYTES);
+    tail.append(format!("frozen repository credential: {password}").as_bytes());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .assert_value();
+    let (entered, ready) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let blocker = runtime.spawn_blocking(move || {
+        entered.send(()).unwrap();
+        let _ = held.recv_timeout(Duration::from_secs(10));
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let path = runtime.block_on(async {
+        let saving = repository.save_failure(&tail);
+        tokio::pin!(saving);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), &mut saving)
+                .await
+                .is_err()
+        );
+        std::fs::remove_file(repository.password_path()).unwrap();
+        release.send(()).unwrap();
+        let path = saving.await.expect("private report saved");
+        blocker.await.unwrap();
+        path
+    });
+    let error = io::Error::other(format!(
+        "failed; private diagnostic: {} in checkpoint repository",
+        path.display()
+    ));
+    let report = saved_report(&repository, &error);
+    assert!(report.contains("frozen repository credential: [REDACTED]"));
+    assert!(!report.contains(&password));
+}
+
+#[test]
+fn dropped_private_report_cannot_recreate_discarded_lineage() {
+    for keep_delivery in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let repository = Repository::new(
+            ResticProgram::fake(root.path()).assert_value(),
+            root.path().join("state"),
+        );
+        repository.prepare_paths().assert_value();
+        let delivery = repository.root.join("delivery-state.json");
+        if keep_delivery {
+            std::fs::write(&delivery, "retained delivery receipt").unwrap();
+        }
+        let mut tail = TailBuffer::new(MAX_STDERR_BYTES);
+        tail.append(b"cancelled private report");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .assert_value();
+        let (entered, ready) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let blocker = runtime.spawn_blocking(move || {
+            entered.send(()).unwrap();
+            let _ = held.recv_timeout(Duration::from_secs(10));
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        runtime.block_on(async {
+            let report;
+            {
+                let saving = repository.save_failure(&tail);
+                tokio::pin!(saving);
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(200), &mut saving)
+                        .await
+                        .is_err()
+                );
+                let mut reports = std::fs::read_dir(repository.root.join("diagnostics")).unwrap();
+                report = reports.next().unwrap().unwrap().path();
+                assert!(reports.next().is_none());
+                assert_eq!(std::fs::metadata(&report).unwrap().len(), 0);
+            }
+            assert!(
+                !report.exists(),
+                "dropped future retained its partial report"
+            );
+            let catalog = root.path().join("catalog");
+            if keep_delivery {
+                super::super::discard_workspace_lineage(&catalog, &repository.root).unwrap();
+            } else {
+                super::super::discard_lineage(&catalog, &repository.root).unwrap();
+                assert!(!repository.root.exists());
+            }
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+            tokio::task::spawn_blocking(|| {}).await.unwrap();
+        });
+        assert!(!repository.root.join("diagnostics").exists());
+        assert!(!repository.password_path().exists());
+        if keep_delivery {
+            assert_eq!(
+                std::fs::read_to_string(delivery).unwrap(),
+                "retained delivery receipt"
+            );
+            assert_eq!(std::fs::read_dir(&repository.root).unwrap().count(), 1);
+        } else {
+            assert!(
+                !repository.root.exists(),
+                "deferred write recreated disposed storage"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn dropped_restore_report_cannot_recreate_discarded_lineage() {
+    use super::super::{
+        CheckpointRestore, CheckpointRestoreSelection, ResticCheckpointStore,
+        ResticCheckpointStoreTestConfig, RunCheckpointStore, discard_lineage, restore,
+    };
+
+    let root = tempfile::tempdir().assert_value();
+    let failure = root.path().join("fail");
+    let repository = scripted_repository(
+        root.path(),
+        &format!(
+            "#!/bin/sh\nif [ -f \"$1\" ]; then /bin/cat \"$RESTIC_PASSWORD_FILE\" >&2; printf '%s' 'delayed restore cause' >&2; exit 3; fi\nprintf '%s\\n' '{{\"message_type\":\"summary\",\"snapshot_id\":\"{}\"}}'\n",
+            "a".repeat(64),
+        ),
+    );
+    let program = ResticProgram::test(
+        repository.program.executable.clone(),
+        vec![failure.to_str().unwrap().to_owned()],
+    )
+    .unwrap();
+    let catalog = root.path().join("catalog");
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let store = ResticCheckpointStore::with_program(ResticCheckpointStoreTestConfig {
+        directory: catalog.clone(),
+        repository: repository.root.clone(),
+        workspace: workspace.clone(),
+        writers: Default::default(),
+        program,
+    });
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .assert_value();
+    runtime.block_on(store.finish(&[])).unwrap();
+    std::fs::write(failure, "fail").unwrap();
+    let (entered, ready) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let blocker = runtime.spawn_blocking(move || {
+        entered.send(()).unwrap();
+        let _ = held.recv_timeout(Duration::from_secs(10));
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    runtime.block_on(async {
+        let selection = CheckpointRestore {
+            directory: catalog.clone(),
+            selection: CheckpointRestoreSelection::Latest,
+        };
+        {
+            let restoring = restore(&selection, &workspace);
+            tokio::pin!(restoring);
+            assert!(
+                tokio::time::timeout(Duration::from_secs(1), &mut restoring)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read_dir(repository.root.join("diagnostics"))
+                    .unwrap()
+                    .count(),
+                1
+            );
+        }
+        discard_lineage(&catalog, &repository.root).unwrap();
+        assert!(!repository.root.exists());
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        tokio::task::spawn_blocking(|| {}).await.unwrap();
+    });
+    assert!(!catalog.exists());
+    assert!(
+        !repository.root.exists(),
+        "dropped restore recreated its lineage"
+    );
 }
 
 #[test]
