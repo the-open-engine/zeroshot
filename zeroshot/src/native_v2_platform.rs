@@ -51,6 +51,7 @@ use crate::v2_run_ledger::{
 mod tests;
 
 mod contracts;
+pub(crate) mod hook_output;
 mod preparation;
 use preparation::{PreparationTask, PreparationStart, ResumePreparation};
 pub use contracts::{
@@ -401,6 +402,11 @@ impl NativeV2PlatformController {
             source_credentials,
         } = secrets;
         let RunSubmitParams { run_id, submission } = request;
+        if !self.allocator.supports_environment_teardown() {
+            crate::native_v2_admission::validate_target_environment(
+                submission.environment.as_ref(),
+            )?;
+        }
         let harnesses = self.harnesses.as_ref();
         let digest = submission_digest(&submission)?;
         let submission_key = submission.submission_key.clone();

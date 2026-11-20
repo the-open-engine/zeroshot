@@ -1,10 +1,10 @@
 ---
-description: 'Configure setup commands, startup commands and environment variables for Docker target runs without putting environment settings in profiles.'
+description: 'Configure setup commands, startup commands and environment variables for local and Docker target runs.'
 ---
 
 # Prepare a runtime environment
 
-Run submissions to Docker targets accept an `environment` field alongside `runtime`:
+Run submissions accept an `environment` field alongside `runtime`. This example uses a Docker target:
 
 ```json
 {
@@ -71,8 +71,40 @@ checkpoint restore, clones the original pinned commits again even if their branc
 An unavailable repository or commit stops preparation with `context_checkout_unavailable` before
 agents start. Cloning shares the existing preparation deadline. A host-selected default environment
 that lists context repositories also requires matching client pins; the target never resolves
-mutable branch tips on the client's behalf. Local runs reject context repositories, as they reject
-setup and startup hooks. Runs without context repositories receive no `ZEROSHOT_CONTEXT`.
+mutable branch tips on the client's behalf. Context repositories require a Docker target.
+Runs without context repositories receive no `ZEROSHOT_CONTEXT`.
+
+## Local scripts and services
+
+On Linux and macOS, pass a JSON file with `--environment FILE` to a local run. After selecting
+the worktree or restoring a checkpoint, zeroshot runs `setup` and then `startup` in the final
+checkout. Both run as the invoking user before the graph starts. Hooks receive the local shell's
+basic environment, public `variables`, declared hook `connections`, and `ZEROSHOT_RUN_ID`.
+Install harness prerequisites before submitting the run. Each preparation script has 15 minutes
+within the run's preparation budget.
+
+Start native background services in `startup` and wait for readiness before the script exits.
+The service processes belong to the run and survive agent steps. Keep them in the startup
+process tree. Run cleanup stops them after the optional `teardown` script.
+
+Local `teardown` runs once per attempt after environment preparation begins. It runs after
+success, setup or startup failure, graph failure, force-stop, and suspension. It gets a separate
+60-second deadline, and a failure is reported in the run logs while preserving the original result.
+A controller crash or machine loss can interrupt cleanup. On resume, the new attempt reuses the
+saved scripts with a new run ID and reruns setup and startup.
+
+Docker Compose resources belong to the Docker daemon. To clean up a disposable stack, use the same
+per-run project name in both hooks:
+
+```json
+{
+  "startup": "docker compose --project-name \"zs-$ZEROSHOT_RUN_ID\" up --detach --wait",
+  "teardown": "docker compose --project-name \"zs-$ZEROSHOT_RUN_ID\" down --remove-orphans --volumes"
+}
+```
+
+Use the same Compose file and settings in both hooks. Use project-scoped volumes for this example.
+Omit `--volumes` to retain data, and use distinct host ports when parallel attempts publish ports.
 
 ## Example: pinned Node and npm dependencies
 
@@ -169,5 +201,4 @@ requirements. The target must have a writable root for package installation. Doc
 an operator-provided daemon endpoint. Detached Docker containers belong to that daemon and are not
 terminated by the target's process cleanup. Direct target operators or scripts must manage their
 names, reuse, and removal. When the daemon runs inside a disposable run machine, destroying that
-machine removes its Docker resources. Local execution uses the invoking machine and rejects setup
-and startup hooks and their connection references.
+machine removes its Docker resources. The `teardown` field is for local execution.

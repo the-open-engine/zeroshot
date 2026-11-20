@@ -1179,7 +1179,9 @@ Options:
           Expand one secret-free agent runtime across every executable graph node
 
       --environment <FILE>
-          Load a JSON environment definition: setup, startup, public variables, and hook connections
+          Load setup, startup, public variables, and hook connections from JSON.
+
+          Local runs on Linux and macOS also accept teardown for orderly cleanup.
 
       --no-environment
           Send an empty environment ({}) to bypass the target's configured default

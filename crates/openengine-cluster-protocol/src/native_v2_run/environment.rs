@@ -12,8 +12,8 @@ pub use context::{ContextRepository, validate_context_sources};
 pub const MAX_RUNTIME_SCRIPT_BYTES: usize = 64 * 1024;
 pub const MAX_RUNTIME_VARIABLE_BYTES: usize = 256 * 1024;
 
-/// Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.
-/// Both hooks run again on a new attempt. Values here are public run configuration, never secrets.
+/// Setup and startup prepare each attempt before graph execution. Local execution can also run
+/// teardown during orderly cleanup. Values here are public run configuration, never secrets.
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RuntimeEnvironment {
@@ -25,9 +25,12 @@ pub struct RuntimeEnvironment {
     pub setup: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup: Option<String>,
+    /// Local-only cleanup script, run after preparation begins even if the attempt fails.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teardown: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub variables: BTreeMap<EnvironmentVariableName, String>,
-    /// Exact connection fields available to setup and startup, separate from node credentials.
+    /// Exact connection fields available to environment scripts, separate from node credentials.
     #[serde(default, skip_serializing_if = "DeclaredConnections::is_empty")]
     pub connections: DeclaredConnections,
 }
@@ -35,7 +38,10 @@ pub struct RuntimeEnvironment {
 impl RuntimeEnvironment {
     pub fn validate(&self) -> Result<(), NativeV2RunValueError> {
         context::validate_repositories(&self.context_repositories)?;
-        for script in [&self.setup, &self.startup].into_iter().flatten() {
+        for script in [&self.setup, &self.startup, &self.teardown]
+            .into_iter()
+            .flatten()
+        {
             if script.len() > MAX_RUNTIME_SCRIPT_BYTES || script.contains('\0') {
                 return Err(NativeV2RunValueError(
                     "environment scripts must be at most 65536 bytes and contain no NUL",

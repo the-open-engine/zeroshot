@@ -1814,7 +1814,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GIT_CONFIG_COUNT` in run variables and hook/node connections, case-insensitively, before
   preparation. They would replace or reset the supervisor's exact-path Git trust. Runs without
   context repositories retain caller-owned Git configuration.
-  Local runs reject hooks and use the invoking environment. Direct Docker setup modifies its
+  Linux/macOS local controllers run setup and startup inside the selected/restored workspace as
+  the invoking user during admitted allocation. A run-owned hook task keeps a successful or
+  failed startup shell's background children under native process custody until cleanup.
+  Preparation cancellation settles the unfinished script before starting optional local-only
+  teardown. Teardown runs once after setup begins, startup begins, or teardown alone is configured;
+  it uses the same hook connection scope and attempt ID. The task remains owned by the allocator
+  across allocation cancellation and graph handoff, and by runtime cleanup after handoff. It
+  confirms native process cleanup before releasing workspace ownership; teardown failure is
+  logged separately from the primary run outcome. Teardown is an orderly cleanup contract.
+  Docker resources on a user's daemon are managed by the scripts. Direct Docker setup modifies its
   operator-owned target container, shared by that target's runs; separate target containers are
   needed for independent OS dependency sets. Platform supplies its own disposable execution placement.
   Image-owned harness wrappers pin their Node interpreter independently of the project PATH.

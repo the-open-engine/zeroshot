@@ -192,6 +192,9 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
         .inspect_err(|error| record_startup_failure(&paths, error, &[]))?;
     let bootstrap = load_bootstrap_file(bootstrap_path)
         .inspect_err(|error| record_startup_failure(&paths, error, &[]))?;
+    if super::has_local_teardown(bootstrap.submission.environment.as_ref()) {
+        shutdown.reserve_teardown();
+    }
     let redactions = startup_redactions(&bootstrap);
     let server = start_controller_process(bootstrap, shutdown.requested.clone())
         .await

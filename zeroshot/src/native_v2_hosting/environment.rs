@@ -1,5 +1,4 @@
 //! Run-owned preparation. Services belong to the run, never to an individual agent command.
-mod output;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 
@@ -19,7 +18,7 @@ use crate::execution::process::{HostedProcessIdentity, platform};
 use crate::native_v2_platform::{
     CapsuleAllocationUnavailable, CapsuleCleanupUnavailable, CapsulePreparation,
 };
-use crate::native_v2_capsule::provider_process::safe_provider_text;
+use crate::native_v2_platform::hook_output as output;
 
 const HOOK_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 

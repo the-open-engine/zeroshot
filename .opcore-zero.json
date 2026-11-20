@@ -25,6 +25,10 @@
       {
         "source": "zeroshot/src/native_v2_platform.rs",
         "document": "docs/concepts/targets.md"
+      },
+      {
+        "source": "zeroshot/src/native_v2_portable_controller.rs",
+        "document": "docs/guides/runtime-environments.md"
       }
     ]
   }
