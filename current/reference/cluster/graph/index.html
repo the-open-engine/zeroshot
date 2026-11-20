@@ -1714,6 +1714,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#profile-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profile imports
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#peer-networks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2298,6 +2309,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#profile-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profile imports
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#peer-networks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2476,6 +2498,10 @@ object declares peer communication permissions; omission or <code>{}</code> gran
 <td>Declared state, body, structured array selector <code>over</code>, positive concurrent-item limit <code>maxItems</code>, promoted paths</td>
 </tr>
 <tr>
+<td><code>profile</code></td>
+<td>Name of a saved local run profile to expand at submission</td>
+</tr>
+<tr>
 <td><code>succeed</code></td>
 <td>Declared output type and structured state-to-output bindings</td>
 </tr>
@@ -2611,6 +2637,24 @@ and loops retain control of recovery; there is no global abort, cooldown, waitin
 automatic resumption. After usage becomes available,
 <a href="../../../guides/observe-and-control/#restart-or-resume-a-failed-run">resume the failed run</a> using its
 retained workspace or an available checkpoint.</p>
+<h2 id="profile-imports">Profile imports<a class="headerlink" href="#profile-imports" title="Permanent link">&para;</a></h2>
+<p>Place a node such as <code>{"kind":"profile","name":"review","profile":"code-review"}</code> in a local
+profile or inline graph submitted with <code>zeroshot run</code>. You can also add the reference in the
+local profile editor. The named profile must already be saved in the local profile store.
+Each submission reads the current definitions of all referenced profiles from one store snapshot.
+The admitted graph and recovery data retain the resolved bodies, so a subsequent edit takes
+effect on the next submission. Imports may nest and may appear inside ordinary groups.
+Admission rejects missing profiles, dependency cycles and expansions that exceed graph bounds.
+All imported profiles must use the parent graph policy. ACP and named-target submissions require
+profiles without saved-name imports.</p>
+<p>The imported profile receives its declared input fields from the enclosing state and can
+materialize its usual root defaults. Its own state and graph controls remain scoped to its body.
+It uses the same workspace and run limits as its caller, and its leaves keep their own runtime
+bindings. The run's initial input still supplies input-driven loop limits throughout the expansion.</p>
+<p>A <code>succeed</code> in the imported body ends that body and then continues in the caller. Existing
+early-exit and cancellation rules apply within the body. Its output payload is the result for
+standalone execution. A <code>fail</code> still propagates, and the outer graph authors the run's terminal.
+Resolved graph views include the imported <code>body</code> and its <code>initialInput</code> schema.</p>
 <h2 id="peer-networks">Peer networks<a class="headerlink" href="#peer-networks" title="Permanent link">&para;</a></h2>
 <p><code>GraphSpec.networks</code> maps network names to <code>members</code> and <code>publishers</code> sets. Names use the same
 bounded identifier type as node names. A network must have at least one member. Every publisher
@@ -2954,7 +2998,7 @@ potential contributors until actual outcomes settle the join.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-18">18 November 2026</time>
+    Last updated <time datetime="2026-11-20">20 November 2026</time>
   </span>
 
     
