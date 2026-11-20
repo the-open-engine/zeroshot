@@ -4,6 +4,9 @@ use serde_json::json;
 
 use super::*;
 
+#[path = "tests/expansion.rs"]
+mod expansion;
+
 fn profile_request(name: &str, node: &str, set_default: bool) -> RunProfileSetRequest {
     RunProfileSetRequest {
         name: RunProfileName::new(name).assert_value(),
