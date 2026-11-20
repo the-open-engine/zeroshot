@@ -57,10 +57,14 @@ def wait(predicate):
 save('prompt', json.loads(sys.stdin.readline())['message']['content'][0]['text'])
 save('capability', bool(os.environ.get('ZEROSHOT_STEERING_CAPABILITY')))
 if node == 'sender':
+    save('identity', {'node':node,'nodeInstance':int(instance),'execution':os.environ['ZEROSHOT_EXECUTION_REF']})
     result = subprocess.run([cli, 'steer', run, '--network', 'alpha', 'authorized-network-marker'],
         text=True, capture_output=True, timeout=10)
     save('publication', {'status':result.returncode, 'stdout':result.stdout, 'stderr':result.stderr})
-    if result.returncode: raise RuntimeError('authorized network publication failed: '+result.stderr)
+    unknown = (result.returncode == 1 and not result.stdout and result.stderr.strip().endswith(
+        'network publication outcome is unknown; inspect run vectors before retrying'))
+    if result.returncode and not unknown: raise RuntimeError('authorized network publication failed: '+result.stderr)
+    wait(lambda: (root/('network-'+run+'-confirmed-once')).exists())
 elif node == 'receiver':
     for name in list(os.environ):
         if name.startswith('ZEROSHOT_'): del os.environ[name]
@@ -184,11 +188,24 @@ async fn assert_authority_steers(fixture: &LocalFixture, run: &str, expected: us
     );
 }
 
+async fn submit_authority_run(fixture: &LocalFixture) -> String {
+    let run = fixture.submit_detached("networks").await;
+    confirm_sender_publications(
+        fixture,
+        &run,
+        0,
+        &["alpha"],
+        &[("once", "authorized-network-marker")],
+    )
+    .await;
+    network_wait(fixture, &run, "authority-held").await;
+    run
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs() {
     let suspended = authority_fixture();
-    let suspended_run = suspended.submit_detached("networks").await;
-    network_wait(&suspended, &suspended_run, "authority-held").await;
+    let suspended_run = submit_authority_run(&suspended).await;
     suspended
         .json(&["suspend", &suspended_run], "networks")
         .await;
@@ -196,11 +213,9 @@ async fn networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs()
     suspended.wait_suspended(&suspended_run).await;
     wait_for_exit(suspended.ready_pid(&suspended_run)).await;
     let active = authority_fixture();
-    let active_run = active.submit_detached("networks").await;
-    network_wait(&active, &active_run, "authority-held").await;
+    let active_run = submit_authority_run(&active).await;
     let source = authority_fixture();
-    let source_run = source.submit_detached("networks").await;
-    network_wait(&source, &source_run, "authority-held").await;
+    let source_run = submit_authority_run(&source).await;
     for (fixture, run) in [(&source, &source_run), (&suspended, &suspended_run)] {
         let owner = fixture
             .json(&["steer", run, "authorized-owner-marker"], "networks")
@@ -215,10 +230,11 @@ async fn networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs()
         "publication",
     ))
     .assert_value();
-    assert_eq!(publication["status"], 0, "{publication}");
-    let peer: Value =
-        serde_json::from_str(publication["stdout"].as_str().assert_value()).assert_value();
-    assert_eq!(peer["steer"]["network"]["origin"]["node"], "sender");
+    if publication["status"] == 0 {
+        let peer: Value =
+            serde_json::from_str(publication["stdout"].as_str().assert_value()).assert_value();
+        assert_eq!(peer["steer"]["network"]["origin"]["node"], "sender");
+    }
     let jobs = authority_jobs(&[
         authority_target(&source, &source_run, true),
         authority_target(&active, &active_run, true),
