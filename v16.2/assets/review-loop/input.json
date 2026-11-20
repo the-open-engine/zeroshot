@@ -1,0 +1,3 @@
+{
+  "task": "Add a health-check endpoint that returns HTTP 200. Add focused tests and keep the change scoped."
+}
