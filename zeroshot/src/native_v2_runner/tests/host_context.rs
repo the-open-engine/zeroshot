@@ -101,6 +101,7 @@ async fn host_context_is_fresh_on_reused_sessions_and_auxiliary_agents() {
                 &invocation.node.input,
                 &invocation.response,
                 delivery,
+                None,
             )
             .assert_value();
             assert_eq!(
@@ -167,6 +168,7 @@ async fn absent_and_empty_host_context_preserve_existing_prompts() {
                 &invocation.node.input,
                 &invocation.response,
                 ResponseDelivery::StructuredOutput,
+                None,
             )
             .assert_value()
         );

@@ -251,6 +251,7 @@ impl DriverInvocation {
             &self.node.input,
             &self.response,
             delivery,
+            None,
         )?;
         Ok(self.with_host_context(prompt))
     }

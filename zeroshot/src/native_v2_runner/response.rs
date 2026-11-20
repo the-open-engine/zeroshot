@@ -10,6 +10,8 @@ use super::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
 
 #[path = "response/guidance.rs"]
 mod guidance;
+#[path = "response/review.rs"]
+mod review;
 
 const MAX_RESPONSE_ERROR_BYTES: usize = 8 * 1024;
 const MAX_OUTPUT_CORRECTIONS: usize = 2;
@@ -78,8 +80,10 @@ impl NodeResponseContract {
                 signals,
                 diagnostic,
             } => {
+                let bounded_review = review::payload_has_findings(diagnostic);
                 let signal_properties = signals
                     .iter()
+                    .filter(|(name, _)| !is_optional_signal(name, bounded_review))
                     .map(|(name, labels)| {
                         (
                             name.as_str().to_owned(),
@@ -87,9 +91,16 @@ impl NodeResponseContract {
                         )
                     })
                     .collect::<BTreeMap<_, _>>();
-                closed_object_schema(
+                let mut diagnostic_schema = payload_schema(diagnostic, dialect);
+                if bounded_review {
+                    review::annotate_schema(
+                        &mut diagnostic_schema,
+                        dialect == ProviderSchemaDialect::Standard,
+                    );
+                }
+                let mut schema = closed_object_schema(
                     BTreeMap::from([
-                        ("diagnostic".to_owned(), payload_schema(diagnostic, dialect)),
+                        ("diagnostic".to_owned(), diagnostic_schema),
                         ("output".to_owned(), payload_schema(output, dialect)),
                         (
                             "signals".to_owned(),
@@ -97,6 +108,7 @@ impl NodeResponseContract {
                                 signal_properties,
                                 signals
                                     .keys()
+                                    .filter(|name| !is_optional_signal(name, bounded_review))
                                     .map(|name| name.as_str().to_owned())
                                     .collect(),
                             ),
@@ -107,8 +119,77 @@ impl NodeResponseContract {
                         "output".to_owned(),
                         "signals".to_owned(),
                     ],
-                )
+                );
+                if bounded_review {
+                    if let Some(object) = schema.as_object_mut() {
+                        object.insert(
+                            "description".to_owned(),
+                            Value::String(review::schema_description()),
+                        );
+                    }
+                }
+                schema
             }
+        }
+    }
+
+    pub(crate) fn is_bounded_review(&self) -> bool {
+        matches!(
+            self,
+            Self::Verifier { diagnostic, .. } if review::payload_has_findings(diagnostic)
+        )
+    }
+
+    /// A valid verifier outcome carrying a `truncated` signal, used when the provider stopped at
+    /// its output limit. The graph routes that signal to its own failure reason, so truncation is
+    /// never mistaken for an unreadable verdict or a genuine rejection.
+    pub(crate) fn truncated_outcome(&self, message: &str) -> Option<WorkerOutcome> {
+        let Self::Verifier {
+            output,
+            signals,
+            diagnostic,
+        } = self
+        else {
+            return None;
+        };
+        if !signals
+            .keys()
+            .any(|name| name.as_str() == review::TRUNCATED_FIELD)
+        {
+            return None;
+        }
+        let mut actual = BTreeMap::new();
+        for (name, labels) in signals {
+            let label = if name.as_str() == review::TRUNCATED_FIELD {
+                "true"
+            } else if name.as_str() == review::VERDICT_FIELD
+                && labels
+                    .values()
+                    .iter()
+                    .any(|label| label.as_str() == "rejected")
+            {
+                "rejected"
+            } else {
+                labels.values().first()?.as_str()
+            };
+            actual.insert(name.clone(), EnumLabel::new(label).ok()?);
+        }
+        Some(WorkerOutcome::Verifier {
+            output: review::default_payload_value(output),
+            signals: actual,
+            diagnostic: review::diagnostic_with_message(diagnostic, message),
+            artifacts: Vec::new(),
+        })
+    }
+
+    /// The effective output budget for a verifier carrying a bounded review verdict. A
+    /// caller-declared provider limit can only lower the schema-derived bound.
+    pub(crate) fn effective_max_output_tokens(&self, declared: Option<u32>) -> Option<u32> {
+        match self {
+            Self::Verifier { diagnostic, .. } if review::payload_has_findings(diagnostic) => {
+                Some(review::output_token_budget(declared))
+            }
+            Self::Worker { .. } | Self::Verifier { .. } => declared,
         }
     }
 
@@ -127,7 +208,7 @@ impl NodeResponseContract {
         &self,
         value: Value,
     ) -> Result<WorkerOutcome, NodeResponseError> {
-        let outcome = match self {
+        let mut outcome = match self {
             Self::Worker { .. } => WorkerOutcome::Verified {
                 output: value,
                 artifacts: Vec::new(),
@@ -147,6 +228,21 @@ impl NodeResponseContract {
             }
         };
         self.validate_agent_outcome(&outcome)?;
+        if let (
+            Self::Verifier {
+                diagnostic: expected_diagnostic,
+                ..
+            },
+            WorkerOutcome::Verifier {
+                diagnostic: actual_diagnostic,
+                ..
+            },
+        ) = (self, &mut outcome)
+            && review::payload_has_findings(expected_diagnostic)
+        {
+            review::merge_findings_into_message(actual_diagnostic, "diagnostic")
+                .map_err(NodeResponseError::new)?;
+        }
         Ok(outcome)
     }
 
@@ -202,7 +298,16 @@ impl NodeResponseContract {
                 expected_diagnostic
                     .validate_value(diagnostic)
                     .map_err(|error| NodeResponseError::new(format!("diagnostic {error}")))?;
-                validate_signals(expected_signals, signals)
+                if review::payload_has_findings(expected_output) {
+                    review::validate_review_value("output", output)
+                        .map_err(NodeResponseError::new)?;
+                }
+                let bounded_review = review::payload_has_findings(expected_diagnostic);
+                if bounded_review {
+                    review::validate_review_value("diagnostic", diagnostic)
+                        .map_err(NodeResponseError::new)?;
+                }
+                validate_signals(expected_signals, signals, bounded_review)
             }
             _ => Err(NodeResponseError::new(
                 "final response does not match the node role".to_owned(),
@@ -585,12 +690,19 @@ struct VerifierResponse {
     diagnostic: Value,
 }
 
+/// The runtime may add a `truncated` signal to review verifiers without making every ordinary
+/// verdict carry it. A missing signal is false; a present one still has to use a declared label.
+fn is_optional_signal(name: &FieldName, bounded_review: bool) -> bool {
+    bounded_review && name.as_str() == review::TRUNCATED_FIELD
+}
+
 fn validate_signals(
     expected: &BTreeMap<FieldName, NonEmptyEnumSet>,
     actual: &BTreeMap<FieldName, EnumLabel>,
+    bounded_review: bool,
 ) -> Result<(), NodeResponseError> {
     for name in expected.keys() {
-        if !actual.contains_key(name) {
+        if !actual.contains_key(name) && !is_optional_signal(name, bounded_review) {
             return Err(NodeResponseError::new(format!(
                 "signals is missing required field {}",
                 name.as_str()
@@ -722,13 +834,51 @@ fn closed_object_schema(properties: BTreeMap<String, Value>, required: Vec<Strin
     })
 }
 
+fn review_guidance(response: &NodeResponseContract, declared: Option<u32>) -> String {
+    match response {
+        NodeResponseContract::Verifier { diagnostic, .. }
+            if review::payload_has_findings(diagnostic) =>
+        {
+            let budget = response
+                .effective_max_output_tokens(declared)
+                .unwrap_or(review::REVIEW_OUTPUT_TOKEN_BUDGET);
+            review::guidance(budget)
+        }
+        NodeResponseContract::Worker { .. } | NodeResponseContract::Verifier { .. } => {
+            String::new()
+        }
+    }
+}
+
 /// Renders a provider-neutral node turn contract for the shared workspace.
 pub fn render_agent_prompt(
     instructions: &NodeInstructions,
     input: &Value,
     response: &NodeResponseContract,
 ) -> Result<String, NodeRunnerError> {
-    render_agent_prompt_with_delivery(instructions, input, response, ResponseDelivery::Message)
+    render_agent_prompt_with_delivery(
+        instructions,
+        input,
+        response,
+        ResponseDelivery::Message,
+        None,
+    )
+}
+
+/// Contract-rendering variant that states the lane's effective review output budget.
+pub(crate) fn render_agent_prompt_with_budget(
+    instructions: &NodeInstructions,
+    input: &Value,
+    response: &NodeResponseContract,
+    max_output_tokens: Option<u32>,
+) -> Result<String, NodeRunnerError> {
+    render_agent_prompt_with_delivery(
+        instructions,
+        input,
+        response,
+        ResponseDelivery::Message,
+        max_output_tokens,
+    )
 }
 
 pub(crate) fn render_agent_prompt_with_delivery(
@@ -736,8 +886,10 @@ pub(crate) fn render_agent_prompt_with_delivery(
     input: &Value,
     response: &NodeResponseContract,
     delivery: ResponseDelivery,
+    max_output_tokens: Option<u32>,
 ) -> Result<String, NodeRunnerError> {
     let runtime_guidance = guidance::runtime_guidance(response);
+    let review_guidance = review_guidance(response, max_output_tokens);
     let instructions = instructions.as_str();
     let input = serde_json::to_string(input).map_err(|_| NodeRunnerError::Driver)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;
@@ -745,7 +897,7 @@ pub(crate) fn render_agent_prompt_with_delivery(
     Ok(format!(
         "Execute this graph node using the shared workspace.\n\
          Authored instructions:\n{instructions}\n\
-         {runtime_guidance}\
+         {runtime_guidance}{review_guidance}\
          Input JSON:\n{input}\n\
          Runtime-owned response contract:\n{response}\n\
          The response contract describes the required type; never return the contract itself. \
@@ -763,13 +915,44 @@ pub(crate) fn render_agent_prompt_with_delivery(
 /// Lanes that have no native schema flag, such as Pi, carry the schema in the prompt itself. The
 /// contract object is deliberately omitted because its `kind` discriminator is runtime bookkeeping
 /// that providers otherwise copy into their final response.
+#[cfg(test)]
 pub(crate) fn render_agent_prompt_with_schema(
     instructions: &NodeInstructions,
     input: &Value,
     response: &NodeResponseContract,
     dialect: ProviderSchemaDialect,
 ) -> Result<String, NodeRunnerError> {
+    render_agent_prompt_with_schema_and_budget(AgentPromptRequest {
+        instructions,
+        input,
+        response,
+        dialect,
+        max_output_tokens: None,
+    })
+}
+
+/// Everything a schema prompt needs, including the lane's applied output limit.
+pub(crate) struct AgentPromptRequest<'a> {
+    pub(crate) instructions: &'a NodeInstructions,
+    pub(crate) input: &'a Value,
+    pub(crate) response: &'a NodeResponseContract,
+    pub(crate) dialect: ProviderSchemaDialect,
+    pub(crate) max_output_tokens: Option<u32>,
+}
+
+/// Budget-aware variant for lanes that apply a caller-declared output limit.
+pub(crate) fn render_agent_prompt_with_schema_and_budget(
+    request: AgentPromptRequest<'_>,
+) -> Result<String, NodeRunnerError> {
+    let AgentPromptRequest {
+        instructions,
+        input,
+        response,
+        dialect,
+        max_output_tokens,
+    } = request;
     let runtime_guidance = guidance::runtime_guidance(response);
+    let review_guidance = review_guidance(response, max_output_tokens);
     let instructions = instructions.as_str();
     let input = serde_json::to_string(input).map_err(|_| NodeRunnerError::Driver)?;
     let response_schema = serde_json::to_string(&response.provider_schema(dialect))
@@ -777,7 +960,7 @@ pub(crate) fn render_agent_prompt_with_schema(
     Ok(format!(
         "Execute this graph node using the shared workspace.\n\
          Authored instructions:\n{instructions}\n\
-         {runtime_guidance}\
+         {runtime_guidance}{review_guidance}\
          Input JSON:\n{input}\n\
          Runtime-owned response schema:\n{response_schema}\n\
          The response schema describes the required JSON value; never return the schema itself. \

@@ -508,7 +508,7 @@ fn coverage_contract_verifier_response_errors_are_bounded_and_identify_signal_co
             .is_err()
     );
 
-    let missing = validate_signals(&contract_signals(&contract), &BTreeMap::new())
+    let missing = validate_signals(&contract_signals(&contract), &BTreeMap::new(), false)
         .err()
         .assert_value();
     assert!(
@@ -525,6 +525,7 @@ fn coverage_contract_verifier_response_errors_are_bounded_and_identify_signal_co
                 EnumLabel::new("unknown").assert_value(),
             ),
         ]),
+        false,
     )
     .err()
     .assert_value();
@@ -533,6 +534,339 @@ fn coverage_contract_verifier_response_errors_are_bounded_and_identify_signal_co
     let bounded = NodeResponseError::new("é".repeat(MAX_RESPONSE_ERROR_BYTES));
     assert!(bounded.to_string().len() <= MAX_RESPONSE_ERROR_BYTES);
     assert!(bounded.to_string().ends_with("..."));
+}
+
+fn review_diagnostic() -> PayloadType {
+    serde_json::from_value(json!({
+        "kind": "record",
+        "fields": {
+            "message": { "type": { "kind": "string" }, "required": true },
+            "verdict": { "type": { "kind": "string" }, "required": false },
+            "findings": {
+                "type": {
+                    "kind": "array",
+                    "items": {
+                        "kind": "record",
+                        "fields": {
+                            "summary": { "type": { "kind": "string" }, "required": true },
+                            "location": { "type": { "kind": "string" }, "required": false }
+                        }
+                    }
+                },
+                "required": false
+            }
+        }
+    }))
+    .assert_value()
+}
+
+fn review_response(findings: Value) -> String {
+    json!({
+        "output": null,
+        "signals": {"verdict": "rejected"},
+        "diagnostic": {"message": "repair the checkout flow", "findings": findings}
+    })
+    .to_string()
+}
+
+fn finding(summary: String) -> Value {
+    json!({"summary": summary, "location": "src/checkout.rs:12"})
+}
+
+#[test]
+fn an_oversized_review_verdict_is_corrected_on_the_count_then_accepted() {
+    let contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let twenty = review_response(Value::Array(
+        (0..20)
+            .map(|index| finding(format!("finding {index}")))
+            .collect(),
+    ));
+    let correction =
+        resolve_agent_response_with_schema(&contract, &twenty, ProviderSchemaDialect::Standard)
+            .assert_value();
+    let AgentResponse::Correction {
+        kind,
+        prompt,
+        diagnostic,
+    } = correction
+    else {
+        panic!("a 20-finding verdict must request one correction");
+    };
+    assert_eq!(kind, AgentCorrectionKind::Contract);
+    assert!(diagnostic.to_string().contains("has 20 items"));
+    assert!(diagnostic.to_string().contains("maximum is 8 findings"));
+    assert!(prompt.contains("findings"));
+    assert!(prompt.contains("maximum is 8"));
+
+    let eight = review_response(Value::Array(
+        (0..8)
+            .map(|index| finding(format!("finding {index}")))
+            .collect(),
+    ));
+    assert!(matches!(
+        resolve_agent_response_with_schema(&contract, &eight, ProviderSchemaDialect::Standard)
+            .assert_value(),
+        AgentResponse::Complete(WorkerOutcome::Verifier { .. })
+    ));
+}
+
+#[test]
+fn an_overlong_review_field_is_rejected_by_name() {
+    let contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let response = review_response(Value::Array(vec![finding("x".repeat(401))]));
+    let correction =
+        resolve_agent_response_with_schema(&contract, &response, ProviderSchemaDialect::Standard)
+            .assert_value();
+    let AgentResponse::Correction { diagnostic, .. } = correction else {
+        panic!("an overlong summary must request a correction");
+    };
+    assert!(diagnostic.to_string().contains("findings[0].summary"));
+    assert!(diagnostic.to_string().contains("maximum is 400"));
+
+    let long_verdict = json!({
+        "output": null,
+        "signals": {"verdict": "rejected"},
+        "diagnostic": {"message": "repair", "verdict": "v".repeat(65)}
+    })
+    .to_string();
+    let correction = resolve_agent_response_with_schema(
+        &contract,
+        &long_verdict,
+        ProviderSchemaDialect::Standard,
+    )
+    .assert_value();
+    let AgentResponse::Correction { diagnostic, .. } = correction else {
+        panic!("an overlong verdict must request a correction");
+    };
+    assert!(diagnostic.to_string().contains("diagnostic.verdict"));
+}
+
+#[test]
+fn a_review_schema_states_the_bounds_and_output_budget() {
+    let contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let schema = contract.provider_schema(ProviderSchemaDialect::Standard);
+    let findings =
+        &schema["properties"]["response"]["properties"]["diagnostic"]["properties"]["findings"];
+    assert_eq!(findings["maxItems"], 8);
+    assert_eq!(findings["items"]["properties"]["summary"]["maxLength"], 400);
+    let instructions = NodeInstructions::new("Review the change.").assert_value();
+    let prompt = render_agent_prompt_with_schema(
+        &instructions,
+        &Value::Null,
+        &contract,
+        ProviderSchemaDialect::Standard,
+    )
+    .assert_value();
+    assert!(prompt.contains("Review output budget"));
+    assert!(prompt.contains("At most 8 findings"));
+    assert!(prompt.contains("at most 400 characters"));
+
+    let strict = contract.provider_schema(ProviderSchemaDialect::OpenAiStrict);
+    let strict_json = serde_json::to_string(&strict).assert_value();
+    assert!(!strict_json.contains("maxItems"));
+    assert!(!strict_json.contains("maxLength"));
+    let strict_signals = &strict["properties"]["response"]["properties"]["signals"];
+    assert!(strict_signals["properties"].get("truncated").is_none());
+    assert!(
+        !strict_signals["required"]
+            .as_array()
+            .assert_value()
+            .iter()
+            .any(|name| name == "truncated")
+    );
+
+    let limited = render_agent_prompt_with_schema_and_budget(AgentPromptRequest {
+        instructions: &instructions,
+        input: &Value::Null,
+        response: &contract,
+        dialect: ProviderSchemaDialect::Standard,
+        max_output_tokens: Some(512),
+    })
+    .assert_value();
+    assert!(limited.contains("Review output budget: at most 512 tokens"));
+}
+
+#[test]
+fn a_truncated_review_builds_a_valid_truncated_signal_outcome() {
+    let mut contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let NodeResponseContract::Verifier { signals, .. } = &mut contract else {
+        unreachable!("test contract is a verifier")
+    };
+    signals.insert(
+        FieldName::new("truncated").assert_value(),
+        NonEmptyEnumSet::new(vec![
+            EnumLabel::new("true").assert_value(),
+            EnumLabel::new("false").assert_value(),
+        ])
+        .assert_value(),
+    );
+    let outcome = contract
+        .truncated_outcome("Pi stopped at its output limit after receiving 1296 bytes")
+        .assert_value();
+    let WorkerOutcome::Verifier {
+        output,
+        signals,
+        diagnostic,
+        ..
+    } = outcome
+    else {
+        panic!("a review verifier must build a verifier outcome");
+    };
+    assert_eq!(output, Value::Null);
+    assert_eq!(
+        signals
+            .get(&FieldName::new("truncated").assert_value())
+            .assert_value()
+            .as_str(),
+        "true"
+    );
+    assert_eq!(
+        signals
+            .get(&FieldName::new("verdict").assert_value())
+            .assert_value()
+            .as_str(),
+        "rejected"
+    );
+    assert!(
+        diagnostic["message"]
+            .as_str()
+            .assert_value()
+            .contains("1296 bytes")
+    );
+}
+
+fn review_contract_with_truncated_signal() -> NodeResponseContract {
+    let mut contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let NodeResponseContract::Verifier { signals, .. } = &mut contract else {
+        unreachable!("test contract is a verifier")
+    };
+    signals.insert(
+        FieldName::new("truncated").assert_value(),
+        NonEmptyEnumSet::new(vec![
+            EnumLabel::new("true").assert_value(),
+            EnumLabel::new("false").assert_value(),
+        ])
+        .assert_value(),
+    );
+    contract
+}
+
+#[test]
+fn an_ordinary_review_verdict_does_not_need_the_optional_truncated_signal() {
+    let contract = review_contract_with_truncated_signal();
+    let response = json!({
+        "output": null,
+        "signals": {"verdict": "accepted"},
+        "diagnostic": {"message": "the change meets the request"}
+    })
+    .to_string();
+    assert!(matches!(
+        resolve_agent_response_with_schema(&contract, &response, ProviderSchemaDialect::Standard)
+            .assert_value(),
+        AgentResponse::Complete(WorkerOutcome::Verifier { .. })
+    ));
+    let schema = contract.provider_schema(ProviderSchemaDialect::Standard);
+    let required = schema["properties"]["response"]["properties"]["signals"]["required"]
+        .as_array()
+        .assert_value();
+    assert!(!required.iter().any(|name| name == "truncated"));
+}
+
+#[test]
+fn a_message_and_findings_over_the_combined_cap_are_rejected_by_name() {
+    let contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let response = json!({
+        "output": null,
+        "signals": {"verdict": "rejected"},
+        "diagnostic": {
+            "message": "m".repeat(4_000),
+            "findings": (0..8)
+                .map(|index| json!({
+                    "summary": format!("{index}{}", "s".repeat(399)),
+                    "location": "src/checkout.rs:12"
+                }))
+                .collect::<Vec<_>>()
+        }
+    })
+    .to_string();
+    let AgentResponse::Correction { diagnostic, .. } =
+        resolve_agent_response_with_schema(&contract, &response, ProviderSchemaDialect::Standard)
+            .assert_value()
+    else {
+        panic!("message plus findings over the cap must request a correction");
+    };
+    assert!(
+        diagnostic
+            .to_string()
+            .contains("diagnostic.message plus findings")
+    );
+    assert!(diagnostic.to_string().contains("maximum is 4000"));
+}
+
+#[test]
+fn an_overlong_review_message_is_rejected_by_name() {
+    let contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let response = json!({
+        "output": null,
+        "signals": {"verdict": "rejected"},
+        "diagnostic": {"message": "x".repeat(4_001)}
+    })
+    .to_string();
+    let correction =
+        resolve_agent_response_with_schema(&contract, &response, ProviderSchemaDialect::Standard)
+            .assert_value();
+    let AgentResponse::Correction { diagnostic, .. } = correction else {
+        panic!("an overlong message must request a correction");
+    };
+    assert!(diagnostic.to_string().contains("diagnostic.message"));
+    assert!(diagnostic.to_string().contains("maximum is 4000"));
+}
+
+#[test]
+fn structured_findings_are_merged_into_the_feedback_message() {
+    let contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let response = json!({
+        "output": null,
+        "signals": {"verdict": "rejected"},
+        "diagnostic": {
+            "message": "repair the checkout flow",
+            "findings": [{"summary": "missing empty-cart check", "location": "src/checkout.rs:12"}]
+        }
+    })
+    .to_string();
+    let AgentResponse::Complete(WorkerOutcome::Verifier { diagnostic, .. }) =
+        resolve_agent_response_with_schema(&contract, &response, ProviderSchemaDialect::Standard)
+            .assert_value()
+    else {
+        panic!("an ordinary verdict must parse");
+    };
+    let message = diagnostic["message"].as_str().assert_value();
+    assert!(message.contains("repair the checkout flow"), "{message}");
+    assert!(message.contains("missing empty-cart check"), "{message}");
+    assert!(message.contains("src/checkout.rs:12"), "{message}");
+}
+
+#[test]
+fn an_ordinary_good_review_verdict_still_parses_unchanged() {
+    let contract = verifier_contract(PayloadType::Null, review_diagnostic());
+    let response = review_response(Value::Array(vec![finding("one issue".to_owned())]));
+    let AgentResponse::Complete(WorkerOutcome::Verifier {
+        signals,
+        diagnostic,
+        ..
+    }) = resolve_agent_response_with_schema(&contract, &response, ProviderSchemaDialect::Standard)
+        .assert_value()
+    else {
+        panic!("an ordinary verdict must still parse");
+    };
+    assert_eq!(
+        signals
+            .get(&FieldName::new("verdict").assert_value())
+            .assert_value()
+            .as_str(),
+        "rejected"
+    );
+    assert_eq!(diagnostic["findings"][0]["summary"], "one issue");
 }
 
 fn contract_signals(contract: &NodeResponseContract) -> BTreeMap<FieldName, NonEmptyEnumSet> {
@@ -852,6 +1186,7 @@ fn tool_delivery_preserves_worker_null_and_verifier_contracts() {
             &input,
             &contract,
             ResponseDelivery::StructuredOutput,
+            None,
         )
         .assert_value();
         // Authored instructions, runtime guidance, input and the contract precede delivery wording.
