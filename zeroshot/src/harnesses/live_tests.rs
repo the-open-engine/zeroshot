@@ -410,6 +410,7 @@ async fn steer_live_tool_call_records_carrier_receipt() {
                                 .block_on(crate::v2_run_ledger::steering::record(
                                     self.ledger.as_ref(),
                                     RunSteerParams {
+                                        node: None,
                                         mode: openengine_cluster_protocol::SteeringMode::Standing,
                                         run_id: self.run.clone(),
                                         text: "Keep the requested output contract.".into(),

@@ -1557,6 +1557,9 @@ Options:
       --text-stdin
           Read UTF-8 direction from standard input
 
+      --node <NAME>
+          Direct human guidance to this exact agent node name, including future instances
+
       --network <NAME>
           Broadcast to this authorized graph-local network; repeat for several networks
 

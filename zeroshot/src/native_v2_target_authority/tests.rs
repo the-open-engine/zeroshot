@@ -1215,6 +1215,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
         let id = RunId::new(state);
         let recorded = client
             .run_steer(RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: id.clone(),
                 text: text.clone(),
@@ -1243,6 +1244,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
                 .assert_value()
                 .content,
             RunVectorContent::Steer {
+                node: None,
                 text: text.clone(),
                 mode: Default::default(),
                 network: None
@@ -1252,6 +1254,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
     assert!(
         client
             .run_steer(RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: RunId::new("finished"),
                 text

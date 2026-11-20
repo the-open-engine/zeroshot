@@ -531,6 +531,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
         .assert_value();
     let late = controller
         .steer(openengine_cluster_protocol::RunSteerParams {
+            node: None,
             run_id: run,
             text: "late".to_owned(),
             mode: openengine_cluster_protocol::SteeringMode::Standing,

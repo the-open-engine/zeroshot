@@ -88,6 +88,7 @@ fn inherited_network_origins_and_receipts_reserve_instances_monotonically() {
         let event = crate::v2_run_ledger::vector_event(
             &source.run_id,
             RunVectorContent::Steer {
+                node: None,
                 text: "peer guidance".into(),
                 mode: SteeringMode::Once,
                 network: Some(NetworkSteer {

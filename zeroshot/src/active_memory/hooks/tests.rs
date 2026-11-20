@@ -97,6 +97,7 @@ async fn steer_carrier_capabilities_retire_across_65536_launches_without_affecti
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "Direction after many launches".into(),
@@ -699,6 +700,7 @@ pub(super) async fn record_steer(
     crate::v2_run_ledger::steering::record(
         ledger,
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             run_id: run.clone(),
             text: text.into(),
             mode: Default::default(),
@@ -722,6 +724,7 @@ async fn steer_callback_requires_carrier_receipt_and_reoffers_without_it() {
     let receipt = crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "Human direction".into(),
@@ -825,6 +828,7 @@ async fn steer_maximum_callback_batches_whole_entries_before_memory_in_record_or
         let steer = crate::v2_run_ledger::steering::record(
             ledger.as_ref(),
             openengine_cluster_protocol::RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: run.clone(),
                 text: text.clone(),
@@ -965,6 +969,7 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "Retry at the next callback".into(),
@@ -992,6 +997,7 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
 }
 
 mod network;
+mod node_steering;
 
 /// An unacknowledged delivery records no receipt; it waits until the record holds `text`.
 async fn await_steer(hooks: &ActiveMemoryHooks, invocation: &DriverInvocation, text: &str) {

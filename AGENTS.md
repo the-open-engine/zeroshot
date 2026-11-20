@@ -166,6 +166,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Peer guidance travels on the same carriers as a steer and in the same hand-over. It keeps its
   descriptive `<network-steer>` frame inside a user message too: it is another agent's text, not
   the operator's. No carrier repeats a message the conversation holds, in either mode.
+  Human `steer --node NAME` selects one exact agent name from the admitted runtime plan before
+  publication. The optional `node` stays on the existing vector and its projections; the shared
+  recipient check filters prompt and hook delivery across mapped instances and future visits.
+  Omission retains broadcast serialization and behavior; `--node` and `--network` conflict.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.
@@ -2260,6 +2264,10 @@ Controller request regressions budget each CLI subprocess from its own spawn, in
 Mapped peer-network regressions confirm exact durable publications before releasing recipient tools.
 An unknown publication response requires observation, never a retry; lost-reply probes retain every
 delivery, exclusion and receipt assertion without extending production broker deadlines.
+Mapped network fixtures keep peers live while the host admits and confirms each publication;
+an authority probe also confirms the exact durable vector after an uncertain publication reply.
+Late-version preparation probes budget checkpoint restoration before probe startup and publish
+complete PID markers atomically before asserting cleanup.
 
 ```bash
 cargo fmt --all -- --check
