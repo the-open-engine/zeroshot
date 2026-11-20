@@ -312,6 +312,12 @@ jobs:
           cargo test --package zeroshot --lib
           native_v2_supervisor::checkpoints:: -- --nocapture
 
+      - name: Install Linux CLI loopback prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin gnome-keyring libsecret-tools
+
       - name: Run workspace tests
         if: runner.os != 'Windows'
         run: |
