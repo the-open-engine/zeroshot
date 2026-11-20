@@ -37,7 +37,7 @@ async fn assert_admission_effects(store: &InMemoryAdmissionStore) {
 
 #[test]
 fn protocol_version_is_exact() {
-    assert_eq!(PROTOCOL_VERSION, "openengine.cluster/v1");
+    assert_eq!(PROTOCOL_VERSION, "openengine.cluster/v2");
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn canonical_empty_results_have_exact_wire_shape() {
     assert_eq!(
         serde_json::to_value(initialize).assert_value(),
         serde_json::json!({
-            "protocolVersion": "openengine.cluster/v1",
+            "protocolVersion": "openengine.cluster/v2",
             "capabilities": { "graphProfiles": [], "logs": false, "agentAttach": false },
             "status": {
                 "phase": "empty",
@@ -417,7 +417,7 @@ async fn dispatcher_rejects_a_backend_response_with_the_wrong_protocol_version()
     let response: serde_json::Value = serde_json::from_str(
         &dispatcher
             .dispatch(
-                r#"{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v1"}}"#,
+                r#"{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v2"}}"#,
             )
             .await,
     )
@@ -442,7 +442,7 @@ async fn stdio_emits_protocol_frames_only() {
     stdin
         .write_all(
             concat!(
-                "{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"openengine.cluster/v1\"}}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"openengine.cluster/v2\"}}\n",
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"get\",\"params\":{}}\n"
             )
             .as_bytes(),

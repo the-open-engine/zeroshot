@@ -1270,7 +1270,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
   separate `openengine.hosted-workspace-recovery/v1` outer discovery extension, leaving the strict
-  `zeroshot.hosted-runs/v1` route object unchanged for older clients. POST bodies and results match
+  `zeroshot.hosted-runs/v2` route object unchanged. POST bodies and results match
   the OECP `Run*Params`/`Run*Result` types. These authenticated Platform routes remain available after
   capsule disposal. Platform resolves the admitted connection references freshly; hosted recovery does
   not depend on local direct-target authorization or read local provider environment values.
@@ -1863,6 +1863,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Ordinary runs retain run-scoped session keys.
 
 ## CLI and target contracts
+
+- The current wire contract uses `openengine.cluster/v2` at OECP initialization,
+  `zeroshot.native-v2-target/v3` at target discovery, and `zeroshot.hosted-runs/v2` for hosted
+  observation. These protocol-owned identifiers gate incompatible peers before submission or
+  observation; upgrade clients (including Python wheels), targets and hosted gateways together.
+  Keep one strict timed payload format, existing paths and protocol artifact locations. The
+  isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins the
+  untouched v16.0.0 client/server sources for early-rejection controls without adding duplicate
+  package identities to the product workspace. The protocol's `native_v2_observation` integration
+  suite invokes its locked controls and the current runtime/HTTP wire tests through the existing
+  Linux/Windows and macOS CI entry points; child Cargo commands never select that parent suite.
+  Separate current/released workspaces under `target/wire-contract` preserve the surrounding CLI's
+  feature profile and keep each Cargo workspace's build artifacts independent.
+  Child commands clear the parent package's Cargo metadata so Windows can reuse its leaf-test
+  prebuilds inside the bounded native execution host.
 
 - `target list` and `target remove` manage local named-target state, including the built-in
   `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses

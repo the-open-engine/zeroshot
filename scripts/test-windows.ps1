@@ -17,6 +17,14 @@ $tests = @($artifacts | Where-Object {
     $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable
 })
 if ($tests.Count -eq 0) { throw 'Cargo produced no workspace test executables' }
+
+# The observation suite invokes isolated wire-contract controls. Compile their leaf tests here
+# as well, before CI starts the bounded native execution host (including the non-UI profile).
+$wireTarget = if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR 'wire-contract' } else { Join-Path 'target' 'wire-contract' }
+cargo test --locked --package zeroshot --lib --bin zeroshot --target-dir (Join-Path $wireTarget 'current') --jobs 1 --no-run
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+cargo test --locked --manifest-path crates/openengine-cluster-testkit/tests/released-wire-contract/Cargo.toml --target-dir (Join-Path $wireTarget 'released') --jobs 1 --no-run
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($BuildOnly) { exit 0 }
 
 $failed = $false

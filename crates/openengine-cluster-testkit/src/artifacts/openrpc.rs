@@ -6,7 +6,7 @@ use openengine_cluster_protocol::{
     RunResumeParams, RunStatusParams, RunSubmitParams, RunWatchParams, StopParams, UpdateParams,
     RUN_ATTACH_METHOD, RUN_CHECKPOINTS_METHOD, RUN_DISCARD_WORKSPACE_METHOD, RUN_FORCE_METHOD,
     RUN_LIST_METHOD, RUN_LOGS_METHOD, RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD,
-    RUN_WATCH_METHOD,
+    RUN_WATCH_METHOD, PROTOCOL_VERSION,
 };
 use openengine_cluster_server::method_registry::{MethodDescriptor, MethodKind, METHOD_REGISTRY};
 use schemars::schema_for;
@@ -21,7 +21,7 @@ pub(super) fn document() -> Value {
         "openrpc": "1.3.2",
         "info": {
             "title": "Open Engine Cluster Protocol",
-            "version": "1.0.0"
+            "version": "2.0.0"
         },
         "methods": methods,
         "components": {
@@ -172,7 +172,7 @@ fn initialize_method() -> Value {
             "required": true,
             "schema": {
                 "type": "string",
-                "const": "openengine.cluster/v1"
+                "const": PROTOCOL_VERSION
             }
         }],
         "result": {
