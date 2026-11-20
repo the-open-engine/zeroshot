@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Configure setup commands, startup commands and environment variables for Docker target runs without putting environment settings in profiles.">
+        <meta name="description" content="Configure setup commands, startup commands and environment variables for local and Docker target runs.">
       
       
       
@@ -63,14 +63,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="Prepare a runtime environment | zeroshot docs">
-    <meta property="og:description" content="Configure setup commands, startup commands and environment variables for Docker target runs without putting environment settings in profiles.">
+    <meta property="og:description" content="Configure setup commands, startup commands and environment variables for local and Docker target runs.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/guides/runtime-environments/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Prepare a runtime environment | zeroshot docs">
-    <meta name="twitter:description" content="Configure setup commands, startup commands and environment variables for Docker target runs without putting environment settings in profiles.">
+    <meta name="twitter:description" content="Configure setup commands, startup commands and environment variables for local and Docker target runs.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -817,6 +817,17 @@
     <span class="md-ellipsis">
       
         Read-only context repositories
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-scripts-and-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local scripts and services
       
     </span>
   </a>
@@ -2230,6 +2241,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#local-scripts-and-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local scripts and services
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#example-pinned-node-and-npm-dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2272,7 +2294,7 @@
 
 
 <h1 id="prepare-a-runtime-environment">Prepare a runtime environment<a class="headerlink" href="#prepare-a-runtime-environment" title="Permanent link">&para;</a></h1>
-<p>Run submissions to Docker targets accept an <code>environment</code> field alongside <code>runtime</code>:</p>
+<p>Run submissions accept an <code>environment</code> field alongside <code>runtime</code>. This example uses a Docker target:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">"setup"</span><span class="p">:</span><span class="w"> </span><span class="s2">"apt-get update &amp;&amp; apt-get install -y jq"</span><span class="p">,</span>
@@ -2329,47 +2351,71 @@ checkpoint restore, clones the original pinned commits again even if their branc
 An unavailable repository or commit stops preparation with <code>context_checkout_unavailable</code> before
 agents start. Cloning shares the existing preparation deadline. A host-selected default environment
 that lists context repositories also requires matching client pins; the target never resolves
-mutable branch tips on the client's behalf. Local runs reject context repositories, as they reject
-setup and startup hooks. Runs without context repositories receive no <code>ZEROSHOT_CONTEXT</code>.</p>
+mutable branch tips on the client's behalf. Context repositories require a Docker target.
+Runs without context repositories receive no <code>ZEROSHOT_CONTEXT</code>.</p>
+<h2 id="local-scripts-and-services">Local scripts and services<a class="headerlink" href="#local-scripts-and-services" title="Permanent link">&para;</a></h2>
+<p>On Linux and macOS, pass a JSON file with <code>--environment FILE</code> to a local run. After selecting
+the worktree or restoring a checkpoint, zeroshot runs <code>setup</code> and then <code>startup</code> in the final
+checkout. Both run as the invoking user before the graph starts. Hooks receive the local shell's
+basic environment, public <code>variables</code>, declared hook <code>connections</code>, and <code>ZEROSHOT_RUN_ID</code>.
+Install harness prerequisites before submitting the run. Each preparation script has 15 minutes
+within the run's preparation budget.</p>
+<p>Start native background services in <code>startup</code> and wait for readiness before the script exits.
+The service processes belong to the run and survive agent steps. Keep them in the startup
+process tree. Run cleanup stops them after the optional <code>teardown</code> script.</p>
+<p>Local <code>teardown</code> runs once per attempt after environment preparation begins. It runs after
+success, setup or startup failure, graph failure, force-stop, and suspension. It gets a separate
+60-second deadline, and a failure is reported in the run logs while preserving the original result.
+A controller crash or machine loss can interrupt cleanup. On resume, the new attempt reuses the
+saved scripts with a new run ID and reruns setup and startup.</p>
+<p>Docker Compose resources belong to the Docker daemon. To clean up a disposable stack, use the same
+per-run project name in both hooks:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"startup"</span><span class="p">:</span><span class="w"> </span><span class="s2">"docker compose --project-name \"zs-$ZEROSHOT_RUN_ID\" up --detach --wait"</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"teardown"</span><span class="p">:</span><span class="w"> </span><span class="s2">"docker compose --project-name \"zs-$ZEROSHOT_RUN_ID\" down --remove-orphans --volumes"</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
+</code></pre></div>
+<p>Use the same Compose file and settings in both hooks. Use project-scoped volumes for this example.
+Omit <code>--volumes</code> to retain data, and use distinct host ports when parallel attempts publish ports.</p>
 <h2 id="example-pinned-node-and-npm-dependencies">Example: pinned Node and npm dependencies<a class="headerlink" href="#example-pinned-node-and-npm-dependencies" title="Permanent link">&para;</a></h2>
 <p>For a repository with a committed <code>package-lock.json</code>, save this as <code>setup.sh</code>. It installs OS
 packages and Node 22.22.3, verifies the archive against the release's SHA-256 checksums, and exposes
 Node to every agent through <code>$ZEROSHOT_TOOLS/bin</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">DEBIAN_FRONTEND</span><span class="o">=</span>noninteractive
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>apt-get<span class="w"> </span>update<span class="w"> </span>-qq
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>--no-install-recommends<span class="w"> </span>jq<span class="w"> </span>sqlite3<span class="w"> </span>xz-utils
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="k">case</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>uname<span class="w"> </span>-m<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="k">in</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span>x86_64<span class="o">)</span><span class="w"> </span><span class="nv">arch</span><span class="o">=</span>x64<span class="w"> </span><span class="p">;;</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span>aarch64<span class="o">)</span><span class="w"> </span><span class="nv">arch</span><span class="o">=</span>arm64<span class="w"> </span><span class="p">;;</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Unsupported Node architecture'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="k">esac</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="nv">version</span><span class="o">=</span><span class="m">22</span>.22.3
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="nv">release</span><span class="o">=</span><span class="s2">"node-v</span><span class="nv">$version</span><span class="s2">-linux-</span><span class="nv">$arch</span><span class="s2">"</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="nv">download</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="nb">trap</span><span class="w"> </span><span class="s1">'rm -rf "$download"'</span><span class="w"> </span>EXIT
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span><span class="s2">"https://nodejs.org/dist/v</span><span class="nv">$version</span><span class="s2">/</span><span class="nv">$release</span><span class="s2">.tar.xz"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">/</span><span class="nv">$release</span><span class="s2">.tar.xz"</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span><span class="s2">"https://nodejs.org/dist/v</span><span class="nv">$version</span><span class="s2">/SHASUMS256.txt"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">/SHASUMS256.txt"</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sha256sum<span class="w"> </span>--check<span class="w"> </span>--ignore-missing<span class="w"> </span>SHASUMS256.txt<span class="o">)</span>
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>tar<span class="w"> </span>-xJf<span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">/</span><span class="nv">$release</span><span class="s2">.tar.xz"</span><span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="nv">$ZEROSHOT_TOOLS</span><span class="s2">"</span>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="k">for</span><span class="w"> </span>tool<span class="w"> </span><span class="k">in</span><span class="w"> </span>node<span class="w"> </span>npm<span class="w"> </span>npx<span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">  </span>ln<span class="w"> </span>-sfn<span class="w"> </span><span class="s2">"../</span><span class="nv">$release</span><span class="s2">/bin/</span><span class="nv">$tool</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$ZEROSHOT_TOOLS</span><span class="s2">/bin/</span><span class="nv">$tool</span><span class="s2">"</span>
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="k">done</span>
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>node<span class="w"> </span>--version
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">DEBIAN_FRONTEND</span><span class="o">=</span>noninteractive
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>apt-get<span class="w"> </span>update<span class="w"> </span>-qq
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>--no-install-recommends<span class="w"> </span>jq<span class="w"> </span>sqlite3<span class="w"> </span>xz-utils
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">case</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>uname<span class="w"> </span>-m<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="k">in</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>x86_64<span class="o">)</span><span class="w"> </span><span class="nv">arch</span><span class="o">=</span>x64<span class="w"> </span><span class="p">;;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>aarch64<span class="o">)</span><span class="w"> </span><span class="nv">arch</span><span class="o">=</span>arm64<span class="w"> </span><span class="p">;;</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Unsupported Node architecture'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="k">esac</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="nv">version</span><span class="o">=</span><span class="m">22</span>.22.3
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nv">release</span><span class="o">=</span><span class="s2">"node-v</span><span class="nv">$version</span><span class="s2">-linux-</span><span class="nv">$arch</span><span class="s2">"</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nv">download</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nb">trap</span><span class="w"> </span><span class="s1">'rm -rf "$download"'</span><span class="w"> </span>EXIT
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span><span class="s2">"https://nodejs.org/dist/v</span><span class="nv">$version</span><span class="s2">/</span><span class="nv">$release</span><span class="s2">.tar.xz"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">/</span><span class="nv">$release</span><span class="s2">.tar.xz"</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span><span class="s2">"https://nodejs.org/dist/v</span><span class="nv">$version</span><span class="s2">/SHASUMS256.txt"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">/SHASUMS256.txt"</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sha256sum<span class="w"> </span>--check<span class="w"> </span>--ignore-missing<span class="w"> </span>SHASUMS256.txt<span class="o">)</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>tar<span class="w"> </span>-xJf<span class="w"> </span><span class="s2">"</span><span class="nv">$download</span><span class="s2">/</span><span class="nv">$release</span><span class="s2">.tar.xz"</span><span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="nv">$ZEROSHOT_TOOLS</span><span class="s2">"</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="k">for</span><span class="w"> </span>tool<span class="w"> </span><span class="k">in</span><span class="w"> </span>node<span class="w"> </span>npm<span class="w"> </span>npx<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">  </span>ln<span class="w"> </span>-sfn<span class="w"> </span><span class="s2">"../</span><span class="nv">$release</span><span class="s2">/bin/</span><span class="nv">$tool</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$ZEROSHOT_TOOLS</span><span class="s2">/bin/</span><span class="nv">$tool</span><span class="s2">"</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="k">done</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>node<span class="w"> </span>--version
 </code></pre></div>
 <p>Save the workspace preparation as <code>startup.sh</code>. <code>npm ci</code> rebuilds <code>node_modules</code> from the lockfile,
 so this also works after restoring a workspace:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">test</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>node<span class="w"> </span>--version<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>v22.22.3
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>npm<span class="w"> </span>ci<span class="w"> </span>--no-audit<span class="w"> </span>--no-fund
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">test</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>node<span class="w"> </span>--version<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>v22.22.3
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>npm<span class="w"> </span>ci<span class="w"> </span>--no-audit<span class="w"> </span>--no-fund
 </code></pre></div>
 <p>On your machine, use <code>jq</code> to embed both scripts in a flat environment file, then submit it with
 your existing profile, task input file, and target:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>jq<span class="w"> </span>-n<span class="w"> </span>--rawfile<span class="w"> </span>setup<span class="w"> </span>setup.sh<span class="w"> </span>--rawfile<span class="w"> </span>startup<span class="w"> </span>startup.sh<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="s1">'{setup: $setup, startup: $startup, variables: {CI: "true"}}'</span><span class="w"> </span>&gt;<span class="w"> </span>environment.json
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>zeroshot<span class="w"> </span>run<span class="w"> </span>--profile<span class="w"> </span>my-profile<span class="w"> </span>--target<span class="w"> </span>my-target<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--environment<span class="w"> </span>environment.json<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Fix the failing test"</span><span class="w"> </span>--input<span class="w"> </span>input.json
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>jq<span class="w"> </span>-n<span class="w"> </span>--rawfile<span class="w"> </span>setup<span class="w"> </span>setup.sh<span class="w"> </span>--rawfile<span class="w"> </span>startup<span class="w"> </span>startup.sh<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="s1">'{setup: $setup, startup: $startup, variables: {CI: "true"}}'</span><span class="w"> </span>&gt;<span class="w"> </span>environment.json
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>zeroshot<span class="w"> </span>run<span class="w"> </span>--profile<span class="w"> </span>my-profile<span class="w"> </span>--target<span class="w"> </span>my-target<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--environment<span class="w"> </span>environment.json<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Fix the failing test"</span><span class="w"> </span>--input<span class="w"> </span>input.json
 </code></pre></div>
 <p>The file contains <code>setup</code> and <code>startup</code> directly; an inline run API request puts the same object
 in <code>submission.environment</code>, beside <code>submission.runtime</code>. Setup cannot read repository files because
@@ -2410,8 +2456,7 @@ requirements. The target must have a writable root for package installation. Doc
 an operator-provided daemon endpoint. Detached Docker containers belong to that daemon and are not
 terminated by the target's process cleanup. Direct target operators or scripts must manage their
 names, reuse, and removal. When the daemon runs inside a disposable run machine, destroying that
-machine removes its Docker resources. Local execution uses the invoking machine and rejects setup
-and startup hooks and their connection references.</p>
+machine removes its Docker resources. The <code>teardown</code> field is for local execution.</p>
 
 
 
@@ -2432,7 +2477,7 @@ and startup hooks and their connection references.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-18">18 November 2026</time>
+    Last updated <time datetime="2026-11-20">20 November 2026</time>
   </span>
 
     
