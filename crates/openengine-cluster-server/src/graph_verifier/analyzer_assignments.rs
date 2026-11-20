@@ -370,7 +370,7 @@ impl<'a> Analyzer<'a> {
             return false;
         };
         let mut discovered = false;
-        for ancestor in &info.path {
+        for ancestor in info.scope_path() {
             let DiagnosticPathSegment::Node { name } = ancestor else {
                 continue;
             };

@@ -21,6 +21,7 @@ fn backend(root: &TestDirectory) -> LocalCliBackend {
 
 fn params() -> RunSteerParams {
     RunSteerParams {
+        node: None,
         run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000071"),
         text: "  Keep\t方向\r\nexactly.  ".into(),
         mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -128,6 +129,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
     let mut output = Vec::new();
     execute_native_v2_cli(
         NativeV2CliCommand::Steer {
+            node: None,
             run: RunSelector {
                 target: None,
                 run_id: params.run_id.clone(),

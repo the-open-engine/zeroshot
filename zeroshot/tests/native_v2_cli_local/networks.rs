@@ -8,6 +8,7 @@ fn network_step(name: &str) -> Value {
     node["name"] = json!(name);
     node["worker"] = json!(format!("agent.{name}@1"));
     node["instructions"] = json!("Exercise the declared peer network and return null.");
+    node["timeoutMs"] = json!(SUSPENSION_TIMEOUT.as_secs() * 1000);
     node
 }
 
@@ -85,7 +86,11 @@ fn network_fixture(scenario: &str, parallel: bool) -> LocalFixture {
     let helper = fixture.root.path("network-provider.py");
     openengine_cluster_testkit::fixture::write_executable(
         &helper,
-        openengine_cluster_testkit::fixture::python3_script(NETWORK_PROVIDER).as_bytes(),
+        openengine_cluster_testkit::fixture::python3_script(&NETWORK_PROVIDER.replace(
+            "FIXTURE_WAIT_SECONDS",
+            &SUSPENSION_TIMEOUT.as_secs().to_string(),
+        ))
+        .as_bytes(),
         0o755,
     )
     .assert_value();
@@ -116,10 +121,13 @@ scenario = os.environ['NETWORK_SCENARIO']
 identity = run+'-'+node+'-'+iteration+'-'+instance
 
 def save(kind, value):
-    (root/('network-'+identity+'-'+kind)).write_text(value if isinstance(value,str) else json.dumps(value))
+    path = root/('network-'+identity+'-'+kind)
+    temporary = path.with_name(path.name+'.pending')
+    temporary.write_text(value if isinstance(value,str) else json.dumps(value))
+    temporary.replace(path)
 
 def wait(predicate):
-    deadline = time.monotonic()+15
+    deadline = time.monotonic()+FIXTURE_WAIT_SECONDS
     while not predicate():
         if time.monotonic() >= deadline: raise RuntimeError('network fixture barrier timed out')
         time.sleep(.01)
@@ -188,8 +196,11 @@ elif node == 'talker':
     tool('tool-before')
     (root/('network-ready-'+instance)).touch()
     wait(lambda: len(list(root.glob('network-ready-*'))) == 2)
+    (root/'network-all-ready').touch()
+    wait(lambda: (root/('network-publish-'+instance+'-once')).exists())
     assert publish('publish-once',None,('--network','alpha','--network','beta','--text-stdin'),
         stdin='mapped-once-'+instance) in (0, None)
+    wait(lambda: (root/('network-publish-'+instance+'-standing')).exists())
     assert publish('publish-standing','mapped-standing-'+instance,('--network','alpha','--network','beta','--mode','standing')) in (0, None)
     (root/('network-published-'+instance)).touch()
     wait(lambda: len(list(root.glob('network-published-*'))) == 2)
@@ -291,7 +302,11 @@ async fn network_wait(fixture: &LocalFixture, run: &str, marker: &str) {
     }
 }
 
-async fn recorded_network_publications(fixture: &LocalFixture, run: &str, count: usize) -> Vec<Value> {
+async fn recorded_network_publications(
+    fixture: &LocalFixture,
+    run: &str,
+    count: usize,
+) -> Vec<Value> {
     let deadline = Instant::now() + SUSPENSION_TIMEOUT;
     loop {
         let status = fixture.json(&["status", run], "networks").await;
@@ -302,9 +317,19 @@ async fn recorded_network_publications(fixture: &LocalFixture, run: &str, count:
             return steers.clone();
         }
         assert!(terminal_result(&status).is_none(), "{status}");
-        assert!(Instant::now() < deadline, "publications not recorded: {status}");
+        assert!(
+            Instant::now() < deadline,
+            "publications not recorded: {status}"
+        );
         sleep(Duration::from_millis(30)).await;
     }
+}
+
+fn assert_network_publication(steer: &Value, text: &str, mode: &str, network: Value) {
+    assert_eq!(steer["excerpt"], text);
+    assert_eq!(steer["textBytes"], text.len());
+    assert_eq!(steer["mode"], mode);
+    assert_eq!(steer["network"], network);
 }
 
 async fn confirm_sender_publications(
@@ -324,13 +349,16 @@ async fn confirm_sender_publications(
             "identity",
         ))
         .assert_value();
-        let steer = &published[index];
-        assert_eq!(steer["excerpt"], text);
-        assert_eq!(steer["textBytes"], text.len());
-        assert_eq!(steer["mode"], mode);
-        assert_eq!(steer["network"], json!({"networks": networks, "origin": origin}));
+        assert_network_publication(
+            &published[index],
+            text,
+            mode,
+            json!({"networks": networks, "origin": origin}),
+        );
         fs::write(
-            fixture.repository.join(format!("network-{run}-confirmed-{mode}")),
+            fixture
+                .repository
+                .join(format!("network-{run}-confirmed-{mode}")),
             "go",
         )
         .assert_value();
@@ -445,28 +473,41 @@ async fn networks_map_peers_confirm_lost_publication_replies_without_republishin
     assert_mapped_network_delivery("lost-publication-reply").await;
 }
 
-async fn assert_mapped_network_delivery(scenario: &str) {
-    let fixture = network_fixture(scenario, true);
-    let run = fixture.submit_detached("networks").await;
-    let published = recorded_network_publications(&fixture, &run, 4).await;
-    let identities = network_captures(&fixture, &run, ("talker", 0), "identity");
+async fn confirm_mapped_publications(fixture: &LocalFixture, run: &str) -> Vec<Value> {
+    network_wait(fixture, run, "network-all-ready").await;
+    // Keep both peers live, but confirm each durable publication before admitting the next.
+    // An unknown response never authorizes a retry or proves a concurrent request was admitted.
+    let mut published = Vec::new();
+    let identities = network_captures(fixture, run, ("talker", 0), "identity");
     assert_eq!(identities.len(), 2);
     for identity in identities {
         let identity: Value = serde_json::from_str(&identity).assert_value();
         for mode in ["once", "standing"] {
             let text = format!("mapped-{mode}-{}", identity["nodeInstance"]);
-            assert!(
-                published.iter().any(|steer| {
-                    steer["excerpt"] == text
-                        && steer["textBytes"] == text.len()
-                        && steer["mode"] == mode
-                        && steer["network"]
-                            == json!({"networks":["alpha","beta"],"origin":identity})
-                }),
-                "missing exact publication for {identity}/{mode}: {published:?}"
+            fs::write(
+                fixture.repository.join(format!(
+                    "network-publish-{}-{mode}",
+                    identity["nodeInstance"],
+                )),
+                "go",
+            )
+            .assert_value();
+            published = recorded_network_publications(fixture, run, published.len() + 1).await;
+            assert_network_publication(
+                &published[published.len() - 1],
+                &text,
+                mode,
+                json!({"networks": ["alpha", "beta"], "origin": identity}),
             );
         }
     }
+    published
+}
+
+async fn assert_mapped_network_delivery(scenario: &str) {
+    let fixture = network_fixture(scenario, true);
+    let run = fixture.submit_detached("networks").await;
+    let published = confirm_mapped_publications(&fixture, &run).await;
     fs::write(
         fixture.repository.join("network-publications-confirmed"),
         "go",

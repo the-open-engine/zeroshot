@@ -113,6 +113,13 @@ impl Index {
         conversation: &Conversation,
         networks: &BTreeMap<NodeName, SteeringNetwork>,
     ) -> bool {
+        if let RunVectorContent::Steer {
+            node: Some(node), ..
+        } = &vector.content
+            && node != &conversation.reference.node
+        {
+            return false;
+        }
         match &vector.content {
             RunVectorContent::Steer {
                 network: Some(network),

@@ -73,7 +73,12 @@ export function bindingContext(document: Document, node: GraphNode): BindingCont
       item = selected?.kind === 'array' ? selected.items : undefined;
       itemName = ancestor.name;
     }
-    if (isGroup(ancestor)) {
+    if (ancestor.kind === 'profile') {
+      state = ancestor.initialInput;
+      stateName = ancestor.name;
+      item = undefined;
+      itemName = undefined;
+    } else if (isGroup(ancestor)) {
       state = ancestor.state;
       stateName = ancestor.name;
     }

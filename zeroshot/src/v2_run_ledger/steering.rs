@@ -10,10 +10,25 @@ pub(crate) async fn record(
     ledger: &dyn RunLedger,
     params: RunSteerParams,
 ) -> Result<RunSteerResult, RunLedgerError> {
+    if let Some(node) = &params.node {
+        let stored = ledger
+            .get(&params.run_id)
+            .await?
+            .ok_or(RunLedgerError::RunNotFound)?;
+        if !matches!(
+            stored.admitted.runtime.nodes().get(node),
+            Some(openengine_cluster_protocol::NodeRuntimeBinding::Agent { .. })
+        ) {
+            return Err(RunLedgerError::InvalidEvent(
+                "steer node must name an agent in the admitted runtime plan",
+            ));
+        }
+    }
     record_content(
         ledger,
         params.run_id,
         RunVectorContent::Steer {
+            node: params.node,
             text: params.text,
             mode: params.mode,
             network: None,
@@ -37,6 +52,7 @@ pub(crate) async fn record_network(
         ledger,
         params.run_id,
         RunVectorContent::Steer {
+            node: None,
             text: params.text,
             mode: params.mode,
             network: Some(NetworkSteer { networks, origin }),
@@ -105,6 +121,7 @@ async fn visit(
 
 pub(crate) fn summary(vector: &RunVector) -> Option<RunSteer> {
     let RunVectorContent::Steer {
+        node,
         text,
         mode,
         network,
@@ -117,6 +134,7 @@ pub(crate) fn summary(vector: &RunVector) -> Option<RunSteer> {
         end -= 1;
     }
     Some(RunSteer {
+        node: node.clone(),
         id: vector.id.clone(),
         mode: *mode,
         network: network.clone(),

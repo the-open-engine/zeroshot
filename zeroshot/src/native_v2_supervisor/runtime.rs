@@ -542,28 +542,11 @@ fn collect_execution_metadata(node: &GraphNode, catalog: &mut ExecutionCatalog) 
             node.timeout_ms.map(|value| value.get()),
             &node.instructions,
         ),
-        GraphNode::Seq(node) => node
-            .children
-            .as_slice()
-            .iter()
-            .for_each(|child| collect_execution_metadata(child, catalog)),
-        GraphNode::Choice(node) => {
-            node.branches
-                .as_slice()
-                .iter()
-                .for_each(|branch| collect_execution_metadata(&branch.node, catalog));
-            if let Some(otherwise) = &node.otherwise {
-                collect_execution_metadata(otherwise, catalog);
+        _ => {
+            for child in openengine_cluster_server::graph_verifier::graph_node_children(node) {
+                collect_execution_metadata(child, catalog);
             }
         }
-        GraphNode::Par(node) => node
-            .branches
-            .as_slice()
-            .iter()
-            .for_each(|branch| collect_execution_metadata(branch, catalog)),
-        GraphNode::Loop(node) => collect_execution_metadata(&node.body, catalog),
-        GraphNode::Map(node) => collect_execution_metadata(&node.body, catalog),
-        GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
     }
 }
 

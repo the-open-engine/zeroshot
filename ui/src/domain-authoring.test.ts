@@ -70,6 +70,20 @@ test('blank authoring starts with empty input and state records and no template 
   assert.deepEqual(source, before);
 });
 
+test('adding a saved profile keeps only its authored reference and allocates no runtime binding', () => {
+  const { document, name } = addNode(blank(), 'run', 'profile:shared-review');
+  assertDocument(document);
+  assert.deepEqual(findNode(document.graph.root, name), {
+    kind: 'profile',
+    name,
+    profile: 'shared-review',
+  });
+  assert.deepEqual(document.runtime.nodes, {});
+  const expanded = structuredClone(document);
+  findNode(expanded.graph.root, name)!.body = agent('imported_agent');
+  assert.throws(() => assertDocument(expanded), /the run resolves its definition/);
+});
+
 test('empty structured drafts can be authored without inventing terminal placeholders', () => {
   for (const kind of ['seq', 'par', 'choice']) {
     const original = blank();

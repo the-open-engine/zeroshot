@@ -258,9 +258,10 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
             }
           />
         )}
-        {item.detail && !activity && !junction && item.role !== 'decision' && (
-          <small title={item.detail}>{item.detail}</small>
-        )}
+        {item.detail &&
+          (!activity || node.kind === 'profile') &&
+          !junction &&
+          item.role !== 'decision' && <small title={item.detail}>{item.detail}</small>}
         {activity && executable(node) && <ActivityFields node={node} />}
         {activity && <span className="workflow-node-identity">{node.name}</span>}
         {item.role === 'collapsed' && (
@@ -426,6 +427,7 @@ function CanvasToolbar({
   noneCollapsed: boolean;
   arrange: () => void;
 }) {
+  const canAddNext = selectedNode && (executable(selectedNode) || selectedNode.kind === 'profile');
   const groupTools = [
     {
       label: 'Expand all groups',
@@ -484,7 +486,7 @@ function CanvasToolbar({
               onClick={() =>
                 p.action?.({
                   kind:
-                    selectedNode && executable(selectedNode)
+                    canAddNext
                       ? 'next'
                       : selectedNode?.kind === 'choice'
                         ? 'outcome'
@@ -492,7 +494,7 @@ function CanvasToolbar({
                   owner:
                     selectedNode &&
                     (['seq', 'choice', 'loop', 'map', 'par'].includes(selectedNode.kind) ||
-                      executable(selectedNode))
+                      canAddNext)
                       ? selectedNode.name
                       : p.document.graph.root.name,
                 })

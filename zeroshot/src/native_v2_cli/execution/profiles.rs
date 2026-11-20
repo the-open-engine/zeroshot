@@ -8,9 +8,10 @@ use openengine_cluster_protocol::{
 use super::super::{
     CliOutcome, NativeV2CliBackend, NativeV2CliCommand, NativeV2CliError, ProfileSetCommand,
 };
-use super::submission::materialize_profile;
+use super::submission::{load_profile, require_supported_placement, validate_profile};
 use super::write_json;
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
+use crate::native_v2_cli::LocalRunProfileStore;
 
 pub(super) async fn execute_profile<B, W>(
     command: NativeV2CliCommand,
@@ -76,7 +77,18 @@ async fn set<B: NativeV2CliBackend>(
         runtime,
         set_default,
     } = command;
-    let (graph, mut runtime) = materialize_profile(&graph, &runtime).await?;
+    let (graph, mut runtime) = load_profile(&graph, &runtime)?;
+    require_supported_placement(route.target.as_deref(), &graph)?;
+    if LocalRunProfileStore::has_imports(&graph) {
+        let (expanded_graph, expanded_runtime) = LocalRunProfileStore::production()?.expand(
+            graph.clone(),
+            runtime.clone(),
+            Some(&name),
+        )?;
+        validate_profile(&expanded_graph, &expanded_runtime).await?;
+    } else {
+        validate_profile(&graph, &runtime).await?;
+    }
     materialize_stored_provider_access(&mut runtime, route.target.is_some())?;
     let scope = resolve_scope(&route, backend).await?;
     let result = backend

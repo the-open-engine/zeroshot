@@ -14,6 +14,9 @@ use openengine_cluster_server::graph_verifier::{
 use openengine_cluster_server::worker_registry::{WorkerRegistry, WorkerRegistryError};
 use serde_json::{json, Value};
 
+#[path = "graph_verifier/profile_calls.rs"]
+mod profile_calls;
+
 #[derive(Clone, Copy)]
 struct PermissiveRegistry;
 

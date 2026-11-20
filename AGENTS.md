@@ -166,6 +166,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Peer guidance travels on the same carriers as a steer and in the same hand-over. It keeps its
   descriptive `<network-steer>` frame inside a user message too: it is another agent's text, not
   the operator's. No carrier repeats a message the conversation holds, in either mode.
+  Human `steer --node NAME` selects one exact agent name from the admitted runtime plan before
+  publication. The optional `node` stays on the existing vector and its projections; the shared
+  recipient check filters prompt and hook delivery across mapped instances and future visits.
+  Omission retains broadcast serialization and behavior; `--node` and `--network` conflict.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.
@@ -254,6 +258,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for a node start record, including input and bookkeeping. Local submissions apply the same
   admitted-definition check before creating run storage or a controller. Oversized node starts
   fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
+- Local profile imports resolve from one profile-store snapshot before semantic admission and
+  credential selection. Saved definitions keep references, while admitted and recovery definitions
+  freeze expanded bodies and qualified node identities. The verifier checks child scopes and
+  whole-run bounds, wait and delivery constraints. Imported success becomes continuation at its
+  actual history position after the inner groups apply their existing cancellation semantics.
+  Child terminal payload, state and controls remain scoped, failure propagates, and the same
+  reducer, workspace and execution budgets serve the whole run.
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
 - The reducer inventories error selectors across all choice, loop and first-join guards once per
@@ -2275,6 +2286,10 @@ Controller request regressions budget each CLI subprocess from its own spawn, in
 Mapped peer-network regressions confirm exact durable publications before releasing recipient tools.
 An unknown publication response requires observation, never a retry; lost-reply probes retain every
 delivery, exclusion and receipt assertion without extending production broker deadlines.
+Mapped network fixtures keep peers live while the host admits and confirms each publication;
+an authority probe also confirms the exact durable vector after an uncertain publication reply.
+Late-version preparation probes budget checkpoint restoration before probe startup and publish
+complete PID markers atomically before asserting cleanup.
 
 ```bash
 cargo fmt --all -- --check

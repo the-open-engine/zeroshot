@@ -38,6 +38,7 @@ object declares peer communication permissions; omission or `{}` grants none.
 | `par`      | Declared state, non-empty branches, promoted paths, and a tagged join                                                                                      |
 | `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
 | `map`      | Declared state, body, structured array selector `over`, positive concurrent-item limit `maxItems`, promoted paths                                          |
+| `profile`  | Name of a saved local run profile to expand at submission                                                                                                 |
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
 | `fail`     | Finite-enum reason; `unhandled` is reserved for runtime handling of unchecked worker errors                                                                |
 
@@ -144,6 +145,28 @@ and loops retain control of recovery; there is no global abort, cooldown, waitin
 automatic resumption. After usage becomes available,
 [resume the failed run](../../guides/observe-and-control.md#restart-or-resume-a-failed-run) using its
 retained workspace or an available checkpoint.
+
+## Profile imports
+
+Place a node such as `{"kind":"profile","name":"review","profile":"code-review"}` in a local
+profile or inline graph submitted with `zeroshot run`. You can also add the reference in the
+local profile editor. The named profile must already be saved in the local profile store.
+Each submission reads the current definitions of all referenced profiles from one store snapshot.
+The admitted graph and recovery data retain the resolved bodies, so a subsequent edit takes
+effect on the next submission. Imports may nest and may appear inside ordinary groups.
+Admission rejects missing profiles, dependency cycles and expansions that exceed graph bounds.
+All imported profiles must use the parent graph policy. ACP and named-target submissions require
+profiles without saved-name imports.
+
+The imported profile receives its declared input fields from the enclosing state and can
+materialize its usual root defaults. Its own state and graph controls remain scoped to its body.
+It uses the same workspace and run limits as its caller, and its leaves keep their own runtime
+bindings. The run's initial input still supplies input-driven loop limits throughout the expansion.
+
+A `succeed` in the imported body ends that body and then continues in the caller. Existing
+early-exit and cancellation rules apply within the body. Its output payload is the result for
+standalone execution. A `fail` still propagates, and the outer graph authors the run's terminal.
+Resolved graph views include the imported `body` and its `initialInput` schema.
 
 ## Peer networks
 

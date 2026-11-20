@@ -287,9 +287,15 @@ impl super::RunSteerArgs {
             ));
         }
         let mode = steer_mode(self.mode.as_deref(), !networks.is_empty());
+        let node = self
+            .node
+            .map(openengine_cluster_protocol::NodeName::new)
+            .transpose()
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         Ok(NativeV2CliCommand::Steer {
             run,
             text,
+            node,
             networks,
             mode,
         })
