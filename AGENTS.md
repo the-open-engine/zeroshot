@@ -2255,6 +2255,10 @@ Controller request regressions budget each CLI subprocess from its own spawn, in
 Mapped peer-network regressions confirm exact durable publications before releasing recipient tools.
 An unknown publication response requires observation, never a retry; lost-reply probes retain every
 delivery, exclusion and receipt assertion without extending production broker deadlines.
+Mapped network fixtures keep peers live while the host admits and confirms each publication;
+an authority probe also confirms the exact durable vector after an uncertain publication reply.
+Late-version preparation probes budget checkpoint restoration before probe startup and publish
+complete PID markers atomically before asserting cleanup.
 
 ```bash
 cargo fmt --all -- --check
