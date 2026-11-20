@@ -424,6 +424,11 @@ jobs:
           cargo test --locked --package openengine-cluster-protocol --test native_v2_run --test native_v2_observation
       - name: Run macOS context environment regressions
         run: cargo test --locked --package openengine-cluster-protocol --lib native_v2_run::environment::tests
+      - name: Run macOS ledger storage failure regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          v2_run_ledger::sqlite::storage_failure_tests
+          native_v2_platform::tests::runtime_failure
       - name: Run macOS process provenance regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --

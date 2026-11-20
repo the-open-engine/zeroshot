@@ -17,7 +17,7 @@ async fn bounded_id_pages_ignore_payloads_and_exclude_newer_insertions() {
             )
             .assert_value();
     }
-    let ledger = SqliteRunLedger::from_connection(connection).assert_value();
+    let ledger = SqliteRunLedger::from_connection(connection, None).assert_value();
     let first = ledger.list_ids_page(None, 2).await.assert_value();
     assert_eq!(first, vec![id(5), id(4)]);
 

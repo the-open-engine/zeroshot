@@ -13,6 +13,7 @@ const UNPERSISTED_OUTPUT: &str = "output rejected by storage";
 #[derive(Clone, Copy)]
 enum FailurePoint {
     Output,
+    OutputWithoutSpaceMeasurement,
     Completion,
     CompletionPanic,
     PeerCompletionPanic,
@@ -54,7 +55,7 @@ impl FaultLedger {
 
     fn read_available(&self) -> Result<(), RunLedgerError> {
         if self.lose_reads && self.triggered.load(Ordering::SeqCst) {
-            Err(sqlite_failure())
+            Err(sqlite_failure(self.point))
         } else {
             Ok(())
         }
@@ -62,7 +63,9 @@ impl FaultLedger {
 
     fn matches(&self, events: &[RunEvent]) -> bool {
         events.iter().any(|event| match self.point {
-            FailurePoint::Output => matches!(event, RunEvent::SafeLog { .. }),
+            FailurePoint::Output | FailurePoint::OutputWithoutSpaceMeasurement => {
+                matches!(event, RunEvent::SafeLog { .. })
+            }
             FailurePoint::Completion | FailurePoint::CompletionPanic => {
                 matches!(event, RunEvent::NodeCompleted { .. })
             }
@@ -104,8 +107,13 @@ impl LedgerGate {
     }
 }
 
-fn sqlite_failure() -> RunLedgerError {
-    RunLedgerError::SqliteStorage(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL))
+fn sqlite_failure(point: FailurePoint) -> RunLedgerError {
+    RunLedgerError::SqliteStorage(crate::v2_run_ledger::SqliteStorageError {
+        code: rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+        system_error: None,
+        available_bytes: (!matches!(point, FailurePoint::OutputWithoutSpaceMeasurement))
+            .then_some(0),
+    })
 }
 
 #[async_trait]
@@ -157,7 +165,7 @@ impl RunLedger for FaultLedger {
             }
         }
         if self.permanent && self.triggered.load(Ordering::SeqCst) {
-            return Err(sqlite_failure());
+            return Err(sqlite_failure(self.point));
         }
         if self.armed.load(Ordering::SeqCst)
             && self.matches(&events)
@@ -170,7 +178,7 @@ impl RunLedger for FaultLedger {
                 ),
                 "synthetic private panic payload"
             );
-            return Err(sqlite_failure());
+            return Err(sqlite_failure(self.point));
         }
         self.inner.append(run_id, events).await
     }
@@ -178,7 +186,7 @@ impl RunLedger for FaultLedger {
     async fn request_force_stop(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
         self.force_write.wait().await;
         if self.permanent && self.triggered.load(Ordering::SeqCst) {
-            return Err(sqlite_failure());
+            return Err(sqlite_failure(self.point));
         }
         self.inner.request_force_stop(run_id).await
     }
@@ -252,7 +260,10 @@ impl NodeDriver for FaultDriver {
                 }
             }
         }
-        if matches!(self.point, FailurePoint::Output) {
+        if matches!(
+            self.point,
+            FailurePoint::Output | FailurePoint::OutputWithoutSpaceMeasurement
+        ) {
             control
                 .emit(LiveOutput::new(
                     LiveOutputStream::Output,
@@ -363,7 +374,7 @@ impl FailureHarness {
             FailurePoint::CompletionPanic | FailurePoint::PeerCompletionPanic => {
                 "supervisor task panicked".to_owned()
             }
-            _ => sqlite_failure().to_string(),
+            _ => sqlite_failure(self.ledger.point).to_string(),
         };
         assert_runtime_failure(
             &terminal(&self.controller, &self.before.run_id).await,
@@ -413,7 +424,11 @@ impl FailureHarness {
             .assert_value_with("operator diagnostic");
         assert_eq!(diagnostic.code, "runtime_failed");
         assert_eq!(diagnostic.operation, "supervisor.drive");
-        assert!(diagnostic.stderr.contains(&sqlite_failure().to_string()));
+        assert!(
+            diagnostic
+                .stderr
+                .contains(&sqlite_failure(self.ledger.point).to_string())
+        );
         self.assert_exported_diagnostic(diagnostic);
     }
 
@@ -527,23 +542,28 @@ async fn drain<E>(
 
 #[tokio::test]
 async fn output_append_failure_cancels_a_still_running_handle_and_persists_failure_after_cleanup() {
-    let harness = FailureHarness::new(FailurePoint::Output, false, false).await;
-    harness.release_fault();
-    harness.failed().await;
-    assert!(harness.driver.cancelled.load(Ordering::SeqCst));
-    assert!(!harness.driver.completed.load(Ordering::SeqCst));
-    assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
-    assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
-    let tail = harness.retained().await;
-    assert!(tail.snapshot.active_executions().next().is_none());
-    assert!(matches!(
-        tail.events.last().map(|event| &event.event),
-        Some(RunEvent::Terminal { .. })
-    ));
-    assert!(!tail.events.iter().any(|event| matches!(
-        &event.event, RunEvent::SafeLog { line, .. } if line.as_str() == UNPERSISTED_OUTPUT
-    )));
-    harness.assert_storage_diagnostic();
+    for point in [
+        FailurePoint::Output,
+        FailurePoint::OutputWithoutSpaceMeasurement,
+    ] {
+        let harness = FailureHarness::new(point, false, false).await;
+        harness.release_fault();
+        harness.failed().await;
+        assert!(harness.driver.cancelled.load(Ordering::SeqCst));
+        assert!(!harness.driver.completed.load(Ordering::SeqCst));
+        assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
+        assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
+        let tail = harness.retained().await;
+        assert!(tail.snapshot.active_executions().next().is_none());
+        assert!(matches!(
+            tail.events.last().map(|event| &event.event),
+            Some(RunEvent::Terminal { .. })
+        ));
+        assert!(!tail.events.iter().any(|event| matches!(
+            &event.event, RunEvent::SafeLog { line, .. } if line.as_str() == UNPERSISTED_OUTPUT
+        )));
+        harness.assert_storage_diagnostic();
+    }
 }
 
 #[tokio::test]
@@ -562,6 +582,12 @@ async fn completion_append_failure_after_normal_driver_exit_is_observable_and_du
         panic!("status must remain terminal");
     };
     assert_eq!(stored.snapshot.terminal, Some(terminal_result));
+    let cause = sqlite_failure(FailurePoint::Completion).to_string();
+    assert!(stored.events.iter().any(|event| matches!(
+        &event.event,
+        RunEvent::SafeLog { execution: None, line, .. }
+            if line.as_str() == format!("Runtime failed: {cause}")
+    )));
     harness.assert_storage_diagnostic();
 }
 
@@ -610,7 +636,7 @@ async fn permanent_storage_failure_preserves_status_and_reports_stream_completen
         assert_eq!(logs.assert_at(2).cursor, harness.before.at_cursor);
         assert_eq!(logs.assert_at(2).record.message.as_str(), RETAINED_OUTPUT);
         harness.assert_storage_diagnostic();
-        harness.assert_recovery_diagnostic(&sqlite_failure().to_string());
+        harness.assert_recovery_diagnostic(&sqlite_failure(harness.ledger.point).to_string());
         if lose_reads {
             harness.assert_history_unavailable().await;
         }
@@ -690,7 +716,7 @@ async fn local_failure_note_preserves_the_cause_through_cleanup_and_reporting_fa
         if writable {
             assert_eq!(
                 read_runtime_failure(&paths).assert_value(),
-                sqlite_failure().to_string()
+                sqlite_failure(harness.ledger.point).to_string()
             );
         } else {
             assert!(
