@@ -150,8 +150,9 @@ def publish(name, text, args=(), override=None, target_run=None, stdin=None):
     if scenario == 'lost-publication-reply' and node == 'talker' and result.returncode == 0:
         publication = {'status':1,'stdout':'','stderr':unknown}
     save(name, publication)
-    if publication['status'] and node == 'talker' and publication['stderr'].strip().endswith(unknown):
-        return None  # The host must confirm all four durable publications before releasing our tools.
+    if (node in ('talker','sender') and not name.startswith('deny-') and publication['status'] == 1
+            and not publication['stdout'] and publication['stderr'].strip().endswith(unknown)):
+        return None  # The host confirms the durable publication before we continue.
     if publication['status'] and not name.startswith('deny-'):
         raise AssertionError('network publication '+name+' failed: '+json.dumps(publication))
     return publication['status']
@@ -168,11 +169,13 @@ elif node == 'sender' and (iteration == '1' or scenario == 'rollback'):
         (root/'network-host-held').touch()
         wait(lambda: (root/'network-host-release').exists())
     assert publish('publish-once','peer-once-marker',('--network','alpha','--network','beta'),
-        {'ZEROSHOT_NODE_NAME':'outsider','ZEROSHOT_NODE_INSTANCE_ID':'65536','ZEROSHOT_EXECUTION_REF':'forged'}) == 0
+        {'ZEROSHOT_NODE_NAME':'outsider','ZEROSHOT_NODE_INSTANCE_ID':'65536','ZEROSHOT_EXECUTION_REF':'forged'}) in (0, None)
+    wait(lambda: (root/('network-'+run+'-confirmed-once')).exists())
     standing_file = root/'network-standing-message.txt'
     standing_file.write_text('peer-standing-marker')
     assert publish('publish-standing',None,('--network','alpha','--network','beta','--mode','standing',
-        '--text-file',str(standing_file))) == 0
+        '--text-file',str(standing_file))) in (0, None)
+    wait(lambda: (root/('network-'+run+'-confirmed-standing')).exists())
     if scenario == 'deny':
         assert publish('deny-foreign-run','forbidden-foreign',('--network','alpha'),
             target_run='0199f33f-3b44-7d21-9000-000000000099') != 0
@@ -288,6 +291,63 @@ async fn network_wait(fixture: &LocalFixture, run: &str, marker: &str) {
     }
 }
 
+async fn recorded_network_publications(fixture: &LocalFixture, run: &str, count: usize) -> Vec<Value> {
+    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
+    loop {
+        let status = fixture.json(&["status", run], "networks").await;
+        if let Some(steers) = status["steers"].as_array()
+            && steers.len() >= count
+        {
+            assert_eq!(steers.len(), count, "unexpected publications: {status}");
+            return steers.clone();
+        }
+        assert!(terminal_result(&status).is_none(), "{status}");
+        assert!(Instant::now() < deadline, "publications not recorded: {status}");
+        sleep(Duration::from_millis(30)).await;
+    }
+}
+
+async fn confirm_sender_publications(
+    fixture: &LocalFixture,
+    run: &str,
+    iteration: u64,
+    expected: &[(&str, &str, &[&str])],
+) {
+    // The broker can lose a response while the durable write succeeds. Release the sender
+    // only after observing each intended record, without requesting another publication.
+    for (index, &(mode, text, networks)) in expected.iter().enumerate() {
+        let published = recorded_network_publications(fixture, run, index + 1).await;
+        let origin: Value = serde_json::from_str(&network_capture(
+            fixture,
+            run,
+            ("sender", iteration),
+            "identity",
+        ))
+        .assert_value();
+        let steer = &published[index];
+        assert_eq!(steer["excerpt"], text);
+        assert_eq!(steer["textBytes"], text.len());
+        assert_eq!(steer["mode"], mode);
+        assert_eq!(steer["network"], json!({"networks": networks, "origin": origin}));
+        fs::write(
+            fixture.repository.join(format!("network-{run}-confirmed-{mode}")),
+            "go",
+        )
+        .assert_value();
+    }
+}
+
+async fn confirm_sequential_publications(fixture: &LocalFixture, run: &str, iteration: u64) {
+    let networks = ["alpha", "beta"];
+    confirm_sender_publications(
+        fixture,
+        run,
+        iteration,
+        &[("once", ONCE, &networks), ("standing", STANDING, &networks)],
+    )
+    .await;
+}
+
 /// What a conversation was given: its prompt, the user messages sent at its tool calls, and
 /// the output of its hooks, which never carries a message.
 fn network_received(fixture: &LocalFixture, run: &str, node: &str, iteration: u64) -> String {
@@ -320,6 +380,7 @@ fn network_two_message_receipts(status: &Value) {
 async fn networks_sequential_default_once_standing_and_overlap_keep_sender_and_outsider_excluded() {
     let fixture = network_fixture("sequential", false);
     let run = fixture.submit_detached("networks").await;
+    confirm_sequential_publications(&fixture, &run, 1).await;
     fixture.wait_succeeded(&run, "networks").await;
     wait_for_exit(fixture.ready_pid(&run)).await;
     for iteration in [1, 2] {
@@ -387,22 +448,7 @@ async fn networks_map_peers_confirm_lost_publication_replies_without_republishin
 async fn assert_mapped_network_delivery(scenario: &str) {
     let fixture = network_fixture(scenario, true);
     let run = fixture.submit_detached("networks").await;
-    // Broker deadlines bound the response, not the already-started durable write. In particular,
-    // coverage can lose a response while its publication succeeds. Observe it; never retry it.
-    let deadline = Instant::now() + SUSPENSION_TIMEOUT;
-    let published = loop {
-        let status = fixture.json(&["status", &run], "networks").await;
-        let steers = status["steers"].as_array().cloned().unwrap_or_default();
-        if steers.len() == 4 {
-            break steers;
-        }
-        assert!(terminal_result(&status).is_none(), "{status}");
-        assert!(
-            Instant::now() < deadline,
-            "publications not recorded: {status}"
-        );
-        sleep(Duration::from_millis(30)).await;
-    };
+    let published = recorded_network_publications(&fixture, &run, 4).await;
     let identities = network_captures(&fixture, &run, ("talker", 0), "identity");
     assert_eq!(identities.len(), 2);
     for identity in identities {
@@ -519,6 +565,7 @@ async fn networks_denied_host_member_and_spoofed_publisher_calls_append_no_messa
             .is_empty()
     );
     fs::write(fixture.repository.join("network-host-release"), "go").assert_value();
+    confirm_sequential_publications(&fixture, &run, 1).await;
     fixture.wait_succeeded(&run, "networks").await;
     wait_for_exit(fixture.ready_pid(&run)).await;
     for (node, iteration, kinds) in [
@@ -560,6 +607,7 @@ async fn networks_suspended_successor_keeps_once_consumption_and_sender_exclusio
  {
     let fixture = network_fixture("resume", false);
     let run = fixture.submit_detached("networks").await;
+    confirm_sequential_publications(&fixture, &run, 1).await;
     network_wait(&fixture, &run, "network-resume-held").await;
     fixture.json(&["suspend", &run], "networks").await;
     fs::write(fixture.repository.join("network-resume-release"), "go").assert_value();
@@ -657,6 +705,7 @@ fn network_rollback_fixture() -> LocalFixture {
 async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_branch_instances() {
     let fixture = network_rollback_fixture();
     let mut run = fixture.submit_detached("networks").await;
+    confirm_sequential_publications(&fixture, &run, 0).await;
     fixture
         .wait_terminal(&run, "networks", "network_retry")
         .await;

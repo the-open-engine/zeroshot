@@ -1245,7 +1245,7 @@ impl LocalCliBackend {
             .filter(|ready| ready.run_id == params.run_id)
             .map(|ready| ready.pid.to_string())
             .unwrap_or_else(|| "unavailable".to_owned());
-        controller_request(&params.run_id, "force-stop", async {
+        self.controller_cleanup_request(&params.run_id, "force-stop", async {
             ClusterClient::new(transport.as_ref())
                 .run_force(params.clone())
                 .await
@@ -1266,16 +1266,29 @@ async fn controller_request<T>(
     operation: &str,
     request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
 ) -> Result<T, NativeV2CliError> {
-    tokio::time::timeout(DEFAULT_READY_TIMEOUT, request)
+    request_with_budget(run_id, operation, DEFAULT_READY_TIMEOUT, request).await
+}
+
+async fn request_with_budget<T>(
+    run_id: &RunId,
+    operation: &str,
+    budget: Duration,
+    request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
+) -> Result<T, NativeV2CliError> {
+    tokio::time::timeout(budget, request)
         .await
-        .map_err(|_| controller_request_timeout(run_id, operation))?
+        .map_err(|_| request_timeout(run_id, operation, budget))?
 }
 
 fn controller_request_timeout(run_id: &RunId, operation: &str) -> NativeV2CliError {
+    request_timeout(run_id, operation, DEFAULT_READY_TIMEOUT)
+}
+
+fn request_timeout(run_id: &RunId, operation: &str, budget: Duration) -> NativeV2CliError {
     NativeV2CliError::LocalRequestTimeout(format!(
         "controller did not answer {operation} for run {} within {} seconds",
         run_id.as_str(),
-        DEFAULT_READY_TIMEOUT.as_secs(),
+        budget.as_secs(),
     ))
 }
 

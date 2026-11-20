@@ -496,6 +496,17 @@ fn prepare_submission(
     })
 }
 
+pub(crate) fn validate_target_environment(
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
+) -> Result<(), NativeV2AdmissionError> {
+    if environment.is_some_and(|environment| environment.teardown.is_some()) {
+        return Err(NativeV2AdmissionError::InvalidEnvironment(
+            "environment teardown is only supported for local runs".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_run_environment(
     runtime: &RuntimePlan,
     environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,

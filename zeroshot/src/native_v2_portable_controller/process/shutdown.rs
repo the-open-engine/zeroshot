@@ -1,9 +1,14 @@
 //! One latched request for the private controller process, including preparation and retirement.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 use tokio::sync::watch;
 
+use super::super::TEARDOWN_TIMEOUT;
 use super::PortableControllerError;
 
 /// Includes cancellation, confirmed cleanup, SQLite settlement and connection draining. This is
@@ -14,6 +19,7 @@ const SHUTDOWN_LIMIT: Duration = Duration::from_secs(30);
 pub(super) struct ControllerShutdown {
     pub requested: watch::Receiver<bool>,
     listener: tokio::task::JoinHandle<()>,
+    has_teardown: Arc<AtomicBool>,
 }
 
 impl ControllerShutdown {
@@ -21,14 +27,21 @@ impl ControllerShutdown {
         let termination = crate::execution::platform::controller_termination()
             .map_err(PortableControllerError::Io)?;
         let (request, requested) = watch::channel(false);
+        let has_teardown = Arc::new(AtomicBool::new(false));
+        let reserve_teardown = has_teardown.clone();
         let listener = tokio::spawn(async move {
             termination.await;
             // Arm once, before requesting any work that can block. This thread deliberately
             // survives async scope/runtime teardown; normal process exit needs no join.
             if std::thread::Builder::new()
                 .name("controller-shutdown-deadline".to_owned())
-                .spawn(|| {
+                .spawn(move || {
                     std::thread::sleep(SHUTDOWN_LIMIT);
+                    // The signal listener is armed before bootstrap consumption. The controller
+                    // reserves the extra time before it can launch any environment script.
+                    if reserve_teardown.load(Ordering::Relaxed) {
+                        std::thread::sleep(TEARDOWN_TIMEOUT);
+                    }
                     std::process::exit(1);
                 })
                 .is_err()
@@ -40,7 +53,12 @@ impl ControllerShutdown {
         Ok(Self {
             requested,
             listener,
+            has_teardown,
         })
+    }
+
+    pub(super) fn reserve_teardown(&self) {
+        self.has_teardown.store(true, Ordering::Relaxed);
     }
 }
 

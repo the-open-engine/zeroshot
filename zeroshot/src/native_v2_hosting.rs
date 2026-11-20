@@ -331,6 +331,8 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
 fn prepare_contained_submission(
     submission: &mut openengine_cluster_protocol::RunSubmission,
 ) -> Result<(), TargetAuthorityError> {
+    crate::native_v2_admission::validate_target_environment(submission.environment.as_ref())
+        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     if !submission.runtime.workspace_checkpoints {
         return Err(TargetAuthorityError::invalid(
             "this target does not support disabling workspace checkpoints",

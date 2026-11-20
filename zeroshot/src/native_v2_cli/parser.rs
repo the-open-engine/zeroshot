@@ -720,7 +720,9 @@ struct RunArgs {
     #[arg(long, value_name = "FILE")]
     uniform_runtime_config: Option<PathBuf>,
 
-    /// Load a JSON environment definition: setup, startup, public variables, and hook connections.
+    /// Load setup, startup, public variables, and hook connections from JSON.
+    ///
+    /// Local runs on Linux and macOS also accept teardown for orderly cleanup.
     #[arg(long, value_name = "FILE", conflicts_with = "no_environment")]
     environment: Option<PathBuf>,
 

@@ -201,6 +201,9 @@ where
     if run.target.is_none() {
         crate::native_v2_local::validate_local_environment(intent.environment.as_ref())
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+    } else {
+        crate::native_v2_admission::validate_target_environment(intent.environment.as_ref())
+            .map_err(NativeV2CliError::InvalidRun)?;
     }
     let (connections, github_token) = submission_credentials(run, &intent, &available)?;
     Ok(PreparedRunRequest {
