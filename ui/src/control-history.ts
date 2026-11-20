@@ -35,7 +35,8 @@ export function controlState(state: ControlRecord['state']): WorkflowNodeObserva
 /**
  * Enclosing groups end in the same reduction as their selected succeed or fail node. Give those
  * visits the terminal's outcome; every other completed visit stays neutral. The canonical trace
- * excludes terminals discarded by an earlier parallel join.
+ * excludes terminals discarded by an earlier parallel join. A saved profile's success ends
+ * at its profile boundary.
  */
 export function settleControlVisits(
   root: GraphNode,
@@ -58,6 +59,7 @@ export function settleControlVisits(
       }
       if (enclosing?.state === 'completed' && outcomes.get(enclosing) !== 'failed')
         outcomes.set(enclosing, terminal.state);
+      if (group.kind === 'profile' && terminal.state === 'succeeded') break;
     }
   }
   return visits.map((visit) => {

@@ -1030,7 +1030,11 @@ function useAppController({ services, bootstrap, host, renderRun }: AppProps) {
   const state = useAppState({ services, bootstrap, host });
   const profile = useProfileActions({ services, bootstrap, host }, state);
   const workflow = createWorkflowEditor({ services, bootstrap }, state);
-  return { services, bootstrap, host, renderRun, ...state, ...profile, ...workflow };
+  const profileNames =
+    bootstrap.workspace.kind === 'local'
+      ? state.profiles.filter(({ name }) => name !== state.doc?.name).map(({ name }) => name)
+      : [];
+  return { services, bootstrap, host, renderRun, ...state, ...profile, ...workflow, profileNames };
 }
 
 export type AppModel = ReturnType<typeof useAppController>;

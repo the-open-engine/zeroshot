@@ -83,8 +83,62 @@ pub(super) fn validate_comment_profile(graph: &GraphSpec) -> Result<(), NativeV2
             "comment reviewScope must select a required initial input value",
         ));
     }
+    validate_profile_inputs(&graph.root, node, &graph.initial_input)?;
     let mut published = false;
     validate_position(&graph.root, false, &mut published)
+}
+
+fn validate_profile_inputs(
+    root: &GraphNode,
+    delivery: &VerifierNode,
+    initial_input: &PayloadType,
+) -> Result<bool, NativeV2AdmissionError> {
+    if root.name() == &delivery.name {
+        return Ok(true);
+    }
+    for child in openengine_cluster_server::graph_verifier::graph_node_children(root) {
+        if validate_profile_inputs(child, delivery, initial_input)? {
+            if let GraphNode::Profile(profile) = root {
+                let input = profile
+                    .initial_input
+                    .as_ref()
+                    .ok_or_else(|| invalid("comment delivery requires a resolved profile input"))?;
+                for field in ["url", "reviewScope"] {
+                    if let Some(path) = root_binding(delivery, field)?
+                        && !preserves_required_input(initial_input, input, path)
+                    {
+                        return Err(invalid(
+                            "comment destination and scope must pass unchanged through profile inputs",
+                        ));
+                    }
+                }
+            }
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn preserves_required_input(source: &PayloadType, target: &PayloadType, path: &FieldPath) -> bool {
+    required_path(source, path)
+        .zip(required_path(target, path))
+        .is_some_and(|(source, target)| preserves_projection(source, target))
+}
+
+fn preserves_projection(source: &PayloadType, target: &PayloadType) -> bool {
+    match (source, target) {
+        (PayloadType::Record { fields: source }, PayloadType::Record { fields: target }) => {
+            source.iter().all(|(name, field)| {
+                target
+                    .get(name)
+                    .is_some_and(|other| preserves_projection(&field.value_type, &other.value_type))
+            })
+        }
+        (PayloadType::Array { items: source }, PayloadType::Array { items: target }) => {
+            preserves_projection(source, target)
+        }
+        _ => source.is_subtype_of(target),
+    }
 }
 
 fn validate_position(

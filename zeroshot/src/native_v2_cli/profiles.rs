@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 use openengine_cluster_protocol::{
-    RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
-    RunProfileListRequest, RunProfileMutationResult, RunProfileName, RunProfileScope,
-    RunProfileSelector, RunProfileSetRequest, RunProfileSummary,
+    GraphSpec, RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult,
+    RunProfileDeleteResult, RunProfileListRequest, RunProfileMutationResult, RunProfileName,
+    RunProfileScope, RunProfileSelector, RunProfileSetRequest, RunProfileSummary, RuntimePlan,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::{RawValue, to_raw_value};
@@ -20,6 +20,8 @@ use super::{
 
 const PROFILES_FILE: &str = "profiles.json";
 const PROFILES_LOCK_FILE: &str = "profiles.lock";
+
+mod expansion;
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -54,6 +56,46 @@ impl LocalRunProfileStore {
         Ok(Self {
             root: default_config_root()?,
         })
+    }
+
+    pub(crate) fn has_imports(graph: &GraphSpec) -> bool {
+        expansion::contains_imports(&graph.root)
+    }
+
+    pub(crate) fn expand(
+        &self,
+        graph: GraphSpec,
+        runtime: RuntimePlan,
+        root_name: Option<&RunProfileName>,
+    ) -> Result<(GraphSpec, RuntimePlan), NativeV2CliError> {
+        if !Self::has_imports(&graph) {
+            return Ok((graph, runtime));
+        }
+        expansion::expand(&self.snapshot()?, graph, runtime, root_name)
+    }
+
+    pub(super) fn expanded_for_run(
+        &self,
+        name: Option<&RunProfileName>,
+    ) -> Result<Option<RunProfile>, NativeV2CliError> {
+        let stored = self.snapshot()?;
+        let Some(name) = name.or(stored.default.as_ref()) else {
+            return Ok(None);
+        };
+        let Some(mut profile) = profile(&stored, name)? else {
+            return Ok(None);
+        };
+        if Self::has_imports(&profile.graph) {
+            (profile.graph, profile.runtime) =
+                expansion::expand(&stored, profile.graph, profile.runtime, Some(name))?;
+        }
+        Ok(Some(profile))
+    }
+
+    fn snapshot(&self) -> Result<StoredProfiles, NativeV2CliError> {
+        let lock = self.lock()?;
+        FileExt::lock_shared(&lock).map_err(local_io)?;
+        self.read()
     }
 
     #[cfg(any(test, feature = "ui"))]

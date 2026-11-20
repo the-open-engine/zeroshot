@@ -18,6 +18,10 @@
       {
         "source": "ui/src/domain.ts",
         "document": "ui/README.md"
+      },
+      {
+        "source": "ui/src/workflow-projection.ts",
+        "document": "ui/README.md"
       }
     ]
   }

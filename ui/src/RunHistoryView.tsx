@@ -1111,6 +1111,12 @@ function RunInspector({
             </details>
           </>
         )}
+        {node.kind === 'profile' && (
+          <dl className="run-facts">
+            <dt>Saved profile</dt>
+            <dd className="mono">{node.profile}</dd>
+          </dl>
+        )}
         {!nodeControls.length && observedRoutes(node, projection.invocations).length > 0 && (
           <section className="run-inspector-section">
             <h3>Observed paths</h3>

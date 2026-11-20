@@ -32,8 +32,8 @@ mod review_input;
 
 #[path = "named_source.rs"]
 mod named_source;
-pub(super) use profiles::materialize_profile;
-use profiles::{ResolvedRunProfile, resolve_run_profile};
+pub(super) use profiles::{load_profile, require_supported_placement, validate_profile};
+use profiles::{ResolvedRunProfile, materialize_profile, resolve_run_profile};
 
 struct SubmissionInput {
     review: Option<crate::native_v2_review::PreparedReview>,
@@ -101,7 +101,7 @@ where
     let RunSelection::Inline { graph, runtime } = &run.selection else {
         return Ok(None);
     };
-    let (graph, runtime) = materialize_profile(graph, runtime).await?;
+    let (graph, runtime) = materialize_profile(graph, runtime, run.target.as_deref()).await?;
     prepare_validated_submission_with_environment(
         run,
         ResolvedRunProfile {

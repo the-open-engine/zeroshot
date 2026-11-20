@@ -254,6 +254,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for a node start record, including input and bookkeeping. Local submissions apply the same
   admitted-definition check before creating run storage or a controller. Oversized node starts
   fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
+- Local profile imports resolve from one profile-store snapshot before semantic admission and
+  credential selection. Saved definitions keep references, while admitted and recovery definitions
+  freeze expanded bodies and qualified node identities. The verifier checks child scopes and
+  whole-run bounds, wait and delivery constraints. Imported success becomes continuation at its
+  actual history position after the inner groups apply their existing cancellation semantics.
+  Child terminal payload, state and controls remain scoped, failure propagates, and the same
+  reducer, workspace and execution budgets serve the whole run.
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
 - The reducer inventories error selectors across all choice, loop and first-join guards once per

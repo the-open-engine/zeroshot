@@ -151,7 +151,7 @@ async fn validate(
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let document: ProfileDocument = decode(bytes)?;
-    admit(&state, &document.graph, &document.runtime).await?;
+    admit(&state, &document.graph, &document.runtime, None).await?;
     Ok(Json(json!({"valid":true})))
 }
 async fn setup(
@@ -185,7 +185,13 @@ async fn save(
         return Err(workspace_changed());
     }
     let request: SaveRequest = decode(bytes)?;
-    admit(&state, &request.graph, &request.runtime).await?;
+    admit(
+        &state,
+        &request.graph,
+        &request.runtime,
+        Some(&request.name),
+    )
+    .await?;
     let result = blocking(move || {
         state.store.set_checked(
             RunProfileSetRequest {
@@ -220,8 +226,35 @@ fn harness_registry(state: &UiState) -> crate::harnesses::HarnessRegistry {
         crate::harnesses::HarnessRegistry::local()
     }
 }
-async fn admit(state: &UiState, graph: &GraphSpec, runtime: &RuntimePlan) -> Result<(), ApiError> {
-    workspace::validate_profile_with_harnesses(graph, runtime, &harness_registry(state))
+async fn admit(
+    state: &UiState,
+    graph: &GraphSpec,
+    runtime: &RuntimePlan,
+    name: Option<&RunProfileName>,
+) -> Result<(), ApiError> {
+    let registry = harness_registry(state);
+    if !LocalRunProfileStore::has_imports(graph) {
+        return workspace::validate_profile_with_harnesses(graph, runtime, &registry)
+            .await
+            .map_err(Into::into);
+    }
+    if state.workspace.kind != "local" {
+        return Err(ApiError::invalid(
+            "Saved profile references require a local workspace.".into(),
+        ));
+    }
+    let (store, graph, runtime, name) = (
+        state.store.clone(),
+        graph.clone(),
+        runtime.clone(),
+        name.cloned(),
+    );
+    let (graph, runtime) =
+        tokio::task::spawn_blocking(move || store.expand(graph, runtime, name.as_ref()))
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?
+            .map_err(|error| ApiError::invalid(error.to_string()))?;
+    workspace::validate_profile_with_harnesses(&graph, &runtime, &registry)
         .await
         .map_err(Into::into)
 }
