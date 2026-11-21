@@ -34,6 +34,28 @@ pub(super) fn validate_executable_bindings(
     context: super::NativeV2AdmissionContext<'_>,
 ) -> Result<(), NativeV2AdmissionError> {
     if !runtime.workspace_checkpoints
+        && let Some(enabled) = context.hosted_workspace_checkpoint_opt_out
+    {
+        if !enabled {
+            return Err(NativeV2AdmissionError::InvalidRuntime(
+                "this target does not support disabling workspace checkpoints".to_owned(),
+            ));
+        }
+        if let Some(node) = declarations.iter().find(|node| {
+            [
+                crate::native_v2_request::ASK_WORKER_REF,
+                crate::native_v2_wait::WAIT_WORKER_REF,
+            ]
+            .contains(&node.worker.as_str())
+        }) {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node.name.clone(),
+                detail: "hosted request and wait nodes require workspaceCheckpoints: true"
+                    .to_owned(),
+            });
+        }
+    }
+    if !runtime.workspace_checkpoints
         && !context.checkpointless_requests
         && let Some(node) = declarations
             .iter()

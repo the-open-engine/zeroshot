@@ -587,6 +587,15 @@ pub struct TargetWorkspaceCheckpointsDiscovery {
     pub kind: String,
 }
 
+pub const WORKSPACE_CHECKPOINT_OPT_OUT_KIND: &str = "openengine.workspace-checkpoint-opt-out/v1";
+
+/// Per-run hosted opt-out, independent of checkpoint listing and recovery support.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetWorkspaceCheckpointOptOutDiscovery {
+    pub kind: String,
+}
+
 pub const WORKSPACE_RECOVERY_KIND: &str = "openengine.workspace-recovery/v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -726,6 +735,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_checkpoints: Option<TargetWorkspaceCheckpointsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_checkpoint_opt_out: Option<TargetWorkspaceCheckpointOptOutDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_workspace_recovery: Option<TargetHostedWorkspaceRecoveryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_export: Option<TargetWorkspaceExportDiscovery>,
@@ -791,6 +802,7 @@ impl TargetDiscoveryExtensions {
             && self.hosted_inbox.is_none()
             && self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
+            && self.workspace_checkpoint_opt_out.is_none()
             && self.hosted_workspace_recovery.is_none()
             && self.workspace_export.is_none()
             && self.node_runtime_lanes.is_none()
@@ -804,6 +816,16 @@ impl TargetDiscoveryExtensions {
 }
 
 impl TargetDiscoveryDocument {
+    /// Advertises explicit host support; omission preserves required workspace checkpoints.
+    #[must_use]
+    pub fn with_workspace_checkpoint_opt_out(mut self) -> Self {
+        self.extensions.workspace_checkpoint_opt_out =
+            Some(TargetWorkspaceCheckpointOptOutDiscovery {
+                kind: WORKSPACE_CHECKPOINT_OPT_OUT_KIND.to_owned(),
+            });
+        self
+    }
+
     /// Advertises machine sizes accepted by this host independently of billing or credentials.
     #[must_use]
     pub fn with_run_sizes(mut self, catalog: TargetRunSizesDiscovery) -> Self {

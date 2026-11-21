@@ -68,6 +68,67 @@ Official local builds include contributed adapters; Platform and the default tar
 only core adapters. See [Harness adapters](../project/harness-adapters.md) for availability and
 provider support.
 
+## Hosted workspace checkpoint opt-out
+
+`RuntimePlan.workspaceCheckpoints` defaults to `true`. A compatible named target may explicitly
+allow `false` per run with this independent discovery extension:
+
+```json
+{
+  "workspace_checkpoint_opt_out": {
+    "kind": "openengine.workspace-checkpoint-opt-out/v1"
+  }
+}
+```
+
+The strict marker contains only `kind`. It does not change `openengine.workspace-checkpoints/v1`,
+recovery routes, wire versions or authentication. Missing or different versions retain refusal.
+New CLI clients check it before resolving access tokens or sending run/profile bodies; an older
+client still refuses opt-out. The Python SDK forwards `UniformRuntime.workspace_checkpoints=False` or an exact runtime
+containing `workspaceCheckpoints: false` through its bundled CLI and therefore needs the matching upgraded CLI too.
+
+Host integration uses these Rust APIs:
+
+- Set `ProductionHostingConfig.workspace_checkpoint_opt_out = true` **and** install
+  `workspace_storage: Some(Arc<dyn HostedWorkspaceStorage>)`. Both are required; defaults and
+  `zeroshot target serve` continue to require checkpoints. The production factory installs trusted
+  admission policy and advertises the marker. Gate any public hosted gateway's advertisement and
+  admission on the same host policy, using `TargetDiscoveryDocument::with_workspace_checkpoint_opt_out()`.
+- For host-owned profile validation, set
+  `NativeV2AdmissionContext.hosted_workspace_checkpoint_opt_out = Some(enabled)` and use
+  `NativeV2Admission::validate_profile_with_context`. Production run admission applies that policy
+  independently, even when a client bypasses discovery. `None` retains local admission semantics.
+- `HostedWorkspaceStorage::prepare` receives the admitted boolean as
+  `HostedWorkspaceRequest.workspace_checkpoints`. When false, skip workspace restore/snapshot
+  preparation and return a host-owned `RunCheckpointStore` that retains metadata without copying
+  workspace bytes. The existing lifecycle still calls `enter` at engine boundaries, `finish` on
+  failure, and `discard` after success. Preserve durable execution/final histories, output, comment
+  publications and delivery receipts independently, including after `discard`. Conversation capture
+  is skipped by the supervisor. Do not couple final history publication to a workspace backup.
+- For the template catalog (Cargo feature `workspace`), use
+  `workspace::catalog_with_checkpoint_policy(&harnesses, enabled)`. True preserves code-review's
+  supplied `workspaceCheckpoints: false`; existing `catalog()` and `catalog_with_harnesses()` keep
+  checkpoint defaults enabled for legacy consumers. `profile_setup[_with_harnesses]` preserves
+  the selected setting while materializing contained provider access.
+
+Opted-out hosted graphs reject every request or wait node, including nested groups and expanded
+profile imports, even on an unreachable authored path. These nodes can require persisted
+continuations or suspension. Manual suspension and recovery are also refused for such runs.
+In-run conversation reuse still works, but conversations cannot be restored across runs without
+snapshots. Ordinary history, outputs, usage and logs remain available. A host may separately offer
+a fresh run from original input; this upstream change does not implement that host operation.
+Local checkpoint opt-out, restart on the retained checkout and explicit discard continuations
+retain their existing behavior.
+
+This is the upstream integration contract referenced by
+[Platform issue #734](https://github.com/the-open-engine/zero-cloud/issues/734). Platform integration
+follows a canonical Zeroshot release containing this change; v17.0.0 alone does not supply it.
+Before enabling it, pin the runtime and all protocol/client/server crates to that same released
+source, deploy the matching target/gateway storage implementation, and upgrade CLI clients and
+Python wheels together. Publish the discovery marker only after admission, storage and catalog
+policy agree. No MCP tool schema, shared skill or plugin package changes are required for this
+upstream capability; companion host tools must preserve their existing defaults until enabled.
+
 ## Local workspace and authentication
 
 Omit `--target` to work in an existing local folder. `--cwd FOLDER` selects the folder for one run;

@@ -40,7 +40,7 @@ fn contained_submissions_reject_source_absence_before_materializing_provider_acc
     let mut request = submission(runtime(BTreeSet::new()), &"a".repeat(40), "local-folder");
     request.source = None;
     let original_runtime = request.runtime.clone();
-    let error = prepare_contained_submission(&mut request)
+    let error = prepare_contained_submission(&mut request, false)
         .assert_error_with("contained runs need reproducible Git provenance");
     assert_eq!(error.kind(), TargetAuthorityErrorKind::Invalid);
     assert!(error.message().contains("resolved Git source"));
@@ -839,7 +839,7 @@ async fn assert_running_claude_home_if_root(
 fn unsupported_contained_targets_refuse_workspace_checkpoint_opt_out() {
     let mut request = submission(runtime(BTreeSet::new()), &"a".repeat(40), "local-folder");
     request.runtime.workspace_checkpoints = false;
-    let error = prepare_contained_submission(&mut request).assert_error();
+    let error = prepare_contained_submission(&mut request, false).assert_error();
     assert_eq!(error.kind(), TargetAuthorityErrorKind::Invalid);
     assert!(
         error

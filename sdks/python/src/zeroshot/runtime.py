@@ -116,6 +116,7 @@ class UniformRuntime:
         size: Opaque target-owned size identifier. None leaves the choice to the target default.
         max_concurrency: Optional run-wide owned execution limit. None uses the native default 64.
         workspace_checkpoints: Whether to capture workspace snapshots. Defaults to enabled.
+            Named targets require advertised checkpoint opt-out support for False.
         session_scope: execution opens a fresh session for each execution; node_instance reuses a
             live session when that graph node instance runs again.
         connections: Connection keys mapped to the exact environment field names their agent nodes

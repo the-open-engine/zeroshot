@@ -1,6 +1,7 @@
 //! The observation suite already runs in the Linux, Windows and macOS CI lanes.
 //! Keep frozen release dependencies outside product package selection while exercising their
-//! real initialization controls and the current runtime/HTTP producer boundaries here.
+//! real initialization controls, current runtime/HTTP producer boundaries and optional
+//! hosted checkpoint capability contracts here.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,7 +19,16 @@ fn current_and_released_wire_contracts() {
     let commands: &[(&str, &[&str])] = &[
         (
             "current",
-            &["--package", "zeroshot", "--lib", "--", "wire_contract::"],
+            &[
+                "--package",
+                "zeroshot",
+                "--lib",
+                "--",
+                "wire_contract::",
+                "checkpoint_opt_out",
+                "hosted_checkpointless",
+                "local_checkpointless_wait",
+            ],
         ),
         (
             "current",
@@ -29,6 +39,7 @@ fn current_and_released_wire_contracts() {
                 "zeroshot",
                 "--",
                 "wire_contract::",
+                "checkpoint_opt_out",
             ],
         ),
         (

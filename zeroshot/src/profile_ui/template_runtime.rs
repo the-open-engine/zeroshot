@@ -10,6 +10,7 @@ pub(super) fn for_template(
     template: BuiltinGraphTemplate,
     delivery: TemplateDelivery,
     graph: &GraphSpec,
+    workspace_checkpoint_opt_out: bool,
 ) -> Result<RuntimePlan, WorkspaceError> {
     let mut runtime = match template {
         BuiltinGraphTemplate::CodeReview => serde_json::from_str(include_str!(
@@ -24,9 +25,11 @@ pub(super) fn for_template(
     let object = runtime
         .as_object_mut()
         .ok_or_else(|| WorkspaceError::internal("A built-in runtime must be an object.".into()))?;
-    // Example CLI files may select local machine/snapshot policy. Catalog defaults are portable.
+    // Machine size belongs to the target. Opt-out defaults require explicit host support.
     object.remove("size");
-    object.remove("workspaceCheckpoints");
+    if !workspace_checkpoint_opt_out {
+        object.remove("workspaceCheckpoints");
+    }
     let nodes = object["nodes"].as_object_mut().ok_or_else(|| {
         WorkspaceError::internal("A built-in runtime must contain node bindings.".into())
     })?;

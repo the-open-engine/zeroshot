@@ -146,6 +146,9 @@ pub struct NativeV2AdmissionContext<'a> {
     pub run_sizes: Option<&'a openengine_cluster_protocol::TargetRunSizesDiscovery>,
     /// Host-owned continuation history permits requests after workspace snapshots are disabled.
     pub checkpointless_requests: bool,
+    /// None preserves local policy. Hosted admission requires explicit opt-out support and
+    /// refuses checkpoint-dependent graph paths even when the host supports opt-out.
+    pub hosted_workspace_checkpoint_opt_out: Option<bool>,
 }
 
 impl<'a> NativeV2AdmissionContext<'a> {
@@ -160,6 +163,7 @@ impl<'a> NativeV2AdmissionContext<'a> {
             delivery_policy,
             run_sizes: None,
             checkpointless_requests: false,
+            hosted_workspace_checkpoint_opt_out: None,
         }
     }
 

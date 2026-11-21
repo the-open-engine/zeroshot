@@ -48,6 +48,9 @@ mod tasks;
 #[path = "tests/resume_refusals.rs"]
 mod resume_refusals;
 
+#[path = "tests/checkpoint_opt_out.rs"]
+mod checkpoint_opt_out;
+
 struct Claim;
 impl ExclusiveControllerClaim for Claim {}
 
