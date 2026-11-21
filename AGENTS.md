@@ -2313,6 +2313,10 @@ individual CLI calls. Terminal polling rejects a different completed outcome imm
 the last observed status when its settlement deadline expires.
 Local CLI fixture lifecycle commands (run, resume, answer and force-stop) use that longer budget;
 read-only calls keep the short request deadline. Wait for suspended controllers to exit before cleanup.
+Retained-inspection fixtures wait for both controller lease release and process exit before asserting
+lost availability or freezing storage; Linux zombies count as exited, matching the production probe.
+Hosted workspace-allocation regressions that transfer ownership require Linux; portable capability,
+admission and checkpointless-control regressions remain selected by the macOS observation suite.
 Worker-start markers and run-success polling use the lifecycle budget too; marker failures include
 the last run status and reject an unexpectedly settled run. Explicit probe-cancellation bounds stay short.
 Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.

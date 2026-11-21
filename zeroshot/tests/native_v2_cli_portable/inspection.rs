@@ -94,6 +94,16 @@ fn wait_released(storage: &Path) {
         std::thread::sleep(Duration::from_millis(25));
     }
     FileExt::unlock(&file).unwrap();
+    // Dropping the lease precedes process exit, especially while coverage flushes. Availability
+    // correctly stays unknown until both are confirmed; freeze retained storage only afterward.
+    let ready: Value =
+        serde_json::from_slice(&std::fs::read(storage.join("controller.ready.json")).unwrap())
+            .unwrap();
+    let pid = u32::try_from(ready["pid"].as_u64().unwrap()).unwrap();
+    while super::process_exists(pid) {
+        assert!(Instant::now() < deadline, "controller {pid} did not exit");
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn kill_controller(pid: u32) {

@@ -82,6 +82,8 @@ impl HostedWorkspaceStorage for ExternalStorage {
     }
 }
 
+// Capsule allocation transfers hosted workspace ownership through the Linux boundary.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn external_checkpoint_opt_out_preserves_metadata_without_creating_snapshots() {
     use crate::native_v2_runner::test_support::delivery_checkpoint;
