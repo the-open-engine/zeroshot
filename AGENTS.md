@@ -2238,6 +2238,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
   Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
   remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
+- Runs open in Steps, with a remembered Steps/Graph layout, shared selection and replay cursor.
+  Opening a step preserves following and playback. Steps groups recorded work, attempts and rounds;
+  durations and usage come from recorded evidence and remain unknown when unavailable.
+  Retry rows retain their first attempt's identity and expose each recorded attempt's details;
+  the selected attempt stays shared with Graph. Expanded results retain named signals.
+  Both views use `use-run-projection.ts`: host successor updates and the deadline clock apply at
+  the loaded head, while replay uses the selected prefix and its recorded time. A locally passed
+  deadline is distinct from a recorded answer or expiry. Recorded suspensions hold active work,
+  expose timer due times and stop the run duration at the selected suspended position.
 - Canvas toolbars keep one row and fold by their own width, as ui/DESIGN.md sets out. Folded tools
   go through the shared `MoreMenu` (`ui/src/MoreMenu.tsx`), which owns keyboard movement, focus and
   dismissal; do not add another overflow menu or let a toolbar wrap or scroll.
