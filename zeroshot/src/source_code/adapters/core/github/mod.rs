@@ -407,6 +407,13 @@ impl GhCliDeliveryAuthority {
         let snapshot = self.policy_snapshot(review, credential).await?;
         if !error.authentication_failed()
             && matches!(error.api_status(), None | Some(405 | 409 | 422))
+            && failure.rejection == Some(api::MutationRejection::RequiredCheckQueued)
+            && matches!(snapshot.state, SourceReviewState::Open { .. })
+        {
+            return Ok(SourceMergeRequestOutcome::Pending);
+        }
+        if !error.authentication_failed()
+            && matches!(error.api_status(), None | Some(405 | 409 | 422))
             && failure.rejection == Some(api::MutationRejection::Conversation)
             && !matches!(
                 snapshot.state,

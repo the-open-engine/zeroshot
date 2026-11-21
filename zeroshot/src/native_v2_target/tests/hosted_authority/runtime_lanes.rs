@@ -30,14 +30,14 @@ const RUN: (&str, &str) = ("POST", "/native-v2/run");
 const PROFILE_SET: (&str, &str) = ("POST", "/native-v2/profiles/set");
 const RUN_RECEIPT: &str = r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#;
 
-struct RecordingTarget {
-    origin: String,
+pub(super) struct RecordingTarget {
+    pub(super) origin: String,
     requests: Arc<Mutex<Vec<CapturedHttpRequest>>>,
     server: tokio::task::JoinHandle<()>,
 }
 
 impl RecordingTarget {
-    async fn spawn<F>(respond: F) -> Self
+    pub(super) async fn spawn<F>(respond: F) -> Self
     where
         F: Fn(&CapturedHttpRequest, &str, &mut u8) -> (&'static str, String) + Send + 'static,
     {
@@ -62,7 +62,7 @@ impl RecordingTarget {
         }
     }
 
-    fn stop(self) -> Vec<CapturedHttpRequest> {
+    pub(super) fn stop(self) -> Vec<CapturedHttpRequest> {
         self.server.abort();
         std::mem::take(&mut *self.requests.lock().assert_value())
     }

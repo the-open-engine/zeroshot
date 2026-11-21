@@ -465,6 +465,7 @@ pub enum NativeV2CliCommand {
     Steer {
         run: RunSelector,
         text: SteerText,
+        node: Option<openengine_cluster_protocol::NodeName>,
         networks: Vec<openengine_cluster_protocol::NodeName>,
         mode: openengine_cluster_protocol::SteeringMode,
     },

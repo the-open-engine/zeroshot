@@ -154,6 +154,7 @@ async fn steered_turn(mode: &str) -> (Value, usize) {
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            node: None,
             mode: openengine_cluster_protocol::SteeringMode::Standing,
             run_id: run.clone(),
             text: "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES),

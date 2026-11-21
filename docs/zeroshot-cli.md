@@ -1179,7 +1179,9 @@ Options:
           Expand one secret-free agent runtime across every executable graph node
 
       --environment <FILE>
-          Load a JSON environment definition: setup, startup, public variables, and hook connections
+          Load setup, startup, public variables, and hook connections from JSON.
+
+          Local runs on Linux and macOS also accept teardown for orderly cleanup.
 
       --no-environment
           Send an empty environment ({}) to bypass the target's configured default
@@ -1554,6 +1556,9 @@ Options:
 
       --text-stdin
           Read UTF-8 direction from standard input
+
+      --node <NAME>
+          Direct human guidance to this exact agent node name, including future instances
 
       --network <NAME>
           Broadcast to this authorized graph-local network; repeat for several networks

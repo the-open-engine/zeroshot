@@ -183,9 +183,9 @@ fn checkpoints_are_opt_in_and_discovery_tolerates_future_extensions() {
 }
 
 #[test]
-fn hosted_recovery_routes_do_not_change_the_strict_hosted_runs_v1_shape() {
+fn hosted_recovery_routes_do_not_change_the_strict_hosted_run_route_shape() {
     let legacy_routes = json!({
-        "kind": "zeroshot.hosted-runs/v1",
+        "kind": "zeroshot.hosted-runs/v2",
         "base_url": "https://target.example",
         "route_templates": {
             "list": "/runs",

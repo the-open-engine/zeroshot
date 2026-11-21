@@ -648,6 +648,7 @@ async fn environment_hooks_prepare_private_homes_without_starting_scripts() {
         context_repositories: Vec::new(),
         setup: None,
         startup: None,
+        teardown: None,
         variables: BTreeMap::new(),
         connections: Default::default(),
     });

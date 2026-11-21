@@ -212,7 +212,7 @@ impl<'a> Analyzer<'a> {
         incoming: &Flow,
     ) -> Option<BTreeMap<SelectorKey, CompletionPredicate>> {
         let mut owned = BTreeSet::new();
-        collect_names(racer, &mut owned);
+        collect_visible_names(racer, &mut owned);
         let mut available = BTreeMap::new();
         for (selector, aggregate) in uses.iter().copied() {
             let depth = self.map_depth(&selector.name);
@@ -223,7 +223,7 @@ impl<'a> Analyzer<'a> {
                 self.nodes
                     .get(&selector.name)
                     .and_then(|info| {
-                        info.path.iter().find_map(|part| {
+                        info.scope_path().iter().find_map(|part| {
                             let DiagnosticPathSegment::Node { name } = part else {
                                 return None;
                             };
@@ -267,7 +267,7 @@ impl<'a> Analyzer<'a> {
         target: &NodeName,
         racer: &NodeName,
     ) -> Option<CompletionPredicate> {
-        let path = &self.nodes.get(target)?.path;
+        let path = self.nodes.get(target)?.scope_path();
         let names = path
             .iter()
             .filter_map(|segment| match segment {

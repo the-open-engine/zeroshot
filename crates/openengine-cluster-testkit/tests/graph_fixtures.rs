@@ -59,7 +59,7 @@ const RUST_REJECTION_MARKERS: &[(&str, &str)] = &[
         "UNKNOWN_PROFILE",
     ),
     (
-        "expected one of `step`, `verifier`, `seq`, `choice`, `par`, `loop`, `map`, `succeed`, `fail`",
+        "expected one of `step`, `verifier`, `seq`, `choice`",
         "UNKNOWN_NODE",
     ),
     ("unknown field `bytes`", "FORBIDDEN_ARTIFACT_FIELD"),
@@ -207,6 +207,7 @@ fn classify_graph_header_schema(document: &Value) -> Option<&'static str> {
                     | "par"
                     | "loop"
                     | "map"
+                    | "profile"
                     | "succeed"
                     | "fail"
             )

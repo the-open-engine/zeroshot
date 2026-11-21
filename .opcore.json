@@ -12,11 +12,19 @@
   "documentation": {
     "bindings": [
       {
+        "source": "zeroshot/src/native_v2_portable_controller.rs",
+        "document": "docs/guides/runtime-environments.md"
+      },
+      {
         "source": "ui/src/api.ts",
         "document": "ui/README.md"
       },
       {
         "source": "ui/src/domain.ts",
+        "document": "ui/README.md"
+      },
+      {
+        "source": "ui/src/workflow-projection.ts",
         "document": "ui/README.md"
       }
     ]

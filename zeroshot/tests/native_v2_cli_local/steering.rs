@@ -145,6 +145,47 @@ async fn steer_live_controller_keeps_delivering_after_atomic_executable_replacem
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_node_filters_live_hooks_and_future_prompts_and_keeps_target_metadata() {
+    let fixture = steer_fixture();
+    let run = fixture.submit_detached("steer").await;
+    steer_held(&fixture).await;
+    for node in ["unknown", "Worker", "round", "done"] {
+        let output = fixture.output(&["steer", &run, "--node", node, "denied"], "steer").await;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("agent"));
+    }
+    assert_eq!(fixture.json(&["vectors", &run], "steer").await["vectors"], json!([]));
+    for (node, text) in [("worker", "worker-only"), ("check", "check-only")] {
+        let receipt = fixture.json(&["steer", &run, "--node", node, text], "steer").await;
+        assert_eq!(receipt["steer"]["node"], node);
+        assert_eq!(receipt["steer"]["mode"], "standing");
+        let full = fixture.json(&["vectors", "show", &run,
+            receipt["steer"]["id"].as_str().assert_value()], "steer").await;
+        assert_eq!(full["node"], node);
+        assert_eq!(full["text"], text);
+    }
+    steer_release(&fixture);
+    fixture.wait_succeeded(&run, "steer").await;
+    let hook = steer_read(&fixture, "steer-tool-worker-1-1-0");
+    assert!(hook.contains("worker-only"));
+    assert!(!hook.contains("check-only"));
+    for iteration in [1, 2] {
+        let prompt = steer_read(&fixture, &format!("steer-prompt-check-{iteration}-1"));
+        assert!(prompt.contains("check-only"));
+        assert!(!prompt.contains("worker-only"));
+        assert!(!steer_read(&fixture, &format!("steer-prompt-worker-{iteration}-1")).contains("check-only"));
+        assert!(!steer_read(&fixture, &format!("steer-tool-check-{iteration}-1-0")).contains("worker-only"));
+    }
+    let status = fixture.json(&["status", &run], "steer").await;
+    let vectors = fixture.json(&["vectors", &run], "steer").await;
+    for (index, node, count) in [(0, "worker", 1), (1, "check", 2)] {
+        assert_eq!(status["steers"][index]["node"], node);
+        assert_eq!(status["steers"][index]["receivedExecutions"], count);
+        assert_eq!(vectors["vectors"][index]["node"], node);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn steer_running_local_delivers_tools_then_verifier_prompt_and_retries() {
     let fixture = steer_fixture();
     let run = fixture.submit_detached("steer-retry").await;
@@ -215,7 +256,13 @@ async fn steer_suspended_successor_keeps_receipts_for_continued_conversations() 
     steer_release(&fixture);
     fixture.wait_suspended(&run).await;
     wait_for_exit(fixture.ready_pid(&run)).await;
-    let b = fixture.json(&["steer", &run, "steer-B"], "steer").await;
+    for node in ["unknown", "round", "done"] {
+        let output = fixture.output(&["steer", &run, "--node", node, "denied"], "steer").await;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("agent"));
+    }
+    let b = fixture.json(&["steer", &run, "--node", "check", "steer-B"], "steer").await;
+    assert_eq!(b["steer"]["node"], "check");
     assert_eq!(b["steer"]["receivedExecutions"], 0);
     let status = fixture.json(&["status", &run], "steer").await;
     assert_eq!(status["status"]["phase"], "suspended");
@@ -230,7 +277,7 @@ async fn steer_suspended_successor_keeps_receipts_for_continued_conversations() 
     assert!(check.find("steer-A") < check.find("steer-B"));
     let worker = steer_read(&fixture, "steer-prompt-worker-2-1");
     assert!(!worker.contains("steer-A"));
-    assert_eq!(worker.matches("steer-B").count(), 1);
+    assert_eq!(worker.matches("steer-B").count(), 0);
     let launch: Vec<String> =
         serde_json::from_str(&steer_read(&fixture, "steer-launch-worker-2-1")).assert_value();
     assert!(launch.iter().any(|arg| arg == "resume"));
@@ -407,6 +454,12 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
     write_json(&fixture.graph, &graph);
     let run = fixture.submit_detached("steer-old").await;
     steer_held(&fixture).await;
+    for node in ["unknown", "Worker", "round", "done"] {
+        let output = fixture.output(&["steer", &run, "--node", node, "denied"], "steer-old").await;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("agent"));
+    }
+    assert_eq!(fixture.json(&["vectors", &run], "steer-old").await["vectors"], json!([]));
     fixture
         .json(&["steer", &run, "direction-before-snapshot"], "steer-old")
         .await;
@@ -419,6 +472,10 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
     fixture
         .json(&["steer", &run, "direction-after-snapshot"], "steer-old")
         .await;
+    let targeted = fixture
+        .json(&["steer", &run, "--node", "worker", "node-only-guidance"], "steer-old")
+        .await;
+    assert_eq!(targeted["steer"]["node"], "worker");
     fs::write(fixture.repository.join("steer-release-2"), "go").assert_value();
     wait_for_exit(fixture.ready_pid(&run)).await;
     let status = fixture.json(&["status", &run], "steer-old").await;
@@ -429,6 +486,10 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
     assert!(steer_read(&fixture, "steer-tool-worker-2-1-0").contains("direction-after-snapshot"));
     // The worker's tool call, and both attempts of the verifier whose prompt carried it.
     assert_eq!(status["steers"][1]["receivedExecutions"], 3);
+    assert_eq!(status["steers"][2]["node"], "worker");
+    assert_eq!(status["steers"][2]["receivedExecutions"], 1);
+    assert!(steer_read(&fixture, "steer-tool-worker-2-1-0").contains("node-only-guidance"));
+    assert!(!steer_read(&fixture, "steer-prompt-check-2-1").contains("node-only-guidance"));
     let checkpoints = fixture.json(&["checkpoints", &run], "steer").await;
     let checkpoint = checkpoints["checkpoints"]
         .as_array()
@@ -456,6 +517,9 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
     let prompt = steer_read(&fixture, "steer-prompt-worker-2-1");
     assert!(!prompt.contains("direction-before-snapshot"));
     assert_eq!(prompt.matches("direction-after-snapshot").count(), 1);
+    assert_eq!(prompt.matches("node-only-guidance").count(), 1);
+    assert!(!steer_read(&fixture, "steer-prompt-check-2-1").contains("node-only-guidance"));
+    assert!(!steer_read(&fixture, "steer-tool-check-2-1-0").contains("node-only-guidance"));
     let args: Vec<String> =
         serde_json::from_str(&steer_read(&fixture, "steer-launch-worker-2-1")).assert_value();
     assert!(args.iter().any(|arg| arg == "resume"));
@@ -476,4 +540,8 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
         // The three inherited from the failed run, then the restored worker and its verifier.
         5
     );
+    let entries = vectors["vectors"].as_array().assert_value();
+    assert!(entries.iter().any(|v| v["id"] == targeted["steer"]["id"] && v["node"] == "worker"));
+    assert_eq!(entries.iter().filter(|v| v["kind"] == "steer_receipt"
+        && v["steerId"] == targeted["steer"]["id"]).count(), 2);
 }

@@ -5,6 +5,31 @@ use super::*;
 const NODE_INSTANCE: u64 = 1;
 
 #[test]
+fn profile_projection_keeps_the_declared_shape_of_nested_record_items() {
+    let schema = serde_json::from_value(serde_json::json!({
+        "kind":"array",
+        "items":{"kind":"record","fields":{
+            "task":{"required":true,"type":{"kind":"string"}},
+            "extra":{"required":false,"type":{"kind":"integer"}}
+        }}
+    }))
+    .expect("profile input schema");
+    let value = serde_json::json!([
+        {"task":"first","ignored":true},
+        {"task":"second","extra":2,"ignored":false}
+    ]);
+    assert_eq!(
+        project_payload(&schema, &value).expect("compatible input"),
+        serde_json::json!([{"task":"first"}, {"task":"second","extra":2}])
+    );
+    assert_eq!(
+        project_payload(&openengine_cluster_protocol::PayloadType::Null, &value)
+            .expect("empty input"),
+        Value::Null,
+    );
+}
+
+#[test]
 fn loop_fact_reset_preserves_sibling_map_items_and_ancestor_facts() {
     let child: NodeName = "child".parse().expect("node name");
     let ancestor: NodeName = "ancestor".parse().expect("node name");

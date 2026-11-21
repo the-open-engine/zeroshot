@@ -51,7 +51,7 @@ printf 'FOREGROUND=%s\n' "$foreground"
             .iter()
             .all(|line| line.contains("\"prod\"") && line.contains("continues there"))
     );
-    assert!(stdout.contains("WATCH={\"subscriptionId\":"));
+    assert_watch_subscription(&stdout);
     assert!(stdout.contains("LOGS={\"subscriptionId\":"));
     assert!(stdout.contains("ATTACH={\"subscriptionId\":"));
     assert!(stdout.contains("FOREGROUND="));
@@ -95,7 +95,7 @@ async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
     assert!(stdout.contains("\"runId\":"));
     assert!(stdout.contains("LIST={\"runs\":"));
     assert!(stdout.contains("ACTIVE={\"runId\":"));
-    assert!(stdout.contains("WATCH={\"subscriptionId\":"));
+    assert_watch_subscription(&stdout);
     assert!(stdout.contains("\"phase\":\"queued\""));
     assert!(stdout.contains("LOGS={\"subscriptionId\":"));
     assert!(stdout.contains("acceptance-live-output"));
@@ -112,6 +112,21 @@ async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
         assert!(!registry.contains(forbidden));
     }
     assert!(Path::new(&config).join("targets.json").is_file());
+}
+
+fn assert_watch_subscription(stdout: &str) {
+    let first_event = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("WATCH="))
+        .assert_value_with("watch output");
+    let event: serde_json::Value =
+        serde_json::from_str(first_event).assert_value_with("first watch event");
+    assert!(
+        event["subscriptionId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()),
+        "watch event has no subscription ID: {event}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

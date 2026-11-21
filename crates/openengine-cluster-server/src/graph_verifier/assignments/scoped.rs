@@ -31,7 +31,7 @@ fn map_chain<'a>(key: &SelectorKey, inputs: DimensionInputs<'_, 'a>) -> Vec<&'a 
         .nodes
         .get(&key.name)
         .map(|info| {
-            info.path
+            info.scope_path()
                 .iter()
                 .filter_map(|part| {
                     let DiagnosticPathSegment::Node { name } = part else {

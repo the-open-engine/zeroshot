@@ -1719,6 +1719,54 @@
         },
         {
           "additionalProperties": false,
+          "description": "A saved profile reference. The submitter fills the body and input schema when linking.",
+          "properties": {
+            "body": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GraphNode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "initialInput": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PayloadType"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "profile",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "profile": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "profile"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "bindings": {
               "items": {
@@ -2118,7 +2166,7 @@
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "const": "openengine.cluster/v1",
+          "const": "openengine.cluster/v2",
           "type": "string"
         }
       },
@@ -2133,7 +2181,7 @@
           "$ref": "#/$defs/ServerCapabilities"
         },
         "protocolVersion": {
-          "const": "openengine.cluster/v1",
+          "const": "openengine.cluster/v2",
           "type": "string"
         },
         "status": {
@@ -5963,6 +6011,15 @@
             }
           ]
         },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "receivedExecutions": {
           "format": "uint64",
           "minimum": 0,
@@ -5990,6 +6047,15 @@
         "mode": {
           "$ref": "#/$defs/SteeringMode",
           "default": "standing"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runId": {
           "type": "string"
@@ -6129,6 +6195,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "text": {
@@ -6396,6 +6471,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "textBytes": {
@@ -6768,11 +6852,11 @@
     },
     "RuntimeEnvironment": {
       "additionalProperties": false,
-      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public run configuration, never secrets.",
+      "description": "Setup and startup prepare each attempt before graph execution. Local execution can also run\nteardown during orderly cleanup. Values here are public run configuration, never secrets.",
       "properties": {
         "connections": {
           "$ref": "#/$defs/DeclaredConnections",
-          "description": "Exact connection fields available to setup and startup, separate from node credentials."
+          "description": "Exact connection fields available to environment scripts, separate from node credentials."
         },
         "contextRepositories": {
           "description": "Read-only repositories pinned by the submitting client, in checkout order.",
@@ -6789,6 +6873,13 @@
           ]
         },
         "startup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teardown": {
+          "description": "Local-only cleanup script, run after preparation begins even if the attempt fails.",
           "type": [
             "string",
             "null"

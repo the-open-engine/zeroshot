@@ -175,7 +175,7 @@ impl<'a> Analyzer<'a> {
                     },
                 );
             }
-            GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
+            GraphNode::Profile(_) | GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
         }
     }
 

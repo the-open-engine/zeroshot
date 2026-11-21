@@ -1,15 +1,20 @@
 use super::*;
 
 impl<'a> Analyzer<'a> {
-    pub(super) fn validate_terminal_coverage(&mut self) {
-        self.terminal_flow(&self.graph.root);
-        if self.may_fall_through(&self.graph.root) {
+    pub(super) fn validate_terminal_coverage(&mut self, root: &GraphNode) {
+        self.terminal_flow(root);
+        if self.may_fall_through(root) {
+            let path = if root.name() == self.graph.root.name() {
+                vec![field_segment("root")]
+            } else {
+                self.node_path(root.name())
+            };
             emit_diagnostic!(
                 self,
                 GraphDiagnosticCode::Reachability,
                 "normal-success path falls through without explicit succeed or fail terminal",
-                vec![field_segment("root")],
-                vec![self.graph.root.name().clone()],
+                path,
+                vec![root.name().clone()],
             );
         }
     }
@@ -23,6 +28,7 @@ impl<'a> Analyzer<'a> {
             GraphNode::Map(group) => self.terminal_flow(&group.body),
             GraphNode::Step(_)
             | GraphNode::Verifier(_)
+            | GraphNode::Profile(_)
             | GraphNode::Succeed(_)
             | GraphNode::Fail(_) => {}
         }

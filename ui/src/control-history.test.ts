@@ -5,6 +5,7 @@ import {
   appendControlHistory,
   controlVisitLabel,
   projectControlHistory,
+  settleControlVisits,
   type ControlRecord,
 } from './control-history';
 import {
@@ -85,6 +86,37 @@ const page = (events: HistoryEvent[], control: ControlRecord[]): HistoryPage => 
   nextCursor: events.at(-1)!.cursor,
   headCursor: 'v2:4',
   complete: events.at(-1)!.cursor === 'v2:4',
+});
+
+test('an imported success settles the profile and stops before its enclosing workflow', () => {
+  const root = {
+    kind: 'seq',
+    name: 'run',
+    children: [{
+      kind: 'profile',
+      name: 'review',
+      profile: 'saved-review',
+      body: {
+        kind: 'seq',
+        name: 'review.run',
+        children: [{ kind: 'succeed', name: 'review.done' }],
+      },
+    }],
+  };
+  const visits = ['run', 'review', 'review.run', 'review.done'].map((node, visit) => ({
+    cursor: 'v2:1',
+    node,
+    mapIndices: [],
+    visitId: node,
+    start: 0,
+    updated: 1,
+    visit,
+    state: node.endsWith('.done') ? 'succeeded' as const : 'completed' as const,
+  }));
+  assert.deepEqual(
+    settleControlVisits(root, visits).map(({ state }) => state),
+    ['completed', 'succeeded', 'succeeded', 'succeeded']
+  );
 });
 
 test('a terminal-only choice gets visits without fabricating a worker execution', () => {

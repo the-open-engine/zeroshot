@@ -41,25 +41,21 @@ async fn management_contract_selects_and_materializes_profiles() {
     let named = reference("beta", None);
     let backend = FakeBackend::default();
     for (reference, target, expected) in [
-        (None, None, vec![None]),
+        (None, None, vec![]),
         (
             None,
             Some("prod"),
-            vec![
-                None,
-                Some(RunProfileScope::User),
-                Some(RunProfileScope::Org),
-            ],
+            vec![RunProfileScope::User, RunProfileScope::Org],
         ),
         (
             Some(reference("alpha", Some(ProfileQualifier::Local))),
             None,
-            vec![None],
+            vec![],
         ),
         (
             Some(reference("alpha", Some(ProfileQualifier::Org))),
             Some("prod"),
-            vec![Some(RunProfileScope::Org)],
+            vec![RunProfileScope::Org],
         ),
     ] {
         assert_eq!(
@@ -118,7 +114,7 @@ async fn management_contract_selects_and_materializes_profiles() {
     std::fs::write(&runtime_path, serde_json::to_vec(&runtime).assert_value()).assert_value();
     let selection = RunGraph::File(graph_path.clone());
     let runtime_source = RunRuntime::Exact(runtime_path);
-    let materialized = materialize_profile(&selection, &runtime_source)
+    let materialized = materialize_profile(&selection, &runtime_source, None)
         .await
         .assert_value();
     assert_eq!(materialized, (graph, runtime));
@@ -126,7 +122,7 @@ async fn management_contract_selects_and_materializes_profiles() {
     let unsupported = graph_fixture("worker", json!({"kind":"null"}));
     std::fs::write(&graph_path, serde_json::to_vec(&unsupported).assert_value()).assert_value();
     assert!(matches!(
-        materialize_profile(&selection, &runtime_source)
+        materialize_profile(&selection, &runtime_source, None)
             .await
             .assert_error(),
         NativeV2CliError::Usage(message)

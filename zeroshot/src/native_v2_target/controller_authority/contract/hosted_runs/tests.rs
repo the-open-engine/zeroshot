@@ -113,7 +113,7 @@ fn hosted_routes_reject_missing_cross_origin_or_unsafe_capabilities() {
     let invalid = [
         Value::Null,
         json!({
-            "kind": "zeroshot.hosted-runs/v2",
+            "kind": "zeroshot.hosted-runs/v1",
             "base_url": "https://target.example",
             "route_templates": routes()
         }),

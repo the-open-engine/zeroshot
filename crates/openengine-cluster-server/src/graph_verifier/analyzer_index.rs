@@ -34,28 +34,7 @@ impl<'a> Analyzer<'a> {
             return None;
         }
 
-        let materialized_state = self
-            .graph
-            .root
-            .state()
-            .and_then(|state| self.graph.initial_input.materialized_subtype_of(state));
-        let initial_state = materialized_state
-            .as_ref()
-            .unwrap_or(&self.graph.initial_input);
-        let initial = Flow {
-            defined: required_paths_with_types(initial_state),
-            ..Flow::default()
-        };
-        self.validate_node(
-            &self.graph.root,
-            NodeValidationContext {
-                incoming: &initial,
-                state: initial_state,
-                item: None,
-                map_index_targets: None,
-            },
-        );
-        self.validate_terminal_coverage();
+        self.validate_scope(&self.graph.root, &self.graph.initial_input);
         let order = self.reference_topological_order();
         let fold = self.fold_node(&self.graph.root);
 
@@ -63,6 +42,27 @@ impl<'a> Analyzer<'a> {
             return None;
         }
         self.build_bounds(fold?, order)
+    }
+
+    pub(super) fn validate_scope(&mut self, root: &GraphNode, initial_input: &PayloadType) {
+        let materialized_state = root
+            .state()
+            .and_then(|state| initial_input.materialized_subtype_of(state));
+        let initial_state = materialized_state.as_ref().unwrap_or(initial_input);
+        let initial = Flow {
+            defined: required_paths_with_types(initial_state),
+            ..Flow::default()
+        };
+        self.validate_node(
+            root,
+            NodeValidationContext {
+                incoming: &initial,
+                state: initial_state,
+                item: None,
+                map_index_targets: None,
+            },
+        );
+        self.validate_terminal_coverage(root);
     }
 
     pub(super) fn validate_profile(&mut self) {
@@ -157,15 +157,36 @@ impl<'a> Analyzer<'a> {
                 vec![previous.node.name().clone()],
             );
         } else {
+            let scope_start = self.scope_start(path);
             self.nodes.insert(
                 name.clone(),
                 NodeInfo {
                     node,
                     path: path.to_vec(),
+                    scope_start,
                     ordinal,
                 },
             );
         }
+    }
+
+    fn scope_start(&self, path: &[DiagnosticPathSegment]) -> usize {
+        path.iter()
+            .enumerate()
+            .rev()
+            .skip(1)
+            .find_map(|(index, segment)| {
+                let DiagnosticPathSegment::Node { name } = segment else {
+                    return None;
+                };
+                let parent = self.nodes.get(name)?;
+                Some(if matches!(parent.node, GraphNode::Profile(_)) {
+                    index + 1
+                } else {
+                    parent.scope_start
+                })
+            })
+            .unwrap_or_default()
     }
 
     pub(super) fn validate_node_depth(
@@ -213,8 +234,28 @@ impl<'a> Analyzer<'a> {
                 named_child_path(path, "body", group.body.name()),
                 depth + 1,
             ),
+            GraphNode::Profile(profile) => self.index_profile(profile, path, depth),
             GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
         }
+    }
+
+    fn index_profile(
+        &mut self,
+        profile: &'a ProfileNode,
+        path: &[DiagnosticPathSegment],
+        depth: u64,
+    ) {
+        let (Some(body), Some(_)) = (&profile.body, &profile.initial_input) else {
+            emit_diagnostic!(
+                self,
+                GraphDiagnosticCode::InvalidGraphShape,
+                "profile call must have a resolved body and initialInput before verification",
+                path.to_vec(),
+                vec![profile.name.clone()],
+            );
+            return;
+        };
+        self.index_node(body, named_child_path(path, "body", body.name()), depth + 1);
     }
 
     pub(super) fn index_sequence(

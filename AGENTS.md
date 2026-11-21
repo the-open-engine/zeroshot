@@ -166,6 +166,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Peer guidance travels on the same carriers as a steer and in the same hand-over. It keeps its
   descriptive `<network-steer>` frame inside a user message too: it is another agent's text, not
   the operator's. No carrier repeats a message the conversation holds, in either mode.
+  Human `steer --node NAME` selects one exact agent name from the admitted runtime plan before
+  publication. The optional `node` stays on the existing vector and its projections; the shared
+  recipient check filters prompt and hook delivery across mapped instances and future visits.
+  Omission retains broadcast serialization and behavior; `--node` and `--network` conflict.
   Status seeks an index of steering events in the same ledger and retains bounded excerpts rather
   than full steer texts; legacy read-only ledgers seek their existing vector index. Ordinary log
   history is never replayed to build steering summaries; ledgers predating vectors have no steers.
@@ -254,6 +258,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for a node start record, including input and bookkeeping. Local submissions apply the same
   admitted-definition check before creating run storage or a controller. Oversized node starts
   fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
+- Local profile imports resolve from one profile-store snapshot before semantic admission and
+  credential selection. Saved definitions keep references, while admitted and recovery definitions
+  freeze expanded bodies and qualified node identities. The verifier checks child scopes and
+  whole-run bounds, wait and delivery constraints. Imported success becomes continuation at its
+  actual history position after the inner groups apply their existing cancellation semantics.
+  Child terminal payload, state and controls remain scoped, failure propagates, and the same
+  reducer, workspace and execution budgets serve the whole run.
 - Restic failures retain at most 4 KiB of redacted, control-safe stderr in owner-private reports
   under the checkpoint repository's `diagnostics/`; public errors carry only a relative report
   location. Report writes run on the blocking pool after process cleanup. The awaiting future owns
@@ -1269,7 +1280,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
   separate `openengine.hosted-workspace-recovery/v1` outer discovery extension, leaving the strict
-  `zeroshot.hosted-runs/v1` route object unchanged for older clients. POST bodies and results match
+  `zeroshot.hosted-runs/v2` route object unchanged. POST bodies and results match
   the OECP `Run*Params`/`Run*Result` types. These authenticated Platform routes remain available after
   capsule disposal. Platform resolves the admitted connection references freshly; hosted recovery does
   not depend on local direct-target authorization or read local provider environment values.
@@ -1598,7 +1609,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   empty snapshot cannot authorize repair. A complete GraphQL `UNPROCESSABLE` rejection rooted exactly
   at a null enqueue mutation adds no uncertainty; partial, nested, truncated, or unconfirmed responses
   remain unknown. Classification uses protocol bytes before credential redaction and never invents
-  an HTTP status. Permanent forge policy failures remain execution errors. Before a merge
+  an HTTP status. A definitive enqueue rejection reporting only queued required checks returns
+  through pending-check polling; fresh exact-head policy validation permits a new submission on
+  the same authority while retaining earlier uncertainty and successful admissions. Permanent
+  forge policy failures remain execution errors. Before a merge
   delivery returns repair, refusal, error, or cancellation, trusted authority confirms withdrawal
   of queued/auto-merge effects or the exact already-merged revision. Failed withdrawal never
   authorizes agent repair. Authorities that schedule deferred merges must override
@@ -1821,7 +1835,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GIT_CONFIG_COUNT` in run variables and hook/node connections, case-insensitively, before
   preparation. They would replace or reset the supervisor's exact-path Git trust. Runs without
   context repositories retain caller-owned Git configuration.
-  Local runs reject hooks and use the invoking environment. Direct Docker setup modifies its
+  Linux/macOS local controllers run setup and startup inside the selected/restored workspace as
+  the invoking user during admitted allocation. A run-owned hook task keeps a successful or
+  failed startup shell's background children under native process custody until cleanup.
+  Preparation cancellation settles the unfinished script before starting optional local-only
+  teardown. Teardown runs once after setup begins, startup begins, or teardown alone is configured;
+  it uses the same hook connection scope and attempt ID. The task remains owned by the allocator
+  across allocation cancellation and graph handoff, and by runtime cleanup after handoff. It
+  confirms native process cleanup before releasing workspace ownership; teardown failure is
+  logged separately from the primary run outcome. Teardown is an orderly cleanup contract.
+  Docker resources on a user's daemon are managed by the scripts. Direct Docker setup modifies its
   operator-owned target container, shared by that target's runs; separate target containers are
   needed for independent OS dependency sets. Platform supplies its own disposable execution placement.
   Image-owned harness wrappers pin their Node interpreter independently of the project PATH.
@@ -1854,6 +1877,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Ordinary runs retain run-scoped session keys.
 
 ## CLI and target contracts
+
+- The current wire contract uses `openengine.cluster/v2` at OECP initialization,
+  `zeroshot.native-v2-target/v3` at target discovery, and `zeroshot.hosted-runs/v2` for hosted
+  observation. These protocol-owned identifiers gate incompatible peers before submission or
+  observation; upgrade clients (including Python wheels), targets and hosted gateways together.
+  Keep one strict timed payload format, existing paths and protocol artifact locations. The
+  isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins the
+  untouched v16.0.0 client/server sources for early-rejection controls without adding duplicate
+  package identities to the product workspace. The protocol's `native_v2_observation` integration
+  suite invokes its locked controls and the current runtime/HTTP wire tests through the existing
+  Linux/Windows and macOS CI entry points; child Cargo commands never select that parent suite.
+  Separate current/released workspaces under `target/wire-contract` preserve the surrounding CLI's
+  feature profile and keep each Cargo workspace's build artifacts independent.
+  Child commands clear the parent package's Cargo metadata so Windows can reuse its leaf-test
+  prebuilds inside the bounded native execution host.
 
 - `target list` and `target remove` manage local named-target state, including the built-in
   `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses
@@ -2262,6 +2300,10 @@ Controller request regressions budget each CLI subprocess from its own spawn, in
 Mapped peer-network regressions confirm exact durable publications before releasing recipient tools.
 An unknown publication response requires observation, never a retry; lost-reply probes retain every
 delivery, exclusion and receipt assertion without extending production broker deadlines.
+Mapped network fixtures keep peers live while the host admits and confirms each publication;
+an authority probe also confirms the exact durable vector after an uncertain publication reply.
+Late-version preparation probes budget checkpoint restoration before probe startup and publish
+complete PID markers atomically before asserting cleanup.
 
 ```bash
 cargo fmt --all -- --check

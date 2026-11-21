@@ -7,6 +7,9 @@ mod json_insert;
 #[path = "support/json_read.rs"]
 mod json_read;
 
+#[path = "native_v2_run/steering_nodes.rs"]
+mod steering_nodes;
+
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, NodeName, ResolvedSource, RunId, RunListParams, RunListResult,

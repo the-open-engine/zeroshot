@@ -49,11 +49,13 @@ export const labels: Record<string, string> = {
   choice: 'Choice',
   loop: 'Loop',
   map: 'Map',
+  profile: 'Saved profile',
   succeed: 'Success',
   fail: 'Failure',
 };
 export const isGroup = (node: GraphNode) =>
-  ['seq', 'par', 'choice', 'loop', 'map'].includes(node.kind);
+  ['seq', 'par', 'choice', 'loop', 'map'].includes(node.kind) ||
+  (node.kind === 'profile' && !!node.body);
 export function children(node: GraphNode): GraphNode[] {
   switch (node.kind) {
     case 'seq':
@@ -68,6 +70,8 @@ export function children(node: GraphNode): GraphNode[] {
     case 'loop':
     case 'map':
       return [node.body];
+    case 'profile':
+      return node.body ? [node.body] : [];
     default:
       return [];
   }
@@ -270,7 +274,8 @@ export function addNode(
 ): { document: Document; name: string; parent: string } {
   let next = clone(document);
   let group = findNode(next.graph.root, parent);
-  if (!group || !isGroup(group)) throw new Error('Open a group to add nodes.');
+  if (!group || !isGroup(group) || group.kind === 'profile')
+    throw new Error('Open an editable group to add nodes.');
   // A loop/map owns one body. Adding steps edits its sequence, wrapping an existing
   // single node once while retaining its identity, runtime, and exposed state writes.
   if (['loop', 'map'].includes(group.kind)) {
@@ -316,6 +321,9 @@ export const editableKinds = [
   'fail',
 ];
 function makeNode(root: GraphNode, kind: string, parentState: any): GraphNode {
+  if (kind.startsWith('profile:')) {
+    return { kind: 'profile', name: uniqueName(root, 'profile'), profile: kind.slice(8) };
+  }
   const name = uniqueName(root, kind === 'step' ? 'agent' : kind);
   const state = clone(parentState ?? { kind: 'null' });
   const simple = (n: string): GraphNode => ({
@@ -463,6 +471,12 @@ function assertNodeFields(n: any): void {
     throw new Error('Every graph node needs a supported kind and a name.');
   if (n.instructions !== undefined && typeof n.instructions !== 'string')
     throw new Error(`Instructions for ${n.name} must be text.`);
+  if (n.kind === 'profile') {
+    if (typeof n.profile !== 'string' || !n.profile)
+      throw new Error(`Choose a saved profile for ${n.name}.`);
+    if ('body' in n || 'initialInput' in n)
+      throw new Error(`Use a saved profile name for ${n.name}; the run resolves its definition.`);
+  }
   if (n.kind === 'fail' && typeof n.reason !== 'string')
     throw new Error(`Failure reason for ${n.name} must be text.`);
   for (const key of ['attempts', 'timeoutMs', 'maxIterations', 'maxItems'])

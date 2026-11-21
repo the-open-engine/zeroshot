@@ -230,6 +230,17 @@ async fn openrpc_steer_parameter_references_resolve_and_enforce_their_contracts(
     let mode = &method.assert_key("params")[mode_index];
     assert_eq!(mode.assert_key("required"), false);
     assert_eq!(mode.assert_key("schema").assert_key("default"), "standing");
+    let node_index = method
+        .assert_key("params")
+        .as_array()
+        .assert_value()
+        .iter()
+        .position(|parameter| parameter.assert_key("name") == "node")
+        .assert_value();
+    assert_eq!(
+        method.assert_key("params")[node_index].assert_key("required"),
+        false
+    );
     let options = jsonschema::options()
         .with_resource(
             "https://protocol.test/openrpc.json",
@@ -249,6 +260,20 @@ async fn openrpc_steer_parameter_references_resolve_and_enforce_their_contracts(
     text.push('x');
     assert!(!validator.is_valid(&serde_json::json!(text)));
     for invalid in [serde_json::json!(""), serde_json::json!(42)] {
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    let validator = options.build(&serde_json::json!({
+        "$ref": format!("https://protocol.test/openrpc.json#/methods/{method_index}/params/{node_index}/schema")
+    })).assert_value();
+    for valid in [serde_json::json!("e2e_tester"), serde_json::json!(null)] {
+        assert!(validator.is_valid(&valid));
+    }
+    for invalid in [
+        serde_json::json!("bad/name"),
+        serde_json::json!(""),
+        serde_json::json!(42),
+    ] {
         assert!(!validator.is_valid(&invalid));
     }
 

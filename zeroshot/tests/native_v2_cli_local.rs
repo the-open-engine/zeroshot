@@ -7,6 +7,10 @@ use serde_json::{Value, json};
 
 mod fixture {
     include!("native_v2_cli_local/fixture.rs");
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    mod environment_hooks {
+        include!("native_v2_cli_local/environment_hooks_tests.rs");
+    }
     mod restic_diagnostics {
         include!("native_v2_cli_local/restic_diagnostics.rs");
     }
