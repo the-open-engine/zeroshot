@@ -265,6 +265,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   actual history position after the inner groups apply their existing cancellation semantics.
   Child terminal payload, state and controls remain scoped, failure propagates, and the same
   reducer, workspace and execution budgets serve the whole run.
+- Restic failures retain at most 4 KiB of redacted, control-safe stderr in owner-private reports
+  under the checkpoint repository's `diagnostics/`; public errors carry only a relative report
+  location. Report writes run on the blocking pool after process cleanup. The awaiting future owns
+  the private file guard and freezes redactions before deferring writes; cancellation cannot recreate
+  discarded storage or reread deleted credentials. A late stop skips the optional report wait and
+  preserves the original operation/cleanup error. Capture and restore use the
+  host's bootstrap/connection redactions, independently of the cleared controller environment, plus
+  the repository password. Reuse the shared process tail buffer and private shell-value redaction
+  rules. The supervisor attaches its run-log sink to checkpoint stores; log each new capture's start
+  and successful completion. Snapshot reuse adds no capture messages.
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
 - The reducer inventories error selectors across all choice, loop and first-join guards once per
@@ -1280,9 +1290,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the OECP `Run*Params`/`Run*Result` types. These authenticated Platform routes remain available after
   capsule disposal. Platform resolves the admitted connection references freshly; hosted recovery does
   not depend on local direct-target authorization or read local provider environment values.
-  `ProductionHostingConfig` can accept host-owned `HostedWorkspaceStorage`; the allocator invokes
-  it after source checkout and before provider dispatch, imports settled prerequisites, and
-  preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
+  `ProductionHostingConfig` can accept host-owned `HostedWorkspaceStorage`; the allocator's
+  `workspace` module prepares checkpoint storage and invokes host storage after source checkout
+  and before provider dispatch. It imports settled prerequisites and preserves supplied delivery
+  lineage. Public clients never supply storage paths or execution seeds.
   Host-owned request continuations validate once against the owning host's clock before successor
   admission. Acceptance checks both durable result events, reserving the maximum identity and
   timestamp widths until allocation.

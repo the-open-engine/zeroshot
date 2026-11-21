@@ -500,6 +500,7 @@ where
             let restored = checkpoints::restore_checkpoint_conversations(
                 &conversations,
                 Some(stopping.clone()),
+                &super::process::startup_redactions(bootstrap),
             )
             .await;
             runtime
@@ -704,6 +705,7 @@ fn configure_workspace_checkpoints(
                 fallback.as_deref(),
             )
             .map_err(|error| PortableControllerError::Io(error.0))?
+            .with_redactions(super::process::startup_redactions(bootstrap))
             .with_stop_request(prepared.stopping.clone()),
         ));
     } else {
@@ -724,20 +726,23 @@ async fn restore_execution_seed(
     deadline: tokio::time::Instant,
     stopping: Option<watch::Receiver<bool>>,
 ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, PortableControllerError> {
-    use crate::native_v2_supervisor::checkpoints::{RestoreAttempt, restore_attempt_until_stopped};
+    use crate::native_v2_supervisor::checkpoints::{RestoreAttempt, RestoreOptions, restore_with};
     match &bootstrap.checkpoint {
         Some(selection) => {
             if !bootstrap.submission.runtime.workspace_checkpoints {
                 return Err(PortableControllerError::CheckpointsDisabled);
             }
-            restore_attempt_until_stopped(
+            restore_with(
                 selection,
                 &bootstrap.workspace,
-                RestoreAttempt {
-                    owner: &bootstrap.run_id,
-                    deadline,
+                RestoreOptions {
+                    attempt: Some(RestoreAttempt {
+                        owner: &bootstrap.run_id,
+                        deadline,
+                    }),
+                    stopping,
+                    redactions: &super::process::startup_redactions(bootstrap),
                 },
-                stopping,
             )
             .await
             .map_err(|error| PortableControllerError::Restore(error.0))

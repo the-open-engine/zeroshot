@@ -213,3 +213,53 @@ pub(crate) fn extend_declared_environment(
 #[cfg(test)]
 #[path = "environment/tests.rs"]
 mod tests;
+
+/// Shorter captured shell values are flags such as `1`; provider rules still cover named ones.
+const MIN_SHELL_SECRET_BYTES: usize = 8;
+/// Captured shell names known to carry no credential. Their values, such as `HOME`, often
+/// appear in paths, so redacting them would hide the cause.
+const PUBLIC_SHELL_NAMES: &[&str] = &[
+    "APPDATA",
+    "COLORTERM",
+    "COMSPEC",
+    "HOME",
+    "LANG",
+    "LOCALAPPDATA",
+    "LOGNAME",
+    "OLDPWD",
+    "PATH",
+    "PATHEXT",
+    "PWD",
+    "SHELL",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TERM",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "USERNAME",
+    "USERPROFILE",
+    "WINDIR",
+    "ZEROSHOT_RESTIC",
+];
+
+/// The local bootstrap captures the whole invoking shell, so its values are redacted unless their
+/// name is known to be public. Unfamiliar names fail closed.
+pub(crate) fn private_shell_values(
+    environment: &BTreeMap<String, String>,
+) -> impl Iterator<Item = &str> {
+    environment
+        .iter()
+        .filter(|(name, value)| value.len() >= MIN_SHELL_SECRET_BYTES && !public_shell_name(name))
+        .map(|(_, value)| value.as_str())
+        .chain(private_local_values(environment))
+}
+
+fn public_shell_name(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    name.starts_with("LC_") || PUBLIC_SHELL_NAMES.contains(&name.as_str())
+}

@@ -26,7 +26,7 @@ pub(crate) use context::{apply_execution_environment, is_execution_environment_n
 mod environment;
 pub(crate) use environment::{
     LocalHarnessEnvironment, current_process_environment, extend_declared_environment,
-    merge_local_environment, private_local_values, provider_redactions,
+    merge_local_environment, private_shell_values, provider_redactions,
 };
 pub(crate) mod text;
 pub(crate) mod turn;
@@ -87,7 +87,9 @@ pub(crate) fn agent_workspace_access(
 
 #[path = "provider_process/diagnostic.rs"]
 mod diagnostic;
-pub(crate) use diagnostic::{provider_failure_diagnostic, redact_provider_error, safe_provider_text};
+pub(crate) use diagnostic::{
+    provider_failure_diagnostic, redact_provider_error, redact_stderr_boundary, safe_provider_text,
+};
 #[cfg(test)]
 use diagnostic::MAX_PROVIDER_DIAGNOSTIC_BYTES;
 

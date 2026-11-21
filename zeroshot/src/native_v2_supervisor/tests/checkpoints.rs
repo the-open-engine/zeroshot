@@ -320,11 +320,151 @@ async fn first_checkpoint_rejection_names_the_entry_in_public_run_logs() {
             .collect::<Vec<_>>(),
         [
             concat!("Zeroshot version: ", env!("CARGO_PKG_VERSION")),
+            "Creating workspace checkpoint",
             "Runtime failed: workspace checkpoint is unavailable: candidate contains an \
              unsupported filesystem entry \"dev-server.sock\"",
             "Run failed: runtime_failed",
         ]
     );
+}
+
+#[tokio::test]
+async fn checkpoint_capture_logs_once_per_new_snapshot_and_not_for_reuse() {
+    let root = tempfile::tempdir().assert_value();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let harness = harness(
+        graph(
+            sequence(vec![step("writer", 1_000), succeed("done")], null_type()),
+            null_type(),
+        ),
+        Value::Null,
+        FakeDriver::default(),
+    )
+    .await;
+    let store = Arc::new(
+        crate::native_v2_supervisor::checkpoints::fake_checkpoint_store(
+            root.path(),
+            root.path().join("catalog"),
+            workspace,
+            BTreeSet::from([NodeName::new("writer").assert_value()]),
+        ),
+    );
+    let _supervisor = harness
+        .supervisor
+        .clone()
+        .with_checkpoints(Some(store.clone()));
+    store
+        .enter(&entry_boundary("writer", 1), &[])
+        .await
+        .assert_value();
+    store
+        .enter(&entry_boundary("reader", 1), &[])
+        .await
+        .assert_value();
+    store.finish(&[]).await.assert_value();
+    let history = [prerequisite(7, "writer", success_for(NodeRole::Worker))];
+    store
+        .enter(&entry_boundary("after", 1), &history)
+        .await
+        .assert_value();
+    let mut logs = super::failure_logs::public_subscription(&harness).await;
+    let records = logs.read_available().await.assert_value();
+    assert_eq!(
+        records
+            .iter()
+            .map(|r| r.record.message.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Creating workspace checkpoint",
+            "Workspace checkpoint capture completed",
+            "Creating workspace checkpoint",
+            "Workspace checkpoint capture completed",
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn hanging_checkpoint_logs_start_before_timeout_and_publishes_nothing() {
+    use crate::native_v2_supervisor::checkpoints::{
+        restic::ResticProgram, ResticCheckpointStore, ResticCheckpointStoreTestConfig,
+    };
+    let root = tempfile::tempdir().assert_value();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let directory = root.path().join("catalog");
+    let executable = root.path().join("restic");
+    let pid_path = root.path().join("pid");
+    let script = format!(
+        "#!/bin/sh\nfor arg in \"$@\"; do\nif [ \"$arg\" = backup ]; then\nprintf '%s' \"$$\" > '{}'\nprintf '%s' 'private checkpoint cause' >&2\nexec /bin/sleep 60\nfi\ndone\nexit 0\n",
+        pid_path.display()
+    );
+    openengine_cluster_testkit::fixture::write_executable(&executable, &script, 0o700)
+        .assert_value();
+    let harness = harness(
+        graph(
+            sequence(vec![step("first", 1_000), succeed("done")], null_type()),
+            null_type(),
+        ),
+        Value::Null,
+        FakeDriver::default(),
+    )
+    .await;
+    let store = Arc::new(
+        ResticCheckpointStore::with_program(ResticCheckpointStoreTestConfig {
+            directory: directory.clone(),
+            repository: root.path().join("repository"),
+            workspace,
+            writers: BTreeSet::new(),
+            program: ResticProgram::test(executable, Vec::new()).assert_value(),
+        })
+        .with_restic_deadline(tokio::time::Instant::now() + Duration::from_secs(2)),
+    );
+    let supervisor = harness.supervisor.clone().with_checkpoints(Some(store));
+    let drive = supervisor.drive();
+    tokio::pin!(drive);
+    // Observe the actual ledger while the backup is still pending, rather than inspecting it
+    // only after failure. No provider prerequisite or real 15-minute wait is involved.
+    tokio::select! {
+        result = &mut drive => panic!("capture ended before its start could be observed: {result:?}"),
+        () = async {
+            loop {
+                if pid_path.exists() { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        } => {}
+    }
+    let mut logs = super::failure_logs::public_subscription(&harness).await;
+    let records = logs.read_available().await.assert_value();
+    assert!(
+        records
+            .iter()
+            .any(|r| r.record.message.as_str() == "Creating workspace checkpoint")
+    );
+    let error = drive.await.unwrap_err();
+    assert!(error.to_string().contains("restic backup timed out"));
+    supervisor
+        .fail_runtime(&error.to_string(), || {})
+        .await
+        .assert_value();
+    let records = logs.read_available().await.assert_value();
+    assert!(
+        !records
+            .iter()
+            .any(|r| r.record.message.as_str() == "Workspace checkpoint capture completed")
+    );
+    assert!(!records.iter().any(|r| {
+        r.record
+            .message
+            .as_str()
+            .contains("private checkpoint cause")
+    }));
+    assert!(harness.driver.state().starts.is_empty());
+    assert!(!directory.join("index.json").exists());
+    assert!(!directory.join("latest.json").exists());
+    let pid: libc::pid_t = std::fs::read_to_string(pid_path).unwrap().parse().unwrap();
+    assert_ne!(unsafe { libc::kill(pid, 0) }, 0);
 }
 
 #[tokio::test]

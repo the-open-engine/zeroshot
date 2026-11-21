@@ -11,6 +11,9 @@ mod fixture {
     mod environment_hooks {
         include!("native_v2_cli_local/environment_hooks_tests.rs");
     }
+    mod restic_diagnostics {
+        include!("native_v2_cli_local/restic_diagnostics.rs");
+    }
     mod requests {
         include!("native_v2_cli_local/requests.rs");
     }
