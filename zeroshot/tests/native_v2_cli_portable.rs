@@ -3,6 +3,8 @@
 #[path = "native_v2_cli_portable/fixture.rs"]
 mod fixture;
 
+#[path = "native_v2_cli_portable/checkpoint_opt_out_tests.rs"]
+mod checkpoint_opt_out_tests;
 #[path = "native_v2_cli_portable/discard_workspace_tests.rs"]
 mod discard_workspace_tests;
 #[path = "native_v2_cli_portable/inspection.rs"]

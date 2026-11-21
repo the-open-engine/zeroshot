@@ -12,7 +12,7 @@ use crate::native_v2_contract::{
 
 use super::{WorkspaceError as ApiError, BuiltinGraphTemplate, TemplateDelivery};
 
-pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
+pub(super) fn templates(workspace_checkpoint_opt_out: bool) -> Result<Vec<Value>, ApiError> {
     let mut result = Vec::new();
     for template in BuiltinGraphTemplate::all() {
         let deliveries = match template {
@@ -36,7 +36,12 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
             let bindings = template_bindings(*template, *delivery, &graph)?;
-            let runtime = super::template_runtime::for_template(*template, *delivery, &graph)?;
+            let runtime = super::template_runtime::for_template(
+                *template,
+                *delivery,
+                &graph,
+                workspace_checkpoint_opt_out,
+            )?;
             let setup = super::profile_setup(json!({"runtime":runtime}))?;
             result.push(json!({
                 "id":format!("{}:{}", template.name(), delivery.name()),

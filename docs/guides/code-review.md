@@ -85,10 +85,12 @@ zeroshot run --title "Code review PR 123" \
   --submission-key code-review-pr-123
 ```
 
-`--validate-only` prepares and validates without executing agents. For hosted execution, set
-`workspaceCheckpoints` to `true` (or remove the field) before adding `--target platform`; named
-targets currently reject checkpoint opt-out. Source comes from URL resolution, so a client checkout
-is unnecessary.
+`--validate-only` prepares and validates without executing agents. For hosted execution, add
+`--target platform`. Keeping `workspaceCheckpoints: false` requires a compatible CLI and a target
+advertising [checkpoint opt-out](../reference/target-runtime.md#hosted-workspace-checkpoint-opt-out).
+For other targets, set the field to `true` or remove it. Source comes from URL resolution, so a client
+checkout is unnecessary. Legacy template catalogs keep checkpoints enabled; supporting hosts may
+explicitly preserve the supplied opt-out default.
 
 ## Input and result
 

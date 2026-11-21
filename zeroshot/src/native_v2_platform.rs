@@ -104,6 +104,7 @@ pub struct NativeV2PlatformController {
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
     checkpointless_requests: bool,
+    hosted_workspace_checkpoint_opt_out: Option<bool>,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
     run_sizes: Option<Arc<openengine_cluster_protocol::TargetRunSizesDiscovery>>,
     operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
@@ -173,6 +174,7 @@ impl NativeV2PlatformController {
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
             checkpointless_requests: false,
+            hosted_workspace_checkpoint_opt_out: None,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
             run_sizes: None,
             operator_diagnostics: Arc::default(),
@@ -233,6 +235,11 @@ impl NativeV2PlatformController {
     /// Local successors retain request history in their durable ledger after snapshot discard.
     pub(crate) fn with_checkpointless_requests(mut self, enabled: bool) -> Self {
         self.checkpointless_requests = enabled;
+        self
+    }
+
+    pub(crate) fn with_hosted_workspace_checkpoint_opt_out(mut self, enabled: bool) -> Self {
+        self.hosted_workspace_checkpoint_opt_out = Some(enabled);
         self
     }
 
@@ -428,6 +435,7 @@ impl NativeV2PlatformController {
             self.delivery_policy,
         );
         admission.checkpointless_requests = self.checkpointless_requests;
+        admission.hosted_workspace_checkpoint_opt_out = self.hosted_workspace_checkpoint_opt_out;
         if let Some(catalog) = self.run_sizes.as_deref() {
             admission = admission.with_run_sizes(catalog);
         }
@@ -689,6 +697,14 @@ impl NativeV2PlatformController {
         self.recoverable_resume_source(&run_id).await?;
         let _control = self.lock_run_control(&run_id).await;
         let source = self.recoverable_resume_source(&run_id).await?;
+        if self.hosted_workspace_checkpoint_opt_out.is_some()
+            && !source.admitted.runtime.workspace_checkpoints
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "workspace recovery is unavailable because workspaceCheckpoints is false"
+                    .to_owned(),
+            ));
+        }
         let request_resolution = if let Some(suspension) = &source.snapshot.suspension {
             if matches!(
                 suspension,
@@ -900,6 +916,14 @@ impl NativeV2PlatformController {
         &self,
         params: openengine_cluster_protocol::RunSuspendParams,
     ) -> Result<openengine_cluster_protocol::RunSuspendResult, NativeV2PlatformError> {
+        if self.hosted_workspace_checkpoint_opt_out.is_some()
+            && let Some(stored) = self.ledger.get(&params.run_id).await?
+            && !stored.admitted.runtime.workspace_checkpoints
+        {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "suspend is unavailable because workspaceCheckpoints is false".to_owned(),
+            ));
+        }
         let engine = match self.runtimes.lock().await.get(&params.run_id) {
             Some(RuntimeSlot::Running(engine)) => engine.clone(),
             _ => {
@@ -1088,6 +1112,13 @@ impl NativeV2PlatformController {
             }
         );
         result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
+        if result.workspace_recovery.recoverable
+            && self.hosted_workspace_checkpoint_opt_out.is_some()
+            && let Some(stored) = self.ledger.get(&result.run_id).await?
+            && !stored.admitted.runtime.workspace_checkpoints
+        {
+            result.workspace_recovery.recoverable = false;
+        }
         let suspended = matches!(result.status, RunStatus::Suspended { .. });
         if !(failed || suspended) {
             result.workspace_recovery.recoverable = false;

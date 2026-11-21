@@ -53,9 +53,18 @@ pub fn catalog() -> Result<Value, WorkspaceError> {
 pub fn catalog_with_harnesses(
     harnesses: &crate::harnesses::HarnessRegistry,
 ) -> Result<Value, WorkspaceError> {
+    catalog_with_checkpoint_policy(harnesses, false)
+}
+
+/// Preserve template checkpoint opt-out only for a host that supports it. Hosted consumers must
+/// use the same explicit policy as admission and discovery; legacy catalogs keep checkpoints on.
+pub fn catalog_with_checkpoint_policy(
+    harnesses: &crate::harnesses::HarnessRegistry,
+    workspace_checkpoint_opt_out: bool,
+) -> Result<Value, WorkspaceError> {
     Ok(json!({
         "version": 1,
-        "templates": catalog::templates()?,
+        "templates": catalog::templates(workspace_checkpoint_opt_out)?,
         "workers": catalog::workers()?,
         "runtimeSchema": schemars::schema_for!(RuntimePlan),
         "harnesses": harnesses.descriptors().collect::<Vec<_>>(),

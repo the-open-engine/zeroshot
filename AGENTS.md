@@ -1167,8 +1167,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Runtime plans accept `workspaceCheckpoints`, defaulting to true and omitted from the wire at
   that default. Local opt-out leaves the existing executor and durable ledger intact, skips Restic
   construction and snapshot cleanup, and refuses selected checkpoint restoration before credential
-  resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
-  not workspace writers. Executable steps remain conservative potential writers.
+  resolution. Named clients require the exact independent
+  `openengine.workspace-checkpoint-opt-out/v1` marker before access tokens or run/profile bodies.
+  Production hosted opt-out requires both `ProductionHostingConfig.workspace_checkpoint_opt_out`
+  and host-owned `workspace_storage`; defaults and direct targets retain refusal. Trusted admission
+  rejects request/wait paths throughout expanded graphs. Hosted opted-out runs cannot suspend or
+  recover; local continuation/discard behavior stays unchanged. `HostedWorkspaceRequest.workspace_checkpoints`
+  carries the admitted policy to storage, whose history/final output and delivery receipts remain
+  independent of workspace/conversation snapshots. Decision bindings are not workspace writers.
+  Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. Default resume of a failed run restarts it where it started on the
   retained workspace: a submitted run at the graph root, a successor at the boundary it began at;
@@ -1894,6 +1901,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   package identities to the product workspace. The protocol's `native_v2_observation` integration
   suite invokes its locked controls and the current runtime/HTTP wire tests through the existing
   Linux/Windows and macOS CI entry points; child Cargo commands never select that parent suite.
+  It also covers optional hosted checkpoint discovery, client gating, admission and recovery refusal.
   Separate current/released workspaces under `target/wire-contract` preserve the surrounding CLI's
   feature profile and keep each Cargo workspace's build artifacts independent.
   Child commands clear the parent package's Cargo metadata so Windows can reuse its leaf-test
@@ -2171,7 +2179,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - The native template catalog exposes each complete authored default runtime, a concise description,
   and contained connection requirements derived through the harness registry. Code review preserves
   its supplied mixed Claude/Codex agent plan and native source-neutral delivery; catalog defaults omit
-  target-owned size and enable checkpoints.
+  target-owned size and enable checkpoints. Supporting hosts explicitly select
+  `workspace::catalog_with_checkpoint_policy` to preserve the supplied checkpoint opt-out;
+  existing catalog entry points keep their portable checkpoint defaults. Profile setup preserves
+  the selected policy while materializing provider access.
   `workspace::profile_setup` materializes hosted provider access after caller edits without saving,
   resolving secrets or replacing custom declarations. `setupLanes` exports the same registry's accepted
   provider field sets. Host-selected setup validates and materializes through the same registry as

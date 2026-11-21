@@ -7,6 +7,9 @@ mod json_read;
 #[path = "native_v2_observation/wire_contract.rs"]
 mod wire_contract;
 
+#[path = "native_v2_observation/checkpoint_opt_out.rs"]
+mod checkpoint_opt_out;
+
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
     ActiveExecution, Cursor, ExecutionRef, NodeName, RunAttachEventNotification, RunAttachParams,

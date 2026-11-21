@@ -1,4 +1,5 @@
 use super::*;
+use openengine_cluster_testkit::assertions::AssertError;
 use crate::full_v1_reducer::{DurableExecution, ExecutionBoundary};
 use crate::native_v2_supervisor::checkpoints::{
     CheckpointError, CheckpointRestoreSelection, RunCheckpointStore,
@@ -201,6 +202,129 @@ fn resume_params(run: &RunId) -> RunResumeParams {
         commit_identity: None,
         commit_co_author: None,
     }
+}
+
+#[tokio::test]
+async fn hosted_checkpointless_runs_refuse_manual_suspend_without_changing_history() {
+    let driver = Arc::new(FakeDriver::new(Behavior::Hang));
+    let (ledger, _, runtime) = runtime_parts(driver.clone());
+    let allocator = Arc::new(SuspensionAllocator {
+        runtime,
+        policy: Default::default(),
+        store: Arc::new(SuspensionStore::default()),
+        successor: StdMutex::new(None),
+        preparation_gate: None,
+    });
+    let controller = NativeV2PlatformController::new_with_delivery_policy(
+        ledger.clone(),
+        allocator,
+        DeliveryPolicy::Optional,
+    )
+    .await
+    .assert_value()
+    .with_hosted_workspace_checkpoint_opt_out(true);
+    let mut request = request(Value::Null);
+    request.submission.runtime.workspace_checkpoints = false;
+    let receipt = submit_test_request(&controller, request)
+        .await
+        .assert_value();
+    driver.wait_started().await;
+    let error = controller
+        .suspend(RunSuspendParams {
+            run_id: receipt.run_id.clone(),
+        })
+        .await
+        .assert_error();
+    assert!(matches!(error, NativeV2PlatformError::InvalidRequest(_)));
+    assert!(error.to_string().contains("workspaceCheckpoints is false"));
+    let stored = ledger
+        .get(&receipt.run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert!(!stored.snapshot.suspend_requested);
+    assert!(stored.snapshot.suspension.is_none());
+    controller
+        .force(RunForceParams {
+            run_id: receipt.run_id,
+        })
+        .await
+        .assert_value();
+}
+
+#[tokio::test]
+async fn hosted_checkpointless_failure_keeps_history_but_refuses_recovery_before_allocation() {
+    let driver = Arc::new(FakeDriver::new(Behavior::Complete));
+    let (ledger, _, runtime) = runtime_parts(driver.clone());
+    let allocator = Arc::new(SuspensionAllocator {
+        runtime,
+        policy: Default::default(),
+        store: Arc::new(SuspensionStore::default()),
+        successor: StdMutex::new(None),
+        preparation_gate: None,
+    });
+    let controller = NativeV2PlatformController::new_with_delivery_policy(
+        ledger.clone(),
+        allocator.clone(),
+        DeliveryPolicy::Optional,
+    )
+    .await
+    .assert_value()
+    .with_hosted_workspace_checkpoint_opt_out(true);
+    let mut request = request(Value::Null);
+    request.submission.runtime.workspace_checkpoints = false;
+    persist_request(ledger.as_ref(), &request).await;
+    ledger
+        .append(&request.run_id, vec![RunEvent::RunStarted])
+        .await
+        .assert_value();
+    let stored = ledger
+        .get(&request.run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    append_terminal_failure(
+        ledger.as_ref(),
+        &stored,
+        "worker_failed",
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+    )
+    .await
+    .assert_value();
+    let before = ledger
+        .get(&request.run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    let status = controller
+        .status(RunStatusParams {
+            run_id: request.run_id.clone(),
+        })
+        .await
+        .assert_value();
+    assert!(matches!(status.status, RunStatus::Finished { .. }));
+    assert!(!status.workspace_recovery.recoverable);
+    for from in [
+        None,
+        Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint {
+            checkpoint_id: openengine_cluster_protocol::CheckpointId::new("missing").assert_value(),
+        }),
+    ] {
+        let mut params = resume_params(&request.run_id);
+        params.from = from;
+        let error = controller.resume(params).await.assert_error();
+        assert!(matches!(error, NativeV2PlatformError::InvalidRequest(_)));
+        assert!(error.to_string().contains("workspaceCheckpoints is false"));
+    }
+    let after = ledger
+        .get(&request.run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(after.snapshot, before.snapshot);
+    assert!(allocator.successor.lock().assert_value().is_none());
+    assert_eq!(driver.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(controller.list().await.assert_value().len(), 1);
 }
 
 #[tokio::test]
