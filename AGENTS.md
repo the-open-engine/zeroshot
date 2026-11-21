@@ -1159,6 +1159,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Live-engine force-stop shares a per-run control turn with resume and checks successor ownership
   before signalling the engine, so a stale suspended engine cannot stop an accepted continuation.
   Unrelated submissions and resume reads for an ineligible live source cannot block cancellation.
+  `native_v2_platform::recovery` owns retained-source eligibility and successor preparation;
+  existing live/claimed-source refusals precede hosted checkpoint-policy refusal.
   Direct-target status for failed and suspended runs exposes the immutable admitted connection requirements so the CLI resolves
   fresh resume values without consulting changed profiles. Recovery lineage also retains the root
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.

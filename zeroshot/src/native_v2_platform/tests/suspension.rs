@@ -283,6 +283,14 @@ async fn hosted_checkpointless_failure_keeps_history_but_refuses_recovery_before
         .await
         .assert_value()
         .assert_value();
+    let live_error = controller
+        .resume(resume_params(&request.run_id))
+        .await
+        .assert_error();
+    assert!(matches!(
+        live_error,
+        NativeV2PlatformError::Allocation(CapsuleAllocationUnavailable::Runtime)
+    ));
     append_terminal_failure(
         ledger.as_ref(),
         &stored,
@@ -325,6 +333,21 @@ async fn hosted_checkpointless_failure_keeps_history_but_refuses_recovery_before
     assert!(allocator.successor.lock().assert_value().is_none());
     assert_eq!(driver.starts.load(Ordering::SeqCst), 0);
     assert_eq!(controller.list().await.assert_value().len(), 1);
+
+    *allocator.successor.lock().assert_value() = Some(RunId::new("claimed-successor"));
+    let claimed_error = controller
+        .resume(resume_params(&request.run_id))
+        .await
+        .assert_error();
+    assert!(matches!(
+        claimed_error,
+        NativeV2PlatformError::InvalidRequest(_)
+    ));
+    assert!(
+        claimed_error
+            .to_string()
+            .contains("already claimed by claimed-successor")
+    );
 }
 
 #[tokio::test]
