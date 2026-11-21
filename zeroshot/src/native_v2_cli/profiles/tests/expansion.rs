@@ -165,7 +165,7 @@ fn profile_expansion_checks_the_store_before_accepting_a_body() {
     let parent = importing_profile("parent", "leaf", &["imported"]);
     assert!(matches!(
         store.expand(parent.graph.clone(), parent.runtime.clone(), None),
-        Err(NativeV2CliError::Usage(message)) if message.contains("references missing local profile leaf")
+        Err(NativeV2CliError::Usage(message)) if message.contains("references missing profile leaf")
     ));
     store
         .set(profile_request("leaf", "worker", false))

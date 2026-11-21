@@ -38,7 +38,7 @@ object declares peer communication permissions; omission or `{}` grants none.
 | `par`      | Declared state, non-empty branches, promoted paths, and a tagged join                                                                                      |
 | `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
 | `map`      | Declared state, body, structured array selector `over`, positive concurrent-item limit `maxItems`, promoted paths                                          |
-| `profile`  | Name of a saved local run profile to expand at submission                                                                                                 |
+| `profile`  | Name of a saved run profile in the caller's catalog to expand at submission                                                                                |
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
 | `fail`     | Finite-enum reason; `unhandled` is reserved for runtime handling of unchecked worker errors                                                                |
 
@@ -155,8 +155,10 @@ Each submission reads the current definitions of all referenced profiles from on
 The admitted graph and recovery data retain the resolved bodies, so a subsequent edit takes
 effect on the next submission. Imports may nest and may appear inside ordinary groups.
 Admission rejects missing profiles, dependency cycles and expansions that exceed graph bounds.
-All imported profiles must use the parent graph policy. ACP and named-target submissions require
-profiles without saved-name imports.
+All imported profiles must use the parent graph policy. ACP requires profiles without saved-name
+imports. A named hosted target may accept imported **remote saved profiles** when it advertises
+[host-owned saved-profile expansion](../target-runtime.md#saved-profile-imports). Named-target
+inline graphs and local saved profiles with imports remain unsupported.
 
 The imported profile receives its declared input fields from the enclosing state and can
 materialize its usual root defaults. Its own state and graph controls remain scoped to its body.

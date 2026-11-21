@@ -59,7 +59,7 @@ impl LocalRunProfileStore {
     }
 
     pub(crate) fn has_imports(graph: &GraphSpec) -> bool {
-        expansion::contains_imports(&graph.root)
+        crate::native_v2_admission::profile_expansion::contains_profile_imports(&graph.root)
     }
 
     pub(crate) fn expand(

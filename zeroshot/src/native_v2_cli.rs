@@ -800,6 +800,10 @@ pub trait NativeV2CliBackend: Send + Sync {
         self.profile_list(target, request).await.map(Into::into)
     }
 
+    async fn validate_profile_imports(&self, _target: &str) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Usage("profile imports require a local run or a target advertising openengine.saved-profile-imports/v1".into()))
+    }
+
     async fn profile_show(
         &self,
         _target: Option<&str>,
