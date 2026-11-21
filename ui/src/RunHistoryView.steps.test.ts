@@ -502,3 +502,209 @@ test('a force-stopped deferred timer shows stopped in Steps only after its recor
     container.remove();
   }
 });
+
+/** Sparse execution IDs are opaque; retries share a logical occurrence, not an ID sequence. */
+async function withRetriedSteps(
+  t: TestContext,
+  check: (view: {
+    container: HTMLElement;
+    retry: () => Promise<void>;
+    finish: () => Promise<void>;
+  }) => Promise<void>,
+  live = false
+) {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const base = runDetailFixture('retry-run');
+  const detail: RunDetail = {
+    ...base,
+    graph: {
+      ...base.graph,
+      root: { kind: 'seq', name: 'run', children: [{ kind: 'verifier', name: 'review' }] },
+    },
+    observation: { state: live ? 'active' : 'complete' },
+  };
+  const reference = (execution: string) => ({
+    node: 'review',
+    execution,
+    nodeInstance: 'review-instance',
+    runId: detail.runId,
+  });
+  const first = reference('attempt-17'),
+    second = reference('attempt-91');
+  const values: HistoryPage['events'][number]['event'][] = [
+    { kind: 'run_started' },
+    { kind: 'node_started', reference: first, attempt: 1, input: { prompt: 'First input' } },
+    { kind: 'safe_log', execution: first.execution, stream: 'output', line: 'First transcript' },
+    {
+      kind: 'node_completed',
+      completion: {
+        reference: first,
+        outcome: {
+          status: 'error',
+          code: 'provider_timeout',
+          output: { result: 'First result' },
+        },
+      },
+    },
+    { kind: 'node_started', reference: second, attempt: 2, input: { prompt: 'Second input' } },
+    { kind: 'safe_log', execution: second.execution, stream: 'output', line: 'Second transcript' },
+    {
+      kind: 'node_completed',
+      completion: {
+        reference: second,
+        outcome: {
+          status: 'verifier',
+          signals: { code_review: 'accepted', test_review: 'rejected' },
+          output: { result: 'Second result' },
+        },
+      },
+    },
+  ];
+  const events = values.map((event, index) => ({ cursor: `v2:${index + 1}`, event }));
+  const page = (items: typeof events): HistoryPage => ({
+    ...completePage(),
+    events: items,
+    nextCursor: items.at(-1)!.cursor,
+    headCursor: items.at(-1)!.cursor,
+  });
+  let observer: Parameters<NonNullable<RunHistoryReader['watch']>>[2] | undefined;
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => page(live ? events.slice(0, 4) : events),
+    watch(_id, _after, next) {
+      observer = next;
+      return () => {};
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          runId: detail.runId,
+          source,
+          workers: [],
+        })
+      )
+    );
+    await flushEffects();
+    await check({
+      container,
+      retry: async () => {
+        assert.ok(observer);
+        await act(async () => observer!.page(page(events.slice(4, 5))));
+      },
+      finish: async () => {
+        assert.ok(observer);
+        await act(async () => observer!.page(page(events.slice(5))));
+      },
+    });
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+}
+
+async function switchToSteps(container: HTMLElement) {
+  const button = [...container.querySelectorAll<HTMLButtonElement>('.view-toggle button')].find(
+    (candidate) => candidate.textContent === 'Steps'
+  );
+  assert.ok(button);
+  await act(async () => button.click());
+}
+
+async function openReview(container: HTMLElement) {
+  const button = container.querySelector<HTMLButtonElement>('button.story-step-head');
+  assert.ok(button);
+  await act(async () => button.click());
+}
+
+function assertFirstAttempt(container: HTMLElement) {
+  const row = container.querySelector('.story-step.open');
+  assert.ok(row, 'the grouped retry row is open');
+  const detail = row.querySelector('.step-detail');
+  assert.match(detail?.textContent ?? '', /First input/);
+  assert.match(detail?.textContent ?? '', /First transcript/);
+  assert.match(detail?.textContent ?? '', /First result/);
+  assert.doesNotMatch(detail?.textContent ?? '', /Second (input|transcript|result)/);
+  return row;
+}
+
+test('an earlier attempt selected in Graph opens its grouped Steps row and stays selected across views', async (t) => {
+  await withRetriedSteps(t, async ({ container }) => {
+    await openReview(container);
+    const graph = container.querySelector<HTMLButtonElement>('.step-link');
+    assert.ok(graph);
+    await act(async () => graph.click());
+    const attempts = container.querySelectorAll<HTMLButtonElement>('.execution-stop');
+    assert.equal(attempts.length, 2);
+    await act(async () => attempts[0].click());
+    await switchToSteps(container);
+    assertFirstAttempt(container);
+    assert.match(container.querySelector('button.story-step-head')!.textContent!, /2 attempts/);
+    const selector = container.querySelector<HTMLSelectElement>('select[aria-label="Attempt"]');
+    assert.ok(selector);
+    assert.equal(selector.value, 'attempt-17');
+    await act(async () => {
+      selector.value = 'attempt-91';
+      selector.dispatchEvent(new window.Event('change', { bubbles: true }));
+    });
+    assert.match(container.querySelector('.step-detail')!.textContent!, /Second transcript/);
+    assert.doesNotMatch(container.querySelector('.step-detail')!.textContent!, /First transcript/);
+    await act(async () => container.querySelector<HTMLButtonElement>('.step-link')!.click());
+    assert.match(
+      container.querySelector('.execution-stop[aria-pressed="true"]')!.textContent!,
+      /Attempt 2/
+    );
+  });
+});
+
+test('a live retry keeps the existing row open with its selected attempt and keeps following', async (t) => {
+  await withRetriedSteps(
+    t,
+    async ({ container, retry, finish }) => {
+      await openReview(container);
+      const row = assertFirstAttempt(container);
+      await retry();
+      assert.equal(assertFirstAttempt(container), row, 'the same row survives the retry');
+      assert.ok(row.classList.contains('state-running'));
+      assert.match(row.textContent!, /2 attempts/);
+      await finish();
+      assert.equal(assertFirstAttempt(container), row, 'settlement preserves the selected attempt');
+      assert.equal(
+        container.querySelector('.history-live')?.getAttribute('title'),
+        'Following latest events'
+      );
+      await act(async () => container.querySelector<HTMLButtonElement>('.step-link')!.click());
+      assert.match(container.querySelector('.invocation-detail')!.textContent!, /First transcript/);
+      await switchToSteps(container);
+      assertFirstAttempt(container);
+    },
+    true
+  );
+});
+
+test('expanded Steps results keep each verifier signal name beside its recorded value', async (t) => {
+  await withRetriedSteps(t, async ({ container }) => {
+    await openReview(container);
+    const signals = [...container.querySelectorAll('.step-section')].find((section) =>
+      section.querySelector('summary')?.textContent?.startsWith('Signals')
+    );
+    assert.ok(signals, 'the full signal record is available without leaving Steps');
+    assert.deepEqual(
+      [...signals.querySelectorAll('.step-row')].map((row) => [
+        row.querySelector('dt')?.textContent,
+        row.querySelector('dd')?.textContent,
+      ]),
+      [
+        ['Code review', 'accepted'],
+        ['Test review', 'rejected'],
+      ]
+    );
+  });
+});

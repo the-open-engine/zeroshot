@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { ChevronRight, CornerDownRight, UserRound } from 'lucide-react';
 import type { FailureContext } from './failure-context';
-import { humanize, type Invocation } from './run-history';
+import { humanize } from './run-history';
 import { formatDuration, projectStory, type StoryEntry, type StoryStep } from './run-story';
 import { formatMoment, requestStatus } from './PersonRequestView';
 import {
@@ -50,12 +50,21 @@ export function RunStory({
     () => projectStory(run.document, run.invocations, run.handoffs, run.clock.at, run.controls),
     [run.document, run.invocations, run.handoffs, run.clock.at, run.controls]
   );
-  const byId = useMemo(
-    () => new Map(run.invocations.map((invocation) => [invocation.id, invocation])),
-    [run.invocations]
+  const rowForAttempt = useMemo(
+    () =>
+      new Map(
+        entries.flatMap((entry) =>
+          entry.kind === 'work'
+            ? entry.steps.flatMap((step) =>
+                step.attempts.map((attempt) => [attempt.id, step.invocation] as const)
+              )
+            : []
+        )
+      ),
+    [entries]
   );
   const sections = useMemo(() => frameSections(entries), [entries]);
-  const steps = useOpenSteps(execution);
+  const steps = useOpenSteps(rowForAttempt.get(execution) ?? '');
   const { terminal, currentFailure } = run;
   const failure = terminal?.status === 'failed' ? terminal : currentFailure;
   const startRef = useRef<HTMLLIElement>(null);
@@ -76,10 +85,12 @@ export function RunStory({
   }, [revealStart]);
   useEffect(() => {
     if (!revealStep) return;
-    steps.reveal(revealStep.invocation);
+    const row = rowForAttempt.get(revealStep.invocation);
+    if (!row) return;
+    steps.reveal(row);
     const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-invocation]') ?? [];
     [...rows]
-      .find((row) => row.dataset.invocation === revealStep.invocation)
+      .find((element) => element.dataset.invocation === row)
       ?.scrollIntoView?.({ block: 'start' });
   }, [revealStep?.tick]);
   const start = (
@@ -173,17 +184,14 @@ export function RunStory({
                         <StoryLine
                           key={step.invocation}
                           step={step}
-                          invocation={byId.get(step.invocation)}
+                          execution={execution}
+                          select={(invocation) => select({ node: step.node, invocation })}
                           run={run}
                           open={steps.isOpen(step.invocation)}
                           toggle={() => {
-                            if (!steps.isOpen(step.invocation))
-                              select({ node: step.node, invocation: step.invocation });
                             steps.toggle(step.invocation);
                           }}
-                          showInGraph={() =>
-                            showInGraph({ node: step.node, invocation: step.invocation })
-                          }
+                          showInGraph={(invocation) => showInGraph({ node: step.node, invocation })}
                         />
                       ))}
                     </li>
@@ -315,20 +323,24 @@ function storyStepStatus(step: StoryStep, run: RunContext) {
 
 function StoryLine({
   step,
-  invocation,
+  execution,
+  select,
   run,
   open,
   toggle,
   showInGraph,
 }: {
   step: StoryStep;
-  invocation?: Invocation;
+  execution: string;
+  select: (invocation: string) => void;
   run: RunContext;
   open: boolean;
   toggle: () => void;
-  showInGraph: () => void;
+  showInGraph: (invocation: string) => void;
 }) {
-  const retried = step.attempts > 1;
+  const retried = step.attempts.length > 1;
+  const invocation =
+    step.attempts.find((attempt) => attempt.id === execution) ?? step.attempts.at(-1)!;
   const { state, decision } = storyStepStatus(step, run);
   return (
     <div
@@ -336,13 +348,20 @@ function StoryLine({
       data-invocation={step.invocation}
     >
       <span className="story-dot" aria-hidden="true" />
-      <button className="story-step-head" aria-expanded={open} onClick={toggle}>
+      <button
+        className="story-step-head"
+        aria-expanded={open}
+        onClick={() => {
+          if (!open) select(invocation.id);
+          toggle();
+        }}
+      >
         <span className="story-title">
           {step.request && <UserRound size={14} aria-label="Asked a person" />}
           <span className="story-name">{step.label}</span>
           {decision && <span className="story-decision">{decision}</span>}
           {step.item && <span className="story-meta">{step.item}</span>}
-          {retried && <span className="story-meta">{step.attempts} attempts</span>}
+          {retried && <span className="story-meta">{step.attempts.length} attempts</span>}
           {state === 'running' && <span className="story-meta">In progress</span>}
           <ChevronRight className="story-chevron" size={14} aria-hidden="true" />
           {step.durationMs !== undefined && (
@@ -364,8 +383,15 @@ function StoryLine({
           </span>
         )}
       </button>
-      {open && invocation && (
-        <StepDetail invocation={invocation} run={run} showInGraph={showInGraph} />
+      {open && (
+        <StepDetail
+          key={invocation.id}
+          invocation={invocation}
+          attempts={step.attempts}
+          selectAttempt={select}
+          run={run}
+          showInGraph={() => showInGraph(invocation.id)}
+        />
       )}
     </div>
   );

@@ -281,6 +281,12 @@ div.story-step-head:hover {
   margin: 6px 0 18px;
   font-size: 14px;
 }
+.step-attempt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+}
 .step-section > summary {
   display: flex;
   align-items: baseline;
@@ -501,6 +507,7 @@ a.run-handoff:hover {
   /* 44px touch targets on phones (ui/DESIGN.md); the controls stay visually quiet. */
   .story-step-head,
   .view-toggle button,
+  .step-attempt select,
   .step-link {
     min-height: 44px;
   }

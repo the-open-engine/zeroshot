@@ -7,7 +7,9 @@ import { RecordedValue } from './RecordedValue';
 import { RECORDED_PAGE_SIZE } from './recorded-value';
 import { Transcript } from './Transcript';
 import {
+  executionDecision,
   humanize,
+  stateLabel,
   type Invocation,
   type RunHandoff,
   type RunTerminal,
@@ -128,10 +130,14 @@ export function firstProse(value: unknown): string | undefined {
  */
 export function StepDetail({
   invocation,
+  attempts,
+  selectAttempt,
   run,
   showInGraph,
 }: {
   invocation: Invocation;
+  attempts: readonly Invocation[];
+  selectAttempt: (id: string) => void;
   run: RunContext;
   showInGraph: () => void;
 }) {
@@ -141,6 +147,22 @@ export function StepDetail({
   const notes = hasValue(outcome?.diagnostic) && !repeats(outcome!.diagnostic, said);
   return (
     <div className="step-detail">
+      {attempts.length > 1 && (
+        <label className="step-attempt">
+          Attempt
+          <select
+            aria-label="Attempt"
+            value={invocation.id}
+            onChange={(event) => selectAttempt(event.target.value)}
+          >
+            {attempts.map((attempt) => (
+              <option key={attempt.id} value={attempt.id}>
+                {attempt.attempt} · {executionDecision(attempt) ?? stateLabel(attempt.state)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {invocation.request ? (
         <PersonRequestView
           request={invocation.request}
@@ -173,6 +195,11 @@ export function StepDetail({
         <p className="step-failure">{humanize(failure.reason)}</p>
       )}
       {invocation.reason && <p className="step-note">Stopped: {humanize(invocation.reason)}</p>}
+      {hasValue(outcome?.signals) && (
+        <DetailSection title="Signals" hint={fieldNames(outcome!.signals)}>
+          <Facts value={outcome!.signals} />
+        </DetailSection>
+      )}
       {hasValue(outcome?.output) && (
         <DetailSection
           title={invocation.request ? 'Answer' : 'Result'}

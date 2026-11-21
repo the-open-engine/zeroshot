@@ -22,12 +22,14 @@ export type StoryStep = {
   label: string;
   /** Map item, when the step ran for one element of a map. */
   item?: string;
+  /** The first attempt's execution ID keeps the row stable when later attempts arrive. */
   invocation: string;
   state: NodeState;
   decision?: string;
   /** The step's latest recorded output line, which usually says what it did. */
   line?: string;
-  attempts: number;
+  /** Recorded attempts in history order, available for inspection within this row. */
+  attempts: Invocation[];
   /** The question a request node put to a person, and its answer or expiry. */
   request?: PersonRequest;
   /**
@@ -292,14 +294,14 @@ function collectAttempts(
         node: latest.node,
         label: humanize(latest.node),
         item: itemLabel(ancestors, latest.mapIndices),
-        invocation: latest.id,
+        invocation: attempts[0].id,
         state: latest.state,
         decision: executionDecision(latest),
         // A request's own words are its question, shown with the step rather than as output.
         line: latest.request ? undefined : latest.logs.at(-1)?.text,
         request: latest.request,
         imported: latest.imported,
-        attempts: attempts.length,
+        attempts,
         durationMs: duration(attempts, latest, at),
         start: Math.min(...attempts.map((invocation) => invocation.start)),
         round: loop && recordedRound(ancestors, loop, latest, controls),
@@ -391,7 +393,7 @@ export function projectOutcome(
   const rounds = new Map<string, number>();
   for (const { round } of executions)
     if (round) rounds.set(round.loop, Math.max(rounds.get(round.loop) ?? 0, round.number));
-  const retried = executions.filter((execution) => execution.attempts > 1).length;
+  const retried = executions.filter((execution) => execution.attempts.length > 1).length;
   const failed = executions.filter((execution) => execution.state === 'failed').length;
   const running = executions.filter((execution) => execution.state === 'running');
   const asking = executions.find(

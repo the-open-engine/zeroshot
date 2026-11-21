@@ -74,7 +74,7 @@ function story(doc: Document, values: HistoryEvent['event'][], open = true) {
 }
 /** "!" marks what the list shows in rust or with an attempt count: a failed or retried step. */
 const flagged = (steps: StoryStep[]) =>
-  steps.some((step) => step.state === 'failed' || step.attempts > 1);
+  steps.some((step) => step.state === 'failed' || step.attempts.length > 1);
 const read = (entries: StoryEntry[]) =>
   entries.map((entry) =>
     entry.kind === 'round'
@@ -189,7 +189,11 @@ test('a retry folds into its execution instead of appearing twice', () => {
     complete(second),
   ]);
   assert.deepEqual(read(entries), ['! Build']);
-  assert.equal(entries[0].kind === 'work' && entries[0].steps[0].attempts, 2);
+  assert.deepEqual(
+    entries[0].kind === 'work' && entries[0].steps[0].attempts.map((attempt) => attempt.id),
+    ['b1', 'b2']
+  );
+  assert.equal(entries[0].kind === 'work' && entries[0].steps[0].invocation, 'b1');
   assert.deepEqual(outcome.facts, ['1 step', '1 retried']);
 });
 
