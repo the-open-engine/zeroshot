@@ -16,6 +16,9 @@ fn script_verifier_signals_route_and_persist_without_model_calls() {
         success(&node);
         let node = String::from_utf8(node.stdout).unwrap();
         let empty = json!({"kind":"record","fields":{}});
+        let diagnostic = json!({"kind":"record","fields":{
+            "reason":{"type":{"kind":"string"},"required":true}
+        }});
         let step = |name| {
             json!({
                 "kind":"step", "name":name, "worker":"test.route@1",
@@ -33,12 +36,14 @@ fn script_verifier_signals_route_and_persist_without_model_calls() {
                         {"kind":"verifier","name":"probe","worker":"test.probe@1",
                             "input":{"kind":"null"},"output":{"kind":"null"},
                             "inputBindings":[],"writeBindings":[],"attempts":1,
-                            "signals":{"status":["ready","logged_out"]},"diagnostic":empty},
+                            "signals":{"status":["ready","logged_out"]},"diagnostic":diagnostic},
                         {"kind":"choice","name":"route","state":empty,"promotedStatePaths":[],
                             "branches":[{"when":{"kind":"in",
                                 "value":{"source":"signal","name":"probe","field":"status"},
                                 "labels":["ready"]},"node":step("ready")}],
-                            "otherwise":step("logged_out")},
+                            "otherwise":{"kind":"seq","name":"reject","state":empty,
+                                "promotedStatePaths":[],"children":[step("logged_out"),
+                                    {"kind":"fail","name":"stop","reason":"rejected"}]}},
                         {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
                     ]}
             }),
@@ -47,12 +52,14 @@ fn script_verifier_signals_route_and_persist_without_model_calls() {
         let probe = format!(
             "const fs = require('node:fs'); JSON.parse(fs.readFileSync(0, 'utf8')); \
              if (process.env.ZEROSHOT_NODE_KIND !== 'verifier') process.exit(9); \
-             console.log(JSON.stringify({{output:null,signals:{{status:{label:?}}},diagnostic:{{}}}}));"
+             console.log(JSON.stringify({{output:null,signals:{{status:{label:?}}},\
+             diagnostic:{{reason:'Session observation: {label}; token=' + process.env.OPENAI_API_KEY}}}}));"
         );
         let mut bindings = serde_json::Map::new();
         bindings.insert(
             "probe".to_owned(),
-            json!({"kind":"script","command":[node.trim(),"-e",probe]}),
+            json!({"kind":"script","command":[node.trim(),"-e",probe],
+                "connections":{"openai":["OPENAI_API_KEY"]}}),
         );
         for branch in ["ready", "logged_out"] {
             let source = format!(
@@ -80,7 +87,11 @@ fn script_verifier_signals_route_and_persist_without_model_calls() {
                 .unwrap(),
         );
         let result = fixture.run("finish", false);
-        success(&result);
+        if label == "ready" {
+            success(&result);
+        } else {
+            assert_eq!(result.status.code(), Some(1));
+        }
         assert_eq!(
             std::fs::read_to_string(fixture.workspace.join("route.txt")).unwrap(),
             label
@@ -94,7 +105,48 @@ fn script_verifier_signals_route_and_persist_without_model_calls() {
                 .unwrap();
         let id = receipt["runId"].as_str().unwrap();
         let status = fixture.json(&["status", id]);
-        assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
+        let terminal = &status["status"]["terminalResult"];
+        assert_eq!(
+            terminal["status"],
+            if label == "ready" {
+                "succeeded"
+            } else {
+                "failed"
+            }
+        );
+        let logs = fixture.command(&["logs", id]).output().unwrap();
+        success(&logs);
+        let logs = String::from_utf8(logs.stdout).unwrap();
+        let reports = logs
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .filter(|record| {
+                record["record"]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("Session observation:"))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(reports.len(), 1, "{logs}");
+        let message = reports[0]["record"]["message"].as_str().unwrap();
+        let report: Value = serde_json::from_str(message).unwrap();
+        assert_eq!(report["signals"]["status"], label);
+        assert_eq!(
+            report["diagnostic"]["reason"],
+            format!("Session observation: {label}; token=[REDACTED]")
+        );
+        assert!(!logs.contains("fixture-key"));
+        if label == "logged_out" {
+            assert_eq!(terminal["reason"], "rejected");
+            let context = &terminal["context"];
+            assert_eq!(context["verifiers"].as_array().unwrap().len(), 1);
+            let evidence = &context["verifiers"][0];
+            assert_eq!(evidence["message"], message);
+            assert_eq!(evidence["execution"]["node"], "probe");
+            assert_eq!(evidence["execution"]["execution"], reports[0]["execution"]);
+            assert_eq!(evidence["cursor"], reports[0]["cursor"]);
+            assert!(context["primary"].is_null());
+            assert!(context["recorded"].as_array().unwrap().is_empty());
+        }
         let ledger = SqliteRunLedger::open_read_only(
             fixture.root.path(&format!("state/runs/{id}/runs.sqlite3")),
         )
@@ -133,6 +185,16 @@ fn script_verifier_signals_route_and_persist_without_model_calls() {
         );
         assert_eq!(completions[1]["completion"]["reference"]["node"], label);
         assert_eq!(completions[1]["completion"]["outcome"]["output"], label);
+        let report_events = events
+            .iter()
+            .filter(|event| event["kind"] == "safe_log" && event["diagnostic"] == "verifier")
+            .collect::<Vec<_>>();
+        assert_eq!(report_events.len(), 1);
+        assert_eq!(report_events[0]["line"], message);
+        assert_eq!(
+            report_events[0]["execution"],
+            completions[0]["completion"]["reference"]["execution"]
+        );
         let usage = events
             .iter()
             .filter(|event| event["kind"] == "token_usage_observed")

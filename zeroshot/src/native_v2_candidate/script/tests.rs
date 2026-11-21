@@ -113,9 +113,68 @@ async fn script_verifier_returns_declared_signals_and_successful_timing() {
         json!({"status":"logged_out"})
     );
     assert_eq!(diagnostic, Value::Null);
+    let report = durable.recv_output().await.unwrap();
+    assert_eq!(report.stream, LiveOutputStream::System);
+    assert_eq!(
+        report.diagnostic,
+        Some(openengine_cluster_protocol::FailureDiagnosticKind::Verifier)
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&report.text).unwrap(),
+        json!({"signals":{"status":"logged_out"},"diagnostic":null})
+    );
     let timing: Value = serde_json::from_str(&durable.recv_output().await.unwrap().text).unwrap();
     assert_eq!(timing["event"], "script_timing");
     assert_eq!(timing["succeeded"], true);
+}
+
+#[tokio::test]
+async fn script_verifier_logs_redact_resolved_credentials_without_changing_results() {
+    let secret = "private-script-\"quoted\nline\\secret";
+    for padding in [0, openengine_cluster_protocol::MAX_LOG_MESSAGE_BYTES] {
+        let directory = TestDirectory::new("script-verifier-secret");
+        let (adapter, invocation) = prepared(&directory, &format!(
+            "import json, os\nprint(json.dumps({{'output':{{'result':'ok'}},'signals':{{'status':'logged_out'}},'diagnostic':'x' * {padding} + os.environ['SCRIPT_TOKEN'] + ': login required'}}))\n"
+        )).await;
+        let mut invocation = verifier(invocation);
+        let NodeResponseContract::Verifier { diagnostic, .. } = &mut invocation.response else {
+            panic!("expected verifier fixture")
+        };
+        *diagnostic = PayloadType::String;
+        invocation.environment = ResolvedEnvironment::exact(
+            &invocation.node.binding,
+            BTreeMap::from([(
+                EnvironmentVariableName::new("SCRIPT_TOKEN").unwrap(),
+                secret.to_owned(),
+            )]),
+        )
+        .unwrap();
+        let (outcome, mut durable) = run_script(&adapter, invocation).await;
+        let WorkerOutcome::Verifier { diagnostic, .. } = outcome else {
+            panic!("expected verifier success")
+        };
+        assert_eq!(
+            diagnostic,
+            format!("{}{secret}: login required", "x".repeat(padding))
+        );
+        let report = durable.recv_output().await.unwrap();
+        assert_eq!(
+            report.diagnostic,
+            Some(openengine_cluster_protocol::FailureDiagnosticKind::Verifier)
+        );
+        assert!(report.text.len() <= openengine_cluster_protocol::MAX_LOG_MESSAGE_BYTES);
+        assert!(!report.text.contains("private-script-"));
+        assert!(!report.text.contains("quoted"));
+        assert!(!report.text.contains("line"));
+        if padding == 0 {
+            assert_eq!(
+                serde_json::from_str::<Value>(&report.text).unwrap(),
+                json!({"signals":{"status":"logged_out"},"diagnostic":"[REDACTED]: login required"})
+            );
+        } else {
+            assert!(report.text.contains("[middle truncated]"));
+        }
+    }
 }
 
 #[tokio::test]

@@ -16,7 +16,7 @@ use crate::execution::process::{
 };
 use crate::native_v2_capsule::provider_process::{
     LocalHarnessEnvironment, apply_execution_environment, current_process_environment,
-    safe_provider_text, send_process_input,
+    redaction_values, report_verifier_result, safe_provider_text, send_process_input,
 };
 use crate::native_v2_contract::{NodeCompletion, NodeInvocation, NodeRuntimeBinding, TokenUsageDelta};
 use crate::native_v2_runner::{
@@ -344,6 +344,11 @@ impl NodeDriver for ScriptAdapter {
             .await?;
         let timer = super::timing::ExecutionTiming::start()?;
         let outcome = self.execute(&invocation, &control).await;
+        if let Ok(outcome) = &outcome {
+            let redactions =
+                redaction_values(invocation.environment.iter().map(|(_, value)| value));
+            report_verifier_result(outcome, &redactions, &control).await?;
+        }
         super::timing::publish(
             &control,
             timer.finish(

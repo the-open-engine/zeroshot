@@ -463,6 +463,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - A `script` binding executes an argv program on an existing step or verifier without instructions.
   Steps return plain typed JSON; verifiers return exactly `{output, signals, diagnostic}`, with
   every declared signal present and its label validated by the existing verifier response contract.
+  Verifier results use the shared log/failure-context bridge with resolved connection redactions.
   Successful verifier outcomes count as successful script timing. See the complete signal-routing
   example in [the runtime plan reference](docs/reference/runtime-plan.md#script).
   Its portable signal/history regression stays in the `tool_activity` suite selected by macOS CI.
