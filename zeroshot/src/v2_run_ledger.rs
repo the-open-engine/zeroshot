@@ -28,6 +28,10 @@ pub mod fake;
 pub mod sqlite;
 #[path = "v2_run_ledger/state.rs"]
 mod state;
+#[path = "v2_run_ledger/storage_failure.rs"]
+mod storage_failure;
+
+pub use storage_failure::SqliteStorageError;
 
 pub(crate) use state::validate_admitted_run;
 pub(crate) use state::{
@@ -574,7 +578,7 @@ pub enum RunLedgerError {
     #[error("run ledger storage is unavailable")]
     Storage,
     #[error("run ledger SQLite storage failed: {0}")]
-    SqliteStorage(rusqlite::ffi::Error),
+    SqliteStorage(SqliteStorageError),
     #[error("run ledger storage is corrupt")]
     Corrupt,
 }

@@ -1074,6 +1074,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   loss.
 - SQLite operations acquire the single connection asynchronously before running on a blocking
   thread; cancelling a caller does not release an in-flight database operation's ownership.
+  Ledger failures retain machine SQLite codes and attributable native OS causes, never arbitrary
+  SQLite messages. A failed operation measures available bytes once on its ledger filesystem;
+  unavailable measurements preserve the original cause. Existing runtime-failure context carries
+  this evidence, with space recovery guidance only when exhaustion has supporting evidence.
+  Capture native migration errors before rollback; measure private recovery-image failures on
+  the image's filesystem before cleanup and preserve that measurement through the caller.
   Read-only ledger opens recover hot rollback journals only in a private image copied under
   SQLite's native shared read lock, with no reserved writer. SQLite's VFS supplies both the
   lock and database bytes, preserving native and same-process lock bookkeeping. The image
