@@ -1,4 +1,4 @@
-//! Local deterministic steps with JSON stdin/stdout and shared process containment.
+//! Local deterministic steps and verifiers with JSON I/O and shared process containment.
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,9 +20,8 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_contract::{NodeCompletion, NodeInvocation, NodeRuntimeBinding, TokenUsageDelta};
 use crate::native_v2_runner::{
-    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver,
-    NodeResponseContract, NodeRunnerError, NodeSession, ResolvedEnvironment, SessionFactory,
-    bounded_log_text,
+    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver, NodeRunnerError,
+    NodeSession, ResolvedEnvironment, SessionFactory, bounded_log_text,
 };
 use crate::v2_run_ledger::{RunEvent, validate_event};
 
@@ -83,9 +82,6 @@ impl ScriptAdapter {
         let NodeRuntimeBinding::Script { command, .. } = &invocation.node.binding else {
             return Err(NodeRunnerError::InvalidRole);
         };
-        if !matches!(invocation.response, NodeResponseContract::Worker { .. }) {
-            return Err(NodeRunnerError::InvalidRole);
-        }
         let mut environment = self.environment.clone();
         environment.extend(
             invocation
@@ -354,7 +350,7 @@ impl NodeDriver for ScriptAdapter {
                 "script_timing",
                 outcome
                     .as_ref()
-                    .is_ok_and(|outcome| matches!(outcome, WorkerOutcome::Verified { .. })),
+                    .is_ok_and(|outcome| outcome.error_code().is_none()),
             ),
         )
         .await?;

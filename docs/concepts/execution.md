@@ -45,10 +45,11 @@ The [graph contract](../reference/cluster/graph.md) defines their fields.
 ## Which checks are deterministic
 
 The engine enforces the order, routes and retry limits. What a step decides depends on its
-binding. Agent steps and verifiers are model judgement. A `step` can instead run a
-[script](../reference/runtime-plan.md#script) you own, which takes the step's JSON input and
-returns its JSON output, so that step's result comes from your program, not a model. A non-zero
-exit is an error, and the graph's error and retry rules apply. Script steps are local only for now.
+binding. Agent steps and verifiers are model judgement. A `step` or `verifier` can instead run a
+[script](../reference/runtime-plan.md#script) you own, which takes the node's JSON input and
+returns typed output. Script verifiers also return declared signals for graph routing and typed
+diagnostics. A non-zero exit is an error, and the graph's error and retry rules apply.
+Script bindings are local only.
 
 Outside the graph, delivery waits on your CI and required checks and cannot override them, and
 local runs can add a [delivery check command](delivery-validation.md).

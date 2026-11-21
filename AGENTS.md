@@ -460,8 +460,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `maxTokens` on an agent binding; they are declarations rather than catalog knowledge, are written
   only to the Pi gateway model entry when supplied, and stay absent so the provider keeps its own
   defaults otherwise. Never infer either value from the model identifier.
-- A `script` binding executes an argv program on an existing step without instructions. The local
-  adapter in `native_v2_candidate::script` uses the shared process runner, bounded JSON stdin/stdout,
+- A `script` binding executes an argv program on an existing step or verifier without instructions.
+  Steps return plain typed JSON; verifiers return exactly `{output, signals, diagnostic}`, with
+  every declared signal present and its label validated by the existing verifier response contract.
+  Successful verifier outcomes count as successful script timing. See the complete signal-routing
+  example in [the runtime plan reference](docs/reference/runtime-plan.md#script).
+  Its portable signal/history regression stays in the `tool_activity` suite selected by macOS CI.
+  The local adapter in `native_v2_candidate::script` uses the shared process runner, bounded JSON stdin/stdout,
   authoritative output validation, connection redaction and confirmed process-tree cleanup. It does
   not invoke a shell or inherit ambient provider keys. Local-only placement is enforced both before
   remote submission and at candidate construction. Keep service lifecycle outside the runtime.

@@ -5,7 +5,7 @@ use openengine_cluster_protocol::{EnvironmentVariableName, PayloadType};
 use openengine_cluster_testkit::fixture::python3_script;
 use serde_json::{Value, json};
 use crate::native_v2_candidate::test_support::{NodeRequestFixture, TestDirectory};
-use crate::native_v2_runner::NodeRole;
+use crate::native_v2_runner::{NodeRole, NodeResponseContract};
 
 async fn invocation(
     adapter: &ScriptAdapter,
@@ -77,6 +77,94 @@ async fn run_script(
     let (_cancel, control, durable) =
         crate::native_v2_runner::test_support::control_with_capacity(16);
     (adapter.run(invocation, control).await.unwrap(), durable)
+}
+
+fn verifier(mut invocation: DriverInvocation) -> DriverInvocation {
+    let NodeResponseContract::Worker { output } = invocation.response else {
+        panic!("expected worker fixture")
+    };
+    invocation.role = NodeRole::Verifier;
+    invocation.response = NodeResponseContract::Verifier {
+        output,
+        signals: serde_json::from_value(json!({"status":["ready","logged_out"]})).unwrap(),
+        diagnostic: PayloadType::Null,
+    };
+    invocation
+}
+
+#[tokio::test]
+async fn script_verifier_returns_declared_signals_and_successful_timing() {
+    let directory = TestDirectory::new("script-verifier");
+    let (adapter, invocation) = prepared(&directory,
+        "import os\nassert os.environ['ZEROSHOT_NODE_KIND'] == 'verifier'\nprint('{\"output\":{\"result\":\"ok\"},\"signals\":{\"status\":\"logged_out\"},\"diagnostic\":null}')\n").await;
+    let (outcome, mut durable) = run_script(&adapter, verifier(invocation)).await;
+    let WorkerOutcome::Verifier {
+        output,
+        signals,
+        diagnostic,
+        ..
+    } = outcome
+    else {
+        panic!("expected verifier success: {outcome:?}")
+    };
+    assert_eq!(output, json!({"result":"ok"}));
+    assert_eq!(
+        serde_json::to_value(signals).unwrap(),
+        json!({"status":"logged_out"})
+    );
+    assert_eq!(diagnostic, Value::Null);
+    let timing: Value = serde_json::from_str(&durable.recv_output().await.unwrap().text).unwrap();
+    assert_eq!(timing["event"], "script_timing");
+    assert_eq!(timing["succeeded"], true);
+}
+
+#[tokio::test]
+async fn script_verifier_rejects_malformed_results_and_preserves_crashes() {
+    let valid = json!({"output":{"result":"ok"},"signals":{"status":"ready"},"diagnostic":null});
+    let mut invalid = vec![json!(null), json!({"response":valid}), json!([valid])];
+    for field in ["output", "signals", "diagnostic"] {
+        let mut value = valid.clone();
+        value.as_object_mut().unwrap().remove(field);
+        invalid.push(value);
+    }
+    for (field, replacement) in [
+        ("extra", json!(null)),
+        ("signals", json!({})),
+        ("signals", json!({"status":"ready","extra":"ready"})),
+        ("signals", json!({"status":"unknown"})),
+        ("signals", json!({"status":42})),
+        ("output", json!({"result":42})),
+        ("diagnostic", json!("wrong type")),
+    ] {
+        let mut value = valid.clone();
+        value[field] = replacement;
+        invalid.push(value);
+    }
+    let mut cases = invalid
+        .into_iter()
+        .map(|value| {
+            (
+                format!("print({:?})\n", value.to_string()),
+                WorkerErrorCode::Malformed,
+            )
+        })
+        .collect::<Vec<_>>();
+    cases.extend([
+        ("print('not json')\n".to_owned(), WorkerErrorCode::Malformed),
+        (
+            format!("print({:?})\nsys.exit(7)\n", valid.to_string()),
+            WorkerErrorCode::Crash,
+        ),
+    ]);
+    for (source, expected) in cases {
+        let directory = TestDirectory::new("script-verifier-invalid");
+        let (adapter, invocation) = prepared(&directory, &source).await;
+        let (outcome, _durable) = run_script(&adapter, verifier(invocation)).await;
+        assert!(
+            matches!(outcome, WorkerOutcome::Error { code, .. } if code == expected),
+            "{source}: {outcome:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -235,30 +323,37 @@ async fn invalid_json_wrong_schema_nonzero_exit_and_oversized_output_fail() {
 #[tokio::test]
 async fn cancellation_settles_the_owned_script_process() {
     use std::time::Duration;
-    let directory = TestDirectory::new("script-cancel");
-    let (adapter, invocation) = prepared(
-        &directory,
-        "import pathlib, time\npathlib.Path('started').write_text('ready')\ntime.sleep(60)\n",
-    )
-    .await;
-    let (cancel, control, _durable) =
-        crate::native_v2_runner::test_support::control_with_capacity(16);
-    let task = tokio::spawn(async move { adapter.run(invocation, control).await });
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !directory.child("started").exists() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
-    cancel.send(true).unwrap();
-    assert!(matches!(
-        tokio::time::timeout(Duration::from_secs(10), task)
-            .await
-            .unwrap()
-            .unwrap(),
-        Err(NodeRunnerError::Cancelled)
-    ));
+    for is_verifier in [false, true] {
+        let directory = TestDirectory::new("script-cancel");
+        let (adapter, invocation) = prepared(
+            &directory,
+            "import pathlib, time\npathlib.Path('started').write_text('ready')\ntime.sleep(60)\n",
+        )
+        .await;
+        let invocation = if is_verifier {
+            verifier(invocation)
+        } else {
+            invocation
+        };
+        let (cancel, control, _durable) =
+            crate::native_v2_runner::test_support::control_with_capacity(16);
+        let task = tokio::spawn(async move { adapter.run(invocation, control).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !directory.child("started").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        cancel.send(true).unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(10), task)
+                .await
+                .unwrap()
+                .unwrap(),
+            Err(NodeRunnerError::Cancelled)
+        ));
+    }
 }
 
 #[tokio::test]
@@ -313,71 +408,95 @@ async fn output_at_the_serialized_event_boundary_persists_or_becomes_malformed()
     use crate::native_v2_runner::test_support::{admitted, node_started};
     use crate::v2_run_ledger::{CreateRun, MAX_EVENT_BYTES, RunLedger, sqlite::SqliteRunLedger};
 
-    for excess in [0, 1, 256] {
-        let directory = TestDirectory::new("script-event-size");
-        let (adapter, invocation) = prepared(
-            &directory,
-            "import json\nprint(json.dumps({'result':'x' * 1}))\n",
-        )
-        .await;
-        let reference = invocation.node.reference;
-        let empty_event = RunEvent::NodeCompleted {
-            completion: NodeCompletion {
-                reference: reference.clone(),
-                outcome: WorkerOutcome::Verified {
-                    output: json!({"result":""}),
-                    artifacts: vec![],
-                },
-            },
-        };
-        let envelope = serde_json::to_vec(&empty_event).unwrap().len();
-        let source = format!(
-            "import json\nprint(json.dumps({{'result':'x' * {}}}))\n",
-            MAX_EVENT_BYTES - envelope + excess,
-        );
-        let (_, invocation) = prepared(&directory, &source).await;
-        let (outcome, _durable) = run_script(&adapter, invocation).await;
-        if excess == 0 {
-            assert!(matches!(outcome, WorkerOutcome::Verified { .. }));
-        } else {
-            assert!(matches!(
-                outcome,
-                WorkerOutcome::Error {
-                    code: WorkerErrorCode::Malformed,
-                    ..
-                }
-            ));
-        }
-        let ledger = SqliteRunLedger::open_in_memory().unwrap();
-        ledger
-            .create_or_get(CreateRun {
-                run_id: reference.run_id.clone(),
-                submission_key: IdempotencyKey::new("script-size").unwrap(),
-                submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
-                admitted: admitted(),
-            })
-            .await
-            .unwrap();
-        let expected = outcome.clone();
-        let stored = ledger
-            .append(
-                &reference.run_id,
-                vec![
-                    RunEvent::RunStarted,
-                    node_started(&reference, json!({})),
-                    RunEvent::NodeCompleted {
-                        completion: NodeCompletion {
-                            reference: reference.clone(),
-                            outcome,
-                        },
-                    },
-                ],
+    for is_verifier in [false, true] {
+        for excess in [0, 1, 256] {
+            let directory = TestDirectory::new("script-event-size");
+            let (adapter, invocation) = prepared(
+                &directory,
+                "import json\nprint(json.dumps({'result':'x' * 1}))\n",
             )
-            .await
-            .unwrap();
-        assert_eq!(
-            stored.snapshot.executions[&reference.execution].outcome(),
-            Some(&expected)
-        );
+            .await;
+            let reference = invocation.node.reference;
+            let empty_event = RunEvent::NodeCompleted {
+                completion: NodeCompletion {
+                    reference: reference.clone(),
+                    outcome: if is_verifier {
+                        WorkerOutcome::Verifier {
+                            output: json!({"result":""}),
+                            signals: serde_json::from_value(json!({"status":"ready"})).unwrap(),
+                            diagnostic: Value::Null,
+                            artifacts: vec![],
+                        }
+                    } else {
+                        WorkerOutcome::Verified {
+                            output: json!({"result":""}),
+                            artifacts: vec![],
+                        }
+                    },
+                },
+            };
+            let envelope = serde_json::to_vec(&empty_event).unwrap().len();
+            let response = if is_verifier {
+                "{'output':payload,'signals':{'status':'ready'},'diagnostic':None}"
+            } else {
+                "payload"
+            };
+            let source = format!(
+                "import json\npayload = {{'result':'x' * {}}}\nprint(json.dumps({response}))\n",
+                MAX_EVENT_BYTES - envelope + excess,
+            );
+            let (_, invocation) = prepared(&directory, &source).await;
+            let invocation = if is_verifier {
+                verifier(invocation)
+            } else {
+                invocation
+            };
+            let (outcome, _durable) = run_script(&adapter, invocation).await;
+            if excess == 0 {
+                assert!(matches!(
+                    outcome,
+                    WorkerOutcome::Verified { .. } | WorkerOutcome::Verifier { .. }
+                ));
+            } else {
+                assert!(matches!(
+                    outcome,
+                    WorkerOutcome::Error {
+                        code: WorkerErrorCode::Malformed,
+                        ..
+                    }
+                ));
+            }
+            let ledger = SqliteRunLedger::open_in_memory().unwrap();
+            ledger
+                .create_or_get(CreateRun {
+                    run_id: reference.run_id.clone(),
+                    submission_key: IdempotencyKey::new("script-size").unwrap(),
+                    submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
+                    admitted: admitted(),
+                })
+                .await
+                .unwrap();
+            let expected = outcome.clone();
+            let stored = ledger
+                .append(
+                    &reference.run_id,
+                    vec![
+                        RunEvent::RunStarted,
+                        node_started(&reference, json!({})),
+                        RunEvent::NodeCompleted {
+                            completion: NodeCompletion {
+                                reference: reference.clone(),
+                                outcome,
+                            },
+                        },
+                    ],
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                stored.snapshot.executions[&reference.execution].outcome(),
+                Some(&expected)
+            );
+        }
     }
 }
