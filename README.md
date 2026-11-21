@@ -123,9 +123,9 @@ has complete graph, input, and runtime files.
 One graph per process your team runs.
 
 - **[Graphs are JSON](docs/reference/cluster/graph.md):** steps, reviewers, branches, parallel
-  work, bounded loops and maps over lists.
+  work, bounded loops and maps over lists. Choose [which agents can message each other](docs/reference/cluster/graph.md#peer-networks).
 - **[Profiles](docs/zeroshot-cli.md#zeroshot-profile-set):** save each graph by name and pick one
-  per run with `--profile`.
+  per run with `--profile`. Local graphs can [reuse a saved profile as a step](docs/reference/cluster/graph.md#profile-imports).
 - **[Agent and model per node](docs/reference/runtime-plan.md#per-node-lanes):** Claude Code,
   Codex, Copilot CLI, Pi and [more](docs/project/harness-adapters.md), through the providers each
   agent supports: OpenAI, Anthropic, OpenRouter, Bedrock, Foundry or your own endpoint.
@@ -133,7 +133,11 @@ One graph per process your team runs.
   or opening and merging one on GitHub, GitHub Enterprise or GitLab, or by leaving the change in
   your working copy. The built-in template `software-change` defaults to PR delivery.
 - **[Plans](docs/guides/planning.md):** `plan this with zeroshot` turns a big change into small
-  PRs, each with the tests it must pass.
+  PRs, each with the tests it must pass. On Platform, [submit dependent changes as stacked PRs](docs/guides/stacks.md).
+- [Review an existing PR](docs/guides/review.md) with `pr-review` to check how the change behaves,
+  or use [`code-review`](docs/guides/code-review.md) to have specialist reviewers post their verified findings in one comment.
+- [Active Memory](docs/guides/active-memory.md) gives agents relevant lessons from earlier runs
+  when they work on the same repo or use the same graph.
 
 ### The engine enforces them
 
@@ -144,21 +148,26 @@ Agents do the work. The graph decides what happens next.
   `--validate-only` runs just the checks.
 - **[Reviewers route the run](docs/concepts/execution.md#state-reduction-chooses-the-next-step):**
   each reviewer returns an enum verdict, and the graph routes on it.
+- [Ask for approval](docs/guides/ask-a-person.md) before a step such as opening a PR.
+  The graph pauses for your answer, then follows the branch you defined.
 - **[Script steps](docs/reference/runtime-plan.md#script):** run a deterministic command as a
   step in local runs.
 - **[Secrets stay out of the record](docs/concepts/runtimes-and-connections.md#runtime-configuration-contains-names-not-secret-values):**
   credentials are stored once as named connections and kept out of graphs, run history, logs and
   the UI.
 
-### See inside every run
+### Observe and steer a run
 
 - **[`zeroshot ui`](docs/guides/observe-and-control.md#browser):** each node's input, output and
   logs in the browser, on a timeline you can replay.
 - **[CLI](docs/guides/observe-and-control.md#resume-event-and-log-streams):** `status` and `list`
   return JSON, `watch` and `logs` stream resumable events, `attach` follows a running agent.
+- [Steer a running agent](docs/guides/observe-and-control.md#steer-a-run) with
+  `zeroshot steer RUN_ID --node tester "Check Windows too"`.
 - **[SQLite](docs/concepts/execution.md#durable-run-state):** one SQLite file per local run.
 - **[Resume](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run):** restart a failed
-  run from a checkpoint without redoing finished steps.
+  run from a checkpoint without redoing finished steps. You can also [pause a run at its next checkpoint](docs/guides/observe-and-control.md#suspend-and-continue)
+  and continue it later.
 
 ### Build on it
 
