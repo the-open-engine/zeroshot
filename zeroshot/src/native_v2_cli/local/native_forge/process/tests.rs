@@ -245,3 +245,56 @@ fn credential_helper_refuses_duplicate_passwords_and_changed_authority() {
         "private-token",
     );
 }
+
+#[test]
+fn forgejo_l2_has_no_default_host_so_an_unselected_token_is_never_returned() {
+    // A self-hosted instance has no default host, so without FORGEJO_HOST nothing is selected.
+    let values = BTreeMap::from([("FORGEJO_TOKEN".to_owned(), "forge-token".to_owned())]);
+    assert!(
+        environment_token(FORGEJO, "forge.example", &values)
+            .assert_value()
+            .is_none()
+    );
+}
+
+#[test]
+fn forgejo_l3_a_selector_for_another_host_authorizes_nothing_for_the_instance() {
+    let values = BTreeMap::from([
+        ("FORGEJO_HOST".to_owned(), "other.example".to_owned()),
+        ("FORGEJO_TOKEN".to_owned(), "forge-token".to_owned()),
+    ]);
+    assert!(
+        environment_token(FORGEJO, "forge.example", &values)
+            .assert_value()
+            .is_none()
+    );
+    // The token stays bound to the host its selector names.
+    assert_eq!(
+        environment_token(FORGEJO, "other.example", &values)
+            .assert_value()
+            .as_deref(),
+        Some("forge-token")
+    );
+}
+
+#[test]
+fn forgejo_l4_a_port_in_the_selector_must_match_the_instance_port() {
+    let values = BTreeMap::from([
+        (
+            "FORGEJO_HOST".to_owned(),
+            "https://forge.example:3443".to_owned(),
+        ),
+        ("FORGEJO_TOKEN".to_owned(), "forge-token".to_owned()),
+    ]);
+    assert_eq!(
+        environment_token(FORGEJO, "forge.example:3443", &values)
+            .assert_value()
+            .as_deref(),
+        Some("forge-token")
+    );
+    assert!(
+        environment_token(FORGEJO, "forge.example", &values)
+            .assert_value()
+            .is_none()
+    );
+}

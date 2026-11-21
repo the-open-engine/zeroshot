@@ -1,17 +1,19 @@
 ---
-description: 'Set up GitHub and GitLab delivery with native CLI logins or token connections.'
+description: 'Set up GitHub, GitLab and Forgejo delivery with native CLI logins or token connections.'
 ---
 
-# GitHub and GitLab delivery
+# GitHub, GitLab and Forgejo delivery
 
 GitHub.com, GitHub Enterprise, and GitLab use the same delivery nodes for PR/MR creation, merging,
-and issue or review comments.
+and issue or review comments. Self-hosted Forgejo uses them for pull request creation, required
+checks and merging, without comments; see [Forgejo](#forgejo).
 
-| Service                                     | Minimum version | API credential |
-| ------------------------------------------- | --------------- | -------------- |
-| GitHub.com / Enterprise Cloud (`*.ghe.com`) | Hosted service  | `GH_TOKEN`     |
-| GitHub Enterprise Server                    | 3.22.2          | `GH_TOKEN`     |
-| GitLab.com / self-managed GitLab            | 19.5.1          | `GITLAB_TOKEN` |
+| Service                                     | Minimum version | API credential  |
+| ------------------------------------------- | --------------- | --------------- |
+| GitHub.com / Enterprise Cloud (`*.ghe.com`) | Hosted service  | `GH_TOKEN`      |
+| GitHub Enterprise Server                    | 3.22.2          | `GH_TOKEN`      |
+| GitLab.com / self-managed GitLab            | 19.5.1          | `GITLAB_TOKEN`  |
+| Self-hosted Forgejo                         | 16.0.0          | `FORGEJO_TOKEN` |
 
 Instances must be reachable over HTTPS with certificate verification enabled. Local delivery honors
 the invoking shell's `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, their lower-case forms,
@@ -26,8 +28,9 @@ name. Proxy credentials are kept private.
 Relative CA paths are anchored to the invoking directory before a delivery worktree is created.
 GitLab also supports `socks5://` and `socks5h://` proxy URLs through these same variables.
 
-Older or unidentifiable servers fail version checks. Use a web base without a trailing slash, including any GitLab installation
-prefix (such as `https://gitlab.example/install`). GitHub uses a root web URL.
+Older or unidentifiable servers fail version checks. Use a web base without a trailing slash,
+including any GitLab or Forgejo installation prefix (such as `https://gitlab.example/install`).
+GitHub uses a root web URL.
 
 ## Local setup
 
@@ -323,3 +326,47 @@ Neither procedure requires a force-push.
 For a named target, use `zeroshot checkpoints RUN_ID --target NAME`, then
 `zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --target NAME` with a checkpoint taken
 before the rewrite. The target restores its own retained checkout; omit `--discard-workspace-changes`.
+
+## Forgejo
+
+Forgejo is never identified automatically. Select it with `--source-provider source.forgejo` and
+`--source-base-url https://forge.example`, including the installation path when there is one, or
+with the equivalent `forge` object in a source file, as shown for GitLab:
+
+```console
+zeroshot run --title "Example change" --input task.json \
+  --template software-change --uniform-runtime-config runtime.json --pr \
+  --source-provider source.forgejo --source-base-url https://forge.example
+```
+
+Delivery is HTTPS only. A private certificate authority is trusted through the same `SSL_CERT_FILE`
+mechanism described above.
+
+The token is `FORGEJO_TOKEN` through a delivery connection, or, for local runs, `FORGEJO_HOST` with
+the instance host and port together with `FORGEJO_TOKEN`. Without `FORGEJO_HOST` no ambient token is
+used, because a self-hosted instance has no native login. The scopes are `read:user` and
+`write:repository`, and the token's user needs push access. `check_access` refuses a read-only token
+before agents start.
+
+Required checks come from the rule in effect for the target branch, read through the branch
+endpoint: `enable_status_check` and `status_check_contexts`, with `*` and `?` patterns. Approvals
+come from `required_approvals`.
+
+**Protect the target branch.** Without an enabled status check, a pull request whose CI has not
+reported yet has no statuses and counts as not required, so `--ship` can merge before CI starts.
+Enable a status check on the target branch for CI-gated delivery.
+
+A failed check carries the failed Forgejo Actions job logs into repair, with the same budgets and
+redaction as GitLab. Statuses from other CI systems contribute their status line only. Without
+Actions read access the status lines remain and the diagnostic says why details are missing.
+
+`--ship` merges with the repository's default merge style when it is allowed, otherwise with the
+first allowed style; it pins the reviewed head with `head_commit_id`, never forces a merge, never
+schedules a merge for later, and keeps the head branch.
+
+`mergeable: false` is rechecked three times, two seconds apart, before it counts as a conflict,
+because Forgejo also reports it while its own conflict check runs.
+
+Not supported: review comment intake and conversation resolution, automatic head updates when the
+branch rule blocks outdated branches, and merge queues. A pull request blocked only by such a rule
+waits.
