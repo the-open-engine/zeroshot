@@ -35,6 +35,7 @@ fn reported(harness: &str, version: &str) -> String {
         "claude" => format!("{version} (Claude Code)"),
         "copilot" => format!("GitHub Copilot CLI {version}."),
         "hermes" => format!("Hermes Agent v{version} (2026.9.24) stable"),
+        "opencode" => format!("opencode v{version}"),
         _ => version.to_owned(),
     }
 }
@@ -70,10 +71,7 @@ async fn every_declared_minimum_admits_the_boundary_and_refuses_older_or_unreada
     let registry = HarnessRegistry::local();
     for descriptor in registry.descriptors() {
         let lane = RuntimeLane::new(descriptor.id, descriptor.providers[0]).assert_value();
-        let Some(version) = registry.cli_version(&lane).assert_value() else {
-            assert_eq!(descriptor.id, "opencode");
-            continue;
-        };
+        let version = registry.cli_version(&lane).assert_value().assert_value();
         let root = tempfile::Builder::new()
             .prefix("CLI version with spaces ")
             .tempdir()
@@ -153,18 +151,32 @@ async fn a_valid_version_with_a_failed_command_is_refused() {
 
 #[cfg(feature = "contributed-harnesses")]
 #[tokio::test]
-async fn opencode_keeps_admitting_without_a_version_probe() {
+async fn opencode_refuses_1x_and_releases_before_2_2_3() {
     let root = tempfile::tempdir().assert_value();
-    install(root.path(), "opencode", "unknown", 71);
-    check_lane_versions(
-        &plan("opencode", &["openai"]),
-        &environment(root.path()),
-        root.path(),
-        None,
-    )
-    .await
-    .assert_value();
-    assert!(!root.path().join("probes").exists());
+    for version in ["1.19.3", "2.0.32", "2.2.2"] {
+        install(root.path(), "opencode", &reported("opencode", version), 0);
+        let detail = check_lane_versions(
+            &plan("opencode", &["openai"]),
+            &environment(root.path()),
+            root.path(),
+            None,
+        )
+        .await
+        .assert_error()
+        .to_string();
+        assert!(detail.contains("2.2.3"), "{detail}");
+    }
+    for version in ["2.2.3", "2.2.6"] {
+        install(root.path(), "opencode", &reported("opencode", version), 0);
+        check_lane_versions(
+            &plan("opencode", &["openai"]),
+            &environment(root.path()),
+            root.path(),
+            None,
+        )
+        .await
+        .assert_value();
+    }
 }
 
 #[cfg(feature = "contributed-harnesses")]
