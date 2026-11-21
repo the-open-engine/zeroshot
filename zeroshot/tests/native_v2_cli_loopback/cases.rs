@@ -1,5 +1,42 @@
 use super::*;
 
+#[test]
+fn watch_notification_accepts_optional_timing_and_key_order() {
+    for watch in [
+        r#"{"subscriptionId":"watch-1","runId":"run-1"}"#,
+        r#"{"recordedAt":1725000000123,"subscriptionId":"watch-1","runId":"run-1"}"#,
+        r#"{"runId":"run-1","subscriptionId":"watch-1"}"#,
+        r#"{"runId":"run-1","subscriptionId":"watch-1","recordedAt":1725000000123}"#,
+    ] {
+        assert_watch_notification(&format!("OTHER={{}}\nWATCH={watch}\nLOGS={{}}"), "run-1");
+    }
+}
+
+#[test]
+fn watch_notification_rejects_malformed_json_and_invalid_identity() {
+    for stdout in [
+        r#"LOGS={"subscriptionId":"watch-1","runId":"run-1"}"#,
+        "WATCH=not JSON",
+        "WATCH={",
+        r#"WATCH={"runId":"run-1"}"#,
+        r#"WATCH={"subscriptionId":"","runId":"run-1"}"#,
+        r#"WATCH={"subscriptionId":null,"runId":"run-1"}"#,
+        r#"WATCH={"subscriptionId":1,"runId":"run-1"}"#,
+        r#"WATCH={"subscriptionId":true,"runId":"run-1"}"#,
+        r#"WATCH={"subscriptionId":[],"runId":"run-1"}"#,
+        r#"WATCH={"subscriptionId":{},"runId":"run-1"}"#,
+        r#"WATCH={"subscriptionId":"watch-1"}"#,
+        r#"WATCH={"subscriptionId":"watch-1","runId":null}"#,
+        r#"WATCH={"subscriptionId":"watch-1","runId":1}"#,
+        r#"WATCH={"subscriptionId":"watch-1","runId":"run-2"}"#,
+    ] {
+        assert!(
+            std::panic::catch_unwind(|| assert_watch_notification(stdout, "run-1")).is_err(),
+            "invalid watch notification was accepted: {stdout}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn shipped_cli_announces_each_follow_loss_once_and_ctrl_c_detaches() {
     if !cli_prerequisites_available() {
@@ -51,7 +88,11 @@ printf 'FOREGROUND=%s\n' "$foreground"
             .iter()
             .all(|line| line.contains("\"prod\"") && line.contains("continues there"))
     );
-    assert_watch_subscription(&stdout);
+    let run_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("RUN_ID="))
+        .assert_value_with("run ID marker");
+    assert_watch_notification(&stdout, run_id);
     assert!(stdout.contains("LOGS={\"subscriptionId\":"));
     assert!(stdout.contains("ATTACH={\"subscriptionId\":"));
     assert!(stdout.contains("FOREGROUND="));
@@ -95,7 +136,7 @@ async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
     assert!(stdout.contains("\"runId\":"));
     assert!(stdout.contains("LIST={\"runs\":"));
     assert!(stdout.contains("ACTIVE={\"runId\":"));
-    assert_watch_subscription(&stdout);
+    assert_watch_notification(&stdout, run_id);
     assert!(stdout.contains("\"phase\":\"queued\""));
     assert!(stdout.contains("LOGS={\"subscriptionId\":"));
     assert!(stdout.contains("acceptance-live-output"));
@@ -112,21 +153,6 @@ async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
         assert!(!registry.contains(forbidden));
     }
     assert!(Path::new(&config).join("targets.json").is_file());
-}
-
-fn assert_watch_subscription(stdout: &str) {
-    let first_event = stdout
-        .lines()
-        .find_map(|line| line.strip_prefix("WATCH="))
-        .assert_value_with("watch output");
-    let event: serde_json::Value =
-        serde_json::from_str(first_event).assert_value_with("first watch event");
-    assert!(
-        event["subscriptionId"]
-            .as_str()
-            .is_some_and(|id| !id.is_empty()),
-        "watch event has no subscription ID: {event}"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

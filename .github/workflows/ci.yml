@@ -314,6 +314,12 @@ jobs:
           native_v2_cli::local::backend::discard_tests::
           unsupported_forge_capability_is_rejected_before_source_credential_reads --nocapture
 
+      - name: Install Linux CLI loopback prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin gnome-keyring libsecret-tools
+
       - name: Run workspace tests
         if: runner.os != 'Windows'
         run: |
