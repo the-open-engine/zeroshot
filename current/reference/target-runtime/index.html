@@ -1329,6 +1329,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#hosted-workspace-checkpoint-opt-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted workspace checkpoint opt-out
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#local-workspace-and-authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2348,6 +2359,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#hosted-workspace-checkpoint-opt-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted workspace checkpoint opt-out
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#local-workspace-and-authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2534,6 +2556,60 @@ independently of their harness/provider lanes; zeroshot defines no AWS shapes or
 <p>Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See <a href="../../project/harness-adapters/">Harness adapters</a> for availability and
 provider support.</p>
+<h2 id="hosted-workspace-checkpoint-opt-out">Hosted workspace checkpoint opt-out<a class="headerlink" href="#hosted-workspace-checkpoint-opt-out" title="Permanent link">&para;</a></h2>
+<p><code>RuntimePlan.workspaceCheckpoints</code> defaults to <code>true</code>. A compatible named target may explicitly
+allow <code>false</code> per run with this independent discovery extension:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"workspace_checkpoint_opt_out"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-checkpoint-opt-out/v1"</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
+</code></pre></div>
+<p>The strict marker contains only <code>kind</code>. It does not change <code>openengine.workspace-checkpoints/v1</code>,
+recovery routes, wire versions or authentication. Missing or different versions retain refusal.
+New CLI clients check it before resolving access tokens or sending run/profile bodies; an older
+client still refuses opt-out. The Python SDK forwards <code>UniformRuntime.workspace_checkpoints=False</code> or an exact runtime
+containing <code>workspaceCheckpoints: false</code> through its bundled CLI and therefore needs the matching upgraded CLI too.</p>
+<p>Host integration uses these Rust APIs:</p>
+<ul>
+<li>Set <code>ProductionHostingConfig.workspace_checkpoint_opt_out = true</code> <strong>and</strong> install
+  <code>workspace_storage: Some(Arc&lt;dyn HostedWorkspaceStorage&gt;)</code>. Both are required; defaults and
+  <code>zeroshot target serve</code> continue to require checkpoints. The production factory installs trusted
+  admission policy and advertises the marker. Gate any public hosted gateway's advertisement and
+  admission on the same host policy, using <code>TargetDiscoveryDocument::with_workspace_checkpoint_opt_out()</code>.</li>
+<li>For host-owned profile validation, set
+  <code>NativeV2AdmissionContext.hosted_workspace_checkpoint_opt_out = Some(enabled)</code> and use
+  <code>NativeV2Admission::validate_profile_with_context</code>. Production run admission applies that policy
+  independently, even when a client bypasses discovery. <code>None</code> retains local admission semantics.</li>
+<li><code>HostedWorkspaceStorage::prepare</code> receives the admitted boolean as
+  <code>HostedWorkspaceRequest.workspace_checkpoints</code>. When false, skip workspace restore/snapshot
+  preparation and return a host-owned <code>RunCheckpointStore</code> that retains metadata without copying
+  workspace bytes. The existing lifecycle still calls <code>enter</code> at engine boundaries, <code>finish</code> on
+  failure, and <code>discard</code> after success. Preserve durable execution/final histories, output, comment
+  publications and delivery receipts independently, including after <code>discard</code>. Conversation capture
+  is skipped by the supervisor. Do not couple final history publication to a workspace backup.</li>
+<li>For the template catalog (Cargo feature <code>workspace</code>), use
+  <code>workspace::catalog_with_checkpoint_policy(&amp;harnesses, enabled)</code>. True preserves code-review's
+  supplied <code>workspaceCheckpoints: false</code>; existing <code>catalog()</code> and <code>catalog_with_harnesses()</code> keep
+  checkpoint defaults enabled for legacy consumers. <code>profile_setup[_with_harnesses]</code> preserves
+  the selected setting while materializing contained provider access.</li>
+</ul>
+<p>Opted-out hosted graphs reject every request or wait node, including nested groups and expanded
+profile imports, even on an unreachable authored path. These nodes can require persisted
+continuations or suspension. Manual suspension and recovery are also refused for such runs.
+In-run conversation reuse still works, but conversations cannot be restored across runs without
+snapshots. Ordinary history, outputs, usage and logs remain available. A host may separately offer
+a fresh run from original input; this upstream change does not implement that host operation.
+Local checkpoint opt-out, restart on the retained checkout and explicit discard continuations
+retain their existing behavior.</p>
+<p>This is the upstream integration contract referenced by
+<a href="https://github.com/the-open-engine/zero-cloud/issues/734">Platform issue #734</a>. Platform integration
+follows a canonical Zeroshot release containing this change; v17.0.0 alone does not supply it.
+Before enabling it, pin the runtime and all protocol/client/server crates to that same released
+source, deploy the matching target/gateway storage implementation, and upgrade CLI clients and
+Python wheels together. Publish the discovery marker only after admission, storage and catalog
+policy agree. No MCP tool schema, shared skill or plugin package changes are required for this
+upstream capability; companion host tools must preserve their existing defaults until enabled.</p>
 <h2 id="local-workspace-and-authentication">Local workspace and authentication<a class="headerlink" href="#local-workspace-and-authentication" title="Permanent link">&para;</a></h2>
 <p>Omit <code>--target</code> to work in an existing local folder. <code>--cwd FOLDER</code> selects the folder for one run;
 the default is the invoking folder. Input, graph, runtime, and environment file arguments remain
@@ -2668,7 +2744,7 @@ selection while provider <code>modelId</code> capability and wire-model mappings
 command translated to the singular RPC contract uses its authored <code>modelId</code> as that session's model.
 Contained targets use a private Copilot home and require the canonical <code>COPILOT_GITHUB_TOKEN</code>
 connection instead.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"harness"</span><span class="p">:</span><span class="w"> </span><span class="s2">"copilot"</span><span class="p">,</span><span class="w"> </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"github"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"auto"</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"harness"</span><span class="p">:</span><span class="w"> </span><span class="s2">"copilot"</span><span class="p">,</span><span class="w"> </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"github"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"auto"</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p>Model IDs pass unchanged to the Copilot process. When a registry entry with <code>apiKeyCommand</code> must use
 Copilot's singular provider contract, its authored <code>modelId</code> becomes the RPC session model and its
@@ -2683,12 +2759,12 @@ without expiry metadata are supplied once when each provider process starts.</p>
 <h2 id="workspace-export-protocol">Workspace export protocol<a class="headerlink" href="#workspace-export-protocol" title="Permanent link">&para;</a></h2>
 <p>Hosted targets can advertise workspace downloads independently of resume/checkpoints. Add this
 outer discovery extension alongside the existing <code>hosted_runs</code> extension:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"workspace_export"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-export/v1"</span><span class="p">,</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">"route_template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/native-v2/runs/{run_id}/export-workspace"</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">"workspace_export"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-export/v1"</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">"route_template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/native-v2/runs/{run_id}/export-workspace"</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>TargetWorkspaceExportDiscovery</code> is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
@@ -2700,7 +2776,7 @@ variables, query, fragment, traversal, or origin. The client escapes the run ide
 and never follows redirects.</p>
 <p>The client sends an authenticated POST with <code>Accept: application/x-tar</code>, <code>Cache-Control: no-store</code>,
 and a strict JSON <code>RunExportWorkspaceParams</code> body:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"runId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RUN_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"fromCheckpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CHECKPOINT_ID"</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"runId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RUN_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"fromCheckpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CHECKPOINT_ID"</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p>Omit <code>fromCheckpoint</code> for the latest retained workspace. Path and body run identity must agree.
 Checkpoint IDs select entry snapshots and remain opaque. The server owns authorization, retention,
@@ -2741,7 +2817,7 @@ contract, not a new OECP method. The generated protocol schema includes its requ
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-20">20 November 2026</time>
+    Last updated <time datetime="2026-11-21">21 November 2026</time>
   </span>
 
     
