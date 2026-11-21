@@ -65,6 +65,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) steering: bool,
     pub(super) run_vectors: bool,
     pub(super) workspace_checkpoints: bool,
+    pub(super) workspace_checkpoint_opt_out: bool,
     pub(super) node_runtime_lanes: bool,
     pub(super) runtime_harnesses: Option<Vec<openengine_cluster_protocol::RuntimeLane>>,
     pub(super) run_sizes: Option<openengine_cluster_protocol::TargetRunSizesDiscovery>,
@@ -152,6 +153,13 @@ pub(super) fn build_controller_descriptor(
             .as_ref()
             .is_some_and(|marker| marker.kind == openengine_cluster_protocol::RUN_VECTORS_KIND),
         workspace_checkpoints,
+        workspace_checkpoint_opt_out: wire
+            .extensions
+            .workspace_checkpoint_opt_out
+            .as_ref()
+            .is_some_and(|marker| {
+                marker.kind == openengine_cluster_protocol::WORKSPACE_CHECKPOINT_OPT_OUT_KIND
+            }),
         node_runtime_lanes,
         runtime_harnesses,
         run_sizes,

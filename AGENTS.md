@@ -1159,6 +1159,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Live-engine force-stop shares a per-run control turn with resume and checks successor ownership
   before signalling the engine, so a stale suspended engine cannot stop an accepted continuation.
   Unrelated submissions and resume reads for an ineligible live source cannot block cancellation.
+  `native_v2_platform::recovery` owns retained-source eligibility and successor preparation;
+  existing live/claimed-source refusals precede hosted checkpoint-policy refusal.
   Direct-target status for failed and suspended runs exposes the immutable admitted connection requirements so the CLI resolves
   fresh resume values without consulting changed profiles. Recovery lineage also retains the root
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
@@ -1167,8 +1169,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Runtime plans accept `workspaceCheckpoints`, defaulting to true and omitted from the wire at
   that default. Local opt-out leaves the existing executor and durable ledger intact, skips Restic
   construction and snapshot cleanup, and refuses selected checkpoint restoration before credential
-  resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
-  not workspace writers. Executable steps remain conservative potential writers.
+  resolution. Named clients require the exact independent
+  `openengine.workspace-checkpoint-opt-out/v1` marker before access tokens or run/profile bodies.
+  Production hosted opt-out requires both `ProductionHostingConfig.workspace_checkpoint_opt_out`
+  and host-owned `workspace_storage`; defaults and direct targets retain refusal. Trusted admission
+  rejects request/wait paths throughout expanded graphs. Hosted opted-out runs cannot suspend or
+  recover; local continuation/discard behavior stays unchanged. `HostedWorkspaceRequest.workspace_checkpoints`
+  carries the admitted policy to storage, whose history/final output and delivery receipts remain
+  independent of workspace/conversation snapshots. Decision bindings are not workspace writers.
+  Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. Default resume of a failed run restarts it where it started on the
   retained workspace: a submitted run at the graph root, a successor at the boundary it began at;
@@ -1894,6 +1903,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   package identities to the product workspace. The protocol's `native_v2_observation` integration
   suite invokes its locked controls and the current runtime/HTTP wire tests through the existing
   Linux/Windows and macOS CI entry points; child Cargo commands never select that parent suite.
+  It also covers optional hosted checkpoint discovery, client gating, admission and recovery refusal.
   Separate current/released workspaces under `target/wire-contract` preserve the surrounding CLI's
   feature profile and keep each Cargo workspace's build artifacts independent.
   Child commands clear the parent package's Cargo metadata so Windows can reuse its leaf-test
@@ -2171,7 +2181,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - The native template catalog exposes each complete authored default runtime, a concise description,
   and contained connection requirements derived through the harness registry. Code review preserves
   its supplied mixed Claude/Codex agent plan and native source-neutral delivery; catalog defaults omit
-  target-owned size and enable checkpoints.
+  target-owned size and enable checkpoints. Supporting hosts explicitly select
+  `workspace::catalog_with_checkpoint_policy` to preserve the supplied checkpoint opt-out;
+  existing catalog entry points keep their portable checkpoint defaults. Profile setup preserves
+  the selected policy while materializing provider access.
   `workspace::profile_setup` materializes hosted provider access after caller edits without saving,
   resolving secrets or replacing custom declarations. `setupLanes` exports the same registry's accepted
   provider field sets. Host-selected setup validates and materializes through the same registry as
@@ -2309,6 +2322,10 @@ individual CLI calls. Terminal polling rejects a different completed outcome imm
 the last observed status when its settlement deadline expires.
 Local CLI fixture lifecycle commands (run, resume, answer and force-stop) use that longer budget;
 read-only calls keep the short request deadline. Wait for suspended controllers to exit before cleanup.
+Retained-inspection fixtures wait for both controller lease release and process exit before asserting
+lost availability or freezing storage; Linux zombies count as exited, matching the production probe.
+Hosted workspace-allocation regressions that transfer ownership require Linux; portable capability,
+admission and checkpointless-control regressions remain selected by the macOS observation suite.
 Worker-start markers and run-success polling use the lifecycle budget too; marker failures include
 the last run status and reject an unexpectedly settled run. Explicit probe-cancellation bounds stay short.
 Controller request regressions budget each CLI subprocess from its own spawn, including under coverage.

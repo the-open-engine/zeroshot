@@ -36,7 +36,13 @@ to `false` to skip workspace snapshot storage and the Restic dependency. Run his
 outputs, usage, and logs remain durable. Restart uses the retained workspace and original graph
 input. Selected workspace-checkpoint resume is unavailable when snapshots were disabled.
 This controls file snapshots, not external side effects or node retry semantics.
-The current named targets reject opt-out explicitly.
+Named targets accept opt-out only when they explicitly advertise
+`extensions.workspace_checkpoint_opt_out.kind = "openengine.workspace-checkpoint-opt-out/v1"`.
+Clients refuse missing or different capability versions before acquiring access tokens or sending
+run/profile bodies. Direct targets and hosted integrations keep checkpoints required by default.
+Opted-out hosted graphs cannot contain request or wait nodes, including nested/imported definitions,
+and cannot suspend or recover from a checkpoint. History and final outputs remain durable.
+See the [host integration API](target-runtime.md#hosted-workspace-checkpoint-opt-out).
 The field is accepted in exact and uniform runtime plans and is preserved in saved profiles.
 
 ```json

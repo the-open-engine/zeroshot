@@ -1,4 +1,55 @@
+use openengine_cluster_testkit::assertions::AssertError;
 use super::*;
+
+#[tokio::test]
+async fn hosted_checkpoint_opt_out_rejects_request_and_wait_paths_including_imports() {
+    let harnesses = crate::harnesses::HarnessRegistry::core();
+    for worker in [
+        crate::native_v2_request::ASK_WORKER_REF,
+        crate::native_v2_wait::WAIT_WORKER_REF,
+    ] {
+        let mut leaf = ask();
+        leaf["worker"] = json!(worker);
+        let nested = json!({"kind":"seq", "name":"nested", "state":{"kind":"null"},
+            "children":[leaf.clone()], "promotedStatePaths":[]});
+        let imported = json!({"kind":"profile", "name":"imported", "profile":"saved",
+            "initialInput":{"kind":"null"}, "body":nested.clone()});
+        for node in [leaf, nested, imported] {
+            let graph = graph(vec![node, succeed("done")]);
+            let mut request = submission(
+                graph.clone(),
+                BTreeMap::from([(named("approval"), NodeRuntimeBinding::Request {})]),
+            );
+            request.runtime.workspace_checkpoints = false;
+            for enabled in [false, true] {
+                let mut context =
+                    NativeV2AdmissionContext::new(&harnesses, DeliveryPolicy::Optional);
+                context.hosted_workspace_checkpoint_opt_out = Some(enabled);
+                // Local discarded-snapshot continuation authority must not bypass hosted policy.
+                context.checkpointless_requests = true;
+                let profile_error = NativeV2Admission
+                    .validate_profile_with_context(&graph, &request.runtime, context)
+                    .await
+                    .assert_error();
+                let run_error = NativeV2Admission
+                    .admit_with_context(request.clone(), context)
+                    .await
+                    .assert_error();
+                for error in [profile_error, run_error] {
+                    let message = error.to_string();
+                    assert!(
+                        message.contains(if enabled {
+                            "hosted request and wait nodes require"
+                        } else {
+                            "does not support disabling workspace checkpoints"
+                        }),
+                        "{message}"
+                    );
+                }
+            }
+        }
+    }
+}
 fn ask() -> Value {
     json!({"kind":"verifier","name":"approval","worker":crate::native_v2_request::ASK_WORKER_REF,
         "input":crate::native_v2_request::input_schema().assert_value(),"output":{"kind":"record","fields":{}},

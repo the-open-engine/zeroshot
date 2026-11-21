@@ -17,6 +17,9 @@ pub struct HostedWorkspaceRequest<'a> {
     pub run_id: &'a RunId,
     pub workspace: &'a Path,
     pub checkpoint_directory: &'a Path,
+    /// Admitted per-run policy. False skips workspace and conversation snapshots, never durable
+    /// run history, final output, comment publications or delivery receipts.
+    pub workspace_checkpoints: bool,
     pub writers: BTreeSet<NodeName>,
 }
 
@@ -48,6 +51,9 @@ pub struct HostedWorkspace {
 /// The host resolves its own authenticated restore selection; callers never supply filesystem
 /// paths or execution history. Restore must preserve the workspace root, finish before returning,
 /// and leave no unowned background process writing into the workspace on cancellation.
+/// Hosts enabling checkpoint opt-out must inspect `HostedWorkspaceRequest::workspace_checkpoints`
+/// and return a metadata-only checkpoint store when false. Such runs cannot suspend or recover;
+/// history and final output storage must remain independent of workspace snapshot storage.
 #[async_trait]
 pub trait HostedWorkspaceStorage: Send + Sync {
     /// Retain acknowledged predecessor receipts before the runtime claims its successor.

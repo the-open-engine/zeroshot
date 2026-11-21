@@ -3,6 +3,8 @@
 #[path = "native_v2_cli_portable/fixture.rs"]
 mod fixture;
 
+#[path = "native_v2_cli_portable/checkpoint_opt_out_tests.rs"]
+mod checkpoint_opt_out_tests;
 #[path = "native_v2_cli_portable/discard_workspace_tests.rs"]
 mod discard_workspace_tests;
 #[path = "native_v2_cli_portable/inspection.rs"]
@@ -272,7 +274,17 @@ fn controller_death_closes_its_job_and_replays_runtime_loss() {
 fn process_exists(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        let signalable = unsafe { libc::kill(pid as i32, 0) == 0 };
+        // A surrounding subreaper can retain a departed controller as a zombie. Match the
+        // production availability probe: it no longer runs or owns a lease.
+        #[cfg(target_os = "linux")]
+        if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit_once(") ")
+                .is_some_and(|(_, fields)| fields.starts_with('Z'))
+        }) {
+            return false;
+        }
+        signalable
     }
     #[cfg(windows)]
     {

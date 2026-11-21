@@ -112,6 +112,10 @@ pub struct ProductionHostingConfig {
     /// Private diagnostics collection; the host owns the receiver and durable storage.
     pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
     pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
+    /// Allow per-run workspace checkpoint opt-out with host-owned storage. Defaults to false.
+    /// The storage callback must honor `HostedWorkspaceRequest::workspace_checkpoints` while
+    /// retaining durable histories and delivery state independently of workspace snapshots.
+    pub workspace_checkpoint_opt_out: bool,
     /// Enables wait, suspension and vectors together for host-owned storage. The store must
     /// publish suspended history and vectors before returning its checkpoint acknowledgement.
     pub suspension: Option<crate::native_v2_wait::WaitPolicy>,
@@ -188,7 +192,8 @@ impl ProductionTargetControllerFactory {
         )
         .await
         .map_err(|_| ProductionHostingError::Controller)?
-        .with_operator_diagnostics(self.operator_diagnostics.clone());
+        .with_operator_diagnostics(self.operator_diagnostics.clone())
+        .with_hosted_workspace_checkpoint_opt_out(self.supports_workspace_checkpoint_opt_out());
         if let Some(catalog) = &self.config.run_sizes {
             controller = controller.with_run_sizes(catalog.clone());
         }
@@ -264,6 +269,10 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         true
     }
 
+    fn supports_workspace_checkpoint_opt_out(&self) -> bool {
+        self.config.workspace_checkpoint_opt_out && self.config.workspace_storage.is_some()
+    }
+
     fn supports_git_transport(&self) -> bool {
         true
     }
@@ -289,7 +298,10 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             commit_identity,
             commit_co_author,
         } = request;
-        prepare_contained_submission(&mut submission)?;
+        prepare_contained_submission(
+            &mut submission,
+            self.supports_workspace_checkpoint_opt_out(),
+        )?;
         let digest = submission_digest(&submission)
             .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         if let Some(receipt) = controller
@@ -330,10 +342,11 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
 
 fn prepare_contained_submission(
     submission: &mut openengine_cluster_protocol::RunSubmission,
+    workspace_checkpoint_opt_out: bool,
 ) -> Result<(), TargetAuthorityError> {
     crate::native_v2_admission::validate_target_environment(submission.environment.as_ref())
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
-    if !submission.runtime.workspace_checkpoints {
+    if !submission.runtime.workspace_checkpoints && !workspace_checkpoint_opt_out {
         return Err(TargetAuthorityError::invalid(
             "this target does not support disabling workspace checkpoints",
         ));
@@ -481,6 +494,7 @@ impl Default for ProductionHostingConfig {
             memory_backend: None,
             operator_diagnostic_output: None,
             workspace_storage: None,
+            workspace_checkpoint_opt_out: false,
             suspension: None,
             request_ask: false,
             delivery_validation: None,

@@ -28,6 +28,7 @@ impl ProductionCapsuleAllocator {
                     run_id: request.run_id,
                     workspace: request.workspace,
                     checkpoint_directory: &directory,
+                    workspace_checkpoints: request.admitted.runtime.workspace_checkpoints,
                     writers,
                 })
                 .await
