@@ -3,12 +3,15 @@
 use crate::source_code_provider::{SourceCodeProviderRegistry, SourceRegistryError};
 use super::SourceAdapterContext;
 
+pub(crate) mod forgejo;
+
 pub fn register(
-    _registry: &mut SourceCodeProviderRegistry,
-    _context: SourceAdapterContext<'_>,
+    registry: &mut SourceCodeProviderRegistry,
+    context: SourceAdapterContext<'_>,
 ) -> Result<(), SourceRegistryError> {
+    forgejo::register(registry, context.source, context.transport)?;
     #[cfg(test)]
-    registration_tests::register(_registry, _context)?;
+    registration_tests::register(registry, context)?;
     Ok(())
 }
 
