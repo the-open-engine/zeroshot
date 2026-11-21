@@ -286,22 +286,8 @@ type Section = {
   work: Entry<'work'>[];
 };
 
-function StoryLine({
-  step,
-  invocation,
-  run,
-  open,
-  toggle,
-  showInGraph,
-}: {
-  step: StoryStep;
-  invocation?: Invocation;
-  run: RunContext;
-  open: boolean;
-  toggle: () => void;
-  showInGraph: () => void;
-}) {
-  const retried = step.attempts > 1;
+/** Row state and decision use the same selected terminal, handoff and deadline context. */
+function storyStepStatus(step: StoryStep, run: RunContext) {
   // Deferred work has no synthetic completion when the run stops; only the selected terminal
   // closes it. Before that cursor it still waits, just as the graph's projection shows.
   const stopped = !!run.terminal && step.state === 'suspended';
@@ -324,6 +310,26 @@ function StoryLine({
         : deadlinePassed
           ? 'Deadline passed'
           : step.decision;
+  return { state, decision };
+}
+
+function StoryLine({
+  step,
+  invocation,
+  run,
+  open,
+  toggle,
+  showInGraph,
+}: {
+  step: StoryStep;
+  invocation?: Invocation;
+  run: RunContext;
+  open: boolean;
+  toggle: () => void;
+  showInGraph: () => void;
+}) {
+  const retried = step.attempts > 1;
+  const { state, decision } = storyStepStatus(step, run);
   return (
     <div
       className={`story-step state-${state} ${retried ? 'retried' : ''} ${open ? 'open' : ''}`}

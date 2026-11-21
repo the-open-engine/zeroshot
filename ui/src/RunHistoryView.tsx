@@ -92,6 +92,17 @@ function replayStart(replay: readonly number[], position: number, restart: boole
   return restart || position < first || position >= last ? first : position;
 }
 
+/** The selected recorded moment and whether it is also the loaded current position. */
+function replayPosition(history: HistoryFeed, moments: ReturnType<typeof historyMoments>) {
+  const { cursorIndex, events, loadedHead } = history;
+  const safePosition = Math.max(
+    0,
+    moments.findIndex((moment) => moment.index === Math.min(cursorIndex, events.length - 1))
+  );
+  const moment = moments[safePosition];
+  return { safePosition, moment, current: loadedHead && moment.index === events.length - 1 };
+}
+
 export function RunHistoryView({
   runId,
   source,
@@ -150,12 +161,7 @@ export function RunHistoryView({
     [run]
   );
   const moments = useMemo(() => historyMoments(events, cursorIndex), [events, cursorIndex]);
-  const safePosition = Math.max(
-      0,
-      moments.findIndex((moment) => moment.index === Math.min(cursorIndex, events.length - 1))
-    ),
-    moment = moments[safePosition];
-  const current = history.loadedHead && moment.index === events.length - 1;
+  const { safePosition, moment, current } = replayPosition(history, moments);
   const projection = useProjection(
     document,
     events,
