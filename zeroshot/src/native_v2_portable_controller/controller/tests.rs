@@ -227,7 +227,7 @@ async fn shutdown_before_runtime_composition_never_dispatches_or_admits_a_run() 
             workspace,
             storage.clone(),
         ),
-        async |_| -> Result<PortableRuntime, std::io::Error> {
+        async |_, _| -> Result<PortableRuntime, std::io::Error> {
             panic!("a stopped startup must not compose a runtime")
         },
         Some(stopping),
@@ -239,6 +239,110 @@ async fn shutdown_before_runtime_composition_never_dispatches_or_admits_a_run() 
     assert!(ledger.list().await.assert_value().is_empty());
 }
 use crate::v2_run_ledger::{CreateRun, RunLedger, fake::FakeRunLedger};
+
+#[tokio::test]
+async fn preparation_deadline_rechecks_after_a_successful_blocking_runtime_factory() {
+    let root = tempfile::tempdir().assert_value();
+    let workspace = private_directory(root.path(), "workspace");
+    let storage = root.path().join("state");
+    let mut bootstrap = crate::native_v2_portable_controller::tests::bootstrap(
+        RunId::new("expired-composition"),
+        crate::native_v2_portable_controller::tests::submission("expired-composition"),
+        workspace,
+        storage.clone(),
+    );
+    bootstrap.submission.runtime.workspace_checkpoints = false;
+    bootstrap.preparation_timeout = Duration::from_millis(100);
+    let result = PortableRunController::start(bootstrap, |_| {
+        // A ready future can finish beyond the deadline without yielding to its timer.
+        std::thread::sleep(Duration::from_millis(200));
+        Ok::<_, std::io::Error>(PortableRuntime::new(Arc::new(
+            super::super::tests::NeverDispatched,
+        )))
+    })
+    .await;
+    assert!(matches!(result, Err(ref error) if error.to_string().contains("preparation deadline")));
+    let ledger = SqliteRunLedger::open_read_only(PortableControllerPaths::new(storage).ledger())
+        .assert_value();
+    assert!(ledger.list().await.assert_value().is_empty());
+}
+
+#[tokio::test]
+async fn preparation_deadline_rechecks_at_admission_after_controller_initialization() {
+    let root = tempfile::tempdir().assert_value();
+    let workspace = private_directory(root.path(), "workspace");
+    let storage = root.path().join("state");
+    let mut bootstrap = crate::native_v2_portable_controller::tests::bootstrap(
+        RunId::new("expired-admission"),
+        crate::native_v2_portable_controller::tests::submission("expired-admission"),
+        workspace,
+        storage.clone(),
+    );
+    bootstrap.submission.runtime.workspace_checkpoints = false;
+    bootstrap.preparation_timeout = Duration::from_millis(500);
+    let result = PortableRunController::start(bootstrap, |_| {
+        // Runtime composition finishes promptly, but initialization must wait for a ledger read.
+        let lock = rusqlite::Connection::open(PortableControllerPaths::new(&storage).ledger())
+            .assert_value();
+        lock.execute_batch("BEGIN EXCLUSIVE").assert_value();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(800));
+            drop(lock);
+        });
+        Ok::<_, std::io::Error>(PortableRuntime::new(Arc::new(
+            super::super::tests::NeverDispatched,
+        )))
+    })
+    .await;
+    assert!(matches!(result, Err(ref error) if error.to_string().contains("preparation deadline")));
+    let ledger = SqliteRunLedger::open_read_only(PortableControllerPaths::new(storage).ledger())
+        .assert_value();
+    assert!(ledger.list().await.assert_value().is_empty());
+}
+
+#[tokio::test]
+async fn preparation_deadline_covers_cumulative_work_and_drains_runtime_composition() {
+    let root = tempfile::tempdir().assert_value();
+    let workspace = private_directory(root.path(), "workspace");
+    let mut bootstrap = crate::native_v2_portable_controller::tests::bootstrap(
+        RunId::new("cumulative-preparation"),
+        crate::native_v2_portable_controller::tests::submission("cumulative-preparation"),
+        workspace,
+        root.path().join("state"),
+    );
+    bootstrap.submission.runtime.workspace_checkpoints = false;
+    let prepared = prepare_controller_start(&bootstrap).await.assert_value();
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(200);
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    let completed = std::sync::atomic::AtomicBool::new(false);
+    let result = prepare_runtime(
+        &prepared,
+        &bootstrap,
+        async |_, preparation| {
+            assert_eq!(preparation.deadline, deadline);
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            let mut cancellation =
+                crate::execution::driver::DriverCancellation::new(preparation.stopping);
+            tokio::time::timeout(Duration::from_secs(1), cancellation.cancelled())
+                .await
+                .assert_value();
+            // Cooperative cancellation still owns cleanup; the controller must await it.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            completed.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok::<_, std::io::Error>(PortableRuntime::new(Arc::new(
+                super::super::tests::NeverDispatched,
+            )))
+        },
+        deadline,
+    )
+    .await;
+    assert!(
+        completed.load(std::sync::atomic::Ordering::SeqCst),
+        "preparation must drain before releasing ownership"
+    );
+    assert!(matches!(result, Err(ref error) if error.to_string().contains("preparation deadline")));
+    assert!(prepared.ledger.list().await.assert_value().is_empty());
+}
 
 async fn insert_fake_run(ledger: &FakeRunLedger, run: &str, key: &str, digest: char) {
     ledger
@@ -322,7 +426,7 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
         let result = prepare_runtime(
             &prepared,
             &bootstrap,
-            async |_| {
+            async |_, _| {
                 Err::<PortableRuntime, _>(std::io::Error::other("stop before graph dispatch"))
             },
             deadline,
@@ -834,7 +938,7 @@ async fn workspace_checkpoint_store_follows_runtime_policy() {
         let runtime = prepare_runtime(
             &prepared,
             &bootstrap,
-            async |_| {
+            async |_, _| {
                 Ok::<_, std::io::Error>(PortableRuntime {
                     node_instance_floor: Default::default(),
                     vector_seed: Vec::new(),

@@ -26,6 +26,7 @@ use crate::v2_run_ledger::RunLedger;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 
 use super::engine::PortableRuntime;
+use super::environment_hooks::{EnvironmentHooks, HookCleanup};
 use super::process::PortableControllerServer;
 use super::process::{
     clear_stale_endpoint, require_absolute, validate_existing_ledger_path,
@@ -33,6 +34,7 @@ use super::process::{
 };
 use super::{
     ControllerLease, PortableControllerBootstrap, PortableControllerError, PortableControllerPaths,
+    RuntimePreparation,
 };
 
 const WORKSPACE_MONITOR_INTERVAL: Duration = Duration::from_millis(100);
@@ -142,7 +144,12 @@ impl PortableRunController {
         F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
         E: std::error::Error + Send + Sync + 'static,
     {
-        Self::start_with_shutdown(bootstrap, async |admitted| runtime_factory(admitted), None).await
+        Self::start_with_shutdown(
+            bootstrap,
+            async |admitted, _| runtime_factory(admitted),
+            None,
+        )
+        .await
     }
 
     pub(super) async fn start_with_shutdown<F, E>(
@@ -151,7 +158,7 @@ impl PortableRunController {
         stopping: Option<watch::Receiver<bool>>,
     ) -> Result<Self, PortableControllerError>
     where
-        F: AsyncFnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
+        F: AsyncFnOnce(&AdmittedRun, RuntimePreparation) -> Result<PortableRuntime, E>,
         E: std::error::Error + Send + Sync + 'static,
     {
         let preparation_deadline = tokio::time::Instant::now() + bootstrap.preparation_timeout;
@@ -159,31 +166,52 @@ impl PortableRunController {
         prepared.stopping = stopping;
         let prepared_runtime =
             prepare_runtime(&prepared, &bootstrap, runtime_factory, preparation_deadline).await?;
-        let allocator = Arc::new(SingleRunAllocator::new(
+        let mut allocator = SingleRunAllocator::new(
             bootstrap.run_id.clone(),
             prepared_runtime.runtime,
             prepared.lease.clone(),
             prepared.paths.storage().join("checkpoints"),
-        ));
+        );
+        allocator.hooks = EnvironmentHooks::for_run(
+            &bootstrap,
+            prepared_runtime.workspace_identity.as_ref(),
+            prepared_runtime.workspace_lease.as_ref(),
+        );
+        let allocator = Arc::new(allocator);
         let inner = Arc::new(
             NativeV2PlatformController::new_with_delivery_policy(
-                prepared.ledger,
+                prepared.ledger.clone(),
                 allocator.clone(),
                 bootstrap.delivery_policy,
             )
             .await?
+            .with_local_runtime_failure_report(Arc::new(
+                super::process::LocalRuntimeFailureReport::new(
+                    prepared.paths.clone(),
+                    super::process::startup_redactions(&bootstrap),
+                ),
+            ))
             .with_harness_registry(crate::harnesses::HarnessRegistry::local())
+            .with_checkpointless_requests(bootstrap.predecessor.is_some())
             .with_run_sizes(crate::native_v2_hosting::host_run_sizes()),
         );
+        require_preparing(&prepared, preparation_deadline)?;
         let receipt = inner
-            .submit_with_exact_environment(
+            .submit_with_exact_environment_until(
                 RunSubmitParams {
                     run_id: bootstrap.run_id.clone(),
                     submission: bootstrap.submission,
                 },
                 prepared.environment,
+                preparation_deadline,
             )
-            .await?;
+            .await
+            .map_err(|error| match error {
+                crate::native_v2_platform::NativeV2PlatformError::PreparationTimeout => {
+                    PortableControllerError::PreparationTimeout(None)
+                }
+                error => error.into(),
+            })?;
         if receipt.run_id != bootstrap.run_id {
             return Err(PortableControllerError::DurableIdentity);
         }
@@ -352,13 +380,16 @@ async fn prepare_controller_start(
     bootstrap: &PortableControllerBootstrap,
 ) -> Result<PreparedControllerStart, PortableControllerError> {
     require_absolute(&bootstrap.workspace)?;
+    crate::native_v2_local::validate_local_environment(bootstrap.submission.environment.as_ref())
+        .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     let harnesses = crate::harnesses::HarnessRegistry::local();
     let sizes = crate::native_v2_hosting::host_run_sizes();
-    let admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+    let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
         &harnesses,
         bootstrap.delivery_policy,
     )
     .with_run_sizes(&sizes);
+    admission.checkpointless_requests = bootstrap.predecessor.is_some();
     let admitted = NativeV2Admission
         .admit_with_context(bootstrap.submission.clone(), admission)
         .await?;
@@ -404,7 +435,7 @@ async fn prepare_runtime<F, E>(
     preparation_deadline: tokio::time::Instant,
 ) -> Result<PreparedRuntime, PortableControllerError>
 where
-    F: AsyncFnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
+    F: AsyncFnOnce(&AdmittedRun, RuntimePreparation) -> Result<PortableRuntime, E>,
     E: std::error::Error + Send + Sync + 'static,
 {
     if prepared.existing {
@@ -422,53 +453,95 @@ where
     if !workspace_identity.is_current(&bootstrap.workspace) {
         return Err(PortableControllerError::Workspace);
     }
-    require_not_stopping(prepared)?;
+    require_preparing(prepared, preparation_deadline)?;
     let execution_seed =
         restore_execution_seed(bootstrap, preparation_deadline, prepared.stopping.clone()).await?;
-    require_not_stopping(prepared)?;
-    crate::native_v2_local::check_restored_forge_access(bootstrap, prepared.stopping.clone())
-        .await
-        .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
-    require_not_stopping(prepared)?;
-    crate::native_v2_review::prepare_local_checkout(
-        &prepared.admitted,
-        bootstrap,
-        prepared.stopping.clone(),
-    )
-    .await?;
-    require_not_stopping(prepared)?;
-    let mut runtime = runtime_factory(&prepared.admitted)
-        .await
-        .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
-    require_not_stopping(prepared)?;
-    runtime.execution_seed = execution_seed;
-    let source = seed_predecessor_history(bootstrap, &mut runtime).await?;
-    let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
-    if let Some(source) = source {
-        use crate::native_v2_supervisor::checkpoints;
-        let own = prepared.paths.storage().join("checkpoints");
-        let conversations = checkpoints::successor_conversations(source, &own)
-            .map_err(|error| PortableControllerError::Io(error.0))?;
-        let restored = checkpoints::restore_checkpoint_conversations(
-            &conversations,
-            prepared.stopping.clone(),
+    require_preparing(prepared, preparation_deadline)?;
+    let (stop, stopping) = watch::channel(false);
+    let mut shutdown = crate::execution::driver::DriverCancellation::new(
+        prepared
+            .stopping
+            .clone()
+            .unwrap_or_else(|| stopping.clone()),
+    );
+    let composition = async {
+        crate::native_v2_local::check_restored_forge_access(bootstrap, Some(stopping.clone()))
+            .await
+            .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
+        require_preparing(prepared, preparation_deadline)?;
+        crate::native_v2_review::prepare_local_checkout(
+            &prepared.admitted,
+            bootstrap,
+            Some(stopping.clone()),
         )
-        .await;
-        runtime
-            .runner
-            .restore_conversations(&runtime.execution_seed, restored)
+        .await?;
+        require_preparing(prepared, preparation_deadline)?;
+        let mut runtime = runtime_factory(
+            &prepared.admitted,
+            RuntimePreparation {
+                deadline: preparation_deadline,
+                stopping: stopping.clone(),
+            },
+        )
+        .await
+        .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
+        require_preparing(prepared, preparation_deadline)?;
+        runtime.execution_seed = execution_seed;
+        let source =
+            seed_predecessor_history(bootstrap, &mut runtime, prepared, preparation_deadline)
+                .await?;
+        require_preparing(prepared, preparation_deadline)?;
+        let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
+        if let Some(source) = source {
+            use crate::native_v2_supervisor::checkpoints;
+            let own = prepared.paths.storage().join("checkpoints");
+            let conversations = checkpoints::successor_conversations(source, &own)
+                .map_err(|error| PortableControllerError::Io(error.0))?;
+            let restored = checkpoints::restore_checkpoint_conversations(
+                &conversations,
+                Some(stopping.clone()),
+            )
             .await;
+            runtime
+                .runner
+                .restore_conversations(&runtime.execution_seed, restored)
+                .await;
+        }
+        require_preparing(prepared, preparation_deadline)?;
+        Ok(PreparedRuntime {
+            runtime: Some(runtime),
+            workspace_identity: Some(workspace_identity),
+            workspace_lease: Some(workspace_lease),
+        })
+    };
+    tokio::pin!(composition);
+    tokio::select! {
+        biased;
+        result = &mut composition => {
+            // A ready result may win the poll after its timer became due.
+            if tokio::time::Instant::now() >= preparation_deadline {
+                return Err(PortableControllerError::PreparationTimeout(result.err().map(Box::new)));
+            }
+            result
+        }
+        () = tokio::time::sleep_until(preparation_deadline) => {
+            stop.send_replace(true);
+            // Never drop preparation while it owns helpers or a workspace mutation.
+            let cause = composition.await.err().map(Box::new);
+            Err(PortableControllerError::PreparationTimeout(cause))
+        }
+        () = shutdown.cancelled() => {
+            stop.send_replace(true);
+            composition.await
+        }
     }
-    Ok(PreparedRuntime {
-        runtime: Some(runtime),
-        workspace_identity: Some(workspace_identity),
-        workspace_lease: Some(workspace_lease),
-    })
 }
 
 async fn seed_predecessor_history(
     bootstrap: &PortableControllerBootstrap,
     runtime: &mut PortableRuntime,
+    prepared: &PreparedControllerStart,
+    deadline: tokio::time::Instant,
 ) -> Result<Option<CheckpointRestore>, PortableControllerError> {
     let Some(predecessor) = &bootstrap.predecessor else {
         return Ok(None);
@@ -529,6 +602,7 @@ async fn seed_predecessor_history(
     };
     let mut after = None;
     loop {
+        require_preparing(prepared, deadline)?;
         let page = crate::v2_run_ledger::vectors::list_full(
             &source,
             openengine_cluster_protocol::RunVectorsParams {
@@ -579,6 +653,17 @@ fn require_not_stopping(prepared: &PreparedControllerStart) -> Result<(), Portab
     } else {
         Ok(())
     }
+}
+
+fn require_preparing(
+    prepared: &PreparedControllerStart,
+    deadline: tokio::time::Instant,
+) -> Result<(), PortableControllerError> {
+    require_not_stopping(prepared)?;
+    if tokio::time::Instant::now() >= deadline {
+        return Err(PortableControllerError::PreparationTimeout(None));
+    }
+    Ok(())
 }
 
 fn configure_workspace_checkpoints(
@@ -704,6 +789,7 @@ struct SingleRunAllocator {
     checkpoint_directory: PathBuf,
     run_id: RunId,
     runtime: Mutex<Option<PortableRuntime>>,
+    hooks: Option<Arc<EnvironmentHooks>>,
     lease: Arc<ControllerLease>,
     loss_sender: watch::Sender<bool>,
     loss_receiver: watch::Receiver<bool>,
@@ -721,6 +807,7 @@ impl SingleRunAllocator {
             checkpoint_directory,
             run_id,
             runtime: Mutex::new(runtime),
+            hooks: None,
             lease,
             loss_sender,
             loss_receiver,
@@ -740,6 +827,10 @@ impl SingleRunAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SingleRunAllocator {
+    fn supports_environment_teardown(&self) -> bool {
+        true
+    }
+
     fn supports_request_ask(&self) -> bool {
         true
     }
@@ -762,12 +853,22 @@ impl CapsuleAllocator for SingleRunAllocator {
         request: crate::native_v2_platform::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         self.require_run(request.run_id)?;
+        if let Some(hooks) = &self.hooks {
+            hooks.prepare(&request, self.loss_receiver.clone()).await?;
+        }
         let runtime = self
             .runtime
             .lock()
             .await
             .take()
             .ok_or(CapsuleAllocationUnavailable::Runtime)?;
+        let cleanup = match &self.hooks {
+            Some(hooks) => Arc::new(HookCleanup {
+                hooks: hooks.clone(),
+                inner: runtime.cleanup,
+            }),
+            None => runtime.cleanup,
+        };
         Ok(AllocatedCapsule {
             node_instance_floor: runtime.node_instance_floor,
             checkpoints: runtime.checkpoints,
@@ -775,7 +876,7 @@ impl CapsuleAllocator for SingleRunAllocator {
             vector_seed: runtime.vector_seed,
             runner: runtime.runner,
             loss: self.loss_receiver.clone(),
-            cleanup: runtime.cleanup,
+            cleanup,
         })
     }
 
@@ -796,6 +897,9 @@ impl CapsuleAllocator for SingleRunAllocator {
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         if run_id != &self.run_id {
             return Err(CapsuleCleanupUnavailable);
+        }
+        if let Some(hooks) = &self.hooks {
+            hooks.cleanup().await?;
         }
         if let Some(runtime) = self.runtime.lock().await.take() {
             runtime.cleanup.destroy_or_confirm_absent(exit).await?;

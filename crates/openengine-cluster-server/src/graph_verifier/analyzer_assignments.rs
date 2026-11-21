@@ -255,12 +255,8 @@ impl<'a> Analyzer<'a> {
                 }
                 let mut correlation_guards = Vec::new();
                 correlation.collect_guards(&mut correlation_guards);
-                if let Some(aggregate) = aggregates.get(&SelectorKey::from(selector)).cloned() {
-                    self.extend_aggregate_dependencies(
-                        &correlation_guards,
-                        &aggregate,
-                        &mut aggregates,
-                    );
+                if aggregates.contains_key(&SelectorKey::from(selector)) {
+                    self.extend_aggregate_dependencies(&correlation_guards, &mut aggregates);
                 }
                 expanded.extend(correlation_guards);
                 aggregates.extend(self.explicit_map_aggregates(&expanded));
@@ -283,11 +279,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let mut correlation_guards = Vec::new();
                 correlation.collect_guards(&mut correlation_guards);
-                self.extend_aggregate_dependencies(
-                    &correlation_guards,
-                    &aggregate,
-                    &mut aggregates,
-                );
+                self.extend_aggregate_dependencies(&correlation_guards, &mut aggregates);
                 expanded.extend(correlation_guards);
                 aggregates.extend(self.explicit_map_aggregates(&expanded));
                 discovered = true;
@@ -346,8 +338,8 @@ impl<'a> Analyzer<'a> {
             return false;
         }
         if let Some(until) = &group.until {
-            if let Some(aggregate) = aggregates.get(&SelectorKey::from(selector)).cloned() {
-                self.extend_aggregate_dependencies(&[until], &aggregate, aggregates);
+            if aggregates.contains_key(&SelectorKey::from(selector)) {
+                self.extend_aggregate_dependencies(&[until], aggregates);
             }
             aggregates.extend(self.explicit_map_aggregates(&[until]));
             expanded.push(until);
@@ -358,15 +350,11 @@ impl<'a> Analyzer<'a> {
     fn extend_aggregate_dependencies(
         &self,
         guards: &[&Guard],
-        aggregate: &MapAggregate,
         aggregates: &mut BTreeMap<SelectorKey, MapAggregate>,
     ) {
         for dependency in guards.iter().flat_map(|guard| guard_selectors(guard)) {
-            if self
-                .map_control_scope(dependency)
-                .is_some_and(|scope| scope.owner == aggregate.owner)
-            {
-                aggregates.insert(SelectorKey::from(dependency), aggregate.clone());
+            if let Some(scope) = self.map_control_scope(dependency) {
+                aggregates.insert(SelectorKey::from(dependency), scope);
             }
         }
     }
@@ -382,7 +370,7 @@ impl<'a> Analyzer<'a> {
             return false;
         };
         let mut discovered = false;
-        for ancestor in &info.path {
+        for ancestor in info.scope_path() {
             let DiagnosticPathSegment::Node { name } = ancestor else {
                 continue;
             };
@@ -403,11 +391,7 @@ impl<'a> Analyzer<'a> {
             };
             let mut guards = Vec::new();
             correlation.collect_guards(&mut guards);
-            for dependency in guards.iter().flat_map(|guard| guard_selectors(guard)) {
-                if let Some(owner) = self.map_control_scope(dependency) {
-                    aggregates.insert(SelectorKey::from(dependency), owner);
-                }
-            }
+            self.extend_aggregate_dependencies(&guards, aggregates);
             expanded.extend(guards);
             discovered = true;
         }

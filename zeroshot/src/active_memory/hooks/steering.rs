@@ -51,6 +51,11 @@ struct Index {
     steers: Vec<RunVector>,
     receipts: BTreeMap<(String, VectorId), BTreeMap<VectorId, RunId>>,
     instances: BTreeSet<(u64, VectorId)>,
+    /// Receipts whose append has started and whose outcome is not yet known, keyed by
+    /// conversation, node instance and steer, each with its receipt vector. The conversation
+    /// already holds these steers: they count as consumed until the write resolves, and
+    /// a snapshot may reference the receipt, which counts only once it is committed.
+    publishing: BTreeMap<(String, u64, VectorId), VectorId>,
     initialized: bool,
 }
 impl Index {
@@ -82,15 +87,25 @@ impl Index {
             })
     }
     fn consumed(&self, conversation: &Conversation, vector: &RunVector) -> bool {
+        let instance = conversation.reference.node_instance.get();
         match vector.content {
             RunVectorContent::Steer {
                 mode: SteeringMode::Once,
                 ..
-            } => self.instances.contains(&(
-                conversation.reference.node_instance.get(),
-                vector.id.clone(),
-            )),
-            _ => self.received(conversation, &vector.id),
+            } => {
+                self.instances.contains(&(instance, vector.id.clone()))
+                    || self
+                        .publishing
+                        .keys()
+                        .any(|(_, node, steer)| *node == instance && steer == &vector.id)
+            }
+            _ => {
+                self.received(conversation, &vector.id)
+                    || self
+                        .publishing
+                        .keys()
+                        .any(|(key, _, steer)| key == &conversation.key && steer == &vector.id)
+            }
         }
     }
     fn eligible(
@@ -98,6 +113,13 @@ impl Index {
         conversation: &Conversation,
         networks: &BTreeMap<NodeName, SteeringNetwork>,
     ) -> bool {
+        if let RunVectorContent::Steer {
+            node: Some(node), ..
+        } = &vector.content
+            && node != &conversation.reference.node
+        {
+            return false;
+        }
         match &vector.content {
             RunVectorContent::Steer {
                 network: Some(network),
@@ -213,6 +235,108 @@ impl Record {
                 // a fresh snapshot so a newly recorded steer is visible at this delivery.
                 through = None;
             }
+        }
+    }
+}
+
+impl Record {
+    /// Reserves the receipts of `ids` and hands their append to a task of its own. Selection and
+    /// reservation happen without an await, so a cancelled callback either reserves nothing or
+    /// leaves the reservation with the task. The task is not bounded by a callback deadline:
+    /// a started write may still commit, so the reservation is held until the ledger reports the
+    /// outcome. A committed write records its receipts; a failed one releases the steers to be
+    /// offered again.
+    fn publish(
+        &self,
+        conversation: &Conversation,
+        ids: &[VectorId],
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let execution = conversation.reference.public_execution().ok()?;
+        let instance = conversation.reference.node_instance.get();
+        let mut events = Vec::new();
+        let mut keys = Vec::new();
+        {
+            let mut index = self.index.data.lock().ok()?;
+            for id in ids {
+                let due = index
+                    .steers
+                    .iter()
+                    .find(|vector| &vector.id == id)
+                    .is_some_and(|vector| !index.consumed(conversation, vector));
+                if !due {
+                    continue;
+                }
+                let event = vector_event(
+                    &self.run,
+                    RunVectorContent::SteerReceipt {
+                        steer_id: id.clone(),
+                        conversation: conversation.key.clone(),
+                        execution: execution.clone(),
+                        node_instance: instance,
+                    },
+                )
+                .ok()?;
+                let RunEvent::Vector { vector } = &event else {
+                    return None;
+                };
+                let key = (conversation.key.clone(), instance, id.clone());
+                index.publishing.insert(key.clone(), vector.id.clone());
+                keys.push(key);
+                events.push(event);
+            }
+        }
+        if events.is_empty() {
+            return None;
+        }
+        // Released however the task ends, including a panic or runtime shutdown.
+        let reservation = Reservation {
+            resident: self.index.clone(),
+            keys,
+        };
+        let ledger = self.ledger.clone();
+        let run = self.run.clone();
+        Some(tokio::spawn(async move {
+            if ledger.append(&run, events.clone()).await.is_ok()
+                && let Ok(mut index) = reservation.resident.data.lock()
+            {
+                // The receipts replace their reservations in one step, so no callback sees
+                // the steers as neither pending nor received.
+                for event in events {
+                    if let RunEvent::Vector { vector } = event {
+                        index.apply(vector);
+                    }
+                }
+                for key in &reservation.keys {
+                    index.publishing.remove(key);
+                }
+            }
+            drop(reservation);
+        }))
+    }
+}
+struct OfferRelease<'a> {
+    source: &'a DeliverySource,
+    execution: u64,
+    ids: &'a [VectorId],
+}
+impl Drop for OfferRelease<'_> {
+    fn drop(&mut self) {
+        self.source.release(self.execution, self.ids);
+    }
+}
+struct Reservation {
+    resident: Arc<ResidentRecord>,
+    keys: Vec<(String, u64, VectorId)>,
+}
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        let mut index = self
+            .resident
+            .data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for key in &self.keys {
+            index.publishing.remove(key);
         }
     }
 }
@@ -602,6 +726,18 @@ impl DeliverySource {
                     .flat_map(|(_, receipts)| receipts.iter())
                     .filter(|(id, run)| conversation.includes(id, run))
                     .map(|(id, _)| id.clone())
+                    // A receipt still being written is referenced too: a successor finds it
+                    // only if the write committed, and otherwise offers the steer again.
+                    .chain(
+                        index
+                            .publishing
+                            .iter()
+                            .filter(|((key, _, steer), _)| {
+                                key == &conversation.key
+                                    && !shown_only.contains(&(key.clone(), steer.clone()))
+                            })
+                            .map(|(_, receipt)| receipt.clone()),
+                    )
                     .collect();
                 (
                     conversation.reference.node_instance,
@@ -893,8 +1029,14 @@ impl DeliverySource {
     pub(super) async fn receipt(&self, query: &HookQuery, delivery: &HookDelivery) {
         match query.steers {
             SteerCarrier::HookContext => {
+                // Released however this callback ends: a cancelled one must not keep its offers
+                // reserved. The receipt write, once started, holds its own reservation.
+                let _release = OfferRelease {
+                    source: self,
+                    execution: query.execution_id,
+                    ids: &delivery.steers,
+                };
                 self.receipt_ids(query.execution_id, &delivery.steers).await;
-                self.release(query.execution_id, &delivery.steers);
             }
             SteerCarrier::StoredMessage => self.shown(query.execution_id, &delivery.steer).await,
             SteerCarrier::ShownMessage => {}
@@ -970,54 +1112,17 @@ impl DeliverySource {
         let Some(conversation) = conversation else {
             return;
         };
-        let _ = tokio::time::timeout(DEADLINE, async {
+        let deadline = tokio::time::Instant::now() + DEADLINE;
+        let write = tokio::time::timeout_at(deadline, async {
             let _publication = self.publication.lock().await;
-            let events: Vec<_> = {
-                let index = record
-                    .index
-                    .data
-                    .lock()
-                    .map_err(|_| RunLedgerError::Corrupt)?;
-                ids.iter()
-                    .filter(|id| {
-                        index
-                            .steers
-                            .iter()
-                            .find(|vector| &vector.id == *id)
-                            .is_some_and(|vector| !index.consumed(&conversation, vector))
-                    })
-                    .map(|id| {
-                        vector_event(
-                            &record.run,
-                            RunVectorContent::SteerReceipt {
-                                steer_id: id.clone(),
-                                conversation: conversation.key.clone(),
-                                execution: conversation
-                                    .reference
-                                    .public_execution()
-                                    .map_err(RunLedgerError::InvalidEvent)?,
-                                node_instance: conversation.reference.node_instance.get(),
-                            },
-                        )
-                    })
-                    .collect::<Result<_, _>>()?
-            };
-            if !events.is_empty() {
-                record.ledger.append(&record.run, events.clone()).await?;
-                let mut index = record
-                    .index
-                    .data
-                    .lock()
-                    .map_err(|_| RunLedgerError::Corrupt)?;
-                for event in events {
-                    if let RunEvent::Vector { vector } = event {
-                        index.apply(vector);
-                    }
-                }
-            }
-            Ok::<_, RunLedgerError>(())
+            record.publish(&conversation, ids)
         })
         .await;
+        // The callback waits only within its deadline. A slower write keeps running and holds
+        // its reservation, so the conversation is not offered the steer again meanwhile.
+        if let Ok(Some(write)) = write {
+            let _ = tokio::time::timeout_at(deadline, write).await;
+        }
     }
 }
 impl ActiveMemorySource for DeliverySource {

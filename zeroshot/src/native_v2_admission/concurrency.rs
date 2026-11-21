@@ -53,6 +53,10 @@ fn possible_writers(node: &GraphNode) -> Result<PossibleWriters<'_>, NativeV2Adm
         GraphNode::Par(group) => collect_writers(group.branches.as_slice().iter(), true),
         GraphNode::Loop(group) => possible_writers(&group.body),
         GraphNode::Map(group) => map_writers(group),
+        GraphNode::Profile(profile) => match profile.body.as_deref() {
+            Some(body) => possible_writers(body),
+            None => Ok(PossibleWriters::default()),
+        },
         GraphNode::Succeed(_) | GraphNode::Fail(_) => Ok(PossibleWriters::default()),
     }
 }

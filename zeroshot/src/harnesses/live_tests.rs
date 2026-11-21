@@ -266,10 +266,11 @@ os.execv({program}, [{program}, *sys.argv[1:]])
         },
     )
     .assert_value();
-    for (node, identity, instruction) in [
-        ("worker", (1, 1), &worker),
-        ("worker", (1, 2), &worker),
-        ("verifier", (2, 3), &verifier),
+    // Provider homes count newly opened sessions, independently of execution identities.
+    for (node, identity, session, instruction) in [
+        ("worker", (1, 1), "node-instance/1", &worker),
+        ("worker", (1, 2), "node-instance/1", &worker),
+        ("verifier", (2, 3), "execution/2", &verifier),
     ] {
         let binding = bindings[&NodeName::new(node).assert_value()].clone();
         let values = settings.connection_values(&binding);
@@ -309,10 +310,7 @@ os.execv({program}, [{program}, *sys.argv[1:]])
             }
             outcome => panic!("live {node} returned {outcome:?}"),
         }
-        assert!(
-            memory.queries.lock().assert_value().len() > before,
-            "native tool callback must run in every execution"
-        );
+        assert_execution_recall(&memory, before, node, session);
         if let Some(proof) = &native_proof {
             proof.assert_new_call(proof_before, node, &memory.marker);
         }
@@ -322,6 +320,10 @@ os.execv({program}, [{program}, *sys.argv[1:]])
         proof.assert_completed();
     }
     assert_recall(&settings, &memory, &artifact);
+    println!(
+        "live contract passed: {} / {} — tool recall, reused worker session, fresh verifier, npm test",
+        settings.lane, settings.model
+    );
 }
 
 fn runtime_bindings(
@@ -356,17 +358,29 @@ fn assert_recall(settings: &LiveSettings, memory: &RecalledMemory, artifact: &st
         .collect();
     assert_eq!(
         sessions,
-        BTreeSet::from(["node-instance/1".to_owned(), "execution/3".to_owned()])
+        BTreeSet::from(["node-instance/1".to_owned(), "execution/2".to_owned()])
     );
     let saved = std::fs::read_to_string(settings.workspace.join(artifact)).assert_value();
     assert!(saved.contains(&memory.marker));
-    println!(
-        "live contract passed: {} / {} — tool recall, reused worker session, fresh verifier, npm test",
-        settings.lane, settings.model
+}
+
+fn assert_execution_recall(memory: &RecalledMemory, before: usize, node: &str, session: &str) {
+    let queries = memory.queries.lock().assert_value();
+    let current = &queries[before..];
+    assert!(
+        !current.is_empty(),
+        "native tool callback must run in every execution"
+    );
+    assert!(
+        current.iter().all(|(id, key)| id == node && key == session),
+        "live {node} must recall through provider session {session}: {current:?}"
     );
 }
 
 mod active_memory_tests;
+
+#[path = "live_tests/tests/recall.rs"]
+mod recall;
 
 #[path = "live_tests/tests/conversations.rs"]
 mod conversations;
@@ -396,6 +410,7 @@ async fn steer_live_tool_call_records_carrier_receipt() {
                                 .block_on(crate::v2_run_ledger::steering::record(
                                     self.ledger.as_ref(),
                                     RunSteerParams {
+                                        node: None,
                                         mode: openengine_cluster_protocol::SteeringMode::Standing,
                                         run_id: self.run.clone(),
                                         text: "Keep the requested output contract.".into(),
@@ -478,6 +493,7 @@ fn live_submission(
     (title, run): (&str, &str),
 ) -> RunSubmission {
     RunSubmission {
+        context_sources: Vec::new(),
         title: RunTitle::new(title).assert_value(),
         graph,
         initial_input: Value::Null,

@@ -438,3 +438,6 @@ fn test_preparation() -> CapsulePreparation {
 
 #[path = "tests/suspension.rs"]
 mod suspension_tests;
+
+#[path = "tests/wire_contract.rs"]
+mod wire_contract;

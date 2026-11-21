@@ -120,6 +120,14 @@ impl DeclaredConnections {
             .values()
             .flat_map(DeclaredEnvironment::iter)
             .collect::<Vec<_>>();
+        if names
+            .iter()
+            .any(|name| name.as_str().eq_ignore_ascii_case("ZEROSHOT_CONTEXT"))
+        {
+            return Err(NativeV2RunValueError(
+                "ZEROSHOT_CONTEXT is reserved by the target and cannot be declared by connections",
+            ));
+        }
         if names.len() > MAX_DECLARED_ENVIRONMENT_NAMES {
             return Err(NativeV2RunValueError(
                 "node connections declare more than 64 environment names",

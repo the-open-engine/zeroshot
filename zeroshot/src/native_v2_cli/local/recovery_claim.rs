@@ -16,13 +16,19 @@ impl LocalCliBackend {
         run_id: &RunId,
         shared: bool,
     ) -> Result<Option<LocalRecoveryClaim>, NativeV2CliError> {
+        let path = self.recovery_claim_path(run_id)?;
         let claim = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(self.recovery_claim_path(run_id)?)
-            .map_err(local_io)?;
+            .open(&path)
+            .map_err(|error| {
+                local_message(format!(
+                    "workspace claim {} could not be opened: {error}",
+                    path.display()
+                ))
+            })?;
         let locked = if shared {
             FileExt::try_lock_shared(&claim)
         } else {
@@ -31,7 +37,10 @@ impl LocalCliBackend {
         match locked {
             Ok(()) => Ok(Some(LocalRecoveryClaim(claim))),
             Err(error) if error.kind() == fs2::lock_contended_error().kind() => Ok(None),
-            Err(error) => Err(local_io(error)),
+            Err(error) => Err(local_message(format!(
+                "workspace claim {} could not be acquired: {error}",
+                path.display()
+            ))),
         }
     }
 
@@ -57,7 +66,10 @@ impl LocalCliBackend {
                 wait
             };
             if started.elapsed() >= bound {
-                return Err(local_message("retained workspace is already being resumed"));
+                return Err(local_message(format!(
+                    "retained workspace is already being resumed (claim {})",
+                    self.recovery_claim_path(run_id)?.display()
+                )));
             }
             sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
         }
@@ -68,7 +80,12 @@ impl LocalCliBackend {
         &self,
         run_id: &RunId,
     ) -> Result<LocalRecoveryClaim, NativeV2CliError> {
-        self.try_recovery_claim(run_id, false)?
-            .ok_or_else(|| local_message("retained workspace is already being resumed"))
+        let path = self.recovery_claim_path(run_id)?;
+        self.try_recovery_claim(run_id, false)?.ok_or_else(|| {
+            local_message(format!(
+                "retained workspace is already being resumed (claim {})",
+                path.display()
+            ))
+        })
     }
 }

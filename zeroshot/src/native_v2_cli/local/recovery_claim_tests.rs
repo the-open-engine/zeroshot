@@ -44,6 +44,7 @@ fn resume_claim_fixture(name: &str, submission_key: &str) -> ResumeClaimFixture 
                 delivery_run_id: Some(run_id.clone()),
                 resumed_from: None,
                 successor_run_id: Some(successor_run_id.clone()),
+                workspace_checkpoints_discarded: false,
                 pending_restore: None,
             },
         )
@@ -68,16 +69,18 @@ fn interrupted_resume_releases_the_workspace_claim_for_retry() {
 
     let interrupted_process_claim = backend.claim_recovery_workspace(&run_id).assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&run_id)
+        backend
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_some()
     );
 
     drop(interrupted_process_claim);
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 }
 

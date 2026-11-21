@@ -21,6 +21,7 @@ fn backend(root: &TestDirectory) -> LocalCliBackend {
 
 fn params() -> RunSteerParams {
     RunSteerParams {
+        node: None,
         run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000071"),
         text: "  Keep\t方向\r\nexactly.  ".into(),
         mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -128,6 +129,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
     let mut output = Vec::new();
     execute_native_v2_cli(
         NativeV2CliCommand::Steer {
+            node: None,
             run: RunSelector {
                 target: None,
                 run_id: params.run_id.clone(),
@@ -172,6 +174,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
         resumed_from: None,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     backend
@@ -453,6 +456,7 @@ async fn steer_local_concurrent_steers_share_the_recovery_claim() {
                 resumed_from: None,
                 delivery_run_id: None,
                 successor_run_id: None,
+                workspace_checkpoints_discarded: false,
                 pending_restore: None,
             },
         )
@@ -482,8 +486,9 @@ async fn steer_local_concurrent_steers_share_the_recovery_claim() {
         .assert_value();
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&params.run_id)
+            .recovery_workspace_claim_refusal(&params.run_id)
             .assert_value()
+            .is_none()
     );
     assert!(
         backend
@@ -527,9 +532,10 @@ async fn steer_local_concurrent_steers_share_the_recovery_claim() {
         .claim_recovery_workspace(&params.run_id)
         .assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&params.run_id)
+        backend
+            .recovery_workspace_claim_refusal(&params.run_id)
             .assert_value()
+            .is_some()
     );
     let error = backend.run_steer(None, params.clone()).await.assert_error();
     assert!(

@@ -144,6 +144,8 @@ pub struct NativeV2AdmissionContext<'a> {
     pub source: Option<&'a crate::source_code_provider::SourceCodeProviderRegistry>,
     pub delivery_policy: DeliveryPolicy,
     pub run_sizes: Option<&'a openengine_cluster_protocol::TargetRunSizesDiscovery>,
+    /// Host-owned continuation history permits requests after workspace snapshots are disabled.
+    pub checkpointless_requests: bool,
 }
 
 impl<'a> NativeV2AdmissionContext<'a> {
@@ -157,6 +159,7 @@ impl<'a> NativeV2AdmissionContext<'a> {
             source: None,
             delivery_policy,
             run_sizes: None,
+            checkpointless_requests: false,
         }
     }
 
@@ -321,6 +324,7 @@ impl NativeV2Admission {
             runtime,
             environment,
             source,
+            context_sources,
             submission_key,
         } = submission;
         let prepared = prepare_submission(
@@ -335,6 +339,12 @@ impl NativeV2Admission {
             },
             context,
         )?;
+        openengine_cluster_protocol::validate_context_sources(
+            prepared.environment.as_ref(),
+            &context_sources,
+            source.as_ref(),
+        )
+        .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
         validate_source_delivery_with_registry(source.as_ref(), &prepared.graph, context.source)?;
         comment::resolve_comment_input_at(
             &prepared.graph.root,
@@ -353,6 +363,7 @@ impl NativeV2Admission {
             runtime: prepared.runtime,
             environment: prepared.environment,
             source,
+            context_sources,
         })
     }
 
@@ -485,6 +496,17 @@ fn prepare_submission(
     })
 }
 
+pub(crate) fn validate_target_environment(
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
+) -> Result<(), NativeV2AdmissionError> {
+    if environment.is_some_and(|environment| environment.teardown.is_some()) {
+        return Err(NativeV2AdmissionError::InvalidEnvironment(
+            "environment teardown is only supported for local runs".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_run_environment(
     runtime: &RuntimePlan,
     environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
@@ -492,6 +514,14 @@ pub(crate) fn validate_run_environment(
     if let Some(environment) = environment {
         environment
             .validate()
+            .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
+        environment
+            .validate_context_git_environment(
+                runtime
+                    .nodes()
+                    .values()
+                    .flat_map(|binding| binding.declared_connections().environment_names()),
+            )
             .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
     }
     validation::validate_declared_environment(runtime, environment)

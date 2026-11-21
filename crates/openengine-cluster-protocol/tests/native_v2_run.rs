@@ -7,6 +7,9 @@ mod json_insert;
 #[path = "support/json_read.rs"]
 mod json_read;
 
+#[path = "native_v2_run/steering_nodes.rs"]
+mod steering_nodes;
+
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, NodeName, ResolvedSource, RunId, RunListParams, RunListResult,
@@ -238,6 +241,7 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
     let result = RunListResult {
         runs: vec![RunStatusResult {
             steering: Default::default(),
+            context_sources: Vec::new(),
             run_id,
             title: RunTitle::new("Protocol contract").assert_value(),
             source: Some(openengine_cluster_testkit::native_v2_source_fixture()),
@@ -422,4 +426,21 @@ fn hundred_maximum_inbox_rows_fit_the_hosted_response_limit() {
         serde_json::from_slice::<InboxListResult>(&bytes).assert_value(),
         page
     );
+}
+
+#[test]
+fn empty_context_lists_preserve_existing_requests_and_environments() {
+    let expected = submission();
+    let mut value = expected.clone();
+    value["contextSources"] = json!([]);
+    let decoded: openengine_cluster_protocol::RunSubmission =
+        serde_json::from_value(value).assert_value();
+    assert!(decoded.context_sources.is_empty());
+    assert_eq!(serde_json::to_value(decoded).assert_value(), expected);
+    for value in [json!({}), json!({"contextRepositories":[]})] {
+        let environment: openengine_cluster_protocol::RuntimeEnvironment =
+            serde_json::from_value(value).assert_value();
+        assert!(environment.context_repositories.is_empty());
+        assert_eq!(serde_json::to_value(environment).assert_value(), json!({}));
+    }
 }

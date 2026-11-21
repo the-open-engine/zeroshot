@@ -35,6 +35,10 @@ async fn graph(delivery: TemplateDelivery) -> VerifiedGraph {
         !runtime.workspace_checkpoints,
         "the supplied local code-review runtime must skip workspace snapshots"
     );
+    assert!(
+        !runtime.active_memory().enabled() && !runtime.global_agents().postmortem.enabled,
+        "the supplied code-review runtime must not read or collect Active Memory lessons"
+    );
     if delivery == TemplateDelivery::None {
         runtime
             .nodes_mut()
@@ -57,6 +61,7 @@ async fn graph(delivery: TemplateDelivery) -> VerifiedGraph {
     let admitted = NativeV2Admission
         .admit_with_policy(
             RunSubmission {
+                context_sources: Vec::new(),
                 title: RunTitle::new("Code review").assert_value(),
                 graph: code_review_graph(delivery).assert_value(),
                 initial_input: input(),
@@ -355,7 +360,7 @@ async fn a_change_without_units_still_gets_the_whole_change_review() {
     run.settle_stage(&discovery(), reviewed);
     assert_eq!(dispatched(&run.reduce()), [FINALIZE_REST]);
     let rest_input = run.advance(FINALIZE_REST, verified(json!({"findings":[]})));
-    assert_eq!(rest_input[findings_field("unit_depth")], json!([]));
+    assert_eq!(rest_input[findings_field("unit_design")], json!([]));
     let report_input = run.advance(REPORT, verified(json!({"body":"No actionable findings."})));
     assert_eq!(report_input[UNIT_FINAL], json!([]));
     assert_eq!(report_input[REST_FINAL], json!([]));
@@ -453,7 +458,7 @@ async fn a_crashed_reviewer_gets_one_retry() {
         run.advance(TRIAGE, triaged(1));
         let mut remaining = crashes;
         let reviews = run.settle_stage(&discovery(), |node, input| {
-            if node == "hunt_state" && remaining > 0 {
+            if node == "hunt_claims" && remaining > 0 {
                 remaining -= 1;
                 WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
             } else {
@@ -462,14 +467,14 @@ async fn a_crashed_reviewer_gets_one_retry() {
         });
         let attempts = reviews
             .iter()
-            .filter(|(node, _)| node == "hunt_state")
+            .filter(|(node, _)| node == "hunt_claims")
             .count();
         assert_eq!(attempts, 2);
         let reduction = run.reduce();
         if crashes == 1 {
             assert_eq!(dispatched(&reduction), [FINALIZE_REST, FINALIZE_UNIT]);
         } else {
-            assert_failed(&reduction, "hunt_state_failed");
+            assert_failed(&reduction, "hunt_claims_failed");
         }
     }
 }

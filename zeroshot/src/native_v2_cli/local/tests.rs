@@ -72,13 +72,19 @@ fn recovery_document(
         resumed_from,
         delivery_run_id: None,
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     }
 }
 
-fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> RunStatusResult {
+pub(super) fn contract_status(
+    submission: &RunSubmission,
+    run_id: RunId,
+    failed: bool,
+) -> RunStatusResult {
     RunStatusResult {
         steering: Default::default(),
+        context_sources: Vec::new(),
         run_id,
         title: RunTitle::new("Local storage contract").assert_value(),
         source: submission.source.clone(),
@@ -165,6 +171,7 @@ fn prepared_local_run(
 fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     let submission = contract_submission(submission_key);
     PreparedRunRequest {
+        context_sources: Vec::new(),
         git_credentials: None,
 
         cwd: None,
@@ -437,7 +444,8 @@ async fn local_recovery_contract_preserves_lineage_and_recoverability() {
     assert!(matches!(
         backend.read_recovery_document(&successor),
         Err(NativeV2CliError::Local(message))
-            if message == "workspace recovery metadata is invalid"
+            if message.contains("workspace recovery record") && message.contains("is invalid")
+                && message.contains(&*backend.recovery_path(&successor).assert_value().to_string_lossy())
     ));
 }
 
@@ -751,6 +759,7 @@ fn local_recovery_lineage_is_bounded_and_honors_root_delivery() {
         resumed_from: None,
         delivery_run_id: Some(delivery.clone()),
         successor_run_id: None,
+        workspace_checkpoints_discarded: false,
         pending_restore: None,
     };
     assert_eq!(
@@ -793,15 +802,17 @@ async fn local_stale_state_and_readiness_fail_closed() {
 
     let claim = backend.claim_recovery_workspace(&run_id).assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&run_id)
+        backend
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_some()
     );
     drop(claim);
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 
     let no_ledger = RunId::new("0199f33f-3b44-7d21-9000-000000000072");
@@ -1242,7 +1253,7 @@ async fn assert_successor_claim_and_submission_lock_edges(
     assert!(backend.claim_recovery_workspace(&absent_run).is_err());
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&RunId::new("invalid-local-run"))
+            .recovery_workspace_claim_refusal(&RunId::new("invalid-local-run"))
             .is_err()
     );
 
@@ -1420,21 +1431,24 @@ fn local_recovery_claims_are_exclusive_until_released() {
     );
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 
     let claim = backend.claim_recovery_workspace(&run_id).assert_value();
     assert!(
-        !backend
-            .recovery_workspace_is_unclaimed(&run_id)
+        backend
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_some()
     );
     drop(claim);
     assert!(
         backend
-            .recovery_workspace_is_unclaimed(&run_id)
+            .recovery_workspace_claim_refusal(&run_id)
             .assert_value()
+            .is_none()
     );
 }
 

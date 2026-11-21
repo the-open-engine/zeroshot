@@ -1,17 +1,21 @@
 ---
-description: 'Configure setup commands, startup commands and environment variables for Docker target runs without putting environment settings in profiles.'
+description: 'Configure setup commands, startup commands and environment variables for local and Docker target runs.'
 ---
 
 # Prepare a runtime environment
 
-Run submissions to Docker targets accept an `environment` field alongside `runtime`:
+Run submissions accept an `environment` field alongside `runtime`. This example uses a Docker target:
 
 ```json
 {
   "environment": {
     "setup": "apt-get update && apt-get install -y jq",
     "startup": "npm ci",
-    "variables": { "CI": "true" }
+    "variables": { "CI": "true" },
+    "contextRepositories": [
+      { "repository": "acme/shared-library", "branch": "main" },
+      { "repository": "acme/api-contracts" }
+    ]
   }
 }
 ```
@@ -35,6 +39,72 @@ If installation needs private registry access, add
 The CLI can collect hook credentials for a definition you supply. When a host selects a default,
 its connection store must supply those credentials; the CLI does not inspect saved environments
 to discover additional secrets in your shell.
+
+## Read-only context repositories
+
+`contextRepositories` lists up to 16 extra repositories that agents can inspect and build against.
+Each entry has a `repository` (GitHub `owner/name` or a credential-free HTTPS/SSH Git URL) and an
+optional `branch`. The CLI reads this list from `--environment FILE` and resolves each branch to an
+exact commit before submitting to a named target. An omitted branch uses the remote's default
+branch. Duplicate repositories and the run's own source repository are rejected. Context repositories
+must use the source repository's forge and be accessible with its existing source credential;
+there is no separate context credential.
+
+Targets clone full history before the startup hook. The clones live outside the workspace at
+`$ZEROSHOT_CONTEXT/<repository path>`: for example, `$ZEROSHOT_CONTEXT/acme/shared-library`.
+Startup and every agent receive `ZEROSHOT_CONTEXT`; private agent guidance also lists the paths and
+pinned commits. Status, list and history retain the ordered pins as `contextSources` beside `source`.
+
+When context repositories are requested, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_PARAMETERS`, and
+`GIT_CONFIG_COUNT` overrides in variables or hook/node connections are rejected before preparation.
+The target supplies exact-path Git trust for the supervisor-owned checkouts. Runs without context
+repositories keep their existing Git settings.
+
+These checkouts are readable but cannot be modified or pushed by agents or startup hooks. For
+experiments, copy a repository into `$TMPDIR`, make the copy writable if your copy tool preserves
+read-only permissions, and edit/build there. Keep experimental copies outside the workspace:
+delivery commits the workspace, which still belongs to exactly one source repository. Copies have
+no source credentials and cannot authenticate a push.
+
+Context repositories are excluded from checkpoints. Every allocation, including a resume or
+checkpoint restore, clones the original pinned commits again even if their branches have moved.
+An unavailable repository or commit stops preparation with `context_checkout_unavailable` before
+agents start. Cloning shares the existing preparation deadline. A host-selected default environment
+that lists context repositories also requires matching client pins; the target never resolves
+mutable branch tips on the client's behalf. Context repositories require a Docker target.
+Runs without context repositories receive no `ZEROSHOT_CONTEXT`.
+
+## Local scripts and services
+
+On Linux and macOS, pass a JSON file with `--environment FILE` to a local run. After selecting
+the worktree or restoring a checkpoint, zeroshot runs `setup` and then `startup` in the final
+checkout. Both run as the invoking user before the graph starts. Hooks receive the local shell's
+basic environment, public `variables`, declared hook `connections`, and `ZEROSHOT_RUN_ID`.
+Install harness prerequisites before submitting the run. Each preparation script has 15 minutes
+within the run's preparation budget.
+
+Start native background services in `startup` and wait for readiness before the script exits.
+The service processes belong to the run and survive agent steps. Keep them in the startup
+process tree. Run cleanup stops them after the optional `teardown` script.
+
+Local `teardown` runs once per attempt after environment preparation begins. It runs after
+success, setup or startup failure, graph failure, force-stop, and suspension. It gets a separate
+60-second deadline, and a failure is reported in the run logs while preserving the original result.
+A controller crash or machine loss can interrupt cleanup. On resume, the new attempt reuses the
+saved scripts with a new run ID and reruns setup and startup.
+
+Docker Compose resources belong to the Docker daemon. To clean up a disposable stack, use the same
+per-run project name in both hooks:
+
+```json
+{
+  "startup": "docker compose --project-name \"zs-$ZEROSHOT_RUN_ID\" up --detach --wait",
+  "teardown": "docker compose --project-name \"zs-$ZEROSHOT_RUN_ID\" down --remove-orphans --volumes"
+}
+```
+
+Use the same Compose file and settings in both hooks. Use project-scoped volumes for this example.
+Omit `--volumes` to retain data, and use distinct host ports when parallel attempts publish ports.
 
 ## Example: pinned Node and npm dependencies
 
@@ -131,5 +201,4 @@ requirements. The target must have a writable root for package installation. Doc
 an operator-provided daemon endpoint. Detached Docker containers belong to that daemon and are not
 terminated by the target's process cleanup. Direct target operators or scripts must manage their
 names, reuse, and removal. When the daemon runs inside a disposable run machine, destroying that
-machine removes its Docker resources. Local execution uses the invoking machine and rejects setup
-and startup hooks and their connection references.
+machine removes its Docker resources. The `teardown` field is for local execution.

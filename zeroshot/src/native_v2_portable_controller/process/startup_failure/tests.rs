@@ -39,7 +39,7 @@ fn startup_failure_keeps_its_first_cause_and_stays_bounded() {
     record_startup_failure(&paths, &PortableControllerError::Bootstrap, &[]);
 
     let report = take_startup_failure(&paths).assert_value();
-    assert!(report.len() <= MAX_STARTUP_FAILURE_BYTES);
+    assert!(report.len() <= MAX_FAILURE_BYTES);
     assert!(report.starts_with("portable controller I/O failed: xxx"));
 }
 
@@ -47,11 +47,8 @@ fn startup_failure_keeps_its_first_cause_and_stays_bounded() {
 fn startup_failure_ignores_oversized_or_absent_reports() {
     let (_root, paths) = storage();
     assert_eq!(take_startup_failure(&paths), None);
-    write_private_new_file(
-        &paths.startup_failure(),
-        &vec![b'x'; MAX_STARTUP_FAILURE_BYTES + 1],
-    )
-    .assert_value();
+    write_private_new_file(&paths.startup_failure(), &vec![b'x'; MAX_FAILURE_BYTES + 1])
+        .assert_value();
     assert_eq!(take_startup_failure(&paths), None);
     assert!(!paths.startup_failure().exists());
 }
@@ -123,4 +120,97 @@ fn startup_redactions_cover_bootstrap_credentials_but_not_ordinary_context() {
     ] {
         assert!(!redactions.iter().any(|value| value == public), "{public}");
     }
+}
+
+#[tokio::test]
+async fn runtime_failure_keeps_the_first_cause_private_bounded_and_read_only() {
+    let (_root, paths) = storage();
+    let recorder = Arc::new(LocalRuntimeFailureReport::new(
+        paths.clone(),
+        vec!["runtime-secret".to_owned()],
+    ));
+    recorder.record(&format!(
+        "original runtime-secret\u{1b}[31m\0\n\t{}",
+        "é".repeat(16 * 1024)
+    ));
+    recorder.record("later cleanup failure");
+    recorder.wait_written().await;
+    let report = read_runtime_failure(&paths).assert_value();
+    assert!(
+        report.starts_with("original [REDACTED] [31m\u{fffd}  "),
+        "{report}"
+    );
+    assert!(!report.contains("runtime-secret"));
+    assert!(!report.contains("cleanup"));
+    assert!(!report.chars().any(char::is_control));
+    let bytes = std::fs::read(paths.runtime_failure()).assert_value();
+    assert!(bytes.len() <= MAX_FAILURE_BYTES);
+    let before = std::fs::metadata(paths.runtime_failure()).assert_value();
+    for _ in 0..2 {
+        assert_eq!(
+            read_runtime_failure(&paths).as_deref(),
+            Some(report.as_str())
+        );
+    }
+    let after = std::fs::metadata(paths.runtime_failure()).assert_value();
+    assert_eq!(std::fs::read(paths.runtime_failure()).assert_value(), bytes);
+    assert_eq!(
+        before.modified().assert_value(),
+        after.modified().assert_value()
+    );
+    assert_eq!(before.permissions(), after.permissions());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(after.permissions().mode() & 0o777, 0o600);
+    }
+    assert!(!paths.startup_failure().exists());
+}
+
+#[test]
+fn runtime_failure_ignores_unreadable_or_invalid_notes_without_consuming_them() {
+    let (_root, paths) = storage();
+    assert_eq!(read_runtime_failure(&paths), None);
+    // A failed report must leave an existing path alone.
+    std::fs::create_dir(paths.runtime_failure()).assert_value();
+    write_failure(&paths.runtime_failure(), "cannot be written", &[]);
+    assert_eq!(read_runtime_failure(&paths), None);
+    assert!(paths.runtime_failure().is_dir());
+    std::fs::remove_dir(paths.runtime_failure()).assert_value();
+    for bytes in [vec![0xff], vec![b'x'; MAX_FAILURE_BYTES + 1]] {
+        write_private_new_file(&paths.runtime_failure(), &bytes).assert_value();
+        assert_eq!(read_runtime_failure(&paths), None);
+        assert_eq!(std::fs::read(paths.runtime_failure()).assert_value(), bytes);
+        std::fs::remove_file(paths.runtime_failure()).assert_value();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_failure_refuses_redirected_and_nonprivate_notes() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let (root, paths) = storage();
+    let external = root.path().join("external");
+    write_private_new_file(&external, b"external note").assert_value();
+    symlink(&external, paths.runtime_failure()).assert_value();
+    write_failure(&paths.runtime_failure(), "must not replace a symlink", &[]);
+    assert_eq!(read_runtime_failure(&paths), None);
+    assert_eq!(std::fs::read(&external).assert_value(), b"external note");
+    assert!(
+        std::fs::symlink_metadata(paths.runtime_failure())
+            .assert_value()
+            .is_symlink()
+    );
+    std::fs::remove_file(paths.runtime_failure()).assert_value();
+    write_private_new_file(&paths.runtime_failure(), b"private note").assert_value();
+    std::fs::set_permissions(
+        paths.runtime_failure(),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .assert_value();
+    assert_eq!(read_runtime_failure(&paths), None);
+    assert_eq!(
+        std::fs::read(paths.runtime_failure()).assert_value(),
+        b"private note"
+    );
 }

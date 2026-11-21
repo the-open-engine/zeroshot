@@ -41,6 +41,7 @@ pub(crate) async fn interrupted_delivery_state(
         runtime.workspace_checkpoints = false;
         let admitted = NativeV2Admission
             .admit(crate::native_v2_contract::RunSubmission {
+                context_sources: Vec::new(),
                 environment: None,
                 title: RunTitle::new("Interrupted delivery").assert_value(),
                 graph: full_graph(vec![git_delivery_node(), success_node()]),
@@ -119,6 +120,23 @@ pub(crate) async fn interrupted_delivery_state(
             store.discard().await.assert_value();
         }
     }
+    // A local checkpoint discard must leave an interrupted delivery restartable without
+    // importing graph history or asking the worker to recreate acknowledged forge effects.
+    let directory = repository.join("checkpoints");
+    std::fs::create_dir_all(&directory).assert_value();
+    let snapshots = repository.join("repository/snapshots");
+    std::fs::create_dir_all(&snapshots).assert_value();
+    std::fs::write(snapshots.join("retained"), "checkpoint data").assert_value();
+    assert!(crate::native_v2_supervisor::checkpoints::discard_workspace_lineage(
+        &directory, repository,
+    ).assert_value());
+    assert!(!snapshots.exists());
+    assert!(
+        !crate::native_v2_supervisor::checkpoints::discard_workspace_lineage(
+            &directory, repository,
+        )
+        .assert_value()
+    );
     // Reconstruct only from retained lineage facts; no graph seed or worker responses are imported.
     let recovered = DeliveryCheckpointStore::new(repository.to_owned());
     recovered.finish(&[]).await.assert_value();

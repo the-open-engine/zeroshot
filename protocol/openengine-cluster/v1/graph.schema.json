@@ -775,6 +775,54 @@
         },
         {
           "additionalProperties": false,
+          "description": "A saved profile reference. The submitter fills the body and input schema when linking.",
+          "properties": {
+            "body": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GraphNode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "initialInput": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PayloadType"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "profile",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "profile": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "profile"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "bindings": {
               "items": {
@@ -820,7 +868,7 @@
             "reason": {
               "maxLength": 128,
               "minLength": 1,
-              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|environment_startup_failed|environment_preparation_timeout)$)[A-Za-z_][A-Za-z0-9_.-]*$",
+              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|environment_startup_failed|environment_preparation_timeout|context_checkout_unavailable)$)[A-Za-z_][A-Za-z0-9_.-]*$",
               "type": "string"
             }
           },

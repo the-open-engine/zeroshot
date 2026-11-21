@@ -3,11 +3,16 @@
 #[path = "native_v2_cli_portable/fixture.rs"]
 mod fixture;
 
+#[path = "native_v2_cli_portable/discard_workspace_tests.rs"]
+mod discard_workspace_tests;
 #[path = "native_v2_cli_portable/inspection.rs"]
 mod inspection;
 #[cfg(windows)]
 #[path = "native_v2_cli_portable/restic_resume_tests.rs"]
 mod restic_resume_tests;
+#[cfg(windows)]
+#[path = "native_v2_cli_portable/resume_refusal_tests.rs"]
+mod resume_refusal_tests;
 #[path = "native_v2_cli_portable/startup.rs"]
 mod startup;
 #[cfg(unix)]

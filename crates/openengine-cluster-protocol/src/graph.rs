@@ -381,6 +381,18 @@ pub struct MapNode {
     pub promoted_state_paths: Vec<FieldPath>,
 }
 
+/// A saved profile reference. The submitter fills the body and input schema when linking.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProfileNode {
+    pub name: NodeName,
+    pub profile: crate::RunProfileName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<Box<GraphNode>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_input: Option<PayloadType>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SucceedNode {
@@ -403,6 +415,7 @@ impl FailReason {
                 | "environment_setup_failed"
                 | "environment_startup_failed"
                 | "environment_preparation_timeout"
+                | "context_checkout_unavailable"
         ) {
             Err(FailReasonError)
         } else {
@@ -446,7 +459,7 @@ impl JsonSchema for FailReason {
             "maxLength": 128,
             "pattern": concat!(
                 "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|",
-                "environment_startup_failed|environment_preparation_timeout)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                "environment_startup_failed|environment_preparation_timeout|context_checkout_unavailable)$)[A-Za-z_][A-Za-z0-9_.-]*$"
             )
         })
     }
@@ -469,6 +482,7 @@ pub enum GraphNode {
     Par(ParNode),
     Loop(LoopNode),
     Map(MapNode),
+    Profile(ProfileNode),
     Succeed(SucceedNode),
     Fail(FailNode),
 }
@@ -484,6 +498,7 @@ impl GraphNode {
             Self::Par(node) => &node.name,
             Self::Loop(node) => &node.name,
             Self::Map(node) => &node.name,
+            Self::Profile(node) => &node.name,
             Self::Succeed(node) => &node.name,
             Self::Fail(node) => &node.name,
         }
@@ -497,7 +512,11 @@ impl GraphNode {
             Self::Par(node) => Some(&node.state),
             Self::Loop(node) => Some(&node.state),
             Self::Map(node) => Some(&node.state),
-            Self::Step(_) | Self::Verifier(_) | Self::Succeed(_) | Self::Fail(_) => None,
+            Self::Step(_)
+            | Self::Verifier(_)
+            | Self::Profile(_)
+            | Self::Succeed(_)
+            | Self::Fail(_) => None,
         }
     }
 }

@@ -297,3 +297,54 @@ fn coverage_contract_pi_lanes_without_native_login_accept_no_declared_credential
     assert!(super::super::command::native_local_credentials(PiProvider::Bedrock).is_empty());
     assert!(super::super::command::native_local_credentials(PiProvider::Gateway).is_empty());
 }
+
+#[test]
+fn caller_git_config_reaches_pi_without_context_repositories() {
+    let directory = TestDirectory::new("pi-caller-git-config");
+    let files = files(&directory);
+    let adapter = PiAdapter::new_local(adapter_configuration(
+        PiProvider::Anthropic,
+        "pi",
+        BTreeMap::new(),
+    ))
+    .assert_value();
+    for connection in [false, true] {
+        let mut turn = invocation(
+            agent_binding(
+                "opaque",
+                None,
+                SessionScope::Execution,
+                if connection {
+                    &["GIT_CONFIG_GLOBAL"]
+                } else {
+                    &[]
+                },
+            ),
+            NodeRole::Worker,
+            if connection {
+                resolved(
+                    &["GIT_CONFIG_GLOBAL"],
+                    &[("GIT_CONFIG_GLOBAL", "/dev/null")],
+                )
+            } else {
+                resolved(&[], &[])
+            },
+        );
+        if !connection {
+            turn.environment = turn.environment.with_variables(&BTreeMap::from([(
+                environment_name("GIT_CONFIG_GLOBAL"),
+                "/dev/null".to_owned(),
+            )]));
+        }
+        let command = adapter
+            .command_for_test(&turn, &files, "zs-owned-session")
+            .assert_value();
+        assert_eq!(
+            command
+                .environment
+                .get("GIT_CONFIG_GLOBAL")
+                .map(String::as_str),
+            Some("/dev/null")
+        );
+    }
+}

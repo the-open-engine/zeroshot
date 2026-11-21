@@ -251,7 +251,12 @@ enum UtilityCommand {
     /// Ctrl-C cancels the download and removes its temporary file. Does not restart the run or extract files.
     ExportWorkspace(RunExportWorkspaceArgs),
 
-    /// Permanently delete an abandoned retained target workspace.
+    /// Delete a retained target workspace or a finished local run's checkpoints.
+    ///
+    /// Locally, frees space retained by failed runs across their recovery lineage without
+    /// reading or changing the checkout, ledger or logs. Delivery recovery state is kept.
+    /// Running runs must be force-stopped first; interrupted restores must be resumed first.
+    /// Local checkpoints never expire automatically. Plain resume keeps the current checkout.
     DiscardWorkspace(RunSelectorArgs),
 
     /// Print the Zeroshot version.
@@ -715,7 +720,9 @@ struct RunArgs {
     #[arg(long, value_name = "FILE")]
     uniform_runtime_config: Option<PathBuf>,
 
-    /// Load a JSON environment definition: setup, startup, public variables, and hook connections.
+    /// Load setup, startup, public variables, and hook connections from JSON.
+    ///
+    /// Local runs on Linux and macOS also accept teardown for orderly cleanup.
     #[arg(long, value_name = "FILE", conflicts_with = "no_environment")]
     environment: Option<PathBuf>,
 
@@ -916,6 +923,9 @@ struct RunSteerArgs {
     /// Read UTF-8 direction from standard input.
     #[arg(long)]
     text_stdin: bool,
+    /// Direct human guidance to this exact agent node name, including future instances.
+    #[arg(long, value_name = "NAME", conflicts_with = "networks")]
+    node: Option<String>,
     /// Broadcast to this authorized graph-local network; repeat for several networks.
     #[arg(long = "network", value_name = "NAME")]
     networks: Vec<String>,

@@ -15,7 +15,7 @@
       "kind": "openengine.run-vectors/v1"
     }
   },
-  "kind": "zeroshot.native-v2-target/v2",
+  "kind": "zeroshot.native-v2-target/v3",
   "oecpPath": "/native-v2/oecp",
   "runPath": "/native-v2/run",
   "sessionPath": "/native-v2/oecp-session"

@@ -111,7 +111,7 @@ async fn unary_initialize_and_get_match_in_process_dispatch() {
     let init_request = request_text(
         1,
         "initialize",
-        json!({"protocolVersion": "openengine.cluster/v1"}),
+        json!({"protocolVersion": "openengine.cluster/v2"}),
     );
     send_text(&mut harness.client, init_request.clone()).await;
     let ws_init_response = recv_json(&mut harness.client).await;
@@ -276,7 +276,7 @@ impl DuplicateCancellationChannel for WebsocketDuplicateCancellation<'_> {
             .await;
         self.harness
             .send_raw(
-                r#"{"jsonrpc":"2.0","id":99,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v1"}}"#,
+                r#"{"jsonrpc":"2.0","id":99,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v2"}}"#,
             )
             .await;
         let sync = self.harness.recv_value().await;
@@ -374,7 +374,7 @@ async fn cancel_pending_get_and_confirm_no_response(harness: &mut Harness, id: i
         request_text(
             sync_id,
             "initialize",
-            json!({"protocolVersion": "openengine.cluster/v1"}),
+            json!({"protocolVersion": "openengine.cluster/v2"}),
         ),
     )
     .await;

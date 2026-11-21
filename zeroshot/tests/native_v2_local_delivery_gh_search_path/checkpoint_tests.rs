@@ -320,8 +320,15 @@ async fn stalled_plain_resume_forge_check_does_not_block_other_local_commands() 
         .assert_value_with("a second resume must not wait for the stalled forge request");
     assert!(
         !second.status.success()
-            && String::from_utf8_lossy(&second.stderr)
-                .contains("run does not have a recoverable workspace"),
+            && String::from_utf8_lossy(&second.stderr).contains("already being resumed")
+            && String::from_utf8_lossy(&second.stderr).contains(
+                &*fixture
+                    .state
+                    .join("runs")
+                    .join(&run_id)
+                    .join("workspace-recovery.claim")
+                    .to_string_lossy(),
+            ),
         "the stalled resume must keep its recovery claim: {second:?}"
     );
     // A new submission takes the shared lock; it must be admitted while the request is stalled.

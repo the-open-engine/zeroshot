@@ -97,7 +97,7 @@ impl<'a> Analyzer<'a> {
         path: &[DiagnosticPathSegment],
     ) {
         if let Join::First { when } = &group.join {
-            let racers = collect_descendant_names(&group.branches);
+            let racers = collect_visible_descendant_names(&group.branches);
             if !guard_selectors(when)
                 .iter()
                 .any(|selector| racers.contains(&selector.name))
@@ -111,7 +111,7 @@ impl<'a> Analyzer<'a> {
                 );
             }
             let mut available = incoming.available.clone();
-            available.extend(collect_descendant_names(&group.branches));
+            available.extend(racers);
             for (selector, aggregate) in guard_selector_uses(when) {
                 if !aggregate && self.map_depth(&selector.name) > self.map_depth(&group.name) {
                     emit_diagnostic!(

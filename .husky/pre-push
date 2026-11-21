@@ -5,6 +5,11 @@ if [ -n "${CI:-}" ]; then
   exit 0
 fi
 
+zero="0000000000000000000000000000000000000000"
+changed="$(mktemp)"
+trap 'rm -f "$changed"' EXIT
+full_suite=false
+
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/heads/main)
@@ -18,6 +23,31 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       exit 1
       ;;
   esac
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$remote_sha" != "$zero" ]; then
+    if ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+      full_suite=true
+      continue
+    fi
+    base="$remote_sha"
+  else
+    base="$(git merge-base "$local_sha" origin/main 2>/dev/null || true)"
+  fi
+  if [ -z "$base" ]; then
+    full_suite=true
+  else
+    git diff --name-only -z "$base" "$local_sha" >>"$changed"
+  fi
 done
+
+# Pushes that only touch the root README run the same check as CI's README lane.
+if [ "$full_suite" = false ]; then
+  readme_only="$(node .github/ci-path-classifier.js <"$changed" 2>/dev/null |
+    sed -n 's/^readme_only=//p')"
+  if [ "$readme_only" = "true" ]; then
+    npx --no-install prettier --check README.md
+    exit 0
+  fi
+fi
 
 npm test

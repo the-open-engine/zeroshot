@@ -94,13 +94,19 @@ const BEDROCK_CREDENTIALS: [&str; 2] = [AWS_BEARER_TOKEN_BEDROCK, AWS_REGION];
 
 /// Names the adapter reserves. A declared connection colliding with one is a provider failure
 /// rather than a silent override.
-const RESERVED: [&str; 6] = [
+const RESERVED: [&str; 12] = [
     AGENT_DIR,
     SESSION_DIR,
     PI_OFFLINE,
     PI_TELEMETRY,
     "HOME",
     "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "TERM",
+    "ZEROSHOT_TOOLS",
+    "ZEROSHOT_CONTEXT",
 ];
 
 /// Everything one Pi turn needs to build its argv. The caller-owned model and effort are supplied
@@ -340,9 +346,9 @@ impl EnvironmentRequest<'_> {
 /// Rejects a declared connection that would shadow adapter-reserved process configuration.
 fn validate_reserved(resolved: &ResolvedEnvironment) -> Result<(), NodeRunnerError> {
     for (name, _) in resolved.iter() {
-        if RESERVED.contains(&name.as_str())
-            || crate::native_v2_capsule::process_environment::MINIMAL_ENVIRONMENT_NAMES
-                .contains(&name.as_str())
+        if RESERVED
+            .iter()
+            .any(|reserved| name.as_str().eq_ignore_ascii_case(reserved))
         {
             return Err(NodeRunnerError::DriverDetail(format!(
                 "Pi declared environment conflicts with reserved process configuration {name}"

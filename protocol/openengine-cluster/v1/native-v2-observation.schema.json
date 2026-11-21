@@ -1379,6 +1379,12 @@
           "description": "Durable cursor after the force request was recorded.",
           "type": "string"
         },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "controller": {
           "anyOf": [
             {
@@ -1836,6 +1842,12 @@
         "atCursor": {
           "type": "string"
         },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "controller": {
           "anyOf": [
             {
@@ -1939,6 +1951,15 @@
             }
           ]
         },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "receivedExecutions": {
           "format": "uint64",
           "minimum": 0,
@@ -1980,6 +2001,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "text": {
@@ -2247,6 +2277,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "textBytes": {
@@ -2518,6 +2557,12 @@
       "additionalProperties": false,
       "description": "One durable public status projection. `cursor` is stable run history, not a connection-local\nsequence; clients resume strictly after it.",
       "properties": {
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "cursor": {
           "type": "string"
         },

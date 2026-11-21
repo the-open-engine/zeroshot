@@ -34,6 +34,7 @@ pub(super) fn validate_executable_bindings(
     context: super::NativeV2AdmissionContext<'_>,
 ) -> Result<(), NativeV2AdmissionError> {
     if !runtime.workspace_checkpoints
+        && !context.checkpointless_requests
         && let Some(node) = declarations
             .iter()
             .find(|node| node.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF)
@@ -149,29 +150,11 @@ fn collect_declarations(node: &GraphNode, declarations: &mut Vec<ExecutableDecla
             attempts: verifier.attempts.get(),
             kind: LeafKind::Verifier,
         }),
-        GraphNode::Seq(group) => group
-            .children
-            .as_slice()
-            .iter()
-            .for_each(|child| collect_declarations(child, declarations)),
-        GraphNode::Choice(group) => {
-            group
-                .branches
-                .as_slice()
-                .iter()
-                .for_each(|branch| collect_declarations(&branch.node, declarations));
-            if let Some(otherwise) = &group.otherwise {
-                collect_declarations(otherwise, declarations);
+        _ => {
+            for child in openengine_cluster_server::graph_verifier::graph_node_children(node) {
+                collect_declarations(child, declarations);
             }
         }
-        GraphNode::Par(group) => group
-            .branches
-            .as_slice()
-            .iter()
-            .for_each(|branch| collect_declarations(branch, declarations)),
-        GraphNode::Loop(group) => collect_declarations(&group.body, declarations),
-        GraphNode::Map(group) => collect_declarations(&group.body, declarations),
-        GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
     }
 }
 

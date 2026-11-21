@@ -464,6 +464,9 @@ async fn explicit_github_shorthand_retains_source_connection_without_matching_lo
 
 #[tokio::test]
 async fn unsupported_forge_capability_is_rejected_before_source_credential_reads() {
+    if run_without_installed_forge_credentials() {
+        return;
+    }
     use crate::source_code_provider::SourceCapability;
 
     let root = initialized_repository("unsupported-source-capability");
@@ -506,6 +509,56 @@ async fn unsupported_forge_capability_is_rejected_before_source_credential_reads
                 .contains("source-value-must-remain-unread")
         );
     }
+}
+
+fn run_without_installed_forge_credentials() -> bool {
+    const CHILD: &str = "ZEROSHOT_TEST_SOURCE_CAPABILITY_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        return false;
+    }
+    let root = TestDirectory::new("isolated-forge-credentials");
+    for program in ["gh", "glab"] {
+        #[cfg(unix)]
+        openengine_cluster_testkit::fixture::write_executable(
+            &root.0.join(program),
+            "#!/bin/sh\nprintf called > \"$0.called\"\ncat >/dev/null\nexit 1\n",
+            0o700,
+        )
+        .assert_value();
+        #[cfg(windows)]
+        std::fs::write(
+            root.0.join(format!("{program}.cmd")),
+            "@echo off\r\n> \"%~f0.called\" echo called\r\nmore >nul\r\nexit /b 1\r\n",
+        )
+        .assert_value();
+    }
+    let mut paths = vec![root.0.clone()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let test_name = std::thread::current().name().assert_value().to_owned();
+    let output = std::process::Command::new(std::env::current_exe().assert_value())
+        .args(["--exact", &test_name, "--nocapture", "--test-threads=1"])
+        .current_dir(&root.0)
+        .env(CHILD, "1")
+        .env("PATH", std::env::join_paths(paths).assert_value())
+        .output()
+        .assert_value();
+    assert!(
+        output.status.success(),
+        "isolated source capability test failed: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for program in ["gh", "glab"] {
+        let suffix = if cfg!(windows) {
+            ".cmd.called"
+        } else {
+            ".called"
+        };
+        assert!(root.0.join(format!("{program}{suffix}")).is_file());
+    }
+    true
 }
 
 fn private_source_command(root: &Path, repository: RunRepository) -> RunCommand {
@@ -1206,4 +1259,112 @@ async fn explicit_instance_selection_refuses_other_hosts_prefixes_and_unknown_pr
                 .is_err()
         );
     }
+}
+
+#[tokio::test]
+async fn context_sources_pin_explicit_and_default_branches_and_name_missing_repositories() {
+    use crate::native_v2_cli::{PreparedRunRequest, BuiltinGraphTemplate, TemplateDelivery};
+    let seed = initialized_repository("context-seed");
+    output(
+        &seed.0,
+        &[
+            "-c",
+            "user.name=Context",
+            "-c",
+            "user.email=context@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "base",
+        ],
+    );
+    output(&seed.0, &["branch", "-M", "main"]);
+    output(&seed.0, &["checkout", "-b", "stable"]);
+    output(
+        &seed.0,
+        &[
+            "-c",
+            "user.name=Context",
+            "-c",
+            "user.email=context@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "stable",
+        ],
+    );
+    let stable = output(&seed.0, &["rev-parse", "HEAD"]).trim().to_owned();
+    let main = output(&seed.0, &["rev-parse", "main"]).trim().to_owned();
+    let client = initialized_repository("context-client");
+    let bare = client.0.join("context.git");
+    output(
+        &client.0,
+        &[
+            "clone",
+            "--bare",
+            seed.0.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    output(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    for name in ["library", "contracts"] {
+        output(
+            &client.0,
+            &[
+                "config",
+                "--add",
+                &format!("url.{}.insteadOf", bare.display()),
+                &format!("https://github.com/acme/{name}.git"),
+            ],
+        );
+    }
+    let source = openengine_cluster_testkit::native_v2_source_fixture();
+    let graph = BuiltinGraphTemplate::SingleWorker
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    let mut request = PreparedRunRequest {
+        run_id: openengine_cluster_protocol::RunId::new("context-cli"),
+        intent: crate::native_v2_contract::RunSubmissionIntent {
+            title: RunTitle::new("Context pinning").assert_value(), graph, initial_input: serde_json::Value::Null,
+            runtime: openengine_cluster_protocol::RuntimePlan::new(openengine_cluster_protocol::RuntimeLane::new("codex", "openai").assert_value(), None, Default::default()),
+            environment: Some(serde_json::from_value(serde_json::json!({"contextRepositories":[{"repository":"acme/library","branch":"stable"},{"repository":"acme/contracts"}]})).assert_value()),
+            branch: None, submission_key: openengine_cluster_protocol::IdempotencyKey::new("context-cli").assert_value(),
+        },
+        connections: Default::default(), github_token: None, git_credentials: None,
+        cwd: Some(client.0.clone()), worktree: None, source_connection: None,
+        source: Some(NamedRunSource { resolved: source, dirty: false }), context_sources: Vec::new(), profile: None,
+    };
+    let mut command = test_run_command();
+    command.target = Some("docker".to_owned());
+    command.cwd = Some(client.0.clone());
+    resolve_context_sources(&command, &mut request, Some("context-secret"))
+        .await
+        .assert_value();
+    assert_eq!(
+        request
+            .context_sources
+            .iter()
+            .map(|pin| pin.revision.as_str())
+            .collect::<Vec<_>>(),
+        vec![stable.as_str(), main.as_str()]
+    );
+    assert_eq!(request.context_sources[1].branch.as_str(), "main");
+    assert!(
+        request.github_token.is_none(),
+        "lookup authority is never forwarded"
+    );
+    request.context_sources.clear();
+    request
+        .intent
+        .environment
+        .as_mut()
+        .unwrap()
+        .context_repositories[0]
+        .branch = Some(SourceBranchId::new("missing").assert_value());
+    let error = resolve_context_sources(&command, &mut request, Some("context-secret"))
+        .await
+        .assert_error()
+        .to_string();
+    assert!(error.contains("acme/library"), "{error}");
+    assert!(!error.contains("context-secret"));
 }

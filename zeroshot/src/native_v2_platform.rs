@@ -51,6 +51,7 @@ use crate::v2_run_ledger::{
 mod tests;
 
 mod contracts;
+pub(crate) mod hook_output;
 mod preparation;
 use preparation::{PreparationTask, PreparationStart, ResumePreparation};
 pub use contracts::{
@@ -66,6 +67,8 @@ pub type PlatformRunSubmission = RunSubmission;
 
 #[derive(Debug, Error)]
 pub enum NativeV2PlatformError {
+    #[error("run preparation deadline elapsed before admission")]
+    PreparationTimeout,
     #[error("{0}")]
     InvalidRequest(String),
     #[error(transparent)]
@@ -100,9 +103,12 @@ pub struct NativeV2PlatformController {
     control_turns: Arc<Mutex<BTreeMap<RunId, Weak<Mutex<()>>>>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
+    checkpointless_requests: bool,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
     run_sizes: Option<Arc<openengine_cluster_protocol::TargetRunSizesDiscovery>>,
     operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
+    local_runtime_failure_report:
+        Option<Arc<crate::native_v2_portable_controller::process::LocalRuntimeFailureReport>>,
 }
 
 #[derive(Clone)]
@@ -166,9 +172,11 @@ impl NativeV2PlatformController {
             control_turns: Arc::default(),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
+            checkpointless_requests: false,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
             run_sizes: None,
             operator_diagnostics: Arc::default(),
+            local_runtime_failure_report: None,
         };
         controller.reconcile_persisted_runs().await?;
         Ok(controller)
@@ -222,12 +230,33 @@ impl NativeV2PlatformController {
         self
     }
 
+    /// Local successors retain request history in their durable ledger after snapshot discard.
+    pub(crate) fn with_checkpointless_requests(mut self, enabled: bool) -> Self {
+        self.checkpointless_requests = enabled;
+        self
+    }
+
     pub(crate) fn with_operator_diagnostics(
         mut self,
         diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
     ) -> Self {
         self.operator_diagnostics = diagnostics;
         self
+    }
+
+    pub(crate) fn with_local_runtime_failure_report(
+        mut self,
+        report: Arc<crate::native_v2_portable_controller::process::LocalRuntimeFailureReport>,
+    ) -> Self {
+        self.local_runtime_failure_report = Some(report);
+        self
+    }
+
+    pub(crate) async fn report_local_runtime_failure(&self, cause: &str) {
+        if let Some(report) = &self.local_runtime_failure_report {
+            report.record(cause);
+            report.wait_written().await;
+        }
     }
 
     /// Reconciles durable nonterminal truth before this controller can serve any OECP method.
@@ -286,7 +315,7 @@ impl NativeV2PlatformController {
         self.require_wait_support(&request.submission.runtime)?;
         let environment =
             RunEnvironment::exact_for_submission(&request.submission, BTreeMap::new())?;
-        self.submit_inner(request, environment, RunSourceCredentials::default())
+        self.submit_with_exact_environment(request, environment)
             .await
     }
 
@@ -296,8 +325,30 @@ impl NativeV2PlatformController {
         request: RunSubmitParams,
         environment: RunEnvironment,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
-        self.submit_inner(request, environment, RunSourceCredentials::default())
-            .await
+        self.submit_with_exact_environment_and_source_credentials(
+            request,
+            environment,
+            RunSourceCredentials::default(),
+        )
+        .await
+    }
+
+    /// Local preparation must still be within its budget after submission lookup/validation.
+    pub(crate) async fn submit_with_exact_environment_until(
+        &self,
+        request: RunSubmitParams,
+        environment: RunEnvironment,
+        deadline: tokio::time::Instant,
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
+        self.submit_inner(
+            request,
+            RunSecretEnvelope {
+                environment: Arc::new(environment),
+                source_credentials: RunSourceCredentials::default(),
+            },
+            Some(deadline),
+        )
+        .await
     }
 
     /// Trusted target bootstrap with a checkout/delivery credential kept outside provider
@@ -308,7 +359,7 @@ impl NativeV2PlatformController {
         environment: RunEnvironment,
         github_token: Option<String>,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
-        self.submit_inner(
+        self.submit_with_exact_environment_and_source_credentials(
             request,
             environment,
             RunSourceCredentials {
@@ -328,17 +379,34 @@ impl NativeV2PlatformController {
         environment: RunEnvironment,
         credentials: RunSourceCredentials,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
-        self.submit_inner(request, environment, credentials).await
+        self.submit_inner(
+            request,
+            RunSecretEnvelope {
+                environment: Arc::new(environment),
+                source_credentials: credentials,
+            },
+            None,
+        )
+        .await
     }
 
     async fn submit_inner(
         &self,
         request: RunSubmitParams,
-        environment: RunEnvironment,
-        source_credentials: RunSourceCredentials,
+        secrets: RunSecretEnvelope,
+        preparation_deadline: Option<tokio::time::Instant>,
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
+        let RunSecretEnvelope {
+            environment,
+            source_credentials,
+        } = secrets;
         let RunSubmitParams { run_id, submission } = request;
+        if !self.allocator.supports_environment_teardown() {
+            crate::native_v2_admission::validate_target_environment(
+                submission.environment.as_ref(),
+            )?;
+        }
         let harnesses = self.harnesses.as_ref();
         let digest = submission_digest(&submission)?;
         let submission_key = submission.submission_key.clone();
@@ -359,6 +427,7 @@ impl NativeV2PlatformController {
             harnesses,
             self.delivery_policy,
         );
+        admission.checkpointless_requests = self.checkpointless_requests;
         if let Some(catalog) = self.run_sizes.as_deref() {
             admission = admission.with_run_sizes(catalog);
         }
@@ -366,6 +435,10 @@ impl NativeV2PlatformController {
             .admit_with_context(submission, admission)
             .await?;
         let environment = environment.for_admitted(&admitted)?;
+        if preparation_deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            return Err(NativeV2PlatformError::PreparationTimeout);
+        }
+        // Admission has begun: let the durable write settle rather than drop its future.
         let created = self
             .ledger
             .create_or_get(CreateRun {
@@ -499,6 +572,7 @@ impl NativeV2PlatformController {
             delivery_policy: self.delivery_policy,
             observability: self.observability.clone(),
             operator_diagnostics: self.operator_diagnostics.clone(),
+            local_runtime_failure_report: self.local_runtime_failure_report.clone(),
         });
         self.runtimes
             .lock()
@@ -1214,6 +1288,7 @@ impl NativeV2PlatformController {
             run_id,
             title,
             source,
+            context_sources,
             size,
             at_cursor,
             status,
@@ -1230,6 +1305,7 @@ impl NativeV2PlatformController {
             run_id,
             title,
             source,
+            context_sources,
             size,
             at_cursor,
             status,

@@ -768,6 +768,7 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
             submission_key: IdempotencyKey::new("steer-memory-budgets").unwrap(),
             submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
             admitted: crate::native_v2_contract::AdmittedRun {
+                context_sources: Vec::new(),
                 title: openengine_cluster_protocol::RunTitle::new("Steer memory budgets").unwrap(),
                 graph: serde_json::from_str(include_str!(
                     "../../../../protocol/openengine-cluster/v1/fixtures/graph/canonical/base.json"
@@ -793,6 +794,7 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
     crate::v2_run_ledger::steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run,
             text: text.clone(),

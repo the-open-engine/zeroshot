@@ -4,7 +4,9 @@ use std::path::Path;
 use openengine_cluster_protocol::{RunId, is_canonical_uuid_v7};
 use tokio::process::Command;
 
-use super::{NativeV2CliError, local_io, local_message};
+use crate::execution::platform::{FileAccess, private_file};
+use super::super::support::{CommitPaths, cleanup_temporary, write_and_commit};
+use super::{LocalRecoveryDocument, NativeV2CliError, local_io, local_message};
 
 pub(super) fn validate_local_run_id(run_id: &RunId) -> Result<(), NativeV2CliError> {
     is_canonical_uuid_v7(run_id)
@@ -120,6 +122,54 @@ pub(super) fn remove_private_bootstrap(path: &Path) {
         .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
     {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+impl LocalRecoveryDocument {
+    pub(super) fn workspace_checkpoints_enabled(&self) -> bool {
+        self.submission.runtime.workspace_checkpoints && !self.workspace_checkpoints_discarded
+    }
+
+    pub(super) fn read(path: &Path) -> Result<Self, NativeV2CliError> {
+        let bytes = std::fs::read(path).map_err(|error| {
+            let reason = if error.kind() == std::io::ErrorKind::NotFound {
+                "is missing"
+            } else {
+                "could not be read"
+            };
+            local_message(format!(
+                "workspace recovery record {} {reason}: {error}",
+                path.display()
+            ))
+        })?;
+        openengine_cluster_protocol::bounded_json_from_slice(&bytes).map_err(|_| {
+            local_message(format!(
+                "workspace recovery record {} is invalid",
+                path.display()
+            ))
+        })
+    }
+
+    pub(super) fn write(&self, path: &Path) -> Result<(), NativeV2CliError> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| local_message("workspace recovery path is invalid"))?;
+        let temporary = parent.join(format!(".workspace-recovery-{}.tmp", uuid::Uuid::now_v7()));
+        let bytes = serde_json::to_vec(self)
+            .map_err(|_| local_message("workspace recovery metadata could not be encoded"))?;
+        let result = (|| {
+            let file = private_file(&temporary, FileAccess::CreateNew).map_err(local_io)?;
+            write_and_commit(
+                file,
+                &bytes,
+                CommitPaths {
+                    temporary: &temporary,
+                    destination: path,
+                    parent,
+                },
+            )
+        })();
+        cleanup_temporary(result, &temporary)
     }
 }
 

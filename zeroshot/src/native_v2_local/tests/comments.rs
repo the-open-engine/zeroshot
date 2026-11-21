@@ -177,6 +177,7 @@ async fn software_change_pr_composition_checks_source_and_programs_without_dispa
     runtime.active_memory_mut().graph = false;
     runtime.global_agents_mut().postmortem.enabled = false;
     let submission = RunSubmission {
+        context_sources: Vec::new(),
         title: crate::native_v2_contract::RunTitle::new(
             "Compose the default software-change delivery",
         )

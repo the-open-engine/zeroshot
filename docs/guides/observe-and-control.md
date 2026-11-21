@@ -102,6 +102,13 @@ Unix epoch milliseconds, not the time the controller died. The entry is omitted 
 answers and for finished or suspended runs. `checkpoints` also includes it when applicable. These three commands
 exit 0 after a successful read, including when controller availability is lost or unknown.
 
+For a fatal runtime error, a local controller tries to retain its original cause in a private, redacted note
+of at most 4 KiB outside the ledger. Later `status` calls show that note on stderr, even if the
+ledger cannot be read, and leave it unchanged. The ledger still determines the run's status;
+the note cannot establish a terminal result or controller ownership. Storage failures can also
+prevent this best-effort report. `list` returns readable runs and warns on stderr with the ID
+and read error of each run it skips. Directories without a ledger are ignored.
+
 Local controller requests wait at most 10 seconds for an answer. This includes the status checks
 before `resume` and `checkpoints`, and the initial exchanges for `watch`, `logs` and `attach`.
 `list` checks controllers with bounded concurrency under one shared deadline. Runs that could not
@@ -343,7 +350,14 @@ storage and advertise `openengine.workspace-checkpoints/v1`. They retain that re
 failed recovery lineage and delete it after a successful run. Force-stopping a local run also
 deletes the repository, together with the checkpoints listed by every run in its recovery lineage,
 so neither the original run nor its successors list checkpoints that can no longer be restored.
-Other lineages keep theirs. Platform exposes recovery through
+Local checkpoints never expire automatically. To free the space kept by a finished failed local
+run, use `zeroshot discard-workspace RUN_ID`. It deletes checkpoint data and lists for the whole
+recovery lineage while keeping the checkout, run directory, ledger, logs and delivery recovery
+state. A second call reports `discarded: false`. Plain resume still uses the current checkout,
+with workspace checkpoints disabled; checkpoint selection and `--discard-workspace-changes`
+are refused. A running or resuming lineage must be force-stopped first. An uncontinued suspension
+must also be force-stopped, and an interrupted restore must be completed by repeating its resume.
+Other lineages keep theirs. Named-target behavior is unchanged. Platform exposes recovery through
 authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
 original capsule is removed. Platform resolves declared connections from their original references.
 Direct-target resume reuses the original source connection authorization and resolves fresh values;
@@ -420,6 +434,7 @@ that advertises `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md)
 
 ```console
 zeroshot steer RUN_ID "Prioritize the parser regression."
+zeroshot steer RUN_ID --node e2e_tester "Use the E2E service on port 3000."
 zeroshot steer RUN_ID --text-file direction.txt --target NAME
 printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin
 ```
@@ -428,7 +443,14 @@ Supply exactly one text source. An admitted, running or suspended run accepts di
 Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
-With the default standing mode, every agent conversation, including reviewers, receives each steer
+Use `--node NAME` to select the exact name of one agent in the run's admitted runtime plan.
+The node need not have started: every mapped copy and future visit with that name is eligible.
+Unknown names and non-agent nodes are rejected before recording direction. Without `--node`,
+direction goes to every agent. Node targeting uses human steering authorization and cannot be
+combined with `--network`. Both scopes default to `standing`; `--mode once` delivers once per
+matching node instance.
+
+With the default standing mode, every eligible agent conversation, including reviewers, receives each steer
 at its next tool call or in its next prompt, whichever comes first. It cannot revise a tool call
 already issued. At a tool call the steer arrives as a user message of its own on Claude Code,
 Copilot, Pi and OpenCode: the harness hands it to the model after the tool call in progress and
@@ -451,7 +473,8 @@ newline and carriage return. Text is stored and shown as given: **do not put sec
 
 Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
-byte lengths, character-safe excerpts and receiving execution references. A standing prompt receipt
+byte lengths, character-safe excerpts and receiving execution references. Receipts, status and
+vector entries include `node` only when direction targets a node. A standing prompt receipt
 is recorded when the turn carrying the steer starts and stays provisional until the turn succeeds; a
 failed turn offers the steer in the next prompt, including in a successor. A once prompt receipt is
 recorded after successful provider completion. A tool-call receipt appears when the harness shows

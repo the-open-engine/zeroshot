@@ -176,8 +176,12 @@ fn validate_controller_discovery(
     wire: &TargetDiscoveryDocument,
     authentication: TargetAuthentication,
 ) -> Result<(), TargetAuthorityError> {
-    if wire.kind != DISCOVERY_KIND
-        || wire.authentication != authentication
+    if wire.kind != DISCOVERY_KIND {
+        return Err(authority_error(format!(
+            "native-v2 controller discovery is incompatible (requires {DISCOVERY_KIND}); upgrade the Zeroshot client and target together to a release with the same wire contract"
+        )));
+    }
+    if wire.authentication != authentication
         || wire.audience != CONTROLLER_AUDIENCE
         || !valid_audience(&wire.audience)
     {
@@ -452,8 +456,12 @@ pub(super) async fn read_json_with_limit<T: DeserializeOwned>(
 pub(super) fn validate_hosted_discovery(
     wire: &TargetDiscoveryDocument,
 ) -> Result<(), TargetAuthorityError> {
-    let valid = wire.kind == DISCOVERY_KIND
-        && wire.authentication == TargetAuthentication::HostedOauth
+    if wire.kind != DISCOVERY_KIND {
+        return Err(authority_error(format!(
+            "hosted target discovery is incompatible (requires {DISCOVERY_KIND}); upgrade the Zeroshot client and target together to a release with the same wire contract"
+        )));
+    }
+    let valid = wire.authentication == TargetAuthentication::HostedOauth
         && wire.oauth.as_ref().is_some_and(|oauth| {
             oauth.device_grant_type == DEVICE_GRANT
                 && valid_device_exchange_fields(&oauth.device_exchange_fields)

@@ -14,7 +14,7 @@ use super::{
 };
 use crate::native_v2_target::TargetAuthorityError;
 
-const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v1";
+use openengine_cluster_protocol::HOSTED_RUNS_KIND;
 
 #[derive(Clone)]
 pub(in super::super) struct HostedRunsDescriptor {
@@ -293,10 +293,12 @@ pub(super) fn build_hosted_runs_descriptor(
     extensions: &TargetDiscoveryExtensions,
 ) -> Result<HostedRunsDescriptor, TargetAuthorityError> {
     let wire = extensions.hosted_runs.as_ref().ok_or_else(|| {
-        authority_error("hosted target does not advertise zeroshot.hosted-runs/v1")
+        authority_error(format!("hosted target does not advertise {HOSTED_RUNS_KIND}; upgrade the Zeroshot client and target together to a release with the same wire contract"))
     })?;
     if wire.kind != HOSTED_RUNS_KIND {
-        return Err(authority_error("hosted run discovery is incompatible"));
+        return Err(authority_error(format!(
+            "hosted run discovery is incompatible (requires {HOSTED_RUNS_KIND}); upgrade the Zeroshot client and target together to a release with the same wire contract"
+        )));
     }
     let base_url = capability_base_url(origin, &wire.base_url)?;
     let mut descriptor = compile_hosted_run_routes(base_url, &wire.route_templates)?;

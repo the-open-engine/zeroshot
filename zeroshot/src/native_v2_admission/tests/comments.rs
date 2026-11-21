@@ -28,6 +28,7 @@ pub(super) fn comment_submission() -> RunSubmission {
         },
     );
     RunSubmission {
+        context_sources: Vec::new(),
         title: RunTitle::new("Source-less comment").assert_value(),
         graph,
         initial_input: json!({"url":"https://github.com/acme/project/issues/7","body":"A report", "context":{"title":"An issue","body":"Description","reviewScope":{}}}),
@@ -63,6 +64,68 @@ async fn required_comment_delivery_needs_neither_model_nor_source() {
             .url,
         "https://github.com/acme/project/issues/7"
     );
+}
+
+#[tokio::test]
+async fn imported_comment_delivery_preserves_required_caller_inputs() {
+    let mut submission = comment_submission();
+    let body = submission.graph.root.clone();
+    submission.graph.root = GraphNode::Seq(openengine_cluster_protocol::SeqNode {
+        name: named("caller"),
+        state: submission.graph.initial_input.clone(),
+        children: NonEmptyVec::new(vec![
+            GraphNode::Profile(openengine_cluster_protocol::ProfileNode {
+                name: named("publish_review"),
+                profile: openengine_cluster_protocol::RunProfileName::new("review").assert_value(),
+                body: Some(Box::new(body)),
+                initial_input: Some(submission.graph.initial_input.clone()),
+            }),
+            GraphNode::Succeed(openengine_cluster_protocol::SucceedNode {
+                name: named("caller_done"),
+                output: PayloadType::Null,
+                bindings: Vec::new(),
+            }),
+        ])
+        .assert_value(),
+        promoted_state_paths: Vec::new(),
+    });
+    NativeV2Admission
+        .validate_profile(
+            &submission.graph,
+            &submission.runtime,
+            DeliveryPolicy::Required,
+        )
+        .await
+        .assert_value();
+
+    let GraphNode::Seq(root) = &mut submission.graph.root else {
+        panic!("caller")
+    };
+    let GraphNode::Profile(profile) = &mut root.children.as_mut_slice()[0] else {
+        panic!("profile")
+    };
+    let PayloadType::Record { fields } = profile.initial_input.as_mut().assert_value() else {
+        panic!("profile input")
+    };
+    let context = fields
+        .get_mut(&"context".parse().assert_value())
+        .assert_value();
+    let PayloadType::Record { fields } = &mut context.value_type else {
+        panic!("context")
+    };
+    fields
+        .get_mut(&"reviewScope".parse().assert_value())
+        .assert_value()
+        .value_type = PayloadType::Record {
+        fields: BTreeMap::new(),
+    };
+    assert!(matches!(
+        NativeV2Admission.validate_profile(
+            &submission.graph, &submission.runtime, DeliveryPolicy::Required
+        ).await,
+        Err(NativeV2AdmissionError::InvalidCommentDelivery(detail))
+            if detail.contains("must pass unchanged through profile inputs")
+    ));
 }
 
 #[tokio::test]

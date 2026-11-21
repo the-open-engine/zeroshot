@@ -85,6 +85,7 @@ fn credential_collisions_preserve_raw_failure_context_through_both_budgets() {
         ("ordinary-user", "assertion failed: causal detail"),
         ("assertion", "assertion failed: causal detail"),
         ("error", "error: unresolved symbol"),
+        ("error", "error\x1b[0m\x1b[1m: unresolved symbol"),
         ("panic", "panic: causal detail"),
         ("panicked", "thread case panicked at source.rs:64"),
         ("traceback", "Traceback (most recent call last)"),

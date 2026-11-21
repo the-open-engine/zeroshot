@@ -33,6 +33,7 @@ fn profile_operations() -> (
         set_default: true,
     };
     let run = RunProfileRunRequest {
+        context_sources: Vec::new(),
         environment: prepared.intent.environment.clone(),
         run_id: prepared.run_id,
         profile: selector.clone(),

@@ -65,6 +65,14 @@ const RECOVERED_COMMIT_SUMMARIES = new Map([
     '8523568a8b4cca268e4302500ab8cacb088f62ae',
     "Replace the README's boxed architecture diagram with a compact flow through admission, execution, adapters, durable state and delivery.",
   ],
+  [
+    '667904ddac8926802fbbd74569b755d2499907ee',
+    'Add the README tagline that local runs use your existing agent subscription.',
+  ],
+  [
+    '57a713a48c8cf3d8ba5ff754b086a5859b4ee04c',
+    'Remove the duplicate subscription sentence from the README tagline and describe the graph as your process for solo users too.',
+  ],
 ]);
 const CATEGORIES = Object.freeze([
   ['breaking', 'Breaking changes'],
@@ -253,6 +261,25 @@ function renderReleaseNotes({ version, previousTag, commits }) {
     `Changes since [${previousTag}](${REPOSITORY_URL}/compare/${previousTag}...${releaseTag}).`,
     '',
   ];
+  // This immutable commit changed a public graph control without a breaking-change footer.
+  // Include its upgrade guidance only when the commit belongs to this release's range.
+  if (commits.some(({ hash }) => hash === '7353598ff2025de12acd60f1be15223317fa918b')) {
+    lines.push(
+      '## Compatibility notes',
+      '',
+      `### Map overflow control ([#1504](${REPOSITORY_URL}/pull/1504))`,
+      '',
+      'Maps no longer expose the `overflow` group control or its `ok|overflow` labels. ' +
+        'Update custom graphs that read this control before upgrading.',
+      '',
+      '`maxItems` now limits active complete item bodies, rather than input length. ' +
+        'Maps process the full input unless authored control flow stops them. ' +
+        'For example, three input items with `maxItems: 2` now run with up to two item bodies active; ' +
+        'previously the map ran no items and reported `overflow`. ' +
+        'Graphs that need an input-size limit must check it explicitly before entering the map.',
+      ''
+    );
+  }
   for (const [category, heading] of CATEGORIES) {
     const entries = groups.get(category);
     if (entries.length === 0) continue;

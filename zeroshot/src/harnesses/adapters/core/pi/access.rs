@@ -40,14 +40,7 @@ pub(super) fn provider_access(provider: PiProvider) -> ProviderAccessContract {
             &["OPENROUTER_API_KEY"],
             &[&["OPENROUTER_API_KEY"]],
         ),
-        PiProvider::Gateway => ProviderAccessContract::new(
-            false,
-            "gateway",
-            // The wire protocol is authored alongside the endpoint, never inferred from the
-            // caller-owned model identifier.
-            &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"],
-            &[&["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"]],
-        ),
+        PiProvider::Gateway => ProviderAccessContract::selectable_gateway(),
         PiProvider::Bedrock => ProviderAccessContract::new(
             false,
             "bedrock",

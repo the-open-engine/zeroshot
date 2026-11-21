@@ -17,8 +17,13 @@ Official local builds include every adapter below. Install each native CLI separ
 
 Each adapter owns its CLI version range. Local `run`, checkpoint `resume` and ACP sessions check
 all agent lanes before any node starts, using the captured launch search path and native environment.
-Each distinct executable is probed once with a 60-second deadline. An older, incompatible or unreadable
-version is refused with the lane, executable, reported version, supported range and installation step.
+Each distinct executable is probed once. Local probes use the earlier of their own 60-second limit
+and the controller's remaining preparation budget (`ZEROSHOT_PREPARATION_TIMEOUT`, 600 seconds by
+default), shared with checkpoint restoration and runtime composition. Expiry cancels preparation,
+confirms helper process-tree cleanup and refuses admission, even after a successful late response.
+Workspace replacement finishes once begun; the CLI's extra stop grace allows cleanup only.
+ACP retains an independent 60-second limit per probe. An older, incompatible or unreadable version
+is refused with the lane, executable, reported version, supported range and installation step.
 
 | Harness    | Minimum | First unsupported release | Basis                                                                     |
 | ---------- | ------- | ------------------------- | ------------------------------------------------------------------------- |

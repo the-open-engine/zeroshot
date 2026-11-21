@@ -40,6 +40,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"{\"response\":\"do
         &["OPENAI_API_KEY"],
     );
     let admitted = admit(RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Mixed harness usage").assert_value(),
         graph: graph(false),

@@ -94,10 +94,10 @@ pub enum LocalCompositionError {
     ResolvedSource,
     #[error("local run identity could not be assigned")]
     RunIdentity,
-    #[error(
-        "setup and startup require a Docker target; local runs use the invoking machine environment"
-    )]
-    PreparationRequiresTarget,
+    #[error("context repositories require a Docker target")]
+    ContextRequiresTarget,
+    #[error("local environment scripts require Linux or macOS with Bash")]
+    EnvironmentScriptsUnavailable,
     #[error(transparent)]
     SourceDelivery(#[from] crate::native_v2_admission::NativeV2AdmissionError),
     #[error(transparent)]
@@ -265,6 +265,7 @@ pub(crate) fn local_submission(
         runtime: intent.runtime.clone(),
         environment: intent.environment.clone(),
         source,
+        context_sources: Vec::new(),
         submission_key: intent.submission_key.clone(),
     }
 }
@@ -272,12 +273,17 @@ pub(crate) fn local_submission(
 pub(crate) fn validate_local_environment(
     environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<(), LocalCompositionError> {
-    if environment.is_some_and(|environment| {
-        environment.setup.is_some()
-            || environment.startup.is_some()
-            || !environment.connections.is_empty()
-    }) {
-        return Err(LocalCompositionError::PreparationRequiresTarget);
+    if let Some(environment) = environment {
+        if !environment.context_repositories.is_empty() {
+            return Err(LocalCompositionError::ContextRequiresTarget);
+        }
+        if !cfg!(any(target_os = "linux", target_os = "macos"))
+            && (environment.setup.is_some()
+                || environment.startup.is_some()
+                || environment.teardown.is_some())
+        {
+            return Err(LocalCompositionError::EnvironmentScriptsUnavailable);
+        }
     }
     Ok(())
 }
@@ -656,7 +662,7 @@ pub(crate) async fn check_lane_versions(
     runtime: &RuntimePlan,
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
-    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    preparation: Option<crate::native_v2_portable_controller::RuntimePreparation>,
 ) -> Result<(), LocalCompositionError> {
     check_lane_executables(runtime, native_environment, working_directory)?;
     let registry = crate::harnesses::HarnessRegistry::local();
@@ -682,7 +688,8 @@ pub(crate) async fn check_lane_versions(
                         native: &native,
                         search_path: &search_path,
                         workspace: working_directory,
-                        stopping: stopping.clone(),
+                        stopping: preparation.as_ref().map(|control| control.stopping.clone()),
+                        preparation_deadline: preparation.as_ref().map(|control| control.deadline),
                     },
                 )
                 .await

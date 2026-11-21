@@ -49,8 +49,8 @@ use thiserror::Error;
 
 pub const JSON_RPC_VERSION: &str = "2.0";
 pub const PROTOCOL_NAME: &str = "openengine.cluster";
-/// The only wire protocol version accepted by Cluster Protocol v1 servers.
-pub const PROTOCOL_VERSION: &str = "openengine.cluster/v1";
+/// The single current wire contract accepted at Cluster Protocol initialization.
+pub const PROTOCOL_VERSION: &str = "openengine.cluster/v2";
 pub const BASE_PROFILE: &str = "openengine.cluster/base/v1";
 
 pub const PARSE_ERROR: i64 = -32700;
@@ -194,7 +194,9 @@ fn protocol_version_schema(_generator: &mut SchemaGenerator) -> Schema {
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-#[error("protocol version mismatch: expected {PROTOCOL_VERSION}, received {received}")]
+#[error(
+    "protocol version mismatch: expected {PROTOCOL_VERSION}, received {received}; upgrade the Zeroshot client and server together to a release with the same wire contract"
+)]
 pub struct ProtocolVersionMismatch {
     pub received: String,
 }

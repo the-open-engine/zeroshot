@@ -1,10 +1,11 @@
-param([switch]$Ui)
+param([switch]$Ui, [switch]$BuildOnly)
 $ErrorActionPreference = 'Stop'
 $features = if ($Ui) { @('--features', 'zeroshot/ui') } else { @() }
 
 # Cargo's Windows Job forbids breakaway. Build first, then launch tests outside that Job
 # so detached controllers can exercise their actual lifetime and restrictive-Job behavior.
-$artifacts = @(cargo test --workspace @features --no-run --message-format=json | ForEach-Object {
+# One compiler job limits concurrent metadata mappings on hosted Windows.
+$artifacts = @(cargo test --workspace @features --jobs 1 --no-run --message-format=json | ForEach-Object {
     $message = $_ | ConvertFrom-Json
     if ($message.reason -eq 'compiler-message' -and $message.message.rendered) {
         Write-Host $message.message.rendered
@@ -17,6 +18,15 @@ $tests = @($artifacts | Where-Object {
 })
 if ($tests.Count -eq 0) { throw 'Cargo produced no workspace test executables' }
 
+# The observation suite invokes isolated wire-contract controls. Compile their leaf tests here
+# as well, before CI starts the bounded native execution host (including the non-UI profile).
+$wireTarget = if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR 'wire-contract' } else { Join-Path 'target' 'wire-contract' }
+cargo test --locked --package zeroshot --lib --bin zeroshot --target-dir (Join-Path $wireTarget 'current') --jobs 1 --no-run
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+cargo test --locked --manifest-path crates/openengine-cluster-testkit/tests/released-wire-contract/Cargo.toml --target-dir (Join-Path $wireTarget 'released') --jobs 1 --no-run
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($BuildOnly) { exit 0 }
+
 $failed = $false
 foreach ($test in $tests) {
     Push-Location (Split-Path -Parent $test.manifest_path)
@@ -28,5 +38,5 @@ foreach ($test in $tests) {
     }
 }
 
-cargo test --workspace @features --doc
+cargo test --workspace @features --jobs 1 --doc
 if ($failed -or $LASTEXITCODE -ne 0) { exit 1 }

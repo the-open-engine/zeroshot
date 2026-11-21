@@ -863,3 +863,95 @@ fn tool_activity_success_failure_unknown_and_repeated_events() {
         assert!(logs[1].text.contains(&format!("status={status}")));
     }
 }
+
+#[test]
+fn tool_activity_preserves_reused_ids_across_assistant_steps() {
+    let mut events = Vec::new();
+    for (pass, failed, result) in [(1, false, "FIRST_TOOL_OK"), (2, true, "SECOND_TOOL_FAILED")] {
+        events.push(json!({"type":"message_start","message":{"role":"assistant"}}));
+        events.push(json!({"type":"message_end","message":{
+            "role":"assistant","stopReason":"toolUse",
+            "usage":{"input":pass,"output":pass},
+            "content":[{"type":"toolCall","id":"reused-native-id","name":"probe","arguments":{"pass":pass}}]
+        }}));
+        let call = json!({"type":"tool_execution_start","toolCallId":"reused-native-id","toolName":"probe","args":{"pass":pass}});
+        let completion = json!({"type":"tool_execution_end","toolCallId":"reused-native-id","toolName":"probe","result":{"content":[{"type":"text","text":result}]},"isError":failed});
+        events.extend([call.clone(), call, completion.clone(), completion]);
+    }
+    events.push(json!({"type":"message_start","message":{"role":"assistant"}}));
+    events.push(assistant("final answer"));
+    let source = events
+        .iter()
+        .map(|event| format!("{event}\n"))
+        .collect::<String>();
+    for chunk_size in [1, 97, source.len()] {
+        let mut transcript = PiTranscript::new(Vec::new());
+        let mut logs = Vec::new();
+        for chunk in source.as_bytes().chunks(chunk_size) {
+            logs.extend(transcript.push(chunk));
+        }
+        logs.extend(transcript.finish_stream());
+        let activity = logs
+            .iter()
+            .filter(|log| log.text.starts_with("Pi tool "))
+            .collect::<Vec<_>>();
+        assert_eq!(activity.len(), 4, "chunk size {chunk_size}");
+        for (entry, expected) in activity.iter().zip([
+            "Pi tool call: probe id=reused-native-id status=unknown\n{\"pass\":1}",
+            "Pi tool completed: probe id=reused-native-id status=success\n{\"content\":[{\"text\":\"FIRST_TOOL_OK\",\"type\":\"text\"}]}",
+            "Pi tool call: probe id=reused-native-id status=unknown\n{\"pass\":2}",
+            "Pi tool completed: probe id=reused-native-id status=error\n{\"content\":[{\"text\":\"SECOND_TOOL_FAILED\",\"type\":\"text\"}]}",
+        ]) {
+            assert_eq!(entry.text, expected);
+        }
+        let usage = transcript.token_usage().unwrap();
+        assert_eq!(usage.input_tokens.get(), 3);
+        assert_eq!(usage.output_tokens.get(), 3);
+        let super::PiAttempt::Complete(result) = transcript.finish(None).unwrap() else {
+            panic!("expected the final answer after the tool failure");
+        };
+        assert_eq!(result.message, "final answer");
+    }
+}
+
+#[test]
+fn tool_activity_deduplication_survives_user_and_tool_result_messages() {
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut transcript = PiTranscript::new(Vec::new()).reporting_user_messages(sender);
+    let mut calls = Vec::new();
+    for id in ["first-call", "second-call"] {
+        calls.push(json!({"type":"tool_execution_start","toolCallId":id,"toolName":"probe","args":{"id":id}}));
+        calls.push(
+            json!({"type":"tool_execution_end","toolCallId":id,"result":{"id":id},"isError":false}),
+        );
+    }
+    let mut events = vec![json!({"type":"message_start","message":{"role":"assistant"}})];
+    events.extend(calls.clone());
+    for role in ["user", "toolResult"] {
+        let message = json!({"role":role,"content":"delivered guidance"});
+        events.push(json!({"type":"message_start","message":message}));
+        events.extend(calls.clone());
+        events.push(json!({"type":"message_end","message":message}));
+        events.extend(calls.clone());
+    }
+    let mut logs = Vec::new();
+    for event in events {
+        logs.extend(transcript.push(format!("{event}\n").as_bytes()));
+    }
+    logs.extend(transcript.finish_stream());
+    assert_eq!(logs.len(), 4);
+    for (entries, id) in logs.chunks_exact(2).zip(["first-call", "second-call"]) {
+        assert!(
+            entries[0]
+                .text
+                .starts_with(&format!("Pi tool call: probe id={id} "))
+        );
+        assert!(
+            entries[1]
+                .text
+                .starts_with(&format!("Pi tool completed: probe id={id} status=success"))
+        );
+    }
+    assert_eq!(receiver.try_recv().unwrap(), "delivered guidance");
+    assert!(receiver.try_recv().is_err());
+}
