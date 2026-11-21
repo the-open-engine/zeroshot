@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::process::Stdio;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -201,12 +202,28 @@ fn profile_imports_validate_nested_local_catalog_and_refuse_untrusted_or_named_i
             "Nested local profile",
             "--profile",
             "local:parent",
+            "--detach",
             "--input",
         ])
         .arg(fixture.root.path("null.json"))
         .output()
         .unwrap();
     success(&executed);
+    let receipt: Value = serde_json::from_slice(&executed.stdout).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = fixture.json(&["status", id]);
+        if status["status"]["phase"] == "finished" {
+            assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "imported local run did not finish: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
     let admitted = run_directories(&fixture);
     assert_eq!(admitted.len(), 1);
     let shown = fixture.json(&["profile", "show", "parent"]);
