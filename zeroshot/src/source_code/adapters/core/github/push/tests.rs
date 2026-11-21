@@ -28,6 +28,9 @@ async fn failed_push_records_bounded_redacted_stdout_and_stderr() {
         repository.root.path(),
         "failing-git",
         r#"#!/bin/sh
+case " $* " in
+    *" config --local "* | *" ls-files --stage "*) exec /usr/bin/git "$@" ;;
+esac
 /usr/bin/printf 'stdout-safe-ref=refs/heads/rejected\n'
 /usr/bin/printf 'stdout-token=%s\n' "$GH_TOKEN"
 /usr/bin/printf 'stdout-auth=%s\n' "$GIT_CONFIG_VALUE_1"
@@ -187,6 +190,7 @@ fn observed_git(
         &format!(
             r#"#!/bin/sh
 case " $* " in
+  *" config --local "* | *" ls-files --stage "*) exec /usr/bin/git "$@" ;;
   *" ls-remote "*)
     reference=''
     for argument do reference=$argument; done

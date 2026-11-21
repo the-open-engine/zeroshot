@@ -51,10 +51,11 @@ impl HttpGit {
     }
 
     pub(super) fn git_program(&self, repository: &TempRepo) -> PathBuf {
-        git(
-            &repository.workspace,
-            &["config", "--local", "zeroshotTest.httpOrigin", &self.url],
-        );
+        std::fs::write(
+            repository.workspace.join(".git/zeroshot-test-http-origin"),
+            &self.url,
+        )
+        .assert_value();
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/native_v2_delivery/tests/transport_fixture.sh")
     }

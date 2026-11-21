@@ -308,15 +308,11 @@ pub(crate) fn local_delivery_authority(
 ) -> crate::source_code_provider::adapters::core::GhCliDeliveryAuthority {
     use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 
-    git(
-        workspace,
-        &[
-            "config",
-            "--local",
-            "zeroshotTest.httpOrigin",
-            path_text(remote),
-        ],
-    );
+    std::fs::write(
+        workspace.join(".git/zeroshot-test-http-origin"),
+        path_text(remote),
+    )
+    .assert_value_with("record the fixture HTTP origin");
     let program = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src/native_v2_delivery/tests/transport_fixture.sh");
     GhCliDeliveryAuthority::new(GhCliAuthorityConfig {

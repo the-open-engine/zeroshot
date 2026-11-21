@@ -331,6 +331,9 @@ async fn https_authority_is_private_and_diagnostics_redact_raw_and_encoded_passw
     let repository = Repository::new();
     let program = repository.root.path().join("print-authentication");
     let source = r#"#!/bin/sh
+case " $* " in
+    *" config --local "* | *" ls-files --stage "*) exec /usr/bin/git "$@" ;;
+esac
 printf '%s\n' "$GIT_CONFIG_VALUE_1"
 printf '%s\n' 'private-test-password' >&2
 exit 17
@@ -1223,3 +1226,6 @@ async fn local_checkpoint_after_rewrite_needs_a_merge_to_recover_published_ances
     assert_eq!(git(&repository.remote, &["rev-parse", branch]), merged);
     assert_eq!(git(workspace, &["rev-parse", "HEAD"]), merged);
 }
+
+#[path = "tests/workspace_configuration.rs"]
+mod workspace_configuration;
