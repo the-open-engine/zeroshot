@@ -7,6 +7,7 @@ enum ApiRetry {
     Status,
     ReviewSync,
     Operation,
+    Exhausted,
 }
 
 /// Bounded provider-owned source API failure detail.
@@ -41,10 +42,11 @@ impl SourceApiFailure {
     }
 
     fn retryable_review_sync(&self) -> bool {
-        self.retry != ApiRetry::Status
-            || self
-                .status
-                .is_some_and(|status| matches!(status, 404 | 409 | 422 | 429 | 500..=599))
+        self.retry != ApiRetry::Exhausted
+            && (self.retry != ApiRetry::Status
+                || self
+                    .status
+                    .is_some_and(|status| matches!(status, 404 | 409 | 422 | 429 | 500..=599)))
     }
 
     fn authentication_failed(&self) -> bool {
@@ -115,10 +117,11 @@ impl SourceDeliveryError {
         match self {
             Self::Unavailable => true,
             Self::Api(failure) => {
-                failure.retry == ApiRetry::Operation
-                    || failure
-                        .status
-                        .is_some_and(|status| matches!(status, 429 | 500..=599))
+                failure.retry != ApiRetry::Exhausted
+                    && (failure.retry == ApiRetry::Operation
+                        || failure
+                            .status
+                            .is_some_and(|status| matches!(status, 429 | 500..=599)))
             }
             Self::Command(failure) => failure.retryable_transport(),
             Self::Rejected | Self::Identity(_) | Self::Repairable(_) => false,
@@ -126,10 +129,24 @@ impl SourceDeliveryError {
     }
 
     pub fn temporary(mut self) -> Self {
-        if let Self::Api(failure) = &mut self {
+        if let Self::Api(failure) = &mut self
+            && failure.retry != ApiRetry::Exhausted
+        {
             failure.retry = ApiRetry::Operation;
         }
         self
+    }
+
+    /// An operation-owned retry allowance cannot be renewed by outer polling.
+    pub(crate) fn exhausted(mut self) -> Self {
+        if let Self::Api(failure) = &mut self {
+            failure.retry = ApiRetry::Exhausted;
+        }
+        self
+    }
+
+    pub(crate) fn retries_exhausted(&self) -> bool {
+        matches!(self, Self::Api(failure) if failure.retry == ApiRetry::Exhausted)
     }
 
     /// A successful authenticated read proved this API refusal is about permission.

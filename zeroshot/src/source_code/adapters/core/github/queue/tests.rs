@@ -74,6 +74,7 @@ case "$*" in
     printf '%s' "$((index + 1))" > "$HOME/reads"
     if [ "$index" -gt 0 ] && [ -f "$HOME/require-completion" ]; then [ -f "$HOME/completed" ] || exit 31; fi
     if [ "$index" -gt {last} ]; then index={last}; fi
+    if [ -f "$HOME/policy-$index.stderr" ]; then /bin/cat "$HOME/policy-$index.json"; /bin/cat "$HOME/policy-$index.stderr" >&2; exit 1; fi
     /bin/cat "$HOME/policy-$index.json" ;;
 *) exit 19 ;;
 esac ;;
@@ -92,6 +93,65 @@ fn admission(root: &std::path::Path, action: &str) -> GhCliDeliveryAuthority {
         &[queued(false, false)],
         &[("enqueuePullRequest", action)],
     )
+}
+
+#[tokio::test]
+async fn policy_read_reconciliation_exhaustion_preserves_ambiguous_queue_submission() {
+    let message = "Something went wrong while executing your query on 2026-11-21T18:29:14Z. Please include `2790:35FB30:99F13F9:E90DBDA:6B01E2F9` when reporting this issue.";
+    for token in ["test-token", "exhausted"] {
+        let root = tempfile::tempdir().assert_value();
+        let error_page = json!({"errors":[{"message":message}]});
+        let provider = queue_authority(
+            root.path(),
+            &[
+                queued(false, false),
+                error_page.clone(),
+                error_page.clone(),
+                error_page,
+                queued(false, false),
+            ],
+            &[(
+                "enqueuePullRequest",
+                "printf 'HTTP 503: unavailable %s\\n' \"$GH_TOKEN\" >&2; exit 1",
+            )],
+        );
+        for index in 1..=3 {
+            std::fs::write(
+                root.path().join(format!("policy-{index}.stderr")),
+                format!("gh: {message}\n"),
+            )
+            .assert_value();
+        }
+        let credential = SourceDeliveryCredential::token(token);
+        let error = provider
+            .request_merge(&review(), credential, &TestReviewCheckpoint)
+            .await
+            .assert_error();
+        assert!(error.retries_exhausted());
+        assert_eq!(error.api_status(), None);
+        assert!(!error.retryable_operation());
+        assert!(!error.retryable_review_sync());
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("HTTP 503"));
+        assert!(!diagnostic.contains(token));
+        assert!(
+            diagnostic.len() <= crate::source_code_provider::MAX_SOURCE_API_DIAGNOSTIC_BYTES + 32
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("reads")).assert_value(),
+            "4"
+        );
+        let withdrawal = provider
+            .withdraw_merge_request(&review(), credential)
+            .await
+            .assert_error();
+        assert!(
+            withdrawal
+                .to_string()
+                .contains("submission remains unconfirmed")
+        );
+        assert_eq!(enqueue_count(root.path()), 1);
+    }
 }
 
 #[tokio::test]

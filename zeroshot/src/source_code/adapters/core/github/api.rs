@@ -14,6 +14,8 @@ const MAX_API_OUTPUT_BYTES: usize = MAX_JOB_LOG_BYTES;
 const MAX_API_ERROR_BYTES: usize = 64 * 1024;
 const MAX_API_DIAGNOSTIC_STREAM_BYTES: usize = 8 * 1024;
 
+mod policy_read;
+
 impl GhCliDeliveryAuthority {
     pub(super) async fn api(
         &self,
@@ -367,6 +369,7 @@ pub(super) fn command_failure(
 struct ApiFailure {
     error: SourceDeliveryError,
     unsupported_escape_sequences: bool,
+    policy_read_transient: bool,
 }
 
 impl From<SourceDeliveryError> for ApiFailure {
@@ -374,6 +377,7 @@ impl From<SourceDeliveryError> for ApiFailure {
         Self {
             error,
             unsupported_escape_sequences: false,
+            policy_read_transient: false,
         }
     }
 }
@@ -433,6 +437,7 @@ async fn bounded_output(
         Ok(Ok((status, (), ()))) => {
             // Classify complete native stderr before credential redaction or bounds.
             let unsupported_escape_sequences = output.unsupported_escape_sequences();
+            let policy_read_transient = status.code() == Some(1) && policy_read::transient(&output);
             let error = output.failure(
                 Some(status),
                 &format!("command exited unsuccessfully: {status}"),
@@ -441,6 +446,7 @@ async fn bounded_output(
             Err(ApiFailure {
                 unsupported_escape_sequences: unsupported_escape_sequences
                     && error.api_status().is_none(),
+                policy_read_transient,
                 error,
             })
         }

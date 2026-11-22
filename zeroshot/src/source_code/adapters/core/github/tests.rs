@@ -120,6 +120,10 @@ mod merge_tests;
 #[path = "queue/tests.rs"]
 mod queue_tests;
 
+#[cfg(unix)]
+#[path = "policy_read_tests.rs"]
+mod policy_read_tests;
+
 #[path = "policy/rules_tests.rs"]
 mod rules_tests;
 

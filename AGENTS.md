@@ -1618,9 +1618,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   when their tree has no staged difference. Other unfinished Git operations return raw status for
   repair before staging or reconciliation. Delivery does not inspect or filter user-installed tooling.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
-  merge queues/deferrals, and succeeds only after observing the exact merged result. Merge methods
-  must satisfy repository capabilities, base-ref branch protection, and every active applicable
-  ruleset returned by GitHub. Either branch-protection view can require linear history; neither
+  merge queues/deferrals, and succeeds only after observing the exact merged result. Merge-method
+  and policy-snapshot queries alone use the same read-only retry mechanism for GitHub's complete
+  native slurped generic query-execution error: three attempts per read, waiting one then two seconds
+  within one API deadline, restarting pagination from page one. Classification precedes diagnostic redaction;
+  unknown/mixed/incomplete responses keep existing handling and no HTTP status is invented.
+  Exhaustion stays terminal through merge reconciliation, retaining the mutation's diagnostic and
+  submission uncertainty, and cannot restart through delivery polling;
+  ordinary pending CI/queue polling still waits until cancellation by default. Fresh complete policy
+  and the exact reviewed head remain required before enqueue, merge, or dependent head updates.
+  Merge methods must satisfy repository capabilities, base-ref branch protection, and every active
+  applicable ruleset returned by GitHub. Either branch-protection view can require linear history; neither
   overrides a stricter restriction. Direct merge submission reads all rule pages with an independent
   cursor; PR observation and queues do not require direct-method discovery. Incomplete rule reads and
   empty method intersections stop merge submission with policy diagnostics. Merge queues choose their

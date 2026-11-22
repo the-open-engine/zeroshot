@@ -78,6 +78,7 @@ pub(in crate::native_v2_delivery) enum Script {
 pub(in crate::native_v2_delivery) struct FakeGitHub {
     pub(super) commit_message_authority: Option<Arc<dyn SourceDeliveryAuthority>>,
     pub(super) feedback_authority: Option<(tokio::sync::Mutex<GhCliDeliveryAuthority>, PathBuf)>,
+    pub(super) policy_authority: Option<GhCliDeliveryAuthority>,
     remote: PathBuf,
     script: Script,
     pub(super) pushed: AtomicBool,
@@ -106,6 +107,7 @@ impl FakeGitHub {
         Self {
             commit_message_authority: None,
             feedback_authority: None,
+            policy_authority: None,
             remote,
             script,
             pushed: AtomicBool::new(false),
@@ -707,6 +709,9 @@ impl SourceDeliveryAuthority for FakeGitHub {
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewObservation, SourceDeliveryError> {
+        if let Some(authority) = &self.policy_authority {
+            return authority.inspect_review(review, credential).await;
+        }
         if matches!(self.script, Script::PolicyForbidden) {
             return Err(SourceDeliveryError::api(
                 Some(403),
@@ -811,10 +816,15 @@ impl SourceDeliveryAuthority for FakeGitHub {
 
     async fn request_merge(
         &self,
-        _review: &SourceReviewReceipt,
+        review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
-        _checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
+        checkpoint: &dyn crate::source_code_provider::SourceReviewCheckpoint,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
+        if let Some(authority) = &self.policy_authority {
+            return authority
+                .request_merge(review, credential, checkpoint)
+                .await;
+        }
         if matches!(self.script, Script::MergeFailed) {
             return Err(SourceDeliveryError::api(
                 None,
@@ -853,6 +863,9 @@ impl SourceDeliveryAuthority for FakeGitHub {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
         self.withdrawn_reviews.lock().unwrap().push(review.clone());
+        if let Some(authority) = &self.policy_authority {
+            return authority.withdraw_merge_request(review, credential).await;
+        }
         if matches!(self.script, Script::PreflightMerged) {
             return Ok(SourceMergeWithdrawal::Merged {
                 merge_revision: "c".repeat(40),
