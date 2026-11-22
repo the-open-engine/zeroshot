@@ -301,7 +301,9 @@ impl GhCliDeliveryAuthority {
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<PolicySnapshot, SourceDeliveryError> {
-        let value = self.api(&query_arguments(review)?, credential).await?;
+        let value = self
+            .policy_api(&query_arguments(review)?, credential)
+            .await?;
         let mut snapshot = classify_policy(value, review)?;
         if matches!(
             snapshot.state,
@@ -362,7 +364,7 @@ impl GhCliDeliveryAuthority {
             return Ok(merge_policy::MergeMethod::Queue);
         }
         let value = self
-            .api(&merge_policy::query_arguments(review)?, credential)
+            .policy_api(&merge_policy::query_arguments(review)?, credential)
             .await?;
         merge_policy::classify(value, review)
     }
@@ -584,6 +586,11 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
                 .await
             {
                 Ok(outcome) => Ok(outcome),
+                Err(error) if error.retries_exhausted() => Err(self.policy_read_exhausted(
+                    error.with_context(failure.error),
+                    "during merge reconciliation",
+                    credential,
+                )),
                 Err(_) => Err(failure.error.with_context(format!(
                     "Merge request for {}#{} into {} using {merge_method:?} failed. \
                      Check GitHub's rejection and base-branch policy before retrying delivery.",
