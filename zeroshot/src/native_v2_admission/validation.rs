@@ -226,11 +226,12 @@ fn validate_binding_kinds(
             }
         })?;
         if matches!(binding, NodeRuntimeBinding::Script { .. })
-            && (declaration.kind != LeafKind::Step || declaration.instructions.is_some())
+            && declaration.instructions.is_some()
         {
             return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
                 node: declaration.name.clone(),
-                detail: "script bindings require a step without agent instructions".to_owned(),
+                detail: "script bindings require a step or verifier without agent instructions"
+                    .to_owned(),
             });
         }
         if let NodeRuntimeBinding::Decision { .. } = binding {

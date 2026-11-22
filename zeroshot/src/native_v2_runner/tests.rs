@@ -334,6 +334,38 @@ async fn admitted_role_plan_cannot_be_overridden_by_a_request() {
     ));
 }
 
+#[test]
+fn script_verifier_plan_preserves_role_and_response_contract() {
+    let mut admitted = admitted();
+    let script = serde_json::json!({"kind":"script","command":["python3","probe.py"]});
+    let mut graph = serde_json::to_value(&admitted.graph.root).assert_value();
+    graph["children"][0]
+        .as_object_mut()
+        .assert_value()
+        .remove("instructions");
+    admitted.graph.root = serde_json::from_value(graph.clone()).assert_value();
+    let mut runtime = serde_json::to_value(&admitted.runtime).assert_value();
+    runtime["nodes"]["left"] = script.clone();
+    admitted.runtime = serde_json::from_value(runtime).assert_value();
+    let plan = NodeRolePlan::from_admitted(&admitted).assert_value();
+    let mut invocation = request("run", "left", (1, 1)).invocation;
+    invocation.instructions = None;
+    invocation.binding = serde_json::from_value(script).assert_value();
+    let resolved = plan.resolve(&invocation).assert_value();
+    assert_eq!(resolved.role, NodeRole::Verifier);
+    assert!(matches!(
+        resolved.response,
+        NodeResponseContract::Verifier { .. }
+    ));
+
+    graph["children"][0]["instructions"] = serde_json::json!("Agent instructions");
+    admitted.graph.root = serde_json::from_value(graph).assert_value();
+    assert!(matches!(
+        NodeRolePlan::from_admitted(&admitted),
+        Err(NodeRunnerError::InvalidRole)
+    ));
+}
+
 #[tokio::test]
 async fn stalled_session_open_is_cancellable_and_does_not_lock_other_nodes() {
     let driver = Arc::new(FakeDriver::default());

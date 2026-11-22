@@ -180,7 +180,7 @@ counters, so the four token counters do not overlap and can be added.
 When `complete` is `false`, the totals retain known usage but at least one invocation's usage is
 missing or unusable. An omitted cache counter means at least one invocation did not report that
 counter; its run total is unknown, not zero. Cache counters can be omitted even when `complete` is
-`true`. Script steps record zero for all four counters and preserve known cache totals.
+`true`. Script nodes record zero for all four counters and preserve known cache totals.
 Previously recorded runs retain their original numbers.
 
 ## Failure evidence and mapped executions
