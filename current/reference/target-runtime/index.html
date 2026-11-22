@@ -1329,6 +1329,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#saved-profile-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saved-profile imports
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hosted-workspace-checkpoint-opt-out" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2359,6 +2370,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#saved-profile-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saved-profile imports
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hosted-workspace-checkpoint-opt-out" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2556,14 +2578,57 @@ independently of their harness/provider lanes; zeroshot defines no AWS shapes or
 <p>Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See <a href="../../project/harness-adapters/">Harness adapters</a> for availability and
 provider support.</p>
+<h2 id="saved-profile-imports">Saved-profile imports<a class="headerlink" href="#saved-profile-imports" title="Permanent link">&para;</a></h2>
+<p>A host that expands saved-profile dependencies during its existing profile-run operation may
+advertise this independent optional discovery extension:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"saved_profile_imports"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.saved-profile-imports/v1"</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
+</code></pre></div>
+<p>The marker contains only <code>kind</code>. Its absence or a different kind keeps imported saved profiles
+unsupported by the CLI. It adds no routes and changes no compatibility versions, profile
+selectors, authentication or submission identities. The CLI fetches the selected parent's preview,
+checks this capability, then sends the existing <code>RunProfileRunRequest</code> with its <code>profile</code> selector.
+It never fetches child profiles or sends expanded bodies. Profiles without imports keep their
+existing behavior. Authored inline graphs and local profiles with imports still require local
+execution. <code>--validate-only</code> refuses remote imports because complete validation requires host
+admission; it does not report an unresolved dependency graph as valid.</p>
+<p>Hosts use <code>zeroshot_engine::native_v2_admission::profile_expansion::{expand_profile_imports,
+ProfileExpansionError}</code>. The typed function takes the authored parent <code>GraphSpec</code>, <code>RuntimePlan</code>,
+its optional root <code>RunProfileName</code> (supply it for a saved parent), and a synchronous read-only
+catalog lookup. For example, with a host-owned <code>BTreeMap&lt;RunProfileName, (GraphSpec, RuntimePlan)&gt;</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">graph</span><span class="p">,</span><span class="w"> </span><span class="n">runtime</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expand_profile_imports</span><span class="p">(</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="n">parent_graph</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="n">parent_runtime</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nb">Some</span><span class="p">(</span><span class="o">&amp;</span><span class="n">parent_name</span><span class="p">),</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="o">|</span><span class="n">name</span><span class="o">|</span><span class="w"> </span><span class="nb">Ok</span><span class="p">(</span><span class="n">catalog</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">).</span><span class="n">cloned</span><span class="p">()),</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</code></pre></div>
+<p>Resolve and authorize the parent selector and every dependency from <strong>one immutable snapshot</strong> in
+the parent's scope. Unqualified same-scope names are sufficient; storage and authorization remain
+host responsibilities. Do not assemble a catalog from successive mutable remote reads or accept
+client-supplied <code>body</code>/<code>initialInput</code> expansions. The helper rejects supplied expansions, missing
+profiles, cycles, incompatible child policies and expanded node/depth/import-byte limits. It
+preserves input bindings and child schemas, qualifies node/control/worker/network identities
+deterministically, and materializes each agent's effective lane relative to the parent runtime.
+The local profile store uses this same linker while preserving its raw stored-byte limit.</p>
+<p>After expansion, apply the host's usual provider-access materialization, runtime catalog, connection
+selection, graph/input verification, delivery policy and admitted-definition byte limit before
+allocating a run. Persist the expanded graph and runtime as the admitted/recovery definition; retain
+authored references in profile storage and editors. The helper does not perform admission or grant
+authority. Advertise the marker only when the profile-run handler follows this contract, including
+when callers bypass the CLI. Existing MCP tool definitions and shared skills need no changes;
+hosted services adopt the helper and capability with their native dependency update.</p>
 <h2 id="hosted-workspace-checkpoint-opt-out">Hosted workspace checkpoint opt-out<a class="headerlink" href="#hosted-workspace-checkpoint-opt-out" title="Permanent link">&para;</a></h2>
 <p><code>RuntimePlan.workspaceCheckpoints</code> defaults to <code>true</code>. A compatible named target may explicitly
 allow <code>false</code> per run with this independent discovery extension:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"workspace_checkpoint_opt_out"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-checkpoint-opt-out/v1"</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">"workspace_checkpoint_opt_out"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-checkpoint-opt-out/v1"</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">}</span>
 </code></pre></div>
 <p>The strict marker contains only <code>kind</code>. It does not change <code>openengine.workspace-checkpoints/v1</code>,
 recovery routes, wire versions or authentication. Missing or different versions retain refusal.
@@ -2744,7 +2809,7 @@ selection while provider <code>modelId</code> capability and wire-model mappings
 command translated to the singular RPC contract uses its authored <code>modelId</code> as that session's model.
 Contained targets use a private Copilot home and require the canonical <code>COPILOT_GITHUB_TOKEN</code>
 connection instead.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"harness"</span><span class="p">:</span><span class="w"> </span><span class="s2">"copilot"</span><span class="p">,</span><span class="w"> </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"github"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"auto"</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"harness"</span><span class="p">:</span><span class="w"> </span><span class="s2">"copilot"</span><span class="p">,</span><span class="w"> </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"github"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"auto"</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p>Model IDs pass unchanged to the Copilot process. When a registry entry with <code>apiKeyCommand</code> must use
 Copilot's singular provider contract, its authored <code>modelId</code> becomes the RPC session model and its
@@ -2759,12 +2824,12 @@ without expiry metadata are supplied once when each provider process starts.</p>
 <h2 id="workspace-export-protocol">Workspace export protocol<a class="headerlink" href="#workspace-export-protocol" title="Permanent link">&para;</a></h2>
 <p>Hosted targets can advertise workspace downloads independently of resume/checkpoints. Add this
 outer discovery extension alongside the existing <code>hosted_runs</code> extension:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">"workspace_export"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-export/v1"</span><span class="p">,</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">"route_template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/native-v2/runs/{run_id}/export-workspace"</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">"workspace_export"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.workspace-export/v1"</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">"route_template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/native-v2/runs/{run_id}/export-workspace"</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>TargetWorkspaceExportDiscovery</code> is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
@@ -2776,7 +2841,7 @@ variables, query, fragment, traversal, or origin. The client escapes the run ide
 and never follows redirects.</p>
 <p>The client sends an authenticated POST with <code>Accept: application/x-tar</code>, <code>Cache-Control: no-store</code>,
 and a strict JSON <code>RunExportWorkspaceParams</code> body:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"runId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RUN_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"fromCheckpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CHECKPOINT_ID"</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"runId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RUN_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"fromCheckpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CHECKPOINT_ID"</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p>Omit <code>fromCheckpoint</code> for the latest retained workspace. Path and body run identity must agree.
 Checkpoint IDs select entry snapshots and remain opaque. The server owns authorization, retention,
@@ -2817,7 +2882,7 @@ contract, not a new OECP method. The generated protocol schema includes its requ
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-21">21 November 2026</time>
+    Last updated <time datetime="2026-11-22">22 November 2026</time>
   </span>
 
     

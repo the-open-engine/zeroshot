@@ -18,7 +18,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/execution/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/runtimes-and-connections/</loc>
@@ -126,7 +126,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/target-runtime/</loc>
-         <lastmod>2026-11-21</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/admission/</loc>
@@ -142,7 +142,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/graph/</loc>
-         <lastmod>2026-11-20</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/lifecycle/</loc>
