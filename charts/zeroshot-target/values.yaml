@@ -1,0 +1,15 @@
+image:
+  repository: ghcr.io/the-open-engine/zeroshot-target
+  tag: '' # Defaults to the chart's appVersion.
+
+publicOrigin: http://127.0.0.1:8080
+
+storage:
+  size: 20Gi
+  storageClassName: null # Uses the cluster default.
+
+resources: {}
+
+nodeSelector:
+  kubernetes.io/os: linux
+  kubernetes.io/arch: amd64

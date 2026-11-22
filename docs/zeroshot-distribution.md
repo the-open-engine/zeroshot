@@ -21,6 +21,7 @@ description: 'The zeroshot distribution contract defines canonical releases, pla
 | Graph design skill   | npm `skills/zeroshot-graph-design/SKILL.md`; release asset `zeroshot-graph-design-skill.md` |
 | Plan skill           | npm `skills/zeroshot-plan/SKILL.md`; release asset `zeroshot-plan-skill.md`                 |
 | Target image         | `ghcr.io/the-open-engine/zeroshot-target`                                                   |
+| Target Helm chart    | `oci://ghcr.io/the-open-engine/charts/zeroshot-target`                                      |
 | Python wheel release | `zeroshot-python-vX.Y.Z_1`                                                                  |
 | Python package       | `the-open-engine-zeroshot==X.Y.Z.post1` when PyPI publication is enabled                    |
 | Minor documentation  | `vX.Y/` at its newest patch, including Python SDK revision `1`                              |
@@ -74,9 +75,9 @@ those staged versions.
 | ---- | ------------------------------------------------------------------------------------------------------ |
 | 1    | Build and smoke all native archives.                                                                   |
 | 2    | Generate and verify `SHA256SUMS`.                                                                      |
-| 3    | Build and smoke `docker/zeroshot-target/Dockerfile` from the same commit.                              |
+| 3    | Build and smoke the target image and package the Helm chart from the same commit.                      |
 | 4    | Create or verify the canonical GitHub Release and its exact assets.                                    |
-| 5    | Publish the image version, source-commit, and eligible `latest` tags.                                  |
+| 5    | Publish the image tags, then the matching Helm chart version.                                          |
 | 6    | Pack, install, smoke, and publish `@the-open-engine-company/zeroshot`.                                 |
 | 7    | Build and publish Python SDK revision `1` as an immutable GitHub wheel release.                        |
 | 8    | Publish that wheel set to PyPI; use `publish_pypi: false` only when trusted publishing is unavailable. |

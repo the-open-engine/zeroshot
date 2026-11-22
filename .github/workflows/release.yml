@@ -34,6 +34,7 @@ concurrency:
 
 env:
   ZEROSHOT_IMAGE: ghcr.io/the-open-engine/zeroshot-target
+  ZEROSHOT_CHART: ghcr.io/the-open-engine/charts/zeroshot-target
 
 jobs:
   plan:
@@ -500,6 +501,35 @@ jobs:
       - name: Install pinned script dependencies
         run: npm ci --ignore-scripts
 
+      - name: Package the versioned target Helm chart
+        shell: bash
+        env:
+          TAG_EXISTS: ${{ needs.plan.outputs.tag-exists }}
+        run: |
+          set -euo pipefail
+          chart=charts/zeroshot-target
+          if [[ ! -f "$chart/Chart.yaml" && "$TAG_EXISTS" == "true" ]]; then
+            echo "Release source predates the target Helm chart"
+            exit 0
+          fi
+          staged="$RUNNER_TEMP/zeroshot-target-chart"
+          cp -R "$chart" "$staged"
+          node - "$staged/Chart.yaml" <<'NODE'
+          const fs = require('node:fs');
+          const yaml = require('js-yaml');
+          const filename = process.argv[2];
+          const chart = yaml.load(fs.readFileSync(filename, 'utf8'));
+          chart.annotations = {
+            ...chart.annotations,
+            'org.opencontainers.image.revision': process.env.RELEASE_COMMIT,
+          };
+          fs.writeFileSync(filename, yaml.dump(chart));
+          NODE
+          mkdir -p image-artifact
+          helm package "$staged" --version "$RELEASE_VERSION" --app-version "$RELEASE_VERSION" \
+            --destination image-artifact
+          helm lint --strict "image-artifact/zeroshot-target-$RELEASE_VERSION.tgz"
+
       - name: Stage explicit Zeroshot package version
         run: node scripts/distribution.js stage-version --tag "$RELEASE_TAG"
 
@@ -571,7 +601,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: zeroshot-target-image-v${{ needs.plan.outputs.version }}
-          path: image-artifact/zeroshot-target.tar
+          path: image-artifact/
           if-no-files-found: error
 
   image-publish:
@@ -678,6 +708,54 @@ jobs:
         run: |
           mkdir -p "$DOCKER_CONFIG"
           docker pull "$ZEROSHOT_IMAGE:$RELEASE_VERSION"
+
+      - name: Authenticate Helm to GHCR
+        if: hashFiles('image-artifact/zeroshot-target-*.tgz') != ''
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s\n' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish or verify the immutable target Helm chart
+        if: hashFiles('image-artifact/zeroshot-target-*.tgz') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          filename="zeroshot-target-$RELEASE_VERSION.tgz"
+          published="$(mktemp -d)"
+          pull_log="$RUNNER_TEMP/zeroshot-chart-pull.log"
+          if helm pull "oci://$ZEROSHOT_CHART" --version "$RELEASE_VERSION" \
+            --destination "$published" >"$pull_log" 2>&1; then
+            # Helm archives contain build-time tar timestamps. Compare every packaged file.
+            python3 - "image-artifact/$filename" "$published/$filename" <<'PY'
+          import sys
+          import tarfile
+
+          def chart_files(path):
+              files = {}
+              with tarfile.open(path, "r:gz") as archive:
+                  for member in archive:
+                      if not member.isfile() or member.name in files:
+                          raise SystemExit(f"Unexpected chart archive entry: {member.name}")
+                      files[member.name] = archive.extractfile(member).read()
+              return files
+
+          if chart_files(sys.argv[1]) != chart_files(sys.argv[2]):
+              raise SystemExit("Published Helm chart differs from the exact release input")
+          PY
+            echo "$ZEROSHOT_CHART:$RELEASE_VERSION is already published"
+          elif grep --quiet --fixed-strings "$ZEROSHOT_CHART:$RELEASE_VERSION: not found" "$pull_log"; then
+            helm push "image-artifact/$filename" "oci://${ZEROSHOT_CHART%/*}"
+          else
+            cat "$pull_log" >&2
+            exit 1
+          fi
+
+      - name: Verify anonymous Helm installation input
+        if: hashFiles('image-artifact/zeroshot-target-*.tgz') != ''
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/zeroshot-anonymous-docker
+          HELM_REGISTRY_CONFIG: ${{ runner.temp }}/zeroshot-anonymous-helm/config.json
+        run: helm pull "oci://$ZEROSHOT_CHART" --version "$RELEASE_VERSION" --destination "$RUNNER_TEMP"
 
   publish:
     needs: [plan, image-input, manifest]
