@@ -371,7 +371,7 @@ async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
         r#"{
             "harness":"codex",
             "provider":"openai",
-            "size":"small",
+            "size":"host",
             "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
         }"#,
     )
