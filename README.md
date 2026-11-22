@@ -189,8 +189,8 @@ Run locally on your Claude, ChatGPT or Copilot subscription,
 [self-host with Docker](docker/zeroshot-target/README.md), or share graphs and run on
 [zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API keys.
 
-zeroshot sends no telemetry. The CLI contacts GitHub only to install or update, and otherwise only
-the model providers, Git hosts and targets you set up. See
+zeroshot sends no telemetry. Installation and updates fetch releases from GitHub. Runs use the
+model providers, Git hosts and targets you configure. See
 [network access](docs/reference/installation.md#network-access).
 
 ## Community

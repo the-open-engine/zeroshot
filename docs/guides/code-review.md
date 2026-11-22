@@ -14,7 +14,7 @@ It does not install dependencies or start applications, services or browsers.
 ## What the graph does
 
 ```text
-triage                 summary and at most six review units
+triage                 summary and instructions to form at most six review units
 discover (parallel)
   per unit:            two broad reviews, a design review
   whole change:        contracts, claims
@@ -40,11 +40,11 @@ ranges. Another finalizer does the same for findings outside every unit. The rep
 the final findings by severity and writes the comment. The native publisher posts it after every
 agent has settled. The native header records the captured revisions once.
 
-Every agent is read-only: it inspects the checkout and the diff of the admitted head against its
+The graph instructs agents to inspect the checkout and the diff of the admitted head against its
 merge base with the captured base revision, without changing tracked files. A change with N units
-runs 4N + 5 agent executions. A crashed agent is retried once. Any other agent failure stops the run before publication. Additional review units wait for map
-capacity. Finding
-problems is a successful review.
+runs 4N + 5 agent executions before retries. A crashed agent is retried once. Any other agent failure
+stops the run before publication. Each map processes at most eight review units concurrently.
+Finding problems is a successful review.
 
 A confirmed Claude usage quota refusal bypasses crash retries. Its failure context preserves
 reset information and guidance to [resume after usage becomes available](observe-and-control.md#restart-or-resume-a-failed-run).
@@ -73,8 +73,8 @@ credentials belong to the native node and are not declared on the review agents.
 
 ## Run the review
 
-Select a clean checkout already at the PR head. zeroshot refuses a mismatch instead of switching
-or resetting the worktree.
+Select a checkout at the PR head with no tracked changes. zeroshot refuses a mismatch instead of
+switching or resetting the worktree.
 
 ```console
 zeroshot run --title "Code review PR 123" \

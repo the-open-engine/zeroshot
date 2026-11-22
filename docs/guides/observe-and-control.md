@@ -408,9 +408,10 @@ zeroshot force-stop RUN_ID
 The command asks the controller to stop active work and writes the resulting status as JSON. Read
 status first if another operator may already have stopped the run, or if it may have completed.
 
-If a local controller does not answer within 10 seconds, `force-stop` exits non-zero and names the
-run and the controller PID recorded at readiness. The request stays queued and takes effect if the
-controller answers again. The command does not kill the controller process.
+`force-stop` waits up to 10 seconds for the local controller, or 100 seconds if the run has a
+`teardown` script. On timeout it exits non-zero and names the run and the controller PID recorded at
+readiness. The request stays queued and takes effect if the controller answers again. The command
+does not kill the controller process.
 
 Python follows the same rule. A timeout or task cancellation detaches observation;
 `await run.force_stop()` changes the run lifetime.
@@ -499,11 +500,10 @@ With the default standing mode, every eligible agent conversation, including rev
 at its next tool call or in its next prompt, whichever comes first. It cannot revise a tool call
 already issued. At a tool call the steer arrives as a user message of its own on Claude Code,
 Copilot, Pi and OpenCode: the harness hands it to the model after the tool call in progress and
-keeps it in the conversation. It is never placed inside a tool result, which a model may refuse to
-follow. Codex has no such channel and receives the steer with the tool call's hook context, which
-it keeps. A steer of any permitted size arrives whole either way. Subagents do not receive steers:
-on Claude Code a message sent while a subagent works reaches the node's own conversation when the
-subagent returns. A message the harness never shows in the conversation is not counted as
+keeps it in the conversation. Codex receives the steer with native hook context. Hermes appends
+it as a plugin notice to the retained tool message. A steer of any permitted size arrives whole.
+On Claude Code, a message sent while a subagent works reaches the node's own conversation when
+the subagent returns. A message the harness never shows in the conversation is not counted as
 received, and the steer is delivered with that conversation's next prompt instead. A steer that
 reached a conversation is not delivered to it a second time, in either mode. A small model can
 take a large message that arrives while it works for tool output and ignore it; steer again if a
@@ -516,15 +516,14 @@ new conversations receive the standing direction. A lost acknowledgement can cau
 Text must be nonblank UTF-8, at most 262,144 bytes, with no NUL or control characters except tab,
 newline and carriage return. Text is stored and shown as given: **do not put secrets in a steer**.
 
-Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
 byte lengths, character-safe excerpts and receiving execution references. Receipts, status and
 vector entries include `node` only when direction targets a node. A standing prompt receipt
 is recorded when the turn carrying the steer starts and stays provisional until the turn succeeds; a
 failed turn offers the steer in the next prompt, including in a successor. A once prompt receipt is
-recorded after successful provider completion. A tool-call receipt appears when the harness shows
-the message in the conversation, or on Codex when its hook has returned. A receipt records that
-the conversation holds the steer, not that the model followed it.
+recorded after successful provider completion. A tool-call receipt records the harness showing
+the message, OpenCode storing it, Codex returning hook context, or Hermes confirming the retained
+notice. Receipts track delivery.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:
 
@@ -534,9 +533,7 @@ zeroshot vectors show RUN_ID STEER_ID
 ```
 
 The record includes `steer` and `steer_receipt` entries in event order. Add `--target NAME` to these
-commands for a direct target advertising steering and run vectors. Tool-call receipts record a
-message the harness showed (on Codex, acknowledged hook context), while once prompt receipts record
-successful provider completion. Standing prompt receipts may be provisional, as described above.
+commands for a direct target advertising steering and run vectors.
 
 ### Send a peer message
 

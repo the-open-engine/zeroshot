@@ -26,9 +26,10 @@ remain available for `zeroshot resume`; explicit `zeroshot force-stop` keeps its
 discard behavior. Closing the invoking terminal still leaves a detached run running.
 
 The controller allows up to 30 seconds from its first termination request for shutdown, including
-startup, cleanup and terminal persistence. Repeated signals do not extend that deadline. An earlier
-OS grace deadline, `SIGKILL`, OOM or unavailable storage can prevent cleanup or a terminal record;
-later recovery reports an unrecorded controller loss as `runtime_lost`.
+startup, cleanup and terminal persistence. A configured `teardown` adds 60 seconds. Repeated
+signals do not extend that deadline. An earlier OS grace deadline, `SIGKILL`, OOM or unavailable
+storage can prevent cleanup or a terminal record. Later recovery reports an unrecorded controller
+loss as `runtime_lost`.
 
 On Windows, detached controllers retain their Ctrl-C and Ctrl-Break protections. They install no
 handler for console close, logoff or system shutdown events, which can terminate them without
@@ -51,15 +52,13 @@ Network messages default to `once`, with receipt tracking by recipient node inst
 retries, fresh conversations and successors. `standing` tracks each provider conversation; a
 continued conversation retains messages kept in its saved session and a fresh conversation receives
 them again. At a tool call a message arrives as a user message of its own on Claude Code, Copilot,
-Pi and OpenCode and with the hook context on Codex; a conversation that holds a message is not
-given it again in either mode. Both modes preserve sender exclusion. Human broadcast steering keeps its standing default
-and instruction precedence. Peer messages remain attributed context under authored instructions.
+Pi and OpenCode, with hook context on Codex, or in a retained plugin notice on Hermes. A
+conversation that holds a message is not given it again in either mode. Both modes preserve sender
+exclusion. Human broadcast steering keeps its standing default and instruction precedence. Peer
+messages remain attributed context under authored instructions.
 
-The existing vector ledger owns messages and receipts. A tool-call receipt is recorded when the
-harness shows the message in the conversation, or on Codex when its hook has returned.
-Once prompt delivery records a receipt after successful provider completion. Standing
-prompt receipts are recorded at preparation and remain provisional until successful completion.
-Receipts do not prove model compliance. A missing acknowledgement leaves delivery pending and can cause a repeat.
+The existing vector ledger owns messages and receipts. Peer messages use the same
+[receipt rules as human steering](../guides/observe-and-control.md#steer-a-run).
 
 ## Auto-research
 
@@ -101,14 +100,14 @@ PR and merge delivery consider feedback by default. Use `--no-pr-feedback` to ig
 the [`git_delivery` binding](runtime-plan.md#git_delivery) describes the runtime
 setting.
 
-Automatic repairs accept feedback only from current writers on the target repository. GitHub
+Automatic repairs accept human feedback only from current writers on the target repository. GitHub
 confirms effective write or admin permission for issue comments, submitted reviews (including
 unwritten change requests), inline comments and replies. GitLab confirms active Developer-or-higher
 project membership, including inherited and invited membership, for discussion notes. The account
 must be active. Enterprise Edition also requires active `membership_state`; awaiting membership is
 ignored. Community Edition omits that field, so its response is accepted only after instance metadata
 confirms the edition. Unknown or malformed membership status fails the feedback read. Permissions
-are checked again on each inspection and bound to the author's stable numeric identity. Organization
-association, PR authorship, requested-reviewer status and bot status grant no exception. Confirmed
-read-only access or nonmembership is ignored and does not start another worker/reviewer round.
-Failed or incomplete permission lookups stop delivery or use its existing retry handling.
+are checked again on each inspection and bound to the author's stable numeric identity. GitHub App
+bot feedback is authorized by GitHub's API actor type and stable identity on the bound repository.
+Confirmed read-only access or nonmembership is ignored and does not start another worker/reviewer
+round. Failed or incomplete permission lookups stop delivery or use its existing retry handling.

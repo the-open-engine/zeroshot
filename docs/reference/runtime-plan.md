@@ -22,14 +22,14 @@ independent of a provider's context window and the selected run size.
 
 ## Document fields
 
-`RuntimePlan` is a closed JSON object. The following four fields are required; unknown fields are rejected.
+`RuntimePlan` is a closed JSON object. Unknown fields are rejected.
 
-| Field      | Value                                                                              |
-| ---------- | ---------------------------------------------------------------------------------- |
-| `harness`  | Registered harness of the default lane                                             |
-| `provider` | Provider of the default lane, supported by the selected harness                    |
-| `size`     | `small`, `medium`, or `large`                                                      |
-| `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings) |
+| Field      | Required | Value                                                                              |
+| ---------- | -------- | ---------------------------------------------------------------------------------- |
+| `harness`  | Yes      | Registered harness of the default lane                                             |
+| `provider` | Yes      | Provider of the default lane, supported by the selected harness                    |
+| `size`     | No       | Target-owned size identifier. Omit it to use the target's default.                 |
+| `nodes`    | Yes      | Object mapping each executable graph node name to a [node binding](#node-bindings) |
 
 Optional `workspaceCheckpoints` is a boolean that defaults to `true`. Local CLI runs may set it
 to `false` to skip workspace snapshot storage and the Restic dependency. Run history, structured
@@ -59,7 +59,8 @@ carries its own [`lane`](#per-node-lanes). `size` applies to the whole run. Mode
 window, output limit, session scope, and connections are chosen per node.
 
 `size` is a run-level resource class. zeroshot records it with the run and reports it in run
-status; the hosting target decides what resources each class receives.
+status. Use `zeroshot target sizes NAME` to list a named target's sizes. See
+[discovery and sizes](target-runtime.md#discovery-and-sizes).
 
 `nodes` keys are graph node names: 1 to 128 bytes matching `[A-Za-z_][A-Za-z0-9_.-]*`.
 
@@ -69,7 +70,6 @@ This plan binds the three agent nodes of the built-in `software-change` template
 {
   "harness": "claude",
   "provider": "anthropic",
-  "size": "medium",
   "nodes": {
     "worker": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "sessionScope": "node_instance" },
     "acceptance": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "effort": "high" },
@@ -111,8 +111,8 @@ rather than a bypass argument.
 
 ## Node bindings
 
-`kind` selects an agent, script, decision, Git delivery, or comment delivery binding. Fields belonging to another
-kind are rejected.
+`kind` selects an agent, script, decision, request, Git delivery, or comment delivery binding.
+Fields belonging to another kind are rejected.
 
 ### `script`
 
@@ -158,8 +158,9 @@ may keep indexes or models warm across script invocations. Service lifecycle is 
 | `sessionScope`  | No       | `execution` (default) or `node_instance`                           |
 | `connections`   | No       | [Connection declarations](#connections); empty when omitted        |
 
-zeroshot passes `model` and `effort` to the harness unchanged. It keeps no model catalog and does not
-check whether a model supports the chosen effort. `contextWindow` and `maxTokens` are caller
+Supply the provider's model ID. Each adapter formats native arguments, such as OpenCode's
+`<provider>/<model>` locator. zeroshot keeps no model catalog and does not check whether a model
+supports the chosen effort. `contextWindow` and `maxTokens` are caller
 declarations, never inferences: they are validated at admission, emitted only into the
 `pi/gateway` model entry, and otherwise left unset for the provider to default. An absent value
 retains the provider's own limit; a present value must be a positive integer in the stated range.
@@ -224,9 +225,9 @@ statistic. Use normal graph guards on the signal to select an already authored b
 A decision binding cannot supply the postmortem's agent model. Graphs with no agent bindings
 skip Active Memory setup; mixed graphs inherit a postmortem model from an agent binding.
 
-Declare exactly `DECISION_ENDPOINT` and `DECISION_API_KEY` through named connections. Local
-runs resolve these fields from the invoking environment; hosted runs use the target's connection
-resolver. Supply the full POST endpoint, including its path:
+Declare exactly `DECISION_ENDPOINT` and `DECISION_API_KEY` through named connections. Local runs
+resolve these fields from saved connections or the invoking environment. Named targets use their
+connection resolver. Supply the full POST endpoint, including its path:
 
 | Service                        | Example `DECISION_ENDPOINT`                          |
 | ------------------------------ | ---------------------------------------------------- |
@@ -305,7 +306,6 @@ on the default `codex`/`openai` lane, and both reviewers run on Claude Code:
 {
   "harness": "codex",
   "provider": "openai",
-  "size": "medium",
   "nodes": {
     "worker": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "sessionScope": "node_instance" },
     "acceptance": {
@@ -406,8 +406,8 @@ name. Structural nodes (`seq`, `choice`, `par`, `loop`, `map`) and terminal node
 `connections` maps a connection key to the exact environment field names the node may receive.
 Values come from the submission environment or a target connection store at run time.
 
-The example below is the shape a Pi `gateway` lane uses: `GATEWAY_API` names its wire protocol and
-is Pi-specific. Other lanes list only their own provider's fields.
+Pi, Copilot, OpenCode and Hermes `gateway` lanes use the fields below. `GATEWAY_API` selects the
+[wire protocol](#harness-and-provider).
 
 ```json
 {
@@ -445,7 +445,7 @@ the fields of several providers.
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------- |
 | `harness`        | Yes      | As in `RuntimePlan`                                                                                     |
 | `provider`       | Yes      | As in `RuntimePlan`                                                                                     |
-| `size`           | No       | As in `RuntimePlan`; default `medium`                                                                   |
+| `size`           | No       | As in `RuntimePlan`; omit it to use the target's default                                                |
 | `model`          | Yes      | As in an `agent` binding                                                                                |
 | `effort`         | No       | As in an `agent` binding                                                                                |
 | `contextWindow`  | No       | As in an `agent` binding                                                                                |
@@ -458,16 +458,14 @@ the fields of several providers.
 runtime configuration. They are caller declarations and are never inferred from the model
 identifier.
 
-Every executable node gets an `agent` binding with these values, except nodes that use a delivery
-worker. Those get a `git_delivery` binding as described below.
+The CLI applies these values to agent bindings. It uses `request`, `git_delivery` or
+`comment_delivery` bindings for the corresponding built-in worker references.
 
 When selecting the built-in `software-change` template, omitted `sessionScope` defaults to
 `node_instance` for `worker` and `execution` for its reviewers. The worker retains its session
 through implementation and every repair; reviewers start fresh each pass. An explicit uniform
 `sessionScope` still applies to every agent. Exact runtime plans and saved graphs retain their
 authored scopes; use `node_instance` on `worker` in an exact plan to retain its session.
-When using the updated template with an older exact runtime config, remove its `review_repair`
-and `delivery_repair` bindings. Existing saved profiles keep their stored graph and bindings.
 
 For `auto-research`, an omitted uniform `sessionScope` defaults to `node_instance` for `explorer`,
 `synthesizer`, `challenger`, and `researcher`, and `execution` for `reviewer`. The normal round has
@@ -487,13 +485,12 @@ omits delivery. The existing `worker` handles delivery repairs. With
 reviewer already handle the round records and delivery description.
 `single-worker` has no delivery modes.
 
-The CLI inserts a `git_delivery` binding with no forge connection for push, or
-`{"github": ["GH_TOKEN"]}` for PR and merge. Git transport uses the selected
-[source credentials](../concepts/targets.md#source-and-delivery-credentials).
+The CLI inserts a `git_delivery` binding. PR and merge delivery resolve the default connection for
+the selected GitHub or GitLab repository when the binding has no explicit connection. Git
+transport uses the selected [source credentials](../concepts/targets.md#source-and-delivery-credentials).
 `--no-pr-feedback` (requires pull-request or merge delivery) sets `pullRequestFeedback` to `ignore`.
-When feedback is enabled, the forge adapter admits repair requests only from current repository
-writers, with permissions rechecked on each inspection. See [Execution](../concepts/execution.md)
-for the GitHub and GitLab authorization rules and lookup failure behavior.
+See [delivery feedback](execution.md#delivery-feedback) for GitHub and GitLab authorization
+rules and lookup failure behavior.
 
 A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind
 all agent nodes itself. Software-change uses `worker`, `acceptance`, and `code` with every delivery
@@ -519,7 +516,6 @@ Omitting it preserves existing behavior. Nodes sharing a lane can have different
 {
   "harness": "claude",
   "provider": "anthropic",
-  "size": "small",
   "nodes": {
     "writer": { "kind": "agent", "model": "your-model" },
     "reviewer": {

@@ -439,11 +439,10 @@ starting point is recorded, restarts at the root with new conversations and asks
 
 Every request has a deadline: `timeoutMs` from creation, 7 days when omitted, at most 30 days.
 Acceptance is strictly before the deadline. At or after it, `answer` checks expiry before content,
-records an `expiry` vector and starts the `timeout` successor, then exits 1 naming it. Without a
-guard on the request node's `timeout` error, an expiry continues with the next node like any other
-unrouted node error; a graph in which a late answer must not proceed routes it, as the
-example does. Local and direct targets have no request timer. Inbox reads report overdue requests as `expired` without
-changing the suspended run or starting anything.
+records an `expiry` vector and starts the `timeout` successor, then exits 1 naming it. The successor
+fails with `unhandled` if no guard in the graph reads the request node's error selector. The example
+routes `timeout` to an explicit failure. Local and direct targets have no request timer. Inbox reads
+report overdue requests as `expired` without changing the suspended run or starting anything.
 
 `inbox list` returns `requests` and optional `nextAfter` in run ID order. Pass that cursor with
 `--after`, which locally must be a run ID; `--limit` accepts 1 through 100, default 50. Answered

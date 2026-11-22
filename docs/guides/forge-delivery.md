@@ -47,13 +47,12 @@ so changes you make after a failure can be delivered with the run's own work. Ru
 delivery keep their normal behavior. Delivery shows Git's warning when a run adds an unregistered
 embedded repository, but permits the gitlink; register it as a submodule when others need to clone it.
 
-**Breaking change:** in-place delivery commits on the branch you checked out and pushes the
-remote branch with that same name, including earlier unpushed commits. It creates no
-`zeroshot/v2-…` branch. `--pr` and `--ship` open the PR/MR from that branch into a different
-upstream branch when configured, otherwise the remote's default branch. Starting on the target
-itself is refused before agents start: use a feature branch or `--worktree`. Explicit `--push`
-may publish `main`. Delivery never force-pushes; non-fast-forward and forge policy refusals name
-the branch and stop without an agent repair round.
+In-place delivery commits on the checked-out branch and pushes to the remote branch with the same
+name, including any existing unpushed commits. `--pr` and `--ship` open the PR or MR from that branch
+into a different upstream branch when configured, or the remote's default branch. If you're on the
+target branch, start from a feature branch or use `--worktree`. Explicit `--push` can publish
+`main`. A non-fast-forward push or forge policy refusal names the branch and stops delivery before
+an agent repair round.
 
 Delivery can publish existing committed work without creating another commit and confirm that same
 published commit again on resume. Before a fresh

@@ -1049,7 +1049,8 @@ class Run:
         """Force-stop this run and wait for its durable terminal result.
 
         Returns:
-            The existing terminal result, or a failed result whose reason is force_stopped.
+            The terminal result. A stop before graph completion normally reports force_stopped.
+            Stopping during the postmortem preserves the recorded graph result.
 
         Raises:
             RunSuspendedError: If the run is suspended and already has a successor, which a
