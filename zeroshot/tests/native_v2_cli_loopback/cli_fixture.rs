@@ -238,6 +238,7 @@ pub(crate) fn assert_watch_notification(stdout: &str, run_id: &str) {
 pub(crate) fn cli_prerequisites_available() -> bool {
     for prerequisite in [
         "dbus-run-session",
+        "dbus-send",
         "gnome-keyring-daemon",
         "secret-tool",
         "timeout",
