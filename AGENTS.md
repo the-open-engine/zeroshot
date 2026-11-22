@@ -2314,6 +2314,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 Run the narrowest relevant checks first, then the complete affected lane.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
+Linux loopback fixtures initialize their unlocked keyring through its private control socket before
+accessing Secret Service, preventing D-Bus activation from racing daemon startup.
 Suspension and terminal-failure polling share a bounded checkpoint and cleanup budget separate from
 individual CLI calls. Terminal polling rejects a different completed outcome immediately and includes
 the last observed status when its settlement deadline expires.

@@ -56,6 +56,8 @@ mkdir -p "$3/keyring-control" "$3/keyring-data" || exit 90
 chmod 700 "$3/keyring-control" "$3/keyring-data" || exit 90
 export XDG_DATA_HOME="$3/keyring-data"
 eval "$(printf '\n' | gnome-keyring-daemon --control-directory="$3/keyring-control" --unlock --components=secrets)"
+# Synchronize with the unlocked daemon before secret-tool can trigger D-Bus activation.
+gnome-keyring-daemon --control-directory="$3/keyring-control" --start --components=secrets >/dev/null || exit 90
 printf ready | secret-tool store --label='Zeroshot native-v2 acceptance' zeroshot-test "$$" || exit 90
 test "$(secret-tool lookup zeroshot-test "$$")" = ready || exit 90
 secret-tool clear zeroshot-test "$$" || exit 90
