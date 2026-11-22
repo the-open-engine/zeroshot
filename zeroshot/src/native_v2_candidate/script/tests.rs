@@ -178,6 +178,52 @@ async fn script_verifier_logs_redact_resolved_credentials_without_changing_resul
 }
 
 #[tokio::test]
+async fn malformed_verifier_diagnostics_redact_escaped_credentials_before_truncation() {
+    for secret in [
+        "parser-secret-ordinary".to_owned(),
+        "parser-secret-\"quoted\nline\\tail\r\t\u{8}\u{c}".to_owned(),
+        "parser-secret-\"quoted\nline\\tail\r\t\u{8}\u{c}".repeat(400),
+    ] {
+        for response in [
+            "os.environ['SCRIPT_TOKEN']",
+            "{'output':{'result':'ok'},'signals':os.environ['SCRIPT_TOKEN'],'diagnostic':None}",
+        ] {
+            let directory = TestDirectory::new("script-malformed-secret");
+            let (adapter, invocation) = prepared(
+                &directory,
+                &format!("import json, os\nprint(json.dumps({response}))\n"),
+            )
+            .await;
+            let mut invocation = verifier(invocation);
+            invocation.environment = ResolvedEnvironment::exact(
+                &invocation.node.binding,
+                BTreeMap::from([(
+                    EnvironmentVariableName::new("SCRIPT_TOKEN").unwrap(),
+                    secret.clone(),
+                )]),
+            )
+            .unwrap();
+            let (outcome, mut durable) = run_script(&adapter, invocation).await;
+            assert!(matches!(
+                outcome,
+                WorkerOutcome::Error {
+                    code: WorkerErrorCode::Malformed,
+                    ..
+                }
+            ));
+            let diagnostic = durable.recv_output().await.unwrap();
+            assert_eq!(diagnostic.stream, LiveOutputStream::Error);
+            assert!(diagnostic.text.contains("violates declared schema"));
+            assert!(diagnostic.text.contains("[REDACTED]"));
+            assert!(!diagnostic.text.contains("parser-secret-"));
+            assert!(!diagnostic.text.contains("quoted"));
+            assert!(!diagnostic.text.contains("tail"));
+            assert!(diagnostic.text.len() <= 8 * 1024);
+        }
+    }
+}
+
+#[tokio::test]
 async fn script_verifier_rejects_malformed_results_and_preserves_crashes() {
     let valid = json!({"output":{"result":"ok"},"signals":{"status":"ready"},"diagnostic":null});
     let mut invalid = vec![json!(null), json!({"response":valid}), json!([valid])];

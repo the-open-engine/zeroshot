@@ -6,6 +6,81 @@ use zeroshot_engine::native_v2_observability::NativeV2Observability;
 use zeroshot_engine::v2_run_ledger::sqlite::SqliteRunLedger;
 
 #[test]
+fn malformed_script_verifier_logs_redact_escaped_connection_credentials() {
+    for secret in [
+        "malformed-fixture-plain",
+        "malformed-fixture-\"quoted\nline\\secret\r\t\u{8}\u{c}",
+    ] {
+        let fixture = Fixture::new();
+        let node = std::process::Command::new("node")
+            .args(["-p", "process.execPath"])
+            .output()
+            .unwrap();
+        success(&node);
+        let node = String::from_utf8(node.stdout).unwrap();
+        let mut graph: Value =
+            serde_json::from_slice(&std::fs::read(fixture.root.path("graph.json")).unwrap())
+                .unwrap();
+        let mut verifier = graph["root"]["children"][0].clone();
+        verifier["kind"] = json!("verifier");
+        verifier.as_object_mut().unwrap().remove("instructions");
+        verifier["signals"] = json!({"status":["ready"]});
+        verifier["diagnostic"] = json!({"kind":"null"});
+        graph["root"]["children"] = json!([
+            verifier,
+            {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+        ]);
+        fixture.write("graph.json", &graph);
+        fixture.write("runtime.json", &json!({
+            "harness":"codex","provider":"openai","size":"host","workspaceCheckpoints":false,
+            "activeMemory":{"repository":false,"graph":false},
+            "globalAgents":{"postmortem":{"enabled":false}},
+            "nodes":{"worker":{"kind":"script","connections":{"openai":["OPENAI_API_KEY"]},
+                "command":[node.trim(),"-e",
+                    "require('node:fs').readFileSync(0); console.log(JSON.stringify({output:null, signals:process.env.OPENAI_API_KEY, diagnostic:null}));"]}}
+        }));
+        let result = fixture
+            .run_command("finish", false)
+            .env("OPENAI_API_KEY", secret)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(1));
+        let receipt: Value =
+            serde_json::from_slice(result.stdout.split(|byte| *byte == b'\n').next().unwrap())
+                .unwrap();
+        let id = receipt["runId"].as_str().unwrap();
+        let status = fixture.json(&["status", id]);
+        let terminal = &status["status"]["terminalResult"];
+        assert_eq!(terminal["reason"], "unhandled");
+        let cause = terminal["context"]["primary"]["message"].as_str().unwrap();
+        assert!(cause.contains("worker") && cause.contains("malformed"));
+        let logs = fixture.command(&["logs", id]).output().unwrap();
+        success(&logs);
+        let logs = String::from_utf8(logs.stdout).unwrap();
+        let diagnostic = logs
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|record| {
+                record["record"]["message"].as_str().is_some_and(|message| {
+                    message.contains("script output violates declared schema")
+                })
+            })
+            .unwrap();
+        let message = diagnostic["record"]["message"].as_str().unwrap();
+        assert!(message.contains("[REDACTED]"), "{message}");
+        for public in [
+            logs,
+            status.to_string(),
+            String::from_utf8(result.stdout).unwrap(),
+            String::from_utf8(result.stderr).unwrap(),
+        ] {
+            assert!(!public.contains("malformed-fixture-"), "{public}");
+        }
+        assert!(!fixture.workspace.join("mutation.txt").exists());
+    }
+}
+
+#[test]
 fn script_verifier_signals_route_and_persist_without_model_calls() {
     for label in ["ready", "logged_out"] {
         let fixture = Fixture::new();

@@ -287,7 +287,11 @@ async fn read_stdout(
 fn redact(text: &str, environment: &ResolvedEnvironment) -> String {
     let redactions = environment
         .iter()
-        .map(|(_, value)| value.to_owned())
+        .flat_map(|(_, value)| {
+            // Serde's rejected string values use Rust debug escaping in schema diagnostics.
+            let quoted = format!("{value:?}");
+            [value.to_owned(), quoted[1..quoted.len() - 1].to_owned()]
+        })
         .collect::<Vec<_>>();
     safe_provider_text(text, &redactions)
 }
