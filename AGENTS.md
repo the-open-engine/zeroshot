@@ -1621,7 +1621,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   merge queues/deferrals, and succeeds only after observing the exact merged result. Merge-method
   and policy-snapshot queries alone use the same read-only retry mechanism for GitHub's complete
   native slurped generic query-execution error: three attempts per read, waiting one then two seconds
-  within one API deadline, restarting pagination from page one. Classification precedes diagnostic redaction;
+  within one API deadline, restarting pagination from page one. Native capture owns that deadline so
+  timeouts retain bounded, redacted partial streams and command context. Classification precedes diagnostic redaction;
   unknown/mixed/incomplete responses keep existing handling and no HTTP status is invented.
   Exhaustion stays terminal through merge reconciliation, retaining the mutation's diagnostic and
   submission uncertainty, and cannot restart through delivery polling;

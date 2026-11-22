@@ -11,39 +11,40 @@ impl GhCliDeliveryAuthority {
         self.ensure_instance(credential).await?;
         let deadline = Instant::now() + self.config.api_deadline;
         let mut attempt = 1;
-        let mut previous = None;
         loop {
-            let result = timeout_at(deadline, async {
-                if attempt > 1 {
-                    sleep(Duration::from_secs(attempt - 1)).await;
+            // Capture owns the request deadline so it can retain partial diagnostics
+            // before returning, rather than being dropped by an outer timeout.
+            match self
+                .request_api_output(arguments, credential, ApiCapture::Policy(deadline))
+                .await
+            {
+                Ok(output) => return self.decode_api_output(output, credential),
+                Err(failure) if failure.timed_out && attempt > 1 => {
+                    return Err(self.policy_read_exhausted(
+                        failure.error,
+                        "at the API deadline",
+                        credential,
+                    ));
                 }
-                self.request_api_output(arguments, credential, false).await
-            })
-            .await;
-            match result {
-                Ok(Ok(output)) => return self.decode_api_output(output, credential),
-                Ok(Err(failure)) if !failure.policy_read_transient => return Err(failure.error),
-                Ok(Err(failure)) if attempt == 3 => {
+                Err(failure) if !failure.policy_read_transient => return Err(failure.error),
+                Err(failure) if attempt == 3 => {
                     return Err(self.policy_read_exhausted(
                         failure.error,
                         "after 3 attempts",
                         credential,
                     ));
                 }
-                Ok(Err(failure)) => previous = Some(failure.error),
-                Err(_) => {
-                    return Err(match previous {
-                        Some(error) => {
-                            self.policy_read_exhausted(error, "at the API deadline", credential)
-                        }
-                        None => redacted_api_error(
-                            None,
-                            self.network
-                                .redact("GitHub policy read timed out at the API deadline"),
+                Err(failure) => {
+                    if timeout_at(deadline, sleep(Duration::from_secs(attempt)))
+                        .await
+                        .is_err()
+                    {
+                        return Err(self.policy_read_exhausted(
+                            failure.error,
+                            "at the API deadline",
                             credential,
-                        )
-                        .temporary(),
-                    });
+                        ));
+                    }
                 }
             }
             attempt += 1;

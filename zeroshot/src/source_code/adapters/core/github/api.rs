@@ -2,7 +2,7 @@ use serde_json::Value;
 #[cfg(test)]
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout_at};
 
 use super::wire::{GitReferenceWire, reference_revision, require_review_head};
 use super::*;
@@ -15,6 +15,12 @@ const MAX_API_ERROR_BYTES: usize = 64 * 1024;
 const MAX_API_DIAGNOSTIC_STREAM_BYTES: usize = 8 * 1024;
 
 mod policy_read;
+
+enum ApiCapture {
+    Standard,
+    BranchRules,
+    Policy(Instant),
+}
 
 impl GhCliDeliveryAuthority {
     pub(super) async fn api(
@@ -34,7 +40,7 @@ impl GhCliDeliveryAuthority {
         let arguments = policy::branch_rules_arguments(review)?;
         self.ensure_instance(credential).await?;
         let output = self
-            .request_api_output(&arguments, credential, true)
+            .request_api_output(&arguments, credential, ApiCapture::BranchRules)
             .await
             .map_err(|failure| failure.error)?;
         self.decode_api_output(output, credential)
@@ -69,7 +75,7 @@ impl GhCliDeliveryAuthority {
         arguments: &[String],
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Vec<u8>, SourceDeliveryError> {
-        self.request_api_output(arguments, credential, false)
+        self.request_api_output(arguments, credential, ApiCapture::Standard)
             .await
             .map_err(|failure| failure.error)
     }
@@ -78,7 +84,7 @@ impl GhCliDeliveryAuthority {
         &self,
         arguments: &[String],
         credential: SourceDeliveryCredential<'_>,
-        allow_unavailable_rules: bool,
+        capture: ApiCapture,
     ) -> Result<Vec<u8>, ApiFailure> {
         let mut command = self.api_command(credential);
         command
@@ -90,7 +96,7 @@ impl GhCliDeliveryAuthority {
             "command: {:?} api {arguments:?}",
             self.config.gh_program
         ));
-        bounded_output(command, self, credential, allow_unavailable_rules)
+        bounded_output(command, self, credential, capture)
             .await
             .map_err(|mut failure| {
                 let retryable = failure.error.retryable_operation();
@@ -121,11 +127,15 @@ impl GhCliDeliveryAuthority {
             "--allow-escape-sequences".to_owned(),
         ];
         self.ensure_instance(credential).await?;
-        let mut output = self.request_api_output(&arguments, credential, false).await;
+        let mut output = self
+            .request_api_output(&arguments, credential, ApiCapture::Standard)
+            .await;
         if matches!(&output, Err(failure) if failure.unsupported_escape_sequences) {
             // Older gh rejects this flag before sending the request.
             arguments.pop();
-            output = self.request_api_output(&arguments, credential, false).await;
+            output = self
+                .request_api_output(&arguments, credential, ApiCapture::Standard)
+                .await;
         }
         // Redact complete credentials before excerpt selection can split one.
         output
@@ -370,6 +380,7 @@ struct ApiFailure {
     error: SourceDeliveryError,
     unsupported_escape_sequences: bool,
     policy_read_transient: bool,
+    timed_out: bool,
 }
 
 impl From<SourceDeliveryError> for ApiFailure {
@@ -378,6 +389,7 @@ impl From<SourceDeliveryError> for ApiFailure {
             error,
             unsupported_escape_sequences: false,
             policy_read_transient: false,
+            timed_out: false,
         }
     }
 }
@@ -386,9 +398,12 @@ async fn bounded_output(
     mut command: Command,
     authority: &GhCliDeliveryAuthority,
     credential: SourceDeliveryCredential<'_>,
-    allow_unavailable_rules: bool,
+    capture: ApiCapture,
 ) -> Result<Vec<u8>, ApiFailure> {
-    let deadline = authority.config.api_deadline;
+    let deadline = match capture {
+        ApiCapture::Policy(deadline) => Some(deadline),
+        _ => None,
+    };
     command
         .kill_on_drop(true)
         .stdout(Stdio::piped())
@@ -410,25 +425,28 @@ async fn bounded_output(
         secrets: authority.network.secrets(),
         ..Default::default()
     };
-    let result = timeout(deadline, async {
-        tokio::try_join!(
-            async {
-                child
-                    .wait()
-                    .await
-                    .map_err(|error| format!("could not wait for command: {error}"))
-            },
-            collect_bounded(stdout, &mut output.stdout, MAX_API_OUTPUT_BYTES, "stdout"),
-            collect_bounded(stderr, &mut output.stderr, MAX_API_ERROR_BYTES, "stderr"),
-        )
-    })
+    let result = timeout_at(
+        deadline.unwrap_or_else(|| Instant::now() + authority.config.api_deadline),
+        async {
+            tokio::try_join!(
+                async {
+                    child
+                        .wait()
+                        .await
+                        .map_err(|error| format!("could not wait for command: {error}"))
+                },
+                collect_bounded(stdout, &mut output.stdout, MAX_API_OUTPUT_BYTES, "stdout"),
+                collect_bounded(stderr, &mut output.stderr, MAX_API_ERROR_BYTES, "stderr"),
+            )
+        },
+    )
     .await;
     match result {
         Ok(Ok((status, (), ()))) if status.success() => {
             validate_api_output(output.stdout).map_err(Into::into)
         }
         Ok(Ok((status, (), ())))
-            if allow_unavailable_rules
+            if matches!(capture, ApiCapture::BranchRules)
                 && status.code() == Some(1)
                 && output.branch_rules_unavailable() =>
         {
@@ -447,21 +465,27 @@ async fn bounded_output(
                 unsupported_escape_sequences: unsupported_escape_sequences
                     && error.api_status().is_none(),
                 policy_read_transient,
+                timed_out: false,
                 error,
             })
         }
         Ok(Err(error)) => Err(output.failure(None, &error, credential).into()),
-        Err(_) => Err(output
-            .failure(
-                None,
-                &format!(
+        Err(_) => {
+            let context = match deadline {
+                Some(_) => "command timed out at the API deadline".to_owned(),
+                None => format!(
                     "command timed out after {} milliseconds",
-                    deadline.as_millis()
+                    authority.config.api_deadline.as_millis()
                 ),
-                credential,
-            )
-            .temporary()
-            .into()),
+            };
+            Err(ApiFailure {
+                timed_out: true,
+                ..output
+                    .failure(None, &context, credential)
+                    .temporary()
+                    .into()
+            })
+        }
     }
 }
 

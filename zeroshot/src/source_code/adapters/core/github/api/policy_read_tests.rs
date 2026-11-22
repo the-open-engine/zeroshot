@@ -183,7 +183,7 @@ async fn incomplete_native_policy_error_never_acquires_retry_authority() {
             .request_api_output(
                 &["graphql".to_owned()],
                 SourceDeliveryCredential::token("test-token"),
-                false,
+                ApiCapture::Standard,
             )
             .await
             .err()
@@ -191,6 +191,87 @@ async fn incomplete_native_policy_error_never_acquires_retry_authority() {
         assert!(!failure.policy_read_transient);
         assert!(!failure.error.to_string().contains("retry allowance"));
         assert_eq!(failure.error.api_status(), None);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn policy_read_timeout_retains_bounded_redacted_streams_and_command_context() {
+    for attempt in [1, 2] {
+        let root = TemporaryDirectory::for_test("github-policy-timeout");
+        let output = native_error(MESSAGE);
+        std::fs::write(root.as_path().join("stdout"), output.stdout).unwrap();
+        std::fs::write(root.as_path().join("stderr"), output.stderr).unwrap();
+        for (stream, prefix) in [
+            ("partial-stdout", "partial stdout"),
+            ("partial-stderr", "gh: partial response (HTTP 401)"),
+        ] {
+            std::fs::write(
+                root.as_path().join(stream),
+                format!(
+                    "{prefix} test-token private-proxy-password\n{}",
+                    "padding\n".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES)
+                ),
+            )
+            .unwrap();
+        }
+        let program = script(
+            root.as_path(),
+            &format!(
+                r#"
+printf 'call\n' >> "$HOME/calls"
+count=$(/usr/bin/wc -l < "$HOME/calls")
+if [ "$count" -lt {attempt} ]; then
+    cat "$HOME/stdout"
+    cat "$HOME/stderr" >&2
+    exit 1
+fi
+cat "$HOME/partial-stdout"
+cat "$HOME/partial-stderr" >&2
+exec /bin/sleep 30
+"#
+            ),
+        );
+        let network =
+            crate::source_code_provider::adapters::core::network::ForgeNetwork::from_snapshot(
+                &BTreeMap::from([(
+                    "HTTPS_PROXY".to_owned(),
+                    "http://private-proxy-user:private-proxy-password@proxy.invalid:8080"
+                        .to_owned(),
+                )]),
+            );
+        let started = std::time::Instant::now();
+        let error = authority(program, Duration::from_millis(400 + (attempt - 1) * 1000))
+            .with_network(network)
+            .policy_api(
+                &["graphql".to_owned(), "query=diagnostic-query".to_owned()],
+                SourceDeliveryCredential::token("test-token"),
+            )
+            .await
+            .unwrap_err();
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("command:"));
+        assert!(diagnostic.contains("query=diagnostic-query"));
+        assert!(diagnostic.contains("command timed out"));
+        assert!(diagnostic.contains("stdout (truncated=true):\npartial stdout [REDACTED]"));
+        assert!(diagnostic.contains("stderr (truncated=true):\ngh: partial response (HTTP 401)"));
+        assert!(!diagnostic.contains("test-token"));
+        assert!(!diagnostic.contains("private-proxy-password"));
+        assert!(
+            diagnostic.len() <= crate::source_code_provider::MAX_SOURCE_API_DIAGNOSTIC_BYTES + 32
+        );
+        assert_eq!(error.api_status(), None);
+        assert!(!error.authentication_failed());
+        assert_eq!(error.retries_exhausted(), attempt > 1);
+        assert_eq!(error.retryable_operation(), attempt == 1);
+        assert!(started.elapsed() < Duration::from_secs(4));
+        assert_eq!(
+            std::fs::read_to_string(root.as_path().join("calls"))
+                .unwrap()
+                .lines()
+                .count(),
+            attempt as usize
+        );
     }
 }
 
