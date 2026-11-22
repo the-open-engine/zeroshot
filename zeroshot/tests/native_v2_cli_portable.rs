@@ -20,6 +20,9 @@ mod startup;
 #[cfg(unix)]
 #[path = "native_v2_cli_portable/submission_scan_tests.rs"]
 mod submission_scan_tests;
+#[cfg(windows)]
+#[path = "native_v2_cli_portable/windows_contained.rs"]
+mod windows_contained;
 use fixture::{Fixture, success};
 
 #[test]
@@ -190,32 +193,42 @@ fn detached_controller_does_not_retain_unrelated_inheritable_handles() {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
 
-    let fixture = Fixture::new();
-    let path = fixture.root.path("caller-owned-handle");
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .share_mode(0)
-        .open(&path)
-        .unwrap();
-    assert_ne!(
-        unsafe {
-            SetHandleInformation(
-                file.as_raw_handle(),
-                HANDLE_FLAG_INHERIT,
-                HANDLE_FLAG_INHERIT,
-            )
-        },
-        0
-    );
-    let (id, _) = fixture.start_blocked();
-    drop(file);
-    let removed = std::fs::remove_file(path);
-    success(&fixture.command(&["force-stop", &id]).output().unwrap());
-    assert!(
-        removed.is_ok(),
-        "controller inherited a caller-owned handle: {removed:?}"
-    );
+    for policy in ["detached", "contained"] {
+        let fixture = Fixture::new();
+        let path = fixture.root.path("caller-owned-handle");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        assert_ne!(
+            unsafe {
+                SetHandleInformation(
+                    file.as_raw_handle(),
+                    HANDLE_FLAG_INHERIT,
+                    HANDLE_FLAG_INHERIT,
+                )
+            },
+            0
+        );
+        let submitted = fixture
+            .run_command("block", true)
+            .args(["--controller", policy])
+            .output()
+            .unwrap();
+        success(&submitted);
+        let receipt: serde_json::Value = serde_json::from_slice(&submitted.stdout).unwrap();
+        let id = receipt["runId"].as_str().unwrap();
+        fixture.await_child();
+        drop(file);
+        let removed = std::fs::remove_file(path);
+        success(&fixture.command(&["force-stop", id]).output().unwrap());
+        assert!(
+            removed.is_ok(),
+            "controller inherited a caller-owned handle: {removed:?}"
+        );
+    }
 }
 
 #[cfg(windows)]

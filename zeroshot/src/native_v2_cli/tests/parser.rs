@@ -358,7 +358,7 @@ fn parser_exposes_workspace_recovery_commands() {
         parse_native_v2_args(args(&["resume", "run-7", "--target", "docker"])).assert_value();
     assert!(matches!(
         resume,
-        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id }, from: None, discard_workspace_changes: false, forward_github_token: false })
+        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id, .. }, from: None, discard_workspace_changes: false, forward_github_token: false })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-7"
     ));
 
@@ -366,7 +366,7 @@ fn parser_exposes_workspace_recovery_commands() {
         .assert_value();
     assert!(matches!(
         discard,
-        NativeV2CliCommand::DiscardWorkspace(RunSelector { target, run_id })
+        NativeV2CliCommand::DiscardWorkspace(RunSelector { target, run_id, .. })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-8"
     ));
 }
@@ -385,7 +385,7 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
     assert!(matches!(
         resume,
         NativeV2CliCommand::Resume(RunResumeCommand {
-            run: RunSelector { target, run_id },
+            run: RunSelector { target, run_id, .. },
             from: Some(RunResumeFrom::Checkpoint { checkpoint_id }),
             discard_workspace_changes: false,
             forward_github_token: false,
@@ -434,7 +434,7 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
     assert!(matches!(
         listing,
         NativeV2CliCommand::Checkpoints(RunCheckpointsCommand {
-            run: RunSelector { target, run_id }, after: Some(after), limit: Some(1),
+            run: RunSelector { target, run_id, .. }, after: Some(after), limit: Some(1),
         }) if target.as_deref() == Some("docker")
             && run_id.as_str() == "run-7" && after.as_str() == "entry:opaque-1"
     ));
@@ -1192,6 +1192,7 @@ fn steer_parser_requires_exactly_one_text_source() {
             NativeV2CliCommand::Steer {
                 node: None,
                 run: RunSelector {
+                    controller: Default::default(),
                     run_id: RunId::new("run-1"),
                     target: Some("prod".into())
                 },
@@ -1268,4 +1269,51 @@ fn steer_usage_names_the_run_id_before_the_text_source() {
         usage,
         "Usage: zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>"
     );
+}
+
+#[test]
+fn controller_policy_is_local_and_applies_to_every_launch_path() {
+    use crate::native_v2_cli::local::LocalControllerMode::{Contained, Detached};
+
+    for mut argv in [
+        vec![
+            "run",
+            "--title",
+            "contained",
+            "--template",
+            "single-worker",
+            "--input",
+            "input.json",
+            "--uniform-runtime-config",
+            "runtime.json",
+        ],
+        vec!["resume", "run-1"],
+        vec!["answer", "run-1", "--input", "answer.json"],
+    ] {
+        assert_eq!(
+            parse_native_v2_args(args(&argv))
+                .assert_value()
+                .local_controller_mode(),
+            Detached
+        );
+        argv.extend(["--controller", "contained"]);
+        assert_eq!(
+            parse_native_v2_args(args(&argv))
+                .assert_value()
+                .local_controller_mode(),
+            Contained
+        );
+        *argv.last_mut().unwrap() = "detached";
+        assert_eq!(
+            parse_native_v2_args(args(&argv))
+                .assert_value()
+                .local_controller_mode(),
+            Detached
+        );
+        *argv.last_mut().unwrap() = "automatic";
+        assert!(parse_native_v2_args(args(&argv)).is_err());
+        *argv.last_mut().unwrap() = "contained";
+        argv.extend(["--target", "remote"]);
+        assert!(parse_native_v2_args(args(&argv)).is_err());
+    }
 }

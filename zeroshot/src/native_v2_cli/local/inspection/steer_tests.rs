@@ -131,6 +131,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
         NativeV2CliCommand::Steer {
             node: None,
             run: RunSelector {
+                controller: Default::default(),
                 target: None,
                 run_id: params.run_id.clone(),
             },

@@ -687,6 +687,8 @@ EXIT STATUS
     1  The run finished failed, or the command failed. A failed run's summary is printed on
        stderr. `zeroshot watch RUN_ID` waits for a detached run and exits the same way."#)]
 struct RunArgs {
+    #[command(flatten)]
+    controller: ControllerArgs,
     /// Human-readable title recorded with the run.
     #[arg(long, value_name = "TITLE")]
     title: String,
@@ -866,9 +868,26 @@ struct RunSelectorArgs {
 }
 
 #[derive(Debug, Args)]
-struct RunResumeArgs {
+struct ControllerArgs {
+    /// Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host
+    /// closure promises neither termination nor survival. Use force-stop for explicit cleanup.
+    /// Linux/macOS retain their usual launch behavior. Independent of --detach observation.
+    #[arg(long, value_enum, value_name = "MODE", conflicts_with = "target")]
+    controller: Option<super::local::LocalControllerMode>,
+}
+
+#[derive(Debug, Args)]
+struct LocalLaunchArgs {
     #[command(flatten)]
     run: RunSelectorArgs,
+    #[command(flatten)]
+    controller: ControllerArgs,
+}
+
+#[derive(Debug, Args)]
+struct RunResumeArgs {
+    #[command(flatten)]
+    run: LocalLaunchArgs,
 
     /// Restore this checkpoint and continue from its saved graph boundary.
     #[arg(long, value_name = "ID")]
@@ -1043,7 +1062,7 @@ pub use convert::parse_native_v2_args;
 #[derive(Debug, Args)]
 struct RunAnswerArgs {
     #[command(flatten)]
-    run: RunSelectorArgs,
+    run: LocalLaunchArgs,
     /// JSON answer file, containing signals and output. No standard-input form.
     #[arg(long, value_name = "FILE")]
     input: PathBuf,

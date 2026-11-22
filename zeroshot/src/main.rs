@@ -121,7 +121,8 @@ async fn run_local_command(
     detach: &mut CtrlCDetachSignal,
     output: &mut impl Write,
 ) -> Result<(), ProcessError> {
-    let backend = LocalCliBackend::production()?;
+    let backend =
+        LocalCliBackend::production()?.with_controller_mode(command.local_controller_mode());
     execute_backend_command(command, &backend, detach, output).await
 }
 

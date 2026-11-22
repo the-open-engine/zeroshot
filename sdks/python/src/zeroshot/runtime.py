@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from os import PathLike
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from .values import JsonValue
 
@@ -20,10 +20,18 @@ class LocalTarget:
             the client opens; per-run cwd is relative to this folder.
         state_dir: Optional native controller state directory. Reuse it to observe local runs from
             later client instances; None uses the native package-owned default.
+        controller: Local launch policy. On Windows, contained permits non-breakaway caller Jobs;
+            their native policy governs host closure, promising neither termination nor survival.
+            Explicit force_stop still cleans up descendants. Linux/macOS behavior is unchanged.
     """
 
     workspace: str | PathLike[str] | None = None
     state_dir: str | PathLike[str] | None = field(default=None, kw_only=True)
+    controller: Literal["detached", "contained"] = field(default="detached", kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.controller not in ("detached", "contained"):
+            raise ValueError("controller must be detached or contained")
 
 
 @dataclass(frozen=True, slots=True)

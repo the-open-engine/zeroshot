@@ -145,6 +145,7 @@ pub(crate) fn controller_termination() -> io::Result<impl Future<Output = ()> + 
 
 pub(crate) fn spawn_controller(
     command: &mut tokio::process::Command,
+    _mode: super::LocalControllerMode,
 ) -> io::Result<ControllerChild> {
     unsafe {
         command.pre_exec(|| {

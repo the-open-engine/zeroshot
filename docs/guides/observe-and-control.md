@@ -58,6 +58,23 @@ zeroshot run \
 
 Ctrl-C closes the terminal stream and leaves the controller running.
 
+For local Windows launches inside a Job that forbids breakaway, explicitly pass
+`--controller contained` to `run`. The default is `--controller detached`; it still requires
+permission to leave every caller Job. Use the same selection on `resume` or `answer` when launching
+a successor controller. Named targets do not accept this local policy. Linux and macOS keep their
+usual controller launch behavior.
+
+Contained mode keeps the caller's native Job policy, the private controller bootstrap and hidden
+console, and Zeroshot's own descendant Jobs and cleanup checks. Incompatible Job nesting is refused
+before a worker executes. `--detach` only selects whether the CLI observes the run; closing or
+killing that CLI alone does not establish controller loss or allow another writer.
+
+Caller Job policy governs abrupt host closure. A non-breakaway Job, including `LimitFlags=0`,
+does not necessarily terminate children when its last handle closes. Contained mode promises
+neither termination with the caller nor survival of host closure. Use `zeroshot force-stop RUN_ID`
+for explicit descendant cleanup. Resume retains the existing bounded ownership handoff and admits
+only one successor after predecessor ownership releases.
+
 ## Inventory and current status
 
 These commands are read-only and return JSON:

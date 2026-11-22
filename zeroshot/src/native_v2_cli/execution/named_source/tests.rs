@@ -345,6 +345,7 @@ async fn named_remote_tip_rejects_filesystem_and_missing_remotes() {
 
 fn test_run_command() -> RunCommand {
     RunCommand {
+        controller: Default::default(),
         environment: None,
         target: None,
         cwd: None,

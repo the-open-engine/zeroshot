@@ -1264,3 +1264,36 @@ def test_steer_rejects_invalid_mode_before_dispatch(fake_native: Path, mode: obj
             assert read_invocations(fake_native) == before
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("controller", ["detached", "contained"])
+def test_local_controller_policy_reaches_every_launch_path(
+    controller: str, fake_native: Path
+) -> None:
+    async def exercise() -> None:
+        async with Client(
+            target=LocalTarget(controller=controller),  # type: ignore[arg-type]
+            preset=Preset("single-worker"),
+            runtime=runtime(),
+        ) as client:
+            await client.submit("contained submission")
+            run = client.get_run("original")
+            await run.status()
+            await run.resume()
+            await run.answer({"signals": {}, "output": None})
+            await run.force_stop()
+
+    asyncio.run(exercise())
+    calls = read_invocations(fake_native)
+    for name, count in [("run", 2), ("resume", 1), ("answer", 1)]:
+        selected = [call for call in calls if call["args"][0] == name]
+        assert len(selected) == count
+        for call in selected:
+            args = call["args"]
+            assert args[args.index("--controller") + 1] == controller
+            assert "--target" not in args
+    assert all(
+        "--controller" not in call["args"]
+        for call in calls
+        if call["args"][0] in ("status", "force-stop")
+    )

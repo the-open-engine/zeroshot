@@ -1897,10 +1897,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   releasing controller ownership. Durable state
   stays in the configured state directory. Windows state uses protected current-user/SYSTEM ACLs, rejects
   reparse points, and pins volume/file identity. Provider and delivery descendants belong to
-  kill-on-close Job Objects before their first instruction. Detached controllers run on a new
+  kill-on-close Job Objects before their first instruction, rejecting incompatible nesting before
+  worker execution. Local controllers run on a new
   windowless console shared by their console descendants, ignore Ctrl-C/Ctrl-Break delivered to it,
-  inherit no caller handles, and resume only after proving they escaped every caller Job;
-  restrictive Job policies reject controller startup. Windows config defaults to
+  inherit no caller handles. Local `run`, `resume`, and `answer`
+  select `--controller detached|contained`; Python exposes `LocalTarget(controller=...)`.
+  Detached remains the default and resumes only after proving escape from every caller Job.
+  Contained omits breakaway and accepts inherited restrictive Jobs without changing their policy.
+  This is an invocation-local launch policy, absent from remote protocols and recovery records;
+  Linux/macOS keep their existing launch behavior. Both modes reuse controller/workspace ownership,
+  bounded handoff and descendant cleanup. Closing an observer never proves controller loss.
+  Caller Job policy governs abrupt host closure: even non-breakaway `LimitFlags=0` does not imply
+  kill-on-close. Contained promises neither caller-exit termination nor host-exit survival; explicit
+  force-stop remains the cleanup path. Windows Job regressions run through the existing independent
+  Windows CI host, with mandatory compiled-test inventory checks. Windows config defaults to
   `%LOCALAPPDATA%/zeroshot` and state to its `state` directory. Hosted target isolation remains Linux-only.
 - The experimental local ACP endpoint owns one workspace lease and reusable runner for the outer
   ACP session. Each prompt remains a separate admitted run with its own controller lock, durable

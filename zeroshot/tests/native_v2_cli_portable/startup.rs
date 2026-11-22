@@ -284,3 +284,38 @@ fn profile_imports_validate_nested_local_catalog_and_refuse_untrusted_or_named_i
         "validation must not allocate runs"
     );
 }
+
+#[test]
+fn contained_local_policy_reaches_submission_and_resume() {
+    let fixture = Fixture::new();
+    let failed = fixture
+        .run_command("fail", false)
+        .args(["--controller", "contained"])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let receipt: Value =
+        serde_json::from_slice(failed.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let resumed = fixture
+        .command(&["resume", id, "--controller", "contained"])
+        .env("FIXTURE_MODE", "finish")
+        .output()
+        .unwrap();
+    success(&resumed);
+    let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    let successor = receipt["runId"].as_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = fixture.json(&["status", successor]);
+        if status["status"]["phase"] == "finished" {
+            assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "contained successor did not finish: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
