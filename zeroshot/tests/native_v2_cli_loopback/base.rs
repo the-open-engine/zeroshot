@@ -55,9 +55,18 @@ pub(crate) const KEYRING_PREAMBLE: &str = r#"
 mkdir -p "$3/keyring-control" "$3/keyring-data" || exit 90
 chmod 700 "$3/keyring-control" "$3/keyring-data" || exit 90
 export XDG_DATA_HOME="$3/keyring-data"
-eval "$(printf '\n' | gnome-keyring-daemon --control-directory="$3/keyring-control" --unlock --components=secrets)"
+keyring_env=$(printf '\n' | gnome-keyring-daemon --control-directory="$3/keyring-control" --unlock --components=secrets) || exit 90
+eval "$keyring_env"
 # Synchronize with the unlocked daemon before secret-tool can trigger D-Bus activation.
 gnome-keyring-daemon --control-directory="$3/keyring-control" --start --components=secrets >/dev/null || exit 90
+# Query the bus itself so the probe cannot activate a second daemon before this one is ready.
+attempt=0
+until dbus-send --session --dest=org.freedesktop.DBus --print-reply --reply-timeout=200 \
+    /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.secrets >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 100 || { echo "The fixture Secret Service did not claim its D-Bus name" >&2; exit 90; }
+  sleep 0.05
+done
 printf ready | secret-tool store --label='Zeroshot native-v2 acceptance' zeroshot-test "$$" || exit 90
 test "$(secret-tool lookup zeroshot-test "$$")" = ready || exit 90
 secret-tool clear zeroshot-test "$$" || exit 90
