@@ -15,8 +15,8 @@ walkthrough using the same case IDs. Unfilled fixtures or package validation can
 
 Preflight the generated native client formats: OpenAI uses `.codex-plugin/plugin.json` with
 explicit skill/`.mcp.json` mappings; Claude uses `.claude-plugin/plugin.json` and `.mcp.json`.
-Codex CLI 0.167.0 has loaded the three skills and declared MCP server from its package. Repeat that
-loading check for the release artifacts, then run the authorization and workflow cases below.
+Load the release artifacts and verify the declared skills and MCP server, then run the
+authorization and workflow cases below.
 
 ## Generate the packages
 

@@ -55,8 +55,8 @@ Targets must advertise task resolution and comment delivery; an older target ref
 
 ## Run the review
 
-Select a clean checkout already at the PR head. zeroshot refuses a mismatch instead of switching
-or resetting the worktree.
+Select a checkout at the PR head with no tracked changes. zeroshot refuses a mismatch instead of
+switching or resetting the worktree.
 
 ```console
 zeroshot run --title "Review PR 123" \

@@ -73,7 +73,7 @@ async fn documented_review_loop_stops_on_an_unchecked_worker_error_in_round_one(
             title: RunTitle::new("Documented review loop").assert_value(),
             graph,
             initial_input: initial_input.clone(),
-            runtime,
+            runtime: with_host_size(runtime),
             source: None,
             submission_key: IdempotencyKey::new("documented-unhandled").assert_value(),
         })

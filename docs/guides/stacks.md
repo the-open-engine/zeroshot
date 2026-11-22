@@ -20,7 +20,8 @@ Stacks run on hosted targets with GitHub.com repositories. There is no local sta
 
 ## Write a manifest
 
-Save the manifest as JSON, for example `checkout.stack.json`:
+Save the manifest as `checkout.stack.json`. Replace `DEADLINE` with an RFC 3339 timestamp within
+the next seven days before validating it.
 
 ```json
 {
@@ -29,7 +30,7 @@ Save the manifest as JSON, for example `checkout.stack.json`:
   "delivery": "stacked_pull_requests",
   "source": { "repository": "acme/shop", "branch": "main" },
   "profile": "org:software-change",
-  "expiresAt": "2026-11-10T00:00:00Z",
+  "expiresAt": "DEADLINE",
   "runs": {
     "api": { "input": { "task": "Add the order total endpoint." } },
     "client": {

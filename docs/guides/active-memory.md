@@ -58,8 +58,8 @@ cause in error logs, including when postmortem is disabled but recall is enabled
 specialists log their role and cause, followed by one error summary. Confirmed hook configuration
 or carrier failures are reported once per execution; a conversation without tool callbacks is
 not treated as a failure. These auxiliary errors do not become primary graph failure evidence.
-Foreground `run` and `watch` print the latest five memory error records on stderr when observation
-ends. `resume` also checks that stream after its receipt, within the existing five-second log-read
+Foreground `run` and `watch` print the latest five memory error records on stderr when the run
+finishes or fails. `resume` also checks that stream after its receipt, within the existing five-second log-read
 deadline; longer-running successors can be followed with `watch`. Complete diagnostics remain in
 `zeroshot logs RUN_ID`. Disabling both memory scopes skips store initialization without a warning.
 
@@ -86,10 +86,8 @@ no model calls. An ID/revision is supplied once per provider conversation; compa
 this deduplication. Copilot does not keep tool-call context in its session, so there a repository
 lesson is supplied once per execution. Each matching injection gets its own context limit.
 
-Repository lessons arrive at matching tool calls through harness hooks, never inside a tool
-result. Disabled hooks can prevent delivery; scripts that
-hide their file paths can miss matches. Advice cannot change a tool call already issued, and receipt
-of a lesson does not prove the model followed it. See the
+Repository lessons arrive through the harness at matching tool calls. Disabled hooks can prevent
+delivery, and scripts that hide their file paths can miss matches. See the
 [matching and delivery rules](../reference/active-memory.md#indexing-and-retrieval) for details.
 
 ## Storage and backups { #persistence-and-run-completion }
@@ -117,8 +115,8 @@ Restore it while those processes are stopped.
 ## Initialize from local history
 
 Ask your agent to use the `zeroshot-memory-init` skill to learn from completed local runs.
-`zeroshot update` installs the skill; if it is missing after upgrading through an older updater,
-run the update again.
+`zeroshot update` installs managed skills by default. See
+[skill installation](../reference/installation.md#managed-skills) for the opt-out.
 
 The skill inventories local history across repositories, discovers lessons, checks them against
 current source and publishes them together. Keep the selected checkouts stable during its final
@@ -147,9 +145,5 @@ advice. Hosting integrations must explicitly provide a memory namespace and enfo
 See [memory lifecycle and storage](../reference/active-memory.md) for maintenance, evidence and host
 contracts.
 
-The native tool-call carrier is installed for every agent conversation, including when Active
-Memory is off, so it can deliver standing [steers](../guides/observe-and-control.md#steer-a-run).
-Memory off still leaves its database unopened. Steers come from the run vector record. At a tool
-call they travel as a user message where the harness has a channel for one, and ahead of the
-memory cards in hook context on Codex. They are delivered whole and do not count against
-`nodeInjectionTokens` or `hookInjectionTokens`; memory card selection keeps its own limits.
+[Steering](observe-and-control.md#steer-a-run) remains available with Active Memory off. Steers
+have their own limits and arrive ahead of memory cards when they share a delivery channel.

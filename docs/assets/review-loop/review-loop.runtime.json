@@ -1,7 +1,6 @@
 {
   "harness": "codex",
   "provider": "openai",
-  "size": "medium",
   "nodes": {
     "worker": {
       "kind": "agent",

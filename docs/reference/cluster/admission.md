@@ -54,7 +54,7 @@ The idempotency fingerprint is SHA-256 over canonical JSON containing the method
 parameters, excluding `idempotencyKey`. Object keys are recursively sorted. Same key and same
 fingerprint returns the original receipt with `deduped:true`; different parameters return
 `IDEMPOTENCY_REUSE` without verification or writes. Keys share one namespace across apply, update,
-and stop, so cross-method reuse also conflicts. Racing first uses may both verify, but only one
+stop, retry, resubmit and delete, so cross-method reuse also conflicts. Racing first uses may both verify, but only one
 commits.
 
 ## Atomicity and cancellation

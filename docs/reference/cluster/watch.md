@@ -39,9 +39,8 @@ the wire. `WatchEvent` is a closed, tagged (`type`) enum:
   suspend/resume, stop-request). The admission transition (`admission.runId/spec/seedInput`) is
   present only on the event that also commits the run.
 - `node_begin{node, input}` / `node_end{node, outcome}`: a structured `NodeAddress{node, attempt}`
-  plus verified input or a normalized `WorkerOutcome`. This is a testkit-only synthetic hook for
-  golden vectors; it is not derived from node dispatch because no native graph executor exists
-  yet.
+  plus verified input or a normalized `WorkerOutcome`. These are synthetic testkit events for
+  golden vectors.
 - `bookmark`: advances the cursor with no public fold change (internal dispatch/lease turn
   bookkeeping).
 - `fault{fault}`: a durable, closed, bounded, backend-neutral `BackendFault` projection (bounded
@@ -53,7 +52,7 @@ the wire. `WatchEvent` is a closed, tagged (`type`) enum:
   provider codes, credentials, session IDs, and arbitrary maps are unrepresentable. Native
   `EngineFault` mapping is outside this contract, as are the synthetic `node_begin` and `node_end`
   hooks.
-- `finished{finalStatus, stopMode?}`: always the last event for a run.
+- `finished{final_status, stop_mode?}`: always the last event for a run.
 
 A continuous watch from a run's first cursor through its `finished` event, after `(runId, cursor)`
 deduplication, folds to the same public state as an authoritative `get` at the same cursor.

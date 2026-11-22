@@ -1270,7 +1270,6 @@ RUNTIME CONFIGURATION
       {
         "harness": "codex",
         "provider": "openrouter",
-        "size": "medium",
         "nodes": {
           "worker": {
             "kind": "agent",
@@ -1296,9 +1295,8 @@ RUNTIME CONFIGURATION
     copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.
     Copilot's other lanes use native BYOK transports; its Bedrock lane uses AWS's Responses API. Pi has no permission
     control of its own, so its contained runs rely on the disposable capsule rather than a bypass
-    argument. Model IDs are passed
-    unchanged to the selected harness and
-    provider; Zeroshot does not maintain or validate provider model catalogs.
+    argument. Use the provider's model ID. The adapter formats native arguments, such as OpenCode's
+    <provider>/<model> locator. Zeroshot does not maintain or validate provider model catalogs.
 
     Size identifiers are target-owned strings. List offered sizes with `zeroshot target sizes NAME`.
     Omit size to use the target default; the target decides whether a requested size is available.
