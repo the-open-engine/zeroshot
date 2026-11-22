@@ -2716,7 +2716,7 @@ counters, so the four token counters do not overlap and can be added.</p>
 <p>When <code>complete</code> is <code>false</code>, the totals retain known usage but at least one invocation's usage is
 missing or unusable. An omitted cache counter means at least one invocation did not report that
 counter; its run total is unknown, not zero. Cache counters can be omitted even when <code>complete</code> is
-<code>true</code>. Script steps record zero for all four counters and preserve known cache totals.
+<code>true</code>. Script nodes record zero for all four counters and preserve known cache totals.
 Previously recorded runs retain their original numbers.</p>
 <h2 id="failure-evidence-and-mapped-executions">Failure evidence and mapped executions<a class="headerlink" href="#failure-evidence-and-mapped-executions" title="Permanent link">&para;</a></h2>
 <p>Failed <code>terminalResult.context</code> separates the known runtime cause (<code>primary</code>) from recent recorded

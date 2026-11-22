@@ -2438,10 +2438,11 @@ it refuses remote imports, which require host admission.</p>
 The <a href="../../reference/cluster/graph/">graph contract</a> defines their fields.</p>
 <h2 id="which-checks-are-deterministic">Which checks are deterministic<a class="headerlink" href="#which-checks-are-deterministic" title="Permanent link">&para;</a></h2>
 <p>The engine enforces the order, routes and retry limits. What a step decides depends on its
-binding. Agent steps and verifiers are model judgement. A <code>step</code> can instead run a
-<a href="../../reference/runtime-plan/#script">script</a> you own, which takes the step's JSON input and
-returns its JSON output, so that step's result comes from your program, not a model. A non-zero
-exit is an error, and the graph's error and retry rules apply. Script steps are local only for now.</p>
+binding. Agent steps and verifiers are model judgement. A <code>step</code> or <code>verifier</code> can instead run a
+<a href="../../reference/runtime-plan/#script">script</a> you own, which takes the node's JSON input and
+returns typed output. Script verifiers also return declared signals for graph routing and typed
+diagnostics. A non-zero exit is an error, and the graph's error and retry rules apply.
+Script bindings are local only.</p>
 <p>Outside the graph, delivery waits on your CI and required checks and cannot override them, and
 local runs can add a <a href="../delivery-validation/">delivery check command</a>.</p>
 <h2 id="state-reduction-chooses-the-next-step">How results choose the next step<a class="headerlink" href="#state-reduction-chooses-the-next-step" title="Permanent link">&para;</a></h2>
