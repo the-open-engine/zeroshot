@@ -39,6 +39,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - For runtime/workflow, shared skill, or remote plugin changes, check MCP impact using
   [plugins/AGENTS.md](plugins/AGENTS.md).
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
+- The Helm chart in `charts/zeroshot-target/` deploys a single direct target with persistent storage.
+  Canonical releases package it as `ghcr.io/the-open-engine/charts/zeroshot-target:X.Y.Z` with the
+  matching target image version and publish it after verifying that image.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
   `ZEROSHOT.postSDK`. Canonical releases publish SDK revision `1`; later SDK revisions may release
