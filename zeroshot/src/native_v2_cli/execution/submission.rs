@@ -273,6 +273,14 @@ where
             .await
             .map_err(NativeV2CliError::InvalidRun)?;
     }
+    if run.target.is_none() {
+        // Resolve a copy: omitted and explicit sizes remain distinct idempotency inputs.
+        crate::native_v2_admission::resolve_runtime_size(
+            &mut params.intent.runtime.clone(),
+            &crate::native_v2_hosting::host_run_sizes(),
+        )
+        .map_err(NativeV2CliError::InvalidRun)?;
+    }
     crate::native_v2_cli::local::native_forge::select_local_source(run, &mut params)?;
     validate_local_only_workspace(run, &params)?;
     resolve_named_source(run, &mut params, &outbound, &available).await?;

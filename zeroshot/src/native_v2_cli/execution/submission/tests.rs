@@ -429,7 +429,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
         serde_json::json!({
             "harness":"codex",
             "provider":"openai",
-            "size":"small",
+            "size":"host",
             "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
         })
         .to_string(),

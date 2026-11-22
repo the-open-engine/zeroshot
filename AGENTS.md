@@ -1950,6 +1950,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Record cleanup obligations before credential writes and retain them until removal succeeds.
   These commands do not change MCP tools, protocol source types, shared skills or remote plugins.
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
+- Shared local run preparation checks a runtime copy against `host_run_sizes` for inline and
+  resolved-profile validation/submission. Preserve the authored size for idempotency; profile
+  storage stays portable and named targets retain their own size catalogs. Portable `startup::`
+  regressions cover this preflight contract on Linux, Windows and the curated macOS CI lane.
+  Supported-size diagnostics list complete IDs within the HTTP problem byte limit and count omissions.
 - Hosted suspend and vector POST routes use the separate `hosted_run_controls` discovery extension
   (`openengine.hosted-run-controls/v1`), relative to `hosted_runs.base_url`. Its strict
   `route_templates` contains `suspend`, `vectors` and `vector`; the existing hosted run/recovery

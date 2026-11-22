@@ -31,6 +31,11 @@ independent of a provider's context window and the selected run size.
 | `size`     | No       | Target-owned size identifier. Omit it to use the target's default.                 |
 | `nodes`    | Yes      | Object mapping each executable graph node name to a [node binding](#node-bindings) |
 
+Local runs offer `host`, which uses the current machine's CPU, memory and storage; local
+validation checks the same catalog as execution. Other targets advertise their own identifiers,
+such as `small`, `medium`, or `large`; these are examples, not universal values. Saved profiles
+preserve the authored size, and the selected target checks availability at admission.
+
 Optional `workspaceCheckpoints` is a boolean that defaults to `true`. Local CLI runs may set it
 to `false` to skip workspace snapshot storage and the Restic dependency. Run history, structured
 outputs, usage, and logs remain durable. Restart uses the retained workspace and original graph
