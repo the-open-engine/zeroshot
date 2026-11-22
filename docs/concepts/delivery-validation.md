@@ -14,10 +14,11 @@ while observing an open review (`review`), and immediately before requesting a m
 `openengine.delivery-validation/v1` JSON on stdin. It includes the publication stage, repository,
 branches, exact head and tree, trusted review base when available, and verifier-authored title and body.
 No delivery credential is supplied. The helper returns exactly one verdict: `accepted`, `pending`,
-`repair` with a public-safe reason, or `refused` with a public-safe reason. Pending keeps polling;
-repair enters the authored repair/review loop; refusal, malformed output and process failure stop the
-execution. Pending observation does not hide CI or new feedback; pending publication and merge block
-those effects. Acceptance cannot override forge policy, required checks, reviews or merge queues.
+`repair` with a public-safe reason, or `refused` with a public-safe reason. Pending at `publish` or
+`merge` blocks the action and keeps polling. At `published` and `review`, CI and feedback observation
+continues. The graph must declare and route a repair signal to run a repair pass. Refusal, malformed
+output and process failure stop delivery. Forge policy, required checks, reviews and merge queues
+still apply.
 
 The helper has no imposed turn deadline. Bounded pipes and cancellation use the normal process session;
 its process tree must be confirmed gone before delivery releases the workspace, even if the outer
@@ -56,7 +57,8 @@ scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 git clone --quiet --shared --no-checkout . "$scratch/repo"
 git -C "$scratch/repo" checkout --quiet --detach "$head"
-if (cd "$scratch/repo" && npm ci && npm test) >/dev/null 2>&1; then
+(cd "$scratch/repo" && npm ci) >/dev/null 2>&1
+if (cd "$scratch/repo" && npm test) >/dev/null 2>&1; then
   echo '{"verdict":"accepted"}'
 else
   jq -cn --arg head "$head" '{verdict: "repair",

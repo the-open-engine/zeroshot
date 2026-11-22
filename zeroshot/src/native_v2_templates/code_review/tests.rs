@@ -1,4 +1,5 @@
 use super::super::review::tests::{reduce_with_input, settle};
+use super::super::tests::with_host_size;
 use super::*;
 use openengine_cluster_protocol::{
     IdempotencyKey, NodeRuntimeBinding, RunSubmission, RunTitle, RuntimePlan, SessionScope,
@@ -27,10 +28,11 @@ fn input() -> Value {
 }
 
 async fn graph(delivery: TemplateDelivery) -> VerifiedGraph {
-    let mut runtime: RuntimePlan = serde_json::from_str(include_str!(
+    let runtime: RuntimePlan = serde_json::from_str(include_str!(
         "../../../../docs/assets/code-review/runtime.json"
     ))
     .assert_value();
+    let mut runtime = with_host_size(runtime);
     assert!(
         !runtime.workspace_checkpoints,
         "the supplied local code-review runtime must skip workspace snapshots"

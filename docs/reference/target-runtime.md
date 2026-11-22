@@ -19,12 +19,9 @@ identifiers. Hosted gateway operators must update the gateway's discovery and pr
 as part of the same rollout. An incompatibility is final for that operation: submissions are not
 automatically retried. Existing runs keep executing and compatible clients can observe them.
 
-This contract retains active execution `startedAt` and watch notification `recordedAt` as Unix
-milliseconds when known. Historical unknown times remain omitted. Released v16.0.0 clients use the
-previous contract and receive an early incompatibility error; they cannot observe current targets.
-Python users must upgrade the `the-open-engine-zeroshot` wheel, which carries the native client.
-Updating Python projection code alone does not upgrade its wire reader. MCP tool definitions and shared skills do not change;
-services using a native client must upgrade that client with their target.
+Active execution `startedAt` and watch notification `recordedAt` are Unix
+milliseconds when known. Python users upgrade the native client by upgrading the
+`the-open-engine-zeroshot` wheel.
 
 ## Discovery and sizes
 
@@ -168,19 +165,12 @@ Opted-out hosted graphs reject every request or wait node, including nested grou
 profile imports, even on an unreachable authored path. These nodes can require persisted
 continuations or suspension. Manual suspension and recovery are also refused for such runs.
 In-run conversation reuse still works, but conversations cannot be restored across runs without
-snapshots. Ordinary history, outputs, usage and logs remain available. A host may separately offer
-a fresh run from original input; this upstream change does not implement that host operation.
+snapshots. Ordinary history, outputs, usage and logs remain available.
 Local checkpoint opt-out, restart on the retained checkout and explicit discard continuations
 retain their existing behavior.
 
-This is the upstream integration contract referenced by
-[Platform issue #734](https://github.com/the-open-engine/zero-cloud/issues/734). Platform integration
-follows a canonical Zeroshot release containing this change; v17.0.0 alone does not supply it.
-Before enabling it, pin the runtime and all protocol/client/server crates to that same released
-source, deploy the matching target/gateway storage implementation, and upgrade CLI clients and
-Python wheels together. Publish the discovery marker only after admission, storage and catalog
-policy agree. No MCP tool schema, shared skill or plugin package changes are required for this
-upstream capability; companion host tools must preserve their existing defaults until enabled.
+Use matching release versions of the runtime and protocol crates, target and gateway, and CLI and
+Python clients. Advertise opt-out only when admission, storage and catalog policy agree.
 
 ## Local workspace and authentication
 

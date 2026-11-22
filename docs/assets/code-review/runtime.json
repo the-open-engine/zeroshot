@@ -1,7 +1,6 @@
 {
   "harness": "claude",
   "provider": "anthropic",
-  "size": "medium",
   "workspaceCheckpoints": false,
   "activeMemory": {
     "repository": false,

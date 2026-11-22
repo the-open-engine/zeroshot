@@ -39,7 +39,6 @@ A minimal runtime has one node binding:
 {
   "harness": "codex",
   "provider": "openai",
-  "size": "medium",
   "nodes": {
     "worker": {
       "kind": "agent",
@@ -151,7 +150,7 @@ standard error. The process accepts one active ACP session, doesn't implement se
 rejects MCP servers or extra workspace directories.
 
 The client sends one nonempty ACP text block per prompt. zeroshot maps it to `{"task":"..."}` and
-streams the successful `response` as an agent message. The prompt response includes
+sends the completed `response` as one agent message after graph success. The prompt response includes
 zeroshot-specific metadata with the durable run ID and raw graph output:
 
 ```json

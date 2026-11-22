@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use openengine_cluster_protocol::{IdempotencyKey, RunSubmission, RunTitle, WorkerOutcome};
+use openengine_cluster_protocol::{IdempotencyKey, RunSubmission, RunTitle, RuntimePlan, WorkerOutcome};
 use openengine_cluster_server::admission::VerifiedGraph;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
@@ -23,6 +23,15 @@ mod continuity;
 
 #[path = "tests/unhandled.rs"]
 mod unhandled;
+
+pub(super) fn with_host_size(mut runtime: RuntimePlan) -> RuntimePlan {
+    crate::native_v2_admission::resolve_runtime_size(
+        &mut runtime,
+        &crate::native_v2_hosting::host_run_sizes(),
+    )
+    .assert_value();
+    runtime
+}
 
 #[test]
 fn built_in_templates_have_no_terminals_inside_parallel_branches() {
