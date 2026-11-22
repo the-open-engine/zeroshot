@@ -240,23 +240,21 @@ fn contained_caller_job_lifetimes_and_force_stop() {
             1
         );
         job.close(); // Last caller Job handle: native policy, not CLI liveness, decides lifetime.
-        if flags == 0 {
+        let reason = if flags == 0 {
             assert!(process_exists(controller) && process_exists(worker));
             success(&fixture.command(&["force-stop", &id]).output().unwrap());
             wait_until(|| !process_exists(worker));
-            assert_eq!(
-                fixture.json(&["status", &id])["status"]["terminalResult"]["reason"],
-                "force_stopped"
-            );
+            "force_stopped"
         } else {
             wait_until(|| !process_exists(controller) && !process_exists(worker));
             let lost = fixture.json(&["status", &id]);
             assert_eq!(lost["controller"]["state"], "lost");
             success(&fixture.command(&["force-stop", &id]).output().unwrap());
-        }
+            "runtime_lost"
+        };
         success(&fixture.command(&["force-stop", &id]).output().unwrap());
         wait_until(|| !process_exists(controller) && !process_exists(worker));
-        super::startup::assert_force_stopped_restart(&fixture, &id, worker);
+        super::startup::assert_terminal_restart(&fixture, &id, worker, reason);
     }
 }
 

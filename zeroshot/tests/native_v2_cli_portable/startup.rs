@@ -333,18 +333,15 @@ fn contained_force_stop_survives_restart() {
     let id = receipt["runId"].as_str().unwrap();
     let worker = fixture.await_child();
     success(&fixture.command(&["force-stop", id]).output().unwrap());
-    assert_force_stopped_restart(&fixture, id, worker);
+    assert_terminal_restart(&fixture, id, worker, "force_stopped");
 }
 
 // Shared with the native Windows Job fixture so portable CI exercises the same restart checks.
-pub(super) fn assert_force_stopped_restart(fixture: &Fixture, id: &str, worker: u32) {
+pub(super) fn assert_terminal_restart(fixture: &Fixture, id: &str, worker: u32, reason: &str) {
     let terminal = fixture.json(&["status", id]);
     assert_eq!(terminal["status"]["phase"], "finished");
     assert_eq!(terminal["status"]["terminalResult"]["status"], "failed");
-    assert_eq!(
-        terminal["status"]["terminalResult"]["reason"],
-        "force_stopped"
-    );
+    assert_eq!(terminal["status"]["terminalResult"]["reason"], reason);
     assert!(
         !super::process_exists(worker),
         "stopped descendant survived"
