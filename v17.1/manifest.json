@@ -1,8 +1,8 @@
 {
   "docsVersion": "v17.1",
-  "productVersion": "17.1.0",
-  "publisherCommit": "d4bd1dd0368138c1b21ec37cc9083534a01edd2c",
-  "pythonSdkVersion": "17.1.0.post1",
+  "productVersion": "17.1.1",
+  "publisherCommit": "15e17f792359cf6f6a0358918ad6146da57fb32f",
+  "pythonSdkVersion": "17.1.1.post1",
   "routes": {
     "cli": "zeroshot-cli/",
     "clusterApi": "reference/cluster/api/",
@@ -23,5 +23,5 @@
     "targets": "concepts/targets/"
   },
   "schemaVersion": 2,
-  "sourceCommit": "d4bd1dd0368138c1b21ec37cc9083534a01edd2c"
+  "sourceCommit": "15e17f792359cf6f6a0358918ad6146da57fb32f"
 }
