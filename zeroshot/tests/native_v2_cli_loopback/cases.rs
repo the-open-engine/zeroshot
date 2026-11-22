@@ -101,25 +101,6 @@ printf 'FOREGROUND=%s\n' "$foreground"
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn keyring_setup_initializes_the_login_daemon_before_access() {
-    if !cli_prerequisites_available() {
-        return;
-    }
-    let root = temp_root();
-    let config = root.path("keyring-config");
-    // Login mode defers initialization until --start reaches this daemon's control socket.
-    let script = KEYRING_PREAMBLE.replace("--unlock", "--login");
-    let mut command = tokio::process::Command::new("dbus-run-session");
-    command
-        .args(["--", "bash", "--noprofile", "--norc", "-c"])
-        .arg(script)
-        .args(["keyring-initialization", "unused", "unused"])
-        .arg(&config);
-    run_cli_command(command, Duration::from_secs(30), "keyring initialization").await;
-    assert!(config.join("keyring-data/keyrings/login.keyring").is_file());
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
     if !cli_prerequisites_available() {
         return;

@@ -57,8 +57,6 @@ chmod 700 "$3/keyring-control" "$3/keyring-data" || exit 90
 export XDG_DATA_HOME="$3/keyring-data"
 keyring_env=$(printf '\n' | gnome-keyring-daemon --control-directory="$3/keyring-control" --unlock --components=secrets) || exit 90
 eval "$keyring_env"
-# Synchronize with the unlocked daemon before secret-tool can trigger D-Bus activation.
-gnome-keyring-daemon --control-directory="$3/keyring-control" --start --components=secrets >/dev/null || exit 90
 # Query the bus itself so the probe cannot activate a second daemon before this one is ready.
 attempt=0
 until dbus-send --session --dest=org.freedesktop.DBus --print-reply --reply-timeout=200 \
