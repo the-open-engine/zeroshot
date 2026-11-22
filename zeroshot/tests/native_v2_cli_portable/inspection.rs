@@ -359,6 +359,9 @@ fn explicit_controls_recover_interrupted_ledgers_without_a_temporary_image() {
     }
 }
 
+// Abrupt owner-loss cleanup is provided by the Linux supervisor and Windows Jobs.
+// macOS process groups require a live controller; its explicit-stop restart case is in startup.
+#[cfg(any(target_os = "linux", windows))]
 #[test]
 fn contained_controller_loss_survives_restart() {
     let fixture = Fixture::new();

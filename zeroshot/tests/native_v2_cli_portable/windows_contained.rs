@@ -386,6 +386,11 @@ fn contained_nested_job_checkpoint_recovery_has_one_successor() {
 #[test]
 fn contained_incompatible_job_refuses_before_worker_execution() {
     let fixture = Fixture::new();
+    // Isolate provider containment from checkpoint-tool startup under the same Job restrictions.
+    let mut runtime: Value =
+        serde_json::from_slice(&fs::read(fixture.root.path("runtime.json")).unwrap()).unwrap();
+    runtime["workspaceCheckpoints"] = false.into();
+    fixture.write("runtime.json", &runtime);
     let job = CallerJob::new(0);
     let restrictions = JOBOBJECT_BASIC_UI_RESTRICTIONS {
         UIRestrictionsClass: JOB_OBJECT_UILIMIT_HANDLES,
@@ -401,7 +406,8 @@ fn contained_incompatible_job_refuses_before_worker_execution() {
         },
         0
     );
-    let mut command = fixture.run_command("finish", true);
+    // A detached receipt only confirms admission; Job assignment happens when the worker starts.
+    let mut command = fixture.run_command("finish", false);
     command
         .args(["--controller", "contained"])
         .stdout(Stdio::piped())
@@ -412,9 +418,11 @@ fn contained_incompatible_job_refuses_before_worker_execution() {
         "incompatible nesting succeeded: {refused:?}"
     );
     let reason = String::from_utf8_lossy(&refused.stderr);
+    // Capture fails after process creation, so the shared runner conservatively retains its
+    // cleanup classification rather than exposing the underlying native assignment error.
     assert!(
-        reason.contains("os error 5"),
-        "expected native Job assignment rejection: {reason}"
+        reason.contains("provider process cleanup could not be confirmed"),
+        "expected contained process startup refusal: {reason}"
     );
     assert!(!fixture.workspace.join("mutation.txt").exists());
     assert!(!fixture.workspace.join("child.pid").exists());
