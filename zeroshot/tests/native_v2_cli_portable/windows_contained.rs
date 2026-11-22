@@ -226,6 +226,7 @@ fn contained_caller_job_lifetimes_and_force_stop() {
         assert_eq!(fixture.json(&["status", &id])["status"]["phase"], "running");
         let refused = fixture
             .command(&["resume", &id, "--controller", "contained"])
+            .env("FIXTURE_MODE", "finish")
             .output()
             .unwrap();
         assert!(
@@ -254,21 +255,8 @@ fn contained_caller_job_lifetimes_and_force_stop() {
             success(&fixture.command(&["force-stop", &id]).output().unwrap());
         }
         success(&fixture.command(&["force-stop", &id]).output().unwrap());
-        let terminal = fixture.json(&["status", &id]);
-        assert_eq!(terminal["status"]["phase"], "finished");
-        assert_eq!(terminal["status"]["terminalResult"]["status"], "failed");
-        assert!(
-            !fixture
-                .command(&["resume", &id, "--controller", "contained"])
-                .output()
-                .unwrap()
-                .status
-                .success()
-        );
-        assert_eq!(
-            fixture.json(&["status", &id])["status"]["terminalResult"],
-            terminal["status"]["terminalResult"]
-        );
+        wait_until(|| !process_exists(controller) && !process_exists(worker));
+        super::startup::assert_force_stopped_restart(&fixture, &id, worker);
     }
 }
 
@@ -327,6 +315,8 @@ fn contained_nested_job_checkpoint_recovery_has_one_successor() {
     lease.try_lock_exclusive().unwrap();
     let refused = fixture
         .command(&["resume", id, "--controller", "contained"])
+        .env("FIXTURE_MODE", "finish")
+        .env("FIXTURE_RECEIPTS", &receipts)
         .output()
         .unwrap();
     assert!(!refused.status.success());

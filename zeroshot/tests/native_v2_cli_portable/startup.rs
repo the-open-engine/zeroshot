@@ -319,3 +319,70 @@ fn contained_local_policy_reaches_submission_and_resume() {
         std::thread::sleep(Duration::from_millis(30));
     }
 }
+
+#[test]
+fn contained_force_stop_survives_restart() {
+    let fixture = Fixture::new();
+    let submitted = fixture
+        .run_command("block", true)
+        .args(["--controller", "contained"])
+        .output()
+        .unwrap();
+    success(&submitted);
+    let receipt: Value = serde_json::from_slice(&submitted.stdout).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let worker = fixture.await_child();
+    success(&fixture.command(&["force-stop", id]).output().unwrap());
+    assert_force_stopped_restart(&fixture, id, worker);
+}
+
+// Shared with the native Windows Job fixture so portable CI exercises the same restart checks.
+pub(super) fn assert_force_stopped_restart(fixture: &Fixture, id: &str, worker: u32) {
+    let terminal = fixture.json(&["status", id]);
+    assert_eq!(terminal["status"]["phase"], "finished");
+    assert_eq!(terminal["status"]["terminalResult"]["status"], "failed");
+    assert_eq!(
+        terminal["status"]["terminalResult"]["reason"],
+        "force_stopped"
+    );
+    assert!(
+        !super::process_exists(worker),
+        "stopped descendant survived"
+    );
+    std::fs::remove_file(fixture.workspace.join("mutation.txt")).unwrap();
+    let resumed = fixture
+        .command(&["resume", id, "--controller", "contained"])
+        .env("FIXTURE_MODE", "finish")
+        .output()
+        .unwrap();
+    success(&resumed);
+    let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    let successor = receipt["runId"].as_str().unwrap();
+    assert_ne!(successor, id);
+    assert_eq!(receipt["resumedFrom"], id);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = fixture.json(&["status", successor]);
+        if status["status"]["phase"] == "finished" {
+            assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "restart did not finish: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert_eq!(
+        std::fs::read_to_string(fixture.workspace.join("mutation.txt")).unwrap(),
+        "native worker ran"
+    );
+    assert_eq!(
+        fixture.json(&["status", id])["status"]["terminalResult"],
+        terminal["status"]["terminalResult"]
+    );
+    assert!(
+        !super::process_exists(worker),
+        "stopped descendant restarted"
+    );
+}
