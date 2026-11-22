@@ -184,9 +184,12 @@ async fn malformed_verifier_diagnostics_redact_escaped_credentials_before_trunca
         "parser-secret-\"quoted\nline\\tail\r\t\u{8}\u{c}".to_owned(),
         "parser-secret-\"quoted\nline\\tail\r\t\u{8}\u{c}".repeat(400),
     ] {
-        for response in [
-            "os.environ['SCRIPT_TOKEN']",
-            "{'output':{'result':'ok'},'signals':os.environ['SCRIPT_TOKEN'],'diagnostic':None}",
+        for (response, reports_value) in [
+            ("os.environ['SCRIPT_TOKEN']", false),
+            (
+                "{'output':{'result':'ok'},'signals':os.environ['SCRIPT_TOKEN'],'diagnostic':None}",
+                true,
+            ),
         ] {
             let directory = TestDirectory::new("script-malformed-secret");
             let (adapter, invocation) = prepared(
@@ -214,7 +217,7 @@ async fn malformed_verifier_diagnostics_redact_escaped_credentials_before_trunca
             let diagnostic = durable.recv_output().await.unwrap();
             assert_eq!(diagnostic.stream, LiveOutputStream::Error);
             assert!(diagnostic.text.contains("violates declared schema"));
-            assert!(diagnostic.text.contains("[REDACTED]"));
+            assert_eq!(diagnostic.text.contains("[REDACTED]"), reports_value);
             assert!(!diagnostic.text.contains("parser-secret-"));
             assert!(!diagnostic.text.contains("quoted"));
             assert!(!diagnostic.text.contains("tail"));
@@ -226,7 +229,12 @@ async fn malformed_verifier_diagnostics_redact_escaped_credentials_before_trunca
 #[tokio::test]
 async fn script_verifier_rejects_malformed_results_and_preserves_crashes() {
     let valid = json!({"output":{"result":"ok"},"signals":{"status":"ready"},"diagnostic":null});
-    let mut invalid = vec![json!(null), json!({"response":valid}), json!([valid])];
+    let mut invalid = vec![
+        json!(null),
+        json!({"response":valid}),
+        json!([valid]),
+        json!([valid["output"], valid["signals"], valid["diagnostic"]]),
+    ];
     for field in ["output", "signals", "diagnostic"] {
         let mut value = valid.clone();
         value.as_object_mut().unwrap().remove(field);
