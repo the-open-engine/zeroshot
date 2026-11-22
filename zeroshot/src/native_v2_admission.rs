@@ -30,6 +30,8 @@ use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
 
 pub(crate) const MAX_AGENT_VERIFIER_ATTEMPTS: u64 = 2;
 
+pub mod profile_expansion;
+
 mod sizes;
 pub use sizes::resolve_runtime_size;
 

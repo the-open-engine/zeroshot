@@ -12,11 +12,14 @@ export function Transcript({
   title = 'Transcript',
   follow = false,
   onReadingChange,
+  titled = true,
 }: {
   logs: Invocation['logs'];
   title?: string;
   follow?: boolean;
   onReadingChange?: (reading: boolean) => void;
+  /** False inside a section that already names it; the title still labels the entries. */
+  titled?: boolean;
 }) {
   const [filter, setFilter] = useState('all');
   const [window, setWindow] = useState<TranscriptWindow>({
@@ -39,31 +42,36 @@ export function Transcript({
   }, [follow, window.atBottom, start, end, lastIndex, filter]);
 
   const pin = () => setWindow((current) => ({ ...current, start, atBottom: false }));
+  const filterable = logs.some((log) => log.stream !== 'output');
 
   return (
-    <section className="history-transcript">
-      <div className="transcript-heading">
-        <h3>
-          {title} <span>{logs.length}</span>
-        </h3>
-        {logs.some((log) => log.stream !== 'output') && (
-          <select
-            aria-label="Transcript filter"
-            value={filter}
-            onChange={(event) => {
-              setFilter(event.target.value);
-              setWindow((current) => ({
-                ...current,
-                start: 0,
-                count: TRANSCRIPT_PAGE_SIZE,
-              }));
-            }}
-          >
-            <option value="all">All output</option>
-            <option value="messages">Messages</option>
-          </select>
-        )}
-      </div>
+    <section className={`history-transcript ${titled ? '' : 'untitled'}`}>
+      {(titled || filterable) && (
+        <div className="transcript-heading">
+          {titled && (
+            <h3>
+              {title} <span>{logs.length}</span>
+            </h3>
+          )}
+          {filterable && (
+            <select
+              aria-label="Transcript filter"
+              value={filter}
+              onChange={(event) => {
+                setFilter(event.target.value);
+                setWindow((current) => ({
+                  ...current,
+                  start: 0,
+                  count: TRANSCRIPT_PAGE_SIZE,
+                }));
+              }}
+            >
+              <option value="all">All output</option>
+              <option value="messages">Messages</option>
+            </select>
+          )}
+        </div>
+      )}
       <div
         ref={scrollBox}
         className="transcript-scroll"

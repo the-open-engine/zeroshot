@@ -27,6 +27,8 @@ mod lost_submission_reply;
 mod machine;
 #[path = "hosted_authority/problem_errors.rs"]
 mod problem_errors;
+#[path = "hosted_authority/profile_imports.rs"]
+mod profile_imports;
 #[path = "hosted_authority/runtime_lanes.rs"]
 mod runtime_lanes;
 #[path = "hosted_authority/stacks.rs"]

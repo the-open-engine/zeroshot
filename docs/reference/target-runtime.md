@@ -68,6 +68,59 @@ Official local builds include contributed adapters; Platform and the default tar
 only core adapters. See [Harness adapters](../project/harness-adapters.md) for availability and
 provider support.
 
+## Saved-profile imports
+
+A host that expands saved-profile dependencies during its existing profile-run operation may
+advertise this independent optional discovery extension:
+
+```json
+{
+  "saved_profile_imports": {
+    "kind": "openengine.saved-profile-imports/v1"
+  }
+}
+```
+
+The marker contains only `kind`. Its absence or a different kind keeps imported saved profiles
+unsupported by the CLI. It adds no routes and changes no compatibility versions, profile
+selectors, authentication or submission identities. The CLI fetches the selected parent's preview,
+checks this capability, then sends the existing `RunProfileRunRequest` with its `profile` selector.
+It never fetches child profiles or sends expanded bodies. Profiles without imports keep their
+existing behavior. Authored inline graphs and local profiles with imports still require local
+execution. `--validate-only` refuses remote imports because complete validation requires host
+admission; it does not report an unresolved dependency graph as valid.
+
+Hosts use `zeroshot_engine::native_v2_admission::profile_expansion::{expand_profile_imports,
+ProfileExpansionError}`. The typed function takes the authored parent `GraphSpec`, `RuntimePlan`,
+its optional root `RunProfileName` (supply it for a saved parent), and a synchronous read-only
+catalog lookup. For example, with a host-owned `BTreeMap<RunProfileName, (GraphSpec, RuntimePlan)>`:
+
+```rust
+let (graph, runtime) = expand_profile_imports(
+    parent_graph,
+    parent_runtime,
+    Some(&parent_name),
+    |name| Ok(catalog.get(name).cloned()),
+)?;
+```
+
+Resolve and authorize the parent selector and every dependency from **one immutable snapshot** in
+the parent's scope. Unqualified same-scope names are sufficient; storage and authorization remain
+host responsibilities. Do not assemble a catalog from successive mutable remote reads or accept
+client-supplied `body`/`initialInput` expansions. The helper rejects supplied expansions, missing
+profiles, cycles, incompatible child policies and expanded node/depth/import-byte limits. It
+preserves input bindings and child schemas, qualifies node/control/worker/network identities
+deterministically, and materializes each agent's effective lane relative to the parent runtime.
+The local profile store uses this same linker while preserving its raw stored-byte limit.
+
+After expansion, apply the host's usual provider-access materialization, runtime catalog, connection
+selection, graph/input verification, delivery policy and admitted-definition byte limit before
+allocating a run. Persist the expanded graph and runtime as the admitted/recovery definition; retain
+authored references in profile storage and editors. The helper does not perform admission or grant
+authority. Advertise the marker only when the profile-run handler follows this contract, including
+when callers bypass the CLI. Existing MCP tool definitions and shared skills need no changes;
+hosted services adopt the helper and capability with their native dependency update.
+
 ## Hosted workspace checkpoint opt-out
 
 `RuntimePlan.workspaceCheckpoints` defaults to `true`. A compatible named target may explicitly

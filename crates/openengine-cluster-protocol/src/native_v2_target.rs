@@ -612,6 +612,16 @@ pub struct TargetDecisionModelsDiscovery {
     pub kind: String,
 }
 
+pub const SAVED_PROFILE_IMPORTS_KIND: &str = "openengine.saved-profile-imports/v1";
+
+/// Host-owned snapshot expansion through the existing saved-profile run operation.
+/// Frozen at `{"kind": ...}`; new data requires a new extension key.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetSavedProfileImportsDiscovery {
+    pub kind: String,
+}
+
 pub const NODE_RUNTIME_LANES_KIND: &str = "openengine.node-runtime-lanes/v1";
 
 /// Frozen at `{"kind": ...}` so older clients parse it; new data needs a new extension key.
@@ -743,6 +753,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved_profile_imports: Option<TargetSavedProfileImportsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_harnesses: Option<TargetRuntimeHarnessesDiscovery>,
     #[serde(
         default,
@@ -806,6 +818,7 @@ impl TargetDiscoveryExtensions {
             && self.hosted_workspace_recovery.is_none()
             && self.workspace_export.is_none()
             && self.node_runtime_lanes.is_none()
+            && self.saved_profile_imports.is_none()
             && self.runtime_harnesses.is_none()
             && self.run_size_catalog.is_none()
             && self.decision_models.is_none()
@@ -920,6 +933,15 @@ impl TargetDiscoveryDocument {
                 kind: WORKSPACE_RECOVERY_KIND.to_owned(),
             });
         }
+        self
+    }
+
+    /// Advertise only when saved-profile submission expands an authorized immutable snapshot.
+    #[must_use]
+    pub fn with_saved_profile_imports(mut self) -> Self {
+        self.extensions.saved_profile_imports = Some(TargetSavedProfileImportsDiscovery {
+            kind: SAVED_PROFILE_IMPORTS_KIND.to_owned(),
+        });
         self
     }
 

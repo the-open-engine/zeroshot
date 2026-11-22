@@ -100,7 +100,13 @@ impl<B: NativeV2CliBackend> StoredProfileLookup<'_, B> {
             .backend
             .profile_show(self.target, selector.clone())
             .await?;
-        require_supported_placement(self.target, &profile.graph)?;
+        if LocalRunProfileStore::has_imports(&profile.graph) {
+            self.backend
+                .validate_profile_imports(self.target.ok_or_else(|| {
+                    NativeV2CliError::Usage("remote profile selectors require --target".into())
+                })?)
+                .await?;
+        }
         Ok(Some(from_profile(profile, Some(selector))))
     }
 }

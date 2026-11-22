@@ -30,21 +30,31 @@ export function useProjection(
   through: Inputs[2],
   control: Inputs[3],
   run: RunDetail | undefined,
-  listedSuccessor: string | undefined
+  listedSuccessor: string | undefined,
+  /** Only the loaded head may use the host's current successor and wall clock. */
+  current: boolean
 ) {
   const projection = useMemo(
     () => document && projectHistory(document, events, through, control),
     [document, events, through, control]
   );
-  const successorRunId = run?.workspaceRecovery?.successorRunId ?? listedSuccessor;
-  const suspension = run?.phase === 'suspended' ? run.suspension : undefined;
-  const now = useDeadlineClock(successorRunId ? undefined : suspension?.request?.expiresAt);
+  const successorRunId = current
+    ? (run?.workspaceRecovery?.successorRunId ?? listedSuccessor)
+    : undefined;
+  const suspension =
+    projection?.suspension ?? (current && run?.phase === 'suspended' ? run.suspension : undefined);
+  const clock = useDeadlineClock(
+    current && !successorRunId ? suspension?.request?.expiresAt : undefined
+  );
+  const now = current ? clock : projection?.clock.at;
   return useMemo(
     () =>
       projection && {
         ...projection,
-        nodes: requestStanding(projection.nodes, suspension, !!successorRunId, now),
+        nodes: requestStanding(projection.nodes, suspension, !!successorRunId, now ?? 0),
         successorRunId,
+        suspension,
+        now,
       },
     [projection, suspension, successorRunId, now]
   );

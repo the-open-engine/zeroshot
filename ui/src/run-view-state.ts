@@ -4,6 +4,7 @@ import { findNode, type GraphNode } from './domain';
 import type { Viewport } from '@xyflow/react';
 
 export type CanvasView = { collapsed: string[]; viewport?: Viewport };
+export type RunLayout = 'story' | 'graph';
 /** Preferences only: admitted definitions and history are always read from the current source. */
 export type RunViewState = {
   selected: string;
@@ -12,6 +13,7 @@ export type RunViewState = {
   cursor: string;
   following: boolean;
   canvas?: CanvasView;
+  layout?: RunLayout;
 };
 const token = (value: unknown): value is string => typeof value === 'string' && value.length <= 256;
 function validCanvas(canvas: CanvasView) {
@@ -32,7 +34,8 @@ function validView(value: RunViewState) {
     typeof value.inspector === 'boolean' &&
     typeof value.following === 'boolean' &&
     typeof value.cursor === 'string' &&
-    /^v2:[0-9]+$/.test(value.cursor)
+    /^v2:[0-9]+$/.test(value.cursor) &&
+    (value.layout === undefined || ['graph', 'story'].includes(value.layout))
   );
 }
 export function readRunView(key?: string): RunViewState | undefined {
@@ -80,6 +83,7 @@ export function useRunViewPersistence(
     view.cursor,
     view.following,
     view.canvas,
+    view.layout,
   ]);
 }
 
@@ -102,8 +106,56 @@ export function historyViewCursor(
   return pending ?? events[index]?.cursor ?? 'v2:0';
 }
 
+const layouts: readonly RunLayout[] = ['story', 'graph'];
+/** The last chosen view is a workspace preference, kept beside that workspace's run views. */
+export function preferredLayoutKey(key?: string) {
+  const prefix = 'zeroshot.workspace.v1.';
+  if (!key?.startsWith(prefix)) return;
+  const delimiter = '%5D.run-view.%5B';
+  for (
+    let marker = key.indexOf(delimiter);
+    marker >= 0;
+    marker = key.indexOf(delimiter, marker + delimiter.length)
+  ) {
+    const workspaceKey = key.slice(0, marker + 3);
+    try {
+      JSON.parse(decodeURIComponent(workspaceKey.slice(prefix.length)));
+      return `${workspaceKey}.run-layout`;
+    } catch {
+      // A delimiter inside the encoded identity does not close its JSON array.
+    }
+  }
+}
+function readPreferredLayout(key?: string): RunLayout | undefined {
+  const storageKey = preferredLayoutKey(key);
+  if (!storageKey) return;
+  try {
+    const value = window.localStorage.getItem(storageKey);
+    return layouts.find((layout) => layout === value);
+  } catch {
+    // An unavailable preference falls back to the steps.
+  }
+}
+function writePreferredLayout(key: string | undefined, layout: RunLayout) {
+  const storageKey = preferredLayoutKey(key);
+  if (!storageKey) return;
+  try {
+    window.localStorage.setItem(storageKey, layout);
+  } catch {
+    // Storage may be unavailable or full; the current view still changes.
+  }
+}
+
 export function useRunView(key?: string) {
   const saved: Partial<RunViewState> = useMemo(() => readRunView(key) ?? {}, [key]);
   const [canvas, setCanvas] = useState<CanvasView | undefined>(saved.canvas);
-  return { saved, canvas, setCanvas };
+  // A run reopens in its own saved view; a new run opens in the view chosen last.
+  const [layout, setLayoutState] = useState<RunLayout>(
+    () => saved.layout ?? readPreferredLayout(key) ?? 'story'
+  );
+  const setLayout = (next: RunLayout) => {
+    setLayoutState(next);
+    writePreferredLayout(key, next);
+  };
+  return { saved, canvas, setCanvas, layout, setLayout };
 }

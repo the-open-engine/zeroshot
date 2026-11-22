@@ -184,6 +184,12 @@ export type Invocation = {
   usage?: Record<string, number> | null;
   /** Settled or held in an earlier run and carried into this one when it continued. */
   imported?: boolean;
+  /**
+   * Ledger times of this execution's start and settlement. Carried-over executions have no start:
+   * their recorded time is when they were imported, not when they ran.
+   */
+  startedAt?: number;
+  endedAt?: number;
   /** The question this execution asked a person, and how it was resolved. */
   request?: PersonRequest;
 };
@@ -209,6 +215,8 @@ export type PersonRequest = {
       }
     | { kind: 'expiry'; at?: number; runId?: string };
 };
+/** Where this run continued an earlier one, at the index of its continuation record. */
+export type RunHandoff = { kind: 'continued'; index: number; from: string };
 type PriorExecution = {
   execution: string | number;
   node_instance: string | number;
@@ -303,6 +311,24 @@ function priorExecution(event: HistoryEvent['event']): PriorExecution | undefine
   if (event.kind !== 'prior_execution') return undefined;
   const value = (event as { execution?: unknown }).execution;
   return value && typeof value === 'object' ? (value as PriorExecution) : undefined;
+}
+/**
+ * What an execution decided, as recorded; a person's request reads as answered, expired or
+ * waiting. A recorded answer or expiry outranks the suspended state it has not yet settled.
+ */
+export function executionDecision(invocation: Invocation): string | undefined {
+  const resolution = invocation.request?.resolution;
+  if (resolution?.kind === 'expiry') return 'No answer in time';
+  if (resolution?.kind === 'answer' && invocation.state === 'suspended') {
+    const chosen = Object.values(resolution.signals);
+    return chosen.length ? chosen.map(humanize).join(', ') : 'Answered';
+  }
+  if (invocation.state === 'failed')
+    return humanize(invocation.outcome?.code ?? invocation.outcome?.reason ?? 'failed');
+  if (invocation.state === 'suspended')
+    return invocation.request ? 'Waiting for an answer' : 'Waiting';
+  const signals = Object.values(invocation.outcome?.signals ?? {});
+  return signals.length ? signals.map(humanize).join(', ') : undefined;
 }
 export function eventLabel(event: HistoryEvent['event']): string {
   const node = eventNode(event);
@@ -462,6 +488,7 @@ export function projectHistory(
   const references = new Map<string, Reference>();
   const systemLogs: Invocation['logs'] = [];
   const requests: PersonRequest[] = [];
+  const handoffs: RunHandoff[] = [];
   const projection: HistoryProjection = {
     invocations,
     byId,
@@ -469,15 +496,31 @@ export function projectHistory(
     references,
     systemLogs,
     requests,
+    handoffs,
     unowned: [],
   };
   let terminal: RunTerminal | undefined;
   let suspended = false;
+  let suspension: RunSummary['suspension'];
+  /**
+   * The run's first recorded time and the latest one at this position, when the ledger kept times.
+   * Events from before the ledger recorded times leave the start unknown rather than estimated.
+   */
+  const clock: { first?: number; at?: number } = {};
+  let untimedStart = false;
   for (let index = 0; index <= Math.min(through, events.length - 1); index++) {
-    const event = events[index].event;
+    const { event, recordedAt } = events[index];
+    if (recordedAt === undefined) untimedStart ||= clock.at === undefined;
+    else {
+      if (!untimedStart) clock.first ??= recordedAt;
+      clock.at = recordedAt;
+    }
     if (event.kind === 'terminal') terminal = event.result;
-    else readHistoryEvent(event, index, projection);
-    if (event.kind === 'suspended') suspended = true;
+    else readHistoryEvent(event, index, projection, recordedAt);
+    if (event.kind === 'suspended') {
+      suspended = true;
+      suspension = event.suspension;
+    }
   }
   // A run that ended suspended runs nothing: its open groups and held-back work wait with it.
   const held = suspended && !terminal;
@@ -518,7 +561,22 @@ export function projectHistory(
       ...nodes[document.graph.root.name],
       state: terminal.status === 'succeeded' ? 'succeeded' : 'failed',
     };
-  return { invocations, nodes, terminal, systemLogs, controls, requests };
+  // Keep the original active descendants for the graph's fallback above, then hold their
+  // execution rows too. No completion or settlement time was recorded for this held work.
+  if (held)
+    for (const invocation of invocations)
+      if (invocation.state === 'running') invocation.state = 'suspended';
+  return {
+    invocations,
+    nodes,
+    terminal,
+    systemLogs,
+    controls,
+    requests,
+    handoffs,
+    clock,
+    suspension: terminal ? undefined : suspension,
+  };
 }
 
 type HistoryProjection = {
@@ -528,6 +586,7 @@ type HistoryProjection = {
   references: Map<string, Reference>;
   systemLogs: Invocation['logs'];
   requests: PersonRequest[];
+  handoffs: RunHandoff[];
   /** The execution whose request deferral awaits the question it asked. */
   asking?: Invocation;
   /** Carried-over questions recorded before the execution that asked them. */
@@ -537,21 +596,23 @@ type HistoryProjection = {
 function readHistoryEvent(
   event: HistoryEvent['event'],
   index: number,
-  projection: HistoryProjection
+  projection: HistoryProjection,
+  recordedAt?: number
 ) {
   const { byId, systemLogs } = projection;
   const prior = priorExecution(event);
   if (event.kind === 'node_started' && event.reference) {
-    startInvocation(projection, index, {
+    const invocation = startInvocation(projection, index, {
       reference: event.reference,
       mapIndices: event.occurrence?.mapIndices ?? [],
       attempt: event.attempt ?? 1,
       input: event.input,
     });
+    if (invocation) invocation.startedAt = recordedAt;
   } else if (prior) {
     readPriorExecution(prior, index, projection);
   } else if (event.kind === 'vector' && event.vector) {
-    readVector(event.vector, projection);
+    readVector(event.vector, index, projection);
   } else if (event.kind === 'suspended' && event.suspension?.request) {
     const { request, node, createdAt } = event.suspension;
     recordRequest(projection, { ...request, node, createdAt });
@@ -559,6 +620,7 @@ function readHistoryEvent(
     const invocation = openInvocation(projection, event.completion.reference);
     if (!invocation) return;
     invocation.end = index;
+    invocation.endedAt = recordedAt;
     invocation.outcome = event.completion.outcome;
     invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
   } else if (
@@ -568,6 +630,7 @@ function readHistoryEvent(
     const invocation = openInvocation(projection, event.reference);
     if (!invocation) return;
     invocation.end = index;
+    invocation.endedAt = recordedAt;
     invocation.state = event.kind === 'execution_voided' ? 'skipped' : 'suspended';
     invocation.reason = event.reason;
     // The question this execution asked is recorded right after its deferral.
@@ -669,9 +732,9 @@ function startInvocation(
   return invocation;
 }
 
-/** Requests and their answers or expiry, each with the time it was recorded. */
-function readVector(vector: VectorRecord, projection: HistoryProjection) {
-  const { requests } = projection;
+/** Requests, answers and expiry, each with the time it was recorded, and handoffs between runs. */
+function readVector(vector: VectorRecord, index: number, projection: HistoryProjection) {
+  const { requests, handoffs } = projection;
   const at = vector.createdAt;
   if (
     vector.kind === 'request' &&
@@ -696,6 +759,8 @@ function readVector(vector: VectorRecord, projection: HistoryProjection) {
       vector.kind === 'answer' && vector.answer
         ? { kind: 'answer', ...vector.answer, at, runId: vector.runId }
         : { kind: 'expiry', at, runId: vector.runId };
+  } else if (vector.kind === 'continuation' && vector.resumedFrom) {
+    handoffs.push({ kind: 'continued', index, from: vector.resumedFrom });
   }
 }
 

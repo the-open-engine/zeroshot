@@ -258,6 +258,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for a node start record, including input and bookkeeping. Local submissions apply the same
   admitted-definition check before creating run storage or a controller. Oversized node starts
   fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
+- `native_v2_admission::profile_expansion::expand_profile_imports` is the canonical typed linker
+  over a caller-owned immutable authorized catalog lookup, shared with the local store. Hosts own
+  snapshot selection, same-scope name resolution, authentication, credential selection and full
+  admission. `extensions.saved_profile_imports` with exact `openengine.saved-profile-imports/v1`
+  opts named saved-profile selectors into host expansion through the existing profile-run route;
+  missing/wrong markers and named inline/local graphs retain refusal. Remote imports cannot be
+  fully checked by `--validate-only`; no client dependency reads or supplied expansions are trusted.
+  The public API and named-client regressions use the existing observation `wire_contract::`
+  selectors; actual local CLI cases run in the portable `startup::` suite on all native CI lanes.
 - Local profile imports resolve from one profile-store snapshot before semantic admission and
   credential selection. Saved definitions keep references, while admitted and recovery definitions
   freeze expanded bodies and qualified node identities. The verifier checks child scopes and
@@ -2245,6 +2254,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
   Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
   remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
+- Runs open in Steps, with a remembered Steps/Graph layout, shared selection and replay cursor.
+  Opening a step preserves following and playback. Steps groups recorded work, attempts and rounds;
+  durations and usage come from recorded evidence and remain unknown when unavailable.
+  Retry rows retain their first attempt's identity and expose each recorded attempt's details;
+  the selected attempt stays shared with Graph. Expanded results retain named signals.
+  Both views use `use-run-projection.ts`: host successor updates and the deadline clock apply at
+  the loaded head, while replay uses the selected prefix and its recorded time. A locally passed
+  deadline is distinct from a recorded answer or expiry. Recorded suspensions hold active work,
+  expose timer due times and stop the run duration at the selected suspended position.
 - Canvas toolbars keep one row and fold by their own width, as ui/DESIGN.md sets out. Folded tools
   go through the shared `MoreMenu` (`ui/src/MoreMenu.tsx`), which owns keyboard movement, focus and
   dismissal; do not add another overflow menu or let a toolbar wrap or scroll.
