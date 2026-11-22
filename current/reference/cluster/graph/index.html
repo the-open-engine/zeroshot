@@ -2507,7 +2507,7 @@ object declares peer communication permissions; omission or <code>{}</code> gran
 </tr>
 <tr>
 <td><code>fail</code></td>
-<td>Finite-enum reason; <code>unhandled</code> is reserved for runtime handling of unchecked worker errors</td>
+<td>One reason label. Runtime labels such as <code>unhandled</code> are reserved.</td>
 </tr>
 </tbody>
 </table>
@@ -2950,8 +2950,9 @@ order or a bounded structural ranking with positive maximum iterations.</p>
 <p>Artifact bytes, inline payloads, filesystem paths, signed URLs, bearer tokens, and credential
 material are deliberately unrepresentable.</p>
 <h2 id="canonical-compiled-ir-and-identity">Canonical compiled IR and identity<a class="headerlink" href="#canonical-compiled-ir-and-identity" title="Permanent link">&para;</a></h2>
-<p><code>CompiledGraphIr</code> contains the profile, initial input type, policy binding, root, and proven
-structural bounds. Canonical bytes are compact UTF-8 JSON after these transformations:</p>
+<p><code>CompiledGraphIr</code> contains the profile, initial input type, policy binding, root, proven
+structural bounds, and any peer networks. Canonical bytes are compact UTF-8 JSON after these
+transformations:</p>
 <ul>
 <li>object/map keys, record fields, bindings, signal names, enum labels, policy/set-like collections,
   promoted paths, and other semantically unordered collections are sorted; binding and <code>k_of_n</code>
@@ -2960,14 +2961,14 @@ structural bounds. Canonical bytes are compact UTF-8 JSON after these transforma
 <li>parallel branches are sorted by stable node name;</li>
 <li>sequence child order, choice branch order, loop/map body structure, and every semantic order are
   preserved;</li>
-<li>optional/default fields are serialized explicitly;</li>
+<li>optional/default fields are serialized explicitly, with an empty network map omitted;</li>
 <li>floats and non-finite values are absent from and rejected by the closed IR algebra.</li>
 </ul>
 <p><code>GraphIdentity</code> is lowercase hexadecimal SHA-256 over exactly those canonical bytes. Equivalent IR
 built with different map, set, guard, binding-order, or parallel insertion order has the same
 identity. Changing semantic sequence order, authored instructions, a payload type, bound, worker
-reference, policy reference, binding content or multiplicity, or <code>k_of_n</code> selector multiplicity
-changes the identity.</p>
+reference, policy reference, binding content or multiplicity, <code>k_of_n</code> selector multiplicity, or
+peer network membership or publishing permissions changes the identity.</p>
 <h2 id="generated-conformance-vectors">Generated conformance vectors<a class="headerlink" href="#generated-conformance-vectors" title="Permanent link">&para;</a></h2>
 <p><code>graph.schema.json</code> is rooted at <code>GraphSpec</code>; <code>compiled-ir.schema.json</code> is rooted at
 <code>CompiledGraphIr</code>. OpenRPC exposes these and the graph diagnostic, bounds, and artifact component

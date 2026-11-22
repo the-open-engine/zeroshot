@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Choose local execution, a self-hosted Docker target or zeroshot Platform. Connect a target and prepare its source and credentials.">
+        <meta name="description" content="Choose local execution, a self-hosted target on Docker or Kubernetes, or zeroshot Platform. Connect a target and prepare its source and credentials.">
       
       
       
@@ -63,14 +63,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="Targets | zeroshot docs">
-    <meta property="og:description" content="Choose local execution, a self-hosted Docker target or zeroshot Platform. Connect a target and prepare its source and credentials.">
+    <meta property="og:description" content="Choose local execution, a self-hosted target on Docker or Kubernetes, or zeroshot Platform. Connect a target and prepare its source and credentials.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/concepts/targets/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Targets | zeroshot docs">
-    <meta name="twitter:description" content="Choose local execution, a self-hosted Docker target or zeroshot Platform. Connect a target and prepare its source and credentials.">
+    <meta name="twitter:description" content="Choose local execution, a self-hosted target on Docker or Kubernetes, or zeroshot Platform. Connect a target and prepare its source and credentials.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -677,6 +677,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubernetes-target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run a Kubernetes target
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2392,6 +2403,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kubernetes-target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run a Kubernetes target
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hosted-target" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2501,7 +2523,7 @@ graph and models.</p>
 <td>Your existing files, including uncommitted changes</td>
 </tr>
 <tr>
-<td>Direct Docker</td>
+<td>Direct (Docker or Kubernetes)</td>
 <td>Run on infrastructure you manage</td>
 <td>An exact committed Git revision</td>
 </tr>
@@ -2572,7 +2594,7 @@ If you change the browser origin, set <code>--public-origin</code> to match it.<
 <p>Docker must be running. The restart policy recovers from reboots and unexpected exits; after a
 manual stop, use <code>docker start zeroshot-target</code>. Interrupted runs are marked lost. If recovery data
 exists, start a successor with <code>zeroshot resume RUN_ID --target local-target</code>.</p>
-<p>Docker and hosted runs use the remote Git revision, not your uncommitted files. <code>--cwd</code> chooses the
+<p>Direct and hosted runs use an exact committed Git revision from the remote. <code>--cwd</code> chooses the
 client checkout used to select that source. Its upstream takes precedence; otherwise zeroshot
 selects the unique eligible HTTPS or SSH remote. For ambiguous remotes, set an upstream or pass
 <code>--repository</code> with a credential-free clone URL or GitHub <code>owner/name</code>. Use <code>--branch</code> and
@@ -2592,36 +2614,53 @@ confirm the result, check <code>zeroshot list --target NAME</code> or rerun with
 <code>--public-origin</code> to that origin, such as <code>http://127.0.0.1:18080</code>.
 The <a href="https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md">target image README</a>
 covers proxies, Docker access and image builds.</p>
-<p>For Kubernetes, use the
-<a href="https://github.com/the-open-engine/zeroshot/tree/main/charts/zeroshot-target">Zeroshot target Helm chart</a>.
-Helm selects the newest stable chart from GHCR, and each chart pins the matching target image.</p>
+<h2 id="kubernetes-target">Run a Kubernetes target<a class="headerlink" href="#kubernetes-target" title="Permanent link">&para;</a></h2>
+<p>The public Helm chart deploys a single direct target. It requires a Linux <code>amd64</code> node, a writable
+volume that supports POSIX ownership and permissions, and a namespace that allows the target to
+start as root so it can launch isolated worker UIDs.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">helm upgrade --install zeroshot-target \</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">  oci://ghcr.io/the-open-engine/charts/zeroshot-target \</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">  --namespace zeroshot --create-namespace --wait</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">kubectl --namespace zeroshot port-forward service/zeroshot-target 8080:8080</span>
+</code></pre></div>
+<p>Keep the port forward open. In another terminal, use a Zeroshot CLI release that matches the target.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot target add kubernetes --url http://127.0.0.1:8080 --direct</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot list --target kubernetes</span>
+</code></pre></div>
+<p>Use <code>--target kubernetes</code> for runs and observation commands. Open <code>http://127.0.0.1:8080/ui/</code> for
+profiles and run history. Any workload that can reach the target's ClusterIP Service can submit runs.
+Restrict network access to trusted workloads.</p>
+<p>Helm selects the newest stable chart and its matching image. Pass <code>--version X.Y.Z</code> to pin a release
+on install or upgrade. A pod replacement interrupts active runs. The persistent volume preserves
+profiles and run history. See the <a href="https://github.com/the-open-engine/zeroshot/blob/main/charts/zeroshot-target/README.md">chart guide</a>
+for storage and proxy settings, uninstall behavior, and Docker access.</p>
 <h2 id="hosted-target">Use a hosted target<a class="headerlink" href="#hosted-target" title="Permanent link">&para;</a></h2>
 <p>For zeroshot Platform, run <code>zeroshot target login platform</code>, then use <code>--target platform</code>.
 To register another hosting service:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot target login production</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">zeroshot target login production</span>
 </code></pre></div>
 <p>The service manages login, source access, organization connections, queues and capacity.
 See the <a href="https://app.zeroshot.sh/docs">Platform docs</a> for its setup.</p>
 <h3 id="api-keys">API keys<a class="headerlink" href="#api-keys" title="Permanent link">&para;</a></h3>
 <p>For CI, sign in as a human and create a delegation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot target login platform</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot delegation create ci</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot target login platform</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">zeroshot delegation create ci</span>
 </code></pre></div>
 <p>Store the one-time <code>api_key</code> as <code>ZEROSHOT_API_KEY</code> in your CI secret store. It carries your current
 permissions. Keys expire after 90 days by default; <code>--expires-in-days</code> accepts 1–365.
 Set <code>ZEROSHOT_ORGANIZATION</code> to the organization UUID when a user key needs organization selection.</p>
 <p>Organization owners and admins can create an organization delegation instead:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
 </code></pre></div>
 <p>Organization keys stay in their organization. Omitted profile and connection scopes follow the
 owner's scope. Keep provider and source credentials in their usual connections.</p>
 <p>Unset <code>ZEROSHOT_API_KEY</code> and use human login to manage delegations. Create a replacement key before
 revoking the old one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot delegation list</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="go">zeroshot delegation list</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
 </code></pre></div>
 <p>Revocation blocks further calls; already accepted runs continue.</p>
 <h3 id="workspace-export-protocol">Workspace export protocol<a class="headerlink" href="#workspace-export-protocol" title="Permanent link">&para;</a></h3>
@@ -2637,12 +2676,12 @@ core adapters only. Check <a href="../../project/harness-adapters/">harness supp
 <h2 id="source-and-delivery-credentials">Source and delivery credentials<a class="headerlink" href="#source-and-delivery-credentials" title="Permanent link">&para;</a></h2>
 <p>Local Git operations can reuse your Git authentication. PR and merge delivery support GitHub and
 GitLab; other Git hosts support checkout and push. See <a href="../../guides/forge-delivery/">forge setup</a>.</p>
-<p><strong>Breaking change:</strong> in-place local delivery commits on the checked-out branch and pushes the
-remote branch of the same name, including existing unpushed commits. It creates no managed run
-branch. PR/MR targets use a different upstream branch, otherwise the remote's default branch.
-<code>--pr</code> and <code>--ship</code> refuse to start on that target; use a feature branch or <code>--worktree</code>.
-Explicit <code>--push</code> can publish any checked-out branch, including <code>main</code>. Non-fast-forward pushes
-and forge policy refusals stop delivery without asking agents to repair them.</p>
+<p>In-place local delivery commits on the checked-out branch and pushes to the remote branch with the
+same name, including any existing unpushed commits. <code>--pr</code> and <code>--ship</code> target a different upstream
+branch when configured, or the remote's default branch. If you're on the target branch, start from
+a feature branch or use <code>--worktree</code>. Explicit <code>--push</code> can publish any checked-out branch,
+including <code>main</code>. Non-fast-forward pushes and forge policy refusals stop delivery before an agent
+repair round.</p>
 <p><code>--worktree</code> selects a separate retained worktree on a managed run branch. It starts at local HEAD,
 including committed unpushed work. <code>--worktree-base remote</code> fetches the invoking branch's upstream;
 without one, configure it or choose <code>--worktree-base local</code>. Delivery commits and publishes that

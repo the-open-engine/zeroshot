@@ -2531,21 +2531,11 @@ to export the complete <code>GraphSpec</code>.</p>
 </tbody>
 </table>
 <p>Required approval blocks <code>--ship</code>, but not <code>--pr</code>.</p>
-<p><strong>Breaking change:</strong> local delivery commits on the checked-out branch and publishes the remote
-branch of the same name, including existing unpushed commits. In-place runs create no managed
-<code>zeroshot/v2-…</code> branch. <code>--pr</code> and <code>--ship</code> target a different upstream branch when configured,
-otherwise the remote's default branch. Starting on that target is refused before agents start;
-use a feature branch or <code>--worktree</code>. Explicit <code>--push</code> can publish <code>main</code>; delivery never force-pushes.</p>
-<p>Add <code>--worktree</code> to work on a managed run branch in a separate, retained Git worktree. Its default
-base is the invoking branch's exact local HEAD. <code>--worktree-base remote</code> fetches its upstream and
-requires one to be configured. Delivery commits and publishes the matching managed run branch;
-PR/MR targets remain the invoking branch's upstream, or its name when none is set. The invoking
-checkout stays unchanged. Worktrees contain committed files only, with no dependency setup or
-untracked resources copied. Resume reuses the worktree and keeps HEAD attached without rewinding
-shared branch tips. Remove the worktree explicitly when finished. See
-<a href="../targets/#source-and-delivery-credentials">source and delivery setup</a>.</p>
-<p>PR feedback is enabled by default and restricted to repository writers. <code>--no-pr-feedback</code>
-disables it; <a href="../../reference/execution/#delivery-feedback">feedback rules</a> cover permission checks.</p>
+<p>Local delivery pushes the checked-out branch, including existing unpushed commits. Use
+<code>--worktree</code> to deliver from a separate, retained worktree on a managed branch. See
+<a href="../../guides/forge-delivery/#local-setup">local forge setup</a> for branch selection and recovery.</p>
+<p>PR feedback is enabled by default. <code>--no-pr-feedback</code> disables it. See
+<a href="../../reference/execution/#delivery-feedback">feedback rules</a> for writer and app-bot authorization.</p>
 <p><code>auto-research</code> runs ten rounds by default; <code>options.iterations</code> changes the count. Results stay in
 <code>.zeroshot/research</code>; <code>--push</code> publishes each accepted round. See
 <a href="../../reference/execution/#auto-research">research rounds and repair</a> for the full behavior.</p>

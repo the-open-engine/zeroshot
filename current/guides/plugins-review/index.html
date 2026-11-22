@@ -2525,8 +2525,8 @@ record before testing and keeps redacted transcripts, observed tool arguments/re
 walkthrough using the same case IDs. Unfilled fixtures or package validation cannot count as a pass.</p>
 <p>Preflight the generated native client formats: OpenAI uses <code>.codex-plugin/plugin.json</code> with
 explicit skill/<code>.mcp.json</code> mappings; Claude uses <code>.claude-plugin/plugin.json</code> and <code>.mcp.json</code>.
-Codex CLI 0.167.0 has loaded the three skills and declared MCP server from its package. Repeat that
-loading check for the release artifacts, then run the authorization and workflow cases below.</p>
+Load the release artifacts and verify the declared skills and MCP server, then run the
+authorization and workflow cases below.</p>
 <h2 id="generate-the-packages">Generate the packages<a class="headerlink" href="#generate-the-packages" title="Permanent link">&para;</a></h2>
 <p>From the repository root:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>node<span class="w"> </span>scripts/plugins.js<span class="w"> </span>generate
@@ -2677,7 +2677,7 @@ approval; record published install links only after they work.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-10">10 November 2026</time>
+    Last updated <time datetime="2026-11-22">22 November 2026</time>
   </span>
 
     

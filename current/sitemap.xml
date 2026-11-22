@@ -6,7 +6,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/zeroshot-cli/</loc>
-         <lastmod>2026-11-20</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/zeroshot-distribution/</loc>
@@ -14,7 +14,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/delivery-validation/</loc>
-         <lastmod>2026-11-11</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/execution/</loc>
@@ -22,7 +22,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/runtimes-and-connections/</loc>
-         <lastmod>2026-11-10</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/targets/</loc>
@@ -30,31 +30,31 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/getting-started/first-run/</loc>
-         <lastmod>2026-11-17</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/getting-started/install/</loc>
-         <lastmod>2026-11-11</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/acp/</loc>
-         <lastmod>2026-11-11</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/active-memory/</loc>
-         <lastmod>2026-11-18</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/ask-a-person/</loc>
-         <lastmod>2026-11-17</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/code-review/</loc>
-         <lastmod>2026-11-21</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/forge-delivery/</loc>
-         <lastmod>2026-11-17</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/observe-and-control/</loc>
@@ -62,11 +62,11 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/planning/</loc>
-         <lastmod>2026-11-10</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/plugins-review/</loc>
-         <lastmod>2026-11-10</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/plugins/</loc>
@@ -74,15 +74,15 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/python-sdk/</loc>
-         <lastmod>2026-11-18</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/review-loop/</loc>
-         <lastmod>2026-11-17</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/review/</loc>
-         <lastmod>2026-11-10</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/runtime-environments/</loc>
@@ -90,7 +90,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/stacks/</loc>
-         <lastmod>2026-11-14</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/project/harness-adapters/</loc>
@@ -106,15 +106,15 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/active-memory/</loc>
-         <lastmod>2026-11-17</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/execution/</loc>
-         <lastmod>2026-11-17</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/installation/</loc>
-         <lastmod>2026-11-11</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/</loc>
@@ -130,7 +130,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/admission/</loc>
-         <lastmod>2026-10-24</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/api/</loc>
@@ -146,7 +146,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/lifecycle/</loc>
-         <lastmod>2026-10-24</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/portable-bindings/</loc>
@@ -154,22 +154,22 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/watch/</loc>
-         <lastmod>2026-10-24</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/client/</loc>
-         <lastmod>2026-11-21</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/configuration/</loc>
-         <lastmod>2026-11-21</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/errors/</loc>
-         <lastmod>2026-11-21</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/results/</loc>
-         <lastmod>2026-11-21</lastmod>
+         <lastmod>2026-11-22</lastmod>
     </url>
 </urlset>

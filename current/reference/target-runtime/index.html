@@ -2539,12 +2539,9 @@ observing a run. Upgrade the Zeroshot client and target together to releases imp
 identifiers. Hosted gateway operators must update the gateway's discovery and protocol dependencies
 as part of the same rollout. An incompatibility is final for that operation: submissions are not
 automatically retried. Existing runs keep executing and compatible clients can observe them.</p>
-<p>This contract retains active execution <code>startedAt</code> and watch notification <code>recordedAt</code> as Unix
-milliseconds when known. Historical unknown times remain omitted. Released v16.0.0 clients use the
-previous contract and receive an early incompatibility error; they cannot observe current targets.
-Python users must upgrade the <code>the-open-engine-zeroshot</code> wheel, which carries the native client.
-Updating Python projection code alone does not upgrade its wire reader. MCP tool definitions and shared skills do not change;
-services using a native client must upgrade that client with their target.</p>
+<p>Active execution <code>startedAt</code> and watch notification <code>recordedAt</code> are Unix
+milliseconds when known. Python users upgrade the native client by upgrading the
+<code>the-open-engine-zeroshot</code> wheel.</p>
 <h2 id="discovery-and-sizes">Discovery and sizes<a class="headerlink" href="#discovery-and-sizes" title="Permanent link">&para;</a></h2>
 <p>Targets advertise their enabled harness/provider pairs through the
 <code>openengine.runtime-harnesses/v1</code> discovery extension. The CLI checks every selected lane before
@@ -2663,18 +2660,11 @@ containing <code>workspaceCheckpoints: false</code> through its bundled CLI and 
 profile imports, even on an unreachable authored path. These nodes can require persisted
 continuations or suspension. Manual suspension and recovery are also refused for such runs.
 In-run conversation reuse still works, but conversations cannot be restored across runs without
-snapshots. Ordinary history, outputs, usage and logs remain available. A host may separately offer
-a fresh run from original input; this upstream change does not implement that host operation.
+snapshots. Ordinary history, outputs, usage and logs remain available.
 Local checkpoint opt-out, restart on the retained checkout and explicit discard continuations
 retain their existing behavior.</p>
-<p>This is the upstream integration contract referenced by
-<a href="https://github.com/the-open-engine/zero-cloud/issues/734">Platform issue #734</a>. Platform integration
-follows a canonical Zeroshot release containing this change; v17.0.0 alone does not supply it.
-Before enabling it, pin the runtime and all protocol/client/server crates to that same released
-source, deploy the matching target/gateway storage implementation, and upgrade CLI clients and
-Python wheels together. Publish the discovery marker only after admission, storage and catalog
-policy agree. No MCP tool schema, shared skill or plugin package changes are required for this
-upstream capability; companion host tools must preserve their existing defaults until enabled.</p>
+<p>Use matching release versions of the runtime and protocol crates, target and gateway, and CLI and
+Python clients. Advertise opt-out only when admission, storage and catalog policy agree.</p>
 <h2 id="local-workspace-and-authentication">Local workspace and authentication<a class="headerlink" href="#local-workspace-and-authentication" title="Permanent link">&para;</a></h2>
 <p>Omit <code>--target</code> to work in an existing local folder. <code>--cwd FOLDER</code> selects the folder for one run;
 the default is the invoking folder. Input, graph, runtime, and environment file arguments remain

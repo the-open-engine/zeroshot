@@ -2441,9 +2441,9 @@ provider accepts. zeroshot passes it on unchanged.</p>
 </div>
 </div>
 </div>
-<p>A local run needs no API key. Docker and Platform runs cannot use your CLI's login; they need the
-provider's API key (<code>OPENAI_API_KEY</code> for Codex) from your environment or the target's connection
-store.
+<p>The local configurations above reuse your agent CLI's native login. Docker, Kubernetes and
+Platform targets use provider credentials such as <code>OPENAI_API_KEY</code> from your environment or the
+target's connection store.
 <a href="../../concepts/runtimes-and-connections/">Runtimes and connections</a> explains both.
 <a href="../../project/harness-adapters/">Harness adapters</a> lists every agent and provider pair.</p>
 <h2 id="3-check-it">3. Check it<a class="headerlink" href="#3-check-it" title="Permanent link">&para;</a></h2>
@@ -2481,8 +2481,8 @@ error records, then the <code>zeroshot logs</code> command that shows the rest.
   a tree. Names marked <code>*</code> need runtime bindings. Add <code>--json</code> to export the <code>GraphSpec</code> that
   <code>--graph</code> and the Python SDK accept.</li>
 <li><strong>Go smaller.</strong> <code>zeroshot template show single-worker</code> is one agent with no review loop.</li>
-<li><strong>Research instead of change.</strong> <code>zeroshot template show auto-research</code> runs ten iterations by
-  default; set <code>options.iterations</code> in the input to change that. Results stay under
+<li><strong>Research instead of change.</strong> Select <code>--template auto-research</code> on <code>zeroshot run</code> for a default
+  limit of ten iterations. Set <code>options.iterations</code> in the input to change the limit. Results stay under
   <code>.zeroshot/research</code>; add <code>--push</code> to publish each finalized iteration.</li>
 <li><strong>Write your own graph.</strong> <a href="../../guides/review-loop/">Build a review loop</a> goes step by step.</li>
 </ul>
@@ -2506,7 +2506,7 @@ error records, then the <code>zeroshot logs</code> command that shows the rest.
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-17">17 November 2026</time>
+    Last updated <time datetime="2026-11-22">22 November 2026</time>
   </span>
 
     

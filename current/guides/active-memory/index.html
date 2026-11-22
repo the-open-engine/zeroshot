@@ -2363,8 +2363,8 @@ cause in error logs, including when postmortem is disabled but recall is enabled
 specialists log their role and cause, followed by one error summary. Confirmed hook configuration
 or carrier failures are reported once per execution; a conversation without tool callbacks is
 not treated as a failure. These auxiliary errors do not become primary graph failure evidence.
-Foreground <code>run</code> and <code>watch</code> print the latest five memory error records on stderr when observation
-ends. <code>resume</code> also checks that stream after its receipt, within the existing five-second log-read
+Foreground <code>run</code> and <code>watch</code> print the latest five memory error records on stderr when the run
+finishes or fails. <code>resume</code> also checks that stream after its receipt, within the existing five-second log-read
 deadline; longer-running successors can be followed with <code>watch</code>. Complete diagnostics remain in
 <code>zeroshot logs RUN_ID</code>. Disabling both memory scopes skips store initialization without a warning.</p>
 <p>While the postmortem runs, the run stays <code>running</code>. <code>status</code> and <code>list</code> carry the recorded graph
@@ -2385,10 +2385,8 @@ transfer automatically across graph versions.</p>
 no model calls. An ID/revision is supplied once per provider conversation; compaction does not reset
 this deduplication. Copilot does not keep tool-call context in its session, so there a repository
 lesson is supplied once per execution. Each matching injection gets its own context limit.</p>
-<p>Repository lessons arrive at matching tool calls through harness hooks, never inside a tool
-result. Disabled hooks can prevent delivery; scripts that
-hide their file paths can miss matches. Advice cannot change a tool call already issued, and receipt
-of a lesson does not prove the model followed it. See the
+<p>Repository lessons arrive through the harness at matching tool calls. Disabled hooks can prevent
+delivery, and scripts that hide their file paths can miss matches. See the
 <a href="../../reference/active-memory/#indexing-and-retrieval">matching and delivery rules</a> for details.</p>
 <h2 id="persistence-and-run-completion">Storage and backups<a class="headerlink" href="#persistence-and-run-completion" title="Permanent link">&para;</a></h2>
 <p>Local runs share a database outside your checkouts, with separate repository scopes:</p>
@@ -2422,8 +2420,8 @@ using the store and copy the whole <code>active-memory/</code> directory, includ
 Restore it while those processes are stopped.</p>
 <h2 id="initialize-from-local-history">Initialize from local history<a class="headerlink" href="#initialize-from-local-history" title="Permanent link">&para;</a></h2>
 <p>Ask your agent to use the <code>zeroshot-memory-init</code> skill to learn from completed local runs.
-<code>zeroshot update</code> installs the skill; if it is missing after upgrading through an older updater,
-run the update again.</p>
+<code>zeroshot update</code> installs managed skills by default. See
+<a href="../../reference/installation/#managed-skills">skill installation</a> for the opt-out.</p>
 <p>The skill inventories local history across repositories, discovers lessons, checks them against
 current source and publishes them together. Keep the selected checkouts stable during its final
 review and publication. It does not clone repositories, pull changes or change branches.
@@ -2443,12 +2441,8 @@ repository identity checks and interruption recovery.</p>
 advice. Hosting integrations must explicitly provide a memory namespace and enforce its access.
 See <a href="../../reference/active-memory/">memory lifecycle and storage</a> for maintenance, evidence and host
 contracts.</p>
-<p>The native tool-call carrier is installed for every agent conversation, including when Active
-Memory is off, so it can deliver standing <a href="../observe-and-control/#steer-a-run">steers</a>.
-Memory off still leaves its database unopened. Steers come from the run vector record. At a tool
-call they travel as a user message where the harness has a channel for one, and ahead of the
-memory cards in hook context on Codex. They are delivered whole and do not count against
-<code>nodeInjectionTokens</code> or <code>hookInjectionTokens</code>; memory card selection keeps its own limits.</p>
+<p><a href="../observe-and-control/#steer-a-run">Steering</a> remains available with Active Memory off. Steers
+have their own limits and arrive ahead of memory cards when they share a delivery channel.</p>
 
 
 
@@ -2469,7 +2463,7 @@ memory cards in hook context on Codex. They are delivered whole and do not count
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-18">18 November 2026</time>
+    Last updated <time datetime="2026-11-22">22 November 2026</time>
   </span>
 
     

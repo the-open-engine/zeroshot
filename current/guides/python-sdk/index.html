@@ -2507,7 +2507,7 @@ chosen worktree explicitly with <code>git worktree remove PATH</code>.</p>
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>            <span class="nb">print</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 </code></pre></div>
 <p>A <code>RunWaitTimeout</code> carries the still-active run handle, and cancelling the Python task detaches in
-the same way. Neither action stops native work; only <code>await run.force_stop()</code> changes run lifetime.</p>
+the same way. The run continues in both cases.</p>
 <p><code>status.active_executions</code> entries expose optional <code>started_at</code> ledger recording times. Statuses
 yielded by <code>run.watch()</code> also expose optional <code>recorded_at</code> for the event producing that notification.
 Both use Unix milliseconds, remain <code>None</code> when unknown, and are not precise provider measurements.
@@ -2649,8 +2649,8 @@ continuing a suspended run. Use <code>await run.steer(text, mode="once")</code> 
 <code>mode="standing"</code> delivers per provider conversation and remains the default. <code>RunStatus.steers</code> from
 <code>Run.status()</code> exposes excerpts, message modes, optional network origin metadata and recorded
 receiving executions; statuses streamed by <code>Run.watch()</code> omit them. <code>omitted_steers</code> reports the
-bounded listing's omissions. Each agent conversation receives a steer at its next tool call or
-prompt, within the <a href="../observe-and-control/#steer-a-run">Claude Code limits</a>.
+bounded listing's omissions. Delivery occurs at the next eligible tool callback or prompt, using
+the <a href="../observe-and-control/#steer-a-run">same rules as CLI steering</a>.
 <code>await run.vector(steer.id)</code> reads its full text, and
 <code>await run.vectors()</code> includes <code>steer</code> and <code>steer_receipt</code> entries. Direction is limited to 262,144
 UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error types report refusals.</p>
@@ -2674,7 +2674,7 @@ UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-18">18 November 2026</time>
+    Last updated <time datetime="2026-11-22">22 November 2026</time>
   </span>
 
     
