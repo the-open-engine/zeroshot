@@ -1,4 +1,5 @@
 use super::*;
+use std::process::Stdio;
 use crate::native_v2_supervisor::checkpoints::{
     CheckpointRestore, CheckpointRestoreSelection, remove_restore_stage,
 };
@@ -6,6 +7,23 @@ use crate::v2_run_ledger::RunLedgerError;
 use openengine_cluster_protocol::{NOT_FOUND, RunResumeFrom};
 
 impl LocalCliBackend {
+    pub(super) fn spawn_controller(&self, bootstrap: &Path) -> Result<Child, NativeV2CliError> {
+        let mut command = Command::new(&self.executable);
+        command
+            .arg(LOCAL_CONTROLLER_MODE)
+            .arg("--bootstrap")
+            .arg(bootstrap)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        // Harness context crosses the private one-shot bootstrap, not this long-lived process
+        // environment. Keep only the platform values needed to re-exec the controller.
+        command.env_clear();
+        copy_minimal_process_environment(&mut command)?;
+        crate::execution::platform::spawn_controller(&mut command, self.controller_mode)
+            .map_err(local_io)
+    }
+
     pub(super) async fn controller_cleanup_request<T>(
         &self,
         run_id: &RunId,
