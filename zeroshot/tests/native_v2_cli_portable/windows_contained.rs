@@ -60,7 +60,7 @@ impl CallerJob {
         present != 0
     }
 
-    fn flags(&self) -> u32 {
+    fn limits(&self) -> JOBOBJECT_BASIC_LIMIT_INFORMATION {
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         assert_ne!(
             unsafe {
@@ -74,7 +74,11 @@ impl CallerJob {
             },
             0
         );
-        limits.BasicLimitInformation.LimitFlags
+        limits.BasicLimitInformation
+    }
+
+    fn flags(&self) -> u32 {
+        self.limits().LimitFlags
     }
 
     fn terminate(&self) {
@@ -387,21 +391,22 @@ fn contained_nested_job_checkpoint_recovery_has_one_successor() {
 fn contained_incompatible_job_refuses_before_worker_execution() {
     let fixture = Fixture::new();
     let job = CallerJob::new(0);
-    let restrictions = JOBOBJECT_BASIC_UI_RESTRICTIONS {
-        UIRestrictionsClass: JOB_OBJECT_UILIMIT_HANDLES,
-    };
+    // A caller UI limit alone does not establish incompatible nesting.
+    // Admit the CLI and controller, but leave no process slot for controller preparation.
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+    limits.BasicLimitInformation.ActiveProcessLimit = 2;
     assert_ne!(
         unsafe {
             SetInformationJobObject(
                 job.raw(),
-                JobObjectBasicUIRestrictions,
-                std::ptr::from_ref(&restrictions).cast(),
-                std::mem::size_of_val(&restrictions) as u32,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
             )
         },
         0
     );
-    // A detached receipt only confirms admission; preparation probes run in the controller.
     let mut command = fixture.run_command("finish", false);
     command
         .args(["--controller", "contained"])
@@ -410,17 +415,16 @@ fn contained_incompatible_job_refuses_before_worker_execution() {
     let refused = output(spawn_in_jobs(&mut command, &[&job]));
     assert!(
         !refused.status.success(),
-        "incompatible nesting succeeded: {refused:?}"
+        "contained startup exceeded the caller process limit: {refused:?}"
     );
     let reason = String::from_utf8_lossy(&refused.stderr);
-    // The Codex version probe uses LocalProcessRunner before provider candidate construction.
-    // Its Job capture failure reaches the preparation diagnostic without provider remapping.
     assert!(
-        reason.contains("--version") && reason.contains("process containment capture failed"),
-        "expected contained version-probe startup refusal: {reason}"
+        reason.contains("controller exited before becoming ready"),
+        "expected contained controller preparation refusal: {reason}"
     );
     assert!(!fixture.workspace.join("mutation.txt").exists());
     assert!(!fixture.workspace.join("child.pid").exists());
-    assert_eq!(job.flags(), 0);
+    assert_eq!(job.flags(), JOB_OBJECT_LIMIT_ACTIVE_PROCESS);
+    assert_eq!(job.limits().ActiveProcessLimit, 2);
     job.terminate();
 }

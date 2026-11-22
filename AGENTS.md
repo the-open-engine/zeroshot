@@ -1917,8 +1917,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Caller Job policy governs abrupt host closure: even non-breakaway `LimitFlags=0` does not imply
   kill-on-close. Contained promises neither caller-exit termination nor host-exit survival; explicit
   force-stop remains the cleanup path. Windows Job regressions run through the existing independent
-  Windows CI host, with mandatory compiled-test inventory checks. Incompatible-Job fixtures follow
-  the run to version-probe preparation failure; a detached receipt proves only admission. Abrupt
+  Windows CI host, with mandatory compiled-test inventory checks. Incompatible-Job fixtures use an
+  enforced process cap and require controller preparation failure before worker writes; caller UI
+  limits alone do not establish incompatible nesting. A detached receipt proves only admission. Abrupt
   controller-loss cleanup/restart fixtures require Linux's supervisor or Windows Jobs; macOS retains
   explicit-stop restart coverage without a new owner-death guarantee. Windows config defaults to
   `%LOCALAPPDATA%/zeroshot` and state to its `state` directory. Hosted target isolation remains Linux-only.
