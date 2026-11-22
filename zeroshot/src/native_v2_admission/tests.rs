@@ -685,29 +685,50 @@ async fn host_selected_harness_registry_controls_profiles_intents_and_run_admiss
 mod source_access;
 
 #[tokio::test]
-async fn scripts_require_a_step_without_instructions() {
+async fn scripts_accept_steps_and_verifiers_without_instructions() {
     let script: NodeRuntimeBinding =
         serde_json::from_value(json!({"kind":"script", "command":["python3"]})).assert_value();
-    let mut plain = null_step("work", "app.work@1");
-    plain.as_object_mut().assert_value().remove("instructions");
-    NativeV2Admission
-        .admit(submission(
-            graph(vec![plain, succeed("done")]),
+    for mut node in [
+        null_step("work", "app.work@1"),
+        null_verifier("work", "app.work@1"),
+    ] {
+        node.as_object_mut().assert_value().remove("instructions");
+        let request = submission(
+            graph(vec![node, succeed("done")]),
             BTreeMap::from([(named("work"), script.clone())]),
-        ))
-        .await
-        .assert_value();
+        );
+        NativeV2Admission
+            .validate_profile(&request.graph, &request.runtime, DeliveryPolicy::Optional)
+            .await
+            .assert_value();
+        NativeV2Admission
+            .validate_intent(&submission_intent(&request), DeliveryPolicy::Optional)
+            .await
+            .assert_value();
+        NativeV2Admission.admit(request).await.assert_value();
+    }
+}
+
+#[tokio::test]
+async fn scripts_reject_instructions_on_steps_and_verifiers() {
+    let script: NodeRuntimeBinding =
+        serde_json::from_value(json!({"kind":"script", "command":["python3"]})).assert_value();
     for node in [
         null_step("work", "app.work@1"),
         null_verifier("work", "app.work@1"),
     ] {
+        let request = submission(
+            graph(vec![node, succeed("done")]),
+            BTreeMap::from([(named("work"), script.clone())]),
+        );
         assert!(matches!(
             NativeV2Admission
-                .admit(submission(
-                    graph(vec![node, succeed("done")]),
-                    BTreeMap::from([(named("work"), script.clone())])
-                ))
+                .validate_profile(&request.graph, &request.runtime, DeliveryPolicy::Optional)
                 .await,
+            Err(NativeV2AdmissionError::InvalidRuntimeBinding { .. })
+        ));
+        assert!(matches!(
+            NativeV2Admission.admit(request).await,
             Err(NativeV2AdmissionError::InvalidRuntimeBinding { .. })
         ));
     }

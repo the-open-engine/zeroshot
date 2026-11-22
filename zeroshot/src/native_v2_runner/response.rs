@@ -133,6 +133,11 @@ impl NodeResponseContract {
                 artifacts: Vec::new(),
             },
             Self::Verifier { .. } => {
+                if !value.is_object() {
+                    return Err(NodeResponseError::new(
+                        "verifier response must be an object containing exactly output, signals, and diagnostic".to_owned(),
+                    ));
+                }
                 let verifier: VerifierResponse = serde_json::from_value(value).map_err(|error| {
                     NodeResponseError::new(format!(
                         "verifier response must contain exactly output, signals, and diagnostic: {error}"

@@ -4,6 +4,10 @@ use std::sync::Arc;
 use zeroshot_engine::native_v2_observability::NativeV2Observability;
 use zeroshot_engine::v2_run_ledger::sqlite::SqliteRunLedger;
 
+// Keep script execution history in the activity suite selected by macOS CI.
+#[path = "script_signal_tests.rs"]
+mod script_signals;
+
 #[test]
 fn core_tool_activity_reaches_durable_cli_logs_and_node_transcript_data() {
     const NUMERIC_CREDENTIAL: &str = "8675309123";

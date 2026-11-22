@@ -116,8 +116,8 @@ kind are rejected.
 
 ### `script`
 
-A script binding executes a caller-owned program on an existing `step`, using the step's typed
-input and output. The step must omit `instructions`. This initial implementation is local only.
+A script binding executes a caller-owned program on an existing `step` or `verifier`, using the
+node's typed input and output. The node must omit `instructions`. Script bindings are local only.
 Named targets and contained placements reject script bindings.
 
 ```json
@@ -132,18 +132,109 @@ temporary files and locale. Public run variables and explicitly declared connect
 added through the existing connection resolver. Other ambient credentials are not inherited.
 
 The program receives one JSON value on stdin, followed by EOF, and must exit zero with exactly
-one JSON value on stdout. zeroshot validates that value against the step's output schema.
+one JSON value on stdout. For a step, that value is the plain output, validated against the
+step's output schema. For a verifier, stdout must be exactly an object with `output`, `signals`
+and `diagnostic`, for example:
+
+```json
+{ "output": null, "signals": { "status": "logged_out" }, "diagnostic": {} }
+```
+
+Every declared signal must be present, with one of its declared labels; extra signals are rejected.
+The output and diagnostic must satisfy the verifier's respective schemas. Missing fields, extra
+envelope fields, undeclared labels and invalid types produce `malformed`. Signals feed existing
+choice guards and remain observable in durable run history, just as agent verifier signals do.
+
 Process input and output are each bounded at 8 MiB. A result must also fit the ledger's
 1 MiB serialized completion event, including execution metadata. Complete stderr is retained
 as bounded diagnostics with resolved connection values redacted. Truncated stderr is omitted because its cut boundary
 may split a credential. A nonzero exit becomes `crash`, and invalid or oversized
 JSON becomes `malformed`. The ordinary graph error and retry rules apply. Cancellation and the
-step's optional `timeoutMs` terminate the process tree through the shared process runner.
+node's optional `timeoutMs` terminate the process tree through the shared process runner.
 Linux cleanup also covers detached descendants and controller death; Windows uses Job Objects.
 macOS process-group cleanup cannot cover descendants that detach themselves. See
 [process ownership](../concepts/execution.md#durable-run-state).
-Script steps record zero native model tokens. Services started separately by the application
+Script nodes record zero native model tokens. Services started separately by the application
 may keep indexes or models warm across script invocations. Service lifecycle is application owned.
+
+For a complete routing example, save this as `graph.json`:
+
+```json
+{
+  "profile": "openengine.graph.full/v1",
+  "initialInput": { "kind": "record", "fields": {} },
+  "policy": { "policy": "policy.native-v2@1", "default": "deny" },
+  "root": {
+    "kind": "seq",
+    "name": "root",
+    "state": { "kind": "record", "fields": {} },
+    "promotedStatePaths": [],
+    "children": [
+      {
+        "kind": "verifier",
+        "name": "probe",
+        "worker": "demo.probe@1",
+        "input": { "kind": "null" },
+        "output": { "kind": "null" },
+        "inputBindings": [],
+        "writeBindings": [],
+        "attempts": 1,
+        "signals": { "status": ["ready", "logged_out"] },
+        "diagnostic": { "kind": "record", "fields": {} }
+      },
+      {
+        "kind": "choice",
+        "name": "route",
+        "state": { "kind": "record", "fields": {} },
+        "promotedStatePaths": [],
+        "branches": [
+          {
+            "when": {
+              "kind": "in",
+              "value": { "source": "signal", "name": "probe", "field": "status" },
+              "labels": ["logged_out"]
+            },
+            "node": { "kind": "fail", "name": "login_required", "reason": "rejected" }
+          }
+        ],
+        "otherwise": {
+          "kind": "succeed",
+          "name": "ready",
+          "output": { "kind": "null" },
+          "bindings": []
+        }
+      }
+    ]
+  }
+}
+```
+
+Save the exact runtime plan as `runtime.json`. The default lane is metadata here; no agent is bound
+or invoked. Change the last command argument to `logged_out` to take the other route.
+
+```json
+{
+  "harness": "codex",
+  "provider": "openai",
+  "size": "host",
+  "nodes": { "probe": { "kind": "script", "command": ["python3", "probe.py", "ready"] } }
+}
+```
+
+Save this deterministic observation as `probe.py`:
+
+```python
+import json
+import sys
+
+json.load(sys.stdin)
+print(json.dumps({"output": None, "signals": {"status": sys.argv[1]}, "diagnostic": {}}))
+```
+
+Save `{}` as `input.json`, then run
+`zeroshot run --title probe --graph graph.json --runtime-config runtime.json --input input.json`.
+Both observations successfully complete the verifier. The graph succeeds on `ready` and follows
+the authored `rejected` terminal on `logged_out`; neither observation is a process crash.
 
 ### `agent`
 
