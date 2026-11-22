@@ -10,6 +10,9 @@ use serde_json::{Value, json};
 
 use super::fixture::{Fixture, success};
 
+#[path = "runtime_sizes.rs"]
+mod runtime_sizes;
+
 fn run_directories(fixture: &Fixture) -> BTreeSet<OsString> {
     let entries = match std::fs::read_dir(fixture.root.path("state/runs")) {
         Ok(entries) => entries,
