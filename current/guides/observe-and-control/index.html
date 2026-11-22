@@ -2575,11 +2575,29 @@ lifetime.</p>
 <h2 id="browser">Browser<a class="headerlink" href="#browser" title="Permanent link">&para;</a></h2>
 <p>Run <a href="../../getting-started/install/#open-the-workspace-ui"><code>zeroshot ui</code></a>, then select a run in <strong>Runs</strong>.
 The read-only graph uses that run's admitted definition. Select a node for its inputs, outputs,
-decisions, and transcript; with the details panel open, select the empty canvas or the first link
-above a node's name for the run's own details. Use the timeline to replay its history. Active runs
-update live.
-Seeking pauses following; <strong>Go live</strong> returns to the latest event. Scrolling a transcript keeps
+decisions, and transcript; use the timeline under the view to replay its history. Active runs update
+live. Seeking pauses following; <strong>Go live</strong> returns to the latest event. Scrolling a transcript keeps
 the graph live and follows new output only when you reach the bottom.</p>
+<p>Switch the run view between <strong>Steps</strong> and <strong>Graph</strong>. Runs open in Steps until you choose the
+graph, and a run you have not opened before starts in the view you chose last. Both show the same
+replay position, and the selection carries over when you switch.</p>
+<p>In the graph, selecting a step opens it in the inspector, whose header names the groups that enclose
+it, each a link up the hierarchy; while it is open, selecting the empty canvas or the header's first
+link shows the run's own details. The graph
+opens with only the groups that hold running, waiting or failed steps expanded.</p>
+<p><strong>Steps</strong> lists the work in the order it started. Each step shows its state, its decision and its
+latest output line; steps that ran side by side stay together under the parallel group or map that
+ran them, and each loop round starts with a heading, repeated where the run continued mid-round.
+Selecting a step opens its input, transcript and result in place, with a link to show it in the
+graph; opening steps never pauses the replay or following. The timeline's <strong>Show node</strong> opens that
+node's latest step in the list. The list opens with the run's start, which holds its input and run
+log, and a finished run closes with its result or failure.</p>
+<p>Each step shows how long it took, from the ledger's recorded times; work carried over from an
+earlier run shows none, because its recorded time is when it was imported. The status line adds the
+run's duration, unknown when its first events predate recorded times, and the total tokens of the
+work the run did itself, marked as a lower bound when an agent step reported no usage; an open step
+lists its own token usage. A failed step shows in rust and a step that needed another attempt shows
+its attempt count; decision values are shown as recorded and never judged.</p>
 <p>For a direct target, open <code>/ui/</code> on its configured public origin. Closing either browser view
 leaves the run active.</p>
 <h2 id="foreground-and-detached-submission">Foreground and detached submission<a class="headerlink" href="#foreground-and-detached-submission" title="Permanent link">&para;</a></h2>
@@ -2976,6 +2994,17 @@ The answer starts one successor on the retained workspace. Ordinary <code>resume
 Deadlines default to 7 days and accept at most 30 days. A late answer starts the author's <code>timeout</code>
 route and exits 1 naming its successor. Reads never apply expiry. Add <code>--target NAME</code> for a target
 that advertises <code>openengine.request-ask/v1</code>. See <a href="../ask-a-person/">Ask a person</a>.</p>
+<p>In the browser, a request step shows its question and allowed answers. While the run waits, the
+status line reads <strong>Waiting for a person</strong> with the question, and the step shows the deadline and
+the <code>answer</code> command. When the deadline passes, the open view marks it and removes the answer hint;
+this does not imply that a successor has recorded an expiry. Replay uses the selected position's
+recorded time and shows successor information only at the current end of history.
+Once a successor run took the question over, the step names that run and the
+status line reads <strong>Continued in run</strong> with its ID; a question the run stopped waiting for without
+a successor reads as closed without an answer. Once answered, the chosen answer is marked with how
+long the answer took, from the recorded request and answer times.
+Who answered is not recorded. A successor run lists the work it carried over, marks where it
+continued after each answer, and links back to the run that asked.</p>
 <h2 id="steer-a-run">Steer a run<a class="headerlink" href="#steer-a-run" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="go">zeroshot steer RUN_ID "Prioritize the parser regression."</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">zeroshot steer RUN_ID --node e2e_tester "Use the E2E service on port 3000."</span>
@@ -3081,7 +3110,7 @@ outcome, inspect the run vectors before sending the message again.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-21">21 November 2026</time>
+    Last updated <time datetime="2026-11-22">22 November 2026</time>
   </span>
 
     
