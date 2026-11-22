@@ -258,10 +258,21 @@ where
     if run.target.is_none() && matches!(run.input, super::super::RunInput::TaskFrom(_)) {
         review_input::validate_local(&mut params).await?;
     }
-    NativeV2Admission
-        .validate_intent(&params.intent, DeliveryPolicy::Optional)
-        .await
-        .map_err(NativeV2CliError::InvalidRun)?;
+    // Only a saved selector can delegate expansion/admission to the host. A local validation
+    // cannot prove an unresolved remote dependency graph without that host-owned operation.
+    let host_expands = params.profile.is_some()
+        && super::super::LocalRunProfileStore::has_imports(&params.intent.graph);
+    if host_expands && run.validate_only {
+        return Err(NativeV2CliError::Usage(
+            "saved profiles with imports require host admission; --validate-only cannot validate remote imports".into(),
+        ));
+    }
+    if !host_expands {
+        NativeV2Admission
+            .validate_intent(&params.intent, DeliveryPolicy::Optional)
+            .await
+            .map_err(NativeV2CliError::InvalidRun)?;
+    }
     crate::native_v2_cli::local::native_forge::select_local_source(run, &mut params)?;
     validate_local_only_workspace(run, &params)?;
     resolve_named_source(run, &mut params, &outbound, &available).await?;

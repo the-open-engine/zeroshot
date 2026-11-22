@@ -23,8 +23,10 @@ A run needs four inputs:
 | Runtime plan  | Chooses each agent's harness, provider, model and connections |
 
 Before starting a local controller or submitting to a target, zeroshot checks the graph, runtime
-bindings and input. For a target-stored profile, it fetches the profile first and applies the same
-checks. `--validate-only` runs these checks without starting a run.
+bindings and input. For a target-stored profile, it fetches the profile first. A capable host expands
+[saved-profile imports](../reference/target-runtime.md#saved-profile-imports) from its authorized
+snapshot and performs complete admission. `--validate-only` checks profiles without starting a run;
+it refuses remote imports, which require host admission.
 
 ## Graph nodes
 

@@ -258,6 +258,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for a node start record, including input and bookkeeping. Local submissions apply the same
   admitted-definition check before creating run storage or a controller. Oversized node starts
   fail as `runtime_failed` with public byte counts, never as runtime loss or a new terminal reason.
+- `native_v2_admission::profile_expansion::expand_profile_imports` is the canonical typed linker
+  over a caller-owned immutable authorized catalog lookup, shared with the local store. Hosts own
+  snapshot selection, same-scope name resolution, authentication, credential selection and full
+  admission. `extensions.saved_profile_imports` with exact `openengine.saved-profile-imports/v1`
+  opts named saved-profile selectors into host expansion through the existing profile-run route;
+  missing/wrong markers and named inline/local graphs retain refusal. Remote imports cannot be
+  fully checked by `--validate-only`; no client dependency reads or supplied expansions are trusted.
+  The public API and named-client regressions use the existing observation `wire_contract::`
+  selectors; actual local CLI cases run in the portable `startup::` suite on all native CI lanes.
 - Local profile imports resolve from one profile-store snapshot before semantic admission and
   credential selection. Saved definitions keep references, while admitted and recovery definitions
   freeze expanded bodies and qualified node identities. The verifier checks child scopes and

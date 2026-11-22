@@ -375,6 +375,19 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         TargetHttpControlAuthority::profile_list(self, target, request).await
     }
 
+    async fn validate_profile_imports(
+        &self,
+        target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        let (_, controller) = self.descriptors(target).await?;
+        if !controller.saved_profile_imports {
+            return Err(authority_error(
+                "target does not advertise openengine.saved-profile-imports/v1",
+            ));
+        }
+        Ok(())
+    }
+
     async fn profile_show(
         &self,
         target: &TargetRecord,
