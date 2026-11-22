@@ -728,6 +728,7 @@ test('a continued run carries earlier work over and settles the question a perso
     runId: 'second-run',
   });
   assert.equal(ship.state, 'running');
+  assert.deepEqual(projection.handoffs, [{ kind: 'continued', index: 3, from: 'first-run' }]);
   // Carried-over work is context, not a replay stop of its own.
   assert.equal(
     historyMoments(history).some((moment) => moment.label.includes('carried over')),
@@ -964,4 +965,18 @@ test('a run that ended suspended shows its held-back node and open groups as sus
   assert.equal(ended.nodes.b.state, 'suspended');
   assert.doesNotMatch(ended.nodes.b.detail ?? '', /queued/);
   assert.equal(ended.nodes.a.state, 'succeeded');
+});
+
+test('suspension keeps the group fallback when structural history is unavailable', () => {
+  const doc = document(sequence('run', step('a')));
+  const history = events({ kind: 'run_started' }, start(ref('a')), {
+    kind: 'suspended',
+    suspension: { reason: 'command', node: 'a', createdAt: 1000 },
+  });
+  assert.equal(projectHistory(doc, history, 1).nodes.run.state, 'running');
+  const held = projectHistory(doc, history, 2);
+  assert.equal(held.nodes.run.state, 'suspended');
+  assert.equal(held.nodes.a.state, 'suspended');
+  assert.equal(held.invocations[0].state, 'suspended');
+  assert.equal(held.invocations[0].end, undefined, 'holding work is not a recorded settlement');
 });

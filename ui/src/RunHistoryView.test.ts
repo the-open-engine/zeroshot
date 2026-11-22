@@ -3,139 +3,21 @@ import assert from 'node:assert/strict';
 import { act, createElement } from 'react';
 import type { Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { JSDOM } from 'jsdom';
 import type { HistoryPage, RunDetail } from './run-history';
 import { ApiError } from './api';
 import type { RunHistoryReader } from './run-history-source';
-import { createViteTestServer, runDetailFixture } from './test-support';
-
-function stubWorker(t: TestContext) {
-  const worker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
-  Object.defineProperty(globalThis, 'Worker', {
-    configurable: true,
-    value: class {
-      postMessage() {}
-      terminate() {}
-    },
-  });
-  t.after(() => {
-    if (worker) Object.defineProperty(globalThis, 'Worker', worker);
-    else Reflect.deleteProperty(globalThis, 'Worker');
-  });
-}
-
-async function viewerModule(t: TestContext) {
-  const server = await createViteTestServer(t);
-  const viewer = await server.ssrLoadModule('/src/RunHistoryView.tsx');
-  return { RunHistoryView: viewer.RunHistoryView };
-}
-
-const completePage = (): HistoryPage => ({
-  events: [],
-  nextCursor: 'v2:0',
-  headCursor: 'v2:0',
-  complete: true,
-});
-
-const renderedText = (container: HTMLElement) => container.textContent ?? '';
-async function clickButton(container: HTMLElement, label: string) {
-  const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
-  assert.ok(button, label);
-  await act(async () => button.click());
-}
-async function loadMoreHistory(container: HTMLElement) {
-  const button = [...container.querySelectorAll('button')].find(
-    (candidate) => candidate.textContent === 'Load more history'
-  );
-  assert.ok(button);
-  await act(async () => button.click());
-}
-const browserGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'Element',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-  'ResizeObserver',
-] as const;
-
-function installBrowser(t: TestContext) {
-  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://example.test/',
-  });
-  const descriptors = new Map(
-    browserGlobals.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)])
-  );
-  class ResizeObserverStub {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  const globals = {
-    window: dom.window,
-    document: dom.window.document,
-    navigator: dom.window.navigator,
-    Element: dom.window.Element,
-    HTMLElement: dom.window.HTMLElement,
-    SVGElement: dom.window.SVGElement,
-    Node: dom.window.Node,
-    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
-    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
-    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
-    ResizeObserver: ResizeObserverStub,
-  };
-  for (const name of browserGlobals)
-    Object.defineProperty(globalThis, name, { configurable: true, value: globals[name] });
-  Object.defineProperty(dom.window, 'ResizeObserver', {
-    configurable: true,
-    value: ResizeObserverStub,
-  });
-  Object.defineProperties(dom.window.HTMLElement.prototype, {
-    clientWidth: { configurable: true, get: () => 800 },
-    clientHeight: { configurable: true, get: () => 600 },
-    offsetWidth: { configurable: true, get: () => 800 },
-    offsetHeight: { configurable: true, get: () => 600 },
-  });
-  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
-    x: 0,
-    y: 0,
-    top: 0,
-    right: 800,
-    bottom: 600,
-    left: 0,
-    width: 800,
-    height: 600,
-    toJSON: () => ({}),
-  });
-  const styles = dom.window.document.createElement('style');
-  styles.textContent = '.react-flow__pane { z-index: 1; }';
-  dom.window.document.head.append(styles);
-  const actGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
-  const actEnvironment = actGlobal.IS_REACT_ACT_ENVIRONMENT;
-  actGlobal.IS_REACT_ACT_ENVIRONMENT = true;
-  t.after(() => {
-    actGlobal.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
-    for (const name of browserGlobals) {
-      const descriptor = descriptors.get(name);
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
-    }
-    dom.window.close();
-  });
-  return dom.window;
-}
-
-async function flushEffects() {
-  await act(async () => {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  });
-}
+import { runDetailFixture } from './test-support';
+import {
+  stubWorker,
+  viewerModule,
+  completePage,
+  renderedText,
+  clickButton,
+  showGraph,
+  loadMoreHistory,
+  installBrowser,
+  flushEffects,
+} from './run-history-test-support';
 
 function installHistoryRetryTimers(t: TestContext) {
   const originalSetTimeout = globalThis.setTimeout;
@@ -553,6 +435,7 @@ test('a remounted run restores its paused cursor, inspector and execution withou
   await render();
   await flushEffects();
   assert.equal(watches, 1);
+  await showGraph(container);
   await click('Go to start');
   await click('Show details');
   await click('Next event');
@@ -778,21 +661,64 @@ for (const durable of [true, false])
       );
       assert.ok(log);
       await act(async () => log.click());
-      assert.equal(details(), null);
       assert.equal(
         container.querySelector<HTMLInputElement>('[aria-label="History position"]')?.value,
         '3'
       );
       assert.match(renderedText(container), /Recorded delivery detail/);
-      assert.match(
-        container.querySelector('[aria-label="Run inspector"]')!.textContent!,
-        /Deliver/
-      );
+      // Steps opens the step that wrote the log line in place.
+      assert.match(container.querySelector('.story-step.open')!.textContent!, /Deliver/);
     } finally {
       await act(async () => root.unmount());
       container.remove();
     }
   });
+
+test('in Steps, a run-wide failure log opens the run start, where the run log is', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const { detail, source: fixture } = failureHistoryFixture(true);
+  detail.terminal.context.recorded = [{ message: 'Run setup failed', cursor: 'v2:3' }] as never;
+  // The failing line is the run's own, written by no step.
+  const source: RunHistoryReader = {
+    ...fixture,
+    page: async (...args) => {
+      const page = await fixture.page(...args);
+      return {
+        ...page,
+        events: page.events.map((entry) =>
+          entry.cursor === 'v2:3'
+            ? { ...entry, event: { kind: 'safe_log', stream: 'error', line: 'Run setup failed' } }
+            : entry
+        ),
+      };
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(createElement(RunHistoryView, { runId: detail.runId, source, workers: [] }))
+    );
+    await flushEffects();
+    const startOpen = () =>
+      container.querySelector('.run-boundary .story-step-head')?.getAttribute('aria-expanded');
+    assert.equal(startOpen(), 'false');
+    const log = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('View log · v2:3')
+    );
+    assert.ok(log);
+    await act(async () => log.click());
+    assert.equal(startOpen(), 'true');
+    assert.ok(container.querySelector('.run-steps-view'), 'the log opens in Steps');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
 
 const incompleteHistoryError = () =>
   new ApiError(503, 'history_incomplete', 'The remaining archive could not be retained.');
