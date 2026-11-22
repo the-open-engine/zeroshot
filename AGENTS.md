@@ -1918,9 +1918,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   kill-on-close. Contained promises neither caller-exit termination nor host-exit survival; explicit
   force-stop remains the cleanup path. Windows Job regressions run through the existing independent
   Windows CI host, with mandatory compiled-test inventory checks. Incompatible-Job fixtures follow
-  the run to worker failure; a detached receipt proves only admission. Abrupt controller-loss
-  cleanup/restart fixtures require Linux's supervisor or Windows Jobs; macOS retains explicit-stop
-  restart coverage without a new owner-death guarantee. Windows config defaults to
+  the run to version-probe preparation failure; a detached receipt proves only admission. Abrupt
+  controller-loss cleanup/restart fixtures require Linux's supervisor or Windows Jobs; macOS retains
+  explicit-stop restart coverage without a new owner-death guarantee. Windows config defaults to
   `%LOCALAPPDATA%/zeroshot` and state to its `state` directory. Hosted target isolation remains Linux-only.
 - The experimental local ACP endpoint owns one workspace lease and reusable runner for the outer
   ACP session. Each prompt remains a separate admitted run with its own controller lock, durable
