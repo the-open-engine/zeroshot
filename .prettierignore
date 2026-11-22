@@ -1,4 +1,5 @@
 node_modules
+charts/zeroshot-target/templates/
 .mypy_cache
 target
 **/target

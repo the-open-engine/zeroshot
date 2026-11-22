@@ -121,6 +121,10 @@ Keep the tunnel open. If port 8080 is taken locally, forward another port and se
 The [target image README](https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md)
 covers proxies, Docker access and image builds.
 
+For Kubernetes, use the
+[Zeroshot target Helm chart](https://github.com/the-open-engine/zeroshot/tree/main/charts/zeroshot-target).
+Helm selects the newest stable chart from GHCR, and each chart pins the matching target image.
+
 ## Use a hosted target { #hosted-target }
 
 For zeroshot Platform, run `zeroshot target login platform`, then use `--target platform`.
