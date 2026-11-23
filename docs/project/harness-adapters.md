@@ -75,8 +75,9 @@ directory and its native permission policy, while its data, state and cache (dat
 logins, sessions, logs) live in a private directory per node session that is removed when the
 session closes. A local run exports only the lane's integration and copies its active saved login
 into that private store unless the node declares its own credential; nothing is written back to the
-user's store. A declared
-credential reaches OpenCode through its inline configuration. A private plugin checks every model
+user's store. A declared credential reaches OpenCode through its inline configuration. Managed
+sessions deny OpenCode's `opencode_session_move` tool, so a session keeps the working directory
+Zeroshot assigned; renaming stays available. A private plugin checks every model
 request of the selected provider and stops it when another authentication header or a different
 endpoint would be sent. The runtime's own plugins must load; a turn in which one of them did not
 load fails. Native plugins and custom transport code run with the native CLI's authority. Local

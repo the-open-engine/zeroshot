@@ -398,8 +398,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   directories under its private home. On local runs without a declared credential, the saved
   login for the lane's integration is copied once per session with
   `auth export --standalone <integration>` and `auth import --standalone`; only its active
-  credential moves, nothing is written back, and imported secrets are redacted. Declared keys and endpoints reach OpenCode through the
-  inline configuration. A private dependency-free owned plugin verifies every request of the
+  credential moves, nothing is written back, and imported secrets are redacted. Declared keys
+  and endpoints reach OpenCode through the inline configuration. The inline configuration
+  denies `opencode_session_move`, so a managed session keeps its assigned working directory;
+  rename and `execute` stay. A private dependency-free owned plugin verifies every request of the
   selected provider in `http.request` and `experimental.ws.handshake` and stops it on another
   auth-like header, a missing or wrong canonical header, or a URL outside the normalized
   declared endpoint; the node then fails with a conflict message that names headers, never

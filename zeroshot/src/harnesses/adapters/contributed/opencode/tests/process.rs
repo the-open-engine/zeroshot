@@ -947,7 +947,11 @@ async fn native_args_and_config_are_isolated_and_survive_reused_sessions() {
     assert_eq!(configs.len(), 3);
     assert_eq!(configs[0]["permission"]["edit"], "deny");
     assert_eq!(configs[1]["permission"]["edit"], "deny");
-    assert!(configs[2].get("permission").is_none());
+    assert_eq!(configs[0]["permission"]["opencode_session_move"], "deny");
+    assert_eq!(
+        configs[2]["permission"],
+        json!({"opencode_session_move": "deny"})
+    );
 }
 
 #[tokio::test]

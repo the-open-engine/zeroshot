@@ -409,6 +409,10 @@ mod store;
 #[path = "tests/plugin.rs"]
 mod plugin;
 
+#[cfg(unix)]
+#[path = "tests/session_tools.rs"]
+mod session_tools;
+
 #[test]
 fn native_authentication_and_model_errors_preserve_machine_classification() {
     for (error, model_text) in [
