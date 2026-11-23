@@ -407,7 +407,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   declared endpoint; the node then fails with a conflict message that names headers, never
   values. Arbitrary native custom transport code remains trusted executable code and may
   replace HTTP behavior. Owned plugins write a load marker after registering their hooks; a
-  successful turn whose owned plugin did not load fails. OpenCode 2 has no input for a
+  successful turn whose owned plugin did not load fails. OpenCode sends model requests even when
+  a plugin fails to load, so a declared lane runs `--model <provider>/zeroshot-guarded`, an alias
+  that only the auth plugin creates and resolves to the lane's model in
+  `experimental.model.resolve` (OpenCode 2.4.0 or newer); without that plugin OpenCode stops with
+  "Model unavailable" before any request and the node reports that the plugin did not load.
+  OpenCode 2 has no input for a
   declared GitHub Copilot token, so a declared `COPILOT_GITHUB_TOKEN` is refused before
   launch and GitHub lanes use the native Copilot login.
   Local OpenCode keeps native permissions and adds no `--auto`: native configuration inspection

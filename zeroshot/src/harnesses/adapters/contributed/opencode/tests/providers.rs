@@ -53,7 +53,12 @@ fn gateway_selects_native_sdk_and_preserves_native_model_settings() {
                 ("GATEWAY_API", api),
             ],
         );
-        assert!(command.argv.iter().any(|arg| arg == "gateway/opaque/model"));
+        assert!(
+            command
+                .argv
+                .iter()
+                .any(|arg| arg == "gateway/zeroshot-guarded")
+        );
         let config: Value =
             serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
         let provider = &config["provider"]["gateway"];
@@ -116,7 +121,7 @@ fn bedrock_pins_bearer_region_and_native_endpoint_without_replacing_other_settin
         command
             .argv
             .iter()
-            .any(|arg| arg == "amazon-bedrock/opaque/model")
+            .any(|arg| arg == "amazon-bedrock/zeroshot-guarded")
     );
     let config: Value =
         serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
@@ -223,7 +228,7 @@ fn opencode_zen_and_go_apply_a_declared_account_key_to_their_own_provider() {
             command
                 .argv
                 .iter()
-                .any(|arg| *arg == format!("{provider}/opaque/model"))
+                .any(|arg| *arg == format!("{provider}/zeroshot-guarded"))
         );
         assert_eq!(
             provider_config(&command, provider).assert_value()["options"]["apiKey"],

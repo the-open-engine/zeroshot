@@ -44,11 +44,18 @@ pub(super) fn install(installation: Installation<'_>) -> Result<(), NodeRunnerEr
     } else {
         "Authorization"
     };
+    let crate::native_v2_contract::NodeRuntimeBinding::Agent { model, .. } =
+        &invocation.node.binding
+    else {
+        return Err(NodeRunnerError::InvalidRole);
+    };
     let selection = serde_json::json!({
         "provider": command::native_provider(provider),
         "key": command::credential_field(provider),
         "endpoint": endpoint,
         "header": header,
+        "model": model.as_str(),
+        "alias": command::GUARDED_MODEL,
     });
     let source = HOOK.replace("AUTH_SELECTION", &selection.to_string());
     super::plugin::install(command, files.home(), "zeroshot-provider-auth", &source).map_err(|_| {
@@ -60,7 +67,8 @@ pub(super) fn install(installation: Installation<'_>) -> Result<(), NodeRunnerEr
 
 // The plugin only verifies: the declared key and endpoint reach OpenCode through the inline
 // config, and a conflict error names headers, never values. Both the HTTP and the WebSocket
-// transport are checked.
+// transport are checked. It also creates the guarded alias of the lane's model; the run selects
+// that alias, so OpenCode has no model to call when the plugin did not load.
 const HOOK: &str = r#"import fs from 'node:fs';
 import path from 'node:path';
 const selection = AUTH_SELECTION;
@@ -103,6 +111,19 @@ export default {
     await ctx.session.hook('experimental.ws.handshake', async (event) => {
       if (event.model?.providerID !== selection.provider) return;
       verify(Object.entries(event.headers ?? {}).map(([name, value]) => [name.toLowerCase(), String(value)]), String(event.url).replace(/^ws(s?):/i, 'http$1:'));
+    });
+    // The alias only has to exist; every request for it is resolved to the lane's model, which
+    // OpenCode has by then completed from the configuration (API id, settings, variants).
+    await ctx.model.transform((editor) => {
+      const real = editor.get(selection.provider, selection.model);
+      if (!real) return;
+      editor.update(selection.provider, selection.alias, (model) => {
+        Object.assign(model, structuredClone(real));
+      });
+    });
+    await ctx.session.hook('experimental.model.resolve', async (event) => {
+      if (event.model?.providerID !== selection.provider || event.model?.id !== selection.alias) return;
+      event.model = {...event.model, id: selection.model};
     });
     fs.mkdirSync(path.dirname(LOADED_MARKER), {recursive: true}); fs.writeFileSync(LOADED_MARKER, '');
   }

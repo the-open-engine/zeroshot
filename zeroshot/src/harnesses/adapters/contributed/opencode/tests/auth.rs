@@ -530,3 +530,102 @@ fn typed_native_upstream_byok_keys_are_redacted() {
         command::configuration_secrets(&environment).contains(&"private-upstream-key".to_owned())
     );
 }
+
+fn transform_results(
+    provider: &str,
+    fields: &[(&str, &str)],
+    catalog: Value,
+    refs: Value,
+) -> Value {
+    let name = format!(
+        "opencode-transform-{}",
+        VERIFY_COUNTER.fetch_add(1, Ordering::SeqCst)
+    );
+    let directory = TestDirectory::new(&name);
+    let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
+    adapter.config.provider = provider.to_owned();
+    let files =
+        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
+            .assert_value();
+    let invocation = invocation(fields);
+    let command: ProcessSessionCommand = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &invocation,
+        files: &files,
+        session_id: None,
+    })
+    .assert_value();
+    let plugin_url = owned_plugin(&command, "zeroshot-provider-auth");
+    let script = format!(
+        "{PLUGIN_SETUP}\n{}",
+        r#"const catalog = JSON.parse(process.env.CATALOG);
+const updates = {};
+const editor = {
+  get: (provider, model) => catalog[provider + '/' + model],
+  update: (provider, model, fn) => { const entry = {}; fn(entry); updates[provider + '/' + model] = entry; },
+};
+await hooks['model.transform'](editor);
+const resolved = [];
+for (const model of JSON.parse(process.env.REFS)) {
+  const event = {sessionID:'ses_fixture', agent:'build', kind:'primary', model};
+  await hooks['session.experimental.model.resolve'](event);
+  resolved.push(event.model);
+}
+console.log(JSON.stringify({updates, resolved}));"#
+    );
+    let output = node_command()
+        .args(["--input-type=module", "-e", &script, &plugin_url])
+        .arg(&adapter.config.workspace)
+        .envs(&command.environment)
+        .env("CATALOG", catalog.to_string())
+        .env("REFS", refs.to_string())
+        .output()
+        .assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).assert_value()
+}
+
+#[test]
+fn the_auth_plugin_creates_the_guarded_alias_and_resolves_it_to_the_lane_model() {
+    let catalog = json!({"openai/opaque/model":{"id":"opaque/model","modelID":"wire-fixture","variants":[{"id":"high"}]}});
+    let refs = json!([
+        {"providerID":"openai","id":"zeroshot-guarded","variant":"high"},
+        {"providerID":"openai","id":"other-model"},
+        {"providerID":"anthropic","id":"zeroshot-guarded"}
+    ]);
+    let results = transform_results(
+        "openai",
+        &[("OPENAI_API_KEY", "declared-key")],
+        catalog,
+        refs,
+    );
+    let updates = results["updates"].as_object().assert_value();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(
+        updates["openai/zeroshot-guarded"]["variants"][0]["id"],
+        "high"
+    );
+    assert_eq!(
+        results["resolved"],
+        json!([
+            {"providerID":"openai","id":"opaque/model","variant":"high"},
+            {"providerID":"openai","id":"other-model"},
+            {"providerID":"anthropic","id":"zeroshot-guarded"}
+        ])
+    );
+}
+
+#[test]
+fn an_unknown_lane_model_gets_no_guarded_alias() {
+    let results = transform_results(
+        "anthropic",
+        &[("ANTHROPIC_API_KEY", "declared-key")],
+        json!({}),
+        json!([]),
+    );
+    assert_eq!(results["updates"], json!({}));
+}

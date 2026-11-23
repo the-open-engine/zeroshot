@@ -80,7 +80,9 @@ sessions deny OpenCode's `opencode_session_move` tool, so a session keeps the wo
 Zeroshot assigned; renaming stays available. A private plugin checks every model
 request of the selected provider and stops it when another authentication header or a different
 endpoint would be sent. The runtime's own plugins must load; a turn in which one of them did not
-load fails. Native plugins and custom transport code run with the native CLI's authority. Local
+load fails. With a declared credential the run selects a model alias that only that plugin
+creates, so no request leaves when the plugin fails to load. Native plugins and custom transport
+code run with the native CLI's authority. Local
 OpenCode adds no `--auto` flag and skips configuration inspection because that inspection can start
 background dependency work.
 

@@ -98,6 +98,9 @@ const AUTHENTICATION: &[&str] = &[
     "AWS_SHARED_CREDENTIALS_FILE",
 ];
 
+/// Model alias that only the owned auth plugin creates; a run without that plugin has no model.
+pub(super) const GUARDED_MODEL: &str = "zeroshot-guarded";
+
 pub(super) fn native_provider(provider: &str) -> &str {
     match provider {
         "bedrock" => "amazon-bedrock",
@@ -166,7 +169,7 @@ pub(super) fn command(
     );
     let mut command = ProcessSessionCommand {
         program: adapter.config.executable.clone(),
-        argv: arguments(adapter, invocation, session_id)?,
+        argv: arguments(adapter, invocation, session_id, declared)?,
         environment,
         workspace: WorkspaceCapability {
             current_dir: files.workspace.clone(),
@@ -304,22 +307,25 @@ fn arguments(
     adapter: &OpenCodeAdapter,
     invocation: &DriverInvocation,
     session_id: Option<&str>,
+    guarded: bool,
 ) -> Result<Vec<String>, NodeRunnerError> {
     let NodeRuntimeBinding::Agent { model, effort, .. } = &invocation.node.binding else {
         return Err(NodeRunnerError::InvalidRole);
+    };
+    // A declared lane selects the alias of its owned auth plugin, so it fails closed without it.
+    let selected = if guarded {
+        GUARDED_MODEL
+    } else {
+        model.as_str()
     };
     let model_spec = match effort {
         Some(effort) => format!(
             "{}/{}#{}",
             native_provider(&adapter.config.provider),
-            model.as_str(),
+            selected,
             effort_token(*effort)
         ),
-        None => format!(
-            "{}/{}",
-            native_provider(&adapter.config.provider),
-            model.as_str()
-        ),
+        None => format!("{}/{}", native_provider(&adapter.config.provider), selected),
     };
     let mut argv = adapter.config.prefix_arguments.clone();
     argv.extend([

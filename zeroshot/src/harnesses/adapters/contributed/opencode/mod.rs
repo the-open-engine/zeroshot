@@ -261,7 +261,12 @@ impl OpenCodeAdapter {
                     }
                 }
                 if let Some(id) = plugin::missing(&owned, &scratch) {
-                    if matches!(result, Ok(ProviderAttempt::Complete(_))) {
+                    // Without the auth plugin the guarded model does not exist.
+                    if matches!(
+                        result,
+                        Ok(ProviderAttempt::Complete(_))
+                            | Err(NodeRunnerError::ModelUnavailable(_))
+                    ) {
                         return Err(NodeRunnerError::DriverDetail(format!(
                             "OpenCode plugin {id} did not load"
                         )));
@@ -276,6 +281,7 @@ impl OpenCodeAdapter {
                             else {
                                 return NodeRunnerError::Driver;
                             };
+                            let detail = detail.replace(command::GUARDED_MODEL, model.as_str());
                             NodeRunnerError::ModelUnavailable(format!("model {model}: {detail}"))
                         }
                         error => error,

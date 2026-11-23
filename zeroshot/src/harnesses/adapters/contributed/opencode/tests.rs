@@ -53,7 +53,7 @@ pub(super) fn owned_plugin(command: &ProcessSessionCommand, id: &str) -> String 
 #[cfg(unix)]
 pub(super) const PLUGIN_SETUP: &str = r#"const {default:plugin} = await import(new URL('index.js', process.argv[1]));
 const hooks = {};
-const ctx = {location:{directory:process.argv[2]}, tool:{hook: async (name, fn) => { hooks['tool.' + name] = fn; }}, session:{hook: async (name, fn) => { hooks['session.' + name] = fn; }}};
+const ctx = {location:{directory:process.argv[2]}, tool:{hook: async (name, fn) => { hooks['tool.' + name] = fn; }}, session:{hook: async (name, fn) => { hooks['session.' + name] = fn; }}, model:{transform: async (fn) => { hooks['model.transform'] = fn; }}};
 await plugin.setup(ctx);"#;
 
 fn event(kind: &str, id: &str, message: &str) -> Value {

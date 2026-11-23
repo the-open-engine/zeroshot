@@ -109,6 +109,85 @@ async fn header_conflict_stops_the_request(transport: &str) {
 }
 
 #[tokio::test]
+#[ignore = "requires installed OpenCode; proves the guarded model reaches the real model id"]
+async fn native_guarded_model_reaches_the_real_model_id() {
+    let directory = TestDirectory::new("opencode-native-guarded-model");
+    let adapter = native_openai_adapter(&directory, None, Some("http"));
+    let (listener, endpoint) = native_listener().await;
+    let invocation = super::process::invocation(&[
+        ("OPENAI_API_KEY", "declared-wire-key"),
+        ("OPENAI_BASE_URL", endpoint.as_str()),
+    ]);
+    let captured = run_native_wire(&adapter, invocation, listener).await;
+    assert!(
+        captured.contains("\"model\":\"wire-fixture\""),
+        "{captured}"
+    );
+    assert!(!captured.contains("zeroshot-guarded"), "{captured}");
+}
+
+#[tokio::test]
+#[ignore = "requires installed OpenCode; proves no request leaves when the auth plugin does not load"]
+async fn native_auth_plugin_failure_stops_the_request() {
+    for breakage in ["throws", "missing"] {
+        plugin_failure_stops_the_request(breakage).await;
+    }
+}
+
+async fn plugin_failure_stops_the_request(breakage: &str) {
+    let directory = TestDirectory::new(&format!("opencode-native-plugin-{breakage}"));
+    let mut adapter = native_openai_adapter(&directory, None, Some("http"));
+    let binary =
+        std::env::var("ZEROSHOT_OPENCODE_BINARY").expect("set the explicit native OpenCode binary");
+    let quote = |value: &str| format!("'{}'", value.replace('\'', "'\\''"));
+    let locate = r#"dir=$(printf '%s' "$OPENCODE_CONFIG_CONTENT" | grep -o 'file://[^"]*/zeroshot-plugins/zeroshot-provider-auth/' | head -n 1 | sed 's#^file://##'); [ -n "$dir" ] || exit 97"#;
+    let action = if breakage == "throws" {
+        r#"printf '%s\n' 'export default {id: "zeroshot-provider-auth", async setup() { throw new Error("broken on purpose"); }};' > "${dir}index.js""#
+    } else {
+        r#"rm -rf "$dir""#
+    };
+    let script = format!(
+        "#!/bin/sh\n{locate}\n{action}\nexec {} --print-logs --log-level debug \"$@\" 2>>{}\n",
+        quote(&binary),
+        quote(&directory.child("native-stderr.log").to_string_lossy())
+    );
+    adapter.config.executable = directory
+        .write_executable("native-opencode-broken-plugin", &script)
+        .to_string_lossy()
+        .into_owned();
+    let (listener, endpoint) = native_listener().await;
+    let invocation = super::process::invocation(&[
+        ("OPENAI_API_KEY", "declared-wire-key"),
+        ("OPENAI_BASE_URL", endpoint.as_str()),
+    ]);
+    let (_cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
+    let drain = tokio::spawn(async move { while durable.recv_output().await.is_ok() {} });
+    let execution = adapter.run(invocation, control);
+    tokio::pin!(execution);
+    let result = tokio::select! {
+        _ = listener.accept() =>
+            panic!("provider request left although the auth plugin {breakage}"),
+        result = &mut execution => result,
+        _ = tokio::time::sleep(std::time::Duration::from_secs(60)) =>
+            panic!("a run whose auth plugin {breakage} did not stop"),
+    };
+    let detail = format!("{}", result.unwrap_err());
+    assert!(
+        detail.contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "{breakage}: {detail}\n{}",
+        native_stderr(&directory)
+    );
+    assert!(!detail.contains("declared-wire-key"), "{detail}");
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), listener.accept())
+            .await
+            .is_err(),
+        "provider request left although the auth plugin {breakage}"
+    );
+    drain.await.assert_value();
+}
+
+#[tokio::test]
 #[ignore = "requires installed OpenCode on Linux; proves cancellation stops the private server"]
 #[cfg(target_os = "linux")]
 async fn native_cancellation_stops_every_opencode_process_of_the_session() {
@@ -220,11 +299,32 @@ pub(super) async fn capture_request(listener: tokio::net::TcpListener) -> String
         }
     };
     let header_text = String::from_utf8(bytes[..headers].to_vec()).assert_value();
+    // The body is read when its length is declared, so a test can check the requested model.
+    let length = header_text.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok())
+            .flatten()
+    });
+    if let Some(length) = length {
+        assert!(
+            length < 2 * 1024 * 1024,
+            "wire fixture body exceeded its bound"
+        );
+        while bytes.len() < headers + length {
+            let mut chunk = [0; 8192];
+            let read = stream.read(&mut chunk).await.assert_value();
+            assert!(read > 0, "native provider closed before sending its body");
+            bytes.extend_from_slice(&chunk[..read]);
+        }
+    }
+    let request_text = String::from_utf8_lossy(&bytes).into_owned();
     let body = r#"{"error":{"message":"local wire fixture complete","type":"authentication_error","code":"invalid_api_key"}}"#;
     stream.write_all(format!("HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).as_bytes())
         .await.assert_value();
     stream.shutdown().await.assert_value();
-    header_text
+    request_text
 }
 
 #[tokio::test]

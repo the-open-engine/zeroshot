@@ -398,7 +398,7 @@ fn a_declared_key_drops_foreign_keys_and_uses_environment_interpolation() {
         "{env:ANTHROPIC_API_KEY}"
     );
     assert!(!config.to_string().contains("declared-secret"));
-    assert_eq!(command.argv[5], "anthropic/opaque/model");
+    assert_eq!(command.argv[5], "anthropic/zeroshot-guarded");
     owned_plugin(&command, "zeroshot-provider-auth");
 }
 
@@ -1066,4 +1066,84 @@ async fn dispatch_metadata_reaches_opencode_correction_processes() {
             "step",
         );
     }
+}
+
+#[test]
+fn a_declared_lane_keeps_its_effort_on_the_guarded_model() {
+    let directory = TestDirectory::new("opencode-declared-guarded-effort");
+    let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
+    let files =
+        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
+            .assert_value();
+    let mut invocation = invocation(&[("ANTHROPIC_API_KEY", "declared-secret")]);
+    let NodeRuntimeBinding::Agent { effort, .. } = &mut invocation.node.binding else {
+        panic!("agent binding expected");
+    };
+    *effort = Some(ReasoningEffort::High);
+    let command = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &invocation,
+        files: &files,
+        session_id: None,
+    })
+    .assert_value();
+    assert_eq!(command.argv[5], "anthropic/zeroshot-guarded#high");
+}
+
+#[tokio::test]
+async fn a_missing_guarded_model_without_the_auth_plugin_reports_the_plugin() {
+    let directory = TestDirectory::new("opencode-guarded-model-without-plugin");
+    let native_error = json!({
+        "type": "error",
+        "sessionID": "ses_fixture",
+        "error": {"type": "provider.no-route", "message": "Model unavailable: anthropic/zeroshot-guarded"}
+    })
+    .to_string();
+    let body = format!(
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+    );
+    let adapter = adapter(&directory, &body);
+    let detail = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value()
+    .to_string();
+    assert!(
+        detail.contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "{detail}"
+    );
+    assert!(!detail.contains("declared-key"), "{detail}");
+}
+
+#[tokio::test]
+async fn an_unknown_lane_model_with_the_auth_plugin_names_the_lane_model() {
+    let directory = TestDirectory::new("opencode-guarded-model-unknown");
+    let native_error = json!({
+        "type": "error",
+        "sessionID": "ses_fixture",
+        "error": {"type": "provider.no-route", "message": "Model unavailable: anthropic/zeroshot-guarded"}
+    })
+    .to_string();
+    let body = format!(
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\n{LOADS_PLUGINS}\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+    );
+    let adapter = adapter(&directory, &body);
+    let error = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value();
+    let detail = error.to_string();
+    assert!(
+        matches!(error, NodeRunnerError::ModelUnavailable(_)),
+        "{detail}"
+    );
+    assert!(detail.contains("anthropic/opaque/model"), "{detail}");
+    assert!(!detail.contains("zeroshot-guarded"), "{detail}");
+    assert!(!detail.contains("did not load"), "{detail}");
 }
