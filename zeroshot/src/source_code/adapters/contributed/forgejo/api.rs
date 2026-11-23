@@ -3,7 +3,6 @@
 //! values returned by `diagnostic_secrets` are the single set used for all Forgejo diagnostic text,
 //! and never enter a URL, a printed diagnostic, a log line or a `Debug` value.
 
-use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,16 +12,14 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 use url::Position;
 
-use crate::native_v2_delivery::{command, git_auth};
 use crate::source_code_provider::adapters::core::ci_diagnostics;
+use crate::source_code_provider::adapters::core::forge_http::{self, BodyFailure};
 use crate::source_code_provider::adapters::core::network::ForgeNetwork;
-use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError, SourceGitCredential};
+use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
 
 use super::wire::ServerVersion;
 
 pub(super) const RESPONSE_LIMIT: usize = 1024 * 1024;
-/// A Forgejo rejection is a short message; a longer body keeps only its prefix.
-pub(super) const ERROR_BODY_LIMIT: usize = 4 * 1024;
 pub(super) const PAGE_LIMIT: u32 = 64;
 pub(super) const PAGE_SIZE: usize = 50;
 pub(super) const MINIMUM_VERSION: (u64, u64, u64) = (16, 0, 0);
@@ -302,20 +299,7 @@ impl Api {
         credential: SourceDeliveryCredential<'_>,
     ) -> SourceDeliveryError {
         let status = response.status().as_u16();
-        let mut body = Vec::new();
-        let truncated = loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) if body.len() + chunk.len() <= ERROR_BODY_LIMIT => {
-                    body.extend_from_slice(&chunk);
-                }
-                Ok(Some(chunk)) => {
-                    body.extend_from_slice(&chunk[..ERROR_BODY_LIMIT - body.len()]);
-                    break true;
-                }
-                Ok(None) => break false,
-                Err(_) => break true,
-            }
-        };
+        let (body, truncated) = forge_http::rejection_body(&mut response).await;
         let mut diagnostic = format!("Forgejo API {resource} returned HTTP {status}").into_bytes();
         if !body.is_empty() {
             diagnostic.extend_from_slice(b": ");
@@ -333,21 +317,7 @@ impl Api {
         error: reqwest::Error,
         credential: SourceDeliveryCredential<'_>,
     ) -> SourceDeliveryError {
-        let error = error.without_url();
-        let mut detail = context;
-        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
-        while let Some(current) = cause {
-            let _ = write!(detail, ": {current}");
-            // Operating systems localize their messages; the portable kind keeps the cause readable.
-            if let Some(kind) = current
-                .downcast_ref::<std::io::Error>()
-                .filter(|error| error.raw_os_error().is_some())
-                .map(std::io::Error::kind)
-            {
-                let _ = write!(detail, " [{kind}]");
-            }
-            cause = current.source();
-        }
+        let detail = forge_http::transport_detail(context, error);
         SourceDeliveryError::api(
             None,
             self.display_text(detail.into_bytes(), false, credential),
@@ -357,31 +327,21 @@ impl Api {
 
     async fn response_bytes(
         &self,
-        mut response: reqwest::Response,
+        response: reqwest::Response,
         credential: SourceDeliveryCredential<'_>,
         maximum_bytes: usize,
     ) -> Result<Vec<u8>, SourceDeliveryError> {
-        if response
-            .content_length()
-            .is_some_and(|length| length > maximum_bytes as u64)
-        {
-            return Err(self.api_error("Forgejo response exceeded its byte bound", credential));
-        }
-        let source = response.url()[..Position::AfterPath].to_owned();
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|error| {
-            self.transport_failure(
+        match forge_http::bounded_body(response, maximum_bytes).await {
+            Ok(bytes) => Ok(bytes),
+            Err(BodyFailure::TooLarge) => {
+                Err(self.api_error("Forgejo response exceeded its byte bound", credential))
+            }
+            Err(BodyFailure::Transport { source, error }) => Err(self.transport_failure(
                 format!("Forgejo API response from {source} transport failed"),
                 error,
                 credential,
-            )
-        })? {
-            if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
-                return Err(self.api_error("Forgejo response exceeded its byte bound", credential));
-            }
-            bytes.extend_from_slice(&chunk);
+            )),
         }
-        Ok(bytes)
     }
 
     async fn bytes(
@@ -455,32 +415,7 @@ impl Api {
         &self,
         credential: SourceDeliveryCredential<'_>,
     ) -> Vec<String> {
-        let mut values = vec![credential.expose()];
-        values.extend(credential.github_git_token());
-        let mut secrets = self.network.secrets();
-        secrets.extend_from_slice(credential.diagnostic_secrets());
-        match credential.git() {
-            Some(SourceGitCredential::Https { username, password }) => {
-                values.extend([username, password]);
-                secrets.push(git_auth::encode_user_password(username, password));
-            }
-            Some(SourceGitCredential::Ssh {
-                private_key,
-                known_hosts,
-            }) => {
-                values.extend([private_key, known_hosts]);
-                values.extend(private_key.lines());
-            }
-            None => {}
-        }
-        for value in values.into_iter().filter(|value| !value.is_empty()) {
-            secrets.extend([
-                value.to_owned(),
-                credential_segment(value),
-                git_auth::encode_basic_credential(value),
-            ]);
-        }
-        secrets
+        forge_http::diagnostic_secrets(credential, &self.network.secrets())
     }
 
     /// Forge response text is redacted before truncation and kept on one control-free line.
@@ -490,24 +425,8 @@ impl Api {
         truncated: bool,
         credential: SourceDeliveryCredential<'_>,
     ) -> String {
-        let secrets = self.diagnostic_secrets(credential);
-        // Redact every credential before any size bound or lossy UTF-8 conversion can split it.
-        let (text, truncated) = command::diagnostic_text_with_secrets(bytes, truncated, &secrets);
-        let mut text = text.replace(char::is_control, " ");
-        if truncated {
-            text.push_str(" [truncated]");
-        }
-        text
+        forge_http::display_text(bytes, truncated, &self.diagnostic_secrets(credential))
     }
-}
-
-// Match the request encoder, including slash and percent escapes, without changing its URL.
-fn credential_segment(token: &str) -> String {
-    let mut url = Url::parse("https://redacted.invalid/").expect("static hierarchical URL");
-    url.path_segments_mut()
-        .expect("HTTP URL supports path segments")
-        .push(token);
-    url.path()[1..].to_owned()
 }
 
 /// Forgejo prefixes each job-log line with its timestamp. The delivery diagnostic keeps the line

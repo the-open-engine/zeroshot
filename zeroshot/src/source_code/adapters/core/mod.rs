@@ -9,6 +9,7 @@ use crate::execution::process::HostedProcessIdentity;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
 pub(crate) mod ci_diagnostics;
+pub(crate) mod forge_http;
 mod git;
 pub(crate) mod github;
 pub(crate) mod gitlab;
