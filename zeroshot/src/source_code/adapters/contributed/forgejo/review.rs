@@ -3,11 +3,11 @@ use std::time::Duration;
 use reqwest::Method;
 use serde_json::json;
 
+use crate::source_code_provider::adapters::core::forge_http;
 use crate::source_code_provider::{
-    DELIVERY_GENERATED_BODY_END, DELIVERY_GENERATED_BODY_START, SourceChecks,
-    SourceDeliveryCredential, SourceDeliveryError, SourceDeliveryRead, SourceDeliverySnapshot,
-    SourceReviewLinks, SourceReviewObservation, SourceReviewReceipt, SourceReviewRequest,
-    SourceReviewState, valid_delivery_description, valid_git_revision,
+    SourceChecks, SourceDeliveryCredential, SourceDeliveryError, SourceDeliveryRead,
+    SourceDeliverySnapshot, SourceReviewLinks, SourceReviewObservation, SourceReviewReceipt,
+    SourceReviewRequest, SourceReviewState, valid_delivery_description, valid_git_revision,
 };
 
 use super::api::ApiRequest;
@@ -244,49 +244,7 @@ fn generated_description(request: &SourceReviewRequest) -> Result<String, Source
     if !valid_delivery_description(&request.description) {
         return Err(SourceDeliveryError::Rejected);
     }
-    let issue = request
-        .source_issue
-        .as_ref()
-        .map_or(String::new(), |issue| {
-            format!("\n\nCloses #{}", issue.number)
-        });
-    Ok(format!(
-        "{DELIVERY_GENERATED_BODY_START}\n{}{issue}\n{DELIVERY_GENERATED_BODY_END}",
-        request.description
-    ))
-}
-
-fn refresh_description(existing: &str, replacement: &str) -> Result<String, SourceDeliveryError> {
-    if !existing.contains(DELIVERY_GENERATED_BODY_START)
-        && !existing.contains(DELIVERY_GENERATED_BODY_END)
-    {
-        return Ok(if existing.is_empty() {
-            replacement.to_owned()
-        } else {
-            format!("{existing}\n\n{replacement}")
-        });
-    }
-    let Some(start) = existing.find(DELIVERY_GENERATED_BODY_START) else {
-        return Err(SourceDeliveryError::identity(
-            "Forgejo pull request lacks its generated metadata section",
-        ));
-    };
-    let Some(end) = existing.find(DELIVERY_GENERATED_BODY_END) else {
-        return Err(SourceDeliveryError::Rejected);
-    };
-    if start >= end
-        || existing.matches(DELIVERY_GENERATED_BODY_START).count() != 1
-        || existing.matches(DELIVERY_GENERATED_BODY_END).count() != 1
-    {
-        return Err(SourceDeliveryError::Rejected);
-    }
-    let suffix = end + DELIVERY_GENERATED_BODY_END.len();
-    Ok(format!(
-        "{}{}{}",
-        &existing[..start],
-        replacement,
-        &existing[suffix..]
-    ))
+    Ok(forge_http::generated_description(request))
 }
 
 fn normalize_body(body: &str) -> String {
@@ -513,7 +471,11 @@ async fn update(
         &request.target.target_branch,
         &request.head_branch,
     );
-    let body = refresh_description(found.body.as_deref().unwrap_or(""), description)?;
+    let body = forge_http::refresh_description(
+        found.body.as_deref().unwrap_or(""),
+        description,
+        "Forgejo pull request",
+    )?;
     // A draft applied after creation belongs to its human author. Metadata refresh must not
     // mark it ready again, even when the generated description changes.
     let title = if found.draft {

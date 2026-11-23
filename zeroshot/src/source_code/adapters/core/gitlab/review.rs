@@ -235,53 +235,6 @@ fn normalized_request(
     })
 }
 
-fn generated_description(request: &SourceReviewRequest) -> String {
-    let issue = request
-        .source_issue
-        .as_ref()
-        .map_or(String::new(), |issue| {
-            format!("\n\nCloses #{}", issue.number)
-        });
-    format!(
-        "{DELIVERY_GENERATED_BODY_START}\n{}{issue}\n{DELIVERY_GENERATED_BODY_END}",
-        request.description
-    )
-}
-
-fn refresh_description(existing: &str, replacement: &str) -> Result<String, SourceDeliveryError> {
-    if !existing.contains(DELIVERY_GENERATED_BODY_START)
-        && !existing.contains(DELIVERY_GENERATED_BODY_END)
-    {
-        return Ok(if existing.is_empty() {
-            replacement.to_owned()
-        } else {
-            format!("{existing}\n\n{replacement}")
-        });
-    }
-    let Some(start) = existing.find(DELIVERY_GENERATED_BODY_START) else {
-        return Err(SourceDeliveryError::identity(
-            "GitLab review lacks its generated metadata section",
-        ));
-    };
-    let Some(end) = existing.find(DELIVERY_GENERATED_BODY_END) else {
-        return Err(SourceDeliveryError::Rejected);
-    };
-    if start >= end
-        || existing.matches(DELIVERY_GENERATED_BODY_START).count() != 1
-        || existing.matches(DELIVERY_GENERATED_BODY_END).count() != 1
-    {
-        return Err(SourceDeliveryError::Rejected);
-    }
-    let suffix = end + DELIVERY_GENERATED_BODY_END.len();
-    let body = format!(
-        "{}{}{}",
-        &existing[..start],
-        replacement,
-        &existing[suffix..]
-    );
-    Ok(body)
-}
-
 fn review_read(request: &SourceReviewRequest) -> SourceDeliveryRead<'_> {
     SourceDeliveryRead {
         target: &request.target,
@@ -302,7 +255,7 @@ pub(super) async fn open_or_update(
         .await?;
     let request = normalized_request(request)?;
     let request = &request;
-    let description = generated_description(request);
+    let description = super::super::forge_http::generated_description(request);
     let (found, _) = consistent_review_ref(authority, review_read(request), credential).await?;
     if let Some(found) = found {
         return update(authority, (request, &found, &description), credential).await;
@@ -481,10 +434,14 @@ async fn update(
         ));
     }
     let receipt = found.receipt(request, project.id, credential)?;
-    let body = refresh_description(found.description.as_deref().unwrap_or(""), description)
-        .map_err(|error| {
-            super::api::delivery_context(error, merge_request_identity(&receipt), credential)
-        })?;
+    let body = super::super::forge_http::refresh_description(
+        found.description.as_deref().unwrap_or(""),
+        description,
+        "GitLab review",
+    )
+    .map_err(|error| {
+        super::api::delivery_context(error, merge_request_identity(&receipt), credential)
+    })?;
     // A draft applied after creation belongs to its human author. Metadata refresh must not
     // mark it ready again, even when the generated description changes.
     let title = if found.draft {
