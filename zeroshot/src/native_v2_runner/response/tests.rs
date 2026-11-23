@@ -477,6 +477,39 @@ fn provider_envelope_is_unwrapped_before_authoritative_validation() {
 }
 
 #[test]
+fn verifier_response_requires_an_object_while_worker_arrays_remain_valid() {
+    let contract = verifier_contract();
+    let envelope: Value = serde_json::from_str(&valid_verifier_envelope()).assert_value();
+    let verifier = envelope["response"].clone();
+    assert!(matches!(
+        contract.parse_agent_value(verifier.clone()).assert_value(),
+        WorkerOutcome::Verifier { .. }
+    ));
+    let positional = json!([
+        verifier["output"],
+        verifier["signals"],
+        verifier["diagnostic"]
+    ]);
+    assert!(contract.parse_agent_value(positional.clone()).is_err());
+    assert!(matches!(
+        resolve_agent_response(&contract, &json!({"response":positional}).to_string())
+            .assert_value(),
+        AgentResponse::Correction { .. }
+    ));
+
+    let worker = NodeResponseContract::Worker {
+        output: PayloadType::Array {
+            items: Box::new(PayloadType::String),
+        },
+    };
+    let array = json!(["plain", "step", "output"]);
+    assert!(matches!(
+        worker.parse_agent_value(array.clone()).assert_value(),
+        WorkerOutcome::Verified { output, .. } if output == array
+    ));
+}
+
+#[test]
 fn coverage_contract_verifier_response_errors_are_bounded_and_identify_signal_contract_violations()
 {
     let verdict = FieldName::new("verdict").assert_value();

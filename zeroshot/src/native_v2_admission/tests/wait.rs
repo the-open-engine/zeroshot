@@ -9,6 +9,21 @@ fn wait() -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn local_checkpointless_wait_policy_is_unchanged() {
+    let graph = graph(vec![wait(), succeed("done")]);
+    let mut request = submission(
+        graph.clone(),
+        BTreeMap::from([(named("wait"), NodeRuntimeBinding::Request {})]),
+    );
+    request.runtime.workspace_checkpoints = false;
+    NativeV2Admission
+        .validate_profile(&graph, &request.runtime, DeliveryPolicy::Optional)
+        .await
+        .assert_value();
+    NativeV2Admission.admit(request).await.assert_value();
+}
+
+#[tokio::test]
 async fn wait_requires_exact_host_contract_and_binding() {
     let bindings = BTreeMap::from([(named("wait"), NodeRuntimeBinding::Request {})]);
     let valid = wait();

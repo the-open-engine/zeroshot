@@ -63,6 +63,8 @@ async fn controller_detachment_respects_job_hierarchy() {
     // Job membership is irreversible, so each case owns a separate test process.
     for mode in [
         "restricted",
+        "contained-restricted",
+        "contained-nested",
         "nested-explicit",
         "nested-silent",
         "explicit",
@@ -84,7 +86,7 @@ async fn controller_detachment_respects_job_hierarchy() {
 
 async fn exercise_job_hierarchy(mode: &str) {
     let mut jobs = Vec::new();
-    if mode.starts_with("nested-") {
+    if mode.starts_with("nested-") || mode == "contained-nested" {
         jobs.push(join_job(0));
     }
     let flags = if mode.ends_with("explicit") {
@@ -96,8 +98,14 @@ async fn exercise_job_hierarchy(mode: &str) {
     };
     jobs.push(join_job(flags));
     let mut command = fixture_command(JOB_TEST, MODE, "detached");
-    let should_succeed = matches!(mode, "explicit" | "silent");
-    match spawn_controller(&mut command) {
+    let contained = mode.starts_with("contained-");
+    let should_succeed = contained || matches!(mode, "explicit" | "silent");
+    let policy = if contained {
+        LocalControllerMode::Contained
+    } else {
+        LocalControllerMode::Detached
+    };
+    match spawn_controller(&mut command, policy) {
         Ok(mut child) => {
             let detached = !in_job(child.0.as_raw_handle()).unwrap();
             child.kill().await.unwrap();
@@ -105,7 +113,7 @@ async fn exercise_job_hierarchy(mode: &str) {
                 should_succeed,
                 "controller started inside a restrictive Job"
             );
-            assert!(detached, "controller retained a caller-owned Job");
+            assert_eq!(detached, !contained, "unexpected caller Job membership");
         }
         Err(error) => {
             assert!(!should_succeed, "permitted breakaway failed: {error}");
@@ -159,22 +167,27 @@ async fn controller_console_is_hidden_and_shared() {
         }
         return;
     }
-    let result = Scratch::new("console");
-    let mut command = fixture_command(CONSOLE_TEST, CONSOLE_MODE, "controller");
-    command.env(RESULT, &result.0);
-    let mut child = spawn_controller(&mut command).unwrap();
-    let exited = wait_for(Duration::from_secs(60), || {
-        child.try_wait().unwrap().is_some()
-    })
-    .await;
-    if !exited {
-        child.kill().await.unwrap();
+    for policy in [
+        LocalControllerMode::Detached,
+        LocalControllerMode::Contained,
+    ] {
+        let result = Scratch::new("console");
+        let mut command = fixture_command(CONSOLE_TEST, CONSOLE_MODE, "controller");
+        command.env(RESULT, &result.0);
+        let mut child = spawn_controller(&mut command, policy).unwrap();
+        let exited = wait_for(Duration::from_secs(60), || {
+            child.try_wait().unwrap().is_some()
+        })
+        .await;
+        if !exited {
+            child.kill().await.unwrap();
+        }
+        assert_eq!(
+            result.read().as_deref(),
+            Some("ok"),
+            "controller exited: {exited}"
+        );
     }
-    assert_eq!(
-        result.read().as_deref(),
-        Some("ok"),
-        "controller exited: {exited}"
-    );
 }
 
 #[tokio::test]
@@ -193,7 +206,7 @@ async fn guarded_controller_survives_console_break() {
     let marker = Scratch::new("guarded");
     let mut command = fixture_command(BREAK_TEST, CONSOLE_MODE, "guarded");
     command.env(RESULT, &marker.0);
-    let mut child = spawn_controller(&mut command).unwrap();
+    let mut child = spawn_controller(&mut command, LocalControllerMode::Detached).unwrap();
     let reported = wait_for(Duration::from_secs(30), || {
         marker.read().is_some() || child.try_wait().unwrap().is_some()
     })
@@ -211,7 +224,7 @@ async fn guarded_controller_survives_console_break() {
     let marker = Scratch::new("unguarded");
     let mut command = fixture_command(BREAK_TEST, CONSOLE_MODE, "unguarded");
     command.env(RESULT, &marker.0);
-    let mut child = spawn_controller(&mut command).unwrap();
+    let mut child = spawn_controller(&mut command, LocalControllerMode::Detached).unwrap();
     let exited = wait_for(Duration::from_secs(30), || {
         child.try_wait().unwrap().is_some()
     })
@@ -322,7 +335,7 @@ fn break_own_console() {
 async fn break_caller_console() {
     guard_controller_console().unwrap();
     let mut command = fixture_command(CALLER_TEST, CONSOLE_MODE, "idle");
-    let mut controller = spawn_controller(&mut command).unwrap();
+    let mut controller = spawn_controller(&mut command, LocalControllerMode::Detached).unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
     check(unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0) }).unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;

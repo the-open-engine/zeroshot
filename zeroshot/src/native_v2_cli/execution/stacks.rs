@@ -153,6 +153,8 @@ fn prepared_request(
     profile: &RunProfile,
     environment: &dyn Fn(&str) -> Option<OsString>,
 ) -> Result<PreparedStackRequest, NativeV2CliError> {
+    crate::native_v2_admission::validate_target_environment(manifest.environment.as_ref())
+        .map_err(NativeV2CliError::InvalidRun)?;
     crate::native_v2_admission::validate_run_environment(
         &profile.runtime,
         manifest.environment.as_ref(),

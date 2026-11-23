@@ -1024,12 +1024,12 @@ async fn unrestorable_conversations_are_distinct_from_checkpoints_without_conver
     };
     // Before the first checkpoint there is no latest pointer, and so no conversation.
     assert_eq!(
-        reason(restore_checkpoint_conversations(&continued, None).await),
+        reason(restore_checkpoint_conversations(&continued, None, &[]).await),
         None
     );
     fixture.input_checkpoint("writer").await;
     assert_eq!(
-        reason(restore_checkpoint_conversations(&continued, None).await),
+        reason(restore_checkpoint_conversations(&continued, None, &[]).await),
         None
     );
     fs::write(fixture.restic_control("fail-restore"), "fail").assert_value();
@@ -1041,7 +1041,7 @@ async fn unrestorable_conversations_are_distinct_from_checkpoints_without_conver
     )
     .with_conversation_restore(Some(continued.clone()));
     for files in [
-        restore_checkpoint_conversations(&continued, None).await,
+        restore_checkpoint_conversations(&continued, None, &[]).await,
         store.restored_conversations().await,
     ] {
         assert_eq!(

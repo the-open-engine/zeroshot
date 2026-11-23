@@ -84,6 +84,7 @@ pub(super) fn contract_status(
 ) -> RunStatusResult {
     RunStatusResult {
         steering: Default::default(),
+        context_sources: Vec::new(),
         run_id,
         title: RunTitle::new("Local storage contract").assert_value(),
         source: submission.source.clone(),
@@ -170,6 +171,7 @@ fn prepared_local_run(
 fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     let submission = contract_submission(submission_key);
     PreparedRunRequest {
+        context_sources: Vec::new(),
         git_credentials: None,
 
         cwd: None,
@@ -662,6 +664,7 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
     let error = backend
         .start_local_successor(
             RunResumeParams {
+                runtime: None,
                 git_credentials: None,
                 commit_identity: None,
                 commit_co_author: None,

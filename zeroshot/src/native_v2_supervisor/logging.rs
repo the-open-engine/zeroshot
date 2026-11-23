@@ -12,6 +12,20 @@ use crate::v2_run_ledger::{
     SafeLogStream, StoredRun, cursor_sequence,
 };
 
+pub(crate) fn checkpoint_capture_log(completed: bool) -> Result<RunEvent, RunLedgerError> {
+    Ok(RunEvent::SafeLog {
+        execution: None,
+        diagnostic: None,
+        timestamp: crate::native_v2_runner::current_timestamp(),
+        stream: SafeLogStream::System,
+        line: SafeLogLine::new(if completed {
+            "Workspace checkpoint capture completed"
+        } else {
+            "Creating workspace checkpoint"
+        })?,
+    })
+}
+
 /// Record the executing build before preparation or dispatch can produce other logs.
 /// A successor has its own empty ledger; reopening a run preserves its original version.
 pub(crate) async fn record_run_version(

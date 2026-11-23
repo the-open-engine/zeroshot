@@ -133,11 +133,9 @@ fn help_explains_runtime_configuration() {
             "disposable capsule rather than a bypass argument."
         )
         .to_owned(),
-        concat!(
-            "model ids are passed unchanged to the selected harness and provider; ",
-            "zeroshot does not maintain or validate provider model catalogs."
-        )
-        .to_owned(),
+        "use the provider's model id.".to_owned(),
+        "opencode's <provider>/<model> locator".to_owned(),
+        "zeroshot does not maintain or validate provider model catalogs.".to_owned(),
         "size identifiers are target-owned strings.".to_owned(),
         "zeroshot target sizes name".to_owned(),
         format!(

@@ -7,12 +7,25 @@ use crate::active_memory::hooks::{
     tests::{invocation, steer_record},
 };
 
+// How the wrapped ledger handles the next steer receipt write.
+#[derive(Clone, Copy, PartialEq)]
+enum Receipt {
+    // Fails at once.
+    Fail,
+    // Starts, then waits for the test's release, then commits: a write that is already
+    // under way when its caller gives up.
+    HeldCommit,
+    // Starts, then waits for the test's release, then fails without committing.
+    HeldFail,
+}
+
 // Each page is legal and timely, but the complete record takes longer than a callback.
 struct SlowPages {
     ledger: Arc<dyn RunLedger>,
     reads: Mutex<Vec<Option<Cursor>>>,
     fail_next_read: AtomicBool,
-    timeout_next_receipt: AtomicBool,
+    next_receipt: Mutex<Option<Receipt>>,
+    receipt: PublicationGate,
     publication: Option<Arc<PublicationGate>>,
 }
 #[derive(Default)]
@@ -48,13 +61,20 @@ impl RunLedger for SlowPages {
         run: &RunId,
         events: Vec<RunEvent>,
     ) -> Result<crate::v2_run_ledger::AppendResult, RunLedgerError> {
-        if matches!(events.first(), Some(RunEvent::Vector { vector })
+        let receipt = matches!(events.first(), Some(RunEvent::Vector { vector })
             if matches!(vector.content, RunVectorContent::SteerReceipt { .. }))
-            && self.timeout_next_receipt.swap(false, Ordering::SeqCst)
-        {
-            // The production receipt deadline must cancel this first publication. Its
-            // offer remains due, independently of scheduling or SQLite write speed.
-            std::future::pending::<()>().await;
+        .then(|| self.next_receipt.lock().assert_value().take())
+        .flatten();
+        if let Some(receipt) = receipt {
+            if receipt != Receipt::Fail {
+                // Held until released, so what the callbacks see in between does not
+                // depend on scheduling or write speed.
+                self.receipt.entered.notify_one();
+                self.receipt.release.notified().await;
+            }
+            if receipt != Receipt::HeldCommit {
+                return Err(RunLedgerError::Storage);
+            }
         }
         if let Some(gate) = &self.publication
             && matches!(events.first(), Some(RunEvent::Vector { vector })
@@ -109,7 +129,8 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
         ),
         reads: Mutex::default(),
         fail_next_read: AtomicBool::new(false),
-        timeout_next_receipt: AtomicBool::new(true),
+        next_receipt: Mutex::new(Some(Receipt::Fail)),
+        receipt: PublicationGate::default(),
         publication: None,
     });
     ledger
@@ -134,6 +155,7 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             vector_event(
                 &run,
                 RunVectorContent::Steer {
+                    node: None,
                     mode: Default::default(),
                     network: None,
                     text: format!(
@@ -191,12 +213,11 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
             if !delivery.steers.is_empty() {
                 assert_eq!(&delivery.context[position..], "\n</steer>");
             }
-            let forced_timeout =
-                !delivery.steers.is_empty() && ledger.timeout_next_receipt.load(Ordering::SeqCst);
+            let forced_failure =
+                !delivery.steers.is_empty() && ledger.next_receipt.lock().assert_value().is_some();
             hooks.acknowledge(&query, &delivery).await;
-            // Acknowledgement can time out without publication, or while an already
-            // started SQLite write drains. Read durable receipts through that same
-            // connection before advancing; a repeated offer is valid until then.
+            // A failed receipt write leaves its offer due. Read durable receipts through
+            // the same connection before advancing.
             loop {
                 let events = ledger
                     .ledger
@@ -219,7 +240,7 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
                     }
                 }
             }
-            if forced_timeout {
+            if forced_failure {
                 assert!(received.is_empty());
             }
         }
@@ -227,8 +248,8 @@ async fn steer_many_maximum_entries_progress_across_callback_deadlines_and_reach
     .await
     .assert_value();
     assert_eq!(received, expected);
-    assert!(repeated, "a receipt timeout must leave its offer due");
-    assert!(!ledger.timeout_next_receipt.load(Ordering::SeqCst));
+    assert!(repeated, "a failed receipt must leave its offer due");
+    assert!(ledger.next_receipt.lock().assert_value().is_none());
     let reads = ledger.reads.lock().assert_value().clone();
     assert_eq!(reads.iter().filter(|cursor| cursor.is_none()).count(), 2);
     assert!(
@@ -419,6 +440,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "before-snapshot".into(),
@@ -432,6 +454,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
     steering::record(
         ledger.as_ref(),
         RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "after-snapshot".into(),
@@ -490,7 +513,8 @@ async fn network_timeout_keeps_the_started_write_fenced_until_retirement_drains(
         ledger,
         reads: Mutex::default(),
         fail_next_read: AtomicBool::new(false),
-        timeout_next_receipt: AtomicBool::new(false),
+        next_receipt: Mutex::default(),
+        receipt: PublicationGate::default(),
         publication: Some(gate.clone()),
     });
     let hooks = Arc::new(ActiveMemoryHooks::empty().assert_value());
@@ -581,6 +605,7 @@ async fn steer_sent_as_a_message_is_received_when_shown_and_delivered_once() {
     steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             run_id: run.clone(),
             text: "Standing direction".into(),
             mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -653,6 +678,7 @@ async fn steer_message_that_was_never_shown_is_due_again_at_the_next_prompt() {
     steering::record(
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: "Standing direction".into(),
@@ -698,4 +724,314 @@ async fn steer_message_that_was_never_shown_is_due_again_at_the_next_prompt() {
     hooks.steer_shown(execution, &delivery.steer).await;
     hooks.finish_steers(execution, true).await;
     assert_eq!(received().await, 1);
+}
+
+async fn held_ledger(next_receipt: Receipt) -> (Arc<SlowPages>, RunId) {
+    let (ledger, run) = steer_record().await;
+    let ledger = Arc::new(SlowPages {
+        ledger,
+        reads: Mutex::default(),
+        fail_next_read: AtomicBool::new(false),
+        next_receipt: Mutex::new(Some(next_receipt)),
+        receipt: PublicationGate::default(),
+        publication: None,
+    });
+    (ledger, run)
+}
+
+async fn prepared(hooks: &ActiveMemoryHooks, invocation: &mut DriverInvocation) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while hooks.prepare_steers(invocation, false).await.is_none() {}
+    })
+    .await
+    .assert_value();
+}
+
+async fn tool_call(hooks: &ActiveMemoryHooks, invocation: &DriverInvocation) -> HookDelivery {
+    let (query, delivery) = hooks
+        .tool_delivery(crate::active_memory::hooks::ToolCall::hook(
+            invocation,
+            &serde_json::json!({"tool_name":"Read"}),
+            std::path::Path::new("/workspace"),
+        ))
+        .await;
+    hooks.acknowledge(&query, &delivery).await;
+    delivery
+}
+
+// Polls tool calls until one offers a steer.
+async fn offered_again(hooks: &ActiveMemoryHooks, invocation: &DriverInvocation) -> HookDelivery {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let delivery = tool_call(hooks, invocation).await;
+            if !delivery.steers.is_empty() {
+                break delivery;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .assert_value()
+}
+
+// Waits until the steers have the given number of durable receipts each.
+async fn received(ledger: &dyn RunLedger, run: &RunId, expected: &[u64]) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let status = steering::status(ledger, run).await.assert_value();
+            let received: Vec<_> = status
+                .steers
+                .iter()
+                .map(|steer| steer.received_executions)
+                .collect();
+            if received == expected {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .assert_value();
+}
+
+async fn durable_receipts(ledger: &dyn RunLedger, run: &RunId) -> usize {
+    steering::all(ledger, run)
+        .await
+        .assert_value()
+        .iter()
+        .filter(|vector| matches!(vector.content, RunVectorContent::SteerReceipt { .. }))
+        .count()
+}
+
+async fn started(ledger: &SlowPages) {
+    tokio::time::timeout(Duration::from_secs(30), ledger.receipt.entered.notified())
+        .await
+        .assert_value();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_receipt_write_that_outlasts_the_callback_commits_once_and_is_never_reoffered() {
+    let (ledger, run) = held_ledger(Receipt::HeldCommit).await;
+    let hooks = ActiveMemoryHooks::empty().assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut first = invocation();
+    prepared(&hooks, &mut first).await;
+    let steer = crate::active_memory::hooks::tests::record_steer(ledger.as_ref(), &run, "held")
+        .await
+        .steer
+        .id;
+    let delivery = tool_call(&hooks, &first).await;
+    assert_eq!(delivery.steers, [steer]);
+    // The callback gave up at its deadline; its write has started and may still commit.
+    started(&ledger).await;
+    assert_eq!(durable_receipts(ledger.as_ref(), &run).await, 0);
+    for _ in 0..3 {
+        let delivery = tool_call(&hooks, &first).await;
+        assert!(delivery.steers.is_empty());
+        assert!(!delivery.context.contains("<steer>"));
+    }
+    // A snapshot references the pending receipt, which is not yet a canonical one.
+    let pending = hooks.capture_steers();
+    let pending: BTreeSet<_> = pending.values().flat_map(|r| r.receipts.clone()).collect();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(durable_receipts(ledger.as_ref(), &run).await, 0);
+    ledger.receipt.release.notify_one();
+    received(ledger.as_ref(), &run, &[1]).await;
+    assert!(tool_call(&hooks, &first).await.steers.is_empty());
+    assert_eq!(durable_receipts(ledger.as_ref(), &run).await, 1);
+    // The same receipt is now canonical, so a resumed conversation does not receive the
+    // steer again while a fresh one does.
+    let committed: BTreeSet<_> = hooks
+        .capture_steers()
+        .values()
+        .flat_map(|r| r.receipts.clone())
+        .collect();
+    assert_eq!(committed, pending);
+    let captured = hooks.capture_steers();
+    let successor = ActiveMemoryHooks::empty().assert_value();
+    successor.bind_ledger(run.clone(), ledger.clone());
+    let saved = captured.values().next().assert_value().clone();
+    successor.restore_steers(first.node.reference.node_instance.get(), saved);
+    let mut resumed = first.clone();
+    resumed.node.reference.execution =
+        crate::native_v2_contract::ExecutionId::new(5).assert_value();
+    let continued = successor
+        .prepare_steers(&mut resumed, true)
+        .await
+        .assert_value();
+    assert!(resumed.host_context.is_none());
+    successor.finish_steers(continued, true).await;
+    let mut fresh = first.clone();
+    fresh.node.reference.execution = crate::native_v2_contract::ExecutionId::new(6).assert_value();
+    fresh.provider_home_slot = crate::native_v2_contract::NodeInstanceId::new(9).assert_value();
+    successor
+        .prepare_steers(&mut fresh, false)
+        .await
+        .assert_value();
+    assert!(fresh.host_context.as_ref().assert_value().contains("held"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_receipt_write_that_fails_after_the_callback_is_offered_again_and_retried() {
+    let (ledger, run) = held_ledger(Receipt::HeldFail).await;
+    let hooks = ActiveMemoryHooks::empty().assert_value();
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let mut first = invocation();
+    prepared(&hooks, &mut first).await;
+    let steer = crate::active_memory::hooks::tests::record_steer(ledger.as_ref(), &run, "retry")
+        .await
+        .steer
+        .id;
+    assert_eq!(
+        tool_call(&hooks, &first).await.steers,
+        std::slice::from_ref(&steer)
+    );
+    started(&ledger).await;
+    assert!(tool_call(&hooks, &first).await.steers.is_empty());
+    assert_eq!(
+        hooks
+            .capture_steers()
+            .values()
+            .next()
+            .assert_value()
+            .receipts
+            .len(),
+        1
+    );
+    ledger.receipt.release.notify_one();
+    // The confirmed failure released the reservation and left no receipt or snapshot reference.
+    let delivery = offered_again(&hooks, &first).await;
+    assert_eq!(delivery.steers, [steer]);
+    assert!(delivery.context.contains("retry"));
+    received(ledger.as_ref(), &run, &[1]).await;
+    assert!(tool_call(&hooks, &first).await.steers.is_empty());
+    assert_eq!(durable_receipts(ledger.as_ref(), &run).await, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steer_cancelled_callback_leaves_its_started_write_owning_the_reservation() {
+    for receipt in [Receipt::HeldCommit, Receipt::HeldFail] {
+        let (ledger, run) = held_ledger(receipt).await;
+        let hooks = ActiveMemoryHooks::empty().assert_value();
+        hooks.bind_ledger(run.clone(), ledger.clone());
+        let mut first = invocation();
+        prepared(&hooks, &mut first).await;
+        crate::active_memory::hooks::tests::record_steer(ledger.as_ref(), &run, "cancelled").await;
+        let (query, delivery) = hooks
+            .tool_delivery(crate::active_memory::hooks::ToolCall::hook(
+                &first,
+                &serde_json::json!({"tool_name":"Read"}),
+                std::path::Path::new("/workspace"),
+            ))
+            .await;
+        assert_eq!(delivery.steers.len(), 1);
+        // Drop the acknowledgement once its write has started, well inside the deadline.
+        let mut acknowledgement = Box::pin(hooks.acknowledge(&query, &delivery));
+        tokio::select! {
+            () = &mut acknowledgement => unreachable!("the write is held"),
+            () = started(&ledger) => {}
+        }
+        drop(acknowledgement);
+        assert!(tool_call(&hooks, &first).await.steers.is_empty());
+        ledger.receipt.release.notify_one();
+        if receipt == Receipt::HeldCommit {
+            received(ledger.as_ref(), &run, &[1]).await;
+            assert!(tool_call(&hooks, &first).await.steers.is_empty());
+        } else {
+            // The task still owned the reservation and released it on the failure.
+            assert_eq!(offered_again(&hooks, &first).await.steers.len(), 1);
+            received(ledger.as_ref(), &run, &[1]).await;
+        }
+        assert_eq!(durable_receipts(ledger.as_ref(), &run).await, 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn network_pending_receipt_holds_once_per_instance_and_standing_per_conversation() {
+    use crate::v2_run_ledger::steering::record_network;
+    let (ledger, run) = held_ledger(Receipt::HeldCommit).await;
+    let hooks = ActiveMemoryHooks::empty().assert_value();
+    let name = |value: &str| NodeName::new(value).assert_value();
+    hooks.configure_networks(&BTreeMap::from([(
+        name("alpha"),
+        SteeringNetwork {
+            members: BTreeSet::from([name("worker"), name("reader")]),
+            publishers: BTreeSet::from([name("worker")]),
+        },
+    )]));
+    hooks.bind_ledger(run.clone(), ledger.clone());
+    let turn = |node: &str, instance: u64, execution: u64, home: u64| {
+        let mut invocation = invocation();
+        invocation.node.reference.node = name(node);
+        invocation.node.reference.node_instance =
+            crate::native_v2_contract::NodeInstanceId::new(instance).assert_value();
+        invocation.node.reference.execution =
+            crate::native_v2_contract::ExecutionId::new(execution).assert_value();
+        invocation.provider_home_slot =
+            crate::native_v2_contract::NodeInstanceId::new(home).assert_value();
+        invocation
+    };
+    let mut origin = turn("worker", 1, 2, 1);
+    let mut reader = turn("reader", 5, 5, 5);
+    for invocation in [&mut origin, &mut reader] {
+        prepared(&hooks, invocation).await;
+    }
+    let source = SteerOrigin {
+        node: origin.node.reference.node.clone(),
+        node_instance: origin.node.reference.node_instance.get(),
+        execution: origin.node.reference.public_execution().assert_value(),
+    };
+    for (text, mode) in [
+        ("peer-once-note", SteeringMode::Once),
+        ("peer-standing-note", SteeringMode::Standing),
+    ] {
+        record_network(
+            ledger.as_ref(),
+            NetworkSteerParams {
+                run_id: run.clone(),
+                text: text.into(),
+                mode,
+                networks: vec![name("alpha")],
+            },
+            source.clone(),
+        )
+        .await
+        .assert_value();
+    }
+    assert_eq!(tool_call(&hooks, &reader).await.steers.len(), 2);
+    started(&ledger).await;
+    assert!(tool_call(&hooks, &reader).await.steers.is_empty());
+    // Another node instance is a different consumer of the Once steer, and its own
+    // conversation needs the Standing one, though the first receipts are still pending.
+    let mut other = turn("reader", 6, 6, 6);
+    prepared(&hooks, &mut other).await;
+    assert!(
+        other
+            .host_context
+            .as_ref()
+            .assert_value()
+            .contains("peer-once-note")
+    );
+    assert!(
+        other
+            .host_context
+            .as_ref()
+            .assert_value()
+            .contains("peer-standing-note")
+    );
+    hooks.finish_steers(6, true).await;
+    // The origin instance never receives its own publication.
+    assert!(
+        !origin
+            .host_context
+            .as_ref()
+            .assert_value()
+            .contains("peer-once-note")
+    );
+    assert!(tool_call(&hooks, &origin).await.steers.is_empty());
+    ledger.receipt.release.notify_one();
+    received(ledger.as_ref(), &run, &[2, 2]).await;
+    assert!(tool_call(&hooks, &reader).await.steers.is_empty());
+    assert!(tool_call(&hooks, &other).await.steers.is_empty());
+    assert_eq!(durable_receipts(ledger.as_ref(), &run).await, 4);
 }

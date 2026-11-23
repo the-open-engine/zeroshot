@@ -22,21 +22,32 @@ independent of a provider's context window and the selected run size.
 
 ## Document fields
 
-`RuntimePlan` is a closed JSON object. The following four fields are required; unknown fields are rejected.
+`RuntimePlan` is a closed JSON object. Unknown fields are rejected.
 
-| Field      | Value                                                                              |
-| ---------- | ---------------------------------------------------------------------------------- |
-| `harness`  | Registered harness of the default lane                                             |
-| `provider` | Provider of the default lane, supported by the selected harness                    |
-| `size`     | `small`, `medium`, or `large`                                                      |
-| `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings) |
+| Field      | Required | Value                                                                              |
+| ---------- | -------- | ---------------------------------------------------------------------------------- |
+| `harness`  | Yes      | Registered harness of the default lane                                             |
+| `provider` | Yes      | Provider of the default lane, supported by the selected harness                    |
+| `size`     | No       | Target-owned size identifier. Omit it to use the target's default.                 |
+| `nodes`    | Yes      | Object mapping each executable graph node name to a [node binding](#node-bindings) |
+
+Local runs offer `host`, which uses the current machine's CPU, memory and storage; local
+validation checks the same catalog as execution. Other targets advertise their own identifiers,
+such as `small`, `medium`, or `large`; these are examples, not universal values. Saved profiles
+preserve the authored size, and the selected target checks availability at admission.
 
 Optional `workspaceCheckpoints` is a boolean that defaults to `true`. Local CLI runs may set it
 to `false` to skip workspace snapshot storage and the Restic dependency. Run history, structured
 outputs, usage, and logs remain durable. Restart uses the retained workspace and original graph
 input. Selected workspace-checkpoint resume is unavailable when snapshots were disabled.
 This controls file snapshots, not external side effects or node retry semantics.
-The current named targets reject opt-out explicitly.
+Named targets accept opt-out only when they explicitly advertise
+`extensions.workspace_checkpoint_opt_out.kind = "openengine.workspace-checkpoint-opt-out/v1"`.
+Clients refuse missing or different capability versions before acquiring access tokens or sending
+run/profile bodies. Direct targets and hosted integrations keep checkpoints required by default.
+Opted-out hosted graphs cannot contain request or wait nodes, including nested/imported definitions,
+and cannot suspend or recover from a checkpoint. History and final outputs remain durable.
+See the [host integration API](target-runtime.md#hosted-workspace-checkpoint-opt-out).
 The field is accepted in exact and uniform runtime plans and is preserved in saved profiles.
 
 ```json
@@ -53,7 +64,8 @@ carries its own [`lane`](#per-node-lanes). `size` applies to the whole run. Mode
 window, output limit, session scope, and connections are chosen per node.
 
 `size` is a run-level resource class. zeroshot records it with the run and reports it in run
-status; the hosting target decides what resources each class receives.
+status. Use `zeroshot target sizes NAME` to list a named target's sizes. See
+[discovery and sizes](target-runtime.md#discovery-and-sizes).
 
 `nodes` keys are graph node names: 1 to 128 bytes matching `[A-Za-z_][A-Za-z0-9_.-]*`.
 
@@ -63,7 +75,6 @@ This plan binds the three agent nodes of the built-in `software-change` template
 {
   "harness": "claude",
   "provider": "anthropic",
-  "size": "medium",
   "nodes": {
     "worker": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "sessionScope": "node_instance" },
     "acceptance": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "effort": "high" },
@@ -105,13 +116,13 @@ rather than a bypass argument.
 
 ## Node bindings
 
-`kind` selects an agent, script, decision, Git delivery, or comment delivery binding. Fields belonging to another
-kind are rejected.
+`kind` selects an agent, script, decision, request, Git delivery, or comment delivery binding.
+Fields belonging to another kind are rejected.
 
 ### `script`
 
-A script binding executes a caller-owned program on an existing `step`, using the step's typed
-input and output. The step must omit `instructions`. This initial implementation is local only.
+A script binding executes a caller-owned program on an existing `step` or `verifier`, using the
+node's typed input and output. The node must omit `instructions`. Script bindings are local only.
 Named targets and contained placements reject script bindings.
 
 ```json
@@ -126,18 +137,109 @@ temporary files and locale. Public run variables and explicitly declared connect
 added through the existing connection resolver. Other ambient credentials are not inherited.
 
 The program receives one JSON value on stdin, followed by EOF, and must exit zero with exactly
-one JSON value on stdout. zeroshot validates that value against the step's output schema.
+one JSON value on stdout. For a step, that value is the plain output, validated against the
+step's output schema. For a verifier, stdout must be exactly an object with `output`, `signals`
+and `diagnostic`, for example:
+
+```json
+{ "output": null, "signals": { "status": "logged_out" }, "diagnostic": {} }
+```
+
+Every declared signal must be present, with one of its declared labels; extra signals are rejected.
+The output and diagnostic must satisfy the verifier's respective schemas. Missing fields, extra
+envelope fields, undeclared labels and invalid types produce `malformed`. Signals feed existing
+choice guards and remain observable in durable run history, just as agent verifier signals do.
+
 Process input and output are each bounded at 8 MiB. A result must also fit the ledger's
 1 MiB serialized completion event, including execution metadata. Complete stderr is retained
 as bounded diagnostics with resolved connection values redacted. Truncated stderr is omitted because its cut boundary
 may split a credential. A nonzero exit becomes `crash`, and invalid or oversized
 JSON becomes `malformed`. The ordinary graph error and retry rules apply. Cancellation and the
-step's optional `timeoutMs` terminate the process tree through the shared process runner.
+node's optional `timeoutMs` terminate the process tree through the shared process runner.
 Linux cleanup also covers detached descendants and controller death; Windows uses Job Objects.
 macOS process-group cleanup cannot cover descendants that detach themselves. See
 [process ownership](../concepts/execution.md#durable-run-state).
-Script steps record zero native model tokens. Services started separately by the application
+Script nodes record zero native model tokens. Services started separately by the application
 may keep indexes or models warm across script invocations. Service lifecycle is application owned.
+
+For a complete routing example, save this as `graph.json`:
+
+```json
+{
+  "profile": "openengine.graph.full/v1",
+  "initialInput": { "kind": "record", "fields": {} },
+  "policy": { "policy": "policy.native-v2@1", "default": "deny" },
+  "root": {
+    "kind": "seq",
+    "name": "root",
+    "state": { "kind": "record", "fields": {} },
+    "promotedStatePaths": [],
+    "children": [
+      {
+        "kind": "verifier",
+        "name": "probe",
+        "worker": "demo.probe@1",
+        "input": { "kind": "null" },
+        "output": { "kind": "null" },
+        "inputBindings": [],
+        "writeBindings": [],
+        "attempts": 1,
+        "signals": { "status": ["ready", "logged_out"] },
+        "diagnostic": { "kind": "record", "fields": {} }
+      },
+      {
+        "kind": "choice",
+        "name": "route",
+        "state": { "kind": "record", "fields": {} },
+        "promotedStatePaths": [],
+        "branches": [
+          {
+            "when": {
+              "kind": "in",
+              "value": { "source": "signal", "name": "probe", "field": "status" },
+              "labels": ["logged_out"]
+            },
+            "node": { "kind": "fail", "name": "login_required", "reason": "rejected" }
+          }
+        ],
+        "otherwise": {
+          "kind": "succeed",
+          "name": "ready",
+          "output": { "kind": "null" },
+          "bindings": []
+        }
+      }
+    ]
+  }
+}
+```
+
+Save the exact runtime plan as `runtime.json`. The default lane is metadata here; no agent is bound
+or invoked. Change the last command argument to `logged_out` to take the other route.
+
+```json
+{
+  "harness": "codex",
+  "provider": "openai",
+  "size": "host",
+  "nodes": { "probe": { "kind": "script", "command": ["python3", "probe.py", "ready"] } }
+}
+```
+
+Save this deterministic observation as `probe.py`:
+
+```python
+import json
+import sys
+
+json.load(sys.stdin)
+print(json.dumps({"output": None, "signals": {"status": sys.argv[1]}, "diagnostic": {}}))
+```
+
+Save `{}` as `input.json`, then run
+`zeroshot run --title probe --graph graph.json --runtime-config runtime.json --input input.json`.
+Both observations successfully complete the verifier. The graph succeeds on `ready` and follows
+the authored `rejected` terminal on `logged_out`; neither observation is a process crash.
 
 ### `agent`
 
@@ -152,8 +254,9 @@ may keep indexes or models warm across script invocations. Service lifecycle is 
 | `sessionScope`  | No       | `execution` (default) or `node_instance`                           |
 | `connections`   | No       | [Connection declarations](#connections); empty when omitted        |
 
-zeroshot passes `model` and `effort` to the harness unchanged. It keeps no model catalog and does not
-check whether a model supports the chosen effort. `contextWindow` and `maxTokens` are caller
+Supply the provider's model ID. Each adapter formats native arguments, such as OpenCode's
+`<provider>/<model>` locator. zeroshot keeps no model catalog and does not check whether a model
+supports the chosen effort. `contextWindow` and `maxTokens` are caller
 declarations, never inferences: they are validated at admission, emitted only into the
 `pi/gateway` model entry, and otherwise left unset for the provider to default. An absent value
 retains the provider's own limit; a present value must be a positive integer in the stated range.
@@ -218,9 +321,9 @@ statistic. Use normal graph guards on the signal to select an already authored b
 A decision binding cannot supply the postmortem's agent model. Graphs with no agent bindings
 skip Active Memory setup; mixed graphs inherit a postmortem model from an agent binding.
 
-Declare exactly `DECISION_ENDPOINT` and `DECISION_API_KEY` through named connections. Local
-runs resolve these fields from the invoking environment; hosted runs use the target's connection
-resolver. Supply the full POST endpoint, including its path:
+Declare exactly `DECISION_ENDPOINT` and `DECISION_API_KEY` through named connections. Local runs
+resolve these fields from saved connections or the invoking environment. Named targets use their
+connection resolver. Supply the full POST endpoint, including its path:
 
 | Service                        | Example `DECISION_ENDPOINT`                          |
 | ------------------------------ | ---------------------------------------------------- |
@@ -299,7 +402,6 @@ on the default `codex`/`openai` lane, and both reviewers run on Claude Code:
 {
   "harness": "codex",
   "provider": "openai",
-  "size": "medium",
   "nodes": {
     "worker": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "sessionScope": "node_instance" },
     "acceptance": {
@@ -400,8 +502,8 @@ name. Structural nodes (`seq`, `choice`, `par`, `loop`, `map`) and terminal node
 `connections` maps a connection key to the exact environment field names the node may receive.
 Values come from the submission environment or a target connection store at run time.
 
-The example below is the shape a Pi `gateway` lane uses: `GATEWAY_API` names its wire protocol and
-is Pi-specific. Other lanes list only their own provider's fields.
+Pi, Copilot, OpenCode and Hermes `gateway` lanes use the fields below. `GATEWAY_API` selects the
+[wire protocol](#harness-and-provider).
 
 ```json
 {
@@ -439,7 +541,7 @@ the fields of several providers.
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------- |
 | `harness`        | Yes      | As in `RuntimePlan`                                                                                     |
 | `provider`       | Yes      | As in `RuntimePlan`                                                                                     |
-| `size`           | No       | As in `RuntimePlan`; default `medium`                                                                   |
+| `size`           | No       | As in `RuntimePlan`; omit it to use the target's default                                                |
 | `model`          | Yes      | As in an `agent` binding                                                                                |
 | `effort`         | No       | As in an `agent` binding                                                                                |
 | `contextWindow`  | No       | As in an `agent` binding                                                                                |
@@ -452,16 +554,14 @@ the fields of several providers.
 runtime configuration. They are caller declarations and are never inferred from the model
 identifier.
 
-Every executable node gets an `agent` binding with these values, except nodes that use a delivery
-worker. Those get a `git_delivery` binding as described below.
+The CLI applies these values to agent bindings. It uses `request`, `git_delivery` or
+`comment_delivery` bindings for the corresponding built-in worker references.
 
 When selecting the built-in `software-change` template, omitted `sessionScope` defaults to
 `node_instance` for `worker` and `execution` for its reviewers. The worker retains its session
 through implementation and every repair; reviewers start fresh each pass. An explicit uniform
 `sessionScope` still applies to every agent. Exact runtime plans and saved graphs retain their
 authored scopes; use `node_instance` on `worker` in an exact plan to retain its session.
-When using the updated template with an older exact runtime config, remove its `review_repair`
-and `delivery_repair` bindings. Existing saved profiles keep their stored graph and bindings.
 
 For `auto-research`, an omitted uniform `sessionScope` defaults to `node_instance` for `explorer`,
 `synthesizer`, `challenger`, and `researcher`, and `execution` for `reviewer`. The normal round has
@@ -481,13 +581,12 @@ omits delivery. The existing `worker` handles delivery repairs. With
 reviewer already handle the round records and delivery description.
 `single-worker` has no delivery modes.
 
-The CLI inserts a `git_delivery` binding with no forge connection for push, or
-`{"github": ["GH_TOKEN"]}` for PR and merge. Git transport uses the selected
-[source credentials](../concepts/targets.md#source-and-delivery-credentials).
+The CLI inserts a `git_delivery` binding. PR and merge delivery resolve the default connection for
+the selected GitHub or GitLab repository when the binding has no explicit connection. Git
+transport uses the selected [source credentials](../concepts/targets.md#source-and-delivery-credentials).
 `--no-pr-feedback` (requires pull-request or merge delivery) sets `pullRequestFeedback` to `ignore`.
-When feedback is enabled, the forge adapter admits repair requests only from current repository
-writers, with permissions rechecked on each inspection. See [Execution](../concepts/execution.md)
-for the GitHub and GitLab authorization rules and lookup failure behavior.
+See [delivery feedback](execution.md#delivery-feedback) for GitHub and GitLab authorization
+rules and lookup failure behavior.
 
 A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind
 all agent nodes itself. Software-change uses `worker`, `acceptance`, and `code` with every delivery
@@ -513,7 +612,6 @@ Omitting it preserves existing behavior. Nodes sharing a lane can have different
 {
   "harness": "claude",
   "provider": "anthropic",
-  "size": "small",
   "nodes": {
     "writer": { "kind": "agent", "model": "your-model" },
     "reviewer": {

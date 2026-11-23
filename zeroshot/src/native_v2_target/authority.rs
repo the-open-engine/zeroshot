@@ -109,6 +109,16 @@ pub trait TargetControlAuthority: Send + Sync {
         ))
     }
 
+    async fn validate_resume_runtime(
+        &self,
+        _target: &TargetRecord,
+        _runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.resume-runtime/v1",
+        ))
+    }
+
     async fn validate_request_ask(
         &self,
         _target: &TargetRecord,
@@ -189,6 +199,15 @@ pub trait TargetControlAuthority: Send + Sync {
     ) -> Result<RunProfileListResult, TargetAuthorityError> {
         profile_unavailable()
     }
+    async fn validate_profile_imports(
+        &self,
+        _target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.saved-profile-imports/v1",
+        ))
+    }
+
     async fn profile_show(
         &self,
         _target: &TargetRecord,

@@ -102,8 +102,9 @@ since the held cleanup fence's phase is never `empty` or `finished`. `ifRunId` i
 (or pass no run) to match an empty cluster's absent current run, exactly as a stale `ifGeneration`
 returns `GENERATION_CONFLICT` and a stale `ifRunId` returns `RUN_CONFLICT`.
 
-On an empty cluster, delete is a history-free no-op: it returns `deleted:false`, `phase:empty`, and
-mutates nothing. On a terminal run, delete commits exclusive ownership before any external cleanup:
+On an empty cluster, delete leaves the cluster and run history unchanged. It records the
+idempotency key and returns a receipt with `deleted:false` and `phase:empty`.
+On a terminal run, delete commits exclusive ownership before any external cleanup:
 it either finalizes immediately (`deleted:true`, `phase:empty`) or, if cleanup is not yet
 authoritatively confirmed, holds the resource in the `deleting` phase (`deleted:false`,
 `phase:deleting`) with its generation, run ID, and cursor observable but otherwise unchanged. The

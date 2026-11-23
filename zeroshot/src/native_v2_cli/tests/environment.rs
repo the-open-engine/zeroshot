@@ -783,47 +783,48 @@ async fn no_environment_is_an_explicit_empty_override_and_omission_stays_unselec
 }
 
 #[tokio::test]
-async fn preparation_hooks_require_a_target_during_validation_and_submission() {
+async fn environment_placement_is_validated_before_credentials_or_submission() {
     use crate::native_v2_cli::execution::try_execute_native_v2_preflight;
 
     let directory = tempfile::tempdir().assert_value();
     let path = directory.path().join("environment.json");
-    for definition in [
-        json!({"setup":"echo install"}),
-        json!({"startup":"npm ci"}),
-        json!({"connections":{"registry":["NPM_TOKEN"]}}),
+    for (definition, contained, message) in [
+        (
+            json!({"contextRepositories":[{"repository":"acme/library"}]}),
+            false,
+            "context repositories require a Docker target",
+        ),
+        (
+            json!({"teardown":"echo cleanup"}),
+            true,
+            "environment teardown is only supported for local runs",
+        ),
     ] {
         std::fs::write(&path, serde_json::to_vec(&definition).assert_value()).assert_value();
-        for contained in [false, true] {
-            let (_files, mut command) = uniform_runtime_command_for_placement(
-                "Validate preparation placement",
-                json!({"harness":"codex", "provider":"openai", "model":"test-model"}),
-                contained,
-            );
-            let NativeV2CliCommand::Run(run) = &mut command else {
-                unreachable!()
-            };
-            run.environment = Some(RunEnvironmentInput::File(path.clone()));
-            run.validate_only = true;
-            let result = try_execute_native_v2_preflight(&command, &mut Vec::new()).await;
-            if contained {
-                assert_eq!(result.assert_value(), Some(CliOutcome::Completed));
-                continue;
-            }
-            let expected = result.assert_error().to_string();
-            assert!(expected.contains("setup and startup require a Docker target"));
-            let NativeV2CliCommand::Run(run) = &mut command else {
-                unreachable!()
-            };
-            run.validate_only = false;
-            let backend = FakeBackend::default();
-            let result = execute_with_environment(command, &backend, &|_| {
-                panic!("local hook rejection must precede credential reads")
-            })
-            .await;
-            assert_eq!(result.assert_error().to_string(), expected);
-            assert!(backend.calls().is_empty());
-        }
+        let (_files, mut command) = uniform_runtime_command_for_placement(
+            "Validate preparation placement",
+            json!({"harness":"codex", "provider":"openai", "model":"test-model"}),
+            contained,
+        );
+        let NativeV2CliCommand::Run(run) = &mut command else {
+            unreachable!()
+        };
+        run.environment = Some(RunEnvironmentInput::File(path.clone()));
+        run.validate_only = true;
+        let result = try_execute_native_v2_preflight(&command, &mut Vec::new()).await;
+        let expected = result.assert_error().to_string();
+        assert!(expected.contains(message), "{expected}");
+        let NativeV2CliCommand::Run(run) = &mut command else {
+            unreachable!()
+        };
+        run.validate_only = false;
+        let backend = FakeBackend::default();
+        let result = execute_with_environment(command, &backend, &|_| {
+            panic!("local hook rejection must precede credential reads")
+        })
+        .await;
+        assert_eq!(result.assert_error().to_string(), expected);
+        assert!(backend.calls().is_empty());
     }
 }
 

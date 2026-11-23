@@ -41,6 +41,7 @@ pub(super) fn request_with_key(input: Value, submission_key: &str) -> RunSubmitP
     RunSubmitParams {
         run_id: RunId::new(format!("run-{submission_key}")),
         submission: RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Platform test run").assert_value_with("title"),
             graph: graph(),
@@ -313,6 +314,7 @@ pub(super) fn complex_request() -> RunSubmitParams {
     RunSubmitParams {
         run_id: RunId::new("run-platform-complex"),
         submission: RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Complex platform test").assert_value_with("title"),
             graph: complex_graph(),

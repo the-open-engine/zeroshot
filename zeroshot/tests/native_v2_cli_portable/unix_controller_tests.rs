@@ -117,6 +117,60 @@ impl Drop for Run {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn resume_runtime_invalid_plan_does_not_reconcile_a_lost_controller() {
+    let run = Run::start();
+    run.freeze_between_ledger_writes();
+    run.signal(libc::SIGKILL);
+    // Abrupt owner loss releases the controller lock before its private supervisor finishes
+    // cleaning up the child. Observe that cleanup without invoking ledger reconciliation.
+    let deadline = Instant::now() + STOP_LIMIT;
+    while process_exists(run.child) {
+        assert!(
+            Instant::now() < deadline,
+            "owner-loss cleanup did not stop the child"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    run.wait_closed(STOP_LIMIT);
+    let read_ledger = || {
+        let ledger = rusqlite::Connection::open_with_flags(
+            run.storage.join("runs.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        ledger
+            .query_row::<String, _, _>(
+                "SELECT stored_json FROM v2_runs WHERE run_id = ?1",
+                [&run.id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    let before = read_ledger();
+    assert!(run.terminal().is_null());
+    let recovery = std::fs::read(run.storage.join("workspace-recovery.json")).unwrap();
+    let mut runtime: Value =
+        serde_json::from_slice(&std::fs::read(run.fixture.root.path("runtime.json")).unwrap())
+            .unwrap();
+    runtime["nodes"].as_object_mut().unwrap().remove("worker");
+    run.fixture.write("invalid.json", &runtime);
+    let output = run
+        .fixture
+        .command(&["resume", &run.id, "--runtime-config"])
+        .arg(run.fixture.root.path("invalid.json"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no binding"));
+    assert_eq!(read_ledger(), before);
+    assert_eq!(
+        std::fs::read(run.storage.join("workspace-recovery.json")).unwrap(),
+        recovery
+    );
+}
+
 #[test]
 fn unix_controller_stalled_requests_return_without_killing_the_controller() {
     use std::process::Stdio;

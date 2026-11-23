@@ -384,6 +384,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
     let receipt = steering::record(
         ledger,
         RunSteerParams {
+            node: None,
             mode: Default::default(),
             run_id: run.clone(),
             text: text.clone(),
@@ -404,7 +405,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
     .await
     .assert_value();
     assert!(matches!(vector.content,
-        RunVectorContent::Steer { text: actual, mode: openengine_cluster_protocol::SteeringMode::Standing,
+        RunVectorContent::Steer { node: None, text: actual, mode: openengine_cluster_protocol::SteeringMode::Standing,
             network: None } if actual == text));
     let execution = reference(&run, 1).public_execution().assert_value();
     ledger
@@ -445,6 +446,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
         steering::record(
             ledger,
             RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: run.clone(),
                 text: "late".into()
@@ -458,6 +460,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
             steering::record(
                 ledger,
                 RunSteerParams {
+                    node: None,
                     mode: Default::default(),
                     run_id: next.clone(),
                     text: invalid.into()
@@ -493,6 +496,7 @@ async fn steer_status_bounds_listing_and_receipts_without_limiting_publication()
         steering::record(
             &ledger,
             RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: run.clone(),
                 text: "a".repeat(1023) + "é",

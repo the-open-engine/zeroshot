@@ -2,6 +2,8 @@
 
 pub(crate) mod availability;
 mod controller;
+mod environment_hooks;
+pub(crate) use environment_hooks::{TEARDOWN_TIMEOUT, has_local_teardown};
 mod engine;
 mod lease;
 pub(crate) mod process;
@@ -94,6 +96,11 @@ impl PortableControllerPaths {
     #[must_use]
     pub fn startup_failure(&self) -> PathBuf {
         self.storage.join("controller.startup-failure.txt")
+    }
+
+    /// Retained supplemental runtime diagnostic; inspection never consumes it.
+    pub(crate) fn runtime_failure(&self) -> PathBuf {
+        self.storage.join("controller.failure.txt")
     }
 
     #[must_use]
@@ -218,8 +225,6 @@ pub enum PortableControllerError {
     Readiness,
     #[error("portable controller durable identity does not match bootstrap")]
     DurableIdentity,
-    #[error("workspace checkpoint restore is unavailable because workspaceCheckpoints is false")]
-    CheckpointsDisabled,
     #[error("workspace checkpoint restore did not complete")]
     Restore(#[source] io::Error),
     #[error("portable runtime could not be constructed")]

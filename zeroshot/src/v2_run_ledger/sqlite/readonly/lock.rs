@@ -90,6 +90,6 @@ fn check(code: i32) -> Result<(), RunLedgerError> {
     if code == ffi::SQLITE_OK {
         Ok(())
     } else {
-        Err(RunLedgerError::SqliteStorage(ffi::Error::new(code)))
+        Err(RunLedgerError::SqliteStorage(ffi::Error::new(code).into()))
     }
 }

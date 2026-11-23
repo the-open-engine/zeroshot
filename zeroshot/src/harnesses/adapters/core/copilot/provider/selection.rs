@@ -101,10 +101,10 @@ fn bedrock_selection(values: &BTreeMap<String, String>) -> Result<Selection, Nod
 
 fn gateway_selection(values: &BTreeMap<String, String>) -> Result<Selection, NodeRunnerError> {
     let _ = gateway::connection(values)?;
-    let (kind, wire) = match values.get("GATEWAY_API").map(String::as_str) {
-        Some("openai-responses") => ("openai", Some("responses")),
-        Some("openai-completions") => ("openai", Some("completions")),
-        Some("anthropic-messages") => ("anthropic", None),
+    let (kind, wire) = match values.get(gateway::API).map(String::as_str) {
+        Some(gateway::OPENAI_RESPONSES) => ("openai", Some("responses")),
+        Some(gateway::OPENAI_COMPLETIONS) => ("openai", Some("completions")),
+        Some(gateway::ANTHROPIC_MESSAGES) => ("anthropic", None),
         _ => return Err(failure("Copilot gateway requires a supported GATEWAY_API")),
     };
     Ok(Selection {

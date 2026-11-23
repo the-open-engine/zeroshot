@@ -37,6 +37,24 @@ fn input_limits_reject_nonpositive_fractional_and_unsafe_values() {
     }
 }
 
+#[test]
+fn imported_loop_binds_from_the_run_initial_input() {
+    let mut node = GraphNode::Profile(openengine_cluster_protocol::ProfileNode {
+        name: "call".parse().unwrap(),
+        profile: openengine_cluster_protocol::RunProfileName::new("child").unwrap(),
+        body: Some(Box::new(parameterized_loop())),
+        initial_input: Some(openengine_cluster_protocol::PayloadType::Null),
+    });
+    bind_input_limits(&mut node, &serde_json::json!({"rounds": 7})).unwrap();
+    let GraphNode::Profile(profile) = node else {
+        panic!("expected profile");
+    };
+    let Some(GraphNode::Loop(group)) = profile.body.as_deref() else {
+        panic!("expected imported loop");
+    };
+    assert_eq!(group.max_iterations.get(), 7);
+}
+
 fn parameterized_loop() -> GraphNode {
     serde_json::from_value(serde_json::json!({"kind":"loop","name":"repeat","state":{"kind":"null"},
         "body":{"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]},"maxIterations":1,"maxIterationsInput":["rounds"],"promotedStatePaths":[]})).unwrap()

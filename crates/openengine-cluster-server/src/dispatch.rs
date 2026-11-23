@@ -124,6 +124,9 @@ where
                 self.dispatch_run_vector(id, params).await
             }
             RUN_CHECKPOINTS_METHOD => self.dispatch_run_checkpoints(id, params).await,
+            openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD => {
+                self.dispatch_run_resume_requirements(id, params).await
+            }
             RUN_RESUME_METHOD => self.dispatch_run_resume(id, params).await,
             RUN_DISCARD_WORKSPACE_METHOD => self.dispatch_run_discard_workspace(id, params).await,
             _ => serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None),
@@ -441,6 +444,20 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_checkpoints(params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_run_resume_requirements(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<
+            openengine_cluster_protocol::RunResumeRequirementsParams,
+        >(params)
+        {
+            Ok(params) => params,
+            Err(_) => return native_v2_invalid_params(id),
+        };
+        match self.run_resume_requirements(params).await {
             Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }

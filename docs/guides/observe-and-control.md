@@ -11,11 +11,33 @@ lifetime.
 
 Run [`zeroshot ui`](../getting-started/install.md#open-the-workspace-ui), then select a run in **Runs**.
 The read-only graph uses that run's admitted definition. Select a node for its inputs, outputs,
-decisions, and transcript; with the details panel open, select the empty canvas or the first link
-above a node's name for the run's own details. Use the timeline to replay its history. Active runs
-update live.
-Seeking pauses following; **Go live** returns to the latest event. Scrolling a transcript keeps
+decisions, and transcript; use the timeline under the view to replay its history. Active runs update
+live. Seeking pauses following; **Go live** returns to the latest event. Scrolling a transcript keeps
 the graph live and follows new output only when you reach the bottom.
+
+Switch the run view between **Steps** and **Graph**. Runs open in Steps until you choose the
+graph, and a run you have not opened before starts in the view you chose last. Both show the same
+replay position, and the selection carries over when you switch.
+
+In the graph, selecting a step opens it in the inspector, whose header names the groups that enclose
+it, each a link up the hierarchy; while it is open, selecting the empty canvas or the header's first
+link shows the run's own details. The graph
+opens with only the groups that hold running, waiting or failed steps expanded.
+
+**Steps** lists the work in the order it started. Each step shows its state, its decision and its
+latest output line; steps that ran side by side stay together under the parallel group or map that
+ran them, and each loop round starts with a heading, repeated where the run continued mid-round.
+Selecting a step opens its input, transcript and result in place, with a link to show it in the
+graph; opening steps never pauses the replay or following. The timeline's **Show node** opens that
+node's latest step in the list. The list opens with the run's start, which holds its input and run
+log, and a finished run closes with its result or failure.
+
+Each step shows how long it took, from the ledger's recorded times; work carried over from an
+earlier run shows none, because its recorded time is when it was imported. The status line adds the
+run's duration, unknown when its first events predate recorded times, and the total tokens of the
+work the run did itself, marked as a lower bound when an agent step reported no usage; an open step
+lists its own token usage. A failed step shows in rust and a step that needed another attempt shows
+its attempt count; decision values are shown as recorded and never judged.
 
 For a direct target, open `/ui/` on its configured public origin. Closing either browser view
 leaves the run active.
@@ -35,6 +57,23 @@ zeroshot run \
 ```
 
 Ctrl-C closes the terminal stream and leaves the controller running.
+
+For local Windows launches inside a Job that forbids breakaway, explicitly pass
+`--controller contained` to `run`. The default is `--controller detached`; it still requires
+permission to leave every caller Job. Use the same selection on `resume` or `answer` when launching
+a successor controller. Named targets do not accept this local policy. Linux and macOS keep their
+usual controller launch behavior.
+
+Contained mode keeps the caller's native Job policy, the private controller bootstrap and hidden
+console, and Zeroshot's own descendant Jobs and cleanup checks. Incompatible Job nesting is refused
+before a worker executes. `--detach` only selects whether the CLI observes the run; closing or
+killing that CLI alone does not establish controller loss or allow another writer.
+
+Caller Job policy governs abrupt host closure. A non-breakaway Job, including `LimitFlags=0`,
+does not necessarily terminate children when its last handle closes. Contained mode promises
+neither termination with the caller nor survival of host closure. Use `zeroshot force-stop RUN_ID`
+for explicit descendant cleanup. Resume retains the existing bounded ownership handoff and admits
+only one successor after predecessor ownership releases.
 
 ## Inventory and current status
 
@@ -102,6 +141,13 @@ Unix epoch milliseconds, not the time the controller died. The entry is omitted 
 answers and for finished or suspended runs. `checkpoints` also includes it when applicable. These three commands
 exit 0 after a successful read, including when controller availability is lost or unknown.
 
+For a fatal runtime error, a local controller tries to retain its original cause in a private, redacted note
+of at most 4 KiB outside the ledger. Later `status` calls show that note on stderr, even if the
+ledger cannot be read, and leave it unchanged. The ledger still determines the run's status;
+the note cannot establish a terminal result or controller ownership. Storage failures can also
+prevent this best-effort report. `list` returns readable runs and warns on stderr with the ID
+and read error of each run it skips. Directories without a ledger are ignored.
+
 Local controller requests wait at most 10 seconds for an answer. This includes the status checks
 before `resume` and `checkpoints`, and the initial exchanges for `watch`, `logs` and `attach`.
 `list` checks controllers with bounded concurrency under one shared deadline. Runs that could not
@@ -134,7 +180,7 @@ counters, so the four token counters do not overlap and can be added.
 When `complete` is `false`, the totals retain known usage but at least one invocation's usage is
 missing or unusable. An omitted cache counter means at least one invocation did not report that
 counter; its run total is unknown, not zero. Cache counters can be omitted even when `complete` is
-`true`. Script steps record zero for all four counters and preserve known cache totals.
+`true`. Script nodes record zero for all four counters and preserve known cache totals.
 Previously recorded runs retain their original numbers.
 
 ## Failure evidence and mapped executions
@@ -265,6 +311,14 @@ with:
 zeroshot resume RUN_ID
 ```
 
+Pass `--runtime-config FILE` or `--uniform-runtime-config FILE` to replace the successor's runtime
+settings, including models, effort, harness configuration, connections and harness/provider selection.
+Omitting both keeps the saved runtime. Zeroshot validates the replacement against the unchanged graph
+and execution environment before restoring files or starting agents; the graph, input, source,
+delivery lineage and selected checkpoint's completed prerequisites stay the same. Credentials are
+resolved freshly. Native conversation restoration continues an existing conversation when supported,
+including after a model change, with the existing fresh-session fallback when restoration fails.
+
 A run you submitted restarts at the root of its graph. A successor restarts at the point it began
 at: after the answer for the successor of an answered request, after the held node for the
 successor of a suspended run, and at the selected node for a checkpoint successor. An answered
@@ -325,6 +379,9 @@ A local checkpoint resume restores the snapshot before any agent starts. That pr
 up to 10 minutes. For larger workspaces or slower disks, set `ZEROSHOT_PREPARATION_TIMEOUT` to a
 whole number of seconds from 1 to 86400 before `zeroshot resume`. When a restore fails, or its
 extraction reaches that deadline, the error names the step that stopped and its elapsed time.
+Restic operations normally have a 15-minute limit each. During restore, the remaining preparation
+deadline replaces that limit, including when it allows more than 15 minutes; it is shared across
+the preparation work rather than restarted for each operation.
 Replacing the workspace files, once started, is allowed to finish. If it is still running 30 seconds
 after the deadline, the resume is stopped with an error that names the deadline. Either way the run
 stays recoverable.
@@ -339,8 +396,16 @@ snapshot on a plain resume; complete such an interrupted restore with
 `zeroshot resume RUN_ID --discard-workspace-changes`, which installs the same snapshot again.
 
 Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
-storage and advertise `openengine.workspace-checkpoints/v1`. They retain that repository only for a
-failed recovery lineage and delete it after a successful run. Force-stopping a local run also
+storage and advertise `openengine.workspace-checkpoints/v1`. Run logs mark the start and completion
+of each new workspace capture; reusing an unchanged snapshot adds no capture messages. Restic
+failures keep the operation and failure stage or exit status in the ordinary error. When available,
+that error points to an owner-private report under `diagnostics/` in the checkpoint repository.
+Reports retain at most 4 KiB of redacted, control-safe stderr, including output received before a
+timeout. Child output stays out of run logs and hosted responses. Local and direct-target owners
+can read the report on the machine holding the repository.
+
+They retain that repository only for a failed recovery lineage and delete it after a successful
+run. Force-stopping a local run also
 deletes the repository, together with the checkpoints listed by every run in its recovery lineage,
 so neither the original run nor its successors list checkpoints that can no longer be restored.
 Local checkpoints never expire automatically. To free the space kept by a finished failed local
@@ -368,9 +433,10 @@ zeroshot force-stop RUN_ID
 The command asks the controller to stop active work and writes the resulting status as JSON. Read
 status first if another operator may already have stopped the run, or if it may have completed.
 
-If a local controller does not answer within 10 seconds, `force-stop` exits non-zero and names the
-run and the controller PID recorded at readiness. The request stays queued and takes effect if the
-controller answers again. The command does not kill the controller process.
+`force-stop` waits up to 10 seconds for the local controller, or 100 seconds if the run has a
+`teardown` script. On timeout it exits non-zero and names the run and the controller PID recorded at
+readiness. The request stays queued and takes effect if the controller answers again. The command
+does not kill the controller process.
 
 Python follows the same rule. A timeout or task cancellation detaches observation;
 `await run.force_stop()` changes the run lifetime.
@@ -423,10 +489,23 @@ Deadlines default to 7 days and accept at most 30 days. A late answer starts the
 route and exits 1 naming its successor. Reads never apply expiry. Add `--target NAME` for a target
 that advertises `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md).
 
+In the browser, a request step shows its question and allowed answers. While the run waits, the
+status line reads **Waiting for a person** with the question, and the step shows the deadline and
+the `answer` command. When the deadline passes, the open view marks it and removes the answer hint;
+this does not imply that a successor has recorded an expiry. Replay uses the selected position's
+recorded time and shows successor information only at the current end of history.
+Once a successor run took the question over, the step names that run and the
+status line reads **Continued in run** with its ID; a question the run stopped waiting for without
+a successor reads as closed without an answer. Once answered, the chosen answer is marked with how
+long the answer took, from the recorded request and answer times.
+Who answered is not recorded. A successor run lists the work it carried over, marks where it
+continued after each answer, and links back to the run that asked.
+
 ## Steer a run
 
 ```console
 zeroshot steer RUN_ID "Prioritize the parser regression."
+zeroshot steer RUN_ID --node e2e_tester "Use the E2E service on port 3000."
 zeroshot steer RUN_ID --text-file direction.txt --target NAME
 printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin
 ```
@@ -435,15 +514,21 @@ Supply exactly one text source. An admitted, running or suspended run accepts di
 Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
 steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
 
-With the default standing mode, every agent conversation, including reviewers, receives each steer
+Use `--node NAME` to select the exact name of one agent in the run's admitted runtime plan.
+The node need not have started: every mapped copy and future visit with that name is eligible.
+Unknown names and non-agent nodes are rejected before recording direction. Without `--node`,
+direction goes to every agent. Node targeting uses human steering authorization and cannot be
+combined with `--network`. Both scopes default to `standing`; `--mode once` delivers once per
+matching node instance.
+
+With the default standing mode, every eligible agent conversation, including reviewers, receives each steer
 at its next tool call or in its next prompt, whichever comes first. It cannot revise a tool call
 already issued. At a tool call the steer arrives as a user message of its own on Claude Code,
 Copilot, Pi and OpenCode: the harness hands it to the model after the tool call in progress and
-keeps it in the conversation. It is never placed inside a tool result, which a model may refuse to
-follow. Codex has no such channel and receives the steer with the tool call's hook context, which
-it keeps. A steer of any permitted size arrives whole either way. Subagents do not receive steers:
-on Claude Code a message sent while a subagent works reaches the node's own conversation when the
-subagent returns. A message the harness never shows in the conversation is not counted as
+keeps it in the conversation. Codex receives the steer with native hook context. Hermes appends
+it as a plugin notice to the retained tool message. A steer of any permitted size arrives whole.
+On Claude Code, a message sent while a subagent works reaches the node's own conversation when
+the subagent returns. A message the harness never shows in the conversation is not counted as
 received, and the steer is delivered with that conversation's next prompt instead. A steer that
 reached a conversation is not delivered to it a second time, in either mode. A small model can
 take a large message that arrives while it works for tool output and ignore it; steer again if a
@@ -456,14 +541,14 @@ new conversations receive the standing direction. A lost acknowledgement can cau
 Text must be nonblank UTF-8, at most 262,144 bytes, with no NUL or control characters except tab,
 newline and carriage return. Text is stored and shown as given: **do not put secrets in a steer**.
 
-Reading steering status requires a client from this release or newer.
 The command prints one JSON receipt. `zeroshot status RUN_ID` lists steers with recording times,
-byte lengths, character-safe excerpts and receiving execution references. A standing prompt receipt
+byte lengths, character-safe excerpts and receiving execution references. Receipts, status and
+vector entries include `node` only when direction targets a node. A standing prompt receipt
 is recorded when the turn carrying the steer starts and stays provisional until the turn succeeds; a
 failed turn offers the steer in the next prompt, including in a successor. A once prompt receipt is
-recorded after successful provider completion. A tool-call receipt appears when the harness shows
-the message in the conversation, or on Codex when its hook has returned. A receipt records that
-the conversation holds the steer, not that the model followed it.
+recorded after successful provider completion. A tool-call receipt records the harness showing
+the message, OpenCode storing it, Codex returning hook context, or Hermes confirming the retained
+notice. Receipts track delivery.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:
 
@@ -473,9 +558,7 @@ zeroshot vectors show RUN_ID STEER_ID
 ```
 
 The record includes `steer` and `steer_receipt` entries in event order. Add `--target NAME` to these
-commands for a direct target advertising steering and run vectors. Tool-call receipts record a
-message the harness showed (on Codex, acknowledged hook context), while once prompt receipts record
-successful provider completion. Standing prompt receipts may be provisional, as described above.
+commands for a direct target advertising steering and run vectors.
 
 ### Send a peer message
 

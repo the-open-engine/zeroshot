@@ -199,6 +199,9 @@ impl NativeV2Supervisor {
         mut self,
         store: Option<Arc<dyn checkpoints::RunCheckpointStore>>,
     ) -> Self {
+        if let Some(store) = &store {
+            store.set_run_log(self.run_id.clone(), self.ledger.clone());
+        }
         self.checkpoints = store;
         self
     }

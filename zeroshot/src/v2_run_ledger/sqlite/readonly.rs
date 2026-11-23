@@ -5,7 +5,7 @@ use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, ffi};
 
-use super::{LedgerConnection, RunLedgerError, sqlite_error};
+use super::{LedgerConnection, RunLedgerError, available_space, sqlite_error, storage_context};
 use crate::execution::platform::{self, FileAccess};
 
 #[path = "readonly/lock.rs"]
@@ -17,6 +17,7 @@ pub(super) fn open(path: &Path) -> Result<LedgerConnection, RunLedgerError> {
     match read_schema(&connection) {
         Ok(()) => Ok(LedgerConnection {
             connection,
+            path: std::path::absolute(path).ok(),
             _snapshot: None,
         }),
         Err(rusqlite::Error::SqliteFailure(code, _))
@@ -24,7 +25,11 @@ pub(super) fn open(path: &Path) -> Result<LedgerConnection, RunLedgerError> {
         {
             recover(&mut connection, path)
         }
-        Err(error) => Err(sqlite_error(error)),
+        Err(error) => Err(storage_context(
+            sqlite_error(error),
+            Some(&connection),
+            || available_space(Some(path)),
+        )),
     }
 }
 
@@ -33,7 +38,7 @@ fn open_connection(path: &Path) -> Result<Connection, RunLedgerError> {
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .map_err(sqlite_error)
+    .map_err(|error| storage_context(sqlite_error(error), None, || available_space(Some(path))))
 }
 
 fn read_schema(connection: &Connection) -> rusqlite::Result<()> {
@@ -55,8 +60,9 @@ fn recover(source: &mut Connection, path: &Path) -> Result<LedgerConnection, Run
         platform::open_readonly_file(&journal_path).map_err(|_| RunLedgerError::Storage)?;
     let metadata = journal.metadata().map_err(|_| RunLedgerError::Storage)?;
     let identity = platform::file_identity(&journal).map_err(|_| RunLedgerError::Storage)?;
-    let guard = SharedReadLock::acquire(source)?;
-    guard.require_no_writer()?;
+    let source_error = |error| storage_context(error, None, || available_space(Some(path)));
+    let guard = SharedReadLock::acquire(source).map_err(source_error)?;
+    guard.require_no_writer().map_err(source_error)?;
     require_single_database_journal(&mut journal)?;
     // Rollback recovery is the sole fallback. Never silently omit WAL history from an image.
     match std::fs::symlink_metadata(std::path::PathBuf::from(format_sidecar(path, "-wal"))) {
@@ -65,7 +71,7 @@ fn recover(source: &mut Connection, path: &Path) -> Result<LedgerConnection, Run
     }
     {
         let mut database = private_file(&image)?;
-        guard.copy_database(&mut database)?;
+        guard.copy_database(&mut database).map_err(source_error)?;
         let mut copy = private_file(&private.join("ledger.sqlite3-journal"))?;
         let copied = std::io::copy(
             &mut Read::by_ref(&mut journal).take(metadata.len()),
@@ -76,7 +82,7 @@ fn recover(source: &mut Connection, path: &Path) -> Result<LedgerConnection, Run
             return Err(RunLedgerError::Storage);
         }
     }
-    guard.require_no_writer()?;
+    guard.require_no_writer().map_err(source_error)?;
     let current = journal.metadata().map_err(|_| RunLedgerError::Storage)?;
     if current.len() != metadata.len()
         || current.modified().ok() != metadata.modified().ok()
@@ -88,16 +94,33 @@ fn recover(source: &mut Connection, path: &Path) -> Result<LedgerConnection, Run
     }
     // No schema initialization or run recovery is performed here. SQLite rolls back only the
     // private files; the retained database and journal remain under the shared read lock.
-    let recovered = Connection::open(&image).map_err(sqlite_error)?;
-    read_schema(&recovered).map_err(sqlite_error)?;
-    drop(recovered);
-    let connection = open_connection(&image)?;
-    read_schema(&connection).map_err(sqlite_error)?;
+    let connection = open_image(&image)?;
     drop(guard);
     Ok(LedgerConnection {
         connection,
+        path: Some(image),
         _snapshot: Some(directory),
     })
+}
+
+fn open_image(image: &Path) -> Result<Connection, RunLedgerError> {
+    // Measure image failures on their own volume, before the temporary directory is removed.
+    let recovered = Connection::open(image).map_err(|error| {
+        storage_context(sqlite_error(error), None, || available_space(Some(image)))
+    })?;
+    read_schema(&recovered).map_err(|error| {
+        storage_context(sqlite_error(error), Some(&recovered), || {
+            available_space(Some(image))
+        })
+    })?;
+    drop(recovered);
+    let connection = open_connection(image)?;
+    read_schema(&connection).map_err(|error| {
+        storage_context(sqlite_error(error), Some(&connection), || {
+            available_space(Some(image))
+        })
+    })?;
+    Ok(connection)
 }
 
 fn format_sidecar(path: &Path, suffix: &str) -> std::ffi::OsString {

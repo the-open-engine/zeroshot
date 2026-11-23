@@ -1,10 +1,13 @@
 mod comment;
+mod context;
 mod delivery;
 mod environment_hooks;
 use environment_hooks::HookContext;
 mod identity_leases;
 mod lanes;
 mod lifecycle;
+mod workspace;
+use workspace::WorkspacePreparation;
 use lifecycle::{AllocationTurns, transfer_workspace_ownership};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,7 +25,6 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
 
 use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
-use crate::native_v2_admission::writer_nodes;
 use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2CandidateCommentDelivery, build_hosted_native_v2_candidate,
 };
@@ -47,8 +49,7 @@ use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    HostedWorkspace, HostedWorkspaceRequest, ProductionHostingConfig, ProductionHostingError,
-    set_traversable_directory,
+    HostedWorkspace, ProductionHostingConfig, ProductionHostingError, set_traversable_directory,
 };
 use super::environment::{self, EnvironmentProcesses, HookPhase};
 use super::repository::{RepositoryInstall, install_repository, production_source};
@@ -88,14 +89,21 @@ struct CapsuleBuildRequest<'a> {
     retained_restore: Option<(&'a RunId, CheckpointRestoreSelection)>,
 }
 
-struct WorkspacePreparation<'a> {
-    run_id: &'a RunId,
-    checkpoint_source: Option<&'a RunId>,
-    delivery_run_id: &'a RunId,
-    workspace: &'a Path,
-    admitted: &'a AdmittedRun,
-    state: &'a ProductionCapsuleState,
-    process_pool: HostedProcessPool,
+impl CapsuleBuildRequest<'_> {
+    fn checkpoint_redactions(&self) -> Vec<String> {
+        let connections = self.preparation.environment.bootstrap_values();
+        let git_secret = self.git_credentials.map(|credentials| match credentials {
+            GitTransportCredentials::Https { password, .. } => password.as_str(),
+            GitTransportCredentials::Ssh { private_key, .. } => private_key.as_str(),
+        });
+        crate::native_v2_capsule::provider_process::redaction_values(
+            connections
+                .values()
+                .flat_map(|values| values.as_map().values().map(String::as_str))
+                .chain(self.github_token)
+                .chain(git_secret),
+        )
+    }
 }
 
 struct CapsuleBuildPaths {
@@ -290,6 +298,7 @@ impl ProductionCapsuleAllocator {
         pending: PendingCapsule<'_>,
         request: &CapsuleBuildRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let redactions = request.checkpoint_redactions();
         let paths = CapsuleBuildPaths::new(&self.config.storage_root, pending.run_id);
         if let Some((source, selection)) = &request.retained_restore {
             // Recorded before preparation can fail, so that a restart of this run finds it.
@@ -322,7 +331,11 @@ impl ProductionCapsuleAllocator {
         .await?;
         let restored_seed = if let Some((source_run_id, selection)) = &request.retained_restore {
             let seed = self
-                .restore_retained_workspace(source_run_id, selection.clone(), &filesystem.workspace)
+                .restore_retained_workspace(
+                    (source_run_id, selection.clone()),
+                    &filesystem.workspace,
+                    &redactions,
+                )
                 .await?;
             transfer_retained_workspace_to_writer(&filesystem.workspace, active_process_pool)?;
             seed
@@ -340,7 +353,10 @@ impl ProductionCapsuleAllocator {
                 admitted: request.admitted,
                 state: &state,
                 process_pool: active_process_pool,
+                redactions: &redactions,
             })
+            .await?;
+        self.install_context_sources(request, &filesystem, active_process_pool)
             .await?;
         self.run_environment_hook(
             request,
@@ -424,7 +440,11 @@ impl ProductionCapsuleAllocator {
             trusted,
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        let candidate = candidate.with_agent_context(self.config.agent_context.clone());
+        let candidate = candidate.with_agent_context(context::agent_context(
+            request.admitted,
+            &state.run_root,
+            self.config.agent_context.clone(),
+        ));
         let candidate: Arc<dyn crate::native_v2_runner::NodeRunner> = match memory {
             Ok(Some(memory)) => memory.wrap(request.admitted, candidate),
             Ok(None) => Arc::new(candidate),
@@ -482,85 +502,6 @@ impl ProductionCapsuleAllocator {
             checkpoints: Some(hosted_workspace.checkpoints),
             execution_seed: hosted_workspace.execution_seed,
             vector_seed,
-        })
-    }
-
-    async fn prepare_hosted_workspace(
-        &self,
-        request: WorkspacePreparation<'_>,
-    ) -> Result<HostedWorkspace, CapsuleAllocationUnavailable> {
-        let directory = checkpoint_directory(&self.config.storage_root, request.run_id);
-        let writers = writer_nodes(request.admitted);
-        if let Some(storage) = &self.config.workspace_storage {
-            let mut prepared = storage
-                .prepare(HostedWorkspaceRequest {
-                    run_id: request.run_id,
-                    workspace: request.workspace,
-                    checkpoint_directory: &directory,
-                    writers,
-                })
-                .await
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            if prepared.request_continuation.is_some() && !self.config.request_ask {
-                return Err(CapsuleAllocationUnavailable::Runtime);
-            }
-            if let Some(continuation) = &prepared.request_continuation {
-                let openengine_cluster_protocol::RunSuspension::Request {
-                    node,
-                    request: question,
-                    ..
-                } = &continuation.suspension
-                else {
-                    return Err(CapsuleAllocationUnavailable::Runtime);
-                };
-                let verifier = crate::native_v2_request::find(&request.admitted.graph.root, node)
-                    .ok_or(CapsuleAllocationUnavailable::Runtime)?;
-                if verifier.worker.as_str() != crate::native_v2_request::ASK_WORKER_REF
-                    || verifier.signals != question.signals
-                    || verifier.output != question.output
-                {
-                    return Err(CapsuleAllocationUnavailable::Runtime);
-                }
-            }
-            prepared
-                .settle_request(request.run_id)
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            transfer_retained_workspace_to_writer(request.workspace, request.process_pool)?;
-            if let Some(id) = &prepared.delivery_run_id {
-                request
-                    .state
-                    .restored_delivery_run_id
-                    .set(id.clone())
-                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            }
-            return Ok(prepared);
-        }
-        Ok(HostedWorkspace {
-            resumed_from: None,
-            comment_publications: None,
-            checkpoints: Arc::new(
-                ResticCheckpointStore::new_with_fallback(
-                    checkpoints::ResticCheckpointStoreRequest {
-                        directory: directory.clone(),
-                        repository: checkpoint_repository(
-                            &self.config.storage_root,
-                            request.delivery_run_id,
-                        ),
-                        workspace: request.workspace.to_owned(),
-                        writers,
-                    },
-                    Some(&checkpoint_directory(
-                        &self.config.storage_root,
-                        request.checkpoint_source.unwrap_or(request.run_id),
-                    )),
-                )
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
-                .with_conversation_restore(request.state.conversation_restore.get().cloned()),
-            ),
-            execution_seed: Vec::new(),
-            request_continuation: None,
-            vector_seed: Vec::new(),
-            delivery_run_id: None,
         })
     }
 
@@ -657,9 +598,9 @@ impl ProductionCapsuleAllocator {
 
     async fn restore_retained_workspace(
         &self,
-        source_run_id: &RunId,
-        selection: CheckpointRestoreSelection,
+        (source_run_id, selection): (&RunId, CheckpointRestoreSelection),
         workspace: &Path,
+        redactions: &[String],
     ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, CapsuleAllocationUnavailable> {
         if selection == CheckpointRestoreSelection::Continue {
             return Ok(Vec::new());
@@ -672,12 +613,16 @@ impl ProductionCapsuleAllocator {
             return Ok(Vec::new());
         }
         self.validate_retained_checkpoint(source_run_id, selection.clone())?;
-        checkpoints::restore(
+        checkpoints::restore_with(
             &CheckpointRestore {
                 directory,
                 selection,
             },
             workspace,
+            checkpoints::RestoreOptions {
+                redactions,
+                ..Default::default()
+            },
         )
         .await
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)
@@ -1261,6 +1206,7 @@ fn retain_failed_workspace(
         &request.checkpoint_directory.join("staging"),
     );
     remove_run_directory(&request.run_root.join("tools"))?;
+    remove_run_directory(&context::directory(request.run_root))?;
     let runtime = request.run_root.join("runtime");
     if runtime.exists() {
         std::fs::remove_dir_all(runtime).map_err(|_| CapsuleCleanupUnavailable)?;
@@ -1471,14 +1417,11 @@ fn remove_run_directory(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
     std::fs::remove_dir_all(path).map_err(|_| CapsuleCleanupUnavailable)
 }
 
-#[cfg(all(test, unix))]
-mod test_support;
-
-#[cfg(all(test, target_os = "linux"))]
-mod cleanup_tests;
-
 #[cfg(all(test, target_os = "linux"))]
 mod allocation_tests;
-
+#[cfg(all(test, target_os = "linux"))]
+mod cleanup_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod lifecycle_tests;
+#[cfg(all(test, unix))]
+mod test_support;

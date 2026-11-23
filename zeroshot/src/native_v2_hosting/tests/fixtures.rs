@@ -97,6 +97,7 @@ pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
         memory_backend: None,
         operator_diagnostic_output: None,
         workspace_storage: None,
+        workspace_checkpoint_opt_out: false,
         delivery_validation: None,
         storage_root,
         copilot_executable: PathBuf::from("/usr/bin/false"),
@@ -133,6 +134,7 @@ pub(in crate::native_v2_hosting) fn capsule_allocator(
 
 pub(super) fn submission(runtime: RuntimePlan, revision: &str, key: &str) -> RunSubmission {
     RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Hosting test run").assert_value_with("title"),
         graph: graph(),
@@ -270,7 +272,7 @@ fn commit(repository: &Path, message: &str) {
     );
 }
 
-fn git(repository: &Path, arguments: &[&str]) {
+pub(super) fn git(repository: &Path, arguments: &[&str]) {
     assert!(
         git_command(repository)
             .args(arguments)
@@ -280,7 +282,7 @@ fn git(repository: &Path, arguments: &[&str]) {
     );
 }
 
-fn git_output(repository: &Path, arguments: &[&str]) -> String {
+pub(super) fn git_output(repository: &Path, arguments: &[&str]) -> String {
     let output = git_command(repository)
         .args(arguments)
         .output()

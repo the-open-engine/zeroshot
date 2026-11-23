@@ -20,8 +20,10 @@ impl<'a> Analyzer<'a> {
             GraphNode::Par(group) => self.validate_par(group, &located),
             GraphNode::Loop(group) => self.validate_loop(group, &located),
             GraphNode::Map(group) => self.validate_map(group, &located),
-            GraphNode::Succeed(terminal) => self.validate_succeed(terminal, &located),
-            GraphNode::Fail(terminal) => terminal_effects(&terminal.name, context.incoming),
+            GraphNode::Profile(profile) => self.validate_profile_node(profile, &located),
+            GraphNode::Succeed(_) | GraphNode::Fail(_) => {
+                self.validate_terminal_node(node, &located)
+            }
         };
         self.node_completion
             .insert(node.name().clone(), effects.completion.clone());
@@ -62,22 +64,54 @@ impl<'a> Analyzer<'a> {
         })
     }
 
-    pub(super) fn validate_succeed(
+    fn validate_profile_node(
         &mut self,
-        terminal: &openengine_cluster_protocol::SucceedNode,
+        profile: &ProfileNode,
         context: &LocatedNodeValidationContext<'_>,
     ) -> Effects {
-        self.validate_input_bindings(
-            &terminal.bindings,
-            InputBindingsValidationContext {
-                target_payload: &terminal.output,
-                node: context.node,
-                node_path: &context.path,
-                field: "bindings",
-                target_field: "output",
-            },
-        );
-        terminal_effects(&terminal.name, context.node.incoming)
+        let (Some(body), Some(initial_input)) = (&profile.body, &profile.initial_input) else {
+            return Effects::default();
+        };
+        if !profile_input_matches(initial_input, context.node) {
+            emit_diagnostic!(
+                self,
+                GraphDiagnosticCode::SchemaSafety,
+                "caller state cannot supply the profile's initialInput",
+                with_field(&context.path, "initialInput"),
+                vec![profile.name.clone()],
+            );
+        }
+        self.validate_scope(body, initial_input);
+        if !scope_has_success(body) {
+            return terminal_effects(&profile.name, context.node.incoming);
+        }
+        Effects {
+            definite_nodes: BTreeSet::from([profile.name.clone()]),
+            exit_failed: context.node.incoming.failed.clone(),
+            falls_through: true,
+            completion: CompletionPredicate::Always,
+            ..Effects::default()
+        }
+    }
+
+    fn validate_terminal_node(
+        &mut self,
+        node: &GraphNode,
+        context: &LocatedNodeValidationContext<'_>,
+    ) -> Effects {
+        if let GraphNode::Succeed(terminal) = node {
+            self.validate_input_bindings(
+                &terminal.bindings,
+                InputBindingsValidationContext {
+                    target_payload: &terminal.output,
+                    node: context.node,
+                    node_path: &context.path,
+                    field: "bindings",
+                    target_field: "output",
+                },
+            );
+        }
+        terminal_effects(node.name(), context.node.incoming)
     }
 
     pub(super) fn validate_group_state(
@@ -278,17 +312,7 @@ impl<'a> Analyzer<'a> {
         group: &LoopNode,
         context: &LocatedNodeValidationContext<'_>,
     ) -> Effects {
-        if let Some(path) = &group.max_iterations_input {
-            if path_type(&self.graph.initial_input, path) != Some(&PayloadType::Integer) {
-                emit_diagnostic!(
-                    self,
-                    GraphDiagnosticCode::SchemaSafety,
-                    "maxIterationsInput must select an integer in initialInput",
-                    with_field(&context.path, "maxIterationsInput"),
-                    vec![group.name.clone()],
-                );
-            }
-        }
+        self.validate_loop_limit_input(group, &context.path);
         let mut effects = self.validate_node(
             &group.body,
             NodeValidationContext {
@@ -309,6 +333,43 @@ impl<'a> Analyzer<'a> {
             target_overrides: context.node.map_index_targets,
         });
         effects
+    }
+
+    fn validate_loop_limit_input(&mut self, group: &LoopNode, path: &[DiagnosticPathSegment]) {
+        let Some(input_path) = &group.max_iterations_input else {
+            return;
+        };
+        let run_input_type = path_type(&self.graph.initial_input, input_path);
+        let message = if run_input_type != Some(&PayloadType::Integer) {
+            "maxIterationsInput must select an integer in initialInput"
+        } else if self
+            .profile_initial_input(&group.name)
+            .is_some_and(|input| path_type(input, input_path) != Some(&PayloadType::Integer))
+        {
+            "maxIterationsInput must also select an integer in the enclosing profile's initialInput"
+        } else {
+            return;
+        };
+        emit_diagnostic!(
+            self,
+            GraphDiagnosticCode::SchemaSafety,
+            message,
+            with_field(path, "maxIterationsInput"),
+            vec![group.name.clone()],
+        );
+    }
+
+    fn profile_initial_input(&self, name: &NodeName) -> Option<&PayloadType> {
+        let info = self.nodes.get(name)?;
+        let DiagnosticPathSegment::Node { name: call } =
+            info.path.get(info.scope_start.checked_sub(1)?)?
+        else {
+            return None;
+        };
+        let GraphNode::Profile(profile) = self.nodes.get(call)?.node else {
+            return None;
+        };
+        profile.initial_input.as_ref()
     }
 
     pub(super) fn validate_loop_exit(
@@ -361,4 +422,26 @@ impl<'a> Analyzer<'a> {
             );
         }
     }
+}
+
+fn scope_has_success(node: &GraphNode) -> bool {
+    match node {
+        GraphNode::Succeed(_) => true,
+        GraphNode::Profile(_) => false,
+        _ => child_nodes(node).into_iter().any(scope_has_success),
+    }
+}
+
+fn profile_input_matches(initial_input: &PayloadType, caller: NodeValidationContext<'_>) -> bool {
+    if matches!(initial_input, PayloadType::Null) {
+        return true;
+    }
+    is_subtype_with_definitions(caller.state, initial_input, &caller.incoming.defined)
+        && caller.map_index_targets.is_none_or(|targets| {
+            targets.iter().all(|(path, indexed_type)| {
+                // An enclosing map can replace its collection with an item-local write.
+                path_type(initial_input, path)
+                    .is_none_or(|expected| indexed_type.is_subtype_of(expected))
+            })
+        })
 }

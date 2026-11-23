@@ -530,6 +530,29 @@
       ],
       "type": "object"
     },
+    "ContextRepository": {
+      "additionalProperties": false,
+      "description": "A credential-free locator in the same forms as the CLI's `--repository`.",
+      "properties": {
+        "branch": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
     "ControlSelector": {
       "additionalProperties": false,
       "properties": {
@@ -1696,6 +1719,54 @@
         },
         {
           "additionalProperties": false,
+          "description": "A saved profile reference. The submitter fills the body and input schema when linking.",
+          "properties": {
+            "body": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GraphNode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "initialInput": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PayloadType"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "profile",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "profile": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "profile"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "bindings": {
               "items": {
@@ -1741,7 +1812,7 @@
             "reason": {
               "maxLength": 128,
               "minLength": 1,
-              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|environment_startup_failed|environment_preparation_timeout)$)[A-Za-z_][A-Za-z0-9_.-]*$",
+              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|environment_startup_failed|environment_preparation_timeout|context_checkout_unavailable)$)[A-Za-z_][A-Za-z0-9_.-]*$",
               "type": "string"
             }
           },
@@ -2095,7 +2166,7 @@
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "const": "openengine.cluster/v1",
+          "const": "openengine.cluster/v2",
           "type": "string"
         }
       },
@@ -2110,7 +2181,7 @@
           "$ref": "#/$defs/ServerCapabilities"
         },
         "protocolVersion": {
-          "const": "openengine.cluster/v1",
+          "const": "openengine.cluster/v2",
           "type": "string"
         },
         "status": {
@@ -2877,7 +2948,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunResumeParams"
+          "$ref": "#/$defs/RunResumeRequirementsParams"
         }
       },
       "required": [
@@ -2889,6 +2960,29 @@
       "type": "object"
     },
     "JsonRpcRequest26": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunResumeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest27": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -3266,6 +3360,16 @@
       "anyOf": [
         {
           "$ref": "#/$defs/JsonRpcSuccess27"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse28": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess28"
         },
         {
           "$ref": "#/$defs/JsonRpcErrorResponse"
@@ -3693,7 +3797,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunResumeResult"
+          "$ref": "#/$defs/RunResumeRequirementsResult"
         }
       },
       "required": [
@@ -3704,6 +3808,25 @@
       "type": "object"
     },
     "JsonRpcSuccess27": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunResumeResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess28": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -5167,6 +5290,12 @@
           "description": "Durable cursor after the force request was recorded.",
           "type": "string"
         },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "controller": {
           "anyOf": [
             {
@@ -5574,6 +5703,17 @@
         "runId": {
           "type": "string"
         },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunResumeRuntime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Complete successor runtime replacement. Omission retains the saved runtime."
+        },
         "successorRunId": {
           "type": "string"
         }
@@ -5581,6 +5721,48 @@
       "required": [
         "runId",
         "successorRunId"
+      ],
+      "type": "object"
+    },
+    "RunResumeRequirementsParams": {
+      "additionalProperties": false,
+      "description": "Resolve replacement declarations against the retained graph and source without starting work.",
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "runtime": {
+          "$ref": "#/$defs/RunResumeRuntime"
+        }
+      },
+      "required": [
+        "runId",
+        "runtime"
+      ],
+      "type": "object"
+    },
+    "RunResumeRequirementsResult": {
+      "additionalProperties": false,
+      "description": "Effective connection declarations, including unchanged source/environment and delivery defaults.",
+      "properties": {
+        "connections": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "connections"
       ],
       "type": "object"
     },
@@ -5599,6 +5781,45 @@
         "resumedFrom"
       ],
       "type": "object"
+    },
+    "RunResumeRuntime": {
+      "description": "A complete replacement, expanded against the predecessor's unchanged graph by its host.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "exact",
+              "type": "string"
+            },
+            "runtime": {
+              "$ref": "#/$defs/RuntimePlan"
+            }
+          },
+          "required": [
+            "kind",
+            "runtime"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "uniform",
+              "type": "string"
+            },
+            "runtime": {
+              "$ref": "#/$defs/UniformRuntimePlan"
+            }
+          },
+          "required": [
+            "kind",
+            "runtime"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RunStatus": {
       "description": "Public run state. The closed phase variants make impossible combinations unrepresentable:\nadmitted runs have no execution, stopping means force was requested, and finished runs have\nexactly one terminal result and no active execution. Running/stopping report every active\nexecution rather than a single \"current worker\" slot.",
@@ -5825,6 +6046,12 @@
         "atCursor": {
           "type": "string"
         },
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "controller": {
           "anyOf": [
             {
@@ -5928,6 +6155,15 @@
             }
           ]
         },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "receivedExecutions": {
           "format": "uint64",
           "minimum": 0,
@@ -5955,6 +6191,15 @@
         "mode": {
           "$ref": "#/$defs/SteeringMode",
           "default": "standing"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runId": {
           "type": "string"
@@ -5989,6 +6234,12 @@
       "additionalProperties": false,
       "description": "Immutable, secret-free native-v2 submission admitted by the selected target.",
       "properties": {
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "environment": {
           "anyOf": [
             {
@@ -6088,6 +6339,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "text": {
@@ -6355,6 +6615,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "node": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "textBytes": {
@@ -6626,6 +6895,12 @@
       "additionalProperties": false,
       "description": "One durable public status projection. `cursor` is stable run history, not a connection-local\nsequence; clients resume strictly after it.",
       "properties": {
+        "contextSources": {
+          "items": {
+            "$ref": "#/$defs/ResolvedSource"
+          },
+          "type": "array"
+        },
         "cursor": {
           "type": "string"
         },
@@ -6721,11 +6996,19 @@
     },
     "RuntimeEnvironment": {
       "additionalProperties": false,
-      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public run configuration, never secrets.",
+      "description": "Setup and startup prepare each attempt before graph execution. Local execution can also run\nteardown during orderly cleanup. Values here are public run configuration, never secrets.",
       "properties": {
         "connections": {
           "$ref": "#/$defs/DeclaredConnections",
-          "description": "Exact connection fields available to setup and startup, separate from node credentials."
+          "description": "Exact connection fields available to environment scripts, separate from node credentials."
+        },
+        "contextRepositories": {
+          "description": "Read-only repositories pinned by the submitting client, in checkout order.",
+          "items": {
+            "$ref": "#/$defs/ContextRepository"
+          },
+          "maxItems": 16,
+          "type": "array"
         },
         "setup": {
           "type": [
@@ -6734,6 +7017,13 @@
           ]
         },
         "startup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teardown": {
+          "description": "Local-only cleanup script, run after preparation begins even if the attempt fails.",
           "type": [
             "string",
             "null"
@@ -7330,6 +7620,139 @@
         "inputTokens",
         "outputTokens",
         "complete"
+      ],
+      "type": "object"
+    },
+    "UniformRuntimePlan": {
+      "additionalProperties": false,
+      "properties": {
+        "activeMemory": {
+          "$ref": "#/$defs/ActiveMemoryConfig",
+          "default": {
+            "graph": true,
+            "hookInjectionTokens": 8000,
+            "nodeInjectionTokens": 16000,
+            "repository": true
+          }
+        },
+        "connections": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeclaredConnections"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "contextWindow": {
+          "default": null,
+          "format": "uint32",
+          "maximum": 10000000,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "globalAgents": {
+          "$ref": "#/$defs/GlobalAgentsConfig",
+          "default": {
+            "postmortem": {
+              "enabled": true,
+              "timeoutMs": 600000
+            }
+          }
+        },
+        "harness": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "harnessConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessConfiguration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "maxConcurrency": {
+          "default": null,
+          "maximum": 65536,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxTokens": {
+          "default": null,
+          "format": "uint32",
+          "maximum": 10000000,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "sessionScope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "size": {
+          "default": null,
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceCheckpoints": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "harness",
+        "provider",
+        "model"
       ],
       "type": "object"
     },
@@ -7946,10 +8369,10 @@
       "$ref": "#/$defs/JsonRpcResponse25"
     },
     "run_discard_workspace_request": {
-      "$ref": "#/$defs/JsonRpcRequest26"
+      "$ref": "#/$defs/JsonRpcRequest27"
     },
     "run_discard_workspace_response": {
-      "$ref": "#/$defs/JsonRpcResponse27"
+      "$ref": "#/$defs/JsonRpcResponse28"
     },
     "run_export_workspace_request": {
       "$ref": "#/$defs/RunExportWorkspaceParams",
@@ -7977,10 +8400,16 @@
       "$ref": "#/$defs/JsonRpcResponse17"
     },
     "run_resume_request": {
+      "$ref": "#/$defs/JsonRpcRequest26"
+    },
+    "run_resume_requirements_request": {
       "$ref": "#/$defs/JsonRpcRequest25"
     },
-    "run_resume_response": {
+    "run_resume_requirements_response": {
       "$ref": "#/$defs/JsonRpcResponse26"
+    },
+    "run_resume_response": {
+      "$ref": "#/$defs/JsonRpcResponse27"
     },
     "run_status_request": {
       "$ref": "#/$defs/JsonRpcRequest15"
@@ -8117,6 +8546,8 @@
     "run_vector_response",
     "run_checkpoints_request",
     "run_checkpoints_response",
+    "run_resume_requirements_request",
+    "run_resume_requirements_response",
     "run_resume_request",
     "run_resume_response",
     "run_discard_workspace_request",

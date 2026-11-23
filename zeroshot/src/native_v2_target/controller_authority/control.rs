@@ -260,6 +260,38 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         super::require_session_capability(&descriptor, super::TargetSessionPurpose::RunSuspension)
     }
 
+    async fn validate_resume_runtime(
+        &self,
+        target: &TargetRecord,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<(), TargetAuthorityError> {
+        let (origin, wire) = self.discovery(target).await?;
+        if !wire
+            .extensions
+            .resume_runtime
+            .as_ref()
+            .is_some_and(|capability| {
+                capability.kind == openengine_cluster_protocol::RESUME_RUNTIME_KIND
+            })
+        {
+            return Err(super::authority_error(
+                "target does not advertise openengine.resume-runtime/v1",
+            ));
+        }
+        let descriptor = super::contract::build_controller_descriptor(
+            &origin,
+            wire,
+            target.access.authentication(),
+        )?;
+        let runtime = match runtime {
+            openengine_cluster_protocol::RunResumeRuntime::Exact { runtime } => runtime.clone(),
+            openengine_cluster_protocol::RunResumeRuntime::Uniform { runtime } => {
+                runtime.clone().into_runtime_plan(Default::default())
+            }
+        };
+        super::require_runtime_capabilities(&descriptor, &runtime)
+    }
+
     async fn validate_request_ask(
         &self,
         target: &TargetRecord,
@@ -373,6 +405,19 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         request: RunProfileListRequest,
     ) -> Result<RunProfileListResult, TargetAuthorityError> {
         TargetHttpControlAuthority::profile_list(self, target, request).await
+    }
+
+    async fn validate_profile_imports(
+        &self,
+        target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        let (_, controller) = self.descriptors(target).await?;
+        if !controller.saved_profile_imports {
+            return Err(authority_error(
+                "target does not advertise openengine.saved-profile-imports/v1",
+            ));
+        }
+        Ok(())
     }
 
     async fn profile_show(

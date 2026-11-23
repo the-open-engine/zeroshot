@@ -1,5 +1,6 @@
 use super::*;
 use super::super::review::tests::{dispatch, reduce_with_input, settle};
+use super::super::tests::with_host_size;
 use openengine_cluster_protocol::{
     IdempotencyKey, RunSubmission, RunTitle, RuntimePlan, TerminalResult, WorkerOutcome,
 };
@@ -47,7 +48,8 @@ async fn graph(delivery: TemplateDelivery) -> VerifiedGraph {
             }
         ));
     }
-    let admitted = NativeV2Admission.admit_with_policy(RunSubmission {
+    let runtime = with_host_size(runtime);
+    let admitted = NativeV2Admission.admit_with_policy(RunSubmission { context_sources: Vec::new(),
         title: RunTitle::new("PR review").assert_value(),
         graph: pr_review_graph(delivery).assert_value(),
         initial_input: input(), runtime,

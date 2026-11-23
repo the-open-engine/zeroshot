@@ -64,6 +64,73 @@ async fn drives_every_full_v1_construct_through_the_real_reducer() {
 }
 
 #[tokio::test]
+async fn profile_success_voids_child_siblings_before_dispatching_parent_work() {
+    let child = json!({
+        "kind":"par","name":"child","state":null_type(),
+        "branches":[
+            {
+                "kind":"seq","name":"return_path","state":null_type(),
+                "children":[step("fast",1_000),succeed("child_done")],"promotedStatePaths":[]
+            },
+            step("slow",1_000)
+        ],
+        "join":{"kind":"all"},"promotedStatePaths":[]
+    });
+    let body = json!({
+        "kind":"seq","name":"child_root","state":null_type(),
+        "children":[child,succeed("child_fallback")],"promotedStatePaths":[]
+    });
+    let root = sequence(
+        vec![
+            json!({"kind":"profile","name":"call","profile":"child","initialInput":null_type(),"body":body}),
+            step("after_call", 1_000),
+            succeed("done"),
+        ],
+        null_type(),
+    );
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let driver = FakeDriver::scripted([
+        ("fast", vec![Behavior::Together(barrier.clone())]),
+        (
+            "slow",
+            vec![Behavior::CancelAfterStart(
+                barrier,
+                NodeRunnerError::Cancelled,
+            )],
+        ),
+    ]);
+    let harness = harness(graph(root, null_type()), Value::Null, driver).await;
+
+    assert_eq!(
+        harness.supervisor.drive().await.assert_value(),
+        TerminalResult::Succeeded {
+            output: Value::Null
+        },
+    );
+    let tail = harness
+        .ledger
+        .snapshot_and_tail(&RunId::new("run-supervisor-test"), None)
+        .await
+        .assert_value();
+    let relevant = tail
+        .events
+        .iter()
+        .filter_map(|event| match &event.event {
+            RunEvent::ExecutionVoided { reference, .. } if reference.node.as_str() == "slow" => {
+                Some("void")
+            }
+            RunEvent::NodeStarted { reference, .. } if reference.node.as_str() == "after_call" => {
+                Some("parent")
+            }
+            RunEvent::Terminal { .. } => Some("terminal"),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(relevant, ["void", "parent", "terminal"]);
+    assert_eq!(harness.driver.cancellations("slow"), 1);
+}
+
+#[tokio::test]
 async fn fail_terminal_is_reduced_without_dispatch() {
     let harness = harness(
         graph(

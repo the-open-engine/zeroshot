@@ -291,10 +291,23 @@ where
                     protocol_version: protocol_version.clone(),
                 },
             )
-            .await?;
+            .await
+            .map_err(|error| match error {
+                ClientError::Rpc(mut error)
+                    if error.data.as_ref().is_some_and(|data| {
+                        data.code == openengine_cluster_protocol::UNSUPPORTED_PROTOCOL_VERSION
+                    }) =>
+                {
+                    error.message.push_str(
+                        "; upgrade the Zeroshot client and server together to a release with the same wire contract",
+                    );
+                    ClientError::Rpc(error)
+                }
+                error => error,
+            })?;
         if result.protocol_version != protocol_version {
             return Err(ClientError::InvalidResponse(format!(
-                "protocol version mismatch: requested {protocol_version}, received {}",
+                "protocol version mismatch: requested {protocol_version}, received {}; upgrade the Zeroshot client and server together to a release with the same wire contract",
                 result.protocol_version
             )));
         }
@@ -411,6 +424,17 @@ where
         params: RunCheckpointsParams,
     ) -> Result<RunCheckpointsResult, ClientError> {
         self.call(RUN_CHECKPOINTS_METHOD, params).await
+    }
+
+    pub async fn run_resume_requirements(
+        &self,
+        params: openengine_cluster_protocol::RunResumeRequirementsParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, ClientError> {
+        self.call(
+            openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD,
+            params,
+        )
+        .await
     }
 
     pub async fn run_resume(

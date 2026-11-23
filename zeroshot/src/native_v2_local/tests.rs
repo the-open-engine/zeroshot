@@ -30,6 +30,7 @@ fn local_request(run_id: RunId) -> PreparedRunRequest {
     }))
     .assert_value();
     PreparedRunRequest {
+        context_sources: Vec::new(),
         run_id,
         intent,
         connections: BTreeMap::new(),
@@ -631,20 +632,20 @@ fn parses_canonical_github_remote_forms() {
 }
 
 #[test]
-fn local_preparation_rejects_target_hooks_before_resolving_source_or_installing_anything() {
-    for field in ["setup", "startup"] {
-        let mut request = local_request(RunId::new("target-only-hooks"));
-        request.intent.environment =
-            Some(serde_json::from_value(json!({field: "touch must-not-run"})).assert_value());
-        assert!(matches!(
-            prepare_local_run(
-                request,
-                Path::new("/nonexistent"),
-                Path::new("/nonexistent")
-            ),
-            Err(LocalCompositionError::PreparationRequiresTarget)
-        ));
-    }
+fn local_preparation_rejects_context_repositories_before_resolving_source() {
+    let mut request = local_request(RunId::new("target-only-context"));
+    request.intent.environment = Some(
+        serde_json::from_value(json!({"contextRepositories": [{"repository":"acme/library"}]}))
+            .assert_value(),
+    );
+    assert!(matches!(
+        prepare_local_run(
+            request,
+            Path::new("/nonexistent"),
+            Path::new("/nonexistent")
+        ),
+        Err(LocalCompositionError::ContextRequiresTarget)
+    ));
 }
 
 #[test]

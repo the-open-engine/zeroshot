@@ -599,6 +599,7 @@ impl AcpFixture {
             let ledger = SqliteRunLedger::open_read_only(path).unwrap();
             let stored = ledger.get(&RunId::new(run_id)).await.unwrap().unwrap();
             let authored = RunSubmission {
+                context_sources: Vec::new(),
                 title: stored.admitted.title,
                 graph: graph.clone(),
                 initial_input: stored.admitted.initial_input,

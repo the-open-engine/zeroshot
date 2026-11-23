@@ -36,6 +36,7 @@ fn prepared_request(run_id: RunId) -> PreparedRunRequest {
     }))
     .assert_value();
     PreparedRunRequest {
+        context_sources: Vec::new(),
         git_credentials: None,
 
         cwd: None,
@@ -204,6 +205,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
             .run_resume(
                 Some("prod"),
                 RunResumeParams {
+                    runtime: None,
                     git_credentials: None,
                     commit_identity: None,
                     commit_co_author: None,
@@ -311,6 +313,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
             .run_resume(
                 None,
                 RunResumeParams {
+                    runtime: None,
                     git_credentials: None,
                     commit_identity: None,
                     commit_co_author: None,
@@ -429,6 +432,7 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
     let error = backend
         .resume_local(
             RunResumeParams {
+                runtime: None,
                 git_credentials: None,
                 commit_identity: None,
                 commit_co_author: None,
@@ -466,6 +470,7 @@ async fn local_resume_rejects_a_commit_identity_or_co_author_before_touching_loc
         let error = backend
             .resume_local(
                 RunResumeParams {
+                    runtime: None,
                     run_id: run_id("0199f33f-3b44-7d21-9000-000000000044"),
                     successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000045"),
                     from: None,
@@ -542,6 +547,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
     let error = backend
         .resume_local(
             RunResumeParams {
+                runtime: None,
                 git_credentials: None,
                 commit_identity: None,
                 commit_co_author: None,
@@ -781,6 +787,7 @@ async fn legacy_git_delivery_resume_without_branch_ownership_refuses_before_any_
             let error = backend
                 .resume_local(
                     RunResumeParams {
+                        runtime: None,
                         run_id: original.clone(),
                         successor_run_id: successor.clone(),
                         from,

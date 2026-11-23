@@ -124,9 +124,9 @@ production, real devices, credentials, paid services, settings outside the repos
 judgment, are marked `Check (manual):` with who does them; a run verifies the other criteria and
 lists these for a person.
 
-Plan files live in `.zeroshot/plans/`, which ignores itself through its own `.gitignore`, so plans
-are not committed unless you choose to. Whether work is running or done is tracked by the run, issue
-or pull request, not in the file.
+By default, plan files live in the main checkout's `.zeroshot/plans/`, including when planning from
+a linked worktree. That directory ignores itself through its own `.gitignore`. Whether work is
+running or done is tracked by the run, issue or pull request.
 
 ## Run a plan
 
@@ -140,8 +140,9 @@ in the plan starts a run by itself.
 When the skill splits work into plans linked by `depends_on`, it offers to write a
 [stack](stacks.md) manifest next to them, `.zeroshot/plans/<id>.stack.json`, named after the first
 plan. The manifest has one run per plan, named after the plan's id, whose task is that plan's Goal,
-Context, Acceptance criteria, Constraints, Decided approach and Decisions, and whose `needs` follow
-`depends_on`. The skill asks for or leaves the rest to you: the hosted profile, the deadline and
+Context, Acceptance criteria, Constraints, Decided approach and Decisions. Its `needs` lists
+`depends_on` plans within the stack. Build and merge external prerequisites before submission.
+The skill asks for or leaves the rest to you: the hosted profile, the deadline and
 `delivery`, which is either `merge`, to merge each plan before the plans that depend on it start, or
 `stacked_pull_requests`, to get one pull request per plan stacked on the one before it. Check it with
 `zeroshot stack validate` and submit it with `zeroshot stack submit`.

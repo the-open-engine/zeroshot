@@ -48,6 +48,9 @@ mod tasks;
 #[path = "tests/resume_refusals.rs"]
 mod resume_refusals;
 
+#[path = "tests/checkpoint_opt_out.rs"]
+mod checkpoint_opt_out;
+
 struct Claim;
 impl ExclusiveControllerClaim for Claim {}
 
@@ -319,6 +322,7 @@ fn request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: run_id(),
         submission: RunSubmission {
+            context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Target authority test").assert_value(),
             graph: graph_fixture("worker", json!({"kind": "null"})),
@@ -626,6 +630,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             .expect_err("unsupported checkpoint query must be rejected"),
         client
             .run_resume(RunResumeParams {
+                runtime: None,
                 run_id: run_id(),
                 successor_run_id: other_run_id(),
                 from: Some(RunResumeFrom::Checkpoint {
@@ -652,6 +657,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
     for from in [None, Some(RunResumeFrom::Restart {})] {
         let error = client
             .run_resume(RunResumeParams {
+                runtime: None,
                 run_id: run_id(),
                 successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
                 from,
@@ -674,6 +680,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
 
     for params in [
         RunResumeParams {
+            runtime: None,
             run_id: RunId::new("not-a-run-id"),
             successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
             from: None,
@@ -685,6 +692,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             commit_co_author: None,
         },
         RunResumeParams {
+            runtime: None,
             run_id: run_id(),
             successor_run_id: RunId::new("not-a-run-id"),
             from: None,
@@ -1025,6 +1033,7 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
     let errors = [
         client
             .run_resume(RunResumeParams {
+                runtime: None,
                 run_id: run_id(),
                 successor_run_id: other_run_id(),
                 from: None,
@@ -1139,6 +1148,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
             .assert_value(),
     );
     let admitted = crate::native_v2_contract::AdmittedRun {
+        context_sources: Vec::new(),
         title: RunTitle::new("Steering target").assert_value(),
         graph: serde_json::from_str(include_str!(
             "../../../protocol/openengine-cluster/v1/fixtures/graph/canonical/base.json"
@@ -1213,6 +1223,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
         let id = RunId::new(state);
         let recorded = client
             .run_steer(RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: id.clone(),
                 text: text.clone(),
@@ -1241,6 +1252,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
                 .assert_value()
                 .content,
             RunVectorContent::Steer {
+                node: None,
                 text: text.clone(),
                 mode: Default::default(),
                 network: None
@@ -1250,6 +1262,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
     assert!(
         client
             .run_steer(RunSteerParams {
+                node: None,
                 mode: Default::default(),
                 run_id: RunId::new("finished"),
                 text

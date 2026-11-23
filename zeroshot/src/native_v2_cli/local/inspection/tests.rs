@@ -435,6 +435,7 @@ async fn steer_and_suspend_leave_a_lost_run_as_recorded() {
         .run_steer(
             None,
             openengine_cluster_protocol::RunSteerParams {
+                node: None,
                 run_id: lost.id.clone(),
                 text: "direction".into(),
                 mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -741,6 +742,7 @@ impl ClusterBackend for LiveController {
         let stopped = self.stopped.clone();
         Ok(RunForceResult {
             steering: Default::default(),
+            context_sources: Vec::new(),
             run_id: stopped.run_id,
             title: stopped.title,
             source: stopped.source,

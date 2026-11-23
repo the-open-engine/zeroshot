@@ -104,6 +104,41 @@ describe('deterministic release notes', () => {
   });
 });
 
+describe('map upgrade guidance', () => {
+  it('includes compatibility guidance only when the exact change is in the release', () => {
+    const historical = {
+      hash: '7353598ff2025de12acd60f1be15223317fa918b',
+      subject: 'feat(runtime): process complete maps with bounded concurrency (#1504)',
+      body: '## Summary\n\nProcess the complete ordered input of a map.',
+    };
+    const notes = renderReleaseNotes({
+      version: '16.1.0',
+      previousTag: 'v16.0.0',
+      commits: [historical],
+    });
+
+    assert.match(notes, /@the-open-engine-company\/zeroshot@16\.1\.0/);
+    assert.match(
+      notes,
+      /Maps no longer expose the `overflow` group control or its `ok\|overflow` labels/
+    );
+    assert.match(notes, /Update custom graphs that read this control before upgrading/);
+    assert.match(
+      notes,
+      /`maxItems` now limits active complete item bodies, rather than input length/
+    );
+    assert.match(notes, /previously the map ran no items and reported `overflow`/);
+    assert.ok(notes.indexOf('## Compatibility notes') < notes.indexOf('## Features'));
+
+    const later = renderReleaseNotes({
+      version: '16.2.0',
+      previousTag: 'v16.1.0',
+      commits: [{ ...historical, hash: 'a'.repeat(40) }],
+    });
+    assert.doesNotMatch(later, /## Compatibility notes|Map overflow control|`ok\|overflow`/);
+  });
+});
+
 describe('release-note validation', () => {
   it('rejects release commits that cannot be traced to a pull request', () => {
     assert.throws(
@@ -237,6 +272,18 @@ const recoveredReadmeSummaries = [
     subject: 'docs(readme): use a compact architecture diagram (#1341)',
     summary:
       "Replace the README's boxed architecture diagram with a compact flow through admission, execution, adapters, durable state and delivery.",
+  },
+  {
+    hash: '667904ddac8926802fbbd74569b755d2499907ee',
+    subject: 'docs(readme): say it runs locally on your agent subscription (#1595)',
+    summary: 'Add the README tagline that local runs use your existing agent subscription.',
+  },
+  {
+    hash: '57a713a48c8cf3d8ba5ff754b086a5859b4ee04c',
+    subject:
+      'docs(readme): drop duplicate subscription line from tagline, say "your process" (#1596)',
+    summary:
+      'Remove the duplicate subscription sentence from the README tagline and describe the graph as your process for solo users too.',
   },
 ];
 

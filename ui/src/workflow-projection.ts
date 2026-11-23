@@ -39,7 +39,7 @@ export type WorkflowEdge = {
 export type WorkflowRegion = {
   id: string;
   owner: string;
-  kind: 'loop' | 'map' | 'par';
+  kind: 'loop' | 'map' | 'par' | 'profile';
   label: string;
   nodeIds: string[];
 };
@@ -57,6 +57,8 @@ type EdgeDetail = Omit<WorkflowEdge, 'id' | 'source' | 'target'>;
 const groups = new Set(['seq', 'choice', 'par', 'loop', 'map']);
 const nodeLike = (value: unknown): value is GraphNode =>
   isObject(value) && typeof value.kind === 'string' && typeof value.name === 'string';
+const outlinedGroup = (node: GraphNode) =>
+  groups.has(node.kind) || (node.kind === 'profile' && nodeLike(node.body));
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 const positive = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
@@ -183,8 +185,19 @@ function childrenOf(node: GraphNode): GraphNode[] {
         .filter(nodeLike),
       ...(nodeLike(node.otherwise) ? [node.otherwise] : []),
     ];
-  if (node.kind === 'loop' || node.kind === 'map') return nodeLike(node.body) ? [node.body] : [];
+  if (['loop', 'map', 'profile'].includes(node.kind)) return nodeLike(node.body) ? [node.body] : [];
   return [];
+}
+
+function profileLabel(node: GraphNode): string {
+  return `Saved profile · ${node.profile}`;
+}
+
+function collapsedGroupLabel(node: GraphNode): string {
+  if (node.kind === 'map') return 'For each item';
+  if (node.kind === 'par') return joinLabel(node);
+  if (node.kind === 'choice') return 'Ordered decision';
+  return node.kind === 'profile' ? profileLabel(node) : 'Subprocess';
 }
 
 function parallelCanReachJoin(node: GraphNode, continuations: boolean[]): boolean {
@@ -195,6 +208,13 @@ function parallelCanReachJoin(node: GraphNode, continuations: boolean[]): boolea
   return possible > 0;
 }
 
+function hasLocalSuccess(node: GraphNode, seen = new Set<GraphNode>()): boolean {
+  if (seen.has(node) || seen.size > 64 || node.kind === 'profile') return false;
+  if (node.kind === 'succeed') return true;
+  const next = new Set(seen).add(node);
+  return childrenOf(node).some((child) => hasLocalSuccess(child, next));
+}
+
 // This deliberately ignores guard truth and provider outcomes. It only prevents
 // obvious terminal-only subtrees from acquiring invented continuation edges.
 function structurallyContinues(node: GraphNode, ancestors = new Set<GraphNode>()): boolean {
@@ -202,6 +222,7 @@ function structurallyContinues(node: GraphNode, ancestors = new Set<GraphNode>()
   const next = new Set(ancestors).add(node);
   if (node.kind === 'succeed' || node.kind === 'fail') return false;
   if (node.kind === 'step' || node.kind === 'verifier') return true;
+  if (node.kind === 'profile') return !nodeLike(node.body) || hasLocalSuccess(node.body);
   const children = childrenOf(node);
   if (node.kind === 'seq') return children.every((child) => structurallyContinues(child, next));
   if (node.kind === 'choice')
@@ -255,29 +276,35 @@ function decisionReadsVerifier(
   )
     return false;
   const visible = list(choice.branches).filter((_, index) => !hidden.has(index));
-  return (
-    visible.length > 0 &&
-    visible.every((branch) => {
-      if (!isObject(branch) || !onlyKeys(branch, ['when', 'node']) || !nodeLike(branch.node))
-        return false;
-      const guard = branch?.when;
-      if (
-        !isObject(guard) ||
-        guard.kind !== 'in' ||
-        !onlyKeys(guard, ['kind', 'value', 'labels']) ||
-        !isObject(guard.value) ||
-        !onlyKeys(guard.value, ['name', 'source', 'field']) ||
-        guard.value.source !== 'signal' ||
-        guard.value.name !== verifier.name ||
-        typeof guard.value.field !== 'string' ||
-        !isStringList(guard.labels) ||
-        !guard.labels.length
-      )
-        return false;
-      const domain = verifier.signals[guard.value.field];
-      return isStringList(domain) && guard.labels.every((label) => domain.includes(label));
-    })
-  );
+  return visible.length > 0 && visible.every((branch) => branchReadsVerifier(branch, verifier));
+}
+
+function branchReadsVerifier(branch: unknown, verifier: GraphNode): boolean {
+  if (!isObject(branch) || !onlyKeys(branch, ['when', 'node']) || !nodeLike(branch.node))
+    return false;
+  const guard = branch.when;
+  if (
+    !isObject(guard) ||
+    guard.kind !== 'in' ||
+    !onlyKeys(guard, ['kind', 'value', 'labels']) ||
+    !isStringList(guard.labels) ||
+    !guard.labels.length
+  )
+    return false;
+  const domain = verifierSignalDomain(guard.value, verifier);
+  return isStringList(domain) && guard.labels.every((label) => domain.includes(label));
+}
+
+function verifierSignalDomain(value: unknown, verifier: GraphNode): unknown {
+  if (
+    !isObject(value) ||
+    !onlyKeys(value, ['name', 'source', 'field']) ||
+    value.source !== 'signal' ||
+    value.name !== verifier.name ||
+    typeof value.field !== 'string'
+  )
+    return undefined;
+  return verifier.signals[value.field];
 }
 
 /** Branches the canvas folds into their checkpoint (standard error routes), by choice. */
@@ -312,7 +339,7 @@ export function drawableGroups(document: Document): Set<string> {
   const walk = (node: GraphNode, ancestors: Set<GraphNode>) => {
     if (ancestors.has(node) || ancestors.size > 64) return;
     const next = new Set(ancestors).add(node);
-    if (groups.has(node.kind) && node.kind !== 'seq' && !foldsAway(node, hidden))
+    if (outlinedGroup(node) && node.kind !== 'seq' && !foldsAway(node, hidden))
       found.add(node.name);
     if (node.kind === 'choice') {
       list(node.branches).forEach((branch, index) => {
@@ -374,6 +401,7 @@ export function projectWorkflow(
 class WorkflowProjectionBuilder {
   private readonly result: WorkflowProjection = { nodes: [], edges: [], regions: [] };
   private readonly used = new Set<string>();
+  private profileReturns?: Exit[];
 
   constructor(
     private readonly document: Document,
@@ -446,31 +474,11 @@ class WorkflowProjectionBuilder {
     // These routes remain authored controls and editable policies at the same
     // checkpoint. Removing their presentation does not move state or bindings.
     if (foldsAway(node, this.hiddenBranches)) return this.visit(node.otherwise, next);
-    if (groups.has(node.kind) && this.collapsed.has(node.name)) {
-      const loop = node.kind === 'loop' ? loopLabels(node) : undefined;
-      const description = loop
-        ? `${loop.bounds}${loop.until ? ` · Stop when ${loop.until}` : ''}`
-        : node.kind === 'map'
-          ? 'For each item'
-          : node.kind === 'par'
-            ? joinLabel(node)
-            : node.kind === 'choice'
-              ? 'Ordered decision'
-              : 'Subprocess';
-      const id = this.addNode(
-        node,
-        'collapsed',
-        nodeTitle(node.name),
-        `${description} · collapsed`
-      );
-      return {
-        entry: id,
-        exits: structurallyContinues(node)
-          ? [{ source: id, ...(loop ? { owner: node.name, label: loop.continuation } : {}) }]
-          : [],
-        ids: [id],
-      };
-    }
+    if (this.collapsed.has(node.name) && outlinedGroup(node)) return this.visitCollapsed(node);
+    return this.visitExpanded(node, next, preceding);
+  }
+
+  private visitExpanded(node: GraphNode, next: Set<GraphNode>, preceding?: Preceding): Fragment {
     switch (node.kind) {
       case 'seq':
         return this.visitSeq(node, next);
@@ -482,10 +490,28 @@ class WorkflowProjectionBuilder {
         return this.visitLoop(node, next);
       case 'map':
         return this.visitMap(node, next);
+      case 'profile':
+        return this.visitProfile(node, next);
       default:
         return this.visitDefault(node);
     }
   }
+  private visitCollapsed(node: GraphNode): Fragment {
+    const loop = node.kind === 'loop' ? loopLabels(node) : undefined;
+    const description = loop
+      ? [loop.bounds, loop.until ? `Stop when ${loop.until}` : undefined].filter(Boolean).join(' · ')
+      : collapsedGroupLabel(node);
+    const id = this.addNode(node, 'collapsed', nodeTitle(node.name), `${description} · collapsed`);
+    if (this.profileReturns && hasLocalSuccess(node)) this.profileReturns.push({ source: id });
+    return {
+      entry: id,
+      exits: structurallyContinues(node)
+        ? [{ source: id, ...(loop ? { owner: node.name, label: loop.continuation } : {}) }]
+        : [],
+      ids: [id],
+    };
+  }
+
   private visitSeq(node: GraphNode, next: Set<GraphNode>): Fragment {
     const children = childrenOf(node);
     if (!children.length) return this.empty(node, 'Add first step');
@@ -709,32 +735,51 @@ class WorkflowProjectionBuilder {
     };
   }
 
+  private visitProfile(node: GraphNode, next: Set<GraphNode>): Fragment {
+    const entry = this.addNode(node, 'activity', nodeTitle(node.name), profileLabel(node));
+    if (!nodeLike(node.body)) {
+      return { entry, exits: [{ source: entry }], ids: [entry] };
+    }
+    const outerReturns = this.profileReturns;
+    const exits: Exit[] = [];
+    this.profileReturns = exits;
+    const body = this.visit(node.body, next);
+    this.profileReturns = outerReturns;
+    this.edge(entry, body.entry, { owner: node.name });
+    const ids = [entry, ...body.ids];
+    this.region(node, 'profile', profileLabel(node), ids);
+    return { entry, exits, ids };
+  }
+
   private visitDefault(node: GraphNode): Fragment {
-    const known = ['step', 'verifier', 'succeed', 'fail'].includes(node.kind);
-    const terminal = node.kind === 'succeed' || node.kind === 'fail';
-    const detail =
-      node.kind === 'succeed'
-        ? this.finalCompletions.has(node.name)
-          ? 'Return the configured run result'
-          : 'Finish the whole run here'
-        : node.kind === 'fail'
-          ? `Stop run${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
-          : node.kind === 'verifier'
-            ? 'Verifier'
-            : node.kind === 'step'
-              ? 'Agent'
-              : 'Advanced node · inspect its contract';
-    const label =
-      node.kind === 'succeed'
-        ? this.finalCompletions.has(node.name)
-          ? 'Complete'
-          : 'Finish run early'
-        : nodeTitle(node.name);
-    const id = this.addNode(node, terminal ? 'completion' : 'activity', label, detail);
+    if (node.kind === 'succeed') return this.visitSuccess(node);
+    const fail = node.kind === 'fail';
+    const detail = fail
+      ? `Stop run${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
+      : node.kind === 'verifier'
+        ? 'Verifier'
+        : node.kind === 'step'
+          ? 'Agent'
+          : 'Advanced node · inspect its contract';
+    const id = this.addNode(node, fail ? 'completion' : 'activity', nodeTitle(node.name), detail);
     return {
       entry: id,
-      exits: known && (node.kind === 'step' || node.kind === 'verifier') ? [{ source: id }] : [],
+      exits: node.kind === 'step' || node.kind === 'verifier' ? [{ source: id }] : [],
       ids: [id],
     };
+  }
+
+  private visitSuccess(node: GraphNode): Fragment {
+    const local = this.profileReturns !== undefined;
+    const final = this.finalCompletions.has(node.name);
+    const label = local ? 'Complete profile' : final ? 'Complete' : 'Finish run early';
+    const detail = local
+      ? 'Continue the enclosing workflow'
+      : final
+        ? 'Return the configured run result'
+        : 'Finish the whole run here';
+    const id = this.addNode(node, 'completion', label, detail);
+    this.profileReturns?.push({ source: id });
+    return { entry: id, exits: [], ids: [id] };
   }
 }

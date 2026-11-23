@@ -12,6 +12,8 @@ pub enum CapsuleAllocationUnavailable {
     Runtime,
     #[error("source checkout failed: repository access, branch, or revision is unavailable")]
     SourceCheckout,
+    #[error("context repository checkout failed; inspect the operator diagnostic")]
+    ContextCheckout,
     #[error("environment setup failed; inspect the preparation log")]
     EnvironmentSetup,
     #[error("environment startup failed; inspect the preparation log")]
@@ -24,6 +26,7 @@ impl CapsuleAllocationUnavailable {
         match self {
             Self::Runtime => "runtime_unavailable",
             Self::SourceCheckout => "source_checkout_unavailable",
+            Self::ContextCheckout => "context_checkout_unavailable",
             Self::EnvironmentSetup => "environment_setup_failed",
             Self::EnvironmentStartup => "environment_startup_failed",
         }
@@ -192,6 +195,11 @@ pub trait ExclusiveControllerClaim: Send + Sync {}
 
 #[async_trait]
 pub trait CapsuleAllocator: Send + Sync {
+    /// Whether the allocator runs an environment teardown script as part of cleanup.
+    fn supports_environment_teardown(&self) -> bool {
+        false
+    }
+
     /// Independent opt-in for human requests; requires suspension-capable checkpoint storage.
     fn supports_request_ask(&self) -> bool {
         false

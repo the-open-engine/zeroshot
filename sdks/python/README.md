@@ -46,6 +46,13 @@ harness, provider, or model. `run()` submits one durable graph run and waits for
 `submit()` returns a `Run` immediately for status, resumable watch/log streams, waiting, or durable
 force-stop control.
 
+For local Windows hosts that forbid Job breakaway, select `LocalTarget(controller="contained")`.
+The default is `"detached"`. The setting applies to submission, resume and answer. Contained mode
+retains native caller Job policy and runtime-owned descendant cleanup; it promises neither
+termination with the caller nor survival of host closure. Closing an observing CLI alone does not
+establish controller loss. Use `Run.force_stop()` for explicit cleanup. Linux/macOS launch behavior
+is unchanged.
+
 ## Local, direct, and hosted targets
 
 Local runs use the folder captured when the client opens. Set `LocalTarget.workspace` or per-run

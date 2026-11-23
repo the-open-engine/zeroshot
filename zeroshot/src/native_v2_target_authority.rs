@@ -142,6 +142,11 @@ pub trait TargetControllerFactory: Send + Sync {
         false
     }
 
+    /// Explicit host support for per-run workspace checkpoint opt-out. Defaults to refusal.
+    fn supports_workspace_checkpoint_opt_out(&self) -> bool {
+        false
+    }
+
     /// Reports support for generic source metadata and private HTTPS/SSH authority.
     fn supports_git_transport(&self) -> bool {
         false
@@ -256,6 +261,10 @@ impl NativeV2TargetAuthority {
         self.factory.supports_workspace_checkpoints()
     }
 
+    fn supports_workspace_checkpoint_opt_out(&self) -> bool {
+        self.factory.supports_workspace_checkpoint_opt_out()
+    }
+
     fn supports_git_transport(&self) -> bool {
         self.factory.supports_git_transport()
     }
@@ -288,6 +297,13 @@ impl NativeV2TargetAuthority {
         &self,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
+        if !request.submission.runtime.workspace_checkpoints
+            && !self.factory.supports_workspace_checkpoint_opt_out()
+        {
+            return Err(TargetAuthorityError::invalid(
+                "this target does not support disabling workspace checkpoints",
+            ));
+        }
         // The target factory's durable retry preflight, mutable source resolution, and ledger
         // create must be one host turn. Otherwise two identical retries can resolve different
         // branch heads and turn the losing retry into a false submission conflict.

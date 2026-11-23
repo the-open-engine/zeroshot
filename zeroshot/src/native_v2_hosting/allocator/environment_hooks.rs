@@ -62,6 +62,9 @@ impl ProductionCapsuleAllocator {
                 filesystem.workspace.as_path(),
             ),
         };
+        if matches!(phase, HookPhase::Startup) && !request.admitted.context_sources.is_empty() {
+            values.extend(super::context::process_environment(&state.run_root));
+        }
         state
             .environment
             .run(HookRequest {

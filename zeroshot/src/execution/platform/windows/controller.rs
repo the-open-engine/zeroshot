@@ -1,4 +1,4 @@
-//! Detached controller creation on a new windowless console with no inherited handles, including
+//! Local controller creation on a new windowless console with no inherited handles, including
 //! extra pipeline handles that PowerShell may pass in addition to the child's standard streams.
 use std::ffi::OsStr;
 use std::io;
@@ -16,6 +16,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::check;
+use crate::execution::platform::LocalControllerMode;
 
 #[cfg(test)]
 mod tests;
@@ -73,6 +74,7 @@ unsafe extern "system" fn ignore_console_interrupt(event: u32) -> BOOL {
 /// launch path intentionally discards stdio and handles instead of inheriting the caller's pipes.
 pub(crate) fn spawn_controller(
     command: &mut tokio::process::Command,
+    mode: LocalControllerMode,
 ) -> io::Result<ControllerChild> {
     let command = command.as_std();
     let program = wide(command.get_program())?;
@@ -101,7 +103,7 @@ pub(crate) fn spawn_controller(
             std::ptr::null(),
             std::ptr::null(),
             0,
-            detached_creation_flags()? | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+            creation_flags(mode)? | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
             environment.as_ptr().cast(),
             directory
                 .as_ref()
@@ -110,13 +112,16 @@ pub(crate) fn spawn_controller(
             &mut process,
         )
     })?;
-    resume_controller(process)
+    resume_controller(process, mode)
 }
 
-fn resume_controller(process: PROCESS_INFORMATION) -> io::Result<ControllerChild> {
+fn resume_controller(
+    process: PROCESS_INFORMATION,
+    mode: LocalControllerMode,
+) -> io::Result<ControllerChild> {
     let child = ControllerChild(unsafe { OwnedHandle::from_raw_handle(process.hProcess) });
     let thread = unsafe { OwnedHandle::from_raw_handle(process.hThread) };
-    if let Err(error) = resume_detached(&child, &thread) {
+    if let Err(error) = resume_checked(&child, &thread, mode) {
         check(unsafe { TerminateProcess(child.0.as_raw_handle(), 1) })?;
         if unsafe { WaitForSingleObject(child.0.as_raw_handle(), 5_000) } != WAIT_OBJECT_0 {
             return Err(io::Error::other(
@@ -128,10 +133,14 @@ fn resume_controller(process: PROCESS_INFORMATION) -> io::Result<ControllerChild
     Ok(child)
 }
 
-fn resume_detached(child: &ControllerChild, thread: &OwnedHandle) -> io::Result<()> {
+fn resume_checked(
+    child: &ControllerChild,
+    thread: &OwnedHandle,
+    mode: LocalControllerMode,
+) -> io::Result<()> {
     // An ancestor Job may prohibit breakaway even when the immediate Job permits it.
     // Check the suspended child before it can consume the bootstrap or start any work.
-    if in_job(child.0.as_raw_handle())? {
+    if mode == LocalControllerMode::Detached && in_job(child.0.as_raw_handle())? {
         return Err(detachment_denied());
     }
     if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
@@ -149,7 +158,7 @@ fn in_job(process: HANDLE) -> io::Result<bool> {
 fn detachment_denied() -> io::Error {
     io::Error::new(
         io::ErrorKind::PermissionDenied,
-        "cannot detach a controller from this Windows Job; run Zeroshot from a terminal that permits process breakaway",
+        "cannot detach a controller from this Windows Job; run Zeroshot from a terminal that permits process breakaway or explicitly select --controller contained",
     )
 }
 
@@ -158,7 +167,7 @@ fn detachment_denied() -> io::Error {
 // keeps the invoking terminal's Ctrl-C and close events out; controller mode guards against
 // Ctrl-Break sent to the hidden console. Leave caller-owned Jobs only through their permitted
 // breakaway policy.
-fn detached_creation_flags() -> io::Result<u32> {
+fn creation_flags(mode: LocalControllerMode) -> io::Result<u32> {
     use windows_sys::Win32::System::JobObjects::{
         QueryInformationJobObject, JobObjectExtendedLimitInformation,
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
@@ -169,6 +178,11 @@ fn detached_creation_flags() -> io::Result<u32> {
     };
     // Windows ignores CREATE_NO_WINDOW when it is combined with a detached or new-console flag.
     let mut flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+    // Contained mode leaves membership and lifetime to native caller Job policy. Runtime-owned
+    // descendants still enter their own kill-on-close Jobs while suspended, before executing.
+    if mode == LocalControllerMode::Contained {
+        return Ok(flags);
+    }
     if in_job(unsafe { GetCurrentProcess() })? {
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         check(unsafe {

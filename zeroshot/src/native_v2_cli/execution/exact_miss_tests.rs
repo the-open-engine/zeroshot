@@ -80,7 +80,7 @@ fn validation_files() -> (tempfile::NamedTempFile, tempfile::NamedTempFile) {
         r#"{
             "harness":"codex",
             "provider":"openai",
-            "size":"small",
+            "size":"host",
             "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
         }"#,
     )

@@ -287,9 +287,15 @@ impl super::RunSteerArgs {
             ));
         }
         let mode = steer_mode(self.mode.as_deref(), !networks.is_empty());
+        let node = self
+            .node
+            .map(openengine_cluster_protocol::NodeName::new)
+            .transpose()
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         Ok(NativeV2CliCommand::Steer {
             run,
             text,
+            node,
             networks,
             mode,
         })
@@ -313,7 +319,16 @@ impl RunResumeArgs {
             .transpose()
             .map_err(|error| usage(format!("invalid --from-checkpoint: {error}")))?
             .map(|checkpoint_id| RunResumeFrom::Checkpoint { checkpoint_id });
+        let runtime = if self.runtime_config.is_some() || self.uniform_runtime_config.is_some() {
+            Some(run_runtime(
+                self.runtime_config,
+                self.uniform_runtime_config,
+            )?)
+        } else {
+            None
+        };
         Ok(NativeV2CliCommand::Resume(RunResumeCommand {
+            runtime,
             run: self.run.into_selector()?,
             from,
             discard_workspace_changes: self.discard_workspace_changes,
@@ -490,6 +505,7 @@ impl RunArgs {
             delivery: self.delivery.selection(),
         })?;
         Ok(NativeV2CliCommand::Run(Box::new(RunCommand {
+            controller: self.controller.controller.unwrap_or_default(),
             target: route.target,
             cwd: self.cwd,
             worktree: self.worktree.then_some(
@@ -761,9 +777,18 @@ impl RunSelectorArgs {
     fn into_selector(self) -> Result<RunSelector, NativeV2CliError> {
         validate_public_id(&self.run_id, "run ID")?;
         Ok(RunSelector {
+            controller: Default::default(),
             target: validated_target(self.target)?,
             run_id: openengine_cluster_protocol::RunId::new(self.run_id),
         })
+    }
+}
+
+impl super::LocalLaunchArgs {
+    fn into_selector(self) -> Result<RunSelector, NativeV2CliError> {
+        let mut run = self.run.into_selector()?;
+        run.controller = self.controller.controller.unwrap_or_default();
+        Ok(run)
     }
 }
 
@@ -798,6 +823,7 @@ impl AttachArgs {
             .map_err(|error| usage(format!("invalid execution reference: {error}")))?;
         Ok(NativeV2CliCommand::Attach {
             run: RunSelector {
+                controller: Default::default(),
                 target: validated_target(self.target)?,
                 run_id: openengine_cluster_protocol::RunId::new(self.run_id),
             },

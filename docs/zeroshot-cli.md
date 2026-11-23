@@ -1149,6 +1149,11 @@ A foreground run follows NDJSON events until completion or suspension. Suspensio
 Usage: zeroshot run [OPTIONS] --title <TITLE>
 
 Options:
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
+
       --title <TITLE>
           Human-readable title recorded with the run
 
@@ -1179,7 +1184,9 @@ Options:
           Expand one secret-free agent runtime across every executable graph node
 
       --environment <FILE>
-          Load a JSON environment definition: setup, startup, public variables, and hook connections
+          Load setup, startup, public variables, and hook connections from JSON.
+
+          Local runs on Linux and macOS also accept teardown for orderly cleanup.
 
       --no-environment
           Send an empty environment ({}) to bypass the target's configured default
@@ -1263,7 +1270,6 @@ RUNTIME CONFIGURATION
       {
         "harness": "codex",
         "provider": "openrouter",
-        "size": "medium",
         "nodes": {
           "worker": {
             "kind": "agent",
@@ -1289,9 +1295,8 @@ RUNTIME CONFIGURATION
     copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.
     Copilot's other lanes use native BYOK transports; its Bedrock lane uses AWS's Responses API. Pi has no permission
     control of its own, so its contained runs rely on the disposable capsule rather than a bypass
-    argument. Model IDs are passed
-    unchanged to the selected harness and
-    provider; Zeroshot does not maintain or validate provider model catalogs.
+    argument. Use the provider's model ID. The adapter formats native arguments, such as OpenCode's
+    <provider>/<model> locator. Zeroshot does not maintain or validate provider model catalogs.
 
     Size identifiers are target-owned strings. List offered sizes with `zeroshot target sizes NAME`.
     Omit size to use the target default; the target decides whether a requested size is available.
@@ -1555,6 +1560,9 @@ Options:
       --text-stdin
           Read UTF-8 direction from standard input
 
+      --node <NAME>
+          Direct human guidance to this exact agent node name, including future instances
+
       --network <NAME>
           Broadcast to this authorized graph-local network; repeat for several networks
 
@@ -1583,6 +1591,11 @@ Arguments:
 Options:
       --target <NAME>
           Use this named target. If omitted, use the local controller
+
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
 
       --input <FILE>
           JSON answer file, containing signals and output. No standard-input form
@@ -1733,7 +1746,7 @@ Commands:
 ```text
 Start a successor from a failed or suspended run's retained workspace.
 
-A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts where it started, on its retained workspace: a submitted run at the root of its graph, a successor at the boundary it began at, so an answered request stays answered. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
+A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts where it started, on its retained workspace: a submitted run at the root of its graph, a successor at the boundary it began at, so an answered request stays answered. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves credentials again for its effective runtime and saved environment; make those credentials available.
 
 Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarting a successor restores the conversations it started with; restarting a submitted run, and execution-scoped agents, start new ones. Token usage starts at zero. Services and Docker state are not restored.
 
@@ -1744,8 +1757,19 @@ Arguments:
           Public run ID
 
 Options:
+      --runtime-config <FILE>
+          Replace the saved runtime with this exact runtime plan
+
+      --uniform-runtime-config <FILE>
+          Apply this runtime configuration to the unchanged graph
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
+
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
 
       --from-checkpoint <ID>
           Restore this checkpoint and continue from its saved graph boundary

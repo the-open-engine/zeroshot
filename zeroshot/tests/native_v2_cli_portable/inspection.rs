@@ -94,6 +94,16 @@ fn wait_released(storage: &Path) {
         std::thread::sleep(Duration::from_millis(25));
     }
     FileExt::unlock(&file).unwrap();
+    // Dropping the lease precedes process exit, especially while coverage flushes. Availability
+    // correctly stays unknown until both are confirmed; freeze retained storage only afterward.
+    let ready: Value =
+        serde_json::from_slice(&std::fs::read(storage.join("controller.ready.json")).unwrap())
+            .unwrap();
+    let pid = u32::try_from(ready["pid"].as_u64().unwrap()).unwrap();
+    while super::process_exists(pid) {
+        assert!(Instant::now() < deadline, "controller {pid} did not exit");
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn kill_controller(pid: u32) {
@@ -347,4 +357,131 @@ fn explicit_controls_recover_interrupted_ledgers_without_a_temporary_image() {
         );
         assert!(!storage.join("runs.sqlite3-journal").exists());
     }
+}
+
+// Abrupt owner-loss cleanup is provided by the Linux supervisor and Windows Jobs.
+// macOS process groups require a live controller; its explicit-stop restart case is in startup.
+#[cfg(any(target_os = "linux", windows))]
+#[test]
+fn contained_controller_loss_survives_restart() {
+    let fixture = Fixture::new();
+    let submitted = fixture
+        .run_command("block", true)
+        .args(["--controller", "contained"])
+        .output()
+        .unwrap();
+    success(&submitted);
+    let receipt: Value = serde_json::from_slice(&submitted.stdout).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let worker = fixture.await_child();
+    let storage = fixture.root.path(&format!("state/runs/{id}"));
+    let ready: Value =
+        serde_json::from_slice(&std::fs::read(storage.join("controller.ready.json")).unwrap())
+            .unwrap();
+    kill_controller(u32::try_from(ready["pid"].as_u64().unwrap()).unwrap());
+    wait_released(&storage);
+    assert_eq!(fixture.json(&["status", id])["controller"]["state"], "lost");
+    for _ in 0..2 {
+        success(&fixture.command(&["force-stop", id]).output().unwrap());
+    }
+    super::startup::assert_terminal_restart(&fixture, id, worker, "runtime_lost");
+}
+
+#[test]
+fn inspection_retains_controller_failure_after_a_fatal_ledger_write() {
+    let fixture = Fixture::new();
+    let (id, child) = fixture.start_blocked();
+    let storage = fixture.root.path(&format!("state/runs/{id}"));
+    let ledger = storage.join("runs.sqlite3");
+    // Keep the directory writable while every subsequent event append fails. SQLite's typed
+    // error must survive; the arbitrary trigger text must never become a diagnostic.
+    let connection = rusqlite::Connection::open(&ledger).unwrap();
+    connection.busy_timeout(Duration::from_secs(10)).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_events BEFORE INSERT ON v2_run_events BEGIN
+         SELECT RAISE(FAIL, 'private-trigger-text'); END;",
+        )
+        .unwrap();
+    drop(connection);
+    wait_released(&storage);
+    assert!(
+        !super::process_exists(child),
+        "runtime cleanup left a descendant"
+    );
+
+    let note = storage.join("controller.failure.txt");
+    let report = std::fs::read_to_string(&note).expect("original runtime cause was lost");
+    assert!(
+        report.contains("run ledger SQLite storage failed"),
+        "{report}"
+    );
+    assert!(!report.contains("private-trigger-text"), "{report}");
+    assert!(!report.contains("Failure cleanup/persistence"), "{report}");
+    assert!(report.len() <= 4096);
+    let before = tree(&storage);
+    for _ in 0..2 {
+        let output = fixture.command(&["status", &id]).output().unwrap();
+        success(&output);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(status["status"]["phase"], "running");
+        assert_eq!(status["controller"]["state"], "lost");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains(&id) && stderr.contains(&report), "{stderr}");
+        assert!(!status.to_string().contains(&report));
+    }
+    assert_eq!(before, tree(&storage), "status changed the note or ledger");
+
+    // The supplemental diagnostic must still appear when the authoritative ledger cannot read.
+    std::fs::write(&ledger, b"unreadable ledger").unwrap();
+    let before = tree(&storage);
+    for _ in 0..2 {
+        let output = fixture.command(&["status", &id]).output().unwrap();
+        assert!(!output.status.success());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains(&report), "{stderr}");
+        assert!(stderr.contains("SQLite"), "{stderr}");
+    }
+    assert_eq!(before, tree(&storage));
+}
+
+#[test]
+fn inspection_list_warns_about_unreadable_runs_and_ignores_empty_directories() {
+    let fixture = Fixture::new();
+    let output = fixture.run("finish", false);
+    success(&output);
+    let receipt: Value =
+        serde_json::from_slice(output.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    wait_released(&fixture.root.path(&format!("state/runs/{id}")));
+    let other = fixture.run("finish", false);
+    success(&other);
+    let receipt: Value =
+        serde_json::from_slice(other.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
+    let unreadable = receipt["runId"].as_str().unwrap();
+    wait_released(&fixture.root.path(&format!("state/runs/{unreadable}")));
+    let empty = "0199f33f-3b44-7d21-9000-000000000062";
+    // Portable private-directory creation is covered by the backend's empty-directory test.
+    #[cfg(unix)]
+    std::fs::create_dir(fixture.root.path(&format!("state/runs/{empty}"))).unwrap();
+    std::fs::write(
+        fixture
+            .root
+            .path(&format!("state/runs/{unreadable}/runs.sqlite3")),
+        b"invalid database",
+    )
+    .unwrap();
+    let before = tree(&fixture.root.path("state/runs"));
+    let output = fixture.command(&["list"]).output().unwrap();
+    success(&output);
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(result["runs"][0]["runId"], id);
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains(unreadable) && stderr.contains("SQLite"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains(empty), "{stderr}");
+    assert_eq!(before, tree(&fixture.root.path("state/runs")));
 }

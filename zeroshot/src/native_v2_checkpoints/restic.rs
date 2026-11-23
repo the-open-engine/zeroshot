@@ -2,17 +2,22 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::Instant;
 
 use crate::execution::platform::{self, FileAccess};
+use crate::execution::process::TailBuffer;
+use crate::native_v2_capsule::provider_process::{
+    private_shell_values, redaction_values, redact_stderr_boundary, safe_provider_text,
+};
+use crate::native_v2_runner::bounded_log_text;
 use crate::execution::process::platform::{
     ProcessContainment, capture_process_tree, configure_process, register_process_tree_for,
     terminate_process_tree,
@@ -22,6 +27,7 @@ use super::stopped;
 const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
 const PASSWORD_BYTES: usize = 32;
+const MAX_STDERR_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -111,7 +117,7 @@ impl ResticProgram {
     }
 
     #[cfg(test)]
-    pub(super) fn test(executable: PathBuf, arguments: Vec<String>) -> io::Result<Self> {
+    pub(crate) fn test(executable: PathBuf, arguments: Vec<String>) -> io::Result<Self> {
         let mut program = Self::from_path(executable)?;
         program.arguments = arguments;
         program.stored_test_program = true;
@@ -154,6 +160,7 @@ impl SnapshotId {
 pub(super) struct Repository {
     program: ResticProgram,
     root: PathBuf,
+    redactions: Vec<String>,
     deadline: Option<Instant>,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
 }
@@ -163,9 +170,15 @@ impl Repository {
         Self {
             program,
             root,
+            redactions: Vec::new(),
             deadline: None,
             stopping: None,
         }
+    }
+
+    pub(super) fn with_redactions(mut self, redactions: Vec<String>) -> Self {
+        self.redactions = redactions;
+        self
     }
 
     /// Stops every later operation at `deadline`, which replaces the per-operation limit: a
@@ -354,6 +367,9 @@ impl Repository {
             .stderr
             .take()
             .ok_or_else(|| io::Error::other("restic stderr is unavailable"))?;
+        // Keep the tail outside the timed/cancellable future: a timeout must not discard output
+        // already drained. The same bounded buffer is used by native provider processes.
+        let mut stderr_tail = TailBuffer::new(MAX_STDERR_BYTES);
         let completion = tokio::time::timeout(timeout, async {
             tokio::try_join!(
                 async {
@@ -362,7 +378,7 @@ impl Repository {
                         .map_err(|error| operation_io_error(operation, "stdout read", error))
                 },
                 async {
-                    discard_output(stderr)
+                    retain_stderr(stderr, &mut stderr_tail)
                         .await
                         .map_err(|error| operation_io_error(operation, "stderr read", error))
                 },
@@ -391,16 +407,99 @@ impl Repository {
                 format!("restic {operation} timed out"),
             )),
         };
-        if termination.cleanup.proves_tree_empty() && termination.error.is_none() {
-            return outcome;
+        let outcome = if termination.cleanup.proves_tree_empty() && termination.error.is_none() {
+            outcome
+        } else {
+            let error = outcome
+                .err()
+                .unwrap_or_else(|| io::Error::other(format!("restic {operation} succeeded")));
+            Err(io::Error::new(
+                error.kind(),
+                format!("{error}; its process cleanup is unconfirmed"),
+            ))
+        };
+        let error = match outcome {
+            Ok(output) => return Ok(output),
+            Err(error) => error,
+        };
+        // Preserve the typed confirmed-stop marker used by the supervisor.
+        if error
+            .get_ref()
+            .is_some_and(|cause| cause.is::<super::CheckpointStopped>())
+        {
+            return Err(error);
         }
-        let error = outcome
-            .err()
-            .unwrap_or_else(|| io::Error::other(format!("restic {operation} succeeded")));
-        Err(io::Error::new(
-            error.kind(),
-            format!("{error}; its process cleanup is unconfirmed"),
-        ))
+        let report = self.save_failure(&stderr_tail).await;
+        Err(match report {
+            Some(path) => io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; private diagnostic: {} in checkpoint repository",
+                    path.display()
+                ),
+            ),
+            None => error,
+        })
+    }
+
+    async fn save_failure(&self, tail: &TailBuffer) -> Option<PathBuf> {
+        let tail = tail.snapshot();
+        if tail.bytes.is_empty() {
+            return None;
+        }
+        let environment = std::env::vars_os()
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .collect();
+        // Restic receives its repository credential through a private file, not the environment.
+        let mut password = String::new();
+        if let Ok(file) = platform::private_file(&self.password_path(), FileAccess::Read) {
+            let _ = file
+                .take((PASSWORD_BYTES * 2 + 1) as u64)
+                .read_to_string(&mut password);
+        }
+        let redactions = redaction_values(
+            self.redactions
+                .iter()
+                .map(String::as_str)
+                .chain(private_shell_values(&environment))
+                .chain(std::iter::once(password.trim())),
+        );
+        let prefix = if tail.truncated {
+            "stderr (truncated tail): "
+        } else {
+            "stderr: "
+        };
+        // Remove a credential cut by the tail boundary before another (possibly one-character)
+        // secret can replace bytes inside it and prevent the existing suffix matcher finding it.
+        let text = redact_stderr_boundary(
+            format!("{prefix}{}", String::from_utf8_lossy(&tail.bytes)),
+            &redactions.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        let report = bounded_log_text(safe_provider_text(&text, &redactions), MAX_STDERR_BYTES);
+        let directory = self.root.join("diagnostics");
+        platform::private_directory(&self.root).ok()?;
+        platform::private_directory(&directory).ok()?;
+        let relative =
+            PathBuf::from("diagnostics").join(format!("restic-{}.txt", uuid::Uuid::now_v7()));
+        let path = self.root.join(&relative);
+        let file = platform::private_file(&path, FileAccess::CreateNew).ok()?;
+        let temporary = tempfile::TempPath::try_from_path(path).ok()?;
+        let temporary = tempfile::NamedTempFile::from_parts(file, temporary);
+        let mut writer = temporary.as_file().try_clone().ok()?;
+        // Freeze redactions and open the private report while this future still owns storage.
+        // On cancellation its guard unlinks the file; detached writes use only the open handle
+        // and cannot reread deleted credentials or recreate a discarded repository.
+        let writing = tokio::task::spawn_blocking(move || {
+            writer.write_all(report.as_bytes())?;
+            writer.sync_all()
+        });
+        tokio::select! {
+            result = writing => result.ok()?.ok()?,
+            // Reporting is optional: a late stop keeps the original operation/cleanup error.
+            () = crate::execution::process::wait_for_stop_request(self.stopping.clone()) => return None,
+        }
+        temporary.keep().ok()?;
+        Some(relative)
     }
 
     #[cfg(test)]
@@ -530,6 +629,20 @@ async fn discard_output(mut reader: impl AsyncRead + Unpin) -> io::Result<()> {
     tokio::io::copy(&mut reader, &mut tokio::io::sink())
         .await
         .map(|_| ())
+}
+
+async fn retain_stderr(
+    mut reader: impl AsyncRead + Unpin,
+    tail: &mut TailBuffer,
+) -> io::Result<()> {
+    let mut buffer = [0; MAX_STDERR_BYTES];
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        tail.append(&buffer[..read]);
+    }
 }
 
 async fn operation_output(reader: impl AsyncRead + Unpin, backup: bool) -> io::Result<Vec<u8>> {

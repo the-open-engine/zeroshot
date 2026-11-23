@@ -123,6 +123,10 @@ pub struct ImplementedProtocolSchema {
     pub run_vector_response: JsonRpcResponse<openengine_cluster_protocol::RunVectorResult>,
     pub run_checkpoints_request: JsonRpcRequest<RunCheckpointsParams>,
     pub run_checkpoints_response: JsonRpcResponse<RunCheckpointsResult>,
+    pub run_resume_requirements_request:
+        JsonRpcRequest<openengine_cluster_protocol::RunResumeRequirementsParams>,
+    pub run_resume_requirements_response:
+        JsonRpcResponse<openengine_cluster_protocol::RunResumeRequirementsResult>,
     pub run_resume_request: JsonRpcRequest<RunResumeParams>,
     pub run_resume_response: JsonRpcResponse<RunResumeResult>,
     pub run_discard_workspace_request: JsonRpcRequest<RunDiscardWorkspaceParams>,
@@ -143,7 +147,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     let cases = [
         (
             "initialize.ndjson",
-            r#"{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocolVersion":"openengine.cluster/v1"}}"#,
+            r#"{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocolVersion":"openengine.cluster/v2"}}"#,
         ),
         (
             "get-empty.ndjson",

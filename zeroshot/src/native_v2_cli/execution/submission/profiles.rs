@@ -19,7 +19,6 @@ pub(super) struct ResolvedRunProfile {
 struct StoredProfileLookup<'a, B> {
     target: Option<&'a str>,
     backend: &'a B,
-    local: &'a LocalRunProfileStore,
 }
 
 pub(super) async fn resolve_run_profile<B>(
@@ -31,7 +30,8 @@ where
 {
     match &run.selection {
         RunSelection::Inline { graph, runtime } => {
-            let (graph, runtime) = materialize_profile(graph, runtime).await?;
+            let (graph, runtime) =
+                materialize_profile(graph, runtime, run.target.as_deref()).await?;
             Ok(ResolvedRunProfile {
                 graph,
                 runtime,
@@ -62,23 +62,16 @@ async fn resolve_stored_profile_with_store<B: NativeV2CliBackend>(
     backend: &B,
     local: &LocalRunProfileStore,
 ) -> Result<ResolvedRunProfile, NativeV2CliError> {
-    let lookup = StoredProfileLookup {
-        target,
-        backend,
-        local,
-    };
+    let lookup = StoredProfileLookup { target, backend };
     if reference
         .is_none_or(|reference| matches!(reference.qualifier, None | Some(ProfileQualifier::Local)))
-        && let Some(profile) = lookup.find(None, reference).await?
+        && let Some(profile) = local.expanded_for_run(reference.map(|reference| &reference.name))?
     {
-        return Ok(profile);
+        require_supported_placement(target, &profile.graph)?;
+        return Ok(from_profile(profile, None));
     }
-    for scope in profile_scopes(reference, target, backend)
-        .await?
-        .into_iter()
-        .flatten()
-    {
-        if let Some(profile) = lookup.find(Some(scope), reference).await? {
+    for scope in profile_scopes(reference, target, backend).await? {
+        if let Some(profile) = lookup.find(scope, reference).await? {
             return Ok(profile);
         }
     }
@@ -88,10 +81,14 @@ async fn resolve_stored_profile_with_store<B: NativeV2CliBackend>(
 impl<B: NativeV2CliBackend> StoredProfileLookup<'_, B> {
     async fn find(
         &self,
-        scope: Option<RunProfileScope>,
+        scope: RunProfileScope,
         reference: Option<&ProfileReference>,
     ) -> Result<Option<ResolvedRunProfile>, NativeV2CliError> {
-        let list = profile_list(scope, self.target, self.backend, self.local).await?;
+        let list = self
+            .backend
+            .profile_list(self.target, RunProfileListRequest { scope })
+            .await?
+            .into();
         let Some(selected) = select_profile(list, reference)? else {
             return Ok(None);
         };
@@ -99,15 +96,18 @@ impl<B: NativeV2CliBackend> StoredProfileLookup<'_, B> {
             scope: selected.scope,
             name: selected.name,
         };
-        let profile = match scope {
-            None => self.local.show(selector.clone())?,
-            Some(_) => {
-                self.backend
-                    .profile_show(self.target, selector.clone())
-                    .await?
-            }
-        };
-        Ok(Some(from_profile(profile, scope.map(|_| selector))))
+        let profile = self
+            .backend
+            .profile_show(self.target, selector.clone())
+            .await?;
+        if LocalRunProfileStore::has_imports(&profile.graph) {
+            self.backend
+                .validate_profile_imports(self.target.ok_or_else(|| {
+                    NativeV2CliError::Usage("remote profile selectors require --target".into())
+                })?)
+                .await?;
+        }
+        Ok(Some(from_profile(profile, Some(selector))))
     }
 }
 
@@ -115,14 +115,14 @@ async fn profile_scopes<B: NativeV2CliBackend>(
     reference: Option<&ProfileReference>,
     target: Option<&str>,
     backend: &B,
-) -> Result<Vec<Option<RunProfileScope>>, NativeV2CliError> {
+) -> Result<Vec<RunProfileScope>, NativeV2CliError> {
     let scopes = match reference.and_then(|value| value.qualifier) {
-        Some(ProfileQualifier::Local) => vec![None],
-        Some(ProfileQualifier::User) => vec![Some(RunProfileScope::User)],
-        Some(ProfileQualifier::Org) => vec![Some(RunProfileScope::Org)],
+        Some(ProfileQualifier::Local) => vec![],
+        Some(ProfileQualifier::User) => vec![RunProfileScope::User],
+        Some(ProfileQualifier::Org) => vec![RunProfileScope::Org],
         None => default_scopes(target, backend).await?,
     };
-    if scopes.iter().any(Option::is_some) && target.is_none() {
+    if !scopes.is_empty() && target.is_none() {
         return Err(NativeV2CliError::Usage(
             "remote profile selectors require --target".to_owned(),
         ));
@@ -133,32 +133,15 @@ async fn profile_scopes<B: NativeV2CliBackend>(
 async fn default_scopes<B: NativeV2CliBackend>(
     target: Option<&str>,
     backend: &B,
-) -> Result<Vec<Option<RunProfileScope>>, NativeV2CliError> {
-    let mut scopes = vec![None];
+) -> Result<Vec<RunProfileScope>, NativeV2CliError> {
+    let mut scopes = Vec::new();
     if target.is_some() {
         if backend.default_resource_scope(target).await? == ConnectionScope::User {
-            scopes.push(Some(RunProfileScope::User));
+            scopes.push(RunProfileScope::User);
         }
-        scopes.push(Some(RunProfileScope::Org));
+        scopes.push(RunProfileScope::Org);
     }
     Ok(scopes)
-}
-
-async fn profile_list<B: NativeV2CliBackend>(
-    scope: Option<RunProfileScope>,
-    target: Option<&str>,
-    backend: &B,
-    local: &LocalRunProfileStore,
-) -> Result<CliProfileListResult, NativeV2CliError> {
-    match scope {
-        None => local.list(RunProfileListRequest {
-            scope: RunProfileScope::User,
-        }),
-        Some(scope) => backend
-            .profile_list(target, RunProfileListRequest { scope })
-            .await
-            .map(Into::into),
-    }
 }
 
 fn select_profile(
@@ -201,15 +184,47 @@ fn from_profile(
 pub(in crate::native_v2_cli::execution) async fn materialize_profile(
     selection: &RunGraph,
     runtime_source: &RunRuntime,
+    target: Option<&str>,
+) -> Result<(GraphSpec, RuntimePlan), NativeV2CliError> {
+    let (mut graph, mut runtime) = load_profile(selection, runtime_source)?;
+    require_supported_placement(target, &graph)?;
+    if LocalRunProfileStore::has_imports(&graph) {
+        (graph, runtime) = LocalRunProfileStore::production()?.expand(graph, runtime, None)?;
+    }
+    validate_profile(&graph, &runtime).await?;
+    Ok((graph, runtime))
+}
+
+pub(in crate::native_v2_cli::execution) fn load_profile(
+    selection: &RunGraph,
+    runtime_source: &RunRuntime,
 ) -> Result<(GraphSpec, RuntimePlan), NativeV2CliError> {
     let graph = materialize_graph(selection)?;
     validate_graph_profile(&graph)?;
     let runtime = materialize_runtime(selection, &graph, runtime_source)?;
-    NativeV2Admission
-        .validate_profile(&graph, &runtime, DeliveryPolicy::Optional)
-        .await
-        .map_err(NativeV2CliError::InvalidRun)?;
     Ok((graph, runtime))
+}
+
+pub(in crate::native_v2_cli::execution) async fn validate_profile(
+    graph: &GraphSpec,
+    runtime: &RuntimePlan,
+) -> Result<(), NativeV2CliError> {
+    NativeV2Admission
+        .validate_profile(graph, runtime, DeliveryPolicy::Optional)
+        .await
+        .map_err(NativeV2CliError::InvalidRun)
+}
+
+pub(in crate::native_v2_cli::execution) fn require_supported_placement(
+    target: Option<&str>,
+    graph: &GraphSpec,
+) -> Result<(), NativeV2CliError> {
+    if target.is_some() && LocalRunProfileStore::has_imports(graph) {
+        return Err(NativeV2CliError::Usage(
+            "profile imports require a local run".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

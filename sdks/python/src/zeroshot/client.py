@@ -480,6 +480,7 @@ class Client:
         return [
             *arguments,
             *self._route_arguments(),
+            *self._controller_arguments(),
             *self._forwarding_arguments(),
             "--detach",
         ]
@@ -595,6 +596,11 @@ class Client:
 
     def _forwarding_arguments(self) -> list[str]:
         return ["--forward-gh-token"] if self.forward_github_token else []
+
+    def _controller_arguments(self) -> list[str]:
+        if isinstance(self.target, LocalTarget):
+            return ["--controller", self.target.controller]
+        return []
 
     def _require_hosted_target(self) -> HostedTarget:
         self._ensure_open()
@@ -911,21 +917,28 @@ class Run:
         )
         return _status(value)
 
-    async def resume(self) -> Run:
-        """Continue this attempt in a successor with fresh native sessions.
+    async def resume(self, *, runtime: _Runtime | None = None) -> Run:
+        """Continue this attempt, optionally replacing its runtime configuration.
+
+        Args:
+            runtime: Complete replacement runtime. None retains the saved configuration.
+                Native conversations use the harness's restoration and fresh-session fallback.
 
         Returns:
             The successor run handle.
         """
         await self._client._ready()
-        value = await self._client._native().json(
-            [
-                "resume",
-                self.id,
-                *self._client._route_arguments(),
-                *self._client._forwarding_arguments(),
-            ]
-        )
+        arguments = [
+            "resume",
+            self.id,
+            *self._client._route_arguments(),
+            *self._client._controller_arguments(),
+            *self._client._forwarding_arguments(),
+        ]
+        with tempfile.TemporaryDirectory(prefix="zeroshot-resume-") as directory:
+            if runtime is not None:
+                self._client._append_runtime(arguments, runtime, Path(directory))
+            value = await self._client._native().json(arguments)
         if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
             raise ProtocolError("Zeroshot emitted malformed resume result")
         return Run(self._client, value["runId"])
@@ -962,6 +975,7 @@ class Run:
                     "--input",
                     str(path),
                     *self._client._route_arguments(),
+                    *self._client._controller_arguments(),
                     *self._client._forwarding_arguments(),
                 ]
             )
@@ -1049,7 +1063,8 @@ class Run:
         """Force-stop this run and wait for its durable terminal result.
 
         Returns:
-            The existing terminal result, or a failed result whose reason is force_stopped.
+            The terminal result. A stop before graph completion normally reports force_stopped.
+            Stopping during the postmortem preserves the recorded graph result.
 
         Raises:
             RunSuspendedError: If the run is suspended and already has a successor, which a

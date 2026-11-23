@@ -132,6 +132,7 @@ pub(super) async fn build(main: &AdmittedRun) -> Result<AdmittedRun, PostmortemE
     })).map_err(|_| PostmortemError::Preparation)?;
     NativeV2Admission
         .admit(RunSubmission {
+            context_sources: Vec::new(),
             title: main.title.clone(),
             graph,
             initial_input: json!({"context":""}),

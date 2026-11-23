@@ -34,6 +34,28 @@ pub(super) fn validate_executable_bindings(
     context: super::NativeV2AdmissionContext<'_>,
 ) -> Result<(), NativeV2AdmissionError> {
     if !runtime.workspace_checkpoints
+        && let Some(enabled) = context.hosted_workspace_checkpoint_opt_out
+    {
+        if !enabled {
+            return Err(NativeV2AdmissionError::InvalidRuntime(
+                "this target does not support disabling workspace checkpoints".to_owned(),
+            ));
+        }
+        if let Some(node) = declarations.iter().find(|node| {
+            [
+                crate::native_v2_request::ASK_WORKER_REF,
+                crate::native_v2_wait::WAIT_WORKER_REF,
+            ]
+            .contains(&node.worker.as_str())
+        }) {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node.name.clone(),
+                detail: "hosted request and wait nodes require workspaceCheckpoints: true"
+                    .to_owned(),
+            });
+        }
+    }
+    if !runtime.workspace_checkpoints
         && !context.checkpointless_requests
         && let Some(node) = declarations
             .iter()
@@ -150,29 +172,11 @@ fn collect_declarations(node: &GraphNode, declarations: &mut Vec<ExecutableDecla
             attempts: verifier.attempts.get(),
             kind: LeafKind::Verifier,
         }),
-        GraphNode::Seq(group) => group
-            .children
-            .as_slice()
-            .iter()
-            .for_each(|child| collect_declarations(child, declarations)),
-        GraphNode::Choice(group) => {
-            group
-                .branches
-                .as_slice()
-                .iter()
-                .for_each(|branch| collect_declarations(&branch.node, declarations));
-            if let Some(otherwise) = &group.otherwise {
-                collect_declarations(otherwise, declarations);
+        _ => {
+            for child in openengine_cluster_server::graph_verifier::graph_node_children(node) {
+                collect_declarations(child, declarations);
             }
         }
-        GraphNode::Par(group) => group
-            .branches
-            .as_slice()
-            .iter()
-            .for_each(|branch| collect_declarations(branch, declarations)),
-        GraphNode::Loop(group) => collect_declarations(&group.body, declarations),
-        GraphNode::Map(group) => collect_declarations(&group.body, declarations),
-        GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
     }
 }
 
@@ -222,11 +226,12 @@ fn validate_binding_kinds(
             }
         })?;
         if matches!(binding, NodeRuntimeBinding::Script { .. })
-            && (declaration.kind != LeafKind::Step || declaration.instructions.is_some())
+            && declaration.instructions.is_some()
         {
             return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
                 node: declaration.name.clone(),
-                detail: "script bindings require a step without agent instructions".to_owned(),
+                detail: "script bindings require a step or verifier without agent instructions"
+                    .to_owned(),
             });
         }
         if let NodeRuntimeBinding::Decision { .. } = binding {

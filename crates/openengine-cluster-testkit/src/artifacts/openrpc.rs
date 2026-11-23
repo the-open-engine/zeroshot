@@ -6,7 +6,7 @@ use openengine_cluster_protocol::{
     RunResumeParams, RunStatusParams, RunSubmitParams, RunWatchParams, StopParams, UpdateParams,
     RUN_ATTACH_METHOD, RUN_CHECKPOINTS_METHOD, RUN_DISCARD_WORKSPACE_METHOD, RUN_FORCE_METHOD,
     RUN_LIST_METHOD, RUN_LOGS_METHOD, RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD,
-    RUN_WATCH_METHOD,
+    RUN_WATCH_METHOD, PROTOCOL_VERSION,
 };
 use openengine_cluster_server::method_registry::{MethodDescriptor, MethodKind, METHOD_REGISTRY};
 use schemars::schema_for;
@@ -21,7 +21,7 @@ pub(super) fn document() -> Value {
         "openrpc": "1.3.2",
         "info": {
             "title": "Open Engine Cluster Protocol",
-            "version": "1.0.0"
+            "version": "2.0.0"
         },
         "methods": methods,
         "components": {
@@ -132,7 +132,10 @@ fn native_v2_method(name: &str) -> Option<Value> {
             json!({"paramStructure":"by-name", "params":[
                 {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
                 {"name":"text","required":true,"schema":{"$ref":"schema.json#/$defs/NodeInstructions"}},
-                {"name":"mode","required":false,"schema":mode}
+                {"name":"mode","required":false,"schema":mode},
+                {"name":"node","required":false,"schema":{
+                    "$ref":"schema.json#/$defs/RunSteerParams/properties/node"
+                }}
             ], "result":{"name":"runSteerResult","schema":{"$ref":"schema.json#/$defs/RunSteerResult"}}})
         }
         openengine_cluster_protocol::RUN_SUSPEND_METHOD => {
@@ -154,6 +157,15 @@ fn native_v2_method(name: &str) -> Option<Value> {
 fn native_v2_recovery_method(name: &str) -> Option<Value> {
     match name {
         RUN_CHECKPOINTS_METHOD => run_checkpoints_method(),
+        openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD => json!({
+            "summary":"Resolve runtime replacement connection declarations without starting a successor",
+            "paramStructure":"by-name",
+            "params":[
+                {"name":"runId","required":true,"schema":{"type":"string"}},
+                {"name":"runtime","required":true,"schema":{"$ref":"schema.json#/$defs/RunResumeRequirementsParams/properties/runtime"}}
+            ],
+            "result":{"name":"runResumeRequirementsResult","schema":{"$ref":"schema.json#/$defs/RunResumeRequirementsResult"}}
+        }),
         RUN_RESUME_METHOD => run_resume_method(),
         RUN_DISCARD_WORKSPACE_METHOD => run_discard_workspace_method(),
         _ => return None,
@@ -169,7 +181,7 @@ fn initialize_method() -> Value {
             "required": true,
             "schema": {
                 "type": "string",
-                "const": "openengine.cluster/v1"
+                "const": PROTOCOL_VERSION
             }
         }],
         "result": {
@@ -467,8 +479,10 @@ fn run_resume_method() -> Value {
         "description": "Omitting from or selecting restart restarts a failed run where it started, on \
             the latest retained workspace: a submitted run at its graph root, a successor at the \
             boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor \
-            outputs and reruns the named node or atomic concurrent group. Original admission and \
-            delivery metadata remain fixed. Credentials are resolved again for the successor. Checkpoint \
+            outputs and reruns the named node or atomic concurrent group. Graph, input, source and \
+            delivery metadata remain fixed. Optional runtime completely replaces the saved runtime \
+            after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime \
+            (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint \
             continuations and suspended successors restore captured node-instance provider conversations, \
             and so does a restart of such a successor; the restart of a submitted run starts new \
             ones. Suspended command/wait runs continue without restoring files. \
@@ -479,6 +493,7 @@ fn run_resume_method() -> Value {
         "params": [
             {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
             {"name": "successorRunId", "required": true, "schema": property_schema(&schema, "successorRunId")},
+            {"name": "runtime", "required": false, "schema": {"$ref":"schema.json#/$defs/RunResumeParams/properties/runtime"}},
             {"name": "from", "required": false, "schema": property_schema(&schema, "from")},
             {"name": "connections", "required": false, "schema": property_schema(&schema, "connections")},
             {"name": "connectionResolver", "required": false, "schema": property_schema(&schema, "connectionResolver")},

@@ -160,6 +160,7 @@ pub enum LocalWorktreeBase {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunCommand {
+    pub controller: local::LocalControllerMode,
     pub target: Option<String>,
     pub cwd: Option<PathBuf>,
     pub worktree: Option<LocalWorktreeBase>,
@@ -252,6 +253,7 @@ pub struct PreparedRunRequest {
     pub worktree: Option<LocalWorktreeBase>,
     pub source_connection: Option<ConnectionKey>,
     pub source: Option<NamedRunSource>,
+    pub context_sources: Vec<ResolvedSource>,
     /// Remote selector retained so the hosted target can resolve the profile atomically.
     pub profile: Option<RunProfileSelector>,
 }
@@ -327,6 +329,7 @@ pub enum RunGraph {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunSelector {
+    pub controller: local::LocalControllerMode,
     pub target: Option<String>,
     pub run_id: openengine_cluster_protocol::RunId,
 }
@@ -340,6 +343,7 @@ pub enum SteerText {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunResumeCommand {
+    pub runtime: Option<RunRuntime>,
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
     /// Allow a local resume to replace the user-owned checkout with a checkpoint snapshot.
@@ -464,6 +468,7 @@ pub enum NativeV2CliCommand {
     Steer {
         run: RunSelector,
         text: SteerText,
+        node: Option<openengine_cluster_protocol::NodeName>,
         networks: Vec<openengine_cluster_protocol::NodeName>,
         mode: openengine_cluster_protocol::SteeringMode,
     },
@@ -490,6 +495,16 @@ pub enum NativeV2CliCommand {
 }
 
 impl NativeV2CliCommand {
+    /// Launch policy for this invocation only; recovery metadata never changes it.
+    pub fn local_controller_mode(&self) -> local::LocalControllerMode {
+        match self {
+            Self::Run(run) => run.controller,
+            Self::Resume(command) => command.run.controller,
+            Self::Answer { run, .. } => run.controller,
+            _ => local::LocalControllerMode::Detached,
+        }
+    }
+
     fn is_management_operation(&self) -> bool {
         self.is_connection_operation()
             || self.is_profile_operation()
@@ -798,6 +813,10 @@ pub trait NativeV2CliBackend: Send + Sync {
         self.profile_list(target, request).await.map(Into::into)
     }
 
+    async fn validate_profile_imports(&self, _target: &str) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Usage("profile imports require a local run or a target advertising openengine.saved-profile-imports/v1".into()))
+    }
+
     async fn profile_show(
         &self,
         _target: Option<&str>,
@@ -918,6 +937,14 @@ pub trait NativeV2CliBackend: Send + Sync {
     ) -> Result<(), NativeV2CliError> {
         Ok(())
     }
+    async fn validate_resume_runtime(
+        &self,
+        _run: &RunSelector,
+        _runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        _github_token: bool,
+    ) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
     async fn authorize_resume_connection_requirements(
         &self,
         target: Option<&str>,
@@ -930,6 +957,14 @@ pub trait NativeV2CliBackend: Send + Sync {
             ));
         }
         Ok(requirements)
+    }
+    async fn replacement_resume_requirements(
+        &self,
+        _run: &RunSelector,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        _github_token: bool,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        Ok(crate::native_v2_runtime_config::requirements(runtime))
     }
     async fn run_export_workspace(
         &self,
@@ -1038,3 +1073,11 @@ impl NativeV2CliError {
 
 mod memory;
 pub use memory::MemoryCommand;
+
+#[doc(hidden)]
+pub fn merge_resume_requirements(
+    base: &RunConnectionRequirements,
+    runtime: &openengine_cluster_protocol::RunResumeRuntime,
+) -> RunConnectionRequirements {
+    crate::native_v2_runtime_config::merge_requirements(base, runtime)
+}

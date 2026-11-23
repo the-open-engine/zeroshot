@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::execution::{driver::WorkspaceCapability, process::ProcessSessionCommand};
+use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{
     ProviderExecutionFiles, agent_workspace_access, effort_token, extend_declared_environment,
     merge_local_environment,
@@ -580,10 +581,10 @@ fn validate_bedrock(
 pub(super) fn gateway_protocol(
     environment: &BTreeMap<String, String>,
 ) -> Result<(&'static str, &'static str), NodeRunnerError> {
-    match environment.get("GATEWAY_API").map(String::as_str) {
-        Some("openai-responses") => Ok(("@ai-sdk/openai", "Authorization")),
-        Some("openai-completions") => Ok(("@ai-sdk/openai-compatible", "Authorization")),
-        Some("anthropic-messages") => Ok(("@ai-sdk/anthropic", "x-api-key")),
+    match environment.get(gateway::API).map(String::as_str) {
+        Some(gateway::OPENAI_RESPONSES) => Ok(("@ai-sdk/openai", "Authorization")),
+        Some(gateway::OPENAI_COMPLETIONS) => Ok(("@ai-sdk/openai-compatible", "Authorization")),
+        Some(gateway::ANTHROPIC_MESSAGES) => Ok(("@ai-sdk/anthropic", "x-api-key")),
         _ => Err(NodeRunnerError::DriverDetail(
             "OpenCode gateway requires a supported GATEWAY_API".to_owned(),
         )),

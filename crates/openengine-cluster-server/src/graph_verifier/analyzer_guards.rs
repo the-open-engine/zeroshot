@@ -143,7 +143,7 @@ impl<'a> Analyzer<'a> {
         let mut valid = true;
         for (selector, map_aggregate, condition) in guarded_selector_uses(guard) {
             let map_available = map_aggregate && self.nodes.get(&selector.name).is_some_and(|info| {
-                info.path.iter().any(|part| matches!(part,
+                info.scope_path().iter().any(|part| matches!(part,
                     DiagnosticPathSegment::Node { name } if name != &selector.name
                         && available.contains(name)
                         && self.nodes.get(name).is_some_and(|info| matches!(info.node, GraphNode::Map(_)))
@@ -387,7 +387,7 @@ impl<'a> Analyzer<'a> {
     pub(super) fn map_owner(&self, target: &NodeName) -> Option<&NodeName> {
         self.nodes
             .get(target)?
-            .path
+            .scope_path()
             .iter()
             .rev()
             .find_map(|segment| match segment {
@@ -405,7 +405,7 @@ impl<'a> Analyzer<'a> {
     }
     pub(super) fn map_depth(&self, name: &NodeName) -> usize {
         self.nodes.get(name).map_or(0, |info| {
-            info.path.iter().filter(|part| matches!(part,
+            info.scope_path().iter().filter(|part| matches!(part,
             DiagnosticPathSegment::Node { name: parent } if parent != name
                 && self.nodes.get(parent).is_some_and(|info| matches!(info.node, GraphNode::Map(_)))
         )).count()

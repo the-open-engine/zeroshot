@@ -1,5 +1,5 @@
 ---
-description: 'Choose local execution, a self-hosted Docker target or zeroshot Platform. Connect a target and prepare its source and credentials.'
+description: 'Choose local execution, a self-hosted target on Docker or Kubernetes, or zeroshot Platform. Connect a target and prepare its source and credentials.'
 ---
 
 # Targets
@@ -7,11 +7,11 @@ description: 'Choose local execution, a self-hosted Docker target or zeroshot Pl
 A target is where your agents run and their run history is stored. Choose it independently of the
 graph and models.
 
-| Target        | Use it for                              | Source                                             |
-| ------------- | --------------------------------------- | -------------------------------------------------- |
-| Local         | Work in a folder on your machine        | Your existing files, including uncommitted changes |
-| Direct Docker | Run on infrastructure you manage        | An exact committed Git revision                    |
-| Hosted        | Use a service such as zeroshot Platform | An exact committed Git revision                    |
+| Target                        | Use it for                              | Source                                             |
+| ----------------------------- | --------------------------------------- | -------------------------------------------------- |
+| Local                         | Work in a folder on your machine        | Your existing files, including uncommitted changes |
+| Direct (Docker or Kubernetes) | Run on infrastructure you manage        | An exact committed Git revision                    |
+| Hosted                        | Use a service such as zeroshot Platform | An exact committed Git revision                    |
 
 The model provider still receives the code and context its agent needs. Self-hosting the target
 does not make model processing local.
@@ -93,7 +93,7 @@ Docker must be running. The restart policy recovers from reboots and unexpected 
 manual stop, use `docker start zeroshot-target`. Interrupted runs are marked lost. If recovery data
 exists, start a successor with `zeroshot resume RUN_ID --target local-target`.
 
-Docker and hosted runs use the remote Git revision, not your uncommitted files. `--cwd` chooses the
+Direct and hosted runs use an exact committed Git revision from the remote. `--cwd` chooses the
 client checkout used to select that source. Its upstream takes precedence; otherwise zeroshot
 selects the unique eligible HTTPS or SSH remote. For ambiguous remotes, set an upstream or pass
 `--repository` with a credential-free clone URL or GitHub `owner/name`. Use `--branch` and
@@ -120,6 +120,35 @@ Keep the tunnel open. If port 8080 is taken locally, forward another port and se
 `--public-origin` to that origin, such as `http://127.0.0.1:18080`.
 The [target image README](https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md)
 covers proxies, Docker access and image builds.
+
+## Run a Kubernetes target { #kubernetes-target }
+
+The public Helm chart deploys a single direct target. It requires a Linux `amd64` node, a writable
+volume that supports POSIX ownership and permissions, and a namespace that allows the target to
+start as root so it can launch isolated worker UIDs.
+
+```console
+helm upgrade --install zeroshot-target \
+  oci://ghcr.io/the-open-engine/charts/zeroshot-target \
+  --namespace zeroshot --create-namespace --wait
+kubectl --namespace zeroshot port-forward service/zeroshot-target 8080:8080
+```
+
+Keep the port forward open. In another terminal, use a Zeroshot CLI release that matches the target.
+
+```console
+zeroshot target add kubernetes --url http://127.0.0.1:8080 --direct
+zeroshot list --target kubernetes
+```
+
+Use `--target kubernetes` for runs and observation commands. Open `http://127.0.0.1:8080/ui/` for
+profiles and run history. Any workload that can reach the target's ClusterIP Service can submit runs.
+Restrict network access to trusted workloads.
+
+Helm selects the newest stable chart and its matching image. Pass `--version X.Y.Z` to pin a release
+on install or upgrade. A pod replacement interrupts active runs. The persistent volume preserves
+profiles and run history. See the [chart guide](https://github.com/the-open-engine/zeroshot/blob/main/charts/zeroshot-target/README.md)
+for storage and proxy settings, uninstall behavior, and Docker access.
 
 ## Use a hosted target { #hosted-target }
 
@@ -188,12 +217,12 @@ core adapters only. Check [harness support](../project/harness-adapters.md) befo
 Local Git operations can reuse your Git authentication. PR and merge delivery support GitHub and
 GitLab; other Git hosts support checkout and push. See [forge setup](../guides/forge-delivery.md).
 
-**Breaking change:** in-place local delivery commits on the checked-out branch and pushes the
-remote branch of the same name, including existing unpushed commits. It creates no managed run
-branch. PR/MR targets use a different upstream branch, otherwise the remote's default branch.
-`--pr` and `--ship` refuse to start on that target; use a feature branch or `--worktree`.
-Explicit `--push` can publish any checked-out branch, including `main`. Non-fast-forward pushes
-and forge policy refusals stop delivery without asking agents to repair them.
+In-place local delivery commits on the checked-out branch and pushes to the remote branch with the
+same name, including any existing unpushed commits. `--pr` and `--ship` target a different upstream
+branch when configured, or the remote's default branch. If you're on the target branch, start from
+a feature branch or use `--worktree`. Explicit `--push` can publish any checked-out branch,
+including `main`. Non-fast-forward pushes and forge policy refusals stop delivery before an agent
+repair round.
 
 `--worktree` selects a separate retained worktree on a managed run branch. It starts at local HEAD,
 including committed unpushed work. `--worktree-base remote` fetches the invoking branch's upstream;

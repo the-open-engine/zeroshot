@@ -1,8 +1,9 @@
+use openengine_cluster_protocol::DeclaredConnections;
 use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_protocol::{
-    ConnectionKey, EnvironmentVariableName, GraphProfile, MAX_MODEL_CONTEXT_WINDOW,
-    MAX_MODEL_MAX_TOKENS, ModelId, NodeRuntimeBinding, PullRequestFeedback,
-    RunConnectionRequirements, RunTitle, SessionScope,
+    ActiveMemoryConfig, GlobalAgentsConfig, NodeName, ConnectionKey, EnvironmentVariableName,
+    GraphProfile, MAX_MODEL_CONTEXT_WINDOW, MAX_MODEL_MAX_TOKENS, ModelId, NodeRuntimeBinding,
+    PullRequestFeedback, RunConnectionRequirements, RunTitle, SessionScope,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -144,12 +145,7 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         ("copilot", "foundry", false),
         ("pi", "unregistered-provider", false),
     ] {
-        let runtime = uniform(harness, provider)
-            .into_runtime_plan(
-                openengine_cluster_protocol::HarnessId::new(harness).assert_value(),
-                BTreeMap::new(),
-            )
-            .assert_value();
+        let runtime = uniform(harness, provider).into_runtime_plan(BTreeMap::new());
         assert_eq!(
             crate::harnesses::HarnessRegistry::local()
                 .validate_runtime(&runtime)
@@ -184,11 +180,10 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         insert_template_binding(
             &mut invalid,
             delivery_name,
-            git_delivery_binding(
-                PullRequestFeedback::Consider,
-                crate::native_v2_delivery::DeliveryMode::PullRequestV2
-            )
-            .assert_value(),
+            NodeRuntimeBinding::GitDelivery {
+                connections: DeclaredConnections::empty(),
+                pull_request_feedback: PullRequestFeedback::Consider
+            },
             false,
         )
         .assert_error()
@@ -429,13 +424,14 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
         serde_json::json!({
             "harness":"codex",
             "provider":"openai",
-            "size":"small",
+            "size":"host",
             "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
         })
         .to_string(),
     )
     .assert_value();
     let run = RunCommand {
+        controller: Default::default(),
         cwd: None,
         worktree: None,
         source_connection: None,
@@ -732,6 +728,7 @@ fn connection_selection_keeps_present_utf8_fields_and_rejects_non_utf8_values() 
 
 fn intent_command(selection: RunSelection) -> RunCommand {
     RunCommand {
+        controller: Default::default(),
         environment: None,
         target: None,
         cwd: None,
@@ -806,16 +803,14 @@ fn template_binding_insertion_owns_comment_and_git_delivery_nodes() {
     );
     let delivery = openengine_cluster_protocol::NodeName::new("delivery").assert_value();
     let comment = openengine_cluster_protocol::NodeName::new("comment").assert_value();
-    let push = git_delivery_binding(
-        PullRequestFeedback::Consider,
-        crate::native_v2_delivery::DeliveryMode::Push,
-    )
-    .assert_value();
-    let merge = git_delivery_binding(
-        PullRequestFeedback::Consider,
-        crate::native_v2_delivery::DeliveryMode::MergeV3,
-    )
-    .assert_value();
+    let push = NodeRuntimeBinding::GitDelivery {
+        connections: DeclaredConnections::empty(),
+        pull_request_feedback: PullRequestFeedback::Consider,
+    };
+    let merge = NodeRuntimeBinding::GitDelivery {
+        connections: DeclaredConnections::empty(),
+        pull_request_feedback: PullRequestFeedback::Consider,
+    };
     let comment_binding = NodeRuntimeBinding::CommentDelivery {
         connections: DeclaredConnections::default(),
     };
@@ -871,11 +866,10 @@ fn template_binding_insertion_owns_comment_and_git_delivery_nodes() {
         insert_template_binding(
             &mut runtime,
             comment,
-            git_delivery_binding(
-                PullRequestFeedback::Consider,
-                crate::native_v2_delivery::DeliveryMode::MergeV3,
-            )
-            .assert_value(),
+            NodeRuntimeBinding::GitDelivery {
+                connections: DeclaredConnections::empty(),
+                pull_request_feedback: PullRequestFeedback::Consider
+            },
             false,
         )
         .assert_error()
@@ -910,6 +904,7 @@ fn named_comment_request(url: &str) -> (RunCommand, PreparedRunRequest) {
         panic!("run command")
     };
     let request = PreparedRunRequest {
+        context_sources: Vec::new(),
         run_id: openengine_cluster_protocol::RunId::new("source-less-comment"),
         intent: TargetRunIntent {
             title: run.title.clone(),
@@ -1098,4 +1093,22 @@ fn branch_tip_lookup_reads_the_shell_token_without_sending_it() {
         branch_tip_lookup_token(&run, &request, &shell).assert_value(),
         None
     );
+    request.intent.environment = Some(
+        serde_json::from_value(serde_json::json!({
+            "contextRepositories": [{"repository":"team/library"}]
+        }))
+        .assert_value(),
+    );
+    request.source = Some(crate::native_v2_cli::NamedRunSource {
+        resolved: openengine_cluster_testkit::native_v2_source_fixture(),
+        dirty: false,
+    });
+    assert_eq!(
+        branch_tip_lookup_token(&run, &request, &shell)
+            .assert_value()
+            .as_deref(),
+        Some("shell-token"),
+        "context branches still need lookup authority when the primary source is pinned"
+    );
+    assert_eq!(request.github_token, None);
 }

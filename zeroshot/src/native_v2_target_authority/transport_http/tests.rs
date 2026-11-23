@@ -1,4 +1,4 @@
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde::ser::Error as _;
 use tokio::io::AsyncWriteExt as _;
 
@@ -62,6 +62,60 @@ fn invalid_public_diagnostic_fails_closed_without_an_empty_body() {
     let problem = decode_problem(response);
     assert_eq!(problem.code(), TARGET_INTERNAL_ERROR_CODE);
     assert_eq!(problem.message(), "target request failed");
+}
+
+#[test]
+fn unavailable_run_size_remains_a_rejection_with_large_catalogs_and_unicode_ids() {
+    use openengine_cluster_protocol::{
+        RunSize, RunSizeDescriptor, RuntimePlan, TargetRunSizesDiscovery,
+    };
+
+    for (count, padding, requested) in [
+        (128, String::new(), "not-offered".to_owned()),
+        (128, "x".repeat(120), "z".repeat(128)),
+        (128, "🦀".repeat(120), "🐳".repeat(128)),
+        (1, "🦀".repeat(120), "🐳".repeat(128)),
+        (1, "🦀".repeat(108), "🐳".repeat(128)),
+    ] {
+        let sizes = (0..count)
+            .map(|index| {
+                RunSizeDescriptor::new(
+                    RunSize::new(format!("size-{index:03}{padding}")).assert_value(),
+                    "Target-owned resources",
+                )
+                .assert_value()
+            })
+            .collect::<Vec<_>>();
+        let catalog = TargetRunSizesDiscovery::new(Some(sizes[0].id.clone()), sizes).assert_value();
+        let mut runtime: RuntimePlan = serde_json::from_value(serde_json::json!({
+            "harness": "codex", "provider": "openai", "nodes": {}, "size": requested,
+        }))
+        .assert_value();
+        let original = runtime.clone();
+        let diagnostic = crate::native_v2_admission::resolve_runtime_size(&mut runtime, &catalog)
+            .assert_error()
+            .to_string();
+        let response = run_error_response(TargetAuthorityError::invalid(diagnostic.clone()));
+        assert_eq!(response.status, 400);
+        let problem = decode_problem(response);
+        assert_eq!(problem.code(), TARGET_RUN_REJECTED_CODE);
+        assert_eq!(problem.message(), diagnostic);
+        assert!(diagnostic.contains(&format!("run size {requested}; supported sizes: ")));
+        let listed = catalog
+            .sizes
+            .iter()
+            .filter(|size| diagnostic.contains(size.id.as_str()))
+            .count();
+        if listed < count {
+            assert!(diagnostic.ends_with(&format!("... ({} more)", count - listed)));
+        } else {
+            assert_eq!(
+                diagnostic.len(),
+                openengine_cluster_protocol::MAX_TARGET_HTTP_PROBLEM_MESSAGE_BYTES
+            );
+        }
+        assert_eq!(runtime, original);
+    }
 }
 
 #[test]

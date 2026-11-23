@@ -20,7 +20,7 @@ pub(crate) fn safe_provider_text(text: &str, redactions: &[String]) -> String {
     redact_stderr_boundary(redacted, &ordered).replace('\0', "\u{fffd}")
 }
 
-fn redact_stderr_boundary(mut text: String, redactions: &[&str]) -> String {
+pub(crate) fn redact_stderr_boundary(mut text: String, redactions: &[&str]) -> String {
     let boundaries = text
         .match_indices(TRUNCATED_STDERR_DETAIL_PREFIX)
         .map(|(index, _)| index + TRUNCATED_STDERR_DETAIL_PREFIX.len())

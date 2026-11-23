@@ -2,6 +2,9 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use openengine_cluster_testkit::fixture::TemporaryDirectory;
 
 use super::*;
+
+#[path = "policy_read_tests.rs"]
+mod policy_read_tests;
 use crate::source_code_provider::adapters::core::ci_diagnostics::{
     MAX_FAILURE_FEEDBACK_CHARS, MAX_JOB_LOG_TAIL_BYTES, include_job_logs,
 };

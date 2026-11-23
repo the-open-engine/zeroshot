@@ -30,14 +30,14 @@ const RUN: (&str, &str) = ("POST", "/native-v2/run");
 const PROFILE_SET: (&str, &str) = ("POST", "/native-v2/profiles/set");
 const RUN_RECEIPT: &str = r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#;
 
-struct RecordingTarget {
-    origin: String,
+pub(super) struct RecordingTarget {
+    pub(super) origin: String,
     requests: Arc<Mutex<Vec<CapturedHttpRequest>>>,
     server: tokio::task::JoinHandle<()>,
 }
 
 impl RecordingTarget {
-    async fn spawn<F>(respond: F) -> Self
+    pub(super) async fn spawn<F>(respond: F) -> Self
     where
         F: Fn(&CapturedHttpRequest, &str, &mut u8) -> (&'static str, String) + Send + 'static,
     {
@@ -62,7 +62,7 @@ impl RecordingTarget {
         }
     }
 
-    fn stop(self) -> Vec<CapturedHttpRequest> {
+    pub(super) fn stop(self) -> Vec<CapturedHttpRequest> {
         self.server.abort();
         std::mem::take(&mut *self.requests.lock().assert_value())
     }
@@ -280,6 +280,98 @@ fn run_request(worker: Value) -> TargetRunRequest {
         serde_json::from_value(worker).assert_value(),
     );
     request
+}
+
+#[tokio::test]
+async fn checkpoint_opt_out_gates_real_run_and_profile_requests_before_tokens_or_bodies() {
+    use openengine_cluster_protocol::WORKSPACE_CHECKPOINT_OPT_OUT_KIND;
+    for hosted in [false, true] {
+        for marker in [
+            None,
+            Some("openengine.workspace-checkpoint-opt-out/v2"),
+            Some(WORKSPACE_CHECKPOINT_OPT_OUT_KIND),
+        ] {
+            for profile in [false, true] {
+                if profile && !hosted {
+                    continue; // Direct targets do not provide profile management.
+                }
+                let root = temp_root();
+                let server = RecordingTarget::spawn(move |request, origin, tokens| {
+                    if (request.method.as_str(), request.path.as_str()) == DISCOVERY {
+                        let mut document = if hosted {
+                            hosted_document(origin)
+                        } else {
+                            serde_json::to_value(
+                                TargetDiscoveryDocument::direct(TargetAuthentication::None)
+                                    .with_workspace_checkpoints()
+                                    .with_workspace_recovery(),
+                            )
+                            .assert_value()
+                        };
+                        if let Some(kind) = marker {
+                            document["extensions"]["workspace_checkpoint_opt_out"] =
+                                json!({"kind": kind});
+                        }
+                        return ("200 OK", document.to_string());
+                    }
+                    hosted_response(request, origin, tokens, false)
+                })
+                .await;
+                let (record, authority) = if hosted {
+                    authenticated_authority(&root, &server.origin).await
+                } else {
+                    (
+                        direct_target(server.origin.clone()),
+                        test_http_authority(root.path("locks")),
+                    )
+                };
+                let result = if profile {
+                    let mut request = profile_request(lane_free_binding());
+                    request.runtime.workspace_checkpoints = false;
+                    authority.profile_set(&record, request).await.map(|stored| {
+                        assert!(!stored.profile.runtime.workspace_checkpoints);
+                    })
+                } else {
+                    let mut request = run_request(lane_free_binding());
+                    request.submission.runtime.workspace_checkpoints = false;
+                    authority.submit(&record, &request).await.map(|_| ())
+                };
+                let requests = server.stop();
+                if marker == Some(WORKSPACE_CHECKPOINT_OPT_OUT_KIND) {
+                    result.assert_value();
+                    let sent = requests.last().assert_value();
+                    let body: Value = serde_json::from_str(&sent.body).assert_value();
+                    assert_eq!(
+                        body.pointer(if profile {
+                            "/runtime/workspaceCheckpoints"
+                        } else {
+                            "/submission/runtime/workspaceCheckpoints"
+                        }),
+                        Some(&json!(false))
+                    );
+                    assert_eq!(
+                        (sent.method.as_str(), sent.path.as_str()),
+                        if profile { PROFILE_SET } else { RUN }
+                    );
+                } else {
+                    assert!(
+                        result
+                            .assert_error()
+                            .to_string()
+                            .contains("does not support disabling workspace checkpoints")
+                    );
+                    assert_eq!(
+                        routes(&requests),
+                        if hosted {
+                            vec![DISCOVERY, OAUTH_METADATA]
+                        } else {
+                            vec![DISCOVERY]
+                        }
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn profile_request(worker: Value) -> RunProfileSetRequest {
@@ -558,6 +650,7 @@ async fn old_hosted_target_refuses_profile_git_source_and_resume_credentials_bef
         hosted_authority_with(HostedCapability::Git(None)).await;
     let request = generic_git_request(true, false);
     let profile = openengine_cluster_protocol::RunProfileRunRequest {
+        context_sources: Vec::new(),
         run_id: request.run_id,
         profile: openengine_cluster_protocol::RunProfileSelector {
             scope: RunProfileScope::User,

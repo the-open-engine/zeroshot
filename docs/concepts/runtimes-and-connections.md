@@ -41,7 +41,6 @@ built-in template configuration short:
   "harness": "claude",
   "provider": "anthropic",
   "model": "PROVIDER_MODEL_ID",
-  "size": "medium",
   "effort": "high",
   "sessionScope": "execution"
 }

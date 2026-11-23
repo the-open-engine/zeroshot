@@ -112,12 +112,7 @@ fn access(provider: &str) -> Result<ProviderAccessContract, HarnessError> {
                 &["AWS_PROFILE", "AWS_REGION"],
             ],
         )),
-        "gateway" => Ok(ProviderAccessContract::new(
-            false,
-            "gateway",
-            &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"],
-            &[&["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"]],
-        )),
+        "gateway" => Ok(ProviderAccessContract::selectable_gateway()),
         _ => Err(HarnessError::Configuration(
             "Hermes provider is unsupported".to_owned(),
         )),

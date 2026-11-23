@@ -27,6 +27,8 @@ mod lost_submission_reply;
 mod machine;
 #[path = "hosted_authority/problem_errors.rs"]
 mod problem_errors;
+#[path = "hosted_authority/profile_imports.rs"]
+mod profile_imports;
 #[path = "hosted_authority/runtime_lanes.rs"]
 mod runtime_lanes;
 #[path = "hosted_authority/stacks.rs"]
@@ -309,7 +311,7 @@ fn controller_response(
 
 fn hosted_discovery(origin: &str) -> String {
     json!({
-        "kind": "zeroshot.native-v2-target/v2",
+        "kind": "zeroshot.native-v2-target/v3",
         "authentication": "hosted_oauth",
         "runPath": "/native-v2/run",
         "sessionPath": "/native-v2/oecp-session",
@@ -351,7 +353,7 @@ fn hosted_discovery(origin: &str) -> String {
                 }
             },
             "hosted_runs": {
-                "kind": "zeroshot.hosted-runs/v1",
+                "kind": "zeroshot.hosted-runs/v2",
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
             },
@@ -642,3 +644,6 @@ impl TargetCredentialStore for RotatingCredentialStore {
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+#[path = "hosted_authority/wire_contract.rs"]
+mod wire_contract;

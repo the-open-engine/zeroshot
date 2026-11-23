@@ -185,7 +185,7 @@ async fn restore_after_restic_move_probe() {
             assert_eq!(seed.len(), usize::from(selected));
             if selected {
                 assert_eq!(seed[0].execution.get(), 1);
-                let conversations = restore_checkpoint_conversations(&selection, None)
+                let conversations = restore_checkpoint_conversations(&selection, None, &[])
                     .await
                     .assert_value();
                 assert_eq!(

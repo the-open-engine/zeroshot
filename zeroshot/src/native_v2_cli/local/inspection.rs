@@ -21,15 +21,41 @@ impl LocalCliBackend {
         &self,
         id: &RunId,
     ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
-        let paths = self.existing_run_paths(id)?;
-        let directory =
-            crate::execution::platform::open_directory(paths.storage()).map_err(local_io)?;
+        let (paths, directory) = self.recorded_directory(id)?;
         if !require_existing_ledger(&paths.ledger()).map_err(local_io)? {
             return Err(NativeV2CliError::RunNotFound {
                 run_id: id.as_str().to_owned(),
             });
         }
         Ok((paths, directory))
+    }
+
+    fn recorded_directory(
+        &self,
+        id: &RunId,
+    ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
+        let paths = self.existing_run_paths(id)?;
+        let directory =
+            crate::execution::platform::open_directory(paths.storage()).map_err(local_io)?;
+        Ok((paths, directory))
+    }
+
+    pub(super) fn report_runtime_failure(&self, id: &RunId) {
+        // Validate and retain the same directory boundary as ledger inspection, but do not
+        // require a readable ledger to report why the controller failed.
+        let Ok((paths, _directory)) = self.recorded_directory(id) else {
+            return;
+        };
+        if let Some(report) =
+            crate::native_v2_portable_controller::process::read_runtime_failure(&paths)
+        {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr(),
+                "zeroshot: run {} controller failure: {report}",
+                id.as_str()
+            );
+        }
     }
 
     // Control fast paths require a durable terminal, not a live runtime-failure projection.

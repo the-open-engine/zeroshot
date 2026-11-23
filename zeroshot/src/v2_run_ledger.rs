@@ -28,6 +28,10 @@ pub mod fake;
 pub mod sqlite;
 #[path = "v2_run_ledger/state.rs"]
 mod state;
+#[path = "v2_run_ledger/storage_failure.rs"]
+mod storage_failure;
+
+pub use storage_failure::SqliteStorageError;
 
 pub(crate) use state::validate_admitted_run;
 pub(crate) use state::{
@@ -110,6 +114,8 @@ pub struct RunSnapshot {
     pub title: RunTitle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_sources: Vec<ResolvedSource>,
     pub size: RunSize,
     pub cursor: Cursor,
     pub phase: RunPhase,
@@ -181,23 +187,27 @@ impl RunSnapshot {
             .size()
             .cloned()
             .ok_or(RunLedgerError::Corrupt)?;
-        Ok(Self::empty(
+        let mut snapshot = Self::empty(
             run_id,
             admitted.title.clone(),
             admitted.source.clone(),
             size,
-        ))
+        );
+        snapshot.context_sources = admitted.context_sources.clone();
+        Ok(snapshot)
     }
 
     /// Returns immutable metadata and the empty projection used to replay durable events.
     #[must_use]
     pub fn replay_seed(&self) -> Self {
-        Self::empty(
+        let mut snapshot = Self::empty(
             self.run_id.clone(),
             self.title.clone(),
             self.source.clone(),
             self.size.clone(),
-        )
+        );
+        snapshot.context_sources = self.context_sources.clone();
+        snapshot
     }
 
     fn empty(
@@ -210,6 +220,7 @@ impl RunSnapshot {
             run_id,
             title,
             source,
+            context_sources: Vec::new(),
             size,
             cursor: initial_cursor(),
             phase: RunPhase::Admitted,
@@ -493,6 +504,8 @@ pub struct RunSummary {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_sources: Vec<ResolvedSource>,
     pub size: RunSize,
     pub cursor: Cursor,
     pub phase: RunPhase,
@@ -510,6 +523,7 @@ impl From<&RunSnapshot> for RunSummary {
             run_id: snapshot.run_id.clone(),
             title: snapshot.title.clone(),
             source: snapshot.source.clone(),
+            context_sources: snapshot.context_sources.clone(),
             size: snapshot.size.clone(),
             cursor: snapshot.cursor.clone(),
             phase: snapshot.phase.clone(),
@@ -564,7 +578,7 @@ pub enum RunLedgerError {
     #[error("run ledger storage is unavailable")]
     Storage,
     #[error("run ledger SQLite storage failed: {0}")]
-    SqliteStorage(rusqlite::ffi::Error),
+    SqliteStorage(SqliteStorageError),
     #[error("run ledger storage is corrupt")]
     Corrupt,
 }

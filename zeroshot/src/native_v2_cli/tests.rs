@@ -34,6 +34,8 @@ mod management_tests;
 mod outcome_tests;
 #[path = "tests/parser.rs"]
 mod parser_tests;
+#[path = "tests/resume_runtime.rs"]
+mod resume_runtime_tests;
 #[path = "tests/review.rs"]
 mod review_tests;
 
@@ -437,6 +439,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
             .is_err()
     );
     let resume = RunResumeParams {
+        runtime: None,
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
@@ -462,6 +465,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
     );
 
     let request = PreparedRunRequest {
+        context_sources: Vec::new(),
         git_credentials: None,
 
         cwd: None,
@@ -956,5 +960,23 @@ async fn logs_attach_and_force_use_the_run_scoped_methods() {
                 run_id: "run-1".to_owned(),
             },
         ]
+    );
+}
+
+#[tokio::test]
+async fn status_json_retains_pinned_context_sources_beside_source() {
+    let pin = openengine_cluster_testkit::native_v2_source_fixture();
+    let backend = FakeBackend::default().with_context_sources(vec![pin.clone()]);
+    let command =
+        parse_native_v2_args(args(&["status", "run-8", "--target", "prod"])).assert_value();
+    let mut output = Vec::new();
+    execute_native_v2_cli(command, &backend, &mut NeverDetach, &mut output)
+        .await
+        .assert_value();
+    let value: Value = serde_json::from_slice(&output).assert_value();
+    assert_eq!(value["source"], source());
+    assert_eq!(
+        value["contextSources"],
+        serde_json::to_value(vec![pin]).assert_value()
     );
 }

@@ -98,9 +98,9 @@ Unset the variable to restore automatic installation and refresh of unchanged ma
 
 ## Windows paths
 
-On Windows, the CLI and local in-process runs work natively from PowerShell or Command Prompt.
-Install Git for Windows and put Git and your chosen harness on `PATH`; npm-installed `.cmd`
-launchers are supported. Local configuration defaults to `%LOCALAPPDATA%\zeroshot` and run state
+The CLI and its local run controller work natively on Windows. From PowerShell or Command Prompt,
+put your chosen harness on `PATH`; npm-installed `.cmd` launchers are supported. Install Git for
+Windows for Git checkout or delivery. Local configuration defaults to `%LOCALAPPDATA%\zeroshot` and run state
 to `%LOCALAPPDATA%\zeroshot\state`. `ZEROSHOT_CONFIG_DIR` and `ZEROSHOT_STATE_DIR` can override
 these with absolute paths. The hosted target image requires Linux.
 

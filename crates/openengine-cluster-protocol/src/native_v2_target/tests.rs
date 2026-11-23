@@ -727,7 +727,7 @@ fn hosted_run_controls_leave_the_strict_v1_routes_unchanged() {
     });
     let value = serde_json::json!({
         "hosted_runs":{
-            "kind":"zeroshot.hosted-runs/v1", "base_url":"https://target.example",
+            "kind":"zeroshot.hosted-runs/v2", "base_url":"https://target.example",
             "route_templates":routes
         },
         "hosted_run_controls":controls

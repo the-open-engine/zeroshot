@@ -6,6 +6,23 @@ description: 'Target discovery, local harness configuration, permissions and wor
 
 [Targets](../concepts/targets.md) covers choosing and connecting a target.
 
+## Wire compatibility
+
+Clients and targets must implement the same current wire contract. OECP initialization requires
+`openengine.cluster/v2`; target discovery requires `zeroshot.native-v2-target/v3`; hosted run
+observation requires `zeroshot.hosted-runs/v2`. These are wire identifiers, independent of package
+versions. The discovery URL, HTTP routes and JSON-RPC method names are unchanged.
+
+An incompatible client or target stops at discovery or initialization, before submitting or
+observing a run. Upgrade the Zeroshot client and target together to releases implementing these
+identifiers. Hosted gateway operators must update the gateway's discovery and protocol dependencies
+as part of the same rollout. An incompatibility is final for that operation: submissions are not
+automatically retried. Existing runs keep executing and compatible clients can observe them.
+
+Active execution `startedAt` and watch notification `recordedAt` are Unix
+milliseconds when known. Python users upgrade the native client by upgrading the
+`the-open-engine-zeroshot` wheel.
+
 ## Discovery and sizes
 
 Targets advertise their enabled harness/provider pairs through the
@@ -47,6 +64,113 @@ independently of their harness/provider lanes; zeroshot defines no AWS shapes or
 Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See [Harness adapters](../project/harness-adapters.md) for availability and
 provider support.
+
+## Saved-profile imports
+
+A host that expands saved-profile dependencies during its existing profile-run operation may
+advertise this independent optional discovery extension:
+
+```json
+{
+  "saved_profile_imports": {
+    "kind": "openengine.saved-profile-imports/v1"
+  }
+}
+```
+
+The marker contains only `kind`. Its absence or a different kind keeps imported saved profiles
+unsupported by the CLI. It adds no routes and changes no compatibility versions, profile
+selectors, authentication or submission identities. The CLI fetches the selected parent's preview,
+checks this capability, then sends the existing `RunProfileRunRequest` with its `profile` selector.
+It never fetches child profiles or sends expanded bodies. Profiles without imports keep their
+existing behavior. Authored inline graphs and local profiles with imports still require local
+execution. `--validate-only` refuses remote imports because complete validation requires host
+admission; it does not report an unresolved dependency graph as valid.
+
+Hosts use `zeroshot_engine::native_v2_admission::profile_expansion::{expand_profile_imports,
+ProfileExpansionError}`. The typed function takes the authored parent `GraphSpec`, `RuntimePlan`,
+its optional root `RunProfileName` (supply it for a saved parent), and a synchronous read-only
+catalog lookup. For example, with a host-owned `BTreeMap<RunProfileName, (GraphSpec, RuntimePlan)>`:
+
+```rust
+let (graph, runtime) = expand_profile_imports(
+    parent_graph,
+    parent_runtime,
+    Some(&parent_name),
+    |name| Ok(catalog.get(name).cloned()),
+)?;
+```
+
+Resolve and authorize the parent selector and every dependency from **one immutable snapshot** in
+the parent's scope. Unqualified same-scope names are sufficient; storage and authorization remain
+host responsibilities. Do not assemble a catalog from successive mutable remote reads or accept
+client-supplied `body`/`initialInput` expansions. The helper rejects supplied expansions, missing
+profiles, cycles, incompatible child policies and expanded node/depth/import-byte limits. It
+preserves input bindings and child schemas, qualifies node/control/worker/network identities
+deterministically, and materializes each agent's effective lane relative to the parent runtime.
+The local profile store uses this same linker while preserving its raw stored-byte limit.
+
+After expansion, apply the host's usual provider-access materialization, runtime catalog, connection
+selection, graph/input verification, delivery policy and admitted-definition byte limit before
+allocating a run. Persist the expanded graph and runtime as the admitted/recovery definition; retain
+authored references in profile storage and editors. The helper does not perform admission or grant
+authority. Advertise the marker only when the profile-run handler follows this contract, including
+when callers bypass the CLI. Existing MCP tool definitions and shared skills need no changes;
+hosted services adopt the helper and capability with their native dependency update.
+
+## Hosted workspace checkpoint opt-out
+
+`RuntimePlan.workspaceCheckpoints` defaults to `true`. A compatible named target may explicitly
+allow `false` per run with this independent discovery extension:
+
+```json
+{
+  "workspace_checkpoint_opt_out": {
+    "kind": "openengine.workspace-checkpoint-opt-out/v1"
+  }
+}
+```
+
+The strict marker contains only `kind`. It does not change `openengine.workspace-checkpoints/v1`,
+recovery routes, wire versions or authentication. Missing or different versions retain refusal.
+New CLI clients check it before resolving access tokens or sending run/profile bodies; an older
+client still refuses opt-out. The Python SDK forwards `UniformRuntime.workspace_checkpoints=False` or an exact runtime
+containing `workspaceCheckpoints: false` through its bundled CLI and therefore needs the matching upgraded CLI too.
+
+Host integration uses these Rust APIs:
+
+- Set `ProductionHostingConfig.workspace_checkpoint_opt_out = true` **and** install
+  `workspace_storage: Some(Arc<dyn HostedWorkspaceStorage>)`. Both are required; defaults and
+  `zeroshot target serve` continue to require checkpoints. The production factory installs trusted
+  admission policy and advertises the marker. Gate any public hosted gateway's advertisement and
+  admission on the same host policy, using `TargetDiscoveryDocument::with_workspace_checkpoint_opt_out()`.
+- For host-owned profile validation, set
+  `NativeV2AdmissionContext.hosted_workspace_checkpoint_opt_out = Some(enabled)` and use
+  `NativeV2Admission::validate_profile_with_context`. Production run admission applies that policy
+  independently, even when a client bypasses discovery. `None` retains local admission semantics.
+- `HostedWorkspaceStorage::prepare` receives the admitted boolean as
+  `HostedWorkspaceRequest.workspace_checkpoints`. When false, skip workspace restore/snapshot
+  preparation and return a host-owned `RunCheckpointStore` that retains metadata without copying
+  workspace bytes. The existing lifecycle still calls `enter` at engine boundaries, `finish` on
+  failure, and `discard` after success. Preserve durable execution/final histories, output, comment
+  publications and delivery receipts independently, including after `discard`. Conversation capture
+  is skipped by the supervisor. Do not couple final history publication to a workspace backup.
+- For the template catalog (Cargo feature `workspace`), use
+  `workspace::catalog_with_checkpoint_policy(&harnesses, enabled)`. True preserves code-review's
+  supplied `workspaceCheckpoints: false`; existing `catalog()` and `catalog_with_harnesses()` keep
+  checkpoint defaults enabled for legacy consumers. `profile_setup[_with_harnesses]` preserves
+  the selected setting while materializing contained provider access.
+
+Opted-out hosted graphs reject every request or wait node, including nested groups and expanded
+profile imports, even on an unreachable authored path. These nodes can require persisted
+continuations or suspension. Manual suspension and recovery are also refused for such runs.
+In-run conversation reuse still works, but conversations cannot be restored across runs without
+snapshots. Ordinary history, outputs, usage and logs remain available.
+Local checkpoint opt-out, restart on the retained checkout and explicit discard continuations
+retain their existing behavior.
+
+Use matching release versions of the runtime and protocol crates, target and gateway, and CLI and
+Python clients. Advertise opt-out only when admission, storage and catalog policy agree.
 
 ## Local workspace and authentication
 
@@ -242,7 +366,7 @@ outer discovery extension alongside the existing `hosted_runs` extension:
 
 `TargetWorkspaceExportDiscovery` is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
-`zeroshot.hosted-runs/v1` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
+`zeroshot.hosted-runs/v2` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
 kind above; an absent or unfamiliar kind disables it without a fallback operation.
 
 The route uses the same-origin `hosted_runs.base_url`, including any installation path prefix,

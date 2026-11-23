@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
@@ -57,6 +57,9 @@ impl CheckpointError {
 /// Delivery receipt retention is independent of workspace capture and graph history.
 #[async_trait]
 pub trait RunCheckpointStore: Send + Sync {
+    /// Attach the owning supervisor's existing run-log sink, when this store captures workspaces.
+    fn set_run_log(&self, _run_id: RunId, _ledger: Arc<dyn crate::v2_run_ledger::RunLedger>) {}
+
     /// Optional private checkpoint payload. Save these files alongside the next workspace
     /// snapshot, outside the exported workspace tree. Older hosts may omit them.
     async fn retain_conversations(
@@ -334,6 +337,10 @@ struct CaptureState {
 
 /// Deduplicated local and direct-target storage backed by one Restic recovery-lineage repository.
 pub struct ResticCheckpointStore {
+    run_log: OnceLock<(RunId, Arc<dyn crate::v2_run_ledger::RunLedger>)>,
+    redactions: Vec<String>,
+    #[cfg(test)]
+    restic_deadline: Option<Instant>,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
     directory: PathBuf,
     repository: PathBuf,
@@ -409,6 +416,10 @@ impl ResticCheckpointStore {
             restic::ResticProgram::fake(&repository)
         });
         Ok(Self {
+            run_log: OnceLock::new(),
+            redactions: Vec::new(),
+            #[cfg(test)]
+            restic_deadline: None,
             conversations: Mutex::new(None),
             conversation_restore: None,
             stopping: None,
@@ -425,6 +436,9 @@ impl ResticCheckpointStore {
     #[cfg(test)]
     pub(crate) fn with_program(config: ResticCheckpointStoreTestConfig) -> Self {
         Self {
+            run_log: OnceLock::new(),
+            redactions: Vec::new(),
+            restic_deadline: None,
             conversations: Mutex::new(None),
             conversation_restore: None,
             stopping: None,
@@ -444,11 +458,23 @@ impl ResticCheckpointStore {
         self
     }
 
+    /// The controller's environment may be cleared; credentials stay in its private bootstrap.
+    pub(crate) fn with_redactions(mut self, redactions: Vec<String>) -> Self {
+        self.redactions = redactions;
+        self
+    }
+
     pub(crate) fn with_stop_request(
         mut self,
         stopping: Option<tokio::sync::watch::Receiver<bool>>,
     ) -> Self {
         self.stopping = stopping;
+        self
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) fn with_restic_deadline(mut self, deadline: Instant) -> Self {
+        self.restic_deadline = Some(deadline);
         self
     }
 
@@ -476,6 +502,7 @@ impl ResticCheckpointStore {
                 return Ok(snapshot.clone());
             }
         }
+        self.log_capture(false).await;
         if !state.initialized {
             self.prepare_storage().await?;
             state.initialized = true;
@@ -532,7 +559,17 @@ impl ResticCheckpointStore {
         state.snapshot = Some(snapshot.clone());
         state.restic_snapshot = Some(restic_snapshot);
         state.last_writer = last_writer;
+        self.log_capture(true).await;
         Ok(snapshot)
+    }
+
+    async fn log_capture(&self, completed: bool) {
+        if let Some((run_id, ledger)) = self.run_log.get()
+            && let Ok(event) = super::logging::checkpoint_capture_log(completed)
+        {
+            // Milestones have no authority over checkpoint publication or cancellation.
+            let _ = ledger.append(run_id, vec![event]).await;
+        }
     }
 
     async fn prepare_storage(&self) -> Result<(), CheckpointError> {
@@ -548,8 +585,15 @@ impl ResticCheckpointStore {
     }
 
     fn restic(&self) -> restic::Repository {
-        restic::Repository::new(self.program.clone(), self.repository.clone())
-            .with_stop_request(self.stopping.clone())
+        let repository = restic::Repository::new(self.program.clone(), self.repository.clone())
+            .with_redactions(self.redactions.clone())
+            .with_stop_request(self.stopping.clone());
+        #[cfg(test)]
+        let repository = match self.restic_deadline {
+            Some(deadline) => repository.with_deadline(deadline),
+            None => repository,
+        };
+        repository
     }
 }
 
@@ -570,6 +614,10 @@ fn publish_storage_configuration(
 
 #[async_trait]
 impl RunCheckpointStore for ResticCheckpointStore {
+    fn set_run_log(&self, run_id: RunId, ledger: Arc<dyn crate::v2_run_ledger::RunLedger>) {
+        let _ = self.run_log.set((run_id, ledger));
+    }
+
     async fn retain_conversations(
         &self,
         files: Option<ConversationFiles>,
@@ -580,7 +628,7 @@ impl RunCheckpointStore for ResticCheckpointStore {
 
     async fn restored_conversations(&self) -> Option<ConversationFiles> {
         let selection = self.conversation_restore.as_ref()?;
-        restore_checkpoint_conversations(selection, self.stopping.clone()).await
+        restore_checkpoint_conversations(selection, self.stopping.clone(), &self.redactions).await
     }
 
     async fn suspend(
@@ -776,11 +824,18 @@ pub struct RestoreAttempt<'a> {
     pub deadline: Instant,
 }
 
+#[derive(Default)]
+pub(crate) struct RestoreOptions<'a> {
+    pub(crate) attempt: Option<RestoreAttempt<'a>>,
+    pub(crate) stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    pub(crate) redactions: &'a [String],
+}
+
 pub async fn restore(
     selection: &CheckpointRestore,
     workspace: &Path,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
-    restore_with(selection, workspace, None, None).await
+    restore_with(selection, workspace, RestoreOptions::default()).await
 }
 
 /// Restores like [`restore`] within one bounded, owner-named attempt. Repeating the same pinned
@@ -790,20 +845,15 @@ pub async fn restore_attempt(
     workspace: &Path,
     attempt: RestoreAttempt<'_>,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
-    restore_with(selection, workspace, Some(attempt), None).await
-}
-
-/// The local process can stop extraction without abandoning its confirmed process cleanup.
-///
-/// With a stop request, workspace replacement runs on the blocking pool and outlives a dropped
-/// future. Await this restore to its end before cleaning up or releasing the workspace.
-pub(crate) async fn restore_attempt_until_stopped(
-    selection: &CheckpointRestore,
-    workspace: &Path,
-    attempt: RestoreAttempt<'_>,
-    stopping: Option<tokio::sync::watch::Receiver<bool>>,
-) -> Result<Vec<DurableExecution>, CheckpointError> {
-    restore_with(selection, workspace, Some(attempt), stopping).await
+    restore_with(
+        selection,
+        workspace,
+        RestoreOptions {
+            attempt: Some(attempt),
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 /// Removes the stage an interrupted attempt by `owner` left beside `workspace`, if any.
@@ -826,12 +876,18 @@ fn restore_parent(workspace: &Path) -> Result<&Path, CheckpointError> {
         .ok_or_else(|| catalog::invalid("workspace has no parent directory"))
 }
 
-async fn restore_with(
+/// With a stop request, workspace replacement runs on the blocking pool and outlives a dropped
+/// future. Await this restore to its end before cleaning up or releasing the workspace.
+pub(crate) async fn restore_with(
     selection: &CheckpointRestore,
     workspace: &Path,
-    attempt: Option<RestoreAttempt<'_>>,
-    stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    options: RestoreOptions<'_>,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
+    let RestoreOptions {
+        attempt,
+        stopping,
+        redactions,
+    } = options;
     let progress = RestoreProgress {
         started: Instant::now(),
         deadline: attempt.map(|attempt| attempt.deadline),
@@ -848,7 +904,8 @@ async fn restore_with(
         .program
         .for_restore()
         .map_err(|error| progress.failed("locating restic", error))?;
-    let repository = restic::Repository::new(program, configuration.repository);
+    let repository = restic::Repository::new(program, configuration.repository)
+        .with_redactions(redactions.to_vec());
     let repository = match progress.deadline {
         Some(deadline) => repository.with_deadline(deadline),
         None => repository,
@@ -1034,6 +1091,7 @@ fn snapshot_path(directory: &Path, snapshot: &SnapshotId) -> PathBuf {
 async fn restore_conversations(
     selection: &CheckpointRestore,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    redactions: &[String],
 ) -> Result<Option<ConversationFiles>, CheckpointError> {
     let snapshot = match selected_snapshot(selection) {
         // No pointer or catalog entry means no such checkpoint, so no conversation either.
@@ -1047,6 +1105,7 @@ async fn restore_conversations(
         configuration.program.for_restore()?,
         configuration.repository,
     )
+    .with_redactions(redactions.to_vec())
     .with_stop_request(stopping);
     let stage = tempfile::Builder::new()
         .prefix("zeroshot-checkpoint-conversations-")
@@ -1093,11 +1152,12 @@ pub(crate) fn successor_conversations(
 pub(crate) async fn restore_checkpoint_conversations(
     selection: &CheckpointRestore,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
+    redactions: &[String],
 ) -> Option<ConversationFiles> {
     if selection.selection == CheckpointRestoreSelection::Latest {
         return None;
     }
-    restore_conversations(selection, stopping)
+    restore_conversations(selection, stopping, redactions)
         .await
         .unwrap_or_else(|_| Some(ConversationFiles::unrestorable()))
 }

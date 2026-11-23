@@ -12,12 +12,18 @@ pub(super) async fn try_publish(
     let NativeV2CliCommand::Steer {
         run,
         text,
+        node,
         networks,
         mode,
     } = command
     else {
         return Ok(None);
     };
+    if node.is_some() && !networks.is_empty() {
+        return Err(NativeV2CliError::Usage(
+            "--node cannot be combined with --network".into(),
+        ));
+    }
     let capability = environment("ZEROSHOT_STEERING_CAPABILITY");
     if networks.is_empty() {
         if capability.is_some() || environment("ZEROSHOT_EXECUTION_REF").is_some() {
@@ -61,7 +67,11 @@ pub(super) async fn execute<B: super::NativeV2CliBackend>(
         result
     } else {
         let NativeV2CliCommand::Steer {
-            run, text, mode, ..
+            run,
+            text,
+            node,
+            mode,
+            ..
         } = command
         else {
             return Err(NativeV2CliError::Usage("expected a steer command".into()));
@@ -71,6 +81,7 @@ pub(super) async fn execute<B: super::NativeV2CliBackend>(
             .run_steer(
                 run.target.as_deref(),
                 openengine_cluster_protocol::RunSteerParams {
+                    node,
                     run_id: run.run_id,
                     text: read_steer_text(text)?,
                     mode,

@@ -4,6 +4,9 @@ use serde_json::json;
 
 use super::*;
 
+#[path = "tests/expansion.rs"]
+mod expansion;
+
 fn profile_request(name: &str, node: &str, set_default: bool) -> RunProfileSetRequest {
     RunProfileSetRequest {
         name: RunProfileName::new(name).assert_value(),
@@ -299,6 +302,179 @@ fn profile_store_round_trips_depth_64_graphs() {
         reopened.show(selector("nested")).assert_value();
     }
     assert!(store.delete(selector("nested")).assert_value().deleted);
+}
+
+fn importing_profile(name: &str, child: &str, sites: &[&str]) -> RunProfileSetRequest {
+    let mut request = nested_profile_request(name, 2);
+    let mut graph = serde_json::to_value(&request.graph).assert_value();
+    let mut children = sites
+        .iter()
+        .map(|site| json!({"kind": "profile", "name": site, "profile": child}))
+        .collect::<Vec<_>>();
+    children.push(json!({
+        "kind": "succeed", "name": "done", "output": {"kind": "null"}, "bindings": []
+    }));
+    graph["root"]["children"] = children.into();
+    request.graph = serde_json::from_value(graph).assert_value();
+    request
+}
+
+#[tokio::test]
+async fn profile_imports_follow_saved_edits_and_freeze_each_submission() {
+    let (_root, store) = temporary_store();
+    let mut worker = profile_request("review", "reviewer", false);
+    if let openengine_cluster_protocol::GraphNode::Step(step) = &mut worker.graph.root {
+        step.instructions = Some(
+            openengine_cluster_protocol::NodeInstructions::new("Review the workspace.")
+                .assert_value(),
+        );
+    }
+    let mut child = nested_profile_request("review", 2);
+    if let openengine_cluster_protocol::GraphNode::Seq(sequence) = &mut child.graph.root {
+        let done = sequence.children.as_slice()[0].clone();
+        sequence.children =
+            openengine_cluster_protocol::NonEmptyVec::new(vec![worker.graph.root, done])
+                .assert_value();
+    }
+    child.runtime = worker.runtime;
+    store.set(child.clone()).assert_value();
+    let parent = importing_profile("parent", "review", &["first", "second"]);
+    store.set(parent.clone()).assert_value();
+
+    let frozen = store
+        .expanded_for_run(Some(&parent.name))
+        .assert_value()
+        .assert_value();
+    let verification = crate::native_v2_admission::NativeV2Admission
+        .validate_profile(
+            &frozen.graph,
+            &frozen.runtime,
+            crate::native_v2_admission::DeliveryPolicy::Optional,
+        )
+        .await;
+    assert!(verification.is_ok(), "{verification:?}");
+    child.runtime.nodes.values_mut().for_each(|binding| {
+        if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { model, .. } = binding {
+            *model = openengine_cluster_protocol::ModelId::new("replacement-model").assert_value();
+        }
+    });
+    store.set(child).assert_value();
+    let current = store
+        .expanded_for_run(Some(&parent.name))
+        .assert_value()
+        .assert_value();
+    assert_eq!(current.graph, frozen.graph);
+    assert_ne!(current.runtime, frozen.runtime);
+    let names = frozen
+        .runtime
+        .nodes
+        .keys()
+        .map(|name| name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["first.reviewer", "second.reviewer"]);
+    assert_eq!(
+        store.show(selector("parent")).assert_value().graph,
+        parent.graph
+    );
+}
+
+#[test]
+fn nested_profile_imports_preserve_default_and_explicit_agent_lanes() {
+    use openengine_cluster_protocol::{
+        GraphNode, NodeName, NodeRuntimeBinding, NonEmptyVec, RuntimeLane,
+    };
+
+    let (_root, store) = temporary_store();
+    let mut leaf = nested_profile_request("leaf", 2);
+    let mut inherited = profile_request("leaf", "inherited", false);
+    let mut explicit = profile_request("leaf", "explicit", false);
+    let claude = RuntimeLane::new("claude", "anthropic").assert_value();
+    let run_lane = leaf.runtime.lane();
+    let matches_root = explicit
+        .runtime
+        .nodes_mut()
+        .values_mut()
+        .next()
+        .assert_value();
+    let NodeRuntimeBinding::Agent { lane, .. } = matches_root else {
+        panic!("agent")
+    };
+    *lane = Some(run_lane.clone());
+
+    let GraphNode::Seq(body) = &mut leaf.graph.root else {
+        panic!("sequence")
+    };
+    let terminal = body.children.as_slice()[0].clone();
+    body.children =
+        NonEmptyVec::new(vec![inherited.graph.root, explicit.graph.root, terminal]).assert_value();
+    leaf.runtime.harness = claude.harness.clone();
+    leaf.runtime.provider = claude.provider.clone();
+    leaf.runtime
+        .nodes_mut()
+        .append(inherited.runtime.nodes_mut());
+    leaf.runtime
+        .nodes_mut()
+        .append(explicit.runtime.nodes_mut());
+
+    let mut middle = importing_profile("middle", "leaf", &["inner"]);
+    let middle_default = RuntimeLane::new("claude", "bedrock").assert_value();
+    middle.runtime.provider = middle_default.provider;
+    middle.runtime.harness = middle_default.harness;
+    let parent = importing_profile("parent", "middle", &["outer"]);
+    store.set(leaf).assert_value();
+    store.set(middle).assert_value();
+    store.set(parent.clone()).assert_value();
+
+    let runtime = store
+        .expanded_for_run(Some(&parent.name))
+        .assert_value()
+        .assert_value()
+        .runtime;
+    let inherited = runtime.nodes()[&NodeName::new("outer.inner.inherited").assert_value()].clone();
+    let explicit = &runtime.nodes()[&NodeName::new("outer.inner.explicit").assert_value()];
+    assert_eq!(runtime.effective_lane(&inherited), Some(claude));
+    assert_eq!(runtime.effective_lane(explicit), Some(run_lane));
+    assert!(matches!(
+        explicit,
+        NodeRuntimeBinding::Agent { lane: None, .. }
+    ));
+}
+
+#[test]
+fn profile_imports_count_wrapper_and_caller_toward_the_graph_depth_limit() {
+    let (_root, store) = temporary_store();
+    let parent = importing_profile("parent", "leaf", &["call"]);
+    store.set(parent.clone()).assert_value();
+    store.set(nested_profile_request("leaf", 62)).assert_value();
+    store
+        .expanded_for_run(Some(&parent.name))
+        .assert_value()
+        .assert_value();
+
+    store.set(nested_profile_request("leaf", 63)).assert_value();
+    assert!(matches!(store.expanded_for_run(Some(&parent.name)),
+        Err(NativeV2CliError::Usage(message)) if message.contains("expanded graph exceeds the graph depth")));
+}
+
+#[test]
+fn profile_imports_reject_cycles_and_qualified_name_collisions() {
+    let (_root, store) = temporary_store();
+    let alpha = importing_profile("alpha", "beta", &["beta_site"]);
+    let beta = importing_profile("beta", "alpha", &["alpha_site"]);
+    store.set(alpha.clone()).assert_value();
+    store.set(beta).assert_value();
+    let result = store.expanded_for_run(Some(&alpha.name));
+    assert!(matches!(result, Err(NativeV2CliError::Usage(message)) if
+        message.contains("alpha → beta → alpha")));
+
+    let mut parent = importing_profile("parent", "leaf", &["child"]);
+    let mut graph = serde_json::to_value(&parent.graph).assert_value();
+    graph["root"]["children"][1]["name"] = json!("child.done");
+    parent.graph = serde_json::from_value(graph).assert_value();
+    store.set(nested_profile_request("leaf", 1)).assert_value();
+    let result = store.expand(parent.graph, parent.runtime, Some(&parent.name));
+    assert!(matches!(result, Err(NativeV2CliError::Usage(message)) if
+        message.contains("duplicate expanded node name child.done")));
 }
 
 fn temporary_store() -> (tempfile::TempDir, LocalRunProfileStore) {

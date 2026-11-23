@@ -15,21 +15,33 @@ if (process.argv.includes('--version')) {
     if (request.method === 'configRequirements/read') emit({ id: request.id, result: { requirements: null } });
   });
 } else {
-  if (process.env.CODEX_API_KEY !== 'fixture-key' || process.env.UNDECLARED_SECRET) process.exit(41);
+  if (!['fixture-key', 'fresh-fixture-key'].includes(process.env.CODEX_API_KEY) || process.env.UNDECLARED_SECRET) process.exit(41);
   const mode = process.env.FIXTURE_MODE;
+  const model = process.argv[process.argv.indexOf('--model') + 1];
+  if (process.env.RESUME_RECEIPTS) {
+    fs.appendFileSync(process.env.RESUME_RECEIPTS, JSON.stringify({
+      node: process.env.ZEROSHOT_NODE_NAME, model, args: process.argv.slice(2),
+      credential: process.env.CODEX_API_KEY
+    }) + '\n');
+  }
+  const completedStep = process.argv.includes('completed-step');
+  if (process.env.FIXTURE_RECEIPTS) fs.appendFileSync(process.env.FIXTURE_RECEIPTS, completedStep ? 'completed\n' : 'worker\n');
     if (mode === 'volume') {
       for (let i = 0; i < 256; i++) emit({ type: 'item.completed', item: {
         type: 'command_execution', command: 'fixture', aggregated_output: 'x'.repeat(16384), exit_code: 0
       } });
     }
   let inputBytes = 0;
-  process.stdin.on('data', (chunk) => { inputBytes += chunk.length; });
+  let prompt = "";
+  process.stdin.on('data', (chunk) => { inputBytes += chunk.length; prompt += chunk; });
   process.stdin.on('end', () => {
-    if (mode === 'fail') process.exit(1);
+    if (completedStep) fs.writeFileSync('completed.txt', 'retained work');
+    if (mode === 'fail' || model === 'retired-model') process.exit(1);
+    if (process.env.RESUME_RECEIPTS && process.env.ZEROSHOT_NODE_NAME === 'worker' && !prompt.includes('preserved-output')) process.exit(43);
     if (mode === 'volume' && inputBytes < 256 * 1024) process.exit(42);
     fs.writeFileSync('mutation.txt', 'native worker ran');
     emit({ type: 'thread.started', thread_id: 'portable-session' });
-    if (mode === 'block' || mode === 'block-quiet') {
+    if (!completedStep && (mode === 'block' || mode === 'block-quiet')) {
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
       fs.writeFileSync('child.pid', String(child.pid));
       if (mode === 'block-quiet') {
@@ -43,7 +55,7 @@ if (process.argv.includes('--version')) {
     const correction = mode === 'correction' && !process.argv.includes('resume');
     if (process.argv.includes('resume')) fs.writeFileSync('resumed.txt', 'same session');
     emit({ type: 'item.completed', item: {
-      type: 'agent_message', text: correction ? 'invalid-json' : JSON.stringify({ response: null })
+      type: 'agent_message', text: correction ? 'invalid-json' : JSON.stringify({ response: process.env.ZEROSHOT_NODE_NAME === 'prerequisite' ? { saved: 'preserved-output' } : null })
     } });
     process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 2 } }));
   });

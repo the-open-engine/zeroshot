@@ -271,6 +271,7 @@ async fn admitted(binding: NodeRuntimeBinding, provider: CodexProvider) -> Admit
         BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
     );
     admit(RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Codex adapter test").assert_value(),
         graph,

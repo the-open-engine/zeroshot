@@ -18,28 +18,11 @@ pub(super) fn executable_names(root: &GraphNode) -> BTreeSet<String> {
             GraphNode::Verifier(node) => {
                 names.insert(node.name.as_str().to_owned());
             }
-            GraphNode::Seq(node) => node
-                .children
-                .as_slice()
-                .iter()
-                .for_each(|child| collect(child, names)),
-            GraphNode::Choice(node) => {
-                node.branches
-                    .as_slice()
-                    .iter()
-                    .for_each(|branch| collect(&branch.node, names));
-                if let Some(otherwise) = &node.otherwise {
-                    collect(otherwise, names);
+            _ => {
+                for child in openengine_cluster_server::graph_verifier::graph_node_children(node) {
+                    collect(child, names);
                 }
             }
-            GraphNode::Par(node) => node
-                .branches
-                .as_slice()
-                .iter()
-                .for_each(|branch| collect(branch, names)),
-            GraphNode::Loop(node) => collect(&node.body, names),
-            GraphNode::Map(node) => collect(&node.body, names),
-            GraphNode::Succeed(_) | GraphNode::Fail(_) => {}
         }
     }
     let mut names = BTreeSet::new();

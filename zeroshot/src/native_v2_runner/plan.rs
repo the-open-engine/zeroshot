@@ -180,7 +180,9 @@ fn planned_verifier_role<'a>(
     NodeRunnerError,
 > {
     match binding {
-        NodeRuntimeBinding::Request {} if verifier.instructions.is_none() => {
+        NodeRuntimeBinding::Request {} | NodeRuntimeBinding::Script { .. }
+            if verifier.instructions.is_none() =>
+        {
             Ok((NodeRole::Verifier, None))
         }
         NodeRuntimeBinding::Request {} | NodeRuntimeBinding::Script { .. } => {

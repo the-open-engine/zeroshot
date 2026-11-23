@@ -1054,8 +1054,11 @@ fn delivery_contract_rejects_the_other_modes_schema() {
 
 #[path = "tests/github_acceptance.rs"]
 mod github_acceptance;
+
 #[path = "tests/output.rs"]
 mod output;
+#[path = "tests/policy_read.rs"]
+mod policy_read;
 #[path = "tests/recovery.rs"]
 mod recovery;
 
@@ -1360,6 +1363,7 @@ fn delivery_submission(
         pull_request_feedback,
     };
     RunSubmission {
+        context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Delivery test").assert_value(),
         graph,

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: zeroshot-target
+description: Self-hosted Zeroshot target
+type: application
+version: 0.1.0
+appVersion: '17.0.0'

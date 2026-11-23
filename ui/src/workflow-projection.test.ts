@@ -99,6 +99,43 @@ function codeChange(): Document {
   return doc(seq('run', [agent('worker'), choice]));
 }
 
+test('an imported success continues to the next profile through an expanded or folded group', () => {
+  const body: GraphNode = {
+    kind: 'loop',
+    name: 'review.retry',
+    state,
+    maxIterations: 3,
+    body: seq('review.round', [agent('review.agent'), done('review.done')]),
+  };
+  const imported: GraphNode = {
+    kind: 'profile',
+    name: 'review',
+    profile: 'saved-review',
+    initialInput: state,
+    body,
+  };
+  const document = doc(seq('run', [imported, agent('deliver'), done('complete')]));
+  const expanded = projectWorkflow(document);
+  const source = byOwner(expanded, 'review.done');
+  assert.equal(source.label, 'Complete profile');
+  assert.equal(outgoing(expanded, source.id)[0]?.target, byOwner(expanded, 'deliver').id);
+  const region = expanded.regions.find((item) => item.owner === 'review');
+  assert.equal(region?.label, 'Saved profile · saved-review');
+  assert.ok(region?.nodeIds.includes(source.id));
+
+  for (const name of ['review', body.name]) {
+    const collapsed = projectWorkflow(document, new Set([name]));
+    const group = byOwner(collapsed, name, 'collapsed');
+    assert.equal(outgoing(collapsed, group.id)[0]?.target, byOwner(collapsed, 'deliver').id);
+  }
+
+  const reference = { kind: 'profile', name: 'review', profile: 'saved-review' };
+  const authored = projectWorkflow(doc(seq('run', [reference, done('complete')])));
+  const activity = byOwner(authored, 'review');
+  assert.equal(activity.detail, 'Saved profile · saved-review');
+  assert.equal(outgoing(authored, activity.id)[0]?.target, byOwner(authored, 'complete').id);
+});
+
 test('canonical code-change projection flattens sequences and loops back to reviews, not the initial worker', () => {
   const document = codeChange();
   const before = structuredClone(document);

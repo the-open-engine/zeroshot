@@ -35,6 +35,7 @@ async fn parallel_terminal_ui_fixture_matches_canonical_control_replay() {
             }
             let admitted = NativeV2Admission
                 .admit(RunSubmission {
+                    context_sources: Vec::new(),
                     environment: None,
                     title: RunTitle::new("Parallel terminal replay").assert_value(),
                     graph: serde_json::from_value(graph).assert_value(),

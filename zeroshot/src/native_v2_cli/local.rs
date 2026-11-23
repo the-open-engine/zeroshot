@@ -1,8 +1,9 @@
 //! Auth-free local CLI backend for one-run controller processes.
 
+pub use crate::execution::platform::LocalControllerMode;
+
 use std::path::{Path, PathBuf};
 use std::fs::{File, OpenOptions};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -167,6 +168,7 @@ impl Drop for LocalRecoveryClaim {
 
 #[derive(Clone, Debug)]
 pub struct LocalCliBackend {
+    controller_mode: LocalControllerMode,
     state_root: PathBuf,
     executable: PathBuf,
     current_directory: PathBuf,
@@ -180,6 +182,7 @@ pub struct LocalCliBackend {
 impl LocalCliBackend {
     pub fn production() -> Result<Self, NativeV2CliError> {
         let backend = Self {
+            controller_mode: LocalControllerMode::Detached,
             state_root: default_local_state_root()?,
             executable: std::env::current_exe().map_err(local_io)?,
             current_directory: std::env::current_dir().map_err(local_io)?,
@@ -202,6 +205,7 @@ impl LocalCliBackend {
         git_program: PathBuf,
     ) -> Self {
         Self {
+            controller_mode: LocalControllerMode::Detached,
             state_root,
             executable,
             current_directory,
@@ -211,6 +215,13 @@ impl LocalCliBackend {
             #[cfg(test)]
             fail_recovery_write: None,
         }
+    }
+
+    /// Select the caller's local launch policy for submissions and successor controllers.
+    #[must_use]
+    pub fn with_controller_mode(mut self, mode: LocalControllerMode) -> Self {
+        self.controller_mode = mode;
+        self
     }
 
     #[must_use]
@@ -801,22 +812,6 @@ impl LocalCliBackend {
         create_local_run_storage(&self.state_root, run_id)
     }
 
-    fn spawn_controller(&self, bootstrap: &Path) -> Result<Child, NativeV2CliError> {
-        let mut command = Command::new(&self.executable);
-        command
-            .arg(LOCAL_CONTROLLER_MODE)
-            .arg("--bootstrap")
-            .arg(bootstrap)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        // Harness context crosses the private one-shot bootstrap, not this long-lived process
-        // environment. Keep only the platform values needed to re-exec the controller.
-        command.env_clear();
-        copy_minimal_process_environment(&mut command)?;
-        crate::execution::platform::spawn_controller(&mut command).map_err(local_io)
-    }
-
     async fn list_local(&self) -> Result<RunListResult, NativeV2CliError> {
         use futures_util::stream::{self, StreamExt};
 
@@ -862,11 +857,20 @@ impl LocalCliBackend {
         match result {
             Ok(result) => Ok(Some(result)),
             // A directory without a ledger is no run: a refused or interrupted start leaves one.
+            Err(NativeV2CliError::RunNotFound { .. }) => Ok(None),
             Err(
-                NativeV2CliError::Local(_)
-                | NativeV2CliError::LocalRequestTimeout(_)
-                | NativeV2CliError::RunNotFound { .. },
-            ) => Ok(None),
+                error @ (NativeV2CliError::Local(_) | NativeV2CliError::LocalRequestTimeout(_)),
+            ) => {
+                use std::io::Write;
+                let error = crate::native_v2_runner::bounded_log_text(error.to_string(), 4 * 1024)
+                    .replace(['\n', '\t'], " ");
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "zeroshot: warning: skipping local run {}: {error}",
+                    run_id.as_str()
+                );
+                Ok(None)
+            }
             Err(error) => Err(error),
         }
     }
@@ -893,6 +897,7 @@ impl LocalCliBackend {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
+        self.report_runtime_failure(&params.run_id);
         let retry = params.clone();
         match self.status_once(params).await {
             Ok(mut result) => {
@@ -1173,6 +1178,7 @@ impl LocalCliBackend {
         let status = self.status_local(RunStatusParams { run_id }).await?;
         Ok(RunForceResult {
             steering: Default::default(),
+            context_sources: status.context_sources,
             run_id: status.run_id,
             title: status.title,
             source: status.source,
@@ -1217,6 +1223,7 @@ impl LocalCliBackend {
         {
             return Ok(RunForceResult {
                 steering: Default::default(),
+                context_sources: recorded.context_sources,
                 run_id: recorded.run_id,
                 title: recorded.title,
                 source: recorded.source,
@@ -1233,7 +1240,7 @@ impl LocalCliBackend {
             .filter(|ready| ready.run_id == params.run_id)
             .map(|ready| ready.pid.to_string())
             .unwrap_or_else(|| "unavailable".to_owned());
-        controller_request(&params.run_id, "force-stop", async {
+        self.controller_cleanup_request(&params.run_id, "force-stop", async {
             ClusterClient::new(transport.as_ref())
                 .run_force(params.clone())
                 .await
@@ -1254,16 +1261,29 @@ async fn controller_request<T>(
     operation: &str,
     request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
 ) -> Result<T, NativeV2CliError> {
-    tokio::time::timeout(DEFAULT_READY_TIMEOUT, request)
+    request_with_budget(run_id, operation, DEFAULT_READY_TIMEOUT, request).await
+}
+
+async fn request_with_budget<T>(
+    run_id: &RunId,
+    operation: &str,
+    budget: Duration,
+    request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
+) -> Result<T, NativeV2CliError> {
+    tokio::time::timeout(budget, request)
         .await
-        .map_err(|_| controller_request_timeout(run_id, operation))?
+        .map_err(|_| request_timeout(run_id, operation, budget))?
 }
 
 fn controller_request_timeout(run_id: &RunId, operation: &str) -> NativeV2CliError {
+    request_timeout(run_id, operation, DEFAULT_READY_TIMEOUT)
+}
+
+fn request_timeout(run_id: &RunId, operation: &str, budget: Duration) -> NativeV2CliError {
     NativeV2CliError::LocalRequestTimeout(format!(
         "controller did not answer {operation} for run {} within {} seconds",
         run_id.as_str(),
-        DEFAULT_READY_TIMEOUT.as_secs(),
+        budget.as_secs(),
     ))
 }
 

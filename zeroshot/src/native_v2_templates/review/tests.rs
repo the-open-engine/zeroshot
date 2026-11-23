@@ -67,6 +67,7 @@ async fn complete_review_preserves_exact_receipt_with_and_without_source_provena
         let admitted = NativeV2Admission
             .admit_with_policy(
                 RunSubmission {
+                    context_sources: Vec::new(),
                     title: RunTitle::new("Review receipt regression").assert_value(),
                     graph: issue_review_graph(TemplateDelivery::Comment).assert_value(),
                     initial_input: input(),
