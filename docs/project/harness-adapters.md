@@ -75,8 +75,10 @@ while native settings and plugins continue to apply. OpenCode keeps `HOME`, its 
 directory and its native permission policy, while its data, state and cache (database, saved
 logins, sessions, logs) live in a private directory per node session that is removed when the
 session closes. A local run exports only the lane's integration and copies its active saved login
-into that private store unless the node declares its own credential; nothing is written back to the
-user's store. A declared credential reaches OpenCode through its inline configuration. Managed
+into that private store unless the node declares its own credential. Before the export, OpenCode
+renews an expiring OAuth login in the user's own profile; the private store receives the access
+token and the account metadata, never the refresh token, so a private node never renews on its
+own. A later turn picks up the renewed token. A declared credential reaches OpenCode through its inline configuration. Managed
 sessions deny OpenCode's `opencode_session_move` tool, so a session keeps the working directory
 Zeroshot assigned; renaming stays available. A private plugin checks every model
 request of the selected provider and stops it when another authentication header or a different

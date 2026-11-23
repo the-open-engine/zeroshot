@@ -212,18 +212,17 @@ impl OpenCodeAdapter {
         let expected = turn.session.id.lock().await.clone();
         let login = {
             let mut login = turn.session.login.lock().await;
-            if login.is_none() {
-                *login = Some(
-                    store::transfer_login(store::TransferRequest {
-                        adapter: self,
-                        invocation: turn.invocation,
-                        files: &turn.files,
-                        control: turn.control,
-                    })
-                    .await?,
-                );
-            }
-            login.clone()
+            let transferred = store::transfer_login(store::TransferRequest {
+                adapter: self,
+                invocation: turn.invocation,
+                files: &turn.files,
+                control: turn.control,
+                previous: login.as_ref(),
+            })
+            .await?;
+            let secrets = transferred.secrets.clone();
+            *login = Some(transferred);
+            secrets
         };
         let scratch = std::path::PathBuf::from(
             turn.files
@@ -241,9 +240,7 @@ impl OpenCodeAdapter {
         })?;
         let owned = plugin::owned(&command, turn.files.home());
         let mut redactions = self.redactions(&turn.invocation.environment);
-        if let Some(secrets) = &login {
-            redactions.extend(secrets.iter().cloned());
-        }
+        redactions.extend(login.iter().cloned());
         self.apply_permission_default(&mut command);
         redactions.extend(command::configuration_secrets(&command.environment));
         let transcript = transcript::OpenCodeTranscript::new(expected.clone(), redactions.clone());
@@ -335,7 +332,7 @@ struct OpenCodeTurn<'a> {
 struct OpenCodeSession {
     core: ProviderSessionCore,
     id: Mutex<Option<String>>,
-    login: Mutex<Option<Vec<String>>>,
+    login: Mutex<Option<store::TransferredLogin>>,
 }
 
 impl_provider_node_session!(OpenCodeSession);

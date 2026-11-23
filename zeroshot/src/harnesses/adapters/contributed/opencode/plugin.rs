@@ -1,5 +1,6 @@
 //! Owned OpenCode 2 plugin directories and their per-turn load check.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
@@ -14,12 +15,21 @@ pub(super) fn install(
     id: &str,
     source: &str,
 ) -> io::Result<()> {
+    install_into(&mut command.environment, home, id, source)
+}
+
+/// Installs an owned plugin into the inline configuration of any OpenCode process environment.
+pub(super) fn install_into(
+    environment: &mut BTreeMap<String, String>,
+    home: &Path,
+    id: &str,
+    source: &str,
+) -> io::Result<()> {
     let root = home.join("zeroshot-plugins");
     let plugin_dir = root.join(id);
     owned_directory(&root, home)?;
     owned_directory(&plugin_dir, home)?;
-    let scratch = command
-        .environment
+    let scratch = environment
         .get("TMPDIR")
         .ok_or_else(|| io::Error::other("TMPDIR is not set"))?;
     let marker = Path::new(scratch)
@@ -31,8 +41,7 @@ pub(super) fn install(
     let plugin = url::Url::from_directory_path(&plugin_dir)
         .map_err(|_| io::Error::other("OpenCode plugin path is invalid"))?;
     let mut config: Value = serde_json::from_str(
-        command
-            .environment
+        environment
             .get("OPENCODE_CONFIG_CONTENT")
             .map(String::as_str)
             .unwrap_or("{}"),
@@ -46,7 +55,7 @@ pub(super) fn install(
         .as_array_mut()
         .ok_or_else(|| io::Error::other("plugins must be an array"))?
         .push(json!(plugin.as_str()));
-    command.environment.insert(
+    environment.insert(
         "OPENCODE_CONFIG_CONTENT".to_owned(),
         serde_json::to_string(&config)?,
     );
