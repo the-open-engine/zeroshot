@@ -147,7 +147,8 @@ The source connection supplies `GIT_USERNAME` / `GIT_PASSWORD` for HTTPS, or
 }
 ```
 
-Default API connections are `github.GH_TOKEN` and `gitlab.GITLAB_TOKEN`; explicit bindings keep their names.
+Default API connections are `github.GH_TOKEN`, `gitlab.GITLAB_TOKEN` and `forgejo.FORGEJO_TOKEN`;
+explicit bindings keep their names.
 Named targets read the declared field names for both submission and resume. Native CLI aliases such
 as `GH_ENTERPRISE_TOKEN` and `GITLAB_ACCESS_TOKEN` apply only to local runs.
 One static connection can hold both transport and API fields; inline run values work too. GitHub uses
@@ -342,11 +343,11 @@ zeroshot run --title "Example change" --input task.json \
 Delivery is HTTPS only. A private certificate authority is trusted through the same `SSL_CERT_FILE`
 mechanism described above.
 
-The token is `FORGEJO_TOKEN` through a delivery connection, or, for local runs, `FORGEJO_HOST` with
-the instance host and port together with `FORGEJO_TOKEN`. Without `FORGEJO_HOST` no ambient token is
-used, because a self-hosted instance has no native login. The scopes are `read:user` and
-`write:repository`, and the token's user needs push access. `check_access` refuses a read-only token
-before agents start.
+The token is `FORGEJO_TOKEN` from the delivery connection: the default `forgejo` connection or the
+connection the delivery node declares, as shown for GitLab above. A self-hosted instance has no
+native login, so local runs read no ambient token and start no CLI for it. The scopes are
+`read:user` and `write:repository`, and the token's user needs push access. `check_access` refuses a
+read-only token before agents start.
 
 Required checks come from the rule in effect for the target branch, read through the branch
 endpoint: `enable_status_check` and `status_check_contexts`, with `*` and `?` patterns. Approvals

@@ -45,6 +45,7 @@ pub(crate) fn register(
     registry: &mut SourceCodeProviderRegistry,
     source: Option<&ResolvedSource>,
     transport: Option<&GitTransport>,
+    selected: Option<&SourceProviderRef>,
 ) -> Result<(), SourceRegistryError> {
     let stored = source.filter(|source| {
         source
@@ -53,8 +54,12 @@ pub(crate) fn register(
             .and_then(|remote| remote.forge.as_ref())
             .is_some_and(|forge| forge.provider.as_str() == FORGEJO_PROVIDER_ID)
     });
-    let authority = match (stored, transport) {
-        (Some(source), Some(transport)) => Some(delivery_authority(source, transport)?),
+    let authority = match (stored, transport, selected) {
+        (Some(source), Some(transport), Some(selected))
+            if selected.id().as_str() == FORGEJO_PROVIDER_ID =>
+        {
+            Some(delivery_authority(source, transport)?)
+        }
         _ => None,
     };
     // Every descriptor value is static and valid, so no contract-error conversion is needed.
@@ -66,7 +71,8 @@ pub(crate) fn register(
 }
 
 /// An admitted instance and an admitted transport are both required; a metadata-only registration
-/// keeps performing no effects.
+/// keeps performing no effects. Another selection, such as a Git-only push, builds no HTTP client,
+/// so Forgejo's HTTP settings cannot affect it.
 fn delivery_authority(
     source: &ResolvedSource,
     transport: &GitTransport,

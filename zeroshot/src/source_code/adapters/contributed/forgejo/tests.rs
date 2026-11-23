@@ -63,13 +63,13 @@ fn f1_descriptor_registers_the_five_declared_capabilities() {
     }
 
     let mut registry = SourceCodeProviderRegistry::new();
-    register(&mut registry, None, None).assert_value();
+    register(&mut registry, None, None, None).assert_value();
     assert_eq!(
         registry.descriptor(&reference).assert_value(),
         provider.descriptor()
     );
     assert_eq!(
-        register(&mut registry, None, None).assert_error(),
+        register(&mut registry, None, None, None).assert_error(),
         SourceRegistryError::DuplicateRegistration {
             provider: reference,
         }
@@ -153,4 +153,103 @@ fn f7_explicit_instance_identity_selects_the_provider_and_auto_selection_stays_o
     assert_eq!(forge.repository.as_str(), REPOSITORY);
     assert_eq!(forge.base_url.as_ref(), Some(&base));
     assert!(forge_identity(&remote).assert_value().is_none());
+}
+
+fn forgejo_source() -> crate::native_v2_contract::ResolvedSource {
+    serde_json::from_value(serde_json::json!({
+        "repository": REPOSITORY,
+        "branch": "main",
+        "revision": "0123456789012345678901234567890123456789",
+        "remote": {
+            "url": REMOTE,
+            "forge": {
+                "provider": FORGEJO_PROVIDER_ID,
+                "repository": REPOSITORY,
+                "baseUrl": BASE_URL,
+            },
+        },
+    }))
+    .assert_value()
+}
+
+fn transport(
+    environment: Option<std::collections::BTreeMap<String, String>>,
+) -> crate::native_v2_delivery::transport::GitTransport {
+    let directory = std::env::temp_dir();
+    crate::native_v2_delivery::transport::GitTransport::new(
+        crate::native_v2_delivery::transport::GitTransportConfig {
+            git_program: "git".into(),
+            workspace: directory.clone(),
+            home_directory: directory.clone(),
+            private_directory: directory,
+            identity: None,
+            local_environment: environment,
+            deadline: std::time::Duration::from_secs(60),
+        },
+        REMOTE,
+    )
+}
+
+fn selection(id: &str) -> SourceProviderRef {
+    SourceProviderRef::new(SourceProviderId::new(id).assert_value(), 1).assert_value()
+}
+
+fn broken_network() -> std::collections::BTreeMap<String, String> {
+    std::collections::BTreeMap::from([(
+        "SSL_CERT_FILE".to_owned(),
+        std::env::temp_dir()
+            .join("zeroshot-missing-ca.pem")
+            .to_string_lossy()
+            .into_owned(),
+    )])
+}
+
+#[test]
+fn f8_a_git_only_selection_builds_no_forgejo_client() {
+    let source = forgejo_source();
+    let transport = transport(Some(broken_network()));
+    let mut registry = SourceCodeProviderRegistry::new();
+    register(
+        &mut registry,
+        Some(&source),
+        Some(&transport),
+        Some(&selection("source.git")),
+    )
+    .assert_value();
+    let provider = registry.lookup(&provider_reference()).assert_value();
+    assert!(provider.delivery_authority().is_none());
+}
+
+#[test]
+fn f9_a_forgejo_selection_with_broken_network_settings_is_unavailable_delivery() {
+    let source = forgejo_source();
+    let transport = transport(Some(broken_network()));
+    let mut registry = SourceCodeProviderRegistry::new();
+    let error = register(
+        &mut registry,
+        Some(&source),
+        Some(&transport),
+        Some(&selection(FORGEJO_PROVIDER_ID)),
+    )
+    .assert_error();
+    assert!(
+        matches!(error, SourceRegistryError::UnavailableDelivery { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn f10_a_forgejo_selection_builds_the_delivery_authority() {
+    let source = forgejo_source();
+    let transport = transport(None);
+    let mut registry = SourceCodeProviderRegistry::new();
+    register(
+        &mut registry,
+        Some(&source),
+        Some(&transport),
+        Some(&selection(FORGEJO_PROVIDER_ID)),
+    )
+    .assert_value();
+    let provider = registry.lookup(&provider_reference()).assert_value();
+    assert!(provider.delivery_authority().is_some());
 }

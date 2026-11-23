@@ -154,6 +154,7 @@ fn ordinary_registration_discovers_contributions_without_source_or_transport() {
         SourceAdapterContext {
             source: None,
             transport: None,
+            selected: None,
         },
     )
     .assert_value();

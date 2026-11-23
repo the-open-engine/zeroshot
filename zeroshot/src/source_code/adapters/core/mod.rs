@@ -253,7 +253,11 @@ fn maintained_registry(
     }
     super::contributed::register(
         &mut registry,
-        super::SourceAdapterContext { source, transport },
+        super::SourceAdapterContext {
+            source,
+            transport,
+            selected: Some(selected),
+        },
     )?;
     Ok(registry)
 }

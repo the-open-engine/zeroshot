@@ -9,7 +9,12 @@ pub fn register(
     registry: &mut SourceCodeProviderRegistry,
     context: SourceAdapterContext<'_>,
 ) -> Result<(), SourceRegistryError> {
-    forgejo::register(registry, context.source, context.transport)?;
+    forgejo::register(
+        registry,
+        context.source,
+        context.transport,
+        context.selected,
+    )?;
     #[cfg(test)]
     registration_tests::register(registry, context)?;
     Ok(())

@@ -7,4 +7,6 @@ pub mod core;
 pub struct SourceAdapterContext<'a> {
     pub source: Option<&'a crate::native_v2_contract::ResolvedSource>,
     pub transport: Option<&'a crate::native_v2_delivery::transport::GitTransport>,
+    /// The provider this run selected. A contribution builds effects only for its own selection.
+    pub selected: Option<&'a crate::source_code_provider::SourceProviderRef>,
 }
