@@ -1,6 +1,6 @@
 //! Pull-request acceptance for the contributed Forgejo forge adapter. Every read and write is
 //! observed through the loopback fixture, so the assertions cover what the adapter sends as well
-//! as what it returns. Each test names the acceptance criterion it verifies, from `R1` to `R21`.
+//! as what it returns. Each test names the acceptance criterion it verifies, from `R1` to `R23`.
 use openengine_cluster_testkit::assertions::{AssertAt, AssertError, AssertValue, JsonAt};
 use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
@@ -508,7 +508,7 @@ async fn r8_two_matching_open_pull_requests_are_an_identity_error_naming_both_nu
         format!("{error}"),
         format!(
             "source delivery identity mismatch: Multiple Forgejo pull requests match head branch \
-             {HEAD_BRANCH} in {REPOSITORY} targeting {TARGET_BRANCH}; review numbers: 7, 9. \
+             {HEAD_BRANCH} in {REPOSITORY}; review numbers: 7, 9. \
              Resolve the ambiguous pull requests before resuming."
         )
     );
@@ -1078,4 +1078,64 @@ async fn r21_inspect_refuses_an_open_pull_whose_head_moved_from_the_bound_review
     assert_eq!(requests.len(), 2, "{requests:?}");
     assert_reads(&requests);
     assert_eq!(requests.assert_at(1).uri, format!("{SEARCH_PATH}/7"));
+}
+
+/// R22: a pull request that was retargeted keeps its head branch, so it blocks a second creation
+/// instead of being ignored by the search.
+#[tokio::test]
+async fn r22_a_retargeted_pull_request_blocks_a_second_creation() {
+    let fixture = Fixture::new().await;
+    let authority = authority(&fixture).await;
+    let target = target();
+
+    let mut retargeted = pull(7);
+    retargeted.base_ref = "other";
+    retargeted.title = TITLE.to_owned();
+    fixture
+        .queue(version())
+        .queue(page(1, vec![pull_value(&retargeted)]));
+
+    let request = review_request(&target, TITLE, DESCRIPTION);
+    let error = review::open_or_update(&authority, &request, credential())
+        .await
+        .assert_error();
+    assert_eq!(
+        format!("{error}"),
+        "source delivery identity mismatch: Forgejo pull request 7 targets other instead of main"
+    );
+
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert_writes(&requests, &[]);
+}
+
+/// R23: a merged pull request whose recorded head is not the reviewed head is not the review the
+/// receipt names.
+#[tokio::test]
+async fn r23_inspect_refuses_a_merged_pull_whose_recorded_head_is_another_revision() {
+    let fixture = Fixture::new().await;
+    let authority = authority(&fixture).await;
+
+    let mut merged = pull(7);
+    merged.state = "closed";
+    merged.merged = true;
+    merged.merge_sha = Some(MERGE_REVISION.to_owned());
+    merged.head_sha = OTHER_REVISION.to_owned();
+    fixture.queue(version()).queue(pull_response(&merged));
+
+    let error = review::inspect(&authority, &review_receipt(7), credential())
+        .await
+        .assert_error();
+    assert_eq!(
+        format!("{error}"),
+        format!(
+            "source delivery identity mismatch: Forgejo pull request 7 was merged at head \
+             revision {OTHER_REVISION} instead of the reviewed head {REVISION}. Inspect the \
+             merge before resuming."
+        )
+    );
+
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert_reads(&requests);
 }

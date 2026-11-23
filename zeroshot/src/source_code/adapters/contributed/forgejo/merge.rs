@@ -77,6 +77,7 @@ pub(super) async fn request(
     let style = merge_style(&repository)?;
 
     let pull = context.pull(credential).await?;
+    review::require_bound_head(&pull, receipt)?;
     if pull.merged {
         review::merged_revision(&pull)?;
         context.release()?;
@@ -85,7 +86,6 @@ pub(super) async fn request(
     if pull.state == "closed" {
         return Ok(SourceMergeRequestOutcome::Pending);
     }
-    review::require_bound_head(&pull, receipt)?;
     if context.record_exists()? {
         // The recorded attempt is unconfirmed, and this read shows the pull is not merged. Forgejo
         // merges synchronously, so that attempt did not merge; releasing the record lets a later
@@ -137,6 +137,7 @@ pub(super) async fn withdraw(
     authority.api.require_supported(credential).await?;
     let pull = context.pull(credential).await?;
     if pull.merged {
+        review::require_bound_head(&pull, receipt)?;
         return Ok(SourceMergeWithdrawal::Merged {
             merge_revision: review::merged_revision(&pull)?,
         });
@@ -277,6 +278,7 @@ impl<'a> Merge<'a> {
             Ok(()) => {
                 let pull = self.pull(credential).await?;
                 if pull.merged {
+                    review::require_bound_head(&pull, self.receipt)?;
                     review::merged_revision(&pull)?;
                     self.release()?;
                 }
@@ -324,6 +326,7 @@ impl<'a> Merge<'a> {
             _ => {
                 let pull = self.pull(credential).await?;
                 if pull.merged {
+                    review::require_bound_head(&pull, self.receipt)?;
                     review::merged_revision(&pull)?;
                     self.release()?;
                     return Ok(SourceMergeRequestOutcome::Accepted);

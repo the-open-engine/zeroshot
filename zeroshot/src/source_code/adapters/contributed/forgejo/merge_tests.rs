@@ -1037,3 +1037,105 @@ async fn m16_a_moved_head_is_the_identity_error_and_no_post_is_sent() {
     assert_eq!(requests.assert_at(2).uri, PULL_URI);
     assert!(writes(&requests).is_empty(), "{requests:?}");
 }
+
+fn merged_at_moved_head() -> String {
+    format!(
+        "source delivery identity mismatch: Forgejo pull request 7 was merged at head revision \
+         {MOVED_REVISION} instead of the reviewed head {REVISION}. Inspect the merge before \
+         resuming."
+    )
+}
+
+/// M17: a pull request already merged at another head is the identity error without a write, and
+/// an earlier attempt stays recorded.
+#[tokio::test]
+async fn m17_a_merged_read_at_another_head_is_the_identity_error_without_a_write() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    fixture.queue(version());
+    gate_reads_without_rule(&fixture, &merged_pull(MOVED_REVISION));
+    remember(&authority);
+
+    let error = merge::request(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    assert_eq!(format!("{error}"), merged_at_moved_head());
+    assert!(
+        recorded(&authority),
+        "the merged read did not confirm this review"
+    );
+
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    assert!(writes(&requests).is_empty(), "{requests:?}");
+}
+
+/// M18: a confirmed write followed by a read merged at another head is the identity error.
+#[tokio::test]
+async fn m18_a_confirmed_write_followed_by_a_merged_read_at_another_head_is_the_identity_error() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    fixture.queue(version());
+    gate_reads(
+        &fixture,
+        &open_pull(REVISION),
+        branch(0, &[], false),
+        page(&[]),
+    )
+    .queue(Response::status(StatusCode::OK))
+    .queue(merged_pull(MOVED_REVISION).response());
+
+    let error = merge::request(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    assert_eq!(format!("{error}"), merged_at_moved_head());
+
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 7, "{requests:?}");
+    assert_eq!(writes(&requests).len(), 1, "{requests:?}");
+}
+
+/// M19: an uncertain write followed by a read merged at another head is the identity error.
+#[tokio::test]
+async fn m19_an_uncertain_write_followed_by_a_merged_read_at_another_head_is_the_identity_error() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    fixture.queue(version());
+    gate_reads(
+        &fixture,
+        &open_pull(REVISION),
+        branch(0, &[], false),
+        page(&[]),
+    )
+    .queue(transport_failure())
+    .queue(merged_pull(MOVED_REVISION).response());
+
+    let error = merge::request(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    assert_eq!(format!("{error}"), merged_at_moved_head());
+
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 7, "{requests:?}");
+    assert_eq!(writes(&requests).len(), 1, "{requests:?}");
+}
+
+/// M20: a withdrawal refuses a pull request merged at another head.
+#[tokio::test]
+async fn m20_withdraw_refuses_a_merged_pull_at_another_head() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    fixture
+        .queue(version())
+        .queue(merged_pull(MOVED_REVISION).response());
+
+    let error = merge::withdraw(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    assert_eq!(format!("{error}"), merged_at_moved_head());
+    assert_eq!(
+        fixture.requests().len(),
+        2,
+        "the version and the pull request read"
+    );
+}

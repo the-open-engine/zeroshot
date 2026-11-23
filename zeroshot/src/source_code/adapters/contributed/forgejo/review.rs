@@ -56,10 +56,11 @@ pub(super) fn links(base_url: &str, review: &SourceReviewReceipt) -> SourceRevie
     }
 }
 
-/// A pull request belongs to this delivery only when its head branch, target branch and
-/// repository all agree. The head branch is read from `label`, because `ref` names the branch only
-/// while it exists. A head that belongs to another repository is a fork, so the search ignores it,
-/// and an empty label names no branch at all.
+/// A pull request belongs to this delivery when its head branch and head repository agree. The
+/// head branch is read from `label`, because `ref` names the branch only while it exists. A head
+/// that belongs to another repository is a fork, so the search ignores it, and an empty label
+/// names no branch at all. The target branch is validated afterwards, so a pull request that was
+/// retargeted blocks a second one instead of being ignored.
 async fn find(
     authority: &ForgejoDeliveryAuthority,
     request: SourceDeliveryRead<'_>,
@@ -82,7 +83,6 @@ async fn find(
         .into_iter()
         .filter(|pull| {
             pull.head.label == request.head_branch
-                && pull.base.reference == request.target.target_branch
                 && pull
                     .head
                     .repo
@@ -95,10 +95,9 @@ async fn find(
     }
     if matches.len() > 1 {
         return Err(SourceDeliveryError::identity(format!(
-            "Multiple Forgejo pull requests match head branch {} in {} targeting {}; review numbers: {}. Resolve the ambiguous pull requests before resuming.",
+            "Multiple Forgejo pull requests match head branch {} in {}; review numbers: {}. Resolve the ambiguous pull requests before resuming.",
             wire::branch_identity(request.head_branch),
             wire::repository_identity(&request.target.repository),
-            wire::branch_identity(&request.target.target_branch),
             matches
                 .iter()
                 .map(|pull| pull.number.to_string())
@@ -703,14 +702,21 @@ pub(super) fn require_pull(
 }
 
 /// The head the observation and a merge are decided for is the one the delivery bound to its
-/// receipt. An open, unmerged pull request that now carries another head is no longer the review
-/// the receipt names, so the read refuses rather than judging the checks of a head the delivery
-/// never published. A merged or closed pull request keeps the head its record confirmed, so it is
-/// not checked here.
+/// receipt. An open pull request that now carries another head, or a merged pull request whose
+/// recorded head is another revision, is not the review the receipt names. A closed, unmerged
+/// pull request is not checked.
 pub(super) fn require_bound_head(
     pull: &PullRequest,
     receipt: &SourceReviewReceipt,
 ) -> Result<(), SourceDeliveryError> {
+    if pull.merged && pull.head.sha != receipt.head_revision {
+        return Err(SourceDeliveryError::identity(format!(
+            "Forgejo pull request {} was merged at head revision {} instead of the reviewed head {}. Inspect the merge before resuming.",
+            pull.number,
+            wire::revision_identity(&pull.head.sha),
+            wire::revision_identity(&receipt.head_revision),
+        )));
+    }
     if pull.merged || pull.state != "open" {
         return Ok(());
     }
