@@ -406,6 +406,10 @@ mod github;
 mod store;
 
 #[cfg(unix)]
+#[path = "tests/oauth_renewal.rs"]
+mod oauth_renewal;
+
+#[cfg(unix)]
 #[path = "tests/plugin.rs"]
 mod plugin;
 

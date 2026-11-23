@@ -58,7 +58,7 @@ fn the_command_configuration_denies_session_move() {
 
 const PROBE: &str = r#"const found = await search({ query: "session" }); const paths = (found.items || []).map((item) => item.path); let moved; try { moved = await (tools.opencode.session && tools.opencode.session.move ? tools.opencode.session.move({ directory: "." }) : tools.opencode.session_move({ directory: "." })); } catch (error) { moved = "ERR " + String((error && error.message) || error); } return JSON.stringify({ paths, moved });"#;
 
-fn sse(blocks: &[(Value, Value)], stop: &str) -> String {
+pub(super) fn sse(blocks: &[(Value, Value)], stop: &str) -> String {
     let mut events = vec![
         json!({"type":"message_start","message":{"id":"msg_probe","type":"message","role":"assistant","model":"probe-model","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}),
     ];
