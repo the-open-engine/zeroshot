@@ -484,12 +484,6 @@ pub(super) fn configure_provider(
     reject_foreign_credentials(invocation, field)?;
     let declared =
         declared_credential(invocation, environment, field, adapter.runners.is_hosted())?;
-    if provider == "github" && declared {
-        return Err(NodeRunnerError::DriverDetail(
-            "OpenCode 2 cannot take a declared GitHub Copilot token; sign in to GitHub Copilot in OpenCode instead"
-                .to_owned(),
-        ));
-    }
     validate_extended_provider(provider, invocation, environment, declared)?;
     let endpoints = endpoint_fields(provider);
     let declared_endpoint = invocation

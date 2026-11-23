@@ -280,7 +280,12 @@ async fn native_cancellation_stops_every_opencode_process_of_the_session() {
 }
 
 pub(super) async fn capture_request(listener: tokio::net::TcpListener) -> String {
-    let (mut stream, _) = listener.accept().await.assert_value();
+    let (stream, _) = listener.accept().await.assert_value();
+    capture_stream(stream).await
+}
+
+/// Reads one request (headers and a declared-length body) and answers it with a 401.
+pub(super) async fn capture_stream(mut stream: tokio::net::TcpStream) -> String {
     let mut bytes = Vec::new();
     let headers = loop {
         let mut chunk = [0; 8192];

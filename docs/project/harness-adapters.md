@@ -32,7 +32,7 @@ is refused with the lane, executable, reported version, supported range and inst
 | `copilot`  | 1.0.70  | Open                      | Oldest CLI explicitly handled by the adapter                              |
 | `pi`       | 1.4.0   | Open                      | Tested hosted release                                                     |
 | `hermes`   | 0.22.5  | 0.22.6                    | Live memory/session/verifier contract; 0.22.6 breaks native agent cleanup |
-| `opencode` | 2.2.3   | Open                      | First release with the native contract; OpenCode 1.x is not supported     |
+| `opencode` | 2.4.0   | Open                      | Declared Copilot token and guarded model; OpenCode 1.x is not supported   |
 
 An open upper bound accepts newer releases; an exclusive upper bound marks a known incompatibility.
 Copilot also checks its RPC protocol at session connection. Claude retains its first-turn check using
@@ -64,9 +64,10 @@ native authentication for every supported provider except gateway, including the
 credential chain for Bedrock. OpenCode's `opencode` (Zen) and `opencode-go` (Go) lanes reuse the
 native OpenCode account login; a declared `OPENCODE_API_KEY` serves both. Other lanes require
 declared connections. GitHub connections use
-`COPILOT_GITHUB_TOKEN`; each harness owns its native exchange and refresh behavior. OpenCode 2
-has no way to accept a declared GitHub token, so OpenCode's `github` lane runs only with the native
-GitHub Copilot login. Declared credentials use private runtime state and preserve saved logins.
+`COPILOT_GITHUB_TOKEN`; each harness owns its native exchange and refresh behavior. OpenCode sends
+a declared GitHub token unchanged as a bearer token; without one, OpenCode's `github` lane uses the
+native GitHub Copilot login. Declared credentials use private runtime state and preserve saved
+logins.
 
 Local OpenCode and Hermes runs preserve native configuration discovery with declared credentials.
 Their declared authentication takes precedence over ambient authentication for the selected lane,

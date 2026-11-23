@@ -412,9 +412,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   that only the auth plugin creates and resolves to the lane's model in
   `experimental.model.resolve` (OpenCode 2.4.0 or newer); without that plugin OpenCode stops with
   "Model unavailable" before any request and the node reports that the plugin did not load.
-  OpenCode 2 has no input for a
-  declared GitHub Copilot token, so a declared `COPILOT_GITHUB_TOKEN` is refused before
-  launch and GitHub lanes use the native Copilot login.
+  A declared `COPILOT_GITHUB_TOKEN` reaches OpenCode's GitHub Copilot integration, which sends
+  it unchanged as a bearer token on every Copilot route; without one, local GitHub lanes use
+  the native Copilot login.
   Local OpenCode keeps native permissions and adds no `--auto`: native configuration inspection
   starts background dependency work, so use the shared unavailable-inspection fallback without a
   probe, custom policy parser or cache-lock management. Contained OpenCode adds `--auto` in its
@@ -1092,7 +1092,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Truncated version output remains available only for classification; omit it from diagnostics so
   credentials crossing the byte limit cannot escape exact-match redaction, including Claude's first-turn check.
   Unknown versions fail closed. Minimums are Claude 2.1.310, Codex 0.155.0, Copilot 1.0.70,
-  Pi 1.4.0, Hermes 0.22.5 and OpenCode 2.2.3. Hermes 0.22.6 is the exclusive upper bound because native agent cleanup
+  Pi 1.4.0, Hermes 0.22.5 and OpenCode 2.4.0. Hermes 0.22.6 is the exclusive upper bound because native agent cleanup
   is incompatible; all other upper bounds remain open.
   Contained Claude sets `DISABLE_AUTOUPDATER=1` after environment merges to preserve image pins.
 - Claude reads its adapter registration's range before each run's first model turn, running the

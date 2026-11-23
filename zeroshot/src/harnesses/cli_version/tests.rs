@@ -153,7 +153,7 @@ async fn a_valid_version_with_a_failed_command_is_refused() {
 #[tokio::test]
 async fn opencode_refuses_1x_and_releases_before_2_2_3() {
     let root = tempfile::tempdir().assert_value();
-    for version in ["1.19.3", "2.0.32", "2.2.2"] {
+    for version in ["1.19.3", "2.0.32", "2.2.3", "2.3.9"] {
         install(root.path(), "opencode", &reported("opencode", version), 0);
         let detail = check_lane_versions(
             &plan("opencode", &["openai"]),
@@ -164,9 +164,9 @@ async fn opencode_refuses_1x_and_releases_before_2_2_3() {
         .await
         .assert_error()
         .to_string();
-        assert!(detail.contains("2.2.3"), "{detail}");
+        assert!(detail.contains("2.4.0"), "{detail}");
     }
-    for version in ["2.2.3", "2.2.6"] {
+    for version in ["2.4.0", "2.4.1"] {
         install(root.path(), "opencode", &reported("opencode", version), 0);
         check_lane_versions(
             &plan("opencode", &["openai"]),
