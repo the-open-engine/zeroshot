@@ -6,6 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 fn native_openai_adapter(
     directory: &TestDirectory,
     header: Option<(&str, &str)>,
+    transport: Option<&str>,
 ) -> OpenCodeAdapter {
     let mut adapter = super::process::adapter(directory, "#!/bin/sh\nexit 0\n");
     adapter.config.provider = "openai".to_owned();
@@ -16,7 +17,10 @@ fn native_openai_adapter(
         Some((name, value)) => json!({ "X-Native-Trace": "native-trace", (name): value }),
         None => json!({ "X-Native-Trace": "native-trace" }),
     };
-    let config = json!({"provider":{"openai":{"options":{"apiKey":"stored-native-key","headers":headers},"models":{"opaque/model":{"id":"wire-fixture","name":"Wire fixture","limit":{"context":100000,"output":4096}}}}}});
+    let mut config = json!({"provider":{"openai":{"options":{"apiKey":"stored-native-key","headers":headers},"models":{"opaque/model":{"id":"wire-fixture","name":"Wire fixture","limit":{"context":100000,"output":4096}}}}}});
+    if let Some(transport) = transport {
+        config["provider"]["openai"]["options"]["transport"] = json!(transport);
+    }
     adapter.local_environment = native_wire_environment(directory, config);
     let script = format!(
         "#!/bin/sh\nexec {} --print-logs --log-level debug \"$@\" 2>>{}\n",
@@ -34,7 +38,7 @@ fn native_openai_adapter(
 #[ignore = "requires installed OpenCode; uses localhost and dummy keys only"]
 async fn native_declared_key_reaches_the_wire_without_native_authority() {
     let directory = TestDirectory::new("opencode-native-declared-key-wire");
-    let adapter = native_openai_adapter(&directory, None);
+    let adapter = native_openai_adapter(&directory, None, None);
     let (listener, endpoint) = native_listener().await;
     let invocation = super::process::invocation(&[
         ("OPENAI_API_KEY", "declared-wire-key"),
@@ -55,10 +59,20 @@ async fn native_declared_key_reaches_the_wire_without_native_authority() {
 }
 
 #[tokio::test]
-#[ignore = "requires installed OpenCode; proves a native auth header conflict stops the request before localhost HTTP"]
+#[ignore = "requires installed OpenCode; proves a native auth header conflict stops the request over HTTP and WebSocket"]
 async fn native_auth_header_from_user_configuration_stops_the_request() {
-    let directory = TestDirectory::new("opencode-native-header-conflict");
-    let adapter = native_openai_adapter(&directory, Some(("X-Api-Key", "native-header-secret")));
+    for transport in ["http", "websocket"] {
+        header_conflict_stops_the_request(transport).await;
+    }
+}
+
+async fn header_conflict_stops_the_request(transport: &str) {
+    let directory = TestDirectory::new(&format!("opencode-native-header-conflict-{transport}"));
+    let adapter = native_openai_adapter(
+        &directory,
+        Some(("X-Api-Key", "native-header-secret")),
+        Some(transport),
+    );
     let (listener, endpoint) = native_listener().await;
     let invocation = super::process::invocation(&[
         ("OPENAI_API_KEY", "declared-wire-key"),
@@ -70,7 +84,7 @@ async fn native_auth_header_from_user_configuration_stops_the_request() {
     tokio::pin!(execution);
     let result = tokio::select! {
         _ = listener.accept() =>
-            panic!("provider request crossed a native auth header conflict"),
+            panic!("provider request crossed a native auth header conflict over {transport}"),
         result = &mut execution => result,
         _ = tokio::time::sleep(std::time::Duration::from_secs(60)) =>
             panic!("native auth header conflict did not stop the request"),
@@ -78,7 +92,10 @@ async fn native_auth_header_from_user_configuration_stops_the_request() {
     let error = result.unwrap_err();
     let detail = format!("{error}");
     let text = detail.clone() + &native_stderr(&directory);
-    assert!(text.contains("declared provider conflict"), "{text}");
+    assert!(
+        text.contains("declared provider conflict"),
+        "{transport}: {text}"
+    );
     assert!(text.contains("x-api-key"), "{text}");
     assert!(!detail.contains("native-header-secret"), "{detail}");
     assert!(!detail.contains("declared-wire-key"), "{detail}");
@@ -96,7 +113,7 @@ async fn native_auth_header_from_user_configuration_stops_the_request() {
 #[cfg(target_os = "linux")]
 async fn native_cancellation_stops_every_opencode_process_of_the_session() {
     let directory = TestDirectory::new("opencode-native-cancellation");
-    let adapter = native_openai_adapter(&directory, None);
+    let adapter = native_openai_adapter(&directory, None, None);
     let (listener, endpoint) = native_listener().await;
     let invocation = super::process::invocation(&[
         ("OPENAI_API_KEY", "declared-wire-key"),
