@@ -10,9 +10,6 @@ use openengine_cluster_protocol::{
 
 use super::connections::LocalConnectionStore;
 use super::{NativeV2CliError, local_message};
-use crate::source_code_provider::adapters::contributed::forgejo::{
-    FORGEJO_PROVIDER_ID, FORGEJO_TOKEN_FIELD,
-};
 
 #[path = "native_forge/process.rs"]
 mod process;
@@ -20,8 +17,6 @@ use process::{environment_token, stored_token};
 
 const GITHUB: &str = "source.github";
 const GITLAB: &str = "source.gitlab";
-pub(crate) const FORGEJO: &str = FORGEJO_PROVIDER_ID;
-pub(crate) const FORGEJO_HOST: &str = "FORGEJO_HOST";
 
 pub(crate) fn needs_forge(capabilities: &[crate::source_code_provider::SourceCapability]) -> bool {
     capabilities.iter().any(|capability| {
@@ -176,7 +171,6 @@ fn credential_field(forge: &SourceForgeIdentity) -> Option<&'static str> {
     match forge.provider.as_str() {
         GITHUB => Some("GH_TOKEN"),
         GITLAB => Some("GITLAB_TOKEN"),
-        FORGEJO => Some(FORGEJO_TOKEN_FIELD),
         _ => None,
     }
 }
@@ -262,23 +256,14 @@ pub(super) async fn token_for(
     context: NativeContext<'_>,
 ) -> Result<String, NativeV2CliError> {
     let host = instance_hostname(base_url(forge)?.as_str())?;
-    let provider = forge.provider.as_str();
-    if let Some(token) = environment_token(provider, &host, context.environment)? {
+    if let Some(token) = environment_token(forge.provider.as_str(), &host, context.environment)? {
         return Ok(token);
     }
-    if provider == FORGEJO {
-        // A self-hosted instance has no native login to read, so its token can only come from
-        // the environment or from the delivery connection.
-        return Err(local_message(format!(
-            "Forgejo token for {host} is unavailable; set {FORGEJO_HOST}={host} and \
-             {FORGEJO_TOKEN_FIELD}, or supply its delivery connection",
-        )));
-    }
-    stored_token(provider, &host, context)
+    stored_token(forge.provider.as_str(), &host, context)
         .await?
         .ok_or_else(|| local_message(format!(
             "forge login for {host} is unavailable; sign in with {} or supply its delivery connection",
-            if provider == GITLAB { "glab" } else { "gh" },
+            if forge.provider.as_str() == GITLAB { "glab" } else { "gh" },
         )))
 }
 

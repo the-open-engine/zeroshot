@@ -876,54 +876,6 @@ fn trusted_local_authority_retains_only_empty_github_com_delivery_requirements()
 }
 
 #[tokio::test]
-async fn forgejo_l1_named_host_and_token_yield_the_token() {
-    let environment = BTreeMap::from([
-        ("FORGEJO_HOST".to_owned(), "forge.example".to_owned()),
-        ("FORGEJO_TOKEN".to_owned(), "forge-token".to_owned()),
-    ]);
-    let forge = fixture_forge(FORGEJO, "forge.example");
-    let context = NativeContext {
-        environment: &environment,
-        directory: Path::new("."),
-    };
-    assert_eq!(
-        token_for(&forge, context).await.assert_value(),
-        "forge-token"
-    );
-    // Nothing is started for a Forgejo token: the lookup answers from the environment alone.
-    assert_eq!(
-        process::stored_token(FORGEJO, "forge.example", context)
-            .await
-            .assert_value(),
-        None,
-    );
-}
-
-#[tokio::test]
-async fn forgejo_l5_names_the_selectors_and_never_a_token_value() {
-    let forge = fixture_forge(FORGEJO, "forge.example");
-    assert_eq!(credential_field(&forge), Some(FORGEJO_TOKEN_FIELD));
-    let environment = BTreeMap::from([
-        ("FORGEJO_HOST".to_owned(), "other.example".to_owned()),
-        ("FORGEJO_TOKEN".to_owned(), "other-host-token".to_owned()),
-    ]);
-    let context = NativeContext {
-        environment: &environment,
-        directory: Path::new("."),
-    };
-    let error = token_for(&forge, context).await.assert_error();
-    let message = match &error {
-        NativeV2CliError::Local(message) => message.clone(),
-        other => panic!("expected the missing-token message, got {other}"),
-    };
-    assert_eq!(
-        message,
-        "Forgejo token for forge.example is unavailable; set FORGEJO_HOST=forge.example and FORGEJO_TOKEN, or supply its delivery connection"
-    );
-    assert!(!message.contains("other-host-token"), "{message}");
-}
-
-#[tokio::test]
 async fn a_shared_connection_with_additional_fields_cannot_be_filled_from_native_login() {
     let root = tempfile::tempdir().assert_value();
     let store = LocalConnectionStore::new(root.path().join("state"));

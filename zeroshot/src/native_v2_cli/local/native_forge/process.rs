@@ -6,10 +6,7 @@ use tokio::process::Command;
 
 use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 
-use super::{
-    NativeContext, NativeV2CliError, FORGEJO, FORGEJO_HOST, FORGEJO_TOKEN_FIELD, GITHUB, GITLAB,
-    local_message,
-};
+use super::{NativeContext, NativeV2CliError, GITHUB, GITLAB, local_message};
 
 const NATIVE_CONTEXT_FIELDS: &[&str] = &[
     "HOME",
@@ -41,32 +38,25 @@ fn environment_token_from_snapshot(
     hostname: &str,
     environment: &LocalHarnessEnvironment,
 ) -> Result<Option<String>, NativeV2CliError> {
-    let (selector, default_host, names): (&str, Option<&str>, &[&str]) = match provider {
+    let (selector, default_host, names): (&str, &str, &[&str]) = match provider {
         GITHUB if hostname == "github.com" || hostname.ends_with(".ghe.com") => {
-            ("GH_HOST", Some("github.com"), &["GH_TOKEN", "GITHUB_TOKEN"])
+            ("GH_HOST", "github.com", &["GH_TOKEN", "GITHUB_TOKEN"])
         }
         GITHUB => (
             "GH_HOST",
-            Some("github.com"),
+            "github.com",
             &["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"],
         ),
         GITLAB => (
             "GITLAB_HOST",
-            Some("gitlab.com"),
+            "gitlab.com",
             &["GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"],
         ),
-        // A self-hosted instance has no default host: an ambient token is never sent to a host
-        // the user did not name.
-        FORGEJO => (FORGEJO_HOST, None, &[FORGEJO_TOKEN_FIELD]),
         _ => return Ok(None),
     };
-    let selected = match environment.get(selector) {
-        Some(value) => value.as_str(),
-        None => match default_host {
-            Some(host) => host,
-            None => return Ok(None),
-        },
-    };
+    let selected = environment
+        .get(selector)
+        .map_or(default_host, String::as_str);
     if environment_hostname(selected).as_deref() != Some(hostname) {
         return Ok(None);
     }
@@ -112,8 +102,6 @@ pub(super) async fn stored_token(
     let executable = match provider {
         GITHUB => "gh",
         GITLAB => "glab",
-        // A self-hosted forge has no native login command, so no program is started for its token.
-        FORGEJO => return Ok(None),
         _ => return Ok(None),
     };
     let Some(mut command) = native_command(executable, context) else {
