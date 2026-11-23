@@ -2,9 +2,9 @@
 //!
 //! Every OpenCode process of a node session runs against private `XDG_DATA_HOME`,
 //! `XDG_STATE_HOME` and `XDG_CACHE_HOME` directories inside the session's private home.
-//! On local runs the user's saved login for the lane's provider is copied into that
-//! private store once per session, unless the node declares its own credential. Nothing
-//! is ever written back to the user's store.
+//! On local runs the user's active saved login for the lane's integration is copied into
+//! that private store once per session, unless the node declares its own credential. Only
+//! that integration is exported, and nothing is ever written back to the user's store.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -81,13 +81,14 @@ pub(super) async fn transfer_login(
     if declared {
         return Ok(Vec::new());
     }
+    let provider = command::native_provider(&adapter.config.provider);
     let export_environment = store_environment(adapter, files)?;
     let exported = run_store_process(StoreProcessRequest {
         adapter,
         files,
         control,
         environment: &export_environment,
-        arguments: &["auth", "export", "--standalone"],
+        arguments: &["auth", "export", "--standalone", provider],
         input: None,
         failure: READ_LOGIN_FAILURE,
         capture: true,
@@ -96,16 +97,14 @@ pub(super) async fn transfer_login(
     .ok_or_else(|| NodeRunnerError::DriverDetail(READ_LOGIN_FAILURE.to_owned()))?;
     let entries: Vec<Value> = serde_json::from_slice(&exported)
         .map_err(|_| NodeRunnerError::DriverDetail(READ_LOGIN_FAILURE.to_owned()))?;
-    let provider = command::native_provider(&adapter.config.provider);
+    // Of the lane's credentials only the active one moves; an inactive one stays behind.
     let selected: Vec<Value> = entries
         .into_iter()
         .filter(|entry| {
-            entry
-                .get("integrationID")
-                .and_then(Value::as_str)
-                .map(|id| id == provider)
-                .unwrap_or(false)
+            entry.get("integrationID").and_then(Value::as_str) == Some(provider)
+                && entry.get("active").and_then(Value::as_bool) == Some(true)
         })
+        .take(1)
         .collect();
     if selected.is_empty() {
         return Ok(Vec::new());

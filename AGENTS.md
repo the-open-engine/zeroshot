@@ -396,9 +396,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   OpenCode 2 keeps the user's HOME, XDG_CONFIG_HOME and native managed, global/project,
   plugin and MCP resources. Each node session gets private XDG data, state and cache
   directories under its private home. On local runs without a declared credential, the saved
-  login for the lane's provider is copied once per session with `auth export --standalone`
-  and `auth import --standalone`; only entries of that provider move, nothing is written back,
-  and imported secrets are redacted. Declared keys and endpoints reach OpenCode through the
+  login for the lane's integration is copied once per session with
+  `auth export --standalone <integration>` and `auth import --standalone`; only its active
+  credential moves, nothing is written back, and imported secrets are redacted. Declared keys and endpoints reach OpenCode through the
   inline configuration. A private dependency-free owned plugin verifies every request of the
   selected provider in `http.request` and `experimental.ws.handshake` and stops it on another
   auth-like header, a missing or wrong canonical header, or a URL outside the normalized

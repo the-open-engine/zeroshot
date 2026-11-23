@@ -11,7 +11,7 @@ fn stub(export_body: &str) -> String {
     let text = text_event("t1", "m1", "{\"response\":null}").to_string();
     let finish = finish_event("f1", "m1", "stop").to_string();
     format!(
-        "#!/bin/sh\nif [ \"$1\" = auth ] && [ \"$2\" = export ]; then echo \"$XDG_DATA_HOME\" >> export-env; {export_body}; exit 0; fi\nif [ \"$1\" = auth ] && [ \"$2\" = import ]; then echo \"$XDG_DATA_HOME\" >> import-env; cat >> import-stdin; exit 0; fi\necho \"$XDG_DATA_HOME\" >> run-env\n{LOADS_PLUGINS}\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
+        "#!/bin/sh\nif [ \"$1\" = auth ] && [ \"$2\" = export ]; then echo \"$XDG_DATA_HOME\" >> export-env; echo \"$*\" >> export-args; {export_body}; exit 0; fi\nif [ \"$1\" = auth ] && [ \"$2\" = import ]; then echo \"$XDG_DATA_HOME\" >> import-env; cat >> import-stdin; exit 0; fi\necho \"$XDG_DATA_HOME\" >> run-env\n{LOADS_PLUGINS}\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
     )
 }
 
@@ -140,4 +140,54 @@ async fn a_store_launch_keeps_unconfirmed_cleanup_and_hides_launch_details() {
         launched::<u8>(refused, &control, "failure"),
         Err(NodeRunnerError::Cancelled)
     );
+}
+
+const TWO_LOGINS: &str = r#"printf '%s\n' '[{"id":"cred_old","integrationID":"anthropic","label":"old","active":false,"value":{"type":"key","key":"inactive-anthropic-secret"}},{"id":"cred_new","integrationID":"anthropic","label":"new","active":true,"value":{"type":"key","key":"active-anthropic-secret"}}]'"#;
+
+#[tokio::test]
+async fn the_export_asks_only_for_the_lane_integration() {
+    let directory = TestDirectory::new("opencode-store-export-target");
+    let adapter = adapter(&directory, &stub(NORMAL_EXPORT));
+    assert!(run(&adapter, invocation(&[])).await.is_ok());
+    let arguments =
+        std::fs::read_to_string(adapter.config.workspace.join("export-args")).assert_value();
+    let lines: Vec<&str> = arguments.lines().collect();
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].ends_with("auth export --standalone anthropic"),
+        "{arguments}"
+    );
+}
+
+#[tokio::test]
+async fn only_the_active_login_of_the_integration_moves() {
+    let directory = TestDirectory::new("opencode-store-active-login");
+    let adapter = adapter(&directory, &stub(TWO_LOGINS));
+    assert!(run(&adapter, invocation(&[])).await.is_ok());
+    let imported =
+        std::fs::read_to_string(adapter.config.workspace.join("import-stdin")).assert_value();
+    assert!(
+        !imported.contains("inactive-anthropic-secret"),
+        "{imported}"
+    );
+    let entries: Vec<Value> = serde_json::from_str(&imported).assert_value();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].get("id").and_then(Value::as_str),
+        Some("cred_new")
+    );
+}
+
+#[tokio::test]
+async fn an_integration_without_an_active_login_imports_nothing() {
+    let directory = TestDirectory::new("opencode-store-no-active-login");
+    let adapter = adapter(
+        &directory,
+        &stub(
+            r#"printf '%s\n' '[{"id":"cred_old","integrationID":"anthropic","label":"old","active":false,"value":{"type":"key","key":"inactive-anthropic-secret"}}]'"#,
+        ),
+    );
+    assert!(run(&adapter, invocation(&[])).await.is_ok());
+    assert!(!adapter.config.workspace.join("import-stdin").exists());
+    assert!(adapter.config.workspace.join("run-env").exists());
 }
