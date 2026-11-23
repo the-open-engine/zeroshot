@@ -57,6 +57,7 @@ impl CapsuleAllocator for RetainedWorkspace {
 
 struct FailedRunFactory {
     ledger: Arc<FakeRunLedger>,
+    checkpoint_opt_out: bool,
 }
 
 #[async_trait]
@@ -69,6 +70,10 @@ impl TargetControllerFactory for FailedRunFactory {
         true
     }
 
+    fn supports_workspace_checkpoint_opt_out(&self) -> bool {
+        self.checkpoint_opt_out
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         NativeV2PlatformController::new_with_delivery_policy(
             self.ledger.clone(),
@@ -76,7 +81,13 @@ impl TargetControllerFactory for FailedRunFactory {
             crate::native_v2_admission::DeliveryPolicy::Optional,
         )
         .await
-        .map(|controller| Arc::new(controller.with_run_sizes(fixture_run_sizes())))
+        .map(|controller| {
+            Arc::new(
+                controller
+                    .with_run_sizes(fixture_run_sizes())
+                    .with_hosted_workspace_checkpoint_opt_out(self.checkpoint_opt_out),
+            )
+        })
         .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
     }
 
@@ -177,6 +188,7 @@ async fn resume_runtime_rpc_rejects_contained_checkpoint_opt_out_without_mutatio
     let before = ledger.get(&run_id()).await.assert_value().assert_value();
     let (_address, endpoint, task) = direct_test_server(Arc::new(FailedRunFactory {
         ledger: ledger.clone(),
+        checkpoint_opt_out: false,
     }))
     .await;
     let client = connect_client(&endpoint, None).await;
@@ -216,15 +228,19 @@ async fn resume_runtime_rpc_rejects_contained_checkpoint_opt_out_without_mutatio
 }
 
 #[tokio::test]
-async fn resume_runtime_rpc_query_and_successor_share_contained_provider_defaults() {
-    for uniform in [false, true] {
+async fn resume_runtime_rpc_query_and_successor_share_contained_policy_and_provider_defaults() {
+    for (uniform, checkpoint_opt_out) in
+        [(false, false), (true, false), (false, true), (true, true)]
+    {
         let ledger = failed_run_declaring_a_connection().await;
+        let before = ledger.get(&run_id()).await.assert_value().assert_value();
         let (_address, endpoint, task) = direct_test_server(Arc::new(FailedRunFactory {
             ledger: ledger.clone(),
+            checkpoint_opt_out,
         }))
         .await;
         let client = connect_client(&endpoint, None).await;
-        let runtime = if uniform {
+        let mut runtime = if uniform {
             json!({"kind":"uniform","runtime":{"harness":"claude","provider":"anthropic","model":"fixture"}})
         } else {
             let source = ledger.get(&run_id()).await.assert_value().assert_value();
@@ -232,6 +248,7 @@ async fn resume_runtime_rpc_query_and_successor_share_contained_provider_default
             runtime["nodes"]["worker"]["connections"] = json!({});
             json!({"kind":"exact","runtime":runtime})
         };
+        runtime["runtime"]["workspaceCheckpoints"] = json!(!checkpoint_opt_out);
         let runtime: openengine_cluster_protocol::RunResumeRuntime =
             serde_json::from_value(runtime).assert_value();
         let requirements = client
@@ -239,9 +256,9 @@ async fn resume_runtime_rpc_query_and_successor_share_contained_provider_default
                 run_id: run_id(),
                 runtime: runtime.clone(),
             })
-            .await
-            .assert_value()
-            .connections;
+            .await;
+        assert!(requirements.is_ok(), "{requirements:?}");
+        let requirements = requirements.assert_value().connections;
         assert_eq!(
             serde_json::to_value(&requirements).assert_value(),
             json!({"anthropic":["ANTHROPIC_API_KEY"]})
@@ -267,6 +284,19 @@ async fn resume_runtime_rpc_query_and_successor_share_contained_provider_default
             .await
             .assert_value()
             .assert_value();
+        assert_eq!(
+            successor.admitted.runtime.workspace_checkpoints,
+            !checkpoint_opt_out
+        );
+        assert_eq!(
+            ledger
+                .get(&run_id())
+                .await
+                .assert_value()
+                .assert_value()
+                .admitted,
+            before.admitted
+        );
         let actual = successor
             .admitted
             .runtime
@@ -283,6 +313,7 @@ async fn resume_runtime_rpc_query_and_successor_share_contained_provider_default
 async fn direct_target_resume_names_a_missing_declared_connection() {
     let factory = Arc::new(FailedRunFactory {
         ledger: failed_run_declaring_a_connection().await,
+        checkpoint_opt_out: false,
     });
     let (_address, endpoint, task) = direct_test_server(factory).await;
     let client = connect_client(&endpoint, None).await;

@@ -384,6 +384,7 @@ fn validate_contained_runtime(
 
 pub(crate) fn prepare_contained_resume_runtime(
     runtime: &mut openengine_cluster_protocol::RunResumeRuntime,
+    workspace_checkpoint_opt_out: bool,
 ) -> Result<(), TargetAuthorityError> {
     let plan = match runtime {
         openengine_cluster_protocol::RunResumeRuntime::Exact { runtime } => runtime.clone(),
@@ -391,7 +392,7 @@ pub(crate) fn prepare_contained_resume_runtime(
             runtime.clone().into_runtime_plan(Default::default())
         }
     };
-    validate_contained_runtime(&plan, false)?;
+    validate_contained_runtime(&plan, workspace_checkpoint_opt_out)?;
     crate::native_v2_runtime_config::materialize_access(runtime, ProviderAccessPlacement::Contained)
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
 }
