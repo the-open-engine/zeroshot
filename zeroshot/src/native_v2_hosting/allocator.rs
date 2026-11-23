@@ -676,6 +676,10 @@ impl ProductionCapsuleAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for ProductionCapsuleAllocator {
+    fn retains_suspended_ledger(&self) -> bool {
+        self.config.workspace_storage.is_none()
+    }
+
     fn supports_request_ask(&self) -> bool {
         self.config.workspace_storage.is_none()
             || (self.config.suspension.is_some() && self.config.request_ask)

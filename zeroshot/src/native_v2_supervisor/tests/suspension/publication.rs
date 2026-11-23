@@ -1,71 +1,7 @@
 use super::*;
-use crate::full_v1_reducer::ExecutionBoundary;
-use crate::native_v2_contract::DeliveryCheckpoint;
-use crate::native_v2_supervisor::checkpoints::{CheckpointError, RunCheckpointStore};
 use openengine_cluster_protocol::{RunVector, RunVectorContent, RunVectorsParams};
-use tokio::sync::Notify;
 
-#[derive(Default)]
-struct PublicationStore {
-    vectors: StdMutex<Vec<RunVector>>,
-    history: StdMutex<Vec<DurableExecution>>,
-    published: Notify,
-    publish_release: Notify,
-    disposing: Notify,
-    disposal_release: Notify,
-    reject: AtomicBool,
-    exits: StdMutex<Vec<RunRuntimeExit>>,
-}
-
-#[async_trait]
-impl RunCheckpointStore for PublicationStore {
-    async fn suspend(
-        &self,
-        history: &[DurableExecution],
-        vectors: &[RunVector],
-    ) -> Result<(), CheckpointError> {
-        *self.history.lock().assert_value() = history.to_vec();
-        *self.vectors.lock().assert_value() = vectors.to_vec();
-        self.published.notify_one();
-        self.publish_release.notified().await;
-        if self.reject.load(Ordering::SeqCst) {
-            return Err(std::io::Error::other("rejected suspension publication").into());
-        }
-        Ok(())
-    }
-
-    async fn retain_delivery_state(&self, _: &DeliveryCheckpoint) -> Result<(), CheckpointError> {
-        Ok(())
-    }
-
-    async fn delivery_state(&self) -> Result<Option<DeliveryCheckpoint>, CheckpointError> {
-        Ok(None)
-    }
-
-    async fn enter(
-        &self,
-        _: &ExecutionBoundary,
-        _: &[DurableExecution],
-    ) -> Result<(), CheckpointError> {
-        Ok(())
-    }
-
-    async fn finish(&self, _: &[DurableExecution]) -> Result<(), CheckpointError> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl RunRuntimeCleanup for PublicationStore {
-    async fn cleanup(&self, exit: RunRuntimeExit) -> Result<(), RuntimeCleanupUnavailable> {
-        self.exits.lock().assert_value().push(exit);
-        if exit == RunRuntimeExit::Suspended {
-            self.disposing.notify_one();
-            self.disposal_release.notified().await;
-        }
-        Ok(())
-    }
-}
+use crate::native_v2_supervisor::publication_test_store::PublicationStore;
 
 async fn fixture() -> (Harness, Arc<PublicationStore>) {
     let (mut harness, _) = waiting(Some(Duration::from_secs(3600))).await;

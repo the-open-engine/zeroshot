@@ -147,3 +147,68 @@ async fn successor_preparation_inherits_every_vector_and_only_suspended_executio
         );
     }
 }
+
+#[tokio::test]
+async fn local_controller_accepts_steers_during_suspension_cleanup_and_after_reopen() {
+    use crate::native_v2_supervisor::publication_test_store::PublicationStore;
+    use openengine_cluster_protocol::{RunSteerParams, RunSuspendParams, SteeringMode};
+    use serde_json::json;
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let root = tempfile::tempdir().assert_value();
+        let workspace = private_directory(root.path(), "workspace");
+        let storage = private_directory(root.path(), "run");
+        let run_id = RunId::new("local-suspended-steering");
+        let paths = PortableControllerPaths::new(storage.clone());
+        let mut submission = submission("local-suspended-steering");
+        let state = json!({"kind":"record","fields":{"durationMs":{"required":true,"type":{"kind":"integer"}}}});
+        submission.graph = serde_json::from_value(json!({
+            "profile":"openengine.graph.full/v1", "initialInput":state,
+            "policy":{"policy":"policy.native-v2@1","default":"deny"},
+            "root":{"kind":"seq","name":"root","state":state,"promotedStatePaths":[],"children":[
+                {"kind":"verifier","name":"wait","worker":crate::native_v2_wait::WAIT_WORKER_REF,
+                 "input":crate::native_v2_wait::input_schema().assert_value(),"output":{"kind":"null"},
+                 "signals":crate::native_v2_wait::signal_labels().assert_value(),
+                 "diagnostic":crate::native_v2_wait::diagnostic_schema().assert_value(),
+                 "inputBindings":[{"target":["durationMs"],"value":{"source":"state","path":["durationMs"]}}],"writeBindings":[],"attempts":1},
+                {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+            ]}
+        })).assert_value();
+        submission.initial_input = json!({"durationMs":7_200_000});
+        let mut runtime = serde_json::to_value(&submission.runtime).assert_value();
+        runtime["nodes"]["wait"] = json!({"kind":"request"});
+        submission.runtime = serde_json::from_value(runtime).assert_value();
+        let store = Arc::new(crate::native_v2_supervisor::checkpoints::fake_checkpoint_store(
+            root.path(), storage.join("checkpoints"), workspace.clone(), Default::default(),
+        ));
+        let cleanup = Arc::new(PublicationStore::default());
+        let controller = PortableRunController::start(
+            bootstrap(run_id.clone(), submission, workspace, storage),
+            |_| Ok::<_, std::io::Error>(PortableRuntime {
+                checkpoints: Some(store), cleanup: cleanup.clone(),
+                ..PortableRuntime::new(Arc::new(NeverDispatched))
+            }),
+        ).await.assert_value();
+        while !matches!(controller.inner.status(RunStatusParams { run_id: run_id.clone() }).await.assert_value().status,
+            RunStatus::Running { ref active_executions, .. } if active_executions.iter().any(|e| e.node.as_str() == "wait")) {
+            tokio::task::yield_now().await;
+        }
+        controller.inner.suspend(RunSuspendParams { run_id: run_id.clone() }).await.assert_value();
+        cleanup.disposing.notified().await;
+        let first = controller.inner.steer(RunSteerParams {
+            run_id: run_id.clone(), node: None, text: "during-local-cleanup".into(), mode: SteeringMode::Standing,
+        }).await.assert_value();
+        cleanup.disposal_release.notify_one();
+        controller.wait_terminal().await.assert_value();
+        drop(controller);
+        let controller = PortableRunController::open_observer(paths.clone(), run_id.clone()).await.assert_value();
+        let second = controller.inner.steer(RunSteerParams {
+            run_id: run_id.clone(), node: None, text: "after-local-reopen".into(), mode: SteeringMode::Standing,
+        }).await.assert_value();
+        let ledger = SqliteRunLedger::open(paths.ledger()).assert_value();
+        let directions = crate::v2_run_ledger::steering::all(&ledger, &run_id).await.assert_value();
+        assert_eq!(directions.iter().map(|v| &v.id).collect::<Vec<_>>(), [&first.steer.id, &second.steer.id]);
+        assert!(matches!(&directions[0].content, RunVectorContent::Steer { text, .. } if text == "during-local-cleanup"));
+        assert!(matches!(&directions[1].content, RunVectorContent::Steer { text, .. } if text == "after-local-reopen"));
+    }).await.assert_value();
+}
