@@ -515,6 +515,16 @@ jobs:
         run: |
           cargo test --locked --package zeroshot --lib --features ui native_v2_cli::local::
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable startup::
+      - name: Run macOS resume checkpoint policy regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          native_v2_target_authority::tests::resume_refusals
+          native_v2_target_authority::tests::checkpoint_opt_out
+      - name: Run macOS network authority regression
+        run: >-
+          cargo test --locked --package zeroshot --features ui
+          --test native_v2_cli_local
+          networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs
 
   python-check:
     name: Python SDK

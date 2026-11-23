@@ -239,7 +239,11 @@ async fn networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs()
         authority_target(&active, &active_run, true),
         authority_target(&suspended, &suspended_run, false),
     ]);
-    write_json(&source.repository.join("authority-jobs.json"), &json!(jobs));
+    // The provider treats the published file's existence as permission to read all jobs.
+    let jobs_path = source.repository.join("authority-jobs.json");
+    let staged_jobs = source.repository.join("authority-jobs.pending.json");
+    write_json(&staged_jobs, &json!(jobs));
+    fs::rename(staged_jobs, jobs_path).assert_value_with("publish complete authority jobs");
     network_wait(&source, &source_run, "authority-checked").await;
     assert_authority_denials(&source, &source_run, &jobs);
     for (fixture, run, count) in [

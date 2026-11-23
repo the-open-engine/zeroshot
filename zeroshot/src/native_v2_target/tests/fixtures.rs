@@ -53,16 +53,19 @@ pub(super) struct FakeAuthority {
     calls: Arc<Mutex<Vec<AuthorityCall>>>,
     endpoint: String,
     receipt_run_id: Option<RunId>,
+    workspace_recovery: bool,
 }
 
 pub(super) struct StubTransport {
     requests: Arc<Mutex<Vec<Value>>>,
+    resume_requirements: Arc<Mutex<Option<RunConnectionRequirements>>>,
 }
 
 #[derive(Clone, Default)]
 pub(super) struct FakeDialer {
     pub(super) sessions: Arc<Mutex<Vec<(TargetRecord, String)>>>,
     pub(super) requests: Arc<Mutex<Vec<Value>>>,
+    pub(super) resume_requirements: Arc<Mutex<Option<RunConnectionRequirements>>>,
 }
 
 #[async_trait::async_trait]
@@ -180,6 +183,7 @@ impl FakeAuthority {
             calls: Arc::new(Mutex::new(Vec::new())),
             endpoint: endpoint.into(),
             receipt_run_id: None,
+            workspace_recovery: false,
         }
     }
 
@@ -188,7 +192,13 @@ impl FakeAuthority {
             calls: Arc::new(Mutex::new(Vec::new())),
             endpoint: endpoint.into(),
             receipt_run_id: Some(receipt_run_id),
+            workspace_recovery: false,
         }
+    }
+
+    pub(super) fn with_workspace_recovery(mut self) -> Self {
+        self.workspace_recovery = true;
+        self
     }
 
     pub(super) fn calls(&self) -> Vec<AuthorityCall> {
@@ -198,6 +208,20 @@ impl FakeAuthority {
 
 #[async_trait]
 impl TargetControlAuthority for FakeAuthority {
+    async fn workspace_recovery_session(
+        &self,
+        target: &TargetRecord,
+        request: &TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        if self.workspace_recovery {
+            self.oecp_session(target, request).await
+        } else {
+            Err(TargetAuthorityError::new(
+                "target does not advertise workspace recovery",
+            ))
+        }
+    }
+
     async fn discover(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {
         self.calls
             .lock()
@@ -242,7 +266,7 @@ impl TargetControlAuthority for FakeAuthority {
             .push(AuthorityCall::Session(target.clone(), request.clone()));
         TargetOecpAccess::new(
             self.endpoint.clone(),
-            Some("access-token".to_owned()),
+            matches!(target.access, TargetAccess::Hosted { .. }).then(|| "access-token".to_owned()),
             &target.access,
         )
         .map_err(|error| TargetAuthorityError::new(error.to_string()))
@@ -332,10 +356,26 @@ impl TargetControlAuthority for FakeAuthority {
 #[async_trait]
 impl JsonRpcTransport for StubTransport {
     async fn request(&self, request: String) -> Result<String, TransportError> {
-        self.requests
-            .lock()
-            .assert_value()
-            .push(serde_json::from_str(&request).assert_value());
+        let request: Value = serde_json::from_str(&request).assert_value();
+        self.requests.lock().assert_value().push(request.clone());
+        if request["method"] == openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD {
+            let connections = self
+                .resume_requirements
+                .lock()
+                .assert_value()
+                .clone()
+                .unwrap_or_else(|| {
+                    zeroshot_engine::native_v2_cli::merge_resume_requirements(
+                        &BTreeMap::new(),
+                        &serde_json::from_value(request["params"]["runtime"].clone())
+                            .assert_value(),
+                    )
+                });
+            return Ok(
+                serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":{"connections":connections}})
+                    .to_string(),
+            );
+        }
         Err(TransportError::Protocol("unused test transport".to_owned()))
     }
 }
@@ -378,6 +418,7 @@ impl TargetOecpDialer for FakeDialer {
             .push((target.clone(), session.endpoint().to_owned()));
         Ok(Arc::new(StubTransport {
             requests: self.requests.clone(),
+            resume_requirements: self.resume_requirements.clone(),
         }))
     }
 }

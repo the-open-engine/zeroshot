@@ -343,6 +343,7 @@ pub enum SteerText {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunResumeCommand {
+    pub runtime: Option<RunRuntime>,
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
     /// Allow a local resume to replace the user-owned checkout with a checkpoint snapshot.
@@ -936,6 +937,14 @@ pub trait NativeV2CliBackend: Send + Sync {
     ) -> Result<(), NativeV2CliError> {
         Ok(())
     }
+    async fn validate_resume_runtime(
+        &self,
+        _run: &RunSelector,
+        _runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        _github_token: bool,
+    ) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
     async fn authorize_resume_connection_requirements(
         &self,
         target: Option<&str>,
@@ -948,6 +957,14 @@ pub trait NativeV2CliBackend: Send + Sync {
             ));
         }
         Ok(requirements)
+    }
+    async fn replacement_resume_requirements(
+        &self,
+        _run: &RunSelector,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+        _github_token: bool,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        Ok(crate::native_v2_runtime_config::requirements(runtime))
     }
     async fn run_export_workspace(
         &self,
@@ -1056,3 +1073,11 @@ impl NativeV2CliError {
 
 mod memory;
 pub use memory::MemoryCommand;
+
+#[doc(hidden)]
+pub fn merge_resume_requirements(
+    base: &RunConnectionRequirements,
+    runtime: &openengine_cluster_protocol::RunResumeRuntime,
+) -> RunConnectionRequirements {
+    crate::native_v2_runtime_config::merge_requirements(base, runtime)
+}

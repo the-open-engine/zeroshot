@@ -265,6 +265,7 @@ impl NativeV2TargetServer {
                 controller,
                 workspace_recovery: self.workspace_recovery(),
                 workspace_checkpoints: self.workspace_checkpoints(),
+                workspace_checkpoint_opt_out: self.target.supports_workspace_checkpoint_opt_out(),
                 run_suspension: self.target.supports_run_suspension(),
                 request_ask: self.target.supports_request_ask(),
             }),
@@ -505,7 +506,7 @@ impl NativeV2TargetServer {
             document = document.with_task_resolution();
         }
         if self.workspace_recovery() {
-            document = document.with_workspace_recovery();
+            document = document.with_workspace_recovery().with_resume_runtime();
         }
         if self.target.supports_request_ask() {
             document = document.with_request_ask();
@@ -607,6 +608,7 @@ struct TargetOecpBackend {
     controller: Arc<NativeV2PlatformController>,
     workspace_recovery: bool,
     workspace_checkpoints: bool,
+    workspace_checkpoint_opt_out: bool,
     run_suspension: bool,
     request_ask: bool,
 }
@@ -786,10 +788,25 @@ impl ClusterBackend for TargetOecpBackend {
         ClusterBackend::run_checkpoints(self.controller.as_ref(), context, params).await
     }
 
+    async fn run_resume_requirements(
+        &self,
+        context: &ConnectionContext,
+        mut params: openengine_cluster_protocol::RunResumeRequirementsParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, BackendError> {
+        if !self.workspace_recovery {
+            return Err(workspace_recovery_unavailable());
+        }
+        if !is_canonical_uuid_v7(&params.run_id) {
+            return Err(workspace_recovery_invalid_run_id());
+        }
+        prepare_resume_runtime(&mut params.runtime, self.workspace_checkpoint_opt_out)?;
+        ClusterBackend::run_resume_requirements(self.controller.as_ref(), context, params).await
+    }
+
     async fn run_resume(
         &self,
         context: &ConnectionContext,
-        params: RunResumeParams,
+        mut params: RunResumeParams,
     ) -> Result<RunResumeResult, BackendError> {
         if !self.workspace_recovery {
             return Err(workspace_recovery_unavailable());
@@ -813,6 +830,9 @@ impl ClusterBackend for TargetOecpBackend {
         if !is_canonical_uuid_v7(&params.run_id) || !is_canonical_uuid_v7(&params.successor_run_id)
         {
             return Err(workspace_recovery_invalid_run_id());
+        }
+        if let Some(runtime) = &mut params.runtime {
+            prepare_resume_runtime(runtime, self.workspace_checkpoint_opt_out)?;
         }
         ClusterBackend::run_resume(self.controller.as_ref(), context, params).await
     }
@@ -838,6 +858,17 @@ fn workspace_checkpoints_unavailable() -> BackendError {
         "Backend does not support native-v2 workspace checkpoints",
         None,
     )
+}
+
+fn prepare_resume_runtime(
+    runtime: &mut openengine_cluster_protocol::RunResumeRuntime,
+    workspace_checkpoint_opt_out: bool,
+) -> Result<(), BackendError> {
+    crate::native_v2_hosting::prepare_contained_resume_runtime(
+        runtime,
+        workspace_checkpoint_opt_out,
+    )
+    .map_err(|error| BackendError::invalid_params(SCHEMA_VIOLATION, error.to_string(), None))
 }
 
 fn workspace_recovery_unavailable() -> BackendError {

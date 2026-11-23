@@ -319,7 +319,16 @@ impl RunResumeArgs {
             .transpose()
             .map_err(|error| usage(format!("invalid --from-checkpoint: {error}")))?
             .map(|checkpoint_id| RunResumeFrom::Checkpoint { checkpoint_id });
+        let runtime = if self.runtime_config.is_some() || self.uniform_runtime_config.is_some() {
+            Some(run_runtime(
+                self.runtime_config,
+                self.uniform_runtime_config,
+            )?)
+        } else {
+            None
+        };
         Ok(NativeV2CliCommand::Resume(RunResumeCommand {
+            runtime,
             run: self.run.into_selector()?,
             from,
             discard_workspace_changes: self.discard_workspace_changes,

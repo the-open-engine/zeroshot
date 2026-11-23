@@ -237,7 +237,26 @@ pub trait TargetConnector: Send + Sync {
             "local authorization for workspace recovery is unavailable".to_owned(),
         ))
     }
-    fn prepare_workspace_recovery_resume(
+    async fn validate_resume_runtime(
+        &self,
+        _name: &str,
+        _runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise openengine.resume-runtime/v1".to_owned(),
+        ))
+    }
+    async fn replacement_workspace_recovery_requirements(
+        &self,
+        _name: &str,
+        _run_id: &openengine_cluster_protocol::RunId,
+        _runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "runtime replacement authorization is unavailable".to_owned(),
+        ))
+    }
+    async fn prepare_workspace_recovery_resume(
         &self,
         _name: &str,
         _params: &RunResumeParams,

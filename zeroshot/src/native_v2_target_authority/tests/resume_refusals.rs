@@ -57,6 +57,7 @@ impl CapsuleAllocator for RetainedWorkspace {
 
 struct FailedRunFactory {
     ledger: Arc<FakeRunLedger>,
+    checkpoint_opt_out: bool,
 }
 
 #[async_trait]
@@ -69,11 +70,25 @@ impl TargetControllerFactory for FailedRunFactory {
         true
     }
 
+    fn supports_workspace_checkpoint_opt_out(&self) -> bool {
+        self.checkpoint_opt_out
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
-        NativeV2PlatformController::new(self.ledger.clone(), Arc::new(RetainedWorkspace))
-            .await
-            .map(Arc::new)
-            .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
+        NativeV2PlatformController::new_with_delivery_policy(
+            self.ledger.clone(),
+            Arc::new(RetainedWorkspace),
+            crate::native_v2_admission::DeliveryPolicy::Optional,
+        )
+        .await
+        .map(|controller| {
+            Arc::new(
+                controller
+                    .with_run_sizes(fixture_run_sizes())
+                    .with_hosted_workspace_checkpoint_opt_out(self.checkpoint_opt_out),
+            )
+        })
+        .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
     }
 
     async fn submit(
@@ -142,6 +157,7 @@ fn resume(
     connections: openengine_cluster_protocol::RunConnectionValues,
 ) -> RunResumeParams {
     RunResumeParams {
+        runtime: None,
         run_id: run_id(),
         successor_run_id,
         from: None,
@@ -167,9 +183,137 @@ fn cli_remote_error(error: ClientError) -> (String, String) {
 }
 
 #[tokio::test]
+async fn resume_runtime_rpc_rejects_contained_checkpoint_opt_out_without_mutation() {
+    let ledger = failed_run_declaring_a_connection().await;
+    let before = ledger.get(&run_id()).await.assert_value().assert_value();
+    let (_address, endpoint, task) = direct_test_server(Arc::new(FailedRunFactory {
+        ledger: ledger.clone(),
+        checkpoint_opt_out: false,
+    }))
+    .await;
+    let client = connect_client(&endpoint, None).await;
+    for uniform in [false, true] {
+        let runtime = if uniform {
+            json!({"kind":"uniform","runtime":{"harness":"claude","provider":"anthropic","model":"fixture","workspaceCheckpoints":false}})
+        } else {
+            let mut runtime = serde_json::to_value(&before.admitted.runtime).assert_value();
+            runtime["workspaceCheckpoints"] = json!(false);
+            json!({"kind":"exact","runtime":runtime})
+        };
+        let runtime: openengine_cluster_protocol::RunResumeRuntime =
+            serde_json::from_value(runtime).assert_value();
+        let query = client
+            .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+                run_id: run_id(),
+                runtime: runtime.clone(),
+            })
+            .await
+            .expect_err("contained query must reject checkpoint opt-out");
+        let mut params = resume(other_run_id(), BTreeMap::new());
+        params.runtime = Some(runtime);
+        let rejected = client
+            .run_resume(params)
+            .await
+            .expect_err("contained resume must reject opt-out");
+        for error in [query, rejected] {
+            let (code, _) = cli_remote_error(error);
+            assert_eq!(code, openengine_cluster_protocol::SCHEMA_VIOLATION);
+        }
+        assert!(ledger.get(&other_run_id()).await.assert_value().is_none());
+        let after = ledger.get(&run_id()).await.assert_value().assert_value();
+        assert_eq!(after.admitted, before.admitted);
+        assert_eq!(after.snapshot, before.snapshot);
+    }
+    task.abort();
+}
+
+#[tokio::test]
+async fn resume_runtime_rpc_query_and_successor_share_contained_policy_and_provider_defaults() {
+    for (uniform, checkpoint_opt_out) in
+        [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let ledger = failed_run_declaring_a_connection().await;
+        let before = ledger.get(&run_id()).await.assert_value().assert_value();
+        let (_address, endpoint, task) = direct_test_server(Arc::new(FailedRunFactory {
+            ledger: ledger.clone(),
+            checkpoint_opt_out,
+        }))
+        .await;
+        let client = connect_client(&endpoint, None).await;
+        let mut runtime = if uniform {
+            json!({"kind":"uniform","runtime":{"harness":"claude","provider":"anthropic","model":"fixture"}})
+        } else {
+            let source = ledger.get(&run_id()).await.assert_value().assert_value();
+            let mut runtime = serde_json::to_value(source.admitted.runtime).assert_value();
+            runtime["nodes"]["worker"]["connections"] = json!({});
+            json!({"kind":"exact","runtime":runtime})
+        };
+        runtime["runtime"]["workspaceCheckpoints"] = json!(!checkpoint_opt_out);
+        let runtime: openengine_cluster_protocol::RunResumeRuntime =
+            serde_json::from_value(runtime).assert_value();
+        let requirements = client
+            .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+                run_id: run_id(),
+                runtime: runtime.clone(),
+            })
+            .await;
+        assert!(requirements.is_ok(), "{requirements:?}");
+        let requirements = requirements.assert_value().connections;
+        assert_eq!(
+            serde_json::to_value(&requirements).assert_value(),
+            json!({"anthropic":["ANTHROPIC_API_KEY"]})
+        );
+        let field = EnvironmentVariableName::new("ANTHROPIC_API_KEY").assert_value();
+        let mut params = resume(
+            other_run_id(),
+            BTreeMap::from([(
+                anthropic(),
+                StaticConnectionValues::new(BTreeMap::from([(
+                    field,
+                    "fresh-api-token".to_owned(),
+                )]))
+                .assert_value(),
+            )]),
+        );
+        params.runtime = Some(runtime);
+        let resumed = client.run_resume(params).await;
+        assert!(resumed.is_ok(), "{resumed:?}");
+        resumed.assert_value();
+        let successor = ledger
+            .get(&other_run_id())
+            .await
+            .assert_value()
+            .assert_value();
+        assert_eq!(
+            successor.admitted.runtime.workspace_checkpoints,
+            !checkpoint_opt_out
+        );
+        assert_eq!(
+            ledger
+                .get(&run_id())
+                .await
+                .assert_value()
+                .assert_value()
+                .admitted,
+            before.admitted
+        );
+        let actual = successor
+            .admitted
+            .runtime
+            .connection_requirements()
+            .into_iter()
+            .map(|(key, fields)| (key, fields.into_iter().collect::<Vec<_>>()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(actual, requirements);
+        task.abort();
+    }
+}
+
+#[tokio::test]
 async fn direct_target_resume_names_a_missing_declared_connection() {
     let factory = Arc::new(FailedRunFactory {
         ledger: failed_run_declaring_a_connection().await,
+        checkpoint_opt_out: false,
     });
     let (_address, endpoint, task) = direct_test_server(factory).await;
     let client = connect_client(&endpoint, None).await;

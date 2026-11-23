@@ -427,6 +427,7 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
     );
     let successor_run_id = RunId::new("run-successor");
     let resume = openengine_cluster_protocol::RunResumeParams {
+        runtime: None,
         git_credentials: None,
         commit_identity: None,
         commit_co_author: None,
@@ -442,6 +443,7 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
         backend
             .connector
             .prepare_workspace_recovery_resume("prod", &resume)
+            .await
             .assert_error()
             .to_string()
             .contains("authorization")
@@ -574,6 +576,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
             .run_resume(
                 Some("prod"),
                 openengine_cluster_protocol::RunResumeParams {
+                    runtime: None,
                     run_id: run_id.clone(),
                     successor_run_id: RunId::new("default-authority-successor"),
                     from: None,

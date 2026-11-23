@@ -630,6 +630,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             .expect_err("unsupported checkpoint query must be rejected"),
         client
             .run_resume(RunResumeParams {
+                runtime: None,
                 run_id: run_id(),
                 successor_run_id: other_run_id(),
                 from: Some(RunResumeFrom::Checkpoint {
@@ -656,6 +657,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
     for from in [None, Some(RunResumeFrom::Restart {})] {
         let error = client
             .run_resume(RunResumeParams {
+                runtime: None,
                 run_id: run_id(),
                 successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
                 from,
@@ -678,6 +680,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
 
     for params in [
         RunResumeParams {
+            runtime: None,
             run_id: RunId::new("not-a-run-id"),
             successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
             from: None,
@@ -689,6 +692,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             commit_co_author: None,
         },
         RunResumeParams {
+            runtime: None,
             run_id: run_id(),
             successor_run_id: RunId::new("not-a-run-id"),
             from: None,
@@ -1029,6 +1033,7 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
     let errors = [
         client
             .run_resume(RunResumeParams {
+                runtime: None,
                 run_id: run_id(),
                 successor_run_id: other_run_id(),
                 from: None,

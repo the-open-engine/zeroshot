@@ -9,6 +9,7 @@ impl NativeV2PlatformController {
     ) -> Result<RunResumeResult, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
         let RunResumeParams {
+            runtime,
             from,
             run_id,
             successor_run_id,
@@ -114,20 +115,11 @@ impl NativeV2PlatformController {
                 )));
             }
         }
-        // Reconcile before claiming/moving the workspace or creating a successor. A hard exit
-        // may leave acknowledged ledger receipts newer than the last workspace boundary.
-        if let Some(state) = source.snapshot.delivery_checkpoint()? {
-            self.allocator
-                .retain_delivery_state(&run_id, &state)
-                .await?;
-        }
         let (submission_key, submission_digest) =
             retained_submission_identity(&run_id, &successor_run_id)?;
-        let mut admitted = source.admitted.clone();
-        if let Some(catalog) = self.run_sizes.as_deref() {
-            crate::native_v2_admission::resolve_runtime_size(&mut admitted.runtime, catalog)?;
-        }
-        self.validate_harnesses(&admitted.runtime)?;
+        let admitted = self
+            .admit_resume_runtime(&source.admitted, runtime, submission_key.clone())
+            .await?;
         let secrets = resume_secret_envelope(ResumeSecretRequest {
             admitted: &admitted,
             successor_run_id: &successor_run_id,
@@ -138,6 +130,13 @@ impl NativeV2PlatformController {
             commit_identity,
             commit_co_author,
         })?;
+        // Reconcile before claiming/moving the workspace or creating a successor. A hard exit
+        // may leave acknowledged ledger receipts newer than the last workspace boundary.
+        if let Some(state) = source.snapshot.delivery_checkpoint()? {
+            self.allocator
+                .retain_delivery_state(&run_id, &state)
+                .await?;
+        }
         let controller_claim = self.allocator.claim_controller(&successor_run_id).await?;
         let stored = self
             .create_resume_successor(CreateRun {
@@ -174,7 +173,7 @@ impl NativeV2PlatformController {
         })
     }
 
-    async fn recoverable_resume_source(
+    pub(super) async fn recoverable_resume_source(
         &self,
         run_id: &RunId,
     ) -> Result<StoredRun, NativeV2PlatformError> {

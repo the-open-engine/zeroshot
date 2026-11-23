@@ -1266,6 +1266,35 @@ def test_steer_rejects_invalid_mode_before_dispatch(fake_native: Path, mode: obj
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("target_kind", ["local", "contained", "direct", "hosted"])
+@pytest.mark.parametrize("uniform", [False, True])
+def test_resume_replaces_runtime_files(fake_native: Path, target_kind: str, uniform: bool) -> None:
+    async def scenario() -> None:
+        target = {
+            "local": LocalTarget(),
+            "contained": LocalTarget(controller="contained"),
+            "direct": DirectTarget("https://target.example"),
+            "hosted": HostedTarget("prod"),
+        }[target_kind]
+        selected = (
+            runtime()
+            if uniform
+            else RuntimePlan({"harness": "codex", "provider": "openai", "nodes": {}})
+        )
+        async with Client(target=target) as client:
+            assert (await client.get_run("original").resume(runtime=selected)).id == "successor"
+        record = next(
+            entry for entry in read_invocations(fake_native) if entry["args"][0] == "resume"
+        )
+        option = "--uniform-runtime-config" if uniform else "--runtime-config"
+        assert record[option] == selected.to_dict()
+        if target_kind == "contained":
+            assert record["args"][record["args"].index("--controller") + 1] == "contained"
+        assert not Path(record["args"][record["args"].index(option) + 1]).exists()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("controller", ["detached", "contained"])
 def test_local_controller_policy_reaches_every_launch_path(
     controller: str, fake_native: Path

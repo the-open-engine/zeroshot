@@ -587,6 +587,14 @@ pub struct TargetWorkspaceCheckpointsDiscovery {
     pub kind: String,
 }
 
+pub const RESUME_RUNTIME_KIND: &str = "openengine.resume-runtime/v1";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetResumeRuntimeDiscovery {
+    pub kind: String,
+}
+
 pub const WORKSPACE_CHECKPOINT_OPT_OUT_KIND: &str = "openengine.workspace-checkpoint-opt-out/v1";
 
 /// Per-run hosted opt-out, independent of checkpoint listing and recovery support.
@@ -715,6 +723,8 @@ pub struct TargetTaskResolutionDiscovery {
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_runtime: Option<TargetResumeRuntimeDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub steering: Option<TargetSteeringDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_wait: Option<TargetRequestWaitDiscovery>,
@@ -813,6 +823,7 @@ impl TargetDiscoveryExtensions {
             && self.request_ask.is_none()
             && self.hosted_inbox.is_none()
             && self.workspace_recovery.is_none()
+            && self.resume_runtime.is_none()
             && self.workspace_checkpoints.is_none()
             && self.workspace_checkpoint_opt_out.is_none()
             && self.hosted_workspace_recovery.is_none()
@@ -933,6 +944,15 @@ impl TargetDiscoveryDocument {
                 kind: WORKSPACE_RECOVERY_KIND.to_owned(),
             });
         }
+        self
+    }
+
+    /// Advertises validated runtime replacements for workspace recovery.
+    #[must_use]
+    pub fn with_resume_runtime(mut self) -> Self {
+        self.extensions.resume_runtime = Some(TargetResumeRuntimeDiscovery {
+            kind: RESUME_RUNTIME_KIND.to_owned(),
+        });
         self
     }
 

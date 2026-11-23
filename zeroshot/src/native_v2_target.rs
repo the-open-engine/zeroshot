@@ -643,16 +643,108 @@ where
         Ok(trusted)
     }
 
-    fn prepare_workspace_recovery_resume(
+    async fn validate_resume_runtime(
+        &self,
+        name: &str,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<(), NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .validate_resume_runtime(&target, runtime)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn replacement_workspace_recovery_requirements(
+        &self,
+        name: &str,
+        run_id: &openengine_cluster_protocol::RunId,
+        runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        let target = self.target(name)?;
+        if !matches!(target.access, TargetAccess::Direct) {
+            return Ok(RunConnectionRequirements::new());
+        }
+        let trusted = self
+            .registry
+            .recovery_authorization_with_source(&target.id, run_id)
+            .map_err(cli_target_error)?;
+        let transport = self
+            .connect_workspace_recovery(name, run_id.clone())
+            .await?;
+        let fixed = openengine_cluster_client::ClusterClient::new(transport.as_ref())
+            .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+                run_id: run_id.clone(),
+                runtime: runtime.clone(),
+            })
+            .await
+            .map_err(|_| {
+                NativeV2CliError::Target(
+                    "target runtime replacement requirements are unavailable".to_owned(),
+                )
+            })?
+            .connections;
+        let mut allowed = zeroshot_engine::native_v2_cli::merge_resume_requirements(
+            &trusted.connections,
+            runtime,
+        );
+        // Uniform plans restore canonical forge connection names. A renamed connection may
+        // forward only a token field already authorized for this target, never a new secret.
+        use zeroshot_engine::source_code_provider::adapters::core;
+        for provider in [core::GITHUB_PROVIDER_ID, core::GITLAB_PROVIDER_ID] {
+            let Some((key, field)) =
+                core::forge_connection_requirement(provider).map_err(|_| {
+                    cli_target_error(TargetConnectorError::RecoveryAuthorizationMismatch)
+                })?
+            else {
+                continue;
+            };
+            if let Some(field) = trusted
+                .connections
+                .values()
+                .flatten()
+                .find(|authorized| authorized.as_str() == field)
+            {
+                let key = openengine_cluster_protocol::ConnectionKey::new(key).map_err(|_| {
+                    cli_target_error(TargetConnectorError::RecoveryAuthorizationMismatch)
+                })?;
+                let fields = allowed.entry(key).or_default();
+                if !fields.contains(field) {
+                    fields.push(field.clone());
+                }
+            }
+        }
+        if !fixed.iter().all(|(key, fields)| {
+            allowed
+                .get(key)
+                .is_some_and(|all| fields.iter().all(|field| all.contains(field)))
+        }) || !trusted.source_connections.iter().all(|(key, fields)| {
+            fixed
+                .get(key)
+                .is_some_and(|all| fields.iter().all(|field| all.contains(field)))
+        }) {
+            return Err(cli_target_error(
+                TargetConnectorError::RecoveryAuthorizationMismatch,
+            ));
+        }
+        Ok(fixed)
+    }
+
+    async fn prepare_workspace_recovery_resume(
         &self,
         name: &str,
         params: &RunResumeParams,
     ) -> Result<(), NativeV2CliError> {
         let target = self.direct_recovery_target(name)?;
-        let trusted = self
+        let mut trusted = self
             .registry
             .recovery_authorization_with_source(&target.id, &params.run_id)
             .map_err(cli_target_error)?;
+        if let Some(runtime) = &params.runtime {
+            trusted.connections = self
+                .replacement_workspace_recovery_requirements(name, &params.run_id, runtime)
+                .await?;
+        }
         if params.connection_resolver.is_some()
             || !connection_values_match_requirements(&params.connections, &trusted.connections)
             || !git_credentials_match_source_authority(

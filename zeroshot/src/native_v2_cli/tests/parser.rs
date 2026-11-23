@@ -358,7 +358,7 @@ fn parser_exposes_workspace_recovery_commands() {
         parse_native_v2_args(args(&["resume", "run-7", "--target", "docker"])).assert_value();
     assert!(matches!(
         resume,
-        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id, .. }, from: None, discard_workspace_changes: false, forward_github_token: false })
+        NativeV2CliCommand::Resume(RunResumeCommand { runtime: None, run: RunSelector { target, run_id, .. }, from: None, discard_workspace_changes: false, forward_github_token: false })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-7"
     ));
 
@@ -385,6 +385,7 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
     assert!(matches!(
         resume,
         NativeV2CliCommand::Resume(RunResumeCommand {
+            runtime: None,
             run: RunSelector { target, run_id, .. },
             from: Some(RunResumeFrom::Checkpoint { checkpoint_id }),
             discard_workspace_changes: false,
@@ -404,6 +405,7 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
     assert!(matches!(
         rollback,
         NativeV2CliCommand::Resume(RunResumeCommand {
+            runtime: None,
             run: RunSelector { target: None, .. },
             from: Some(RunResumeFrom::Checkpoint { .. }),
             discard_workspace_changes: true,
@@ -1268,6 +1270,42 @@ fn steer_usage_names_the_run_id_before_the_text_source() {
     assert_eq!(
         usage,
         "Usage: zeroshot steer [OPTIONS] <RUN_ID> <TEXT|--text-file <FILE>|--text-stdin>"
+    );
+}
+
+#[test]
+fn resume_runtime_file_forms_are_optional_and_mutually_exclusive() {
+    for flag in ["--runtime-config", "--uniform-runtime-config"] {
+        let command = parse_native_v2_args(args(&[
+            "resume",
+            "prior",
+            flag,
+            "replacement.json",
+            "--controller",
+            "contained",
+        ]))
+        .assert_value();
+        let NativeV2CliCommand::Resume(command) = command else {
+            panic!("expected resume");
+        };
+        assert_eq!(
+            command.run.controller,
+            crate::native_v2_cli::local::LocalControllerMode::Contained
+        );
+        assert!(matches!((&command.runtime,flag),
+            (Some(RunRuntime::Exact(path)),"--runtime-config") |
+            (Some(RunRuntime::Uniform(path)),"--uniform-runtime-config") if path == std::path::Path::new("replacement.json")));
+    }
+    assert!(
+        parse_native_v2_args(args(&[
+            "resume",
+            "prior",
+            "--runtime-config",
+            "exact.json",
+            "--uniform-runtime-config",
+            "uniform.json"
+        ]))
+        .is_err()
     );
 }
 

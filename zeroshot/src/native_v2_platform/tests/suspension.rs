@@ -189,6 +189,7 @@ fn wait_request() -> RunSubmitParams {
 
 fn resume_params(run: &RunId) -> RunResumeParams {
     RunResumeParams {
+        runtime: None,
         run_id: run.clone(),
         successor_run_id: RunId::new("wait-successor"),
         from: None,

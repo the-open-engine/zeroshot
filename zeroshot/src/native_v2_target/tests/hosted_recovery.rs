@@ -36,6 +36,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
             .run_resume(
                 Some("prod"),
                 RunResumeParams {
+                    runtime: None,
                     run_id: run_id.clone(),
                     successor_run_id: RunId::new("successor"),
                     from,
@@ -169,4 +170,40 @@ pub(super) fn response(request: &CapturedHttpRequest) -> Option<String> {
 
 fn vector() -> Value {
     json!({"id":"entry", "kind":"suspend_request", "runId":"run-recoverable", "createdAt":1})
+}
+
+#[tokio::test]
+async fn resume_runtime_refuses_an_older_target_before_credentials_or_resume() {
+    let root = temp_root();
+    let (backend, dialer, server) = hosted_backend(&root, 1).await;
+    let runtime = serde_json::from_value(json!({"kind":"uniform","runtime":{
+        "harness":"codex","provider":"openai","model":"replacement"
+    }}))
+    .assert_value();
+    let error = backend
+        .validate_resume_runtime(
+            &zeroshot_engine::native_v2_cli::RunSelector {
+                controller: Default::default(),
+                target: Some("prod".to_owned()),
+                run_id: RunId::new("prior"),
+            },
+            &runtime,
+            false,
+        )
+        .await;
+    assert!(
+        error
+            .err()
+            .assert_value()
+            .to_string()
+            .contains("openengine.resume-runtime/v1")
+    );
+    assert!(dialer.sessions.lock().assert_value().is_empty());
+    let requests = tokio::time::timeout(std::time::Duration::from_secs(5), server)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/.well-known/zeroshot-native-v2");
+    assert!(requests[0].authorization.is_none());
 }

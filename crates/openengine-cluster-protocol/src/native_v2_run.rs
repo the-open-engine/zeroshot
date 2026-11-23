@@ -26,6 +26,7 @@ pub const RUN_VECTORS_METHOD: &str = "run/vectors";
 pub const RUN_VECTOR_METHOD: &str = "run/vector";
 pub const RUN_FORCE_METHOD: &str = "run/force";
 pub const RUN_CHECKPOINTS_METHOD: &str = "run/checkpoints";
+pub const RUN_RESUME_REQUIREMENTS_METHOD: &str = "run/resume_requirements";
 pub const RUN_RESUME_METHOD: &str = "run/resume";
 pub const RUN_DISCARD_WORKSPACE_METHOD: &str = "run/discard_workspace";
 
@@ -706,3 +707,8 @@ pub use vectors::*;
 
 mod requests;
 pub use requests::*;
+
+mod resume_runtime;
+pub use resume_runtime::{
+    RunResumeRuntime, UniformRuntimePlan, RunResumeRequirementsParams, RunResumeRequirementsResult,
+};

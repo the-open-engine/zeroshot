@@ -1,5 +1,43 @@
 use super::*;
 
+impl NativeV2PlatformController {
+    pub(super) async fn admit_resume_runtime(
+        &self,
+        saved: &AdmittedRun,
+        runtime: Option<openengine_cluster_protocol::RunResumeRuntime>,
+        submission_key: openengine_cluster_protocol::IdempotencyKey,
+    ) -> Result<AdmittedRun, NativeV2PlatformError> {
+        let mut admitted = saved.clone();
+        if let Some(runtime) = runtime {
+            let submission = crate::native_v2_runtime_config::replacement_submission(
+                &admitted,
+                runtime,
+                submission_key,
+            )?;
+            self.validate_harnesses(&submission.runtime)?;
+            let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+                &self.harnesses,
+                self.delivery_policy,
+            );
+            admission.checkpointless_requests = self.checkpointless_requests;
+            admission.hosted_workspace_checkpoint_opt_out =
+                self.hosted_workspace_checkpoint_opt_out;
+            if let Some(catalog) = self.run_sizes.as_deref() {
+                admission = admission.with_run_sizes(catalog);
+            }
+            admitted = NativeV2Admission
+                .admit_with_context(submission, admission)
+                .await?;
+            crate::v2_run_ledger::validate_admitted_run(&admitted)?;
+        }
+        if let Some(catalog) = self.run_sizes.as_deref() {
+            crate::native_v2_admission::resolve_runtime_size(&mut admitted.runtime, catalog)?;
+        }
+        self.validate_harnesses(&admitted.runtime)?;
+        Ok(admitted)
+    }
+}
+
 #[async_trait]
 impl ClusterBackend for NativeV2PlatformController {
     async fn initialize(
@@ -160,6 +198,29 @@ impl ClusterBackend for NativeV2PlatformController {
         self.checkpoints(params)
             .await
             .map_err(platform_backend_error)
+    }
+
+    async fn run_resume_requirements(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunResumeRequirementsParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, BackendError> {
+        let source = self
+            .recoverable_resume_source(&params.run_id)
+            .await
+            .map_err(platform_backend_error)?;
+        let submission = crate::native_v2_runtime_config::replacement_submission(
+            &source.admitted,
+            params.runtime,
+            source.submission_key,
+        )
+        .map_err(|error| platform_backend_error(error.into()))?;
+        let connections = submission
+            .connection_requirements()
+            .into_iter()
+            .map(|(key, fields)| (key, fields.into_iter().collect()))
+            .collect();
+        Ok(openengine_cluster_protocol::RunResumeRequirementsResult { connections })
     }
 
     async fn run_resume(

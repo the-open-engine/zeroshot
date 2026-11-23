@@ -278,6 +278,9 @@ pub struct RunSubmitResult {
 #[derive(Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunResumeParams {
+    /// Complete successor runtime replacement. Omission retains the saved runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<super::RunResumeRuntime>,
     pub run_id: RunId,
     pub successor_run_id: RunId,
     /// Omission preserves restarting from the latest retained workspace.
@@ -309,6 +312,7 @@ impl std::fmt::Debug for RunResumeParams {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RunResumeParams")
+            .field("runtime", &self.runtime)
             .field("run_id", &self.run_id)
             .field("successor_run_id", &self.successor_run_id)
             .field("from", &self.from)

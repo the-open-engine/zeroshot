@@ -21,6 +21,9 @@ use super::super::*;
 use super::fixtures::*;
 use super::hosted_authority::*;
 
+#[path = "resume_runtime_tests.rs"]
+mod resume_runtime_tests;
+
 type ServerRequest = tokio_tungstenite::tungstenite::handshake::server::Request;
 type ServerResponse = tokio_tungstenite::tungstenite::handshake::server::Response;
 
@@ -423,7 +426,8 @@ async fn direct_recovery_fixture() -> DirectRecoveryFixture {
     let authority = FakeAuthority::with_receipt(
         "ws://127.0.0.1:8080/native-v2/oecp",
         authoritative_run_id.clone(),
-    );
+    )
+    .with_workspace_recovery();
     let connector =
         NativeV2TargetConnector::new(registry.clone(), authority, FakeDialer::default());
     let mut request = run_request();
@@ -516,6 +520,7 @@ async fn assert_direct_continuation_authorization(
     )
     .assert_value();
     let params = RunResumeParams {
+        runtime: None,
         run_id: fixture.run_id.clone(),
         successor_run_id: successor_run_id.clone(),
         connections: BTreeMap::from([(fixture.key.clone(), untrusted_values)]),
@@ -530,6 +535,7 @@ async fn assert_direct_continuation_authorization(
         fixture
             .connector
             .prepare_workspace_recovery_resume("vm", &params)
+            .await
             .assert_error()
             .to_string()
             .contains("do not match the original run")
@@ -538,6 +544,7 @@ async fn assert_direct_continuation_authorization(
 
     let resolver_successor = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c993");
     let resolver_params = RunResumeParams {
+        runtime: None,
         run_id: fixture.run_id.clone(),
         successor_run_id: resolver_successor.clone(),
         connections: BTreeMap::new(),
@@ -557,6 +564,7 @@ async fn assert_direct_continuation_authorization(
         fixture
             .connector
             .prepare_workspace_recovery_resume("vm", &resolver_params)
+            .await
             .assert_error()
             .to_string()
             .contains("do not match the original run")
@@ -568,12 +576,14 @@ async fn assert_direct_continuation_authorization(
     ))
     .assert_value();
     let params = RunResumeParams {
+        runtime: None,
         connections: BTreeMap::from([(fixture.key.clone(), trusted_values)]),
         ..params
     };
     fixture
         .connector
         .prepare_workspace_recovery_resume("vm", &params)
+        .await
         .assert_value();
     assert_eq!(
         fixture
@@ -627,6 +637,7 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
             .run_resume(
                 Some("prod"),
                 RunResumeParams {
+                    runtime: None,
                     run_id: source_run_id.clone(),
                     successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
                     connections: BTreeMap::new(),

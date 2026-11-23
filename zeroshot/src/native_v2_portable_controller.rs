@@ -225,8 +225,6 @@ pub enum PortableControllerError {
     Readiness,
     #[error("portable controller durable identity does not match bootstrap")]
     DurableIdentity,
-    #[error("workspace checkpoint restore is unavailable because workspaceCheckpoints is false")]
-    CheckpointsDisabled,
     #[error("workspace checkpoint restore did not complete")]
     Restore(#[source] io::Error),
     #[error("portable runtime could not be constructed")]

@@ -729,9 +729,8 @@ async fn restore_execution_seed(
     use crate::native_v2_supervisor::checkpoints::{RestoreAttempt, RestoreOptions, restore_with};
     match &bootstrap.checkpoint {
         Some(selection) => {
-            if !bootstrap.submission.runtime.workspace_checkpoints {
-                return Err(PortableControllerError::CheckpointsDisabled);
-            }
+            // Selection was authorized against the predecessor's retained checkpoint. The
+            // successor's policy controls future captures, not availability of that snapshot.
             restore_with(
                 selection,
                 &bootstrap.workspace,

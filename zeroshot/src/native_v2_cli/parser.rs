@@ -223,7 +223,8 @@ enum UtilityCommand {
     /// preserve published ancestry, or start a new run on a feature branch based on that head.
     /// Older local Git-delivery runs without recorded branch ownership cannot resume; preserve
     /// their workspace and start a new run from the intended attached branch or with --worktree.
-    /// The successor resolves its original connection requirements again; make those credentials available.
+    /// The successor resolves credentials again for its effective runtime and saved environment;
+    /// make those credentials available.
     ///
     /// Target runs reuse the saved environment definition: setup runs before workspace restore,
     /// then startup runs before the graph. Startup must tolerate existing workspace files.
@@ -884,6 +885,12 @@ struct LocalLaunchArgs {
 
 #[derive(Debug, Args)]
 struct RunResumeArgs {
+    /// Replace the saved runtime with this exact runtime plan.
+    #[arg(long, value_name = "FILE", conflicts_with = "uniform_runtime_config")]
+    runtime_config: Option<PathBuf>,
+    /// Apply this runtime configuration to the unchanged graph.
+    #[arg(long, value_name = "FILE")]
+    uniform_runtime_config: Option<PathBuf>,
     #[command(flatten)]
     run: LocalLaunchArgs,
 

@@ -109,6 +109,16 @@ pub trait TargetControlAuthority: Send + Sync {
         ))
     }
 
+    async fn validate_resume_runtime(
+        &self,
+        _target: &TargetRecord,
+        _runtime: &openengine_cluster_protocol::RunResumeRuntime,
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.resume-runtime/v1",
+        ))
+    }
+
     async fn validate_request_ask(
         &self,
         _target: &TargetRecord,

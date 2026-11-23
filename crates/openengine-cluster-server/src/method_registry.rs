@@ -79,6 +79,7 @@ pub static METHOD_REGISTRY: &[MethodDescriptor] = &[
     unary(openengine_cluster_protocol::INBOX_SHOW_METHOD),
     unary(openengine_cluster_protocol::RUN_VECTOR_METHOD),
     unary(openengine_cluster_protocol::RUN_CHECKPOINTS_METHOD),
+    unary(openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD),
     unary(openengine_cluster_protocol::RUN_RESUME_METHOD),
     unary(openengine_cluster_protocol::RUN_DISCARD_WORKSPACE_METHOD),
 ];

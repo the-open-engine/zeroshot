@@ -167,6 +167,11 @@ async fn openrpc_vector_parameters_resolve_in_the_generated_schema() {
             "/$defs/RunVectorsParams/properties/after",
         ),
         ("run/vector", "id", "/$defs/VectorId"),
+        (
+            "run/resume",
+            "runtime",
+            "/$defs/RunResumeParams/properties/runtime",
+        ),
     ] {
         let method = openrpc
             .assert_key("methods")
@@ -297,6 +302,59 @@ async fn openrpc_steer_parameter_references_resolve_and_enforce_their_contracts(
 }
 
 #[tokio::test]
+async fn openrpc_resume_runtime_references_resolve_and_validate_replacements() {
+    let artifacts = generate_artifacts().await;
+    let openrpc = generated_json(&artifacts, "/openrpc.json");
+    let schema = generated_json(&artifacts, "/schema.json");
+    let options = jsonschema::options()
+        .with_resource(
+            "https://protocol.test/openrpc.json",
+            jsonschema::Resource::from_contents(openrpc.clone()).assert_value(),
+        )
+        .with_resource(
+            "https://protocol.test/schema.json",
+            jsonschema::Resource::from_contents(schema).assert_value(),
+        );
+    for method_name in ["run/resume", "run/resume_requirements"] {
+        let (method_index, method) = openrpc
+            .assert_key("methods")
+            .as_array()
+            .assert_value()
+            .iter()
+            .enumerate()
+            .find(|(_, method)| method.assert_key("name") == method_name)
+            .assert_value();
+        let parameter_index = method
+            .assert_key("params")
+            .as_array()
+            .assert_value()
+            .iter()
+            .position(|parameter| parameter.assert_key("name") == "runtime")
+            .assert_value();
+        let validator = options.build(&serde_json::json!({
+            "$ref": format!("https://protocol.test/openrpc.json#/methods/{method_index}/params/{parameter_index}/schema")
+        })).assert_value();
+        let mut replacement = serde_json::json!({"kind":"uniform","runtime":{
+            "harness":"codex","provider":"openai","model":"replacement",
+            "maxConcurrency":65_536,"contextWindow":10_000_000,"maxTokens":1
+        }});
+        assert!(validator.is_valid(&replacement));
+        replacement["runtime"]["maxConcurrency"] = serde_json::json!(65_537);
+        assert!(!validator.is_valid(&replacement));
+        replacement["runtime"]["maxConcurrency"] = serde_json::json!(1);
+        replacement["runtime"]["maxTokens"] = serde_json::json!(0);
+        assert!(!validator.is_valid(&replacement));
+        for invalid in [serde_json::json!({}), serde_json::json!({"kind":"other"})] {
+            assert!(!validator.is_valid(&invalid));
+        }
+        assert_eq!(
+            validator.is_valid(&serde_json::Value::Null),
+            method_name == "run/resume"
+        );
+    }
+}
+
+#[tokio::test]
 async fn openrpc_recovery_methods_match_the_authoritative_schema() {
     let artifacts = generate_artifacts().await;
     let openrpc = generated_json(&artifacts, "/openrpc.json");
@@ -308,6 +366,11 @@ async fn openrpc_recovery_methods_match_the_authoritative_schema() {
             "run/checkpoints",
             "RunCheckpointsParams",
             "RunCheckpointsResult",
+        ),
+        (
+            "run/resume_requirements",
+            "RunResumeRequirementsParams",
+            "RunResumeRequirementsResult",
         ),
         ("run/resume", "RunResumeParams", "RunResumeResult"),
         (
@@ -348,11 +411,19 @@ async fn openrpc_recovery_methods_match_the_authoritative_schema() {
                 required.contains(&serde_json::Value::String(name.clone())),
                 "OpenRPC required flag drifted for {method_name}.{name}"
             );
-            assert_eq!(
-                parameter.assert_key("schema"),
-                property_schema,
-                "OpenRPC schema drifted for {method_name}.{name}"
-            );
+            if matches!(method_name, "run/resume" | "run/resume_requirements") && name == "runtime"
+            {
+                assert_eq!(
+                    parameter.assert_key("schema"),
+                    &serde_json::json!({"$ref":format!("schema.json#/$defs/{params_type}/properties/runtime")})
+                );
+            } else {
+                assert_eq!(
+                    parameter.assert_key("schema"),
+                    property_schema,
+                    "OpenRPC schema drifted for {method_name}.{name}"
+                );
+            }
         }
 
         let result_reference = method

@@ -530,9 +530,28 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 | --- | --- |
 | <code>runCheckpointsResult</code> | <a href="../schema.json#/$defs/RunCheckpointsResult"><code>schema.json#/$defs/RunCheckpointsResult</code></a> |
 
+### <code>run/resume_requirements</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>runtime</code> | Yes | <a href="../schema.json#/$defs/RunResumeRequirementsParams/properties/runtime"><code>schema.json#/$defs/RunResumeRequirementsParams/properties/runtime</code></a> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runResumeRequirementsResult</code> | <a href="../schema.json#/$defs/RunResumeRequirementsResult"><code>schema.json#/$defs/RunResumeRequirementsResult</code></a> |
+
 ### <code>run/resume</code>
 
-Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed. Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.
+Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Graph, input, source and delivery metadata remain fixed. Optional runtime completely replaces the saved runtime after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.
 
 | Parameter structure | Transport | Server push | Inbound notifications |
 | --- | --- | --- | --- |
@@ -544,6 +563,7 @@ Omitting from or selecting restart restarts a failed run where it started, on th
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>successorRunId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>runtime</code> | No | <a href="../schema.json#/$defs/RunResumeParams/properties/runtime"><code>schema.json#/$defs/RunResumeParams/properties/runtime</code></a> |
 | <code>from</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/RunResumeFrom&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Omission preserves restarting from the latest retained workspace.&quot;}</code> |
 | <code>connections</code> | No | <code>{&quot;additionalProperties&quot;:false,&quot;description&quot;:&quot;Fresh static connection values for the successor attempt.&quot;,&quot;patternProperties&quot;:{&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;:{&quot;$ref&quot;:&quot;#/$defs/StaticConnectionValues&quot;}},&quot;type&quot;:&quot;object&quot;}</code> |
 | <code>connectionResolver</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/TargetConnectionResolver&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Run-scoped callback used to resolve fresh dynamic connection values.&quot;}</code> |
