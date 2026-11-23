@@ -1,8 +1,9 @@
 //! Auth-free local CLI backend for one-run controller processes.
 
+pub use crate::execution::platform::LocalControllerMode;
+
 use std::path::{Path, PathBuf};
 use std::fs::{File, OpenOptions};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -167,6 +168,7 @@ impl Drop for LocalRecoveryClaim {
 
 #[derive(Clone, Debug)]
 pub struct LocalCliBackend {
+    controller_mode: LocalControllerMode,
     state_root: PathBuf,
     executable: PathBuf,
     current_directory: PathBuf,
@@ -180,6 +182,7 @@ pub struct LocalCliBackend {
 impl LocalCliBackend {
     pub fn production() -> Result<Self, NativeV2CliError> {
         let backend = Self {
+            controller_mode: LocalControllerMode::Detached,
             state_root: default_local_state_root()?,
             executable: std::env::current_exe().map_err(local_io)?,
             current_directory: std::env::current_dir().map_err(local_io)?,
@@ -202,6 +205,7 @@ impl LocalCliBackend {
         git_program: PathBuf,
     ) -> Self {
         Self {
+            controller_mode: LocalControllerMode::Detached,
             state_root,
             executable,
             current_directory,
@@ -211,6 +215,13 @@ impl LocalCliBackend {
             #[cfg(test)]
             fail_recovery_write: None,
         }
+    }
+
+    /// Select the caller's local launch policy for submissions and successor controllers.
+    #[must_use]
+    pub fn with_controller_mode(mut self, mode: LocalControllerMode) -> Self {
+        self.controller_mode = mode;
+        self
     }
 
     #[must_use]
@@ -799,22 +810,6 @@ impl LocalCliBackend {
         run_id: &openengine_cluster_protocol::RunId,
     ) -> Result<PathBuf, NativeV2CliError> {
         create_local_run_storage(&self.state_root, run_id)
-    }
-
-    fn spawn_controller(&self, bootstrap: &Path) -> Result<Child, NativeV2CliError> {
-        let mut command = Command::new(&self.executable);
-        command
-            .arg(LOCAL_CONTROLLER_MODE)
-            .arg("--bootstrap")
-            .arg(bootstrap)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        // Harness context crosses the private one-shot bootstrap, not this long-lived process
-        // environment. Keep only the platform values needed to re-exec the controller.
-        command.env_clear();
-        copy_minimal_process_environment(&mut command)?;
-        crate::execution::platform::spawn_controller(&mut command).map_err(local_io)
     }
 
     async fn list_local(&self) -> Result<RunListResult, NativeV2CliError> {

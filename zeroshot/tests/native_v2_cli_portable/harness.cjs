@@ -17,6 +17,8 @@ if (process.argv.includes('--version')) {
 } else {
   if (process.env.CODEX_API_KEY !== 'fixture-key' || process.env.UNDECLARED_SECRET) process.exit(41);
   const mode = process.env.FIXTURE_MODE;
+  const completedStep = process.argv.includes('completed-step');
+  if (process.env.FIXTURE_RECEIPTS) fs.appendFileSync(process.env.FIXTURE_RECEIPTS, completedStep ? 'completed\n' : 'worker\n');
     if (mode === 'volume') {
       for (let i = 0; i < 256; i++) emit({ type: 'item.completed', item: {
         type: 'command_execution', command: 'fixture', aggregated_output: 'x'.repeat(16384), exit_code: 0
@@ -25,11 +27,12 @@ if (process.argv.includes('--version')) {
   let inputBytes = 0;
   process.stdin.on('data', (chunk) => { inputBytes += chunk.length; });
   process.stdin.on('end', () => {
+    if (completedStep) fs.writeFileSync('completed.txt', 'retained work');
     if (mode === 'fail') process.exit(1);
     if (mode === 'volume' && inputBytes < 256 * 1024) process.exit(42);
     fs.writeFileSync('mutation.txt', 'native worker ran');
     emit({ type: 'thread.started', thread_id: 'portable-session' });
-    if (mode === 'block' || mode === 'block-quiet') {
+    if (!completedStep && (mode === 'block' || mode === 'block-quiet')) {
       const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
       fs.writeFileSync('child.pid', String(child.pid));
       if (mode === 'block-quiet') {

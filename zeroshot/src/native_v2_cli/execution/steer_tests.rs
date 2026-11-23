@@ -88,6 +88,7 @@ fn steer_stdin_is_bounded_and_validated_without_changing_text() {
 async fn steer_node_uses_human_authorization_and_rejects_network_even_without_parser() {
     let mut command = NativeV2CliCommand::Steer {
         run: RunSelector {
+            controller: Default::default(),
             target: None,
             run_id: RunId::new("run"),
         },
@@ -125,6 +126,7 @@ async fn steer_default_backend_refuses_without_output_and_validation_precedes_di
         let command = NativeV2CliCommand::Steer {
             node: None,
             run: RunSelector {
+                controller: Default::default(),
                 target: Some("older-target".into()),
                 run_id: RunId::new("run"),
             },

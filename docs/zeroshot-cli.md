@@ -1149,6 +1149,11 @@ A foreground run follows NDJSON events until completion or suspension. Suspensio
 Usage: zeroshot run [OPTIONS] --title <TITLE>
 
 Options:
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
+
       --title <TITLE>
           Human-readable title recorded with the run
 
@@ -1587,6 +1592,11 @@ Options:
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
+
       --input <FILE>
           JSON answer file, containing signals and output. No standard-input form
 
@@ -1749,6 +1759,11 @@ Arguments:
 Options:
       --target <NAME>
           Use this named target. If omitted, use the local controller
+
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
 
       --from-checkpoint <ID>
           Restore this checkpoint and continue from its saved graph boundary

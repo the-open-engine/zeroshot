@@ -160,6 +160,7 @@ pub enum LocalWorktreeBase {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunCommand {
+    pub controller: local::LocalControllerMode,
     pub target: Option<String>,
     pub cwd: Option<PathBuf>,
     pub worktree: Option<LocalWorktreeBase>,
@@ -328,6 +329,7 @@ pub enum RunGraph {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunSelector {
+    pub controller: local::LocalControllerMode,
     pub target: Option<String>,
     pub run_id: openengine_cluster_protocol::RunId,
 }
@@ -492,6 +494,16 @@ pub enum NativeV2CliCommand {
 }
 
 impl NativeV2CliCommand {
+    /// Launch policy for this invocation only; recovery metadata never changes it.
+    pub fn local_controller_mode(&self) -> local::LocalControllerMode {
+        match self {
+            Self::Run(run) => run.controller,
+            Self::Resume(command) => command.run.controller,
+            Self::Answer { run, .. } => run.controller,
+            _ => local::LocalControllerMode::Detached,
+        }
+    }
+
     fn is_management_operation(&self) -> bool {
         self.is_connection_operation()
             || self.is_profile_operation()

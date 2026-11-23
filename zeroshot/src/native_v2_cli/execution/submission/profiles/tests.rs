@@ -134,6 +134,7 @@ async fn management_contract_selects_and_materializes_profiles() {
 async fn wave6_cli_contract_remote_profile_resolution_preserves_selector_and_payload() {
     let backend = FakeBackend::default();
     let run = RunCommand {
+        controller: Default::default(),
         cwd: None,
         worktree: None,
         source_connection: None,

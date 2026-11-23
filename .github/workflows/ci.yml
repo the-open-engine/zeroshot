@@ -330,7 +330,7 @@ jobs:
         if: runner.os == 'Windows'
         run: ./scripts/test-windows.ps1 -Ui -BuildOnly
 
-      - name: Run Windows workspace tests
+      - name: Run Windows workspace tests including contained controller Jobs
         if: runner.os == 'Windows'
         run: ./.github/scripts/test-windows-host.ps1
 

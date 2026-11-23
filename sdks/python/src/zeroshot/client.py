@@ -480,6 +480,7 @@ class Client:
         return [
             *arguments,
             *self._route_arguments(),
+            *self._controller_arguments(),
             *self._forwarding_arguments(),
             "--detach",
         ]
@@ -595,6 +596,11 @@ class Client:
 
     def _forwarding_arguments(self) -> list[str]:
         return ["--forward-gh-token"] if self.forward_github_token else []
+
+    def _controller_arguments(self) -> list[str]:
+        if isinstance(self.target, LocalTarget):
+            return ["--controller", self.target.controller]
+        return []
 
     def _require_hosted_target(self) -> HostedTarget:
         self._ensure_open()
@@ -923,6 +929,7 @@ class Run:
                 "resume",
                 self.id,
                 *self._client._route_arguments(),
+                *self._client._controller_arguments(),
                 *self._client._forwarding_arguments(),
             ]
         )
@@ -962,6 +969,7 @@ class Run:
                     "--input",
                     str(path),
                     *self._client._route_arguments(),
+                    *self._client._controller_arguments(),
                     *self._client._forwarding_arguments(),
                 ]
             )

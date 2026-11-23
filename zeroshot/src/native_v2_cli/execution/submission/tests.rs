@@ -436,6 +436,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
     )
     .assert_value();
     let run = RunCommand {
+        controller: Default::default(),
         cwd: None,
         worktree: None,
         source_connection: None,
@@ -732,6 +733,7 @@ fn connection_selection_keeps_present_utf8_fields_and_rejects_non_utf8_values() 
 
 fn intent_command(selection: RunSelection) -> RunCommand {
     RunCommand {
+        controller: Default::default(),
         environment: None,
         target: None,
         cwd: None,

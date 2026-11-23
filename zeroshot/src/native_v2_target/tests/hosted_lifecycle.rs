@@ -57,6 +57,7 @@ where
     let outcome = execute_native_v2_cli(
         NativeV2CliCommand::Watch(RunWatchCommand {
             run: RunSelector {
+                controller: Default::default(),
                 target: Some("prod".to_owned()),
                 run_id: run_id.clone(),
             },

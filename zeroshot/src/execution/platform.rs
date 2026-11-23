@@ -7,6 +7,14 @@ use std::fs::File;
 use std::io;
 use std::path::Path;
 
+/// Local child-controller launch policy; never part of a run or checkpoint's wire format.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, clap::ValueEnum)]
+pub enum LocalControllerMode {
+    #[default]
+    Detached,
+    Contained,
+}
+
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
