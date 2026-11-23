@@ -199,6 +199,15 @@ pub trait TargetControlAuthority: Send + Sync {
     ) -> Result<RunProfileListResult, TargetAuthorityError> {
         profile_unavailable()
     }
+    async fn validate_profile_imports(
+        &self,
+        _target: &TargetRecord,
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise openengine.saved-profile-imports/v1",
+        ))
+    }
+
     async fn profile_show(
         &self,
         _target: &TargetRecord,

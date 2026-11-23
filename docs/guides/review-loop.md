@@ -8,10 +8,9 @@ This guide builds a custom graph that sends one coding task through a worker and
 reviewers. When either reviewer rejects the change, the loop runs the same worker again with both
 reviewers' feedback. The run succeeds when both accept, and fails after four passes.
 
-The example has no guards that read worker errors. If the coding worker crashes after its retry
-attempts, times out, returns malformed output, or refuses, the run fails immediately with reason
-`unhandled` and the worker's name and error code. It does not spend the remaining review rounds on
-that error. Verifier rejection signals still follow the four-pass review loop below.
+The example gives each agent one attempt and has no guards that read worker errors. A crash,
+timeout, malformed output or refusal from any agent fails the run with `unhandled` and the node's
+name and error code. A verifier's `rejected` signal still triggers the review loop below.
 
 The built-in `software-change` template already does this with more recovery paths. Build the loop
 yourself when you want to change the reviewers, their instructions, or the bounds.

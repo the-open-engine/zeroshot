@@ -23,8 +23,10 @@ A run needs four inputs:
 | Runtime plan  | Chooses each agent's harness, provider, model and connections |
 
 Before starting a local controller or submitting to a target, zeroshot checks the graph, runtime
-bindings and input. For a target-stored profile, it fetches the profile first and applies the same
-checks. `--validate-only` runs these checks without starting a run.
+bindings and input. For a target-stored profile, it fetches the profile first. A capable host expands
+[saved-profile imports](../reference/target-runtime.md#saved-profile-imports) from its authorized
+snapshot and performs complete admission. `--validate-only` checks profiles without starting a run;
+it refuses remote imports, which require host admission.
 
 ## Graph nodes
 
@@ -45,10 +47,11 @@ The [graph contract](../reference/cluster/graph.md) defines their fields.
 ## Which checks are deterministic
 
 The engine enforces the order, routes and retry limits. What a step decides depends on its
-binding. Agent steps and verifiers are model judgement. A `step` can instead run a
-[script](../reference/runtime-plan.md#script) you own, which takes the step's JSON input and
-returns its JSON output, so that step's result comes from your program, not a model. A non-zero
-exit is an error, and the graph's error and retry rules apply. Script steps are local only for now.
+binding. Agent steps and verifiers are model judgement. A `step` or `verifier` can instead run a
+[script](../reference/runtime-plan.md#script) you own, which takes the node's JSON input and
+returns typed output. Script verifiers also return declared signals for graph routing and typed
+diagnostics. A non-zero exit is an error, and the graph's error and retry rules apply.
+Script bindings are local only.
 
 Outside the graph, delivery waits on your CI and required checks and cannot override them, and
 local runs can add a [delivery check command](delivery-validation.md).
@@ -111,23 +114,12 @@ to export the complete `GraphSpec`.
 
 Required approval blocks `--ship`, but not `--pr`.
 
-**Breaking change:** local delivery commits on the checked-out branch and publishes the remote
-branch of the same name, including existing unpushed commits. In-place runs create no managed
-`zeroshot/v2-…` branch. `--pr` and `--ship` target a different upstream branch when configured,
-otherwise the remote's default branch. Starting on that target is refused before agents start;
-use a feature branch or `--worktree`. Explicit `--push` can publish `main`; delivery never force-pushes.
+Local delivery pushes the checked-out branch, including existing unpushed commits. Use
+`--worktree` to deliver from a separate, retained worktree on a managed branch. See
+[local forge setup](../guides/forge-delivery.md#local-setup) for branch selection and recovery.
 
-Add `--worktree` to work on a managed run branch in a separate, retained Git worktree. Its default
-base is the invoking branch's exact local HEAD. `--worktree-base remote` fetches its upstream and
-requires one to be configured. Delivery commits and publishes the matching managed run branch;
-PR/MR targets remain the invoking branch's upstream, or its name when none is set. The invoking
-checkout stays unchanged. Worktrees contain committed files only, with no dependency setup or
-untracked resources copied. Resume reuses the worktree and keeps HEAD attached without rewinding
-shared branch tips. Remove the worktree explicitly when finished. See
-[source and delivery setup](targets.md#source-and-delivery-credentials).
-
-PR feedback is enabled by default and restricted to repository writers. `--no-pr-feedback`
-disables it; [feedback rules](../reference/execution.md#delivery-feedback) cover permission checks.
+PR feedback is enabled by default. `--no-pr-feedback` disables it. See
+[feedback rules](../reference/execution.md#delivery-feedback) for writer and app-bot authorization.
 
 `auto-research` runs ten rounds by default; `options.iterations` changes the count. Results stay in
 `.zeroshot/research`; `--push` publishes each accepted round. See

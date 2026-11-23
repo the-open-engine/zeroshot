@@ -598,7 +598,6 @@ struct TemplateShowArgs {
       {
         "harness": "codex",
         "provider": "openrouter",
-        "size": "medium",
         "nodes": {
           "worker": {
             "kind": "agent",
@@ -624,9 +623,8 @@ struct TemplateShowArgs {
     copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.
     Copilot's other lanes use native BYOK transports; its Bedrock lane uses AWS's Responses API. Pi has no permission
     control of its own, so its contained runs rely on the disposable capsule rather than a bypass
-    argument. Model IDs are passed
-    unchanged to the selected harness and
-    provider; Zeroshot does not maintain or validate provider model catalogs.
+    argument. Use the provider's model ID. The adapter formats native arguments, such as OpenCode's
+    <provider>/<model> locator. Zeroshot does not maintain or validate provider model catalogs.
 
     Size identifiers are target-owned strings. List offered sizes with `zeroshot target sizes NAME`.
     Omit size to use the target default; the target decides whether a requested size is available.
@@ -688,6 +686,8 @@ EXIT STATUS
     1  The run finished failed, or the command failed. A failed run's summary is printed on
        stderr. `zeroshot watch RUN_ID` waits for a detached run and exits the same way."#)]
 struct RunArgs {
+    #[command(flatten)]
+    controller: ControllerArgs,
     /// Human-readable title recorded with the run.
     #[arg(long, value_name = "TITLE")]
     title: String,
@@ -721,7 +721,9 @@ struct RunArgs {
     #[arg(long, value_name = "FILE")]
     uniform_runtime_config: Option<PathBuf>,
 
-    /// Load a JSON environment definition: setup, startup, public variables, and hook connections.
+    /// Load setup, startup, public variables, and hook connections from JSON.
+    ///
+    /// Local runs on Linux and macOS also accept teardown for orderly cleanup.
     #[arg(long, value_name = "FILE", conflicts_with = "no_environment")]
     environment: Option<PathBuf>,
 
@@ -865,6 +867,23 @@ struct RunSelectorArgs {
 }
 
 #[derive(Debug, Args)]
+struct ControllerArgs {
+    /// Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host
+    /// closure promises neither termination nor survival. Use force-stop for explicit cleanup.
+    /// Linux/macOS retain their usual launch behavior. Independent of --detach observation.
+    #[arg(long, value_enum, value_name = "MODE", conflicts_with = "target")]
+    controller: Option<super::local::LocalControllerMode>,
+}
+
+#[derive(Debug, Args)]
+struct LocalLaunchArgs {
+    #[command(flatten)]
+    run: RunSelectorArgs,
+    #[command(flatten)]
+    controller: ControllerArgs,
+}
+
+#[derive(Debug, Args)]
 struct RunResumeArgs {
     /// Replace the saved runtime with this exact runtime plan.
     #[arg(long, value_name = "FILE", conflicts_with = "uniform_runtime_config")]
@@ -873,7 +892,7 @@ struct RunResumeArgs {
     #[arg(long, value_name = "FILE")]
     uniform_runtime_config: Option<PathBuf>,
     #[command(flatten)]
-    run: RunSelectorArgs,
+    run: LocalLaunchArgs,
 
     /// Restore this checkpoint and continue from its saved graph boundary.
     #[arg(long, value_name = "ID")]
@@ -928,6 +947,9 @@ struct RunSteerArgs {
     /// Read UTF-8 direction from standard input.
     #[arg(long)]
     text_stdin: bool,
+    /// Direct human guidance to this exact agent node name, including future instances.
+    #[arg(long, value_name = "NAME", conflicts_with = "networks")]
+    node: Option<String>,
     /// Broadcast to this authorized graph-local network; repeat for several networks.
     #[arg(long = "network", value_name = "NAME")]
     networks: Vec<String>,
@@ -1045,7 +1067,7 @@ pub use convert::parse_native_v2_args;
 #[derive(Debug, Args)]
 struct RunAnswerArgs {
     #[command(flatten)]
-    run: RunSelectorArgs,
+    run: LocalLaunchArgs,
     /// JSON answer file, containing signals and output. No standard-input form.
     #[arg(long, value_name = "FILE")]
     input: PathBuf,

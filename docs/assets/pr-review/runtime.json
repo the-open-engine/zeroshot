@@ -1,7 +1,6 @@
 {
   "harness": "codex",
   "provider": "openai",
-  "size": "small",
   "nodes": {
     "classifier": {
       "kind": "agent",

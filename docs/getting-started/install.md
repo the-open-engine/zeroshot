@@ -11,7 +11,7 @@ npm install --global @the-open-engine-company/zeroshot
 ```
 
 This installs the native CLI and its agent skills. Releases support Linux and macOS on x64 and
-arm64, and Windows on x64. Node.js is needed for installation; zeroshot itself is a Rust executable.
+arm64, and Windows on x64. The npm command uses Node.js to launch the bundled Rust executable.
 
 To use zeroshot through ChatGPT, Codex or Claude without the CLI,
 [install the plugin](../guides/plugins.md).
@@ -23,10 +23,11 @@ Put it on `PATH`. Claude Code requires version 2.1.310 or newer; see
 [harness adapters](../project/harness-adapters.md) for all supported agents and providers.
 
 Local runs can reuse supported native logins. Other providers and contained targets need
-[connections](../concepts/runtimes-and-connections.md). For example:
+[connections](../concepts/runtimes-and-connections.md). For a local Codex run using OpenRouter,
+store the key with:
 
 ```console
-zeroshot connection set openai --field OPENAI_API_KEY
+zeroshot connection set openrouter --field OPENROUTER_API_KEY
 ```
 
 Choose a project folder. A local run with `--delivery none` edits that folder and needs no Git
@@ -37,8 +38,8 @@ repository. Opening a PR also requires a clean checkout, a remote and
 
 ### Windows
 
-Use PowerShell or Command Prompt. Install Git for Windows and put Git and your agent CLI on
-`PATH`; npm `.cmd` launchers work. If your Codex permissions require its
+Use PowerShell or Command Prompt and put your agent CLI on `PATH`; npm `.cmd` launchers work.
+Install Git for Windows for Git checkout or delivery. If your Codex permissions require its
 [native Windows sandbox](https://developers.openai.com/codex/windows), complete that setup too.
 zeroshot does not install it. See [Windows paths](../reference/installation.md#windows-paths)
 for configuration and state locations.

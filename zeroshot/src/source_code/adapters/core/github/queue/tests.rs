@@ -74,6 +74,7 @@ case "$*" in
     printf '%s' "$((index + 1))" > "$HOME/reads"
     if [ "$index" -gt 0 ] && [ -f "$HOME/require-completion" ]; then [ -f "$HOME/completed" ] || exit 31; fi
     if [ "$index" -gt {last} ]; then index={last}; fi
+    if [ -f "$HOME/policy-$index.stderr" ]; then /bin/cat "$HOME/policy-$index.json"; /bin/cat "$HOME/policy-$index.stderr" >&2; exit 1; fi
     /bin/cat "$HOME/policy-$index.json" ;;
 *) exit 19 ;;
 esac ;;
@@ -92,6 +93,247 @@ fn admission(root: &std::path::Path, action: &str) -> GhCliDeliveryAuthority {
         &[queued(false, false)],
         &[("enqueuePullRequest", action)],
     )
+}
+
+#[tokio::test]
+async fn policy_read_reconciliation_exhaustion_preserves_ambiguous_queue_submission() {
+    let message = "Something went wrong while executing your query on 2026-11-21T18:29:14Z. Please include `2790:35FB30:99F13F9:E90DBDA:6B01E2F9` when reporting this issue.";
+    for token in ["test-token", "exhausted"] {
+        let root = tempfile::tempdir().assert_value();
+        let error_page = json!({"errors":[{"message":message}]});
+        let provider = queue_authority(
+            root.path(),
+            &[
+                queued(false, false),
+                error_page.clone(),
+                error_page.clone(),
+                error_page,
+                queued(false, false),
+            ],
+            &[(
+                "enqueuePullRequest",
+                "printf 'HTTP 503: unavailable %s\\n' \"$GH_TOKEN\" >&2; exit 1",
+            )],
+        );
+        for index in 1..=3 {
+            std::fs::write(
+                root.path().join(format!("policy-{index}.stderr")),
+                format!("gh: {message}\n"),
+            )
+            .assert_value();
+        }
+        let credential = SourceDeliveryCredential::token(token);
+        let error = provider
+            .request_merge(&review(), credential, &TestReviewCheckpoint)
+            .await
+            .assert_error();
+        assert!(error.retries_exhausted());
+        assert_eq!(error.api_status(), None);
+        assert!(!error.retryable_operation());
+        assert!(!error.retryable_review_sync());
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("HTTP 503"));
+        assert!(!diagnostic.contains(token));
+        assert!(
+            diagnostic.len() <= crate::source_code_provider::MAX_SOURCE_API_DIAGNOSTIC_BYTES + 32
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("reads")).assert_value(),
+            "4"
+        );
+        let withdrawal = provider
+            .withdraw_merge_request(&review(), credential)
+            .await
+            .assert_error();
+        assert!(
+            withdrawal
+                .to_string()
+                .contains("submission remains unconfirmed")
+        );
+        assert_eq!(enqueue_count(root.path()), 1);
+    }
+}
+
+#[tokio::test]
+async fn queued_check_retries_revalidate_the_reviewed_head_and_current_policy() {
+    let green = queue_check_state("semantic", "COMPLETED");
+    let pending = queue_check_state("semantic", "QUEUED");
+    let mut changed_head = green.clone();
+    changed_head["data"]["repository"]["pullRequest"]["headRefOid"] = json!("d".repeat(40));
+    let mut disabled_queue = green.clone();
+    disabled_queue["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(false);
+    disabled_queue["data"]["repository"]["pullRequest"]["baseRef"]["compare"]["behindBy"] =
+        json!(2);
+    for (name, recheck, current, expected) in [
+        (
+            "head-during-rejection",
+            changed_head.clone(),
+            changed_head.clone(),
+            None,
+        ),
+        ("head", pending.clone(), changed_head, None),
+        (
+            "branch-rule",
+            pending.clone(),
+            green.clone(),
+            Some(SourceMergeRequestOutcome::Pending),
+        ),
+        (
+            "queue-disabled",
+            pending.clone(),
+            disabled_queue,
+            Some(SourceMergeRequestOutcome::HeadUpdateRequired),
+        ),
+    ] {
+        let root = tempfile::tempdir().assert_value();
+        let provider = queue_authority(
+            root.path(),
+            &[green.clone(), recheck, current],
+            &[(
+                "enqueuePullRequest",
+                &format!("{}; exit 1", response(&queued_check_rejection("semantic"))),
+            )],
+        );
+        let credential = SourceDeliveryCredential::token("test-token");
+        let initial = provider
+            .request_merge(&review(), credential, &TestReviewCheckpoint)
+            .await;
+        if name == "head-during-rejection" {
+            initial.assert_error();
+        } else {
+            assert_eq!(initial.assert_value(), SourceMergeRequestOutcome::Pending);
+        }
+        if name == "branch-rule" {
+            std::fs::write(
+                root.path().join("branch-rules.json"),
+                json!([[{
+                    "type":"required_status_checks","parameters":{"required_status_checks":[
+                        {"context":"newly-required","integration_id":null}
+                    ]}
+                }]])
+                .to_string(),
+            )
+            .assert_value();
+        }
+        let retried = provider
+            .request_merge(&review(), credential, &TestReviewCheckpoint)
+            .await;
+        if let Some(expected) = expected {
+            assert_eq!(retried.assert_value(), expected, "{name}");
+        } else {
+            retried.assert_error();
+        }
+        assert_eq!(
+            enqueue_count(root.path()),
+            1,
+            "{name} must prevent another enqueue"
+        );
+    }
+}
+
+#[tokio::test]
+async fn permanent_or_mixed_enqueue_refusals_remain_errors_when_checks_are_pending() {
+    let mut policy = rejected_enqueue();
+    policy["errors"][0]["message"] = json!("Policy refused");
+    let mut mixed = queued_check_rejection("semantic");
+    mixed["errors"]
+        .as_array_mut()
+        .assert_value()
+        .push(policy["errors"][0].clone());
+    for rejection in [policy, mixed] {
+        let root = tempfile::tempdir().assert_value();
+        let provider = queue_authority(
+            root.path(),
+            &[
+                queue_check_state("semantic", "COMPLETED"),
+                queue_check_state("semantic", "QUEUED"),
+                queue_check_state("semantic", "COMPLETED"),
+            ],
+            &[(
+                "enqueuePullRequest",
+                &format!("{}; exit 1", response(&rejection)),
+            )],
+        );
+        let error = provider
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
+            .await
+            .assert_error();
+        assert!(!error.retryable_operation());
+        assert!(!error.authentication_failed());
+        assert_eq!(error.api_status(), None);
+        assert!(error.to_string().contains("Policy refused"));
+        provider
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
+            .await
+            .assert_error();
+        assert_withdrawn(&provider).await;
+        assert_eq!(enqueue_count(root.path()), 1);
+    }
+}
+
+#[tokio::test]
+async fn queued_check_rejections_retain_prior_submission_uncertainty_across_retries() {
+    let root = tempfile::tempdir().assert_value();
+    let action = format!(
+        "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; printf 'error connecting to api.github.com\\n' >&2; exit 1; fi; {}; exit 1",
+        response(&queued_check_rejection("semantic"))
+    );
+    let provider = admission(root.path(), &action);
+    let credential = SourceDeliveryCredential::token("test-token");
+    assert!(
+        provider
+            .request_merge(&review(), credential, &TestReviewCheckpoint)
+            .await
+            .assert_error()
+            .retryable_operation()
+    );
+    for count in [2, 3] {
+        assert_eq!(
+            provider
+                .request_merge(&review(), credential, &TestReviewCheckpoint)
+                .await
+                .assert_value(),
+            SourceMergeRequestOutcome::Pending
+        );
+        assert_eq!(enqueue_count(root.path()), count);
+        let error = provider
+            .withdraw_merge_request(&review(), credential)
+            .await
+            .assert_error();
+        assert!(error.to_string().contains("submission remains unconfirmed"));
+    }
+}
+
+#[tokio::test]
+async fn queued_check_text_cannot_mask_authentication_or_permission_failures() {
+    for status in [401, 403] {
+        let root = tempfile::tempdir().assert_value();
+        let action = format!(
+            "{}; printf 'HTTP {status}: Access denied\\n' >&2; exit 1",
+            response(&queued_check_rejection("semantic"))
+        );
+        let provider = admission(root.path(), &action);
+        let error = provider
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint,
+            )
+            .await
+            .assert_error();
+        assert_eq!(error.api_status(), Some(status));
+        assert_eq!(error.authentication_failed(), status == 401);
+        assert!(!error.retryable_operation());
+        assert_eq!(enqueue_count(root.path()), 1);
+    }
 }
 
 async fn assert_withdrawn(provider: &GhCliDeliveryAuthority) {
@@ -114,6 +356,152 @@ fn rejected_enqueue() -> Value {
         "errors": [{"type": "UNPROCESSABLE", "path": ["enqueuePullRequest"],
             "message": "A conversation must be resolved before this pull request can be merged."}]
     })
+}
+
+fn queued_check_rejection(name: &str) -> Value {
+    let mut rejected = rejected_enqueue();
+    rejected["errors"][0]["message"] =
+        json!(format!("Required status check \"{name}\" is queued."));
+    rejected
+}
+
+fn queue_check_state(name: &str, status: &str) -> Value {
+    let mut page = queued(false, false);
+    let pull = &mut page["data"]["repository"]["pullRequest"];
+    pull["baseRef"]["refUpdateRule"]["requiredStatusCheckContexts"] = json!([name]);
+    pull["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = json!({"contexts":{
+        "nodes":[check_run(name, status, (status == "COMPLETED").then_some("SUCCESS"), true)],
+        "pageInfo":{"hasNextPage":false,"endCursor":null}
+    }});
+    page
+}
+
+#[tokio::test]
+async fn queued_check_rerun_retries_on_same_authority_after_fresh_passing_checks() {
+    for name in ["semantic", "Build / Linux (🚀)"] {
+        let root = tempfile::tempdir().assert_value();
+        let green = queue_check_state(name, "COMPLETED");
+        let pending = queue_check_state(name, "QUEUED");
+        let mut merged = queued(false, false);
+        set_review_state(&mut merged, "MERGED", true);
+        merged["data"]["repository"]["pullRequest"]["mergeCommit"] = json!({"oid":"c".repeat(40)});
+        let action = format!(
+            "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; {}; exit 1; fi; {}",
+            response(&queued_check_rejection(name)),
+            response(&enqueue_response())
+        );
+        let provider = queue_authority(
+            root.path(),
+            &[
+                green.clone(),
+                green.clone(),
+                pending.clone(),
+                pending.clone(),
+                pending,
+                green.clone(),
+                green,
+                queued(true, false),
+                queued(true, false),
+                merged,
+            ],
+            &[("enqueuePullRequest", &action)],
+        );
+        let credential = SourceDeliveryCredential::token("test-token");
+        assert_eq!(
+            provider
+                .inspect_review(&review(), credential)
+                .await
+                .assert_value()
+                .state,
+            SourceReviewState::Open {
+                checks: SourceChecks::Passed
+            }
+        );
+        assert_eq!(
+            provider
+                .request_merge(&review(), credential, &TestReviewCheckpoint)
+                .await
+                .assert_value(),
+            SourceMergeRequestOutcome::Pending
+        );
+        assert_eq!(enqueue_count(root.path()), 1);
+        assert_eq!(
+            provider
+                .inspect_review(&review(), credential)
+                .await
+                .assert_value()
+                .state,
+            SourceReviewState::Open {
+                checks: SourceChecks::Pending
+            }
+        );
+        assert_eq!(
+            provider
+                .request_merge(&review(), credential, &TestReviewCheckpoint)
+                .await
+                .assert_value(),
+            SourceMergeRequestOutcome::Pending
+        );
+        assert_eq!(
+            enqueue_count(root.path()),
+            1,
+            "pending polls cannot enqueue"
+        );
+        assert_eq!(
+            provider
+                .inspect_review(&review(), credential)
+                .await
+                .assert_value()
+                .state,
+            SourceReviewState::Open {
+                checks: SourceChecks::Passed
+            }
+        );
+        enqueue_accepted(&provider).await;
+        assert_eq!(
+            enqueue_count(root.path()),
+            2,
+            "the settled rejection must be released"
+        );
+        assert_eq!(
+            provider
+                .inspect_review(&review(), credential)
+                .await
+                .assert_value()
+                .state,
+            SourceReviewState::Open {
+                checks: SourceChecks::Pending
+            }
+        );
+        assert_eq!(
+            provider
+                .request_merge(&review(), credential, &TestReviewCheckpoint)
+                .await
+                .assert_value(),
+            SourceMergeRequestOutcome::Pending
+        );
+        assert_eq!(
+            enqueue_count(root.path()),
+            2,
+            "accepted admissions cannot be replayed"
+        );
+        assert_eq!(
+            provider
+                .inspect_review(&review(), credential)
+                .await
+                .assert_value()
+                .state,
+            SourceReviewState::Merged {
+                merge_revision: "c".repeat(40)
+            }
+        );
+        let args = std::fs::read_to_string(root.path().join("mutations")).assert_value();
+        assert_eq!(
+            args.matches(&format!("expectedHeadOid={}", review().head_revision))
+                .count(),
+            2
+        );
+    }
 }
 
 #[tokio::test]

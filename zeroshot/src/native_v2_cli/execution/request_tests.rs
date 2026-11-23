@@ -163,6 +163,7 @@ async fn answer(
     let result = execute_answer(
         (
             RunSelector {
+                controller: Default::default(),
                 target: Some("remote".to_owned()),
                 run_id: RunId::new("original"),
             },
@@ -312,6 +313,7 @@ async fn default_resume_of_a_request_names_the_successor_before_answer() {
             RunResumeCommand {
                 runtime: None,
                 run: RunSelector {
+                    controller: Default::default(),
                     target: Some("remote".to_owned()),
                     run_id: RunId::new("original"),
                 },

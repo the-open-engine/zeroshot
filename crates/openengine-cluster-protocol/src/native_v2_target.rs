@@ -34,9 +34,9 @@ pub const TARGET_SESSION_PATH: &str = "/native-v2/oecp-session";
 pub const TARGET_OECP_PATH: &str = "/native-v2/oecp";
 pub const TARGET_PRIVATE_BOOTSTRAP_PATH: &str = "/native-v2/private-bootstrap";
 pub const TARGET_OPERATOR_DIAGNOSTICS_PATH_PREFIX: &str = "/native-v2/operator-diagnostics/";
-pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v2";
+pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v3";
 pub const TARGET_CONTROLLER_AUDIENCE: &str = "controller";
-pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v1";
+pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v2";
 pub const RUN_HISTORY_KIND: &str = "zeroshot.run-history/v1";
 pub const CONNECTIONS_KIND: &str = "zeroshot.connections/v1";
 pub const STATIC_CONNECTION_KIND: &str = "static";
@@ -488,7 +488,7 @@ pub struct TargetHostedRunsDiscovery {
 
 pub const HOSTED_RUN_CONTROLS_KIND: &str = "openengine.hosted-run-controls/v1";
 
-/// Optional POST routes relative to `hosted_runs.base_url`; the v1 run routes stay frozen.
+/// Optional POST routes relative to `hosted_runs.base_url`; the hosted run routes stay frozen.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetHostedRunControlsDiscovery {
@@ -595,6 +595,15 @@ pub struct TargetResumeRuntimeDiscovery {
     pub kind: String,
 }
 
+pub const WORKSPACE_CHECKPOINT_OPT_OUT_KIND: &str = "openengine.workspace-checkpoint-opt-out/v1";
+
+/// Per-run hosted opt-out, independent of checkpoint listing and recovery support.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetWorkspaceCheckpointOptOutDiscovery {
+    pub kind: String,
+}
+
 pub const WORKSPACE_RECOVERY_KIND: &str = "openengine.workspace-recovery/v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -608,6 +617,16 @@ pub const DECISION_MODELS_KIND: &str = "openengine.decision-models/v1";
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetDecisionModelsDiscovery {
+    pub kind: String,
+}
+
+pub const SAVED_PROFILE_IMPORTS_KIND: &str = "openengine.saved-profile-imports/v1";
+
+/// Host-owned snapshot expansion through the existing saved-profile run operation.
+/// Frozen at `{"kind": ...}`; new data requires a new extension key.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetSavedProfileImportsDiscovery {
     pub kind: String,
 }
 
@@ -736,11 +755,15 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_checkpoints: Option<TargetWorkspaceCheckpointsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_checkpoint_opt_out: Option<TargetWorkspaceCheckpointOptOutDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_workspace_recovery: Option<TargetHostedWorkspaceRecoveryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_export: Option<TargetWorkspaceExportDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved_profile_imports: Option<TargetSavedProfileImportsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_harnesses: Option<TargetRuntimeHarnessesDiscovery>,
     #[serde(
@@ -802,9 +825,11 @@ impl TargetDiscoveryExtensions {
             && self.workspace_recovery.is_none()
             && self.resume_runtime.is_none()
             && self.workspace_checkpoints.is_none()
+            && self.workspace_checkpoint_opt_out.is_none()
             && self.hosted_workspace_recovery.is_none()
             && self.workspace_export.is_none()
             && self.node_runtime_lanes.is_none()
+            && self.saved_profile_imports.is_none()
             && self.runtime_harnesses.is_none()
             && self.run_size_catalog.is_none()
             && self.decision_models.is_none()
@@ -815,6 +840,16 @@ impl TargetDiscoveryExtensions {
 }
 
 impl TargetDiscoveryDocument {
+    /// Advertises explicit host support; omission preserves required workspace checkpoints.
+    #[must_use]
+    pub fn with_workspace_checkpoint_opt_out(mut self) -> Self {
+        self.extensions.workspace_checkpoint_opt_out =
+            Some(TargetWorkspaceCheckpointOptOutDiscovery {
+                kind: WORKSPACE_CHECKPOINT_OPT_OUT_KIND.to_owned(),
+            });
+        self
+    }
+
     /// Advertises machine sizes accepted by this host independently of billing or credentials.
     #[must_use]
     pub fn with_run_sizes(mut self, catalog: TargetRunSizesDiscovery) -> Self {
@@ -917,6 +952,15 @@ impl TargetDiscoveryDocument {
     pub fn with_resume_runtime(mut self) -> Self {
         self.extensions.resume_runtime = Some(TargetResumeRuntimeDiscovery {
             kind: RESUME_RUNTIME_KIND.to_owned(),
+        });
+        self
+    }
+
+    /// Advertise only when saved-profile submission expands an authorized immutable snapshot.
+    #[must_use]
+    pub fn with_saved_profile_imports(mut self) -> Self {
+        self.extensions.saved_profile_imports = Some(TargetSavedProfileImportsDiscovery {
+            kind: SAVED_PROFILE_IMPORTS_KIND.to_owned(),
         });
         self
     }

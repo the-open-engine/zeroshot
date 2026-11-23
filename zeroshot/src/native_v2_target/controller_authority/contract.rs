@@ -65,7 +65,9 @@ pub(super) struct ControllerDescriptor {
     pub(super) steering: bool,
     pub(super) run_vectors: bool,
     pub(super) workspace_checkpoints: bool,
+    pub(super) workspace_checkpoint_opt_out: bool,
     pub(super) node_runtime_lanes: bool,
+    pub(super) saved_profile_imports: bool,
     pub(super) runtime_harnesses: Option<Vec<openengine_cluster_protocol::RuntimeLane>>,
     pub(super) run_sizes: Option<openengine_cluster_protocol::TargetRunSizesDiscovery>,
     pub(super) request_wait: bool,
@@ -152,7 +154,17 @@ pub(super) fn build_controller_descriptor(
             .as_ref()
             .is_some_and(|marker| marker.kind == openengine_cluster_protocol::RUN_VECTORS_KIND),
         workspace_checkpoints,
+        workspace_checkpoint_opt_out: wire
+            .extensions
+            .workspace_checkpoint_opt_out
+            .as_ref()
+            .is_some_and(|marker| {
+                marker.kind == openengine_cluster_protocol::WORKSPACE_CHECKPOINT_OPT_OUT_KIND
+            }),
         node_runtime_lanes,
+        saved_profile_imports: wire.extensions.saved_profile_imports.as_ref().is_some_and(
+            |marker| marker.kind == openengine_cluster_protocol::SAVED_PROFILE_IMPORTS_KIND,
+        ),
         runtime_harnesses,
         run_sizes,
         request_ask: wire
@@ -176,8 +188,12 @@ fn validate_controller_discovery(
     wire: &TargetDiscoveryDocument,
     authentication: TargetAuthentication,
 ) -> Result<(), TargetAuthorityError> {
-    if wire.kind != DISCOVERY_KIND
-        || wire.authentication != authentication
+    if wire.kind != DISCOVERY_KIND {
+        return Err(authority_error(format!(
+            "native-v2 controller discovery is incompatible (requires {DISCOVERY_KIND}); upgrade the Zeroshot client and target together to a release with the same wire contract"
+        )));
+    }
+    if wire.authentication != authentication
         || wire.audience != CONTROLLER_AUDIENCE
         || !valid_audience(&wire.audience)
     {
@@ -452,8 +468,12 @@ pub(super) async fn read_json_with_limit<T: DeserializeOwned>(
 pub(super) fn validate_hosted_discovery(
     wire: &TargetDiscoveryDocument,
 ) -> Result<(), TargetAuthorityError> {
-    let valid = wire.kind == DISCOVERY_KIND
-        && wire.authentication == TargetAuthentication::HostedOauth
+    if wire.kind != DISCOVERY_KIND {
+        return Err(authority_error(format!(
+            "hosted target discovery is incompatible (requires {DISCOVERY_KIND}); upgrade the Zeroshot client and target together to a release with the same wire contract"
+        )));
+    }
+    let valid = wire.authentication == TargetAuthentication::HostedOauth
         && wire.oauth.as_ref().is_some_and(|oauth| {
             oauth.device_grant_type == DEVICE_GRANT
                 && valid_device_exchange_fields(&oauth.device_exchange_fields)

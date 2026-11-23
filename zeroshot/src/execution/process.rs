@@ -9,6 +9,7 @@ mod session_io;
 mod session_runtime;
 mod spawn_recovery;
 mod tail_buffer;
+pub(crate) use tail_buffer::TailBuffer;
 #[cfg(target_os = "linux")]
 pub(crate) mod tree_supervisor;
 

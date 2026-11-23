@@ -314,6 +314,12 @@ jobs:
           native_v2_cli::local::backend::discard_tests::
           unsupported_forge_capability_is_rejected_before_source_credential_reads --nocapture
 
+      - name: Install Linux CLI loopback prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin gnome-keyring libsecret-tools
+
       - name: Run workspace tests
         if: runner.os != 'Windows'
         run: |
@@ -324,7 +330,7 @@ jobs:
         if: runner.os == 'Windows'
         run: ./scripts/test-windows.ps1 -Ui -BuildOnly
 
-      - name: Run Windows workspace tests
+      - name: Run Windows workspace tests including contained controller Jobs
         if: runner.os == 'Windows'
         run: ./.github/scripts/test-windows-host.ps1
 
@@ -424,6 +430,11 @@ jobs:
           cargo test --locked --package openengine-cluster-protocol --test native_v2_run --test native_v2_observation
       - name: Run macOS context environment regressions
         run: cargo test --locked --package openengine-cluster-protocol --lib native_v2_run::environment::tests
+      - name: Run macOS ledger storage failure regressions
+        run: >-
+          cargo test --locked --package zeroshot --lib --features ui --
+          v2_run_ledger::sqlite::storage_failure_tests
+          native_v2_platform::tests::runtime_failure
       - name: Run macOS process provenance regressions
         run: >-
           cargo test --locked --package zeroshot --lib --features ui --
@@ -487,6 +498,10 @@ jobs:
         run: |
           cargo test --locked --package zeroshot --lib --features ui -- native_v2_cli::local::backend::discard_tests workspace_discard_rejects_redirected_roots interrupted_delivery_rechecks
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable discard_workspace_tests
+      - name: Run macOS private checkpoint diagnostic and capture log regressions
+        run: |
+          cargo test --locked --package zeroshot --lib --features ui -- native_v2_supervisor::checkpoints::restic::tests native_v2_supervisor::tests::checkpoint_tests
+          cargo test --locked --package zeroshot --features ui --test native_v2_cli_local fixture::restic_diagnostics
       - name: Run native macOS controller termination regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unix_controller

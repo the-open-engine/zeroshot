@@ -449,3 +449,6 @@ mod unhandled;
 
 #[path = "full_v1_reducer/parallel_terminals.rs"]
 mod parallel_terminals;
+
+#[path = "full_v1_reducer/profiles.rs"]
+mod profiles;

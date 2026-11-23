@@ -12,14 +12,17 @@ import {
   restoredRunNode,
   restoredHistoryPosition,
   useRunViewPersistence,
+  type RunLayout,
   type RunViewState,
 } from './run-view-state';
 import { ExecutionTimeline } from './ExecutionTimeline';
 import { ControlTimeline } from './ControlTimeline';
 import { appendControlHistory, type ControlRecord } from './control-history';
-import { RecordedValue } from './RecordedValue';
 import { Transcript } from './Transcript';
+import { InvocationView, ValueSection } from './InvocationDetail';
 import { WorkflowCanvas } from './WorkflowCanvas';
+import { RunStory } from './RunStory';
+import type { RunContext } from './RunViewParts';
 import { findNode, labels, type Document, type GraphNode, type Positions } from './domain';
 import type { WorkerOption } from './workers';
 import { nodeTitle } from './workflow-projection';
@@ -35,7 +38,6 @@ import {
   humanize,
   observedRoutes,
   projectHistory,
-  stateLabel,
   suspensionStatus,
   type HistoryEvent,
   type HistoryPage,
@@ -90,6 +92,17 @@ function replayStart(replay: readonly number[], position: number, restart: boole
   return restart || position < first || position >= last ? first : position;
 }
 
+/** The selected recorded moment and whether it is also the loaded current position. */
+function replayPosition(history: HistoryFeed, moments: ReturnType<typeof historyMoments>) {
+  const { cursorIndex, events, loadedHead } = history;
+  const safePosition = Math.max(
+    0,
+    moments.findIndex((moment) => moment.index === Math.min(cursorIndex, events.length - 1))
+  );
+  const moment = moments[safePosition];
+  return { safePosition, moment, current: loadedHead && moment.index === events.length - 1 };
+}
+
 export function RunHistoryView({
   runId,
   source,
@@ -100,9 +113,11 @@ export function RunHistoryView({
   embedded = false,
   successorRunId: listedSuccessor,
 }: RunHistoryViewProps) {
-  const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
+  const { saved: savedView, canvas, setCanvas, layout, setLayout } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
   const failureView = useFailurePresentation(savedView);
+  const [revealStart, setRevealStart] = useState(0);
+  const [revealStep, setRevealStep] = useState<{ invocation: string; tick: number }>();
   const [playbackNode, setPlaybackNode] = useState<string>();
   const [selected, setSelected] = useState(''),
     [inspector, setInspector] = useState(false),
@@ -131,112 +146,59 @@ export function RunHistoryView({
     },
     onMissing: () => setPlaying(false),
   });
-  const {
-    run,
-    events,
-    loadedHead,
-    control,
-    controlError,
-    cursorIndex,
-    setCursorIndex,
-    following,
-    connection,
-    loading,
-    historyPending,
-    error,
-    retained,
-    restoreCursor,
-    restorePending,
-    isLiveRun,
-    follow,
-    loadHistory,
-  } = history;
+  const { run, events, control, cursorIndex, setCursorIndex, following, loading, follow } = history;
   useRunViewPersistence(viewKey, run, loading, {
     selected,
     inspector,
     execution,
     following,
     canvas,
-    cursor: historyViewCursor(restoreCursor.current, events, cursorIndex),
+    layout,
+    cursor: historyViewCursor(history.restoreCursor.current, events, cursorIndex),
   });
   const document: Document | undefined = useMemo(
     () => run && { name: run.runId, graph: run.graph, runtime: run.runtime },
     [run]
   );
   const moments = useMemo(() => historyMoments(events, cursorIndex), [events, cursorIndex]);
-  const selectedReplay = useMemo(
-    () => (document ? nodeReplayPositions(document, moments, events, selected, control) : []),
-    [document, moments, events, selected, control]
+  const { safePosition, moment, current } = replayPosition(history, moments);
+  const projection = useProjection(
+    document,
+    events,
+    moment.index,
+    control,
+    run,
+    listedSuccessor,
+    current
   );
-  const replayScope = useMemo(
-    () =>
-      document && playbackNode
-        ? nodeReplayPositions(document, moments, events, playbackNode, control)
-        : undefined,
-    [document, moments, events, playbackNode, control]
-  );
-  const safePosition = Math.max(
-      0,
-      moments.findIndex((moment) => moment.index === Math.min(cursorIndex, events.length - 1))
-    ),
-    moment = moments[safePosition];
-  const projection = useProjection(document, events, moment.index, control, run, listedSuccessor);
   useEffect(() => {
     window.document.title = `${run?.title ?? 'Runs'} · Zeroshot`;
   }, [run?.title]);
-
-  useReplayTimer({
+  const clearExecution = () => {
+    setExecution('');
+    setReadingExecution('');
+  };
+  const replay = useReplayActions({
+    history,
+    source,
+    failureView,
+    document,
+    moments,
+    safePosition,
+    selected,
     playing,
     setPlaying,
-    position: safePosition,
-    moments,
-    scope: replayScope,
-    cursorIndex,
     playbackNode,
-    setCursorIndex,
+    setPlaybackNode,
+    clearExecution,
   });
-  function scrub(next: number) {
-    failureView.replay();
-    setPlaying(false);
-    follow(false);
-    setExecution('');
-    setReadingExecution('');
-    setCursorIndex(moments[Math.max(0, Math.min(moments.length - 1, next))].index);
-  }
-  function goLatest() {
-    failureView.latest();
-    setPlaying(false);
-    setPlaybackNode(undefined);
-    setExecution('');
-    setReadingExecution('');
-    follow(isLiveRun);
-    setCursorIndex(retained.current.length - 1);
-    if (run && (connection === 'limited' || connection === 'error' || (!loading && !loadedHead)))
-      void loadHistory(run.runId, source, false);
-  }
   /** Select a node, stopping any node replay; the empty canvas selects without opening the panel. */
   function inspect(name: string, open = true) {
     setPlaying(false);
     setPlaybackNode(undefined);
     setSelected(name);
-    setExecution('');
-    setReadingExecution('');
+    clearExecution();
     if (open) setInspector(true);
-  }
-  function playNode(restart = false) {
-    if (!selectedReplay.length) return;
-    failureView.replay();
-    follow(false);
-    if (!restart && playing && playbackNode === selected) {
-      setPlaying(false);
-      return;
-    }
-    const start = replayStart(selectedReplay, safePosition, restart);
-    setCursorIndex(moments[start].index);
-    setExecution('');
-    setReadingExecution('');
-    setPlaybackNode(selected);
-    setPlaying(nextReplayPosition(start, moments.length, selectedReplay) !== undefined);
   }
   function inspectDiagnostic(cursor: string) {
     const target = failureView.diagnostic(cursor, events, projection);
@@ -249,33 +211,57 @@ export function RunHistoryView({
     setInspector(true);
     setCursorIndex(target.index);
   }
+  /** Steps has no inspector: a run-wide log opens the run's Started section instead. */
+  function storyDiagnostic(cursor: string) {
+    const target = failureView.diagnostic(cursor, events, projection);
+    if (target && !target.invocation) setRevealStart(Date.now());
+    else inspectDiagnostic(cursor);
+  }
   function reveal(name: string) {
     inspect(name);
     setFocus({ name, tick: Date.now() });
+  }
+  /** Steps opens work in place: following and playback carry on, since only seeking pauses them. */
+  function selectStep(target: { node: string; invocation?: string }) {
+    setSelected(target.node);
+    setExecution(target.invocation ?? '');
+    setReadingExecution('');
+  }
+  /** The timeline's Show node, in Steps: the node's latest execution, opened where it is listed. */
+  function showStep(name: string) {
+    const target = document && findNode(document.graph.root, name);
+    const names = target && descendantNames(target);
+    const latest = projection?.invocations.filter((item) => names?.has(item.node)).at(-1);
+    if (!latest) return;
+    selectStep({ node: name, invocation: latest.id });
+    setRevealStep({ invocation: latest.id, tick: Date.now() });
   }
   const { terminal: displayedTerminal, currentFailure } = failureView.presentation(
     history,
     moment.index,
     projection?.terminal
   );
-  const node = document && findNode(document.graph.root, selected);
-  const names = node && descendantNames(node);
-  const nodeInvocations =
-    projection?.invocations.filter((invocation) => names?.has(invocation.node)) ?? [];
-  const activeInvocation =
-    nodeInvocations.find((invocation) => invocation.id === execution) ??
-    nodeInvocations.find((invocation) => invocation.id === readingExecution) ??
-    currentInvocation(nodeInvocations, events, moment.index);
-  const readingTranscript = useCallback(
-    (reading: boolean) => {
-      const id = activeInvocation?.id;
-      if (id) setReadingExecution((previous) => (reading ? id : previous === id ? '' : previous));
-    },
-    [activeInvocation?.id]
-  );
-  const nodeControls = projection?.controls.filter((visit) => visit.node === node?.name) ?? [];
-  const showExecutions =
-    node && (['step', 'verifier'].includes(node.kind) || node.name === document?.graph.root.name);
+  const selection = useSelectedNode({
+    document,
+    projection,
+    selected,
+    execution,
+    readingExecution,
+    setReadingExecution,
+    events,
+    index: moment.index,
+  });
+  const { node } = selection;
+  const hasLog = (cursor: string) => events.some((entry) => entry.cursor === cursor);
+  /** A node picked in Graph stays picked in Steps: the execution its inspector shows opens there. */
+  function switchLayout(view: RunLayout) {
+    setLayout(view);
+    const shown = selection.activeInvocation;
+    if (view !== 'story' || !shown || !selected || selected === document?.graph.root.name) return;
+    setExecution(shown.id);
+    setRevealStep({ invocation: shown.id, tick: Date.now() });
+  }
+  const toggle = <RunViewToggle layout={layout} setLayout={switchLayout} />;
   return (
     <main className="workspace history-workspace">
       {run && document && projection ? (
@@ -286,47 +272,83 @@ export function RunHistoryView({
             history={history}
             position={safePosition}
             momentsCount={moments.length}
-            openLog={() => inspect(document.graph.root.name)}
-            retry={() => void loadHistory(run.runId, source, false)}
+            openLog={() =>
+              layout === 'story' ? setRevealStart(Date.now()) : inspect(document.graph.root.name)
+            }
+            retry={() => void history.loadHistory(run.runId, source, false)}
             embedded={embedded}
             runHref={runHref}
             successorRunId={projection.successorRunId}
           />
-          <div className={`editor-body history-body ${inspector ? '' : 'inspector-closed'}`}>
-            <ReactFlowProvider>
-              <WorkflowCanvas
-                document={document}
-                selected={selected}
-                positions={positions}
-                setPositions={setPositions}
-                workers={workers}
-                select={inspect}
-                focus={focus}
-                observation={observed(run.runId, projection.nodes, isLiveRun && following)}
-                view={canvas}
-                onViewChange={setCanvas}
-                inspectorHidden={!inspector}
-                showInspector={() => setInspector(true)}
-                deselect={() => inspect(document.graph.root.name, false)}
+          <div
+            className={`editor-body history-body ${inspector && layout === 'graph' ? '' : 'inspector-closed'}`}
+          >
+            {layout === 'story' ? (
+              <RunStory
+                run={runContext(run, document, projection, {
+                  terminal: displayedTerminal,
+                  currentFailure,
+                  // Steps not recorded yet may still run when live or replaying before the end.
+                  open:
+                    !displayedTerminal &&
+                    (history.isLiveRun || safePosition < moments.length - 1 || !history.loadedHead),
+                  following,
+                  answerable: current && run.phase === 'suspended',
+                  runHref,
+                })}
+                execution={execution}
+                select={selectStep}
+                showInGraph={(target) => {
+                  selectStep(target);
+                  setInspector(true);
+                  setLayout('graph');
+                  setFocus({ name: target.node, tick: Date.now() });
+                }}
+                toolbarStart={toggle}
+                revealStart={revealStart}
+                revealStep={revealStep}
+                failureDetails={(context) => (
+                  <RunFailureDetails context={context} openLog={storyDiagnostic} hasLog={hasLog} />
+                )}
               />
-            </ReactFlowProvider>
-            {inspector && node && (
+            ) : (
+              <ReactFlowProvider>
+                <WorkflowCanvas
+                  document={document}
+                  selected={selected}
+                  positions={positions}
+                  setPositions={setPositions}
+                  workers={workers}
+                  select={inspect}
+                  focus={focus}
+                  observation={observed(
+                    run.runId,
+                    projection.nodes,
+                    history.isLiveRun && following
+                  )}
+                  view={canvas}
+                  onViewChange={setCanvas}
+                  inspectorHidden={!inspector}
+                  showInspector={() => setInspector(true)}
+                  deselect={() => inspect(document.graph.root.name, false)}
+                  toolbarStart={toggle}
+                />
+              </ReactFlowProvider>
+            )}
+            {inspector && node && layout === 'graph' && (
               <RunInspector
                 run={run}
                 document={document}
                 projection={projection}
                 terminal={displayedTerminal}
                 currentFailure={currentFailure}
-                node={node}
                 moment={moment}
-                nodeControls={nodeControls}
-                nodeInvocations={nodeInvocations}
-                activeInvocation={activeInvocation}
-                showExecutions={!!showExecutions}
-                controlError={controlError}
+                {...selection}
+                node={node}
+                controlError={history.controlError}
                 execution={execution}
                 playingNode={playing && playbackNode === node.name}
-                canReplay={!loading && selectedReplay.length > 0}
+                canReplay={!loading && replay.selectedReplay.length > 0}
                 following={following}
                 safePosition={safePosition}
                 close={() => {
@@ -339,12 +361,11 @@ export function RunHistoryView({
                   setReadingExecution('');
                   setExecution(id);
                 }}
-                play={() => playNode()}
-                restart={() => playNode(true)}
+                play={() => replay.playNode()}
+                restart={() => replay.playNode(true)}
                 reveal={reveal}
                 inspectDiagnostic={inspectDiagnostic}
-                hasLog={(cursor) => events.some((entry) => entry.cursor === cursor)}
-                readingTranscript={readingTranscript}
+                hasLog={hasLog}
               />
             )}
           </div>
@@ -352,42 +373,235 @@ export function RunHistoryView({
             moment={moment}
             moments={moments}
             safePosition={safePosition}
-            isLiveRun={isLiveRun}
+            isLiveRun={history.isLiveRun}
             following={following}
-            connection={connection}
+            connection={history.connection}
             loading={loading}
-            loadedHead={loadedHead}
+            loadedHead={history.loadedHead}
             playing={playing}
-            historyPending={historyPending}
-            restorePending={restorePending}
+            historyPending={history.historyPending}
+            restorePending={history.restorePending}
             eventsCount={events.length}
-            showNode={() => reveal(moment.node!)}
-            goLatest={goLatest}
-            scrub={scrub}
-            togglePlay={() => {
-              failureView.replay();
-              follow(false);
-              if (safePosition === moments.length - 1) setCursorIndex(-1);
-              setPlaybackNode(undefined);
-              setExecution('');
-              setReadingExecution('');
-              setPlaying(!playing);
-            }}
-            loadMore={() => void loadHistory(run.runId, source, false)}
+            showNode={() => (layout === 'story' ? showStep : reveal)(moment.node!)}
+            goLatest={replay.goLatest}
+            scrub={replay.scrub}
+            togglePlay={replay.togglePlay}
+            loadMore={() => void history.loadHistory(run.runId, source, false)}
           />
         </>
       ) : (
         <HistoryEmpty
-          historyPending={historyPending}
+          historyPending={history.historyPending}
           loading={loading}
-          error={error}
+          error={history.error}
           runId={runId}
           emptyAction={emptyAction}
-          retry={() => runId && void loadHistory(runId, source, true)}
+          retry={() => runId && void history.loadHistory(runId, source, true)}
         />
       )}
     </main>
   );
+}
+
+/** Steps and Graph: one switch for the run's two views, leading the canvas toolbar. */
+function RunViewToggle({
+  layout,
+  setLayout,
+}: {
+  layout: RunLayout;
+  setLayout: (layout: RunLayout) => void;
+}) {
+  return (
+    <div className="view-toggle" role="group" aria-label="Run view">
+      {(['story', 'graph'] as const).map((view) => (
+        <button
+          key={view}
+          type="button"
+          aria-pressed={layout === view}
+          onClick={() => setLayout(view)}
+        >
+          {view === 'graph' ? 'Graph' : 'Steps'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** What the Steps view reads about the run at this position. */
+function runContext(
+  run: RunDetail,
+  document: Document,
+  projection: NonNullable<ReturnType<typeof useProjection>>,
+  position: Pick<
+    RunContext,
+    'terminal' | 'currentFailure' | 'open' | 'following' | 'answerable' | 'runHref'
+  >
+): RunContext {
+  const successor = projection.successorRunId;
+  return {
+    ...position,
+    document,
+    runId: run.runId,
+    input: run.initialInput,
+    invocations: projection.invocations,
+    handoffs: projection.handoffs,
+    controls: projection.controls,
+    systemLogs: projection.systemLogs,
+    clock: projection.clock,
+    suspension: projection.suspension,
+    now: projection.now,
+    waiting:
+      !position.terminal &&
+      !successor &&
+      (!!projection.suspension?.request ||
+        projection.invocations.some(
+          (invocation) =>
+            invocation.state === 'suspended' && invocation.request && !invocation.request.resolution
+        )),
+    successor,
+  };
+}
+
+/** The selected node's executions and controls, and which execution the inspector shows. */
+function useSelectedNode({
+  document,
+  projection,
+  selected,
+  execution,
+  readingExecution,
+  setReadingExecution,
+  events,
+  index,
+}: {
+  document: Document | undefined;
+  projection: ReturnType<typeof projectHistory> | undefined;
+  selected: string;
+  execution: string;
+  readingExecution: string;
+  setReadingExecution: (update: (previous: string) => string) => void;
+  events: HistoryEvent[];
+  index: number;
+}) {
+  const node = document && findNode(document.graph.root, selected);
+  const names = node && descendantNames(node);
+  const nodeInvocations =
+    projection?.invocations.filter((invocation) => names?.has(invocation.node)) ?? [];
+  const activeInvocation =
+    nodeInvocations.find((invocation) => invocation.id === execution) ??
+    nodeInvocations.find((invocation) => invocation.id === readingExecution) ??
+    currentInvocation(nodeInvocations, events, index);
+  const readingTranscript = useCallback(
+    (reading: boolean) => {
+      const id = activeInvocation?.id;
+      if (id) setReadingExecution((previous) => (reading ? id : previous === id ? '' : previous));
+    },
+    [activeInvocation?.id]
+  );
+  return {
+    node,
+    nodeInvocations,
+    activeInvocation,
+    readingTranscript,
+    nodeControls: projection?.controls.filter((visit) => visit.node === node?.name) ?? [],
+    showExecutions:
+      !!node &&
+      (['step', 'verifier'].includes(node.kind) || node.name === document?.graph.root.name),
+  };
+}
+
+/** Seeking, playback and Go live: the timeline's controls, which pause or resume following. */
+function useReplayActions({
+  history,
+  source,
+  failureView,
+  document,
+  moments,
+  safePosition,
+  selected,
+  playing,
+  setPlaying,
+  playbackNode,
+  setPlaybackNode,
+  clearExecution,
+}: {
+  history: HistoryFeed;
+  source: RunHistoryReader;
+  failureView: ReturnType<typeof useFailurePresentation>;
+  document: Document | undefined;
+  moments: ReturnType<typeof historyMoments>;
+  safePosition: number;
+  selected: string;
+  playing: boolean;
+  setPlaying: (playing: boolean) => void;
+  playbackNode: string | undefined;
+  setPlaybackNode: (node: string | undefined) => void;
+  clearExecution: () => void;
+}) {
+  const { events, control, follow, setCursorIndex, run } = history;
+  const selectedReplay = useMemo(
+    () => (document ? nodeReplayPositions(document, moments, events, selected, control) : []),
+    [document, moments, events, selected, control]
+  );
+  const replayScope = useMemo(
+    () =>
+      document && playbackNode
+        ? nodeReplayPositions(document, moments, events, playbackNode, control)
+        : undefined,
+    [document, moments, events, playbackNode, control]
+  );
+  useReplayTimer({
+    playing,
+    setPlaying,
+    position: safePosition,
+    moments,
+    scope: replayScope,
+    cursorIndex: history.cursorIndex,
+    playbackNode,
+    setCursorIndex,
+  });
+  return {
+    selectedReplay,
+    scrub(next: number) {
+      failureView.replay();
+      setPlaying(false);
+      follow(false);
+      clearExecution();
+      setCursorIndex(moments[Math.max(0, Math.min(moments.length - 1, next))].index);
+    },
+    goLatest() {
+      failureView.latest();
+      setPlaying(false);
+      setPlaybackNode(undefined);
+      clearExecution();
+      follow(history.isLiveRun);
+      setCursorIndex(history.retained.current.length - 1);
+      const { connection, loading, loadedHead } = history;
+      if (run && (connection === 'limited' || connection === 'error' || (!loading && !loadedHead)))
+        void history.loadHistory(run.runId, source, false);
+    },
+    playNode(restart = false) {
+      if (!selectedReplay.length) return;
+      failureView.replay();
+      follow(false);
+      if (!restart && playing && playbackNode === selected) {
+        setPlaying(false);
+        return;
+      }
+      const start = replayStart(selectedReplay, safePosition, restart);
+      setCursorIndex(moments[start].index);
+      clearExecution();
+      setPlaybackNode(selected);
+      setPlaying(nextReplayPosition(start, moments.length, selectedReplay) !== undefined);
+    },
+    togglePlay() {
+      failureView.replay();
+      follow(false);
+      if (safePosition === moments.length - 1) setCursorIndex(-1);
+      setPlaybackNode(undefined);
+      clearExecution();
+      setPlaying(!playing);
+    },
+  };
 }
 
 type HistoryFeed = ReturnType<typeof useHistoryFeed>;
@@ -1111,6 +1325,12 @@ function RunInspector({
             </details>
           </>
         )}
+        {node.kind === 'profile' && (
+          <dl className="run-facts">
+            <dt>Saved profile</dt>
+            <dd className="mono">{node.profile}</dd>
+          </dl>
+        )}
         {!nodeControls.length && observedRoutes(node, projection.invocations).length > 0 && (
           <section className="run-inspector-section">
             <h3>Observed paths</h3>
@@ -1202,98 +1422,5 @@ function RunInspector({
         />
       </div>
     </InspectorPanel>
-  );
-}
-
-function InvocationView({
-  invocation,
-  showNode,
-  reveal,
-  follow,
-  reading,
-}: {
-  invocation: Invocation;
-  showNode: boolean;
-  reveal: () => void;
-  follow: boolean;
-  reading: (value: boolean) => void;
-}) {
-  const outcome = invocation.outcome;
-  return (
-    <section className="invocation-detail">
-      <div className="invocation-status">
-        <span className={`run-status state-${invocation.state}`}>
-          {stateLabel(invocation.state)}
-        </span>
-      </div>
-      {showNode && (
-        <button className="invocation-node" onClick={reveal}>
-          {humanize(invocation.node)}
-          <ChevronRight size={15} />
-        </button>
-      )}
-      <ValueSection title="Input" value={invocation.input} />
-      {outcome && (
-        <details className="history-value invocation-output" open>
-          <summary>Output</summary>
-          {outcome.signals && Object.keys(outcome.signals).length > 0 && (
-            <div className="recorded-signals">
-              {Object.entries(outcome.signals).map(([key, value]) => (
-                <div key={key}>
-                  <span>{humanize(key)}</span>
-                  <strong>{humanize(value)}</strong>
-                </div>
-              ))}
-            </div>
-          )}
-          {outcome.status === 'error' && (
-            <div className="history-node-error">
-              {humanize(outcome.code ?? 'Error')}
-              {outcome.reason && outcome.reason !== 'declared_failure' && (
-                <small>{humanize(outcome.reason)}</small>
-              )}
-            </div>
-          )}
-          {outcome.output != null && <RecordedValue value={outcome.output} />}
-          {outcome.diagnostic != null && (
-            <div className="outcome-diagnostic">
-              {outcome.output != null && <h4>Details</h4>}
-              <RecordedValue value={outcome.diagnostic} />
-            </div>
-          )}
-          {!!outcome.artifacts?.length && (
-            <RecordedValue value={{ artifacts: outcome.artifacts }} />
-          )}
-          {outcome.status !== 'error' &&
-            outcome.output == null &&
-            outcome.diagnostic == null &&
-            !Object.keys(outcome.signals ?? {}).length &&
-            !outcome.artifacts?.length && <p className="history-muted">No returned value.</p>}
-        </details>
-      )}
-      {invocation.reason && (
-        <ValueSection title="Stopped because" value={humanize(invocation.reason)} open />
-      )}
-      <Transcript logs={invocation.logs} follow={follow} onReadingChange={reading} />
-    </section>
-  );
-}
-function ValueSection({
-  title,
-  value,
-  open = false,
-  raw = false,
-}: {
-  title: string;
-  value: unknown;
-  open?: boolean;
-  raw?: boolean;
-}) {
-  if (value === undefined || value === null) return null;
-  return (
-    <details className="history-value" open={open || undefined}>
-      <summary>{title}</summary>
-      {raw ? <pre>{JSON.stringify(value, null, 2)}</pre> : <RecordedValue value={value} />}
-    </details>
   );
 }

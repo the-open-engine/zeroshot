@@ -75,6 +75,10 @@ By default, the target performs no application-level authentication. Anyone who 
 published port can use it. Run the container only on a private machine and private network, and do
 not expose the port to the public internet.
 
+## Run on Kubernetes
+
+Install the same image with the [Zeroshot target Helm chart](../../charts/zeroshot-target/README.md).
+
 ## Environment scripts and Docker
 
 A run submission may supply `environment` beside `runtime`, with `setup`, `startup`, and ordinary

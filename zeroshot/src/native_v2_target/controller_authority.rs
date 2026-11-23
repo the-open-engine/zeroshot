@@ -674,7 +674,7 @@ fn require_runtime_capabilities(
     }
     require_node_runtime_lanes(controller, runtime)?;
     require_runtime_harnesses(controller, runtime)?;
-    if !runtime.workspace_checkpoints {
+    if !runtime.workspace_checkpoints && !controller.workspace_checkpoint_opt_out {
         return Err(authority_error(
             "this target does not support disabling workspace checkpoints",
         ));

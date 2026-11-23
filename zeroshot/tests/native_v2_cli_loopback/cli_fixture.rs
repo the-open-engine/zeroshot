@@ -219,9 +219,26 @@ pub(crate) async fn run_cli_command(
     (stdout, stderr)
 }
 
+pub(crate) fn assert_watch_notification(stdout: &str, run_id: &str) {
+    let watch = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("WATCH="))
+        .assert_value_with("watch notification marker");
+    let watch: serde_json::Value =
+        serde_json::from_str(watch).assert_value_with("watch notification JSON");
+    assert!(
+        watch["subscriptionId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()),
+        "watch subscription identity: {watch}"
+    );
+    assert_eq!(watch["runId"].as_str(), Some(run_id), "watch run identity");
+}
+
 pub(crate) fn cli_prerequisites_available() -> bool {
     for prerequisite in [
         "dbus-run-session",
+        "dbus-send",
         "gnome-keyring-daemon",
         "secret-tool",
         "timeout",

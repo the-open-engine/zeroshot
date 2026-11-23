@@ -29,8 +29,8 @@ mod review_input;
 
 #[path = "named_source.rs"]
 mod named_source;
-pub(super) use profiles::materialize_profile;
-use profiles::{ResolvedRunProfile, resolve_run_profile};
+pub(super) use profiles::{load_profile, require_supported_placement, validate_profile};
+use profiles::{ResolvedRunProfile, materialize_profile, resolve_run_profile};
 
 struct SubmissionInput {
     review: Option<crate::native_v2_review::PreparedReview>,
@@ -98,7 +98,7 @@ where
     let RunSelection::Inline { graph, runtime } = &run.selection else {
         return Ok(None);
     };
-    let (graph, runtime) = materialize_profile(graph, runtime).await?;
+    let (graph, runtime) = materialize_profile(graph, runtime, run.target.as_deref()).await?;
     prepare_validated_submission_with_environment(
         run,
         ResolvedRunProfile {
@@ -198,6 +198,9 @@ where
     if run.target.is_none() {
         crate::native_v2_local::validate_local_environment(intent.environment.as_ref())
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+    } else {
+        crate::native_v2_admission::validate_target_environment(intent.environment.as_ref())
+            .map_err(NativeV2CliError::InvalidRun)?;
     }
     let (connections, github_token) = submission_credentials(run, &intent, &available)?;
     Ok(PreparedRunRequest {
@@ -252,10 +255,29 @@ where
     if run.target.is_none() && matches!(run.input, super::super::RunInput::TaskFrom(_)) {
         review_input::validate_local(&mut params).await?;
     }
-    NativeV2Admission
-        .validate_intent(&params.intent, DeliveryPolicy::Optional)
-        .await
+    // Only a saved selector can delegate expansion/admission to the host. A local validation
+    // cannot prove an unresolved remote dependency graph without that host-owned operation.
+    let host_expands = params.profile.is_some()
+        && super::super::LocalRunProfileStore::has_imports(&params.intent.graph);
+    if host_expands && run.validate_only {
+        return Err(NativeV2CliError::Usage(
+            "saved profiles with imports require host admission; --validate-only cannot validate remote imports".into(),
+        ));
+    }
+    if !host_expands {
+        NativeV2Admission
+            .validate_intent(&params.intent, DeliveryPolicy::Optional)
+            .await
+            .map_err(NativeV2CliError::InvalidRun)?;
+    }
+    if run.target.is_none() {
+        // Resolve a copy: omitted and explicit sizes remain distinct idempotency inputs.
+        crate::native_v2_admission::resolve_runtime_size(
+            &mut params.intent.runtime.clone(),
+            &crate::native_v2_hosting::host_run_sizes(),
+        )
         .map_err(NativeV2CliError::InvalidRun)?;
+    }
     crate::native_v2_cli::local::native_forge::select_local_source(run, &mut params)?;
     validate_local_only_workspace(run, &params)?;
     resolve_named_source(run, &mut params, &outbound, &available).await?;

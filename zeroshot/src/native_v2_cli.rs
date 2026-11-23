@@ -160,6 +160,7 @@ pub enum LocalWorktreeBase {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunCommand {
+    pub controller: local::LocalControllerMode,
     pub target: Option<String>,
     pub cwd: Option<PathBuf>,
     pub worktree: Option<LocalWorktreeBase>,
@@ -328,6 +329,7 @@ pub enum RunGraph {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunSelector {
+    pub controller: local::LocalControllerMode,
     pub target: Option<String>,
     pub run_id: openengine_cluster_protocol::RunId,
 }
@@ -466,6 +468,7 @@ pub enum NativeV2CliCommand {
     Steer {
         run: RunSelector,
         text: SteerText,
+        node: Option<openengine_cluster_protocol::NodeName>,
         networks: Vec<openengine_cluster_protocol::NodeName>,
         mode: openengine_cluster_protocol::SteeringMode,
     },
@@ -492,6 +495,16 @@ pub enum NativeV2CliCommand {
 }
 
 impl NativeV2CliCommand {
+    /// Launch policy for this invocation only; recovery metadata never changes it.
+    pub fn local_controller_mode(&self) -> local::LocalControllerMode {
+        match self {
+            Self::Run(run) => run.controller,
+            Self::Resume(command) => command.run.controller,
+            Self::Answer { run, .. } => run.controller,
+            _ => local::LocalControllerMode::Detached,
+        }
+    }
+
     fn is_management_operation(&self) -> bool {
         self.is_connection_operation()
             || self.is_profile_operation()
@@ -798,6 +811,10 @@ pub trait NativeV2CliBackend: Send + Sync {
         request: RunProfileListRequest,
     ) -> Result<CliProfileListResult, NativeV2CliError> {
         self.profile_list(target, request).await.map(Into::into)
+    }
+
+    async fn validate_profile_imports(&self, _target: &str) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Usage("profile imports require a local run or a target advertising openengine.saved-profile-imports/v1".into()))
     }
 
     async fn profile_show(

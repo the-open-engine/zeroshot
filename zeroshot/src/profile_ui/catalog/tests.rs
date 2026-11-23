@@ -56,7 +56,7 @@ fn delivery_choices_use_native_contracts_and_preserve_legacy_identities() {
 
 #[tokio::test]
 async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bindings() {
-    let templates = templates().assert_value();
+    let templates = templates(false).assert_value();
     assert_eq!(templates.len(), 11);
     for template in templates {
         let kind =
@@ -101,7 +101,7 @@ async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bind
 
 #[test]
 fn first_template_choices_use_their_default_delivery_bindings() {
-    let choices = templates().assert_value();
+    let choices = templates(false).assert_value();
     for (template, kind) in [
         (BuiltinGraphTemplate::IssueReview, "comment_delivery"),
         (BuiltinGraphTemplate::PrReview, "comment_delivery"),
@@ -119,7 +119,7 @@ fn first_template_choices_use_their_default_delivery_bindings() {
 
 #[test]
 fn software_templates_keep_one_worker_session_and_fresh_reviewers() {
-    for template in templates()
+    for template in templates(false)
         .assert_value()
         .iter()
         .filter(|value| value["name"] == "software-change")
@@ -133,7 +133,7 @@ fn software_templates_keep_one_worker_session_and_fresh_reviewers() {
 
 #[test]
 fn research_editor_bindings_keep_four_sessions_and_a_fresh_reviewer() {
-    let templates = templates().assert_value();
+    let templates = templates(false).assert_value();
     for mode in ["none", "push"] {
         let template = templates
             .iter()
@@ -181,7 +181,7 @@ async fn decision_worker_uses_the_native_contract_and_keeps_the_model_caller_own
 
 #[tokio::test]
 async fn complete_template_defaults_admit_and_expose_derived_access() {
-    for template in templates().assert_value() {
+    for template in templates(false).assert_value() {
         let graph: GraphSpec = serde_json::from_value(template["graph"].clone()).assert_value();
         let runtime: RuntimePlan =
             serde_json::from_value(template["runtime"].clone()).assert_value();
@@ -197,7 +197,7 @@ async fn complete_template_defaults_admit_and_expose_derived_access() {
 
 #[test]
 fn code_review_preserves_the_supplied_agent_plan_and_native_delivery() {
-    let template = templates()
+    let template = templates(false)
         .assert_value()
         .into_iter()
         .find(|template| template["name"] == "code-review")
@@ -212,6 +212,16 @@ fn code_review_preserves_the_supplied_agent_plan_and_native_delivery() {
     assert_eq!(template["runtime"]["harness"], supplied["harness"]);
     assert_eq!(template["runtime"]["provider"], supplied["provider"]);
     assert_eq!(
+        template["runtime"]["activeMemory"]
+            .as_object()
+            .map(|memory| (memory["repository"].clone(), memory["graph"].clone())),
+        Some((json!(false), json!(false)))
+    );
+    assert_eq!(
+        template["runtime"]["globalAgents"]["postmortem"]["enabled"],
+        false
+    );
+    assert_eq!(
         template["requirements"]["openai"],
         json!(["OPENAI_API_KEY"])
     );
@@ -222,4 +232,38 @@ fn code_review_preserves_the_supplied_agent_plan_and_native_delivery() {
     assert!(template["requirements"].get("github").is_none());
     assert!(template["runtime"].get("size").is_none());
     assert!(template["runtime"].get("workspaceCheckpoints").is_none());
+}
+
+#[tokio::test]
+async fn checkpoint_opt_out_catalog_preserves_and_materializes_code_review_policy() {
+    let harnesses = crate::harnesses::HarnessRegistry::core();
+    for enabled in [false, true] {
+        let catalog =
+            super::super::catalog_with_checkpoint_policy(&harnesses, enabled).assert_value();
+        for template in catalog["templates"].as_array().assert_value() {
+            let runtime: RuntimePlan =
+                serde_json::from_value(template["runtime"].clone()).assert_value();
+            assert_eq!(
+                runtime.workspace_checkpoints,
+                !(enabled && template["name"] == "code-review")
+            );
+            let setup = super::super::profile_setup(json!({"runtime":runtime})).assert_value();
+            let materialized: RuntimePlan =
+                serde_json::from_value(setup["runtime"].clone()).assert_value();
+            assert_eq!(
+                materialized.workspace_checkpoints,
+                runtime.workspace_checkpoints
+            );
+            let graph: GraphSpec = serde_json::from_value(template["graph"].clone()).assert_value();
+            let mut context = crate::native_v2_admission::NativeV2AdmissionContext::new(
+                &harnesses,
+                crate::native_v2_admission::DeliveryPolicy::Optional,
+            );
+            context.hosted_workspace_checkpoint_opt_out = Some(enabled);
+            crate::native_v2_admission::NativeV2Admission
+                .validate_profile_with_context(&graph, &materialized, context)
+                .await
+                .assert_value();
+        }
+    }
 }

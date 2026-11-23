@@ -94,6 +94,16 @@ fn wait_released(storage: &Path) {
         std::thread::sleep(Duration::from_millis(25));
     }
     FileExt::unlock(&file).unwrap();
+    // Dropping the lease precedes process exit, especially while coverage flushes. Availability
+    // correctly stays unknown until both are confirmed; freeze retained storage only afterward.
+    let ready: Value =
+        serde_json::from_slice(&std::fs::read(storage.join("controller.ready.json")).unwrap())
+            .unwrap();
+    let pid = u32::try_from(ready["pid"].as_u64().unwrap()).unwrap();
+    while super::process_exists(pid) {
+        assert!(Instant::now() < deadline, "controller {pid} did not exit");
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn kill_controller(pid: u32) {
@@ -347,6 +357,34 @@ fn explicit_controls_recover_interrupted_ledgers_without_a_temporary_image() {
         );
         assert!(!storage.join("runs.sqlite3-journal").exists());
     }
+}
+
+// Abrupt owner-loss cleanup is provided by the Linux supervisor and Windows Jobs.
+// macOS process groups require a live controller; its explicit-stop restart case is in startup.
+#[cfg(any(target_os = "linux", windows))]
+#[test]
+fn contained_controller_loss_survives_restart() {
+    let fixture = Fixture::new();
+    let submitted = fixture
+        .run_command("block", true)
+        .args(["--controller", "contained"])
+        .output()
+        .unwrap();
+    success(&submitted);
+    let receipt: Value = serde_json::from_slice(&submitted.stdout).unwrap();
+    let id = receipt["runId"].as_str().unwrap();
+    let worker = fixture.await_child();
+    let storage = fixture.root.path(&format!("state/runs/{id}"));
+    let ready: Value =
+        serde_json::from_slice(&std::fs::read(storage.join("controller.ready.json")).unwrap())
+            .unwrap();
+    kill_controller(u32::try_from(ready["pid"].as_u64().unwrap()).unwrap());
+    wait_released(&storage);
+    assert_eq!(fixture.json(&["status", id])["controller"]["state"], "lost");
+    for _ in 0..2 {
+        success(&fixture.command(&["force-stop", id]).output().unwrap());
+    }
+    super::startup::assert_terminal_restart(&fixture, id, worker, "runtime_lost");
 }
 
 #[test]

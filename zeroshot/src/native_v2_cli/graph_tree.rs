@@ -88,6 +88,12 @@ fn tree_row(node: &GraphNode) -> TreeRow {
                 count(node.max_items, "item")
             )
         }
+        GraphNode::Profile(node) => {
+            if let Some(body) = &node.body {
+                children.push(tree_row(body));
+            }
+            format!("profile  {}", node.profile)
+        }
         GraphNode::Succeed(_) => "succeed".to_owned(),
         GraphNode::Fail(node) => format!("fail  reason: {}", node.reason.as_label()),
     };

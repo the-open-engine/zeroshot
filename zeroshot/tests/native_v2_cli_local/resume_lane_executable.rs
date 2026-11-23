@@ -264,12 +264,15 @@ async fn assert_late_version_is_not_admitted(resuming: bool) {
     let original = fs::read(&executable).assert_value();
     let pids = fixture.root.path("late-version-pids");
     let turns = fixture.root.path("unexpected-turns");
+    // The absolute preparation budget includes checkpoint restore before the probe starts.
+    let preparation_budget = CLI_TIMEOUT.as_secs();
     openengine_cluster_testkit::fixture::write_executable(
         &executable,
         format!(
             "#!/bin/sh\nif [ \"$*\" != --version ]; then printf turn >> {turns}; exit 91; fi\n\
-             /bin/sleep 6 &\nprintf '%s %s\\n' \"$$\" \"$!\" > {pids}\nwait\n\
+             /bin/sleep {delay} &\nprintf '%s %s\\n' \"$$\" \"$!\" > {pids}.pending\nmv {pids}.pending {pids}\nwait\n\
              printf 'codex-cli 0.155.0\\n'\n",
+            delay = preparation_budget + 1,
             turns = shell_literal(turns.to_str().assert_value()),
             pids = shell_literal(pids.to_str().assert_value()),
         ),
@@ -297,10 +300,13 @@ async fn assert_late_version_is_not_admitted(resuming: bool) {
         ],
     };
     let output = timeout(
-        CLI_TIMEOUT,
+        SUSPENSION_TIMEOUT,
         fixture
             .command(&arguments, "finish")
-            .env("ZEROSHOT_PREPARATION_TIMEOUT", "5")
+            .env(
+                "ZEROSHOT_PREPARATION_TIMEOUT",
+                preparation_budget.to_string(),
+            )
             .output(),
     )
     .await
@@ -324,8 +330,17 @@ async fn assert_late_version_is_not_admitted(resuming: bool) {
         "expired preparation returned an admission receipt"
     );
     assert!(!turns.exists(), "expired preparation dispatched a worker");
-    for pid in fs::read_to_string(&pids).assert_value().split_whitespace() {
-        let pid = pid.parse::<u32>().assert_value();
+    let processes = fs::read_to_string(&pids)
+        .assert_value()
+        .split_whitespace()
+        .map(|pid| pid.parse::<u32>().assert_value())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        processes.len(),
+        2,
+        "the version probe and its child must start"
+    );
+    for pid in processes {
         assert!(
             !process_exists(pid),
             "returned before probe process {pid} cleanup"

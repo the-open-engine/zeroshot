@@ -182,6 +182,55 @@ async fn direct_profile_handlers_round_trip_without_a_transport() {
 }
 
 #[tokio::test]
+async fn browser_resolves_saved_profiles_without_persisting_their_expanded_nodes() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-imports");
+    let state = state(root.as_path().to_owned(), "https://local.example");
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-zeroshot-workspace",
+        state.workspace.id.parse().assert_value(),
+    );
+    let child = profile_request();
+    let _ = save(
+        State(state.clone()),
+        headers.clone(),
+        Ok(Bytes::from(child.to_string())),
+    )
+    .await
+    .assert_value();
+
+    let mut parent = child;
+    parent["name"] = json!("parent");
+    parent["graph"]["root"]["children"] = json!([
+        {"kind": "profile", "name": "draft", "profile": "browser-test"},
+        {"kind": "succeed", "name": "complete", "output": {"kind": "null"}, "bindings": []}
+    ]);
+    parent["runtime"]["nodes"] = json!({});
+    let document = json!({"graph":parent["graph"],"runtime":parent["runtime"]});
+    let result = validate(State(state.clone()), Ok(Bytes::from(document.to_string()))).await;
+    assert!(result.is_ok());
+
+    let Json(saved) = save(
+        State(state.clone()),
+        headers.clone(),
+        Ok(Bytes::from(parent.to_string())),
+    )
+    .await
+    .assert_value();
+    assert_eq!(saved["profile"]["graph"], parent["graph"]);
+    assert_eq!(saved["profile"]["runtime"], parent["runtime"]);
+
+    parent["graph"]["root"]["children"][0]["profile"] = json!("parent");
+    parent["expectedRevision"] = saved["revision"].clone();
+    let error = save(State(state), headers, Ok(Bytes::from(parent.to_string())))
+        .await
+        .err()
+        .assert_value();
+    assert_eq!(error.code, "invalid_profile");
+    assert!(error.message.contains("profile import cycle"));
+}
+
+#[tokio::test]
 async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad_json() {
     let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-validation");
     let state = state(root.as_path().to_owned(), "https://target.example");
@@ -522,8 +571,8 @@ async fn host_selected_catalog_and_validation_keep_contributions_local() {
     let mut runtime: RuntimePlan =
         serde_json::from_value(request["runtime"].clone()).assert_value();
     runtime.harness = openengine_cluster_protocol::HarnessId::new("opencode").assert_value();
-    assert!(admit(&local, &graph, &runtime).await.is_ok());
-    assert!(admit(&target, &graph, &runtime).await.is_err());
+    assert!(admit(&local, &graph, &runtime, None).await.is_ok());
+    assert!(admit(&target, &graph, &runtime, None).await.is_err());
     assert!(
         crate::workspace::validate_profile(&graph, &runtime)
             .await

@@ -98,6 +98,12 @@ pub trait TargetConnector: Send + Sync {
         name: &str,
         request: RunProfileListRequest,
     ) -> Result<RunProfileListResult, NativeV2CliError>;
+    async fn validate_profile_imports(&self, _name: &str) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise openengine.saved-profile-imports/v1".into(),
+        ))
+    }
+
     async fn profile_show(
         &self,
         name: &str,

@@ -1149,6 +1149,11 @@ A foreground run follows NDJSON events until completion or suspension. Suspensio
 Usage: zeroshot run [OPTIONS] --title <TITLE>
 
 Options:
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
+
       --title <TITLE>
           Human-readable title recorded with the run
 
@@ -1179,7 +1184,9 @@ Options:
           Expand one secret-free agent runtime across every executable graph node
 
       --environment <FILE>
-          Load a JSON environment definition: setup, startup, public variables, and hook connections
+          Load setup, startup, public variables, and hook connections from JSON.
+
+          Local runs on Linux and macOS also accept teardown for orderly cleanup.
 
       --no-environment
           Send an empty environment ({}) to bypass the target's configured default
@@ -1263,7 +1270,6 @@ RUNTIME CONFIGURATION
       {
         "harness": "codex",
         "provider": "openrouter",
-        "size": "medium",
         "nodes": {
           "worker": {
             "kind": "agent",
@@ -1289,9 +1295,8 @@ RUNTIME CONFIGURATION
     copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.
     Copilot's other lanes use native BYOK transports; its Bedrock lane uses AWS's Responses API. Pi has no permission
     control of its own, so its contained runs rely on the disposable capsule rather than a bypass
-    argument. Model IDs are passed
-    unchanged to the selected harness and
-    provider; Zeroshot does not maintain or validate provider model catalogs.
+    argument. Use the provider's model ID. The adapter formats native arguments, such as OpenCode's
+    <provider>/<model> locator. Zeroshot does not maintain or validate provider model catalogs.
 
     Size identifiers are target-owned strings. List offered sizes with `zeroshot target sizes NAME`.
     Omit size to use the target default; the target decides whether a requested size is available.
@@ -1555,6 +1560,9 @@ Options:
       --text-stdin
           Read UTF-8 direction from standard input
 
+      --node <NAME>
+          Direct human guidance to this exact agent node name, including future instances
+
       --network <NAME>
           Broadcast to this authorized graph-local network; repeat for several networks
 
@@ -1583,6 +1591,11 @@ Arguments:
 Options:
       --target <NAME>
           Use this named target. If omitted, use the local controller
+
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
 
       --input <FILE>
           JSON answer file, containing signals and output. No standard-input form
@@ -1752,6 +1765,11 @@ Options:
 
       --target <NAME>
           Use this named target. If omitted, use the local controller
+
+      --controller <MODE>
+          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+
+          [possible values: detached, contained]
 
       --from-checkpoint <ID>
           Restore this checkpoint and continue from its saved graph boundary

@@ -85,6 +85,38 @@ fn steer_stdin_is_bounded_and_validated_without_changing_text() {
 }
 
 #[tokio::test]
+async fn steer_node_uses_human_authorization_and_rejects_network_even_without_parser() {
+    let mut command = NativeV2CliCommand::Steer {
+        run: RunSelector {
+            controller: Default::default(),
+            target: None,
+            run_id: RunId::new("run"),
+        },
+        text: SteerText::Text("direction".into()),
+        node: Some(openengine_cluster_protocol::NodeName::new("worker").assert_value()),
+        networks: vec![],
+        mode: Default::default(),
+    };
+    for label in ["ZEROSHOT_EXECUTION_REF", "ZEROSHOT_STEERING_CAPABILITY"] {
+        let error = steering::try_publish(&command, &|name| (name == label).then(|| "set".into()))
+            .await
+            .assert_error();
+        assert!(error.to_string().contains("authorized --network"));
+    }
+    if let NativeV2CliCommand::Steer { networks, .. } = &mut command {
+        networks.push(openengine_cluster_protocol::NodeName::new("team").assert_value());
+    }
+    let error = steering::try_publish(&command, &|_| None)
+        .await
+        .assert_error();
+    assert!(
+        error
+            .to_string()
+            .contains("--node cannot be combined with --network")
+    );
+}
+
+#[tokio::test]
 async fn steer_default_backend_refuses_without_output_and_validation_precedes_dispatch() {
     let backend = FakeBackend::default();
     for (text, diagnostic) in [
@@ -92,7 +124,9 @@ async fn steer_default_backend_refuses_without_output_and_validation_precedes_di
         ("\0", "steer must not contain NUL"),
     ] {
         let command = NativeV2CliCommand::Steer {
+            node: None,
             run: RunSelector {
+                controller: Default::default(),
                 target: Some("older-target".into()),
                 run_id: RunId::new("run"),
             },

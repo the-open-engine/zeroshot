@@ -364,6 +364,14 @@ where
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
 
+    async fn validate_profile_imports(&self, name: &str) -> Result<(), NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .validate_profile_imports(&target)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
     async fn profile_show(
         &self,
         name: &str,

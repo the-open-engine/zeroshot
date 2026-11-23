@@ -122,6 +122,7 @@ async fn resume_runtime_requirements_include_shared_delivery_credentials() {
             let requirements = backend
                 .replacement_resume_requirements(
                     &RunSelector {
+                        controller: Default::default(),
                         target: None,
                         run_id: request.run_id.clone(),
                     },
@@ -236,6 +237,7 @@ async fn resume_runtime_bounds_effective_delivery_defaults_and_preserves_native_
                 backend
                     .replacement_resume_requirements(
                         &RunSelector {
+                            controller: Default::default(),
                             target: None,
                             run_id
                         },

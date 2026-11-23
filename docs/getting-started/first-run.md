@@ -99,9 +99,9 @@ provider accepts. zeroshot passes it on unchanged.
     }
     ```
 
-A local run needs no API key. Docker and Platform runs cannot use your CLI's login; they need the
-provider's API key (`OPENAI_API_KEY` for Codex) from your environment or the target's connection
-store.
+The local configurations above reuse your agent CLI's native login. Docker, Kubernetes and
+Platform targets use provider credentials such as `OPENAI_API_KEY` from your environment or the
+target's connection store.
 [Runtimes and connections](../concepts/runtimes-and-connections.md) explains both.
 [Harness adapters](../project/harness-adapters.md) lists every agent and provider pair.
 
@@ -155,7 +155,7 @@ error records, then the `zeroshot logs` command that shows the rest.
   a tree. Names marked `*` need runtime bindings. Add `--json` to export the `GraphSpec` that
   `--graph` and the Python SDK accept.
 - **Go smaller.** `zeroshot template show single-worker` is one agent with no review loop.
-- **Research instead of change.** `zeroshot template show auto-research` runs ten iterations by
-  default; set `options.iterations` in the input to change that. Results stay under
+- **Research instead of change.** Select `--template auto-research` on `zeroshot run` for a default
+  limit of ten iterations. Set `options.iterations` in the input to change the limit. Results stay under
   `.zeroshot/research`; add `--push` to publish each finalized iteration.
 - **Write your own graph.** [Build a review loop](../guides/review-loop.md) goes step by step.

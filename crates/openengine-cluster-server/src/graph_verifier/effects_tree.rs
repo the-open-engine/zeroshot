@@ -1,17 +1,21 @@
 use super::*;
 
-pub(super) fn collect_descendant_names(branches: &NonEmptyVec<GraphNode>) -> BTreeSet<NodeName> {
+pub(super) fn collect_visible_descendant_names(
+    branches: &NonEmptyVec<GraphNode>,
+) -> BTreeSet<NodeName> {
     let mut names = BTreeSet::new();
     for branch in branches.as_slice() {
-        collect_names(branch, &mut names);
+        collect_visible_names(branch, &mut names);
     }
     names
 }
 
-pub(super) fn collect_names(node: &GraphNode, names: &mut BTreeSet<NodeName>) {
+pub(super) fn collect_visible_names(node: &GraphNode, names: &mut BTreeSet<NodeName>) {
     names.insert(node.name().clone());
-    for child in child_nodes(node) {
-        collect_names(child, names);
+    if !matches!(node, GraphNode::Profile(_)) {
+        for child in child_nodes(node) {
+            collect_visible_names(child, names);
+        }
     }
 }
 
@@ -30,6 +34,7 @@ pub fn child_nodes(node: &GraphNode) -> Vec<&GraphNode> {
         GraphNode::Par(group) => group.branches.as_slice().iter().collect(),
         GraphNode::Loop(group) => vec![&group.body],
         GraphNode::Map(group) => vec![&group.body],
+        GraphNode::Profile(profile) => profile.body.iter().map(Box::as_ref).collect(),
         GraphNode::Step(_)
         | GraphNode::Verifier(_)
         | GraphNode::Succeed(_)

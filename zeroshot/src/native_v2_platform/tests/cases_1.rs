@@ -856,6 +856,11 @@ async fn resume_runtime_readmits_replacement_before_allocation_and_preserves_def
         let controller = NativeV2PlatformController::new(harness.ledger.clone(), allocator.clone())
             .await
             .assert_value();
+        let controller = if uniform {
+            controller.with_hosted_workspace_checkpoint_opt_out(true)
+        } else {
+            controller
+        };
         let mut replacement = serde_json::to_value(&predecessor.admitted.runtime).assert_value();
         replacement["nodes"]["worker"]["model"] = json!("replacement-model");
         replacement["nodes"]["worker"]["effort"] = json!("high");
@@ -932,7 +937,7 @@ async fn resume_runtime_readmits_replacement_before_allocation_and_preserves_def
         );
         params.runtime = Some(if uniform {
             serde_json::from_value(json!({"kind":"uniform","runtime":{
-                "harness":"claude","provider":"anthropic","size":"small","model":"replacement-model","effort":"high",
+                "harness":"claude","provider":"anthropic","size":"small","model":"replacement-model","effort":"high","workspaceCheckpoints":false,
                 "connections":{"replacement":["NODE_TOKEN"]},"activeMemory":{"repository":false,"graph":false},"globalAgents":{"postmortem":{"enabled":false}}
             }})).assert_value()
         } else {
@@ -998,6 +1003,10 @@ async fn resume_runtime_readmits_replacement_before_allocation_and_preserves_def
         let effective = serde_json::to_value(&successor.admitted.runtime).assert_value();
         assert_eq!(effective["harness"], "claude");
         assert_eq!(effective["provider"], "anthropic");
+        assert_eq!(
+            effective["workspaceCheckpoints"],
+            if uniform { json!(false) } else { json!(null) }
+        );
         assert_eq!(effective["nodes"]["worker"]["model"], "replacement-model");
         assert_eq!(effective["nodes"]["worker"]["effort"], "high");
         assert_eq!(

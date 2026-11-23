@@ -57,6 +57,32 @@ fn unsupported_targets_refuse_checkpoint_opt_out_before_submission() {
 }
 
 #[test]
+fn checkpoint_opt_out_requires_its_own_exact_marker() {
+    let mut plan = lane_free();
+    plan.workspace_checkpoints = false;
+    let advertised = TargetDiscoveryDocument::direct(TargetAuthentication::None)
+        .with_workspace_checkpoint_opt_out();
+    require_runtime_capabilities(&descriptor(advertised.clone()), &plan).assert_value();
+    let mut future = advertised;
+    future
+        .extensions
+        .workspace_checkpoint_opt_out
+        .as_mut()
+        .assert_value()
+        .kind = "openengine.workspace-checkpoint-opt-out/v2".to_owned();
+    for document in [
+        future,
+        TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_workspace_checkpoints()
+            .with_workspace_recovery(),
+    ] {
+        let controller = descriptor(document);
+        assert!(require_runtime_capabilities(&controller, &plan).is_err());
+        require_runtime_capabilities(&controller, &lane_free()).assert_value();
+    }
+}
+
+#[test]
 fn lane_bearing_plans_are_refused_by_targets_without_the_exact_marker() {
     let mut other_kind =
         TargetDiscoveryDocument::direct(TargetAuthentication::None).with_node_runtime_lanes();

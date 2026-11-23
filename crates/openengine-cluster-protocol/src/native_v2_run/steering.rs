@@ -78,6 +78,8 @@ pub fn validate_steer(text: &str) -> Result<(), String> {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunSteerParams {
     pub run_id: RunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeName>,
     #[serde(default)]
     pub mode: SteeringMode,
     #[schemars(with = "NodeInstructions")]
@@ -88,6 +90,8 @@ pub struct RunSteerParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunSteer {
     pub id: VectorId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeName>,
     #[serde(default)]
     pub mode: SteeringMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]

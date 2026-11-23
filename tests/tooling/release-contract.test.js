@@ -1,7 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { describe, it } = require('node:test');
 const yaml = require('js-yaml');
@@ -102,6 +104,86 @@ describe('Release-note publication contract', () => {
     assert.match(publish.run, /cmp -- "\$notes_file" "\$published_notes"/);
     assert.doesNotMatch(publish.run, /--notes "/);
     assert.doesNotMatch(publish.run, /expected_notes/);
+  });
+});
+
+describe('Target Helm chart publication', { skip: process.platform === 'win32' }, () => {
+  it('publishes a missing version and verifies existing chart contents on retry', async (t) => {
+    const release = yaml.load(read('.github/workflows/release.yml'));
+    const step = release.jobs['image-publish'].steps.find(
+      (candidate) => candidate.name === 'Publish or verify the immutable target Helm chart'
+    );
+    const directory = fs.mkdtempSync(path.join(tmpdir(), 'zeroshot-chart-release-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const filename = 'zeroshot-target-17.1.1.tgz';
+    fs.mkdirSync(path.join(directory, 'image-artifact'));
+    fs.mkdirSync(path.join(directory, 'zeroshot-target'));
+    fs.writeFileSync(
+      path.join(directory, 'helm'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  pull)
+    if [[ -z "$PUBLISHED_CHART" ]]; then
+      printf '%s:%s: not found\\n' "$ZEROSHOT_CHART" "$RELEASE_VERSION" >&2
+      exit 1
+    fi
+    cp "$PUBLISHED_CHART" "$6/zeroshot-target-$RELEASE_VERSION.tgz"
+    ;;
+  push) printf 'helm push %s %s\\n' "$2" "$3" ;;
+  *) exit 2 ;;
+esac
+`,
+      { mode: 0o700 }
+    );
+
+    function archive(relative, contents) {
+      fs.writeFileSync(path.join(directory, 'zeroshot-target', 'Chart.yaml'), contents);
+      const destination = path.join(directory, relative);
+      execFileSync('tar', ['-czf', destination, 'zeroshot-target/Chart.yaml'], {
+        cwd: directory,
+      });
+      return destination;
+    }
+
+    const chart = 'name: zeroshot-target\nversion: 17.1.1\n';
+    archive(`image-artifact/${filename}`, chart);
+    const cases = [
+      { name: 'missing version', published: '', status: 0, message: /helm push image-artifact\// },
+      {
+        name: 'matching version',
+        published: archive('matching.tgz', chart),
+        status: 0,
+        message: /is already published/,
+      },
+      {
+        name: 'conflicting version',
+        published: archive('conflicting.tgz', `${chart}description: different\n`),
+        status: 1,
+        message: /differs from the exact release input/,
+      },
+    ];
+
+    for (const expected of cases) {
+      await t.test(expected.name, () => {
+        const result = spawnSync('bash', ['-c', step.run], {
+          cwd: directory,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${directory}${path.delimiter}${process.env.PATH}`,
+            RUNNER_TEMP: directory,
+            TMPDIR: directory,
+            RELEASE_VERSION: '17.1.1',
+            ZEROSHOT_CHART: release.env.ZEROSHOT_CHART,
+            PUBLISHED_CHART: expected.published,
+          },
+        });
+        assert.equal(result.status, expected.status, result.error?.message ?? result.stderr);
+        assert.match(result.stdout + result.stderr, expected.message);
+        if (expected.published) assert.doesNotMatch(result.stdout, /helm push/);
+      });
+    }
   });
 });
 

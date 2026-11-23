@@ -46,6 +46,7 @@ export type InspectorProps = {
   close: () => void;
   schema: any;
   workers: WorkerOption[];
+  profileNames?: readonly string[];
   replaceBody: (name: string) => void;
   wrapBody: (name: string) => void;
   selectNode: (name: string) => void;
@@ -201,6 +202,21 @@ export function Inspector(p: InspectorProps) {
                 value={node.maxItems}
                 onChange={(value) => graphChange('maxItems', value)}
               />
+            )}
+            {node.kind === 'profile' && (
+              <Field label="Saved profile">
+                <select
+                  value={node.profile}
+                  onChange={(event) => graphChange('profile', event.target.value)}
+                >
+                  {!p.profileNames?.includes(node.profile) && (
+                    <option value={node.profile}>{node.profile}</option>
+                  )}
+                  {p.profileNames?.map((name) => (
+                    <option key={name}>{name}</option>
+                  ))}
+                </select>
+              </Field>
             )}
             {node.kind === 'fail' && (
               <Field label="Failure reason">

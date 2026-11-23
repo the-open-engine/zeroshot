@@ -17,6 +17,7 @@ struct ExternalStorage {
     history: Vec<crate::full_v1_reducer::DurableExecution>,
     reject: bool,
     comment_publications: Option<Arc<dyn CommentPublicationStore>>,
+    checkpoint_policy: Option<bool>,
 }
 
 #[async_trait::async_trait]
@@ -33,6 +34,9 @@ impl HostedWorkspaceStorage for ExternalStorage {
         &self,
         request: HostedWorkspaceRequest<'_>,
     ) -> Result<HostedWorkspace, CheckpointError> {
+        if let Some(expected) = self.checkpoint_policy {
+            assert_eq!(request.workspace_checkpoints, expected);
+        }
         assert!(
             request.workspace.join(".git/HEAD").is_file(),
             "source must already be installed"
@@ -48,25 +52,65 @@ impl HostedWorkspaceStorage for ExternalStorage {
             resumed_from: self.resumed_from.clone(),
             vector_seed: self.vectors.clone(),
             comment_publications: self.comment_publications.clone(),
-            checkpoints: Arc::new(ResticCheckpointStore::with_program(
-                ResticCheckpointStoreTestConfig {
-                    directory: request.checkpoint_directory.to_owned(),
-                    repository: request.checkpoint_directory.join("repository"),
-                    workspace: request.workspace.to_owned(),
-                    writers: request.writers,
-                    program: crate::native_v2_supervisor::checkpoints::restic::ResticProgram::fake(
-                        request
-                            .workspace
-                            .parent()
-                            .ok_or_else(|| std::io::Error::other("workspace has no parent"))?,
-                    )?,
-                },
-            )),
+            checkpoints: if request.workspace_checkpoints {
+                Arc::new(ResticCheckpointStore::with_program(
+                    ResticCheckpointStoreTestConfig {
+                        directory: request.checkpoint_directory.to_owned(),
+                        repository: request.checkpoint_directory.join("repository"),
+                        workspace: request.workspace.to_owned(),
+                        writers: request.writers,
+                        program:
+                            crate::native_v2_supervisor::checkpoints::restic::ResticProgram::fake(
+                                request.workspace.parent().ok_or_else(|| {
+                                    std::io::Error::other("workspace has no parent")
+                                })?,
+                            )?,
+                    },
+                ))
+            } else {
+                Arc::new(
+                    crate::native_v2_supervisor::checkpoints::DeliveryCheckpointStore::new(
+                        request.checkpoint_directory.join("receipts"),
+                    ),
+                )
+            },
             execution_seed: self.history.clone(),
             request_continuation: self.request.clone(),
             // Recovery keeps the historical identity even after the product rename.
             delivery_run_id: Some(RunId::new("original-cloud-delivery")),
         })
+    }
+}
+
+// Capsule allocation transfers hosted workspace ownership through the Linux boundary.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn external_checkpoint_opt_out_preserves_metadata_without_creating_snapshots() {
+    use crate::native_v2_runner::test_support::delivery_checkpoint;
+    for enabled in [false, true] {
+        let mut fixture = CheckoutFixture::with_workspace_storage(
+            "",
+            Some(Arc::new(ExternalStorage {
+                checkpoint_policy: Some(enabled),
+                ..Default::default()
+            })),
+        )
+        .await;
+        fixture.admitted.runtime.workspace_checkpoints = enabled;
+        let capsule = fixture.allocate().await.assert_value();
+        let store = capsule.checkpoints.as_ref().assert_value();
+        let receipt = delivery_checkpoint(json!({"published":"retained"}), 1);
+        store.retain_delivery_state(&receipt).await.assert_value();
+        capture_checkpoint(&capsule).await;
+        finish_checkpoints(&capsule).await;
+        assert_eq!(store.delivery_state().await.assert_value(), Some(receipt));
+        let checkpoints = fixture.checkpoints(&fixture.run_id).await;
+        assert_eq!(checkpoints.checkpoints.is_empty(), !enabled);
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+            .await
+            .assert_value();
     }
 }
 

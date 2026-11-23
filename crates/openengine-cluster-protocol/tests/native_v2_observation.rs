@@ -4,6 +4,15 @@ mod assert_value;
 #[path = "support/json_read.rs"]
 mod json_read;
 
+#[path = "native_v2_observation/wire_contract.rs"]
+mod wire_contract;
+
+#[path = "native_v2_observation/checkpoint_opt_out.rs"]
+mod checkpoint_opt_out;
+
+#[path = "native_v2_observation/profile_imports.rs"]
+mod profile_imports;
+
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
     ActiveExecution, Cursor, ExecutionRef, NodeName, RunAttachEventNotification, RunAttachParams,

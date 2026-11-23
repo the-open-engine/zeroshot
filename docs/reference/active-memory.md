@@ -131,8 +131,7 @@ Repository cards arrive at a matching tool call through the harness's own mechan
   the tool calls of one model response, including in contained mode where automatic project
   extensions remain disabled.
 - OpenCode uses a product-owned plugin that stores cards as a session message.
-
-Cards are never placed inside a tool result, which a model may refuse to follow.
+- Hermes appends a retained plugin notice to the tool message while preserving the raw tool result.
 
 Context guides subsequent model decisions. It cannot revise a tool call already issued, so reads
 and searches provide the most useful early triggers. Managed policy or disabled native hooks can
@@ -252,9 +251,6 @@ accepted run's tenant, repository and graph scope independently of request field
 the same interface for local and direct-target runs. Hosts must return complete bounded snapshots;
 failed or partial reads must never masquerade as an empty lesson set.
 
-The native tool-call carrier is installed for every agent conversation, including when Active
-Memory is off, so it can deliver standing [steers](../guides/observe-and-control.md#steer-a-run).
-Memory off still leaves its database unopened. Steers come from the run vector record. At a tool
-call they travel as a user message where the harness has a channel for one, and ahead of the
-memory cards in hook context on Codex. They are delivered whole and do not count against
-`nodeInjectionTokens` or `hookInjectionTokens`; memory card selection keeps its own limits.
+The native tool-call carrier also delivers [steers](../guides/observe-and-control.md#steer-a-run)
+with Active Memory off. When they share hook context on Codex or Hermes, steers arrive whole ahead
+of memory cards and have their own limits.

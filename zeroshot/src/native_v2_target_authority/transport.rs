@@ -516,6 +516,9 @@ impl NativeV2TargetServer {
         if self.workspace_checkpoints() {
             document = document.with_workspace_checkpoints();
         }
+        if self.target.supports_workspace_checkpoint_opt_out() {
+            document = document.with_workspace_checkpoint_opt_out();
+        }
         #[cfg(feature = "ui")]
         if let Some(capability) = self
             .ui

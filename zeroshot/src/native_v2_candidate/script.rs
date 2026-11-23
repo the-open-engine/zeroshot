@@ -1,4 +1,4 @@
-//! Local deterministic steps with JSON stdin/stdout and shared process containment.
+//! Local deterministic steps and verifiers with JSON I/O and shared process containment.
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,13 +16,12 @@ use crate::execution::process::{
 };
 use crate::native_v2_capsule::provider_process::{
     LocalHarnessEnvironment, apply_execution_environment, current_process_environment,
-    safe_provider_text, send_process_input,
+    redaction_values, report_verifier_result, safe_provider_text, send_process_input,
 };
 use crate::native_v2_contract::{NodeCompletion, NodeInvocation, NodeRuntimeBinding, TokenUsageDelta};
 use crate::native_v2_runner::{
-    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver,
-    NodeResponseContract, NodeRunnerError, NodeSession, ResolvedEnvironment, SessionFactory,
-    bounded_log_text,
+    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver, NodeRunnerError,
+    NodeSession, ResolvedEnvironment, SessionFactory, bounded_log_text,
 };
 use crate::v2_run_ledger::{RunEvent, validate_event};
 
@@ -83,9 +82,6 @@ impl ScriptAdapter {
         let NodeRuntimeBinding::Script { command, .. } = &invocation.node.binding else {
             return Err(NodeRunnerError::InvalidRole);
         };
-        if !matches!(invocation.response, NodeResponseContract::Worker { .. }) {
-            return Err(NodeRunnerError::InvalidRole);
-        }
         let mut environment = self.environment.clone();
         environment.extend(
             invocation
@@ -291,7 +287,11 @@ async fn read_stdout(
 fn redact(text: &str, environment: &ResolvedEnvironment) -> String {
     let redactions = environment
         .iter()
-        .map(|(_, value)| value.to_owned())
+        .flat_map(|(_, value)| {
+            // Serde's rejected string values use Rust debug escaping in schema diagnostics.
+            let quoted = format!("{value:?}");
+            [value.to_owned(), quoted[1..quoted.len() - 1].to_owned()]
+        })
         .collect::<Vec<_>>();
     safe_provider_text(text, &redactions)
 }
@@ -348,13 +348,18 @@ impl NodeDriver for ScriptAdapter {
             .await?;
         let timer = super::timing::ExecutionTiming::start()?;
         let outcome = self.execute(&invocation, &control).await;
+        if let Ok(outcome) = &outcome {
+            let redactions =
+                redaction_values(invocation.environment.iter().map(|(_, value)| value));
+            report_verifier_result(outcome, &redactions, &control).await?;
+        }
         super::timing::publish(
             &control,
             timer.finish(
                 "script_timing",
                 outcome
                     .as_ref()
-                    .is_ok_and(|outcome| matches!(outcome, WorkerOutcome::Verified { .. })),
+                    .is_ok_and(|outcome| outcome.error_code().is_none()),
             ),
         )
         .await?;

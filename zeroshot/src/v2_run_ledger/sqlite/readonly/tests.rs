@@ -5,6 +5,39 @@ use crate::v2_run_ledger::sqlite_crash;
 #[path = "timing_tests.rs"]
 mod timing;
 
+#[test]
+fn image_failures_retain_the_image_volume_measurement_after_cleanup() {
+    for fail_open in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let image = directory.path().join("private-image.sqlite3");
+        if fail_open {
+            std::fs::create_dir(&image).unwrap();
+        } else {
+            std::fs::write(&image, b"private invalid SQLite payload").unwrap();
+        }
+        let error = open_image(&image).expect_err("injected image failure");
+        let RunLedgerError::SqliteStorage(failure) = &error else {
+            panic!("expected SQLite error");
+        };
+        assert_eq!(
+            failure.code.code,
+            if fail_open {
+                ffi::ErrorCode::CannotOpen
+            } else {
+                ffi::ErrorCode::NotADatabase
+            }
+        );
+        let bytes = failure.available_bytes.unwrap();
+        assert!(bytes > 0);
+        drop(directory);
+        assert!(!image.exists());
+        let message = error.to_string();
+        assert!(message.contains(&format!("Available space on the storage volume: {bytes} B")));
+        assert!(!message.contains("private"));
+        assert!(!message.contains("payload"));
+    }
+}
+
 fn seed(path: &Path) {
     let connection = Connection::open(path).unwrap();
     connection
@@ -193,6 +226,7 @@ fn steer_queries_supply_nullable_recorded_time_for_the_shared_replay_decoder() {
     let event = vector_event(
         &run,
         RunVectorContent::Steer {
+            node: None,
             mode: Default::default(),
             network: None,
             text: "keep going".into(),

@@ -40,6 +40,7 @@ pub(super) fn collect_optional_promotions(
         GraphNode::Map(group) => Some((&group.state, &group.promoted_state_paths)),
         GraphNode::Step(_)
         | GraphNode::Verifier(_)
+        | GraphNode::Profile(_)
         | GraphNode::Succeed(_)
         | GraphNode::Fail(_) => None,
     };
@@ -196,6 +197,40 @@ pub(super) fn validate_instance_lineage(
         return Err(ReducerError::InconsistentHistory);
     }
     Ok(())
+}
+
+pub(super) fn project_payload(
+    schema: &openengine_cluster_protocol::PayloadType,
+    value: &Value,
+) -> Result<Value, ReducerError> {
+    use openengine_cluster_protocol::PayloadType;
+
+    match schema {
+        PayloadType::Null => Ok(Value::Null),
+        PayloadType::Record { fields } => {
+            let object = value.as_object().ok_or(ReducerError::InvalidDurableValue)?;
+            let mut projected = Map::new();
+            for (name, field) in fields {
+                if let Some(value) = object.get(name.as_str()) {
+                    projected.insert(
+                        name.as_str().to_owned(),
+                        project_payload(&field.value_type, value)?,
+                    );
+                } else if field.required {
+                    return Err(ReducerError::MissingSelectedValue);
+                }
+            }
+            Ok(Value::Object(projected))
+        }
+        PayloadType::Array { items } => value
+            .as_array()
+            .ok_or(ReducerError::InvalidDurableValue)?
+            .iter()
+            .map(|value| project_payload(items, value))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        _ => Ok(value.clone()),
+    }
 }
 
 pub(super) fn bind_payload(

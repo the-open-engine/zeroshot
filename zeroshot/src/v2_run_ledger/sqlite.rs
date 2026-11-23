@@ -1,6 +1,6 @@
 //! Minimal local durable adapter for the native-v2 run ledger port.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -61,6 +61,7 @@ mod steering;
 // and must be removed only after SQLite has closed its handles (including on Windows).
 struct LedgerConnection {
     connection: Connection,
+    path: Option<PathBuf>,
     _snapshot: Option<tempfile::TempDir>,
 }
 
@@ -75,14 +76,26 @@ pub struct SqliteRunLedger {
 
 impl SqliteRunLedger {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, RunLedgerError> {
-        let connection = Connection::open(path).map_err(sqlite_error)?;
-        Self::from_connection(connection)
+        let path = path.as_ref();
+        let connection = Connection::open(path).map_err(|error| {
+            storage_context(sqlite_error(error), None, || available_space(Some(path)))
+        })?;
+        let path = match connection.path() {
+            Some("") => None,
+            Some(path) => Some(PathBuf::from(path)),
+            None => std::path::absolute(path).ok(),
+        };
+        Self::from_connection(connection, path)
     }
 
     /// Opens retained history without creating a database, changing schema, or admitting writes.
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, RunLedgerError> {
         let connection = readonly::open(path.as_ref())?;
-        let recorded_at = has_recorded_at_column(&connection.connection)?;
+        let recorded_at = has_recorded_at_column(&connection.connection).map_err(|error| {
+            storage_context(error, Some(&connection.connection), || {
+                available_space(connection.path.as_deref())
+            })
+        })?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             clock: system_clock(),
@@ -92,15 +105,26 @@ impl SqliteRunLedger {
 
     pub fn open_in_memory() -> Result<Self, RunLedgerError> {
         let connection = Connection::open_in_memory().map_err(sqlite_error)?;
-        Self::from_connection(connection)
+        Self::from_connection(connection, None)
     }
 
-    fn from_connection(mut connection: Connection) -> Result<Self, RunLedgerError> {
-        connection.execute_batch(SCHEMA).map_err(sqlite_error)?;
-        add_recorded_at_column(&mut connection)?;
+    fn from_connection(
+        mut connection: Connection,
+        path: Option<PathBuf>,
+    ) -> Result<Self, RunLedgerError> {
+        let initialized = (|| {
+            connection.execute_batch(SCHEMA).map_err(sqlite_error)?;
+            add_recorded_at_column(&mut connection)
+        })();
+        initialized.map_err(|error| {
+            storage_context(error, Some(&connection), || {
+                available_space(path.as_deref())
+            })
+        })?;
         Ok(Self {
             connection: Arc::new(Mutex::new(LedgerConnection {
                 connection,
+                path,
                 _snapshot: None,
             })),
             clock: system_clock(),
@@ -152,9 +176,15 @@ impl SqliteRunLedger {
         // Wait asynchronously before reserving a blocking thread. The closure owns the guard,
         // so cancelling its caller cannot admit another operation before this one finishes.
         let mut connection = self.connection.clone().lock_owned().await;
-        tokio::task::spawn_blocking(move || operation(&mut connection.connection))
-            .await
-            .map_err(|_| RunLedgerError::Storage)?
+        tokio::task::spawn_blocking(move || {
+            operation(&mut connection.connection).map_err(|error| {
+                storage_context(error, Some(&connection.connection), || {
+                    available_space(connection.path.as_deref())
+                })
+            })
+        })
+        .await
+        .map_err(|_| RunLedgerError::Storage)?
     }
 
     async fn with_transaction<T, F>(&self, operation: F) -> Result<T, RunLedgerError>
@@ -166,7 +196,9 @@ impl SqliteRunLedger {
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(sqlite_error)?;
-            let result = operation(&transaction)?;
+            // Preserve the native cause before rollback can replace SQLite's error state.
+            let result =
+                operation(&transaction).map_err(|error| system_error(error, &transaction))?;
             transaction.commit().map_err(sqlite_error)?;
             Ok(result)
         })
@@ -430,10 +462,11 @@ fn add_recorded_at_column(connection: &mut Connection) -> Result<(), RunLedgerEr
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sqlite_error)?;
-    if !has_recorded_at_column(&transaction)? {
+    // Rollback changes SQLite's current error state; retain native evidence first.
+    if !has_recorded_at_column(&transaction).map_err(|error| system_error(error, &transaction))? {
         transaction
             .execute_batch("ALTER TABLE v2_run_events ADD COLUMN recorded_at_ms INTEGER")
-            .map_err(sqlite_error)?;
+            .map_err(|error| system_error(sqlite_error(error), &transaction))?;
     }
     transaction.commit().map_err(sqlite_error)
 }
@@ -734,9 +767,61 @@ fn validate_stored_size(stored: &StoredRun) -> Result<(), RunLedgerError> {
 
 fn sqlite_error(error: rusqlite::Error) -> RunLedgerError {
     match error {
-        rusqlite::Error::SqliteFailure(code, _) => RunLedgerError::SqliteStorage(code),
+        rusqlite::Error::SqliteFailure(code, _) => RunLedgerError::SqliteStorage(code.into()),
         _ => RunLedgerError::Storage,
     }
+}
+
+fn system_error(mut error: RunLedgerError, connection: &Connection) -> RunLedgerError {
+    if let RunLedgerError::SqliteStorage(failure) = &mut error
+        && failure.system_error.is_none()
+        // NOMEM leaves the previous native error intact; Windows detects ISDIR through
+        // successful file attributes, so neither establishes a new failed OS operation.
+        && !matches!(failure.code.extended_code,
+            rusqlite::ffi::SQLITE_IOERR_NOMEM | rusqlite::ffi::SQLITE_CANTOPEN_ISDIR)
+        && matches!(
+            failure.code.code,
+            rusqlite::ffi::ErrorCode::CannotOpen | rusqlite::ffi::ErrorCode::SystemIoFailure
+        )
+    {
+        // SAFETY: the caller exclusively owns this live connection. Read only SQLite's
+        // machine error state; never its potentially caller-controlled error message.
+        unsafe {
+            if rusqlite::ffi::sqlite3_extended_errcode(connection.handle())
+                == failure.code.extended_code
+            {
+                let code = rusqlite::ffi::sqlite3_system_errno(connection.handle());
+                failure.system_error = (code != 0).then_some(code);
+            }
+        }
+    }
+    error
+}
+
+fn storage_context(
+    error: RunLedgerError,
+    connection: Option<&Connection>,
+    measure_space: impl FnOnce() -> Option<u64>,
+) -> RunLedgerError {
+    let mut error = match connection {
+        Some(connection) => system_error(error, connection),
+        None => error,
+    };
+    if let RunLedgerError::SqliteStorage(failure) = &mut error {
+        failure.available_bytes = measure_space();
+    }
+    error
+}
+
+fn available_space(path: Option<&Path>) -> Option<u64> {
+    let path = std::path::absolute(path?).ok()?;
+    // A failed open may not have created the database. Use its immediate parent,
+    // never an ancestor on a potentially different volume.
+    let volume = match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.parent()?,
+        _ => &path,
+    };
+    fs2::available_space(volume).ok()
 }
 
 #[cfg(test)]

@@ -20,6 +20,8 @@ impl NativeV2PlatformController {
                 self.delivery_policy,
             );
             admission.checkpointless_requests = self.checkpointless_requests;
+            admission.hosted_workspace_checkpoint_opt_out =
+                self.hosted_workspace_checkpoint_opt_out;
             if let Some(catalog) = self.run_sizes.as_deref() {
                 admission = admission.with_run_sizes(catalog);
             }

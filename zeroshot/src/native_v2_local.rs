@@ -94,10 +94,10 @@ pub enum LocalCompositionError {
     ResolvedSource,
     #[error("local run identity could not be assigned")]
     RunIdentity,
-    #[error(
-        "setup, startup and context repositories require a Docker target; local runs use the invoking machine environment"
-    )]
-    PreparationRequiresTarget,
+    #[error("context repositories require a Docker target")]
+    ContextRequiresTarget,
+    #[error("local environment scripts require Linux or macOS with Bash")]
+    EnvironmentScriptsUnavailable,
     #[error(transparent)]
     SourceDelivery(#[from] crate::native_v2_admission::NativeV2AdmissionError),
     #[error(transparent)]
@@ -273,13 +273,17 @@ pub(crate) fn local_submission(
 pub(crate) fn validate_local_environment(
     environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<(), LocalCompositionError> {
-    if environment.is_some_and(|environment| {
-        !environment.context_repositories.is_empty()
-            || environment.setup.is_some()
-            || environment.startup.is_some()
-            || !environment.connections.is_empty()
-    }) {
-        return Err(LocalCompositionError::PreparationRequiresTarget);
+    if let Some(environment) = environment {
+        if !environment.context_repositories.is_empty() {
+            return Err(LocalCompositionError::ContextRequiresTarget);
+        }
+        if !cfg!(any(target_os = "linux", target_os = "macos"))
+            && (environment.setup.is_some()
+                || environment.startup.is_some()
+                || environment.teardown.is_some())
+        {
+            return Err(LocalCompositionError::EnvironmentScriptsUnavailable);
+        }
     }
     Ok(())
 }

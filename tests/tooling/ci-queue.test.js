@@ -220,3 +220,22 @@ it('preserves Windows prebuild compiler settings without persisting registry cre
   assert.match(host, /Environment = \$environment/);
   assert.match(host, /\$context\.Environment\.GetEnumerator\(\)/);
 });
+
+it('requires the contained Windows Job regressions in the compiled portable test inventory', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts/test-windows.ps1'), 'utf8');
+  for (const test of [
+    'contained_caller_job_lifetimes_and_force_stop',
+    'contained_nested_job_checkpoint_recovery_has_one_successor',
+    'contained_incompatible_job_refuses_before_worker_execution',
+  ]) {
+    assert.ok(script.includes(`windows_contained::${test}`), test);
+    const source = fs.readFileSync(
+      path.join(root, 'zeroshot/tests/native_v2_cli_portable/windows_contained.rs'),
+      'utf8'
+    );
+    assert.ok(source.includes(`fn ${test}()`), `missing regression ${test}`);
+  }
+  assert.match(script, /\$inventory = @\(& \$portable\[0\]\.executable --list\)/);
+  assert.match(script, /\$inventory -notcontains "\$\{required\}: test"/);
+  assert.ok(script.indexOf('$containedTests =') < script.indexOf('if ($BuildOnly)'));
+});

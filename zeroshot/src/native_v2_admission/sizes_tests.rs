@@ -32,15 +32,40 @@ fn omitted_size_uses_the_target_default_and_arbitrary_offered_ids_are_preserved(
 fn unsupported_sizes_and_empty_catalogs_are_target_admission_errors() {
     let mut plan = runtime();
     plan.size = Some(RunSize::new("not-offered").assert_value());
-    assert!(
+    assert_eq!(
         resolve_runtime_size(&mut plan, &catalog("custom-big-box"))
             .assert_error()
-            .to_string()
-            .contains("does not offer run size not-offered")
+            .to_string(),
+        "invalid runtime: this target does not offer run size not-offered; supported sizes: custom-big-box"
     );
     assert_eq!(plan.size().map(RunSize::as_str), Some("not-offered"));
     let mut omitted = runtime();
     let empty = TargetRunSizesDiscovery::new(None, Vec::new()).assert_value();
     assert!(resolve_runtime_size(&mut omitted, &empty).is_err());
     assert!(omitted.size().is_none());
+    assert!(
+        resolve_runtime_size(&mut plan, &empty)
+            .assert_error()
+            .to_string()
+            .contains("supported sizes: none")
+    );
+}
+
+#[test]
+fn unavailable_size_lists_every_offered_identifier_without_changing_the_runtime() {
+    let mut sizes = catalog("custom-big-box");
+    sizes.sizes.push(
+        RunSizeDescriptor::new(RunSize::new("host").assert_value(), "Current machine")
+            .assert_value(),
+    );
+    let mut plan = runtime();
+    plan.size = Some(RunSize::new("medium").assert_value());
+    let original = plan.clone();
+    let error = resolve_runtime_size(&mut plan, &sizes).assert_error();
+    assert!(
+        error
+            .to_string()
+            .contains("supported sizes: custom-big-box, host")
+    );
+    assert_eq!(plan, original);
 }

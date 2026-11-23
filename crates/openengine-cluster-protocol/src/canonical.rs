@@ -208,6 +208,11 @@ fn collect_node_fingerprints(
         }
         GraphNode::Loop(node) => collect_node_fingerprints(&node.body, nodes)?,
         GraphNode::Map(node) => collect_node_fingerprints(&node.body, nodes)?,
+        GraphNode::Profile(node) => {
+            if let Some(body) = &node.body {
+                collect_node_fingerprints(body, nodes)?;
+            }
+        }
         GraphNode::Step(_)
         | GraphNode::Verifier(_)
         | GraphNode::Succeed(_)
@@ -380,6 +385,10 @@ fn normalize_node(node: &mut GraphNode) -> Result<(), CanonicalError> {
         GraphNode::Par(node) => normalize_parallel(node),
         GraphNode::Loop(node) => normalize_loop(node),
         GraphNode::Map(node) => normalize_map(node),
+        GraphNode::Profile(node) => match &mut node.body {
+            Some(body) => normalize_node(body),
+            None => Ok(()),
+        },
         GraphNode::Succeed(node) => sort_by_canonical_json(&mut node.bindings),
         GraphNode::Fail(_) => Ok(()),
     }

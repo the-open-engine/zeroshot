@@ -2,11 +2,52 @@ use super::*;
 use crate::native_v2_cli::RunSelector;
 use crate::native_v2_contract::RuntimePlan;
 use std::collections::BTreeMap;
+use std::process::Stdio;
 use crate::native_v2_supervisor::checkpoints::{
     CheckpointRestore, CheckpointRestoreSelection, remove_restore_stage,
 };
 use crate::v2_run_ledger::RunLedgerError;
 use openengine_cluster_protocol::{NOT_FOUND, RunResumeFrom};
+
+impl LocalCliBackend {
+    pub(super) fn spawn_controller(&self, bootstrap: &Path) -> Result<Child, NativeV2CliError> {
+        let mut command = Command::new(&self.executable);
+        command
+            .arg(LOCAL_CONTROLLER_MODE)
+            .arg("--bootstrap")
+            .arg(bootstrap)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        // Harness context crosses the private one-shot bootstrap, not this long-lived process
+        // environment. Keep only the platform values needed to re-exec the controller.
+        command.env_clear();
+        copy_minimal_process_environment(&mut command)?;
+        crate::execution::platform::spawn_controller(&mut command, self.controller_mode)
+            .map_err(local_io)
+    }
+
+    pub(super) async fn controller_cleanup_request<T>(
+        &self,
+        run_id: &RunId,
+        operation: &str,
+        request: impl std::future::Future<Output = Result<T, NativeV2CliError>>,
+    ) -> Result<T, NativeV2CliError> {
+        let has_teardown = self.read_recovery_document(run_id).is_ok_and(|recovery| {
+            crate::native_v2_portable_controller::has_local_teardown(
+                recovery.submission.environment.as_ref(),
+            )
+        });
+        let budget = if has_teardown {
+            DEFAULT_READY_TIMEOUT
+                + crate::native_v2_portable_controller::TEARDOWN_TIMEOUT
+                + CONTROLLER_STOP_GRACE
+        } else {
+            DEFAULT_READY_TIMEOUT
+        };
+        request_with_budget(run_id, operation, budget, request).await
+    }
+}
 
 /// Chooses the snapshot a local successor restores, if any. Plain resume keeps the user-owned
 /// checkout as it is. Replacing it needs `--discard-workspace-changes`: to roll back to a selected
@@ -229,6 +270,7 @@ impl LocalCliBackend {
                 &RunSelector {
                     target: None,
                     run_id: params.run_id.clone(),
+                    controller: self.controller_mode,
                 },
                 runtime,
                 params.github_token.is_some(),
@@ -923,7 +965,7 @@ impl NativeV2CliBackend for LocalCliBackend {
             });
         }
         let transport = self.connect_run(&params.run_id, false).await?;
-        controller_request(
+        self.controller_cleanup_request(
             &params.run_id,
             "suspend (it may still take effect; check status)",
             async {

@@ -38,8 +38,9 @@ object declares peer communication permissions; omission or `{}` grants none.
 | `par`      | Declared state, non-empty branches, promoted paths, and a tagged join                                                                                      |
 | `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
 | `map`      | Declared state, body, structured array selector `over`, positive concurrent-item limit `maxItems`, promoted paths                                          |
+| `profile`  | Name of a saved run profile in the caller's catalog to expand at submission                                                                                |
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
-| `fail`     | Finite-enum reason; `unhandled` is reserved for runtime handling of unchecked worker errors                                                                |
+| `fail`     | One reason label. Runtime labels such as `unhandled` are reserved.                                                                                         |
 
 Parallel joins are `all`, `any`, `quorum { count }`, or `first { when }`. The closed worker error
 channel is `timeout`, `crash`, `malformed`, and `refusal`. Choice reachability/exhaustiveness, loop
@@ -144,6 +145,30 @@ and loops retain control of recovery; there is no global abort, cooldown, waitin
 automatic resumption. After usage becomes available,
 [resume the failed run](../../guides/observe-and-control.md#restart-or-resume-a-failed-run) using its
 retained workspace or an available checkpoint.
+
+## Profile imports
+
+Place a node such as `{"kind":"profile","name":"review","profile":"code-review"}` in a local
+profile or inline graph submitted with `zeroshot run`. You can also add the reference in the
+local profile editor. The named profile must already be saved in the local profile store.
+Each submission reads the current definitions of all referenced profiles from one store snapshot.
+The admitted graph and recovery data retain the resolved bodies, so a subsequent edit takes
+effect on the next submission. Imports may nest and may appear inside ordinary groups.
+Admission rejects missing profiles, dependency cycles and expansions that exceed graph bounds.
+All imported profiles must use the parent graph policy. ACP requires profiles without saved-name
+imports. A named hosted target may accept imported **remote saved profiles** when it advertises
+[host-owned saved-profile expansion](../target-runtime.md#saved-profile-imports). Named-target
+inline graphs and local saved profiles with imports remain unsupported.
+
+The imported profile receives its declared input fields from the enclosing state and can
+materialize its usual root defaults. Its own state and graph controls remain scoped to its body.
+It uses the same workspace and run limits as its caller, and its leaves keep their own runtime
+bindings. The run's initial input still supplies input-driven loop limits throughout the expansion.
+
+A `succeed` in the imported body ends that body and then continues in the caller. Existing
+early-exit and cancellation rules apply within the body. Its output payload is the result for
+standalone execution. A `fail` still propagates, and the outer graph authors the run's terminal.
+Resolved graph views include the imported `body` and its `initialInput` schema.
 
 ## Peer networks
 
@@ -393,8 +418,9 @@ material are deliberately unrepresentable.
 
 ## Canonical compiled IR and identity
 
-`CompiledGraphIr` contains the profile, initial input type, policy binding, root, and proven
-structural bounds. Canonical bytes are compact UTF-8 JSON after these transformations:
+`CompiledGraphIr` contains the profile, initial input type, policy binding, root, proven
+structural bounds, and any peer networks. Canonical bytes are compact UTF-8 JSON after these
+transformations:
 
 - object/map keys, record fields, bindings, signal names, enum labels, policy/set-like collections,
   promoted paths, and other semantically unordered collections are sorted; binding and `k_of_n`
@@ -403,14 +429,14 @@ structural bounds. Canonical bytes are compact UTF-8 JSON after these transforma
 - parallel branches are sorted by stable node name;
 - sequence child order, choice branch order, loop/map body structure, and every semantic order are
   preserved;
-- optional/default fields are serialized explicitly;
+- optional/default fields are serialized explicitly, with an empty network map omitted;
 - floats and non-finite values are absent from and rejected by the closed IR algebra.
 
 `GraphIdentity` is lowercase hexadecimal SHA-256 over exactly those canonical bytes. Equivalent IR
 built with different map, set, guard, binding-order, or parallel insertion order has the same
 identity. Changing semantic sequence order, authored instructions, a payload type, bound, worker
-reference, policy reference, binding content or multiplicity, or `k_of_n` selector multiplicity
-changes the identity.
+reference, policy reference, binding content or multiplicity, `k_of_n` selector multiplicity, or
+peer network membership or publishing permissions changes the identity.
 
 ## Generated conformance vectors
 

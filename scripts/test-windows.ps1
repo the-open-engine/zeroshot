@@ -17,6 +17,29 @@ $tests = @($artifacts | Where-Object {
     $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable
 })
 if ($tests.Count -eq 0) { throw 'Cargo produced no workspace test executables' }
+
+# Keep the native Job regressions mandatory, including on the independent execution host.
+# A successful harness exit with a misspelled selector or missing target executes zero tests.
+$containedTests = @(
+    'windows_contained::contained_caller_job_lifetimes_and_force_stop',
+    'windows_contained::contained_nested_job_checkpoint_recovery_has_one_successor',
+    'windows_contained::contained_incompatible_job_refuses_before_worker_execution'
+)
+$portable = @($tests | Where-Object { $_.target.name -eq 'native_v2_cli_portable' })
+if ($portable.Count -ne 1) { throw 'Missing Windows portable CLI test executable' }
+$inventory = @(& $portable[0].executable --list)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot list Windows portable CLI tests' }
+foreach ($required in $containedTests) {
+    if ($inventory -notcontains "${required}: test") { throw "Missing Windows regression: $required" }
+}
+
+# The observation suite invokes isolated wire-contract controls. Compile their leaf tests here
+# as well, before CI starts the bounded native execution host (including the non-UI profile).
+$wireTarget = if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR 'wire-contract' } else { Join-Path 'target' 'wire-contract' }
+cargo test --locked --package zeroshot --lib --bin zeroshot --target-dir (Join-Path $wireTarget 'current') --jobs 1 --no-run
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+cargo test --locked --manifest-path crates/openengine-cluster-testkit/tests/released-wire-contract/Cargo.toml --target-dir (Join-Path $wireTarget 'released') --jobs 1 --no-run
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($BuildOnly) { exit 0 }
 
 $failed = $false

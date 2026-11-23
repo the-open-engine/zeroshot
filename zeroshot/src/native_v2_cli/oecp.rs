@@ -262,6 +262,10 @@ where
             .await
     }
 
+    async fn validate_profile_imports(&self, target: &str) -> Result<(), NativeV2CliError> {
+        self.connector.validate_profile_imports(target).await
+    }
+
     async fn profile_show(
         &self,
         target: Option<&str>,

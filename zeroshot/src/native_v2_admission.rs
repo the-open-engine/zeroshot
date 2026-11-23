@@ -30,6 +30,8 @@ use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
 
 pub(crate) const MAX_AGENT_VERIFIER_ATTEMPTS: u64 = 2;
 
+pub mod profile_expansion;
+
 mod sizes;
 pub use sizes::resolve_runtime_size;
 
@@ -146,6 +148,9 @@ pub struct NativeV2AdmissionContext<'a> {
     pub run_sizes: Option<&'a openengine_cluster_protocol::TargetRunSizesDiscovery>,
     /// Host-owned continuation history permits requests after workspace snapshots are disabled.
     pub checkpointless_requests: bool,
+    /// None preserves local policy. Hosted admission requires explicit opt-out support and
+    /// refuses checkpoint-dependent graph paths even when the host supports opt-out.
+    pub hosted_workspace_checkpoint_opt_out: Option<bool>,
 }
 
 impl<'a> NativeV2AdmissionContext<'a> {
@@ -160,6 +165,7 @@ impl<'a> NativeV2AdmissionContext<'a> {
             delivery_policy,
             run_sizes: None,
             checkpointless_requests: false,
+            hosted_workspace_checkpoint_opt_out: None,
         }
     }
 
@@ -494,6 +500,17 @@ fn prepare_submission(
         environment,
         declarations,
     })
+}
+
+pub(crate) fn validate_target_environment(
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
+) -> Result<(), NativeV2AdmissionError> {
+    if environment.is_some_and(|environment| environment.teardown.is_some()) {
+        return Err(NativeV2AdmissionError::InvalidEnvironment(
+            "environment teardown is only supported for local runs".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_run_environment(

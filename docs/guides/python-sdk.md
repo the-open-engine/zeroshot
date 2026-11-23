@@ -17,6 +17,14 @@ python -m pip install the-open-engine-zeroshot
 ```
 
 Supported platforms are Linux x64/ARM64, macOS Intel/Apple silicon, and Windows x64.
+
+Local Windows callers inside non-breakaway Jobs can use `LocalTarget(controller="contained")`.
+The default is `"detached"`. This launch policy also applies to resume and answer; it does not change
+Linux/macOS launches or named targets. Caller Job policy governs abrupt host closure, so contained
+mode promises neither caller-exit termination nor survival.
+Closing an observing SDK/CLI process alone does not establish controller loss. Use
+`Run.force_stop()` for explicit descendant cleanup; see [local control](observe-and-control.md).
+
 Import the package as `zeroshot`:
 
 ```python
@@ -131,7 +139,7 @@ async def observe(runtime: UniformRuntime) -> None:
 ```
 
 A `RunWaitTimeout` carries the still-active run handle, and cancelling the Python task detaches in
-the same way. Neither action stops native work; only `await run.force_stop()` changes run lifetime.
+the same way. The run continues in both cases.
 
 `status.active_executions` entries expose optional `started_at` ledger recording times. Statuses
 yielded by `run.watch()` also expose optional `recorded_at` for the event producing that notification.
@@ -298,8 +306,8 @@ continuing a suspended run. Use `await run.steer(text, mode="once")` to deliver 
 `mode="standing"` delivers per provider conversation and remains the default. `RunStatus.steers` from
 `Run.status()` exposes excerpts, message modes, optional network origin metadata and recorded
 receiving executions; statuses streamed by `Run.watch()` omit them. `omitted_steers` reports the
-bounded listing's omissions. Each agent conversation receives a steer at its next tool call or
-prompt, within the [Claude Code limits](observe-and-control.md#steer-a-run).
+bounded listing's omissions. Delivery occurs at the next eligible tool callback or prompt, using
+the [same rules as CLI steering](observe-and-control.md#steer-a-run).
 `await run.vector(steer.id)` reads its full text, and
 `await run.vectors()` includes `steer` and `steer_receipt` entries. Direction is limited to 262,144
 UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error types report refusals.

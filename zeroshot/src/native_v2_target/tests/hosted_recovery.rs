@@ -183,6 +183,7 @@ async fn resume_runtime_refuses_an_older_target_before_credentials_or_resume() {
     let error = backend
         .validate_resume_runtime(
             &zeroshot_engine::native_v2_cli::RunSelector {
+                controller: Default::default(),
                 target: Some("prod".to_owned()),
                 run_id: RunId::new("prior"),
             },
