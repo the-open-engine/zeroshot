@@ -5467,7 +5467,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <h3 id="zeroshot-resume"><code>zeroshot resume</code><a class="headerlink" href="#zeroshot-resume" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-66-1" name="__codelineno-66-1" href="#__codelineno-66-1"></a>Start a successor from a failed or suspended run's retained workspace.
 <a id="__codelineno-66-2" name="__codelineno-66-2" href="#__codelineno-66-2"></a>
-<a id="__codelineno-66-3" name="__codelineno-66-3" href="#__codelineno-66-3"></a>A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts where it started, on its retained workspace: a submitted run at the root of its graph, a successor at the boundary it began at, so an answered request stays answered. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves its original connection requirements again; make those credentials available.
+<a id="__codelineno-66-3" name="__codelineno-66-3" href="#__codelineno-66-3"></a>A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run restarts where it started, on its retained workspace: a submitted run at the root of its graph, a successor at the boundary it began at, so an answered request stays answered. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a local run this replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves credentials again for its effective runtime and saved environment; make those credentials available.
 <a id="__codelineno-66-4" name="__codelineno-66-4" href="#__codelineno-66-4"></a>
 <a id="__codelineno-66-5" name="__codelineno-66-5" href="#__codelineno-66-5"></a>Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarting a successor restores the conversations it started with; restarting a submitted run, and execution-scoped agents, start new ones. Token usage starts at zero. Services and Docker state are not restored.
 <a id="__codelineno-66-6" name="__codelineno-66-6" href="#__codelineno-66-6"></a>
@@ -5478,29 +5478,35 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-66-11" name="__codelineno-66-11" href="#__codelineno-66-11"></a>          Public run ID
 <a id="__codelineno-66-12" name="__codelineno-66-12" href="#__codelineno-66-12"></a>
 <a id="__codelineno-66-13" name="__codelineno-66-13" href="#__codelineno-66-13"></a>Options:
-<a id="__codelineno-66-14" name="__codelineno-66-14" href="#__codelineno-66-14"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-66-15" name="__codelineno-66-15" href="#__codelineno-66-15"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-66-14" name="__codelineno-66-14" href="#__codelineno-66-14"></a>      --runtime-config &lt;FILE&gt;
+<a id="__codelineno-66-15" name="__codelineno-66-15" href="#__codelineno-66-15"></a>          Replace the saved runtime with this exact runtime plan
 <a id="__codelineno-66-16" name="__codelineno-66-16" href="#__codelineno-66-16"></a>
-<a id="__codelineno-66-17" name="__codelineno-66-17" href="#__codelineno-66-17"></a>      --controller &lt;MODE&gt;
-<a id="__codelineno-66-18" name="__codelineno-66-18" href="#__codelineno-66-18"></a>          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+<a id="__codelineno-66-17" name="__codelineno-66-17" href="#__codelineno-66-17"></a>      --uniform-runtime-config &lt;FILE&gt;
+<a id="__codelineno-66-18" name="__codelineno-66-18" href="#__codelineno-66-18"></a>          Apply this runtime configuration to the unchanged graph
 <a id="__codelineno-66-19" name="__codelineno-66-19" href="#__codelineno-66-19"></a>
-<a id="__codelineno-66-20" name="__codelineno-66-20" href="#__codelineno-66-20"></a>          [possible values: detached, contained]
-<a id="__codelineno-66-21" name="__codelineno-66-21" href="#__codelineno-66-21"></a>
-<a id="__codelineno-66-22" name="__codelineno-66-22" href="#__codelineno-66-22"></a>      --from-checkpoint &lt;ID&gt;
-<a id="__codelineno-66-23" name="__codelineno-66-23" href="#__codelineno-66-23"></a>          Restore this checkpoint and continue from its saved graph boundary
-<a id="__codelineno-66-24" name="__codelineno-66-24" href="#__codelineno-66-24"></a>
-<a id="__codelineno-66-25" name="__codelineno-66-25" href="#__codelineno-66-25"></a>      --discard-workspace-changes
-<a id="__codelineno-66-26" name="__codelineno-66-26" href="#__codelineno-66-26"></a>          Allow a local checkpoint restore to replace the current checkout.
+<a id="__codelineno-66-20" name="__codelineno-66-20" href="#__codelineno-66-20"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-66-21" name="__codelineno-66-21" href="#__codelineno-66-21"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-66-22" name="__codelineno-66-22" href="#__codelineno-66-22"></a>
+<a id="__codelineno-66-23" name="__codelineno-66-23" href="#__codelineno-66-23"></a>      --controller &lt;MODE&gt;
+<a id="__codelineno-66-24" name="__codelineno-66-24" href="#__codelineno-66-24"></a>          Local controller launch policy (default: detached). On Windows, contained keeps caller Job policy; host closure promises neither termination nor survival. Use force-stop for explicit cleanup. Linux/macOS retain their usual launch behavior. Independent of --detach observation
+<a id="__codelineno-66-25" name="__codelineno-66-25" href="#__codelineno-66-25"></a>
+<a id="__codelineno-66-26" name="__codelineno-66-26" href="#__codelineno-66-26"></a>          [possible values: detached, contained]
 <a id="__codelineno-66-27" name="__codelineno-66-27" href="#__codelineno-66-27"></a>
-<a id="__codelineno-66-28" name="__codelineno-66-28" href="#__codelineno-66-28"></a>          The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Attached HEAD, branch tips, commits, and Git configuration are kept. Restoring files does not recover published ancestry after a history rewrite. Named targets restore their own retained copy and do not accept this flag.
-<a id="__codelineno-66-29" name="__codelineno-66-29" href="#__codelineno-66-29"></a>
-<a id="__codelineno-66-30" name="__codelineno-66-30" href="#__codelineno-66-30"></a>      --forward-gh-token
-<a id="__codelineno-66-31" name="__codelineno-66-31" href="#__codelineno-66-31"></a>          Send the GH_TOKEN from this shell with the resume.
-<a id="__codelineno-66-32" name="__codelineno-66-32" href="#__codelineno-66-32"></a>
-<a id="__codelineno-66-33" name="__codelineno-66-33" href="#__codelineno-66-33"></a>          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
-<a id="__codelineno-66-34" name="__codelineno-66-34" href="#__codelineno-66-34"></a>
-<a id="__codelineno-66-35" name="__codelineno-66-35" href="#__codelineno-66-35"></a>  -h, --help
-<a id="__codelineno-66-36" name="__codelineno-66-36" href="#__codelineno-66-36"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-66-28" name="__codelineno-66-28" href="#__codelineno-66-28"></a>      --from-checkpoint &lt;ID&gt;
+<a id="__codelineno-66-29" name="__codelineno-66-29" href="#__codelineno-66-29"></a>          Restore this checkpoint and continue from its saved graph boundary
+<a id="__codelineno-66-30" name="__codelineno-66-30" href="#__codelineno-66-30"></a>
+<a id="__codelineno-66-31" name="__codelineno-66-31" href="#__codelineno-66-31"></a>      --discard-workspace-changes
+<a id="__codelineno-66-32" name="__codelineno-66-32" href="#__codelineno-66-32"></a>          Allow a local checkpoint restore to replace the current checkout.
+<a id="__codelineno-66-33" name="__codelineno-66-33" href="#__codelineno-66-33"></a>
+<a id="__codelineno-66-34" name="__codelineno-66-34" href="#__codelineno-66-34"></a>          The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Attached HEAD, branch tips, commits, and Git configuration are kept. Restoring files does not recover published ancestry after a history rewrite. Named targets restore their own retained copy and do not accept this flag.
+<a id="__codelineno-66-35" name="__codelineno-66-35" href="#__codelineno-66-35"></a>
+<a id="__codelineno-66-36" name="__codelineno-66-36" href="#__codelineno-66-36"></a>      --forward-gh-token
+<a id="__codelineno-66-37" name="__codelineno-66-37" href="#__codelineno-66-37"></a>          Send the GH_TOKEN from this shell with the resume.
+<a id="__codelineno-66-38" name="__codelineno-66-38" href="#__codelineno-66-38"></a>
+<a id="__codelineno-66-39" name="__codelineno-66-39" href="#__codelineno-66-39"></a>          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
+<a id="__codelineno-66-40" name="__codelineno-66-40" href="#__codelineno-66-40"></a>
+<a id="__codelineno-66-41" name="__codelineno-66-41" href="#__codelineno-66-41"></a>  -h, --help
+<a id="__codelineno-66-42" name="__codelineno-66-42" href="#__codelineno-66-42"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-checkpoints"><code>zeroshot checkpoints</code><a class="headerlink" href="#zeroshot-checkpoints" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-67-1" name="__codelineno-67-1" href="#__codelineno-67-1"></a>List one page of a run's saved workspace checkpoints as JSON.

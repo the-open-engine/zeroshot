@@ -2872,6 +2872,13 @@ output and fail the command. The archive is never extracted and its contents are
 with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">zeroshot resume RUN_ID</span>
 </code></pre></div>
+<p>Pass <code>--runtime-config FILE</code> or <code>--uniform-runtime-config FILE</code> to replace the successor's runtime
+settings, including models, effort, harness configuration, connections and harness/provider selection.
+Omitting both keeps the saved runtime. Zeroshot validates the replacement against the unchanged graph
+and execution environment before restoring files or starting agents; the graph, input, source,
+delivery lineage and selected checkpoint's completed prerequisites stay the same. Credentials are
+resolved freshly. Native conversation restoration continues an existing conversation when supported,
+including after a model change, with the existing fresh-session fallback when restoration fails.</p>
 <p>A run you submitted restarts at the root of its graph. A successor restarts at the point it began
 at: after the answer for the successor of an answered request, after the held node for the
 successor of a suspended run, and at the selected node for a checkpoint successor. An answered
