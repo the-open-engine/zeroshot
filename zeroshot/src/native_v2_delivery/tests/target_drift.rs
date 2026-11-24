@@ -42,6 +42,25 @@ fn request(repo: &TempRepo) -> DeliveryRunRequest<'_> {
     }
 }
 
+/// Runs a pr@2 node whose declared contract accepts target drift.
+pub(super) async fn run_accepting_target_drift(
+    request: DeliveryRunRequest<'_>,
+    adapter: Arc<NativeV2DeliveryAdapter>,
+) -> DeliveryExecution {
+    let node = delivery_node_for(request.mode, contract::TargetDrift::Accept);
+    let admitted = NativeV2Admission
+        .admit(delivery_submission_with_node(
+            request.repo,
+            request.mode,
+            PullRequestFeedback::Consider,
+            node,
+        ))
+        .await
+        .assert_value();
+    let handle = start_admitted(request, adapter, Some("test-token"), admitted).await;
+    finish_execution(handle).await
+}
+
 fn response(mode: DeliveryMode, drift: contract::TargetDrift) -> NodeResponseContract {
     NodeResponseContract::Verifier {
         output: contract::delivery_result_schema_for(mode, drift).assert_value(),

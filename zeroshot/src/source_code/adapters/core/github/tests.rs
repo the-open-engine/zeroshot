@@ -120,6 +120,8 @@ mod merge_tests;
 #[path = "queue/tests.rs"]
 mod queue_tests;
 
+#[path = "policy/conflict_checks_tests.rs"]
+mod conflict_checks_tests;
 #[cfg(unix)]
 #[path = "policy_read_tests.rs"]
 mod policy_read_tests;
@@ -1425,72 +1427,4 @@ fn malformed_target_never_authorizes_queue_admission_with_unknown_comparison() {
     page["data"]["repository"]["pullRequest"]["baseRef"]["compare"] = Value::Null;
     page["data"]["repository"]["pullRequest"]["baseRef"]["target"]["oid"] = json!("unknown");
     assert!(classify_policy(json!([page]), &review()).is_err());
-}
-
-#[test]
-fn conflicting_pull_request_reports_only_required_checks_that_started() {
-    let conflict =
-        |contexts| classify(policy_page("CONFLICTING", "DIRTY", contexts, (false, None)));
-    for (contexts, expected) in [
-        (None, SourceChecks::NotRequired),
-        (
-            Some(vec![check_run(
-                "optional",
-                "COMPLETED",
-                Some("FAILURE"),
-                false,
-            )]),
-            SourceChecks::NotRequired,
-        ),
-        (
-            Some(vec![check_run("required", "IN_PROGRESS", None, true)]),
-            SourceChecks::Pending,
-        ),
-        (
-            Some(vec![check_run(
-                "required",
-                "COMPLETED",
-                Some("SUCCESS"),
-                true,
-            )]),
-            SourceChecks::Passed,
-        ),
-    ] {
-        let snapshot = conflict(contexts);
-        assert_eq!(snapshot.state, SourceReviewState::Conflict);
-        assert_eq!(snapshot.conflict_checks, Some(expected));
-    }
-    let failed = conflict(Some(vec![
-        check_run("required", "COMPLETED", Some("FAILURE"), true),
-        check_run("still-running", "IN_PROGRESS", None, true),
-    ]));
-    assert!(matches!(
-        failed.conflict_checks,
-        Some(SourceChecks::Failed { .. })
-    ));
-
-    // A required context that never reported cannot start for a conflicting pull request.
-    let mut page = policy_page(
-        "CONFLICTING",
-        "DIRTY",
-        Some(vec![check_run(
-            "pushed",
-            "COMPLETED",
-            Some("SUCCESS"),
-            true,
-        )]),
-        (false, None),
-    );
-    page.pointer_mut(
-        "/data/repository/pullRequest/baseRef/refUpdateRule/requiredStatusCheckContexts",
-    )
-    .assert_value()
-    .clone_from(&json!(["pushed", "pull-request-only"]));
-    assert_eq!(
-        classify(page).conflict_checks,
-        Some(SourceChecks::NotRequired)
-    );
-
-    let open = classify(policy_page("MERGEABLE", "CLEAN", None, (false, None)));
-    assert_eq!(open.conflict_checks, None);
 }

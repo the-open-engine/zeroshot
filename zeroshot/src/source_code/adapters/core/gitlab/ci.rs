@@ -17,11 +17,15 @@ pub(super) async fn include_failure_details(
     observed: &mut SourceReviewObservation,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<(), SourceDeliveryError> {
-    let SourceReviewState::Open {
-        checks: SourceChecks::Failed { diagnostic },
-    } = &mut observed.state
-    else {
-        return Ok(());
+    let diagnostic = match (&mut observed.state, &mut observed.conflict_checks) {
+        (
+            SourceReviewState::Open {
+                checks: SourceChecks::Failed { diagnostic },
+            },
+            _,
+        )
+        | (SourceReviewState::Conflict, Some(SourceChecks::Failed { diagnostic })) => diagnostic,
+        _ => return Ok(()),
     };
     let head = context.head.ok_or(SourceDeliveryError::Rejected)?;
     let id = head.id.to_string();

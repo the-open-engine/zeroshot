@@ -440,8 +440,11 @@ async fn changed_conflict_observation_retains_the_confirmed_review_baseline() {
 async fn accepted_target_drift_publishes_the_admitted_candidate_unintegrated() {
     let (fixture, authority, adapter) = UpdatedTarget::harness(Script::NoCi);
 
-    let delivered =
-        run_accepting_target_drift(fixture.request(DeliveryMode::PullRequestV2), adapter).await;
+    let delivered = target_drift::run_accepting_target_drift(
+        fixture.request(DeliveryMode::PullRequestV2),
+        adapter,
+    )
+    .await;
 
     let receipt = assert_delivery_signal(&delivered.outcome, DELIVERY_READY_LABEL);
     assert_eq!(authority.target_reconciliations.load(Ordering::SeqCst), 0);

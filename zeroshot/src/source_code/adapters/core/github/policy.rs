@@ -363,7 +363,9 @@ pub(super) fn classify_policy(
     }
     if let Some(mut snapshot) = terminal_snapshot(&first_pull_request)? {
         if snapshot.state == SourceReviewState::Conflict {
-            snapshot.conflict_checks = Some(conflict_checks(&first_pull_request, &contexts));
+            let (checks, failed_job_ids) = conflict_checks(&first_pull_request, &contexts);
+            snapshot.conflict_checks = Some(checks);
+            snapshot.failed_job_ids = failed_job_ids;
         }
         return Ok(snapshot);
     }
@@ -434,11 +436,15 @@ pub(super) fn queue_check_failures(
 }
 
 pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, JobLog)]) {
-    let SourceReviewState::Open {
-        checks: SourceChecks::Failed { diagnostic },
-    } = &mut snapshot.state
-    else {
-        return;
+    let diagnostic = match (&mut snapshot.state, &mut snapshot.conflict_checks) {
+        (
+            SourceReviewState::Open {
+                checks: SourceChecks::Failed { diagnostic },
+            },
+            _,
+        )
+        | (SourceReviewState::Conflict, Some(SourceChecks::Failed { diagnostic })) => diagnostic,
+        _ => return,
     };
     include_job_logs(diagnostic, "GitHub Actions", logs);
 }
@@ -522,20 +528,20 @@ fn check_contexts(
 fn conflict_checks(
     pull_request: &PullRequestPolicyWire,
     contexts: &[CheckContextWire],
-) -> SourceChecks {
+) -> (SourceChecks, Vec<u64>) {
     let evidence = classify_required_checks(contexts);
     if !evidence.failures.is_empty() {
-        return SourceChecks::Failed {
-            diagnostic: failure_diagnostic(evidence.failures),
-        };
+        let diagnostic = failure_diagnostic(evidence.failures);
+        return (SourceChecks::Failed { diagnostic }, evidence.failed_job_ids);
     }
-    match evidence.checks {
+    let checks = match evidence.checks {
         RequiredChecks::Pending => SourceChecks::Pending,
         RequiredChecks::Passed if !required_context_is_missing(pull_request, contexts) => {
             SourceChecks::Passed
         }
         RequiredChecks::Passed | RequiredChecks::Absent => SourceChecks::NotRequired,
-    }
+    };
+    (checks, Vec::new())
 }
 
 fn classify_snapshot(

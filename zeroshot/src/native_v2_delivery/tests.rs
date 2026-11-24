@@ -1253,25 +1253,6 @@ async fn run_with_adapter_token(
     finish_execution(handle).await
 }
 
-/// Runs a pr@2 node whose declared contract accepts target drift.
-async fn run_accepting_target_drift(
-    request: DeliveryRunRequest<'_>,
-    adapter: Arc<NativeV2DeliveryAdapter>,
-) -> DeliveryExecution {
-    let node = delivery_node_for(request.mode, contract::TargetDrift::Accept);
-    let admitted = NativeV2Admission
-        .admit(delivery_submission_with_node(
-            request.repo,
-            request.mode,
-            PullRequestFeedback::Consider,
-            node,
-        ))
-        .await
-        .assert_value();
-    let handle = start_admitted(request, adapter, Some("test-token"), admitted).await;
-    finish_execution(handle).await
-}
-
 async fn finish_execution(mut handle: crate::native_v2_runner::NodeHandle) -> DeliveryExecution {
     let mut durable = handle.take_initial_output().assert_value();
     let drain = async {
