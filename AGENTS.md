@@ -2450,7 +2450,9 @@ python -m mkdocs build --strict
   Native changes also require macOS product and test compilation with the UI
   feature, forge network/access and certificate trust regressions, workspace export integration and private publication regressions, focused Unix controller
   socket regression tests, and APFS workspace clone tests that
-  `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. `.github/ci-path-classifier.js` owns
+  `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. Put additional curated macOS test commands in
+  `scripts/test-macos.sh`, which CI runs after building the UI and preparing pinned Restic. Script
+  changes select the native lane. `.github/ci-path-classifier.js` owns
   fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
   CLI subprocess tests. Windows uses

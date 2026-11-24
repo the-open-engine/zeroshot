@@ -58,6 +58,7 @@ it('selects native checks and their established dependent lanes', () => {
     'ui/src/App.tsx',
     'ui/package-lock.json',
     '.dockerignore',
+    'scripts/test-macos.sh',
     'tests/tooling/smoke-ui.js',
   ]) {
     assert.equal(classifyPath(pathname), 'native');
