@@ -46,17 +46,17 @@ pub(in super::super) async fn observe_removal(
     review: &SourceReviewReceipt,
     snapshot: &mut PolicySnapshot,
     credential: SourceDeliveryCredential<'_>,
-) -> Result<(), SourceDeliveryError> {
+) -> Result<Option<RemovalFailure>, SourceDeliveryError> {
     if !matches!(
         snapshot.state,
         SourceReviewState::Open { .. } | SourceReviewState::Conflict
     ) {
-        return Ok(());
+        return Ok(None);
     }
     let admission = {
         let mut effects = authority.queue_effects.0.lock().await;
         let Some(effect) = effects.get_mut(&identity(review)) else {
-            return Ok(());
+            return Ok(None);
         };
         // Readmission permission belongs to this complete observation only.
         effect.recoverable = None;
@@ -70,14 +70,14 @@ pub(in super::super) async fn observe_removal(
                 checks: SourceChecks::Failed { .. }
             }
         ) {
-            return Ok(());
+            return Ok(None);
         }
         if snapshot.is_in_merge_queue
             || (effect.uncertain || effect.task.is_some())
                 && (matches!(snapshot.state, SourceReviewState::Conflict)
                     || snapshot.head_update.is_some())
         {
-            return recovery::pending(snapshot);
+            return recovery::pending(snapshot).map(|()| None);
         }
         effect
             .settled
@@ -86,14 +86,14 @@ pub(in super::super) async fn observe_removal(
             .cloned()
     };
     let Some(admission) = admission else {
-        return Ok(());
+        return Ok(None);
     };
     let value = authority
         .api(&review_query_arguments(review, OUTCOME_QUERY)?, credential)
         .await?;
     let effects = authority.queue_effects.0.lock().await;
     let Some(effect) = effects.get(&identity(review)) else {
-        return recovery::pending(snapshot);
+        return recovery::pending(snapshot).map(|()| None);
     };
     if effect
         .settled
@@ -101,11 +101,11 @@ pub(in super::super) async fn observe_removal(
         .and_then(|result| result.as_ref().ok())
         != Some(&admission)
     {
-        return recovery::pending(snapshot);
+        return recovery::pending(snapshot).map(|()| None);
     }
     if let Some((removal, checks)) = removed_candidate(value, review, &admission)? {
         if effect.recovered_removals.contains(&removal.id) {
-            return recovery::pending(snapshot);
+            return recovery::pending(snapshot).map(|()| None);
         }
         let checks = policy::queue_check_failures(Value::Array(checks))?;
         if removal.reason == "merge_conflict" && checks.is_none() {
@@ -116,19 +116,53 @@ pub(in super::super) async fn observe_removal(
                 ));
             }
             drop(effects);
-            return recovery::recover(authority, review, snapshot, (admission, removal.id)).await;
+            recovery::recover(authority, review, snapshot, (admission, removal.id)).await?;
+            return Ok(None);
         }
+        let removal_id = removal.id.clone();
         let (diagnostic, jobs) = removal_feedback(removal, checks)?;
         snapshot.state = SourceReviewState::Open {
             checks: SourceChecks::Failed { diagnostic },
         };
         snapshot.failed_job_ids = jobs;
         snapshot.pull_request_ready = false;
+        Ok(Some(RemovalFailure {
+            admission,
+            removal_id,
+        }))
     } else {
         // A retained admission needs current removal evidence before any repair.
-        return recovery::pending(snapshot);
+        recovery::pending(snapshot).map(|()| None)
     }
-    Ok(())
+}
+
+/// Queue failure evidence remains bound to its admission through asynchronous log retrieval.
+pub(in super::super) struct RemovalFailure {
+    admission: QueueAdmission,
+    removal_id: String,
+}
+
+impl RemovalFailure {
+    pub(in super::super) async fn revalidate(
+        self,
+        authority: &GhCliDeliveryAuthority,
+        review: &SourceReviewReceipt,
+        snapshot: &mut PolicySnapshot,
+    ) -> Result<(), SourceDeliveryError> {
+        let effects = authority.queue_effects.0.lock().await;
+        if effects.get(&identity(review)).is_some_and(|effect| {
+            effect
+                .settled
+                .as_ref()
+                .and_then(|result| result.as_ref().ok())
+                == Some(&self.admission)
+                && !effect.recovered_removals.contains(&self.removal_id)
+        }) {
+            Ok(())
+        } else {
+            recovery::pending(snapshot)
+        }
+    }
 }
 
 #[derive(Eq, PartialEq)]

@@ -729,6 +729,113 @@ async fn superseded_admission_cannot_expose_an_older_conflict_observation() {
 }
 
 #[tokio::test]
+async fn queue_failure_logs_remain_bound_to_the_observed_admission() {
+    for readmitted in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let receipt_path = root.path().join("enqueue-dynamic.json");
+        std::fs::write(&receipt_path, enqueue_response().to_string()).assert_value();
+        let provider = Arc::new(admission(
+            root.path(),
+            "/bin/cat \"$HOME/enqueue-dynamic.json\"",
+        ));
+        let program = root.path().join("gh-queue-fixture");
+        let source = std::fs::read_to_string(&program).assert_value();
+        write_executable(
+            &program,
+            source.replace(
+                "repos/acme/project/actions/jobs/*/logs)",
+                "repos/acme/project/actions/jobs/12346/logs) if [ -f \"$HOME/block-next\" ]; then /bin/rm \"$HOME/block-next\"; printf blocked > \"$HOME/blocked\"; while [ ! -f \"$HOME/release\" ]; do /bin/sleep 0.005; done; fi; /bin/cat \"$HOME/job-log\" ;;\nrepos/acme/project/actions/jobs/*/logs)",
+            ),
+        );
+        enqueue_accepted(&provider).await;
+        set_policy(root.path(), recovery_policy(false));
+        let mut second_job = check_run("second-queue-check", "COMPLETED", Some("FAILURE"), true);
+        second_job["databaseId"] = json!(12346);
+        let mut outcome = removed_queue_candidate(
+            "2026-11-09T01:30:00Z",
+            "merge_conflict",
+            vec![
+                check_run("first-queue-check", "COMPLETED", Some("FAILURE"), true),
+                second_job,
+            ],
+        );
+        let outcome_path = root.path().join("queue-outcome.json");
+        std::fs::write(&outcome_path, json!([outcome.clone()]).to_string()).assert_value();
+        std::fs::write(
+            root.path().join("job-log"),
+            "##[error]old queue candidate failed",
+        )
+        .assert_value();
+        std::fs::write(root.path().join("block-next"), "").assert_value();
+        let observer = provider.clone();
+        let stalled = tokio::spawn(async move { inspect(&observer).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !root.path().join("blocked").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .assert_value();
+        if readmitted {
+            for check in outcome["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"][0]
+                ["beforeCommit"]["statusCheckRollup"]["contexts"]["nodes"]
+                .as_array_mut()
+                .assert_value()
+            {
+                check["conclusion"] = json!("SUCCESS");
+            }
+            std::fs::write(outcome_path, json!([outcome]).to_string()).assert_value();
+            let mut receipt = enqueue_response();
+            receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["id"] = json!("NEW_ENTRY");
+            receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["enqueuedAt"] =
+                json!("2026-11-09T02:00:00Z");
+            std::fs::write(receipt_path, receipt.to_string()).assert_value();
+            enqueue_accepted(&provider).await;
+        }
+        std::fs::write(root.path().join("release"), "").assert_value();
+        let observed = stalled.await.assert_value();
+        if readmitted {
+            assert_eq!(
+                observed,
+                SourceReviewState::Open {
+                    checks: SourceChecks::Pending
+                }
+            );
+            assert_eq!(inspect(&provider).await, observed);
+            assert_eq!(
+                provider
+                    .request_merge(
+                        &review(),
+                        SourceDeliveryCredential::token("test-token"),
+                        &TestReviewCheckpoint
+                    )
+                    .await
+                    .assert_value(),
+                SourceMergeRequestOutcome::Pending
+            );
+        } else {
+            let SourceReviewState::Open {
+                checks: SourceChecks::Failed { diagnostic },
+            } = observed
+            else {
+                panic!("current admission must retain queue failures after log retrieval");
+            };
+            for expected in [
+                "first-queue-check concluded FAILURE",
+                "second-queue-check concluded FAILURE",
+                "job 91",
+                "job 12346",
+                "old queue candidate failed",
+            ] {
+                assert!(diagnostic.contains(expected), "{diagnostic}");
+            }
+        }
+        assert_eq!(enqueue_count(root.path()), if readmitted { 2 } else { 1 });
+        assert_withdrawn(&provider).await;
+    }
+}
+
+#[tokio::test]
 async fn recovered_removal_precedes_same_second_ambiguity_on_the_new_admission() {
     let root = tempfile::tempdir().assert_value();
     let receipt_path = root.path().join("enqueue-dynamic.json");
