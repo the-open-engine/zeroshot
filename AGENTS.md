@@ -1664,9 +1664,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
   own method. Queue admission uses explicit `enqueuePullRequest` with the validated PR node ID and
   exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Confirmed
-  admissions retain their added-event identity until confirmed withdrawal. Polling never resubmits a
-  removed entry: matching removal evidence binds the queued commit and complete required checks/job
-  logs, returning CI feedback through the existing repair loop before another admission is requested.
+  admissions retain their added-event identity until confirmed withdrawal. Removed entries normally
+  require repair before readmission: matching removal evidence binds the queued commit and complete
+  required checks/job logs. Without failed-check evidence, return the removal diagnostic as an error,
+  never empty CI feedback. A confirmed `merge_conflict` removal is the narrow exception: complete,
+  stable queue evidence for the configured repository/base keeps predecessors pending, then fresh
+  exact-head policy permits readmission of a clean PR or authenticated materialization of a base
+  conflict. The queue view uses an aliased page-info field to keep `gh` pagination on required checks
+  and is independently bounded to 100 entries; incomplete or changing evidence
+  cannot authorize recovery. Missing, stale, superseded or already recovered removal evidence keeps an admission
+  pending, including when the PR reports a base conflict. Three readmissions per reviewed head exhaust this exception independently
+  of ordinary polling. Retain prior submission uncertainty, ignore already recovered removal events,
+  and never release an admission from a same-second ambiguous removal.
   Completed transient submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
   empty snapshot cannot authorize repair. A complete GraphQL `UNPROCESSABLE` rejection rooted exactly
   at a null enqueue mutation adds no uncertainty; partial, nested, truncated, or unconfirmed responses
@@ -2381,6 +2390,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## Validation
 
 Run the narrowest relevant checks first, then the complete affected lane.
+The GitHub queue pagination regression requires `gh` and exercises its native paginator against a
+fake-token loopback endpoint, independently of the shell-based forge fixtures.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
 Suspension and terminal-failure polling share a bounded checkpoint and cleanup budget separate from
