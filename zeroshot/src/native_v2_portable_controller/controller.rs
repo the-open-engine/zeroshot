@@ -831,6 +831,10 @@ impl SingleRunAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SingleRunAllocator {
+    fn retains_suspended_ledger(&self) -> bool {
+        true
+    }
+
     fn supports_environment_teardown(&self) -> bool {
         true
     }

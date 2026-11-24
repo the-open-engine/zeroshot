@@ -44,10 +44,16 @@ use crate::v2_run_ledger::{
 #[path = "native_v2_supervisor/tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "native_v2_supervisor/tests/suspension/publication_store.rs"]
+pub(crate) mod publication_test_store;
+
 #[path = "native_v2_checkpoints.rs"]
 pub mod checkpoints;
 
 const FIRST_IDENTITY: u64 = 1;
+pub(crate) const SUSPENSION_STEER_RETRY: &str =
+    "run suspension handoff has started; send the steer again shortly";
 
 /// Optional live-observation seam. The supervisor retains cancellation and completion ownership;
 /// a registration grants read-only subscription and is closed after durable output is drained.
@@ -138,6 +144,7 @@ pub struct NativeV2Supervisor {
     conversation_notices: Arc<Mutex<BTreeSet<(NodeName, &'static str)>>>,
     drive_turn: Arc<Mutex<()>>,
     suspend_turn: Arc<Mutex<()>>,
+    steering_closed: Arc<Mutex<bool>>,
     suspend_signal: watch::Sender<bool>,
     wall_clock: crate::native_v2_wait::WallClock,
     wait_threshold: Option<Duration>,
@@ -170,6 +177,7 @@ impl NativeV2Supervisor {
             version_initialized: Arc::new(Mutex::new(false)),
             drive_turn: Arc::new(Mutex::new(())),
             suspend_turn: Arc::new(Mutex::new(())),
+            steering_closed: Arc::new(Mutex::new(false)),
             suspend_signal: watch::channel(false).0,
             wall_clock: Arc::new(crate::native_v2_runner::current_timestamp),
             wait_threshold: None,

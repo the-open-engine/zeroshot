@@ -2,6 +2,18 @@ use super::*;
 use openengine_cluster_protocol::{RunSuspension, RunVectorContent, RunWait};
 
 impl NativeV2Supervisor {
+    /// Platform steering uses this fence when suspension publishes a separate host record.
+    pub(crate) async fn steer(
+        &self,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, RunLedgerError> {
+        let closed = self.steering_closed.lock().await;
+        if *closed {
+            return Err(RunLedgerError::InvalidEvent(SUSPENSION_STEER_RETRY));
+        }
+        crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params).await
+    }
+
     pub(super) async fn suspend_at(
         &self,
         suspension: RunSuspension,
@@ -61,8 +73,11 @@ impl NativeV2Supervisor {
                 },
             );
         }
-        // Keep admission live during host I/O. The first suspend request is the only concurrent
-        // vector append here; republish if it arrived after this snapshot was taken.
+        // Drain admitted platform steers before reading the record, then refuse new ones without
+        // holding their admission turn across host I/O or cleanup. Retained-ledger hosts steer
+        // directly into their durable ledger and do not use this fence.
+        *self.steering_closed.lock().await = true;
+        // Keep suspend-request admission live during host I/O; republish if it changed.
         loop {
             let snapshot = self.snapshot().await?;
             let mut vectors = Vec::new();
