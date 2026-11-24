@@ -1667,7 +1667,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   admissions retain their added-event identity until confirmed withdrawal. Removed entries normally
   require repair before readmission: matching removal evidence binds the queued commit and complete
   required checks/job logs. Without failed-check evidence, return the removal diagnostic as an error,
-  never empty CI feedback. A confirmed `merge_conflict` removal is the narrow exception: complete,
+  never empty CI feedback. Failed required checks on the removed queue commit retain CI feedback and job logs
+  even for `merge_conflict`. A confirmed `merge_conflict` removal without failed required checks is the narrow exception: complete,
   stable queue evidence for the configured repository/base keeps predecessors pending, then fresh
   exact-head policy permits readmission of a clean PR or authenticated materialization of a base
   conflict. The queue view uses an aliased page-info field to keep `gh` pagination on required checks

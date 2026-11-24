@@ -109,6 +109,73 @@ async fn admitted_pr_retains_failed_checks_and_logs_without_removal_evidence() {
 }
 
 #[tokio::test]
+async fn queue_conflict_removal_preserves_queue_commit_failures_before_recovery() {
+    for predecessor in [true, false] {
+        for conflicting in [true, false] {
+            let root = tempfile::tempdir().assert_value();
+            let provider = admission(root.path(), &response(&enqueue_response()));
+            enqueue_accepted(&provider).await;
+            let mut policy = recovery_policy(predecessor);
+            if conflicting {
+                policy["data"]["repository"]["pullRequest"]["mergeable"] = json!("CONFLICTING");
+                policy["data"]["repository"]["pullRequest"]["mergeStateStatus"] = json!("DIRTY");
+            }
+            set_policy(root.path(), policy);
+            let outcome = removed_queue_candidate(
+                "2026-11-09T01:30:00Z",
+                "merge_conflict",
+                vec![check_run(
+                    "queue-required",
+                    "COMPLETED",
+                    Some("FAILURE"),
+                    true,
+                )],
+            );
+            std::fs::write(
+                root.path().join("queue-outcome.json"),
+                json!([outcome]).to_string(),
+            )
+            .assert_value();
+            std::fs::write(
+                root.path().join("job-log"),
+                "##[error]queue candidate required check failed",
+            )
+            .assert_value();
+            for _ in 0..2 {
+                let SourceReviewState::Open {
+                    checks: SourceChecks::Failed { diagnostic },
+                } = inspect(&provider).await
+                else {
+                    panic!("queue candidate failures must precede conflict recovery");
+                };
+                for expected in [
+                    "merge_conflict",
+                    &"c".repeat(40),
+                    "queue-required concluded FAILURE",
+                    "queue candidate required check failed",
+                ] {
+                    assert!(diagnostic.contains(expected), "{diagnostic}");
+                }
+                assert_eq!(
+                    provider
+                        .request_merge(
+                            &review(),
+                            SourceDeliveryCredential::token("test-token"),
+                            &TestReviewCheckpoint,
+                        )
+                        .await
+                        .assert_value(),
+                    SourceMergeRequestOutcome::Pending
+                );
+                assert_eq!(enqueue_count(root.path()), 1);
+            }
+            assert_withdrawn(&provider).await;
+            assert_eq!(enqueue_count(root.path()), 1);
+        }
+    }
+}
+
+#[tokio::test]
 async fn queue_conflict_waits_then_readmits_the_same_authority_and_observes_merge() {
     let root = tempfile::tempdir().assert_value();
     let provider = admission(root.path(), &response(&enqueue_response()));

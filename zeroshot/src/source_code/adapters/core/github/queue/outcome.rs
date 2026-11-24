@@ -92,7 +92,8 @@ pub(in super::super) async fn observe_removal(
         .api(&review_query_arguments(review, OUTCOME_QUERY)?, credential)
         .await?;
     if let Some((removal, checks)) = removed_candidate(value, review, &admission)? {
-        if removal.reason == "merge_conflict" {
+        let checks = policy::queue_check_failures(Value::Array(checks))?;
+        if removal.reason == "merge_conflict" && checks.is_none() {
             if recovered_removals.contains(&removal.id) {
                 return recovery::pending(snapshot);
             }
@@ -159,9 +160,8 @@ fn removed_candidate(
 
 fn removal_feedback(
     removal: Removal,
-    contexts: Vec<Value>,
+    checks: Option<(String, Vec<u64>)>,
 ) -> Result<(String, Vec<u64>), SourceDeliveryError> {
-    let checks = policy::queue_check_failures(Value::Array(contexts))?;
     let diagnostic = format!(
         "Merge queue removed candidate {} before merge ({}). Reassess the queue failure before requesting another admission.",
         removal
