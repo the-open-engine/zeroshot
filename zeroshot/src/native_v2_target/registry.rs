@@ -167,6 +167,9 @@ impl TargetRegistry for FileTargetRegistry {
             return Err(TargetConnectorError::BuiltinTarget);
         }
         let (_lock, mut state, _) = self.locked_state_async().await?;
+        // Refuse before any cleanup, so a refused save cannot leave a registered target without
+        // its saved login and recovery data.
+        refuse_symlinked_store(&self.path)?;
         let target = state
             .targets
             .get(name)

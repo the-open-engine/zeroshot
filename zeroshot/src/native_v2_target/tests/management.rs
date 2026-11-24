@@ -224,3 +224,52 @@ async fn hosted_removal_holds_registry_lock_through_credential_cleanup() {
     registry.remove("cloud", &authority).await.assert_value();
     assert_eq!(store.get(&target.id).await.assert_value(), None);
 }
+
+#[tokio::test]
+async fn refused_removal_from_a_symlinked_registry_keeps_login_and_recovery_data() {
+    let root = temp_root();
+    let path = root.path("config/targets.json");
+    let registry = FileTargetRegistry::new(path.clone());
+    let target = hosted_target("cloud", "https://unreachable.example");
+    registry.insert(target.clone()).assert_value();
+    let run = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
+    registry
+        .record_recovery_authorization(&target.id, &run, &Default::default())
+        .assert_value();
+    let linked = root.path("dotfiles/targets.json");
+    std::fs::create_dir_all(linked.parent().assert_value()).assert_value();
+    std::fs::rename(&path, &linked).assert_value();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&linked, &path).assert_value();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&linked, &path).assert_value();
+    let before = std::fs::read(&linked).assert_value();
+
+    let store = Arc::new(MemoryCredentialStore::default());
+    store.set(&target.id, "stored-login").await.assert_value();
+    let authority = TargetHttpControlAuthority::with_dependencies(
+        store.clone(),
+        Arc::new(MemoryDeviceCodeNotifier::default()),
+        root.path("auth"),
+    );
+    let error = registry
+        .remove("cloud", &authority)
+        .await
+        .assert_error()
+        .to_string();
+    assert!(error.contains("is a symbolic link"));
+    assert_eq!(
+        store.get(&target.id).await.assert_value().as_deref(),
+        Some("stored-login")
+    );
+    registry
+        .recovery_authorization(&target.id, &run)
+        .assert_value();
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .assert_value()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&linked).assert_value(), before);
+}
