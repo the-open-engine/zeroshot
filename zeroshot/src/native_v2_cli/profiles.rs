@@ -298,6 +298,21 @@ impl LocalRunProfileStore {
         Ok(lock)
     }
 
+    /// Refuses to replace a symlinked store entry, including a dangling link, so a
+    /// dotfiles-managed link is never silently swapped for a regular file.
+    fn refuse_symlinked_store(&self) -> Result<(), NativeV2CliError> {
+        let path = self.root.join(PROFILES_FILE);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => Err(local_message(format!(
+                "local profile store {} is a symbolic link; writing through a symlinked store is unsupported",
+                path.display()
+            ))),
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(local_io(error)),
+        }
+    }
+
     fn read(&self) -> Result<StoredProfiles, NativeV2CliError> {
         let path = self.root.join(PROFILES_FILE);
         match File::open(path) {
@@ -311,6 +326,7 @@ impl LocalRunProfileStore {
     }
 
     fn write(&self, stored: &StoredProfiles) -> Result<(), NativeV2CliError> {
+        self.refuse_symlinked_store()?;
         let temporary = temporary_path(&self.root);
         let mut encoded = serde_json::to_vec(stored)
             .map_err(|_| local_message("local profile store could not be encoded"))?;

@@ -936,3 +936,80 @@ fn unreadable_new_or_replacement_profiles_preserve_existing_bytes() {
         );
     }
 }
+
+fn symlink_file(target: &std::path::Path, link: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).assert_value();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(target, link).assert_value();
+}
+
+fn assert_symlink_refused<T>(result: Result<T, NativeV2CliError>) {
+    assert!(matches!(
+        result,
+        Err(NativeV2CliError::Local(message))
+            if message.contains("is a symbolic link")
+    ));
+}
+
+#[test]
+fn symlinked_profile_store_is_never_replaced() {
+    let root = tempfile::tempdir().assert_value();
+    let linked = root.path().join("dotfiles-profiles.json");
+    let link = root.path().join("config").join(PROFILES_FILE);
+    std::fs::create_dir_all(link.parent().assert_value()).assert_value();
+    let original = br#"{"profiles":{}}"#;
+    std::fs::write(&linked, original).assert_value();
+    symlink_file(&linked, &link);
+    let store = LocalRunProfileStore::new(link.parent().assert_value().to_path_buf());
+
+    assert_symlink_refused(store.set(profile_request("alpha", "worker", true)));
+    assert_symlink_refused(store.set_default(RunProfileDefaultRequest {
+        scope: RunProfileScope::User,
+        name: None,
+    }));
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .assert_value()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&linked).assert_value(), original);
+}
+
+#[test]
+fn dangling_profile_store_link_is_not_treated_as_an_empty_store() {
+    let root = tempfile::tempdir().assert_value();
+    let missing = root.path().join("unmounted").join("profiles.json");
+    let link = root.path().join("config").join(PROFILES_FILE);
+    std::fs::create_dir_all(link.parent().assert_value()).assert_value();
+    symlink_file(&missing, &link);
+    let store = LocalRunProfileStore::new(link.parent().assert_value().to_path_buf());
+
+    assert_symlink_refused(store.set(profile_request("alpha", "worker", false)));
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .assert_value()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!missing.exists());
+    assert!(!missing.parent().assert_value().exists());
+}
+
+#[test]
+fn profile_store_behind_a_symlinked_directory_still_works() {
+    let root = tempfile::tempdir().assert_value();
+    let real = root.path().join("real");
+    std::fs::create_dir_all(&real).assert_value();
+    let linked_dir = root.path().join("linked");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &linked_dir).assert_value();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &linked_dir).assert_value();
+    let store = LocalRunProfileStore::new(linked_dir);
+    store
+        .set(profile_request("alpha", "worker", false))
+        .assert_value();
+    assert!(real.join(PROFILES_FILE).is_file());
+}
