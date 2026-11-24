@@ -31,7 +31,7 @@ pub use operator_diagnostics::{OperatorDiagnosticJsonLines, OperatorDiagnosticOu
 pub(crate) use operator_diagnostics::{
     MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES, NewOperatorDiagnostic, OperatorDiagnosticStore,
 };
-pub use transport::NativeV2TargetServer;
+pub use transport::{NativeV2TargetServer, TargetFilesMount};
 pub use private_access::TargetBootstrapKey;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

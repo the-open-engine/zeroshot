@@ -457,6 +457,11 @@ jobs:
           native_v2_portable_controller::transport::unix::tests
           native_v2_supervisor::checkpoints::filesystem::tests::macos_
           native_v2_supervisor::checkpoints::filesystem::tests::cancellation_after_metadata_leaves_only_the_prior_snapshot
+      - name: Run macOS target file regressions
+        run: |
+          cargo test --locked --package openengine-cluster-protocol --test target_files
+          cargo test --locked --package zeroshot --features ui --lib -- native_v2_files::tests native_v2_target_authority::tests::files
+          cargo test --locked --package zeroshot --features ui --test native_v2_files
       - name: Run macOS workspace export regressions
         run: |
           cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace

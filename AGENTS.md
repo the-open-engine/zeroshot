@@ -2498,3 +2498,30 @@ python -m mkdocs build --strict
   Publication verifies the live manifest matches the validated docs, product and source identity.
 - There is no automatic semantic release, release-promotion branch, `dev -> main` flow, or second
   runtime release train.
+
+## Target files
+
+- `target_files` in the protocol crate owns target-relative user/org and read-only run addresses,
+  independent `openengine.target-files/v1` discovery, and the framed binary transfer contract.
+  File bytes never travel through OECP or graph/status receipts. Generate its schema with the
+  existing Rust testkit; generate CLI references from Clap.
+- `native_v2_files::TargetFileHost` is additive to `ArtifactRef` and `HostedWorkspaceStorage`.
+  Hosts supply explicit target identity and scope/member authorization. The disk adapter keeps
+  private immutable tree objects and atomically publishes a bounded catalog under an OS file lock.
+  Pins retain whole selections across replacement/deletion. Stable operations distinguish reusable
+  replacements, staged run inputs, request publications and final publications; released pins cannot
+  be revived, and released publication names cannot be reused. Managed publications alone populate the host-written runs namespace. Live local
+  references stay host-only. Do not resolve missing target paths against a checkout or another target.
+- Local file commands use local state. Direct targets mount the same adapter under their persistent
+  storage root; custom/hosted servers explicitly opt in with `TargetFilesMount`. Older hosts omit
+  the extension. Streaming uses bounded buffers, complete framing/digests, private staging and
+  portable member validation; links, aliases and special files are refused. In-flight transfer
+  leases protect active stages from restart reclamation. Directory capabilities anchor staging,
+  publication and cleanup to opened parents: Unix uses descriptor-relative operations; Windows
+  guards deny ancestor write/delete sharing. Transfer indexes retain original wire offsets even
+  when validated headers are canonicalized. Bound both incoming and normalized metadata/transfer
+  sizes before publication; valid JSON number encodings can expand during normalization. Response
+  bounds include separators and the envelope.
+  A complete mutation already handed to a
+  blocking worker drains to a durable result; retry its operation key after a lost response.
+- File commands add no MCP tool, run input, worker artifact field or shared skill change.

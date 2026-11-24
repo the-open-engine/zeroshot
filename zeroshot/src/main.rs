@@ -52,6 +52,11 @@ async fn run() -> Result<(), ProcessError> {
 
 async fn dispatch(command: NativeV2CliCommand) -> Result<(), ProcessError> {
     match command {
+        NativeV2CliCommand::File(command) => {
+            native_v2_target::files::execute(command, &mut std::io::stdout().lock())
+                .await
+                .map_err(ProcessError::from)
+        }
         NativeV2CliCommand::Acp { profile } => {
             serve_local_acp(profile).await.map_err(ProcessError::from)
         }
