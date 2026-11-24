@@ -38,6 +38,12 @@ impl TemporaryFile {
         self.file.sync_all()?;
         self.directory.rename_replace(&self.name, name)
     }
+
+    pub fn commit_noreplace(&self, name: &std::ffi::OsStr) -> Result<()> {
+        self.file.sync_all()?;
+        self.directory
+            .rename_noreplace(&self.name, &self.directory, name)
+    }
 }
 
 impl Drop for TemporaryFile {

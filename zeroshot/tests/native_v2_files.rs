@@ -376,3 +376,6 @@ async fn old_target_keeps_discovery_and_refuses_file_commands_before_transfer() 
 
 #[path = "native_v2_files/regressions.rs"]
 mod regressions;
+
+#[path = "native_v2_files/failures.rs"]
+mod failures;

@@ -1,15 +1,23 @@
 use std::ffi::{OsStr, OsString};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::io::AsRawHandle;
 
 use super::super::super::{Result, invalid};
 use crate::execution::platform::{self, FileAccess};
-use windows_sys::Win32::Storage::FileSystem::{
-    MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+use windows_sys::Wdk::Storage::FileSystem::{
+    FILE_RENAME_INFORMATION, FileRenameInformation, NtSetInformationFile,
 };
+use windows_sys::Win32::Foundation::RtlNtStatusToDosError;
+use windows_sys::Win32::Storage::FileSystem::{
+    DELETE, FILE_READ_ATTRIBUTES, SYNCHRONIZE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FILE_SHARE_DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+};
+use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 #[derive(Clone)]
 pub(crate) struct Directory(Arc<PinnedDirectory>);
@@ -105,41 +113,57 @@ impl Directory {
     pub fn rename_noreplace(&self, source: &OsStr, destination: &Self, name: &OsStr) -> Result<()> {
         component(source)?;
         component(name)?;
-        rename(
-            &self.0.path.join(source),
-            &destination.0.path.join(name),
-            false,
-        )
+        if self.0.path != destination.0.path {
+            return Err(invalid("file publication requires one directory"));
+        }
+        rename(&self.0.path.join(source), name, false)
     }
 
     pub fn rename_replace(&self, source: &OsStr, destination: &OsStr) -> Result<()> {
         component(source)?;
         component(destination)?;
-        rename(
-            &self.0.path.join(source),
-            &self.0.path.join(destination),
-            true,
-        )
+        rename(&self.0.path.join(source), destination, true)
     }
 }
 
-fn rename(source: &Path, destination: &Path, replace: bool) -> Result<()> {
-    let source: Vec<_> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination: Vec<_> = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-    let flags = MOVEFILE_WRITE_THROUGH
-        | if replace {
-            MOVEFILE_REPLACE_EXISTING
-        } else {
-            0
-        };
-    // Both pinned parents disallow rename/reparse mutation while these paths are in use.
-    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) } == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
+/// A simple native rename stays in the source's parent. A full Win32 destination path reopens
+/// that parent for FILE_WRITE_DATA, conflicting with the write/delete-denying directory guards.
+/// Keep the guards and avoid that reopen; do not relax sharing to make publication succeed.
+fn rename(source: &Path, name: &OsStr, replace: bool) -> Result<()> {
+    let file = OpenOptions::new()
+        .access_mode(DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(source)?;
+    platform::file_identity(&file)?;
+    let name: Vec<u16> = name.encode_wide().collect();
+    if name.contains(&0) {
+        return Err(invalid("file name contains NUL"));
     }
+    let length = std::mem::size_of::<FILE_RENAME_INFORMATION>() + name.len() * 2;
+    let length = u32::try_from(length).map_err(|_| invalid("file name exceeds limit"))?;
+    // usize storage has the structure's pointer alignment; the extra tail holds the UTF-16 name.
+    let mut buffer = vec![0_usize; (length as usize).div_ceil(std::mem::size_of::<usize>())];
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+    let mut status = IO_STATUS_BLOCK::default();
+    // SAFETY: the initialized, aligned buffer includes the complete name and remains live through
+    // this synchronous call. RootDirectory stays NULL and component() permits only a simple name.
+    let result = unsafe {
+        (*info).Anonymous.ReplaceIfExists = replace;
+        (*info).FileNameLength = (name.len() * 2) as u32;
+        std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut status,
+            info.cast(),
+            length,
+            FileRenameInformation,
+        )
+    };
+    if result < 0 {
+        return Err(io::Error::from_raw_os_error(
+            unsafe { RtlNtStatusToDosError(result) } as i32,
+        ));
+    }
+    Ok(())
 }

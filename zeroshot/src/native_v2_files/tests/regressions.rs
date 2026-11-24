@@ -7,6 +7,52 @@ use sha2::{Digest, Sha256};
 use super::*;
 
 #[test]
+fn publication_keeps_parent_guards_and_cleans_stages_after_collisions() {
+    let temp = tempdir();
+    let directory = paths::Directory::open(temp.path()).unwrap();
+    for value in [b"first".as_slice(), b"replacement".as_slice()] {
+        let mut staged = paths::TemporaryFile::new(&directory).unwrap();
+        staged.file.write_all(value).unwrap();
+        staged.commit(OsStr::new("catalog")).unwrap();
+        assert_eq!(std::fs::read(temp.path().join("catalog")).unwrap(), value);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            FILE_WRITE_DATA,
+        };
+        let error = std::fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_DATA)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(temp.path())
+            .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(32), "parent must remain guarded");
+    }
+    let source = temp.path().join("source");
+    std::fs::create_dir_all(source.join("empty")).unwrap();
+    std::fs::write(source.join("payload"), b"complete bytes").unwrap();
+    let mut transfer = tempfile::tempfile().unwrap();
+    pack(&source, &mut transfer).unwrap();
+    transfer::unpack_at(&mut transfer, &directory, OsStr::new("output")).unwrap();
+    assert!(transfer::unpack_at(&mut transfer, &directory, OsStr::new("output")).is_err());
+    assert_eq!(
+        std::fs::read(temp.path().join("output/payload")).unwrap(),
+        b"complete bytes"
+    );
+    assert!(temp.path().join("output/empty").is_dir());
+    let mut file = tempfile::tempfile().unwrap();
+    file.write_all(&bytes(b"must not replace the tree"))
+        .unwrap();
+    assert!(transfer::unpack_at(&mut file, &directory, OsStr::new("output")).is_err());
+    let mut entries: Vec<_> = directory.entries().unwrap().map(Result::unwrap).collect();
+    entries.sort();
+    assert_eq!(entries, ["catalog", "output", "source"]);
+}
+
+#[test]
 fn noncanonical_headers_keep_original_offsets_for_extraction_and_projection() {
     let temp = tempdir();
     let mut transfer = tempfile::tempfile().unwrap();

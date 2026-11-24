@@ -56,7 +56,8 @@ fn policy() -> Arc<dyn FileAuthorizer> {
     })
 }
 fn store(root: &Path) -> DiskFileStore {
-    DiskFileStore::open(root.join("store"), "target-one".to_owned(), policy()).assert_value()
+    DiskFileStore::open(root.join("store"), "target-one".to_owned(), policy())
+        .unwrap_or_else(|error| panic!("open disk file store: {error:?}"))
 }
 fn bytes(value: &[u8]) -> Vec<u8> {
     let temp = tempdir();

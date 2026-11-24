@@ -352,14 +352,27 @@ pub(super) fn unpack_at(
 ) -> Result<()> {
     input.rewind()?;
     let index = copy_validated(input, &mut std::io::sink(), &mut |_| Ok(()))?;
-    let stage = StageDirectory::new(parent)?;
-    for indexed in index {
-        let path = if indexed.entry.path.as_str().is_empty() {
-            "tree".to_owned()
-        } else {
-            format!("tree/{}", indexed.entry.path.as_str())
-        };
-        let (parents, leaf) = path.rsplit_once('/').unwrap_or(("", &path));
+    if let FileEntryKind::File { byte_length } = index[0].entry.kind {
+        let mut stage = paths::TemporaryFile::new(parent)?;
+        input.seek(SeekFrom::Start(index[0].input_offset))?;
+        copy_body(input, &mut stage.file, byte_length.get())?;
+        return stage.commit_noreplace(name);
+    }
+    unpack_directory(input, parent, name, index)
+}
+
+fn unpack_directory(
+    input: &mut File,
+    parent: &paths::Directory,
+    name: &std::ffi::OsStr,
+    index: Vec<IndexedEntry>,
+) -> Result<()> {
+    let mut stage = StageDirectory::new(parent)?;
+    // The private sibling stage is the tree root, so publication renames within one parent.
+    // Windows can then retain its parent guards without reopening that parent for write access.
+    for indexed in index.into_iter().skip(1) {
+        let path = indexed.entry.path.as_str();
+        let (parents, leaf) = path.rsplit_once('/').unwrap_or(("", path));
         let mut directory = stage.directory.as_ref().expect("live stage").clone();
         for component in parents.split('/').filter(|part| !part.is_empty()) {
             directory = directory.child(std::ffi::OsStr::new(component))?;
@@ -377,11 +390,9 @@ pub(super) fn unpack_at(
             }
         }
     }
-    stage
-        .directory
-        .as_ref()
-        .expect("live stage")
-        .rename_noreplace(std::ffi::OsStr::new("tree"), parent, name)
+    // Release the stage's own delete-denying guard; its parent remains pinned through publication.
+    stage.directory.take();
+    parent.rename_noreplace(&stage.name, parent, name)
 }
 
 struct StageDirectory {

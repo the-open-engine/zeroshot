@@ -1,10 +1,8 @@
 use super::*;
 use openengine_cluster_protocol::{
     FILE_TREE_MAGIC, MAX_FILE_ENTRIES, MAX_FILE_METADATA_BYTES, TARGET_FILES_PATH,
-    TargetAuthentication, TargetDiscoveryDocument, TargetFilesDiscovery,
 };
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
 
 async fn direct_fixture() -> (Fixture, Child, std::net::SocketAddr) {
     let fixture = Fixture::new();
@@ -16,7 +14,7 @@ async fn direct_fixture() -> (Fixture, Child, std::net::SocketAddr) {
     (fixture, child, address)
 }
 
-async fn register(fixture: &Fixture, address: std::net::SocketAddr) {
+pub(super) async fn register(fixture: &Fixture, address: std::net::SocketAddr) {
     let output = fixture
         .command()
         .args([
@@ -97,8 +95,6 @@ async fn actual_cli_lists_a_complete_tree_at_the_metadata_limit() {
 #[tokio::test]
 async fn actual_cli_downloads_valid_noncanonical_headers_without_changing_file_bytes() {
     let fixture = Fixture::new();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
     let payload = b"binary bytes\0\xff\n";
     let mut tree = FILE_TREE_MAGIC.to_vec();
     let header = format!(
@@ -109,41 +105,12 @@ async fn actual_cli_downloads_valid_noncanonical_headers_without_changing_file_b
     tree.extend(payload);
     tree.extend(Sha256::digest(payload));
     tree.extend(0_u32.to_be_bytes());
-    let server = tokio::spawn(async move {
-        for _ in 0..3 {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = Vec::new();
-            while !request.ends_with(b"\r\n\r\n") {
-                request.push(socket.read_u8().await.unwrap());
-                assert!(request.len() <= 32768);
-            }
-            let (content_type, response) = if request.starts_with(b"GET ") {
-                let mut discovery = TargetDiscoveryDocument::direct(TargetAuthentication::None)
-                    .with_run_sizes(zeroshot_engine::native_v2_hosting::host_run_sizes());
-                discovery.extensions.files = Some(TargetFilesDiscovery {
-                    kind: openengine_cluster_protocol::TARGET_FILES_KIND.to_owned(),
-                });
-                ("application/json", serde_json::to_vec(&discovery).unwrap())
-            } else {
-                assert!(request.starts_with(format!("POST {TARGET_FILES_PATH} ").as_bytes()));
-                let head = String::from_utf8(request).unwrap();
-                let length: usize = head
-                    .lines()
-                    .find_map(|line| {
-                        let (key, value) = line.split_once(':')?;
-                        key.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse().unwrap())
-                    })
-                    .unwrap();
-                let mut body = vec![0; length];
-                socket.read_exact(&mut body).await.unwrap();
-                (TARGET_FILES_MEDIA_TYPE, tree.clone())
-            };
-            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).as_bytes()).await.unwrap();
-            socket.write_all(&response).await.unwrap();
-            socket.shutdown().await.unwrap();
-        }
-    });
+    let mut response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {TARGET_FILES_MEDIA_TYPE}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        tree.len()
+    ).into_bytes();
+    response.extend(tree);
+    let (address, server) = super::failures::download_server(response).await;
     register(&fixture, address).await;
     let destination = fixture.root.path().join("output");
     fixture

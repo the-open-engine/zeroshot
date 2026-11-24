@@ -20,7 +20,7 @@ async fn optional_file_mount_preserves_existing_host_authentication_before_body_
             tenant: "test-target".to_owned(),
         }),
     )
-    .assert_value();
+    .unwrap_or_else(|error| panic!("open target file store: {error:?}"));
     let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
     let address = listener.local_addr().assert_value();
     let server = NativeV2TargetServer::new_hosted(
