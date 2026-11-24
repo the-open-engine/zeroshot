@@ -124,6 +124,25 @@ async fn prepare_server_with_output(
             server
         }
     };
+    let server = if config.bootstrap_key_file.is_none() {
+        let host = zeroshot_engine::native_v2_files::DiskFileStore::open(
+            config.storage.join("files"),
+            "direct-target".to_owned(),
+            Arc::new(zeroshot_engine::native_v2_files::SingleAccountFiles {
+                principal: "direct-target".to_owned(),
+                tenant: "direct-target".to_owned(),
+            }),
+        )?;
+        server.with_files(
+            zeroshot_engine::native_v2_target_authority::TargetFilesMount {
+                target: "direct-target".to_owned(),
+                host: Arc::new(host),
+                transfers: config.storage.join("file-transfers"),
+            },
+        )?
+    } else {
+        server
+    };
     Ok((Arc::new(server), listener))
 }
 
