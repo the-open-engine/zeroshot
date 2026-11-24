@@ -720,7 +720,15 @@ async fn recovered_removal_precedes_same_second_ambiguity_on_the_new_admission()
     let provider = admission(root.path(), "/bin/cat \"$HOME/enqueue-dynamic.json\"");
     enqueue_accepted(&provider).await;
     set_policy(root.path(), recovery_policy(false));
-    set_conflict_removal(root.path(), "REMOVAL_B");
+    let mut outcome = removed_queue_candidate(
+        "2026-11-09T01:30:00Z",
+        "merge_conflict",
+        vec![check_run("old-queue-check", "IN_PROGRESS", None, true)],
+    );
+    outcome["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"][0]["id"] =
+        json!("REMOVAL_B");
+    let outcome_path = root.path().join("queue-outcome.json");
+    std::fs::write(&outcome_path, json!([outcome.clone()]).to_string()).assert_value();
     let mut receipt = enqueue_response();
     receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["id"] = json!("ENTRY_B_NEW");
     receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["enqueuedAt"] =
@@ -733,6 +741,16 @@ async fn recovered_removal_precedes_same_second_ambiguity_on_the_new_admission()
     conflict["data"]["repository"]["pullRequest"]["mergeable"] = json!("CONFLICTING");
     conflict["data"]["repository"]["pullRequest"]["mergeStateStatus"] = json!("DIRTY");
     set_policy(root.path(), conflict);
+    assert_eq!(
+        inspect(&provider).await,
+        SourceReviewState::Open {
+            checks: SourceChecks::Pending
+        }
+    );
+    // The old queue commit may finish after readmission, without becoming current evidence.
+    outcome["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"][0]["beforeCommit"]["statusCheckRollup"]
+        ["contexts"]["nodes"][0] = check_run("old-queue-check", "COMPLETED", Some("FAILURE"), true);
+    std::fs::write(outcome_path, json!([outcome]).to_string()).assert_value();
     assert_eq!(
         inspect(&provider).await,
         SourceReviewState::Open {

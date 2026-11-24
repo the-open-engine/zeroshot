@@ -92,11 +92,11 @@ pub(in super::super) async fn observe_removal(
         .api(&review_query_arguments(review, OUTCOME_QUERY)?, credential)
         .await?;
     if let Some((removal, checks)) = removed_candidate(value, review, &admission)? {
+        if recovered_removals.contains(&removal.id) {
+            return recovery::pending(snapshot);
+        }
         let checks = policy::queue_check_failures(Value::Array(checks))?;
         if removal.reason == "merge_conflict" && checks.is_none() {
-            if recovered_removals.contains(&removal.id) {
-                return recovery::pending(snapshot);
-            }
             if removal.removed_at == admission.enqueued_at {
                 return Err(SourceDeliveryError::api(
                     None,
