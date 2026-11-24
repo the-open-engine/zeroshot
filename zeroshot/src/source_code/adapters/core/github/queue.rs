@@ -5,14 +5,17 @@ use serde_json::Value;
 type QueueIdentity = (String, String, String, String, String);
 type Submission = Result<QueueAdmission, api::CommandFailure>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct QueueAdmission {
+    entry_id: String,
     enqueued_at: time::OffsetDateTime,
     pull_request_id: String,
 }
 
 mod outcome;
+mod recovery;
 pub(super) use outcome::observe_removal;
+pub(super) use recovery::{RecoveryPolicy, recovery_policy};
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct QueueEffects(Arc<tokio::sync::Mutex<BTreeMap<QueueIdentity, QueueEffect>>>);
@@ -22,6 +25,8 @@ struct QueueEffect {
     task: Option<tokio::task::JoinHandle<QueueSubmission>>,
     settled: Option<Submission>,
     uncertain: bool,
+    recovered_removals: std::collections::BTreeSet<String>,
+    recoverable: Option<String>,
 }
 
 #[derive(Debug)]
@@ -79,7 +84,7 @@ pub(super) async fn enqueue(
     if let Some(effect) = effects.get_mut(&key) {
         if effect.task.is_some()
             || effect.settled.as_ref().is_some_and(|result| {
-                result.is_ok()
+                result.is_ok() && effect.recoverable.is_none()
                     || matches!(result, Err(failure) if failure.error.cleanup_unconfirmed()
                     || uncertain_submission(&failure.error) && !failure.error.retryable_operation()
                         && failure.rejection != Some(api::MutationRejection::RequiredCheckQueued))
@@ -90,6 +95,16 @@ pub(super) async fn enqueue(
     }
     {
         let uncertain = effects.get(&key).is_some_and(|effect| effect.uncertain);
+        let mut recovered_removals = effects
+            .get(&key)
+            .map(|effect| effect.recovered_removals.clone())
+            .unwrap_or_default();
+        if let Some(removal) = effects
+            .get(&key)
+            .and_then(|effect| effect.recoverable.clone())
+        {
+            recovered_removals.insert(removal);
+        }
         let mut command = mutation(authority, ENQUEUE, node_id, credential)
             .map_err(api::CommandFailure::unknown)?;
         command.args(["-f", &format!("expectedHeadOid={}", review.head_revision)]);
@@ -124,6 +139,8 @@ pub(super) async fn enqueue(
                 task: Some(task),
                 settled: None,
                 uncertain,
+                recovered_removals,
+                recoverable: None,
             },
         );
     }
@@ -165,6 +182,7 @@ fn confirm_receipt(
         && pull.get("headRefOid").and_then(Value::as_str) == Some(review.head_revision.as_str());
     valid
         .then_some(QueueAdmission {
+            entry_id: entry["id"].as_str().ok_or_else(invalid_receipt)?.to_owned(),
             enqueued_at: queue_timestamp(&entry["enqueuedAt"]).ok_or_else(invalid_receipt)?,
             pull_request_id: node_id.to_owned(),
         })

@@ -840,6 +840,7 @@ exec /bin/cat "$HOME/payload"
         .as_bytes()
     );
     let mut snapshot = PolicySnapshot {
+        queue_recovery: None,
         pull_request_id: "PR_node_17".to_owned(),
         is_in_merge_queue: false,
         auto_merge_enabled: false,

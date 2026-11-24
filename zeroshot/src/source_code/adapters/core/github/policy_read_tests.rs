@@ -29,6 +29,11 @@ fn fixture(root: &Path, stage: &str, failures: usize) -> GhCliDeliveryAuthority 
         super::queue_tests::enqueue_response().to_string(),
     )
     .unwrap();
+    std::fs::write(root.join("queue-outcome.json"), json!([{"data":{"repository":{
+        "nameWithOwner":"acme/project","pullRequest":{"id":"PR_node_17","number":17,
+            "baseRefName":"main","headRefName":review().head_branch,"headRefOid":review().head_revision,
+            "timelineItems":{"nodes":[]}}
+    }}}]).to_string()).unwrap();
     let program = root.join("gh-policy-read");
     write_executable(
         &program,
@@ -38,6 +43,7 @@ set -eu
 case "$2" in
 graphql)
     case "$*" in
+    *'query QueueOutcome('*) /bin/cat "$HOME/queue-outcome.json"; exit 0 ;;
     *enqueuePullRequest*) printf '%s\n' call >> "$HOME/mutations"; printf '%s\n' "$@" >> "$HOME/enqueue-args"; /bin/cat "$HOME/enqueue.json"; exit 0 ;;
     *'query MergePolicy'*) stage=method ;;
     *'query($owner:'*) stage=snapshot ;;
@@ -433,7 +439,7 @@ async fn policy_read_recovery_preserves_exact_head_queue_admission() {
                         )
                         .await
                         .unwrap(),
-                    SourceMergeRequestOutcome::Accepted
+                    SourceMergeRequestOutcome::Pending
                 );
             }
             "blocked" => assert_eq!(result.unwrap(), SourceMergeRequestOutcome::Pending),
