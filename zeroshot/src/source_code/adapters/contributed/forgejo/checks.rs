@@ -107,8 +107,9 @@ async fn observe_with_rule(
 }
 
 /// Reads the pull request again while `mergeable` is false. `None` means it stayed false through
-/// every read; a read that disagrees with the pull it is rechecking is a temporary API error, so
-/// delivery observes again rather than deciding from two answers that do not describe one pull.
+/// every read; a read that disagrees in state, head revision, target branch or target repository is
+/// a temporary API error, so delivery observes again rather than deciding from two answers that do
+/// not describe one pull.
 async fn recheck_mergeability(
     authority: &ForgejoDeliveryAuthority,
     repository: &str,
@@ -145,6 +146,34 @@ async fn recheck_mergeability(
                     pull.number,
                     wire::revision_identity(&observed.head.sha),
                     wire::revision_identity(&pull.head.sha),
+                ),
+            )
+            .temporary());
+        }
+        if observed.base.reference != pull.base.reference {
+            return Err(SourceDeliveryError::api(
+                None,
+                format!(
+                    "Forgejo pull request {} returned {} as its target branch while its mergeability was rechecked, instead of {}",
+                    pull.number,
+                    wire::branch_identity(&observed.base.reference),
+                    wire::branch_identity(&pull.base.reference),
+                ),
+            )
+            .temporary());
+        }
+        if observed
+            .base
+            .repo
+            .as_ref()
+            .map(|repo| repo.full_name.as_str())
+            != pull.base.repo.as_ref().map(|repo| repo.full_name.as_str())
+        {
+            return Err(SourceDeliveryError::api(
+                None,
+                format!(
+                    "Forgejo pull request {} returned another target repository while its mergeability was rechecked",
+                    pull.number,
                 ),
             )
             .temporary());

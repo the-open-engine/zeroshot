@@ -505,3 +505,25 @@ async fn k16_pattern_matching_line_bounds_and_token_redaction() {
     assert!(diagnostic.contains("[REDACTED]"), "{diagnostic}");
     assert!(diagnostic.starts_with("ci-1: failure: "), "{diagnostic}");
 }
+
+/// K18: a pull retargeted during the recheck is a temporary error, and the recheck stops at the
+/// first read it makes.
+#[tokio::test]
+async fn k18_a_pull_retargeted_during_the_recheck_is_a_temporary_error() {
+    let mut retargeted = pull_value(true, false);
+    retargeted["base"] = json!({ "ref": "other-branch", "sha": BASE_REVISION });
+    let fixture = Fixture::new().await;
+    fixture.queue(Response::json(retargeted));
+
+    tokio::time::pause();
+    let error = observe(&fixture, &pull(false, false)).await.assert_error();
+    let text = format!("{error}");
+    assert!(
+        text.contains("as its target branch while its mergeability was rechecked"),
+        "{text}"
+    );
+
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests.assert_at(0).uri, PULL_URI, "{requests:?}");
+}

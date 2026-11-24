@@ -87,9 +87,9 @@ pub(super) async fn request(
         return Ok(SourceMergeRequestOutcome::Pending);
     }
     if context.record_exists()? {
-        // The recorded attempt is unconfirmed, and this read shows the pull is not merged. Forgejo
-        // merges synchronously, so that attempt did not merge; releasing the record lets a later
-        // call make the write.
+        // The recorded attempt is unconfirmed, and this read shows the pull is not merged. Releasing
+        // the record lets a later call write again: that write is pinned to the same reviewed head,
+        // and a pull the earlier attempt merged meanwhile is confirmed by the next read.
         context.release()?;
         return Ok(SourceMergeRequestOutcome::Pending);
     }
@@ -142,10 +142,16 @@ pub(super) async fn withdraw(
             merge_revision: review::merged_revision(&pull)?,
         });
     }
-    // Forgejo merges synchronously and this adapter never schedules a deferred merge, so an
-    // unconfirmed record describes an attempt that cannot still merge later.
+    // An unconfirmed attempt may still be running on the server, so only a later merged read or a
+    // settled write can release it.
     if context.record_exists()? {
-        context.release()?;
+        return Err(SourceDeliveryError::api(
+            None,
+            format!(
+                "Forgejo merge settlement remains uncertain for {}; no repair handoff is authorized",
+                context.identity()
+            ),
+        ));
     }
     Ok(SourceMergeWithdrawal::Withdrawn)
 }

@@ -12,8 +12,8 @@ use openengine_cluster_protocol::SourceForgeBaseUrl;
 use openengine_cluster_testkit::assertions::{AssertAt, AssertError, AssertSlice, AssertValue, JsonAt};
 
 use crate::source_code_provider::{
-    SourceConflictRequest, SourceDeliveryCredential, SourceMergeRequestOutcome,
-    SourceMergeWithdrawal, SourceReviewReceipt,
+    SourceConflictRequest, SourceDeliveryCredential, SourceDeliveryError,
+    SourceMergeRequestOutcome, SourceMergeWithdrawal, SourceReviewReceipt,
 };
 
 use super::api::{Api, PAGE_SIZE};
@@ -847,9 +847,9 @@ async fn m12_merge_style_prefers_the_default_then_the_allowed_order() {
 }
 
 /// M13: `withdraw` of a merged pull request returns `Merged` with its revision; of an open one it
-/// returns `Withdrawn` and removes the record.
+/// returns `Withdrawn` when no attempt is recorded.
 #[tokio::test]
-async fn m13_withdraw_reports_a_merged_pull_request_and_releases_an_open_one() {
+async fn m13_withdraw_reports_a_merged_pull_request_and_an_open_one_without_a_record() {
     let fixture = Fixture::new().await;
     let authority = new_authority(&fixture).await;
     fixture
@@ -878,26 +878,65 @@ async fn m13_withdraw_reports_a_merged_pull_request_and_releases_an_open_one() {
     );
     assert!(!recorded(&authority), "nothing was recorded to release");
 
-    // An attempt that is still held is released by the withdrawal, so it cannot merge later.
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    assert!(writes(&requests).is_empty(), "{requests:?}");
+    for request in requests.assert_slice(1..3) {
+        assert_eq!(request.uri, PULL_URI, "{requests:?}");
+    }
+}
+
+/// M21: `withdraw` of an open pull request that still holds an unconfirmed attempt keeps the record
+/// and reports the settlement uncertain rather than releasing it.
+#[tokio::test]
+async fn m21_withdraw_keeps_an_unconfirmed_attempt_and_reports_it_uncertain() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
     remember(&authority);
-    fixture.queue(open_pull(REVISION).response());
+    fixture
+        .queue(version())
+        .queue(open_pull(REVISION).response());
+
+    let error = merge::withdraw(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    let text = match &error {
+        SourceDeliveryError::Api(failure) => format!("{failure}"),
+        other => panic!("expected an API error, got {other:?}"),
+    };
+    assert!(
+        text.starts_with("Forgejo merge settlement remains uncertain for"),
+        "{text}"
+    );
+    assert!(text.contains("no repair handoff is authorized"), "{text}");
+    assert!(
+        recorded(&authority),
+        "the unconfirmed attempt stays recorded"
+    );
+
+    let requests = fixture.requests();
+    assert!(writes(&requests).is_empty(), "{requests:?}");
+}
+
+/// M22: `withdraw` of an unconfirmed-recorded open pull request that a later read shows merged
+/// returns `Merged` and releases nothing.
+#[tokio::test]
+async fn m22_withdraw_after_an_unconfirmed_attempt_reports_a_later_merge() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    remember(&authority);
+    fixture
+        .queue(version())
+        .queue(merged_pull(REVISION).response());
+
     assert_eq!(
         merge::withdraw(&authority, &receipt(), credential())
             .await
             .assert_value(),
-        SourceMergeWithdrawal::Withdrawn
+        SourceMergeWithdrawal::Merged {
+            merge_revision: MERGE_REVISION.to_owned(),
+        }
     );
-    assert!(
-        !recorded(&authority),
-        "an unconfirmed attempt cannot merge later"
-    );
-
-    let requests = fixture.requests();
-    assert_eq!(requests.len(), 4, "{requests:?}");
-    assert!(writes(&requests).is_empty(), "{requests:?}");
-    for request in requests.assert_slice(1..4) {
-        assert_eq!(request.uri, PULL_URI, "{requests:?}");
-    }
 }
 
 /// M14: conflict materialization reports the missing transport, and an absent target branch is an
