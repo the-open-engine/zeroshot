@@ -230,9 +230,10 @@ fn private_copy(entry: &mut Value) -> Option<RenewableLogin> {
     if expires == 0.0 {
         return None;
     }
+    // Without an access token there is nothing to renew: the login moves unchanged.
+    let access = value.get("access")?.as_str()?.to_owned();
     value.insert("refresh".to_owned(), Value::String(String::new()));
     value.insert("expires".to_owned(), Value::from(0));
-    let access = value.get("access")?.as_str()?.to_owned();
     Some(RenewableLogin { id, access })
 }
 

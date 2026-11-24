@@ -8,7 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[test]
 fn an_empty_configuration_denies_session_move() {
     let mut config = json!({});
-    command::deny_session_move(&mut config);
+    command::deny_session_move(&mut config).assert_value();
     assert_eq!(
         config,
         json!({"permission": {"opencode_session_move": "deny"}})
@@ -18,7 +18,7 @@ fn an_empty_configuration_denies_session_move() {
 #[test]
 fn a_string_permission_becomes_the_wildcard_rule() {
     let mut config = json!({"permission": "allow"});
-    command::deny_session_move(&mut config);
+    command::deny_session_move(&mut config).assert_value();
     assert_eq!(
         config,
         json!({"permission": {"*": "allow", "opencode_session_move": "deny"}})
@@ -28,11 +28,23 @@ fn a_string_permission_becomes_the_wildcard_rule() {
 #[test]
 fn a_node_permission_keeps_its_rules_but_cannot_allow_session_move() {
     let mut config = json!({"permission": {"bash": "ask", "opencode_session_move": "allow"}});
-    command::deny_session_move(&mut config);
+    command::deny_session_move(&mut config).assert_value();
     assert_eq!(
         config,
         json!({"permission": {"bash": "ask", "opencode_session_move": "deny"}})
     );
+}
+
+#[test]
+fn any_other_permission_value_is_refused() {
+    for permission in [json!(["allow"]), json!(1), json!(true)] {
+        let mut config = json!({"permission": permission});
+        let error = command::deny_session_move(&mut config).expect_err("must refuse");
+        assert!(
+            matches!(&error, NodeRunnerError::DriverDetail(detail) if detail.contains("permission")),
+            "{error:?}"
+        );
+    }
 }
 
 #[test]

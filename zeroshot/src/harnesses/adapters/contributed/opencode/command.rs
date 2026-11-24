@@ -162,7 +162,7 @@ pub(super) fn command(
         }
     }
     configure_provider(adapter, invocation, &mut environment, &mut config)?;
-    deny_session_move(&mut config);
+    deny_session_move(&mut config)?;
     environment.insert(
         "OPENCODE_CONFIG_CONTENT".to_owned(),
         serde_json::to_string(&config).map_err(|_| NodeRunnerError::Driver)?,
@@ -373,22 +373,26 @@ fn merge_options(target: &mut Value, options: &Value) {
 /// A managed session keeps the working directory Zeroshot assigned, so OpenCode's
 /// `opencode_session_move` tool is denied: it then leaves the direct tool list, the Code Mode
 /// catalog and `search`. Other rules of a node's own `permission` value stay; a string value
-/// becomes the wildcard rule.
-pub(super) fn deny_session_move(config: &mut Value) {
+/// becomes the wildcard rule. Any other `permission` value is refused instead of being dropped.
+pub(super) fn deny_session_move(config: &mut Value) -> Result<(), NodeRunnerError> {
     const TOOL: &str = "opencode_session_move";
-    let Some(object) = config.as_object_mut() else {
-        return;
-    };
+    let object = config.as_object_mut().ok_or(NodeRunnerError::Driver)?;
     let mut rules = match object.remove("permission") {
         Some(Value::Object(rules)) => rules,
         Some(Value::String(all)) => {
             serde_json::Map::from_iter([("*".to_owned(), Value::String(all))])
         }
-        _ => serde_json::Map::new(),
+        None | Some(Value::Null) => serde_json::Map::new(),
+        Some(_) => {
+            return Err(NodeRunnerError::DriverDetail(
+                "OpenCode permission must be a rule object or a single action".to_owned(),
+            ));
+        }
     };
     rules.remove(TOOL);
     rules.insert(TOOL.to_owned(), json!("deny"));
     object.insert("permission".to_owned(), Value::Object(rules));
+    Ok(())
 }
 
 fn inline_configuration(environment: &BTreeMap<String, String>) -> Result<Value, NodeRunnerError> {

@@ -123,8 +123,7 @@ pub(super) fn owned(command: &ProcessSessionCommand, home: &Path) -> Vec<String>
     ids
 }
 
-pub(super) fn reset(home: &Path, scratch: &Path) -> io::Result<()> {
-    remove_dir_all_if_exists(&home.join("zeroshot-plugins").join("expected"))?;
+pub(super) fn reset(scratch: &Path) -> io::Result<()> {
     remove_dir_all_if_exists(&scratch.join("zeroshot-plugins"))
 }
 

@@ -35,7 +35,6 @@ fn profile(directory: &TestDirectory, config: Value) -> BTreeMap<String, String>
     .collect();
     environment.extend([
         ("OPENCODE_DISABLE_MODELS_FETCH".to_owned(), "1".to_owned()),
-        ("OPENCODE_DISABLE_LSP_DOWNLOAD".to_owned(), "1".to_owned()),
         ("OPENCODE_CONFIG_CONTENT".to_owned(), config.to_string()),
     ]);
     environment
@@ -232,9 +231,13 @@ async fn provider(
     }
 }
 
-/// Parent process id of every live process, and the id of a lister process to ignore.
+/// A live process: its id and its start time. The start time keeps a reused id from passing for
+/// a process seen earlier.
+type Process = (u32, u64);
+
+/// Parent id and start time of every live process, and the id of a lister process to ignore.
 #[cfg(target_os = "linux")]
-fn process_table() -> (BTreeMap<u32, u32>, Option<u32>) {
+fn process_table() -> (BTreeMap<u32, Process>, Option<u32>) {
     let mut table = BTreeMap::new();
     for entry in std::fs::read_dir("/proc").assert_value().flatten() {
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
@@ -243,30 +246,30 @@ fn process_table() -> (BTreeMap<u32, u32>, Option<u32>) {
         let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
             continue;
         };
-        // The command name may contain spaces; the fields after its closing parenthesis are fixed.
+        // The command name may contain spaces; the fields after its closing parenthesis are fixed:
+        // the parent id is the second of them and the start time the twentieth.
         let Some((_, fields)) = stat.rsplit_once(')') else {
             continue;
         };
-        if let Some(parent) = fields
-            .split_whitespace()
-            .nth(1)
-            .and_then(|value| value.parse().ok())
-        {
-            table.insert(pid, parent);
+        let fields = fields.split_whitespace().collect::<Vec<_>>();
+        let parent = fields.get(1).and_then(|value| value.parse().ok());
+        let started = fields.get(19).and_then(|value| value.parse().ok());
+        if let (Some(parent), Some(started)) = (parent, started) {
+            table.insert(pid, (parent, started));
         }
     }
     (table, None)
 }
 
-/// Parent process id of every live process, and the id of the PowerShell lister to ignore.
+/// Parent id and start time of every live process, and the id of the PowerShell lister to ignore.
 #[cfg(windows)]
-fn process_table() -> (BTreeMap<u32, u32>, Option<u32>) {
+fn process_table() -> (BTreeMap<u32, Process>, Option<u32>) {
     let output = std::process::Command::new("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "$PID; Get-CimInstance Win32_Process | ForEach-Object { '{0} {1}' -f $_.ProcessId, $_.ParentProcessId }",
+            "$PID; Get-CimInstance Win32_Process | ForEach-Object { $started = if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }; '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $started }",
         ])
         .output()
         .assert_value();
@@ -276,33 +279,44 @@ fn process_table() -> (BTreeMap<u32, u32>, Option<u32>) {
     let lister = lines.next().and_then(|line| line.trim().parse().ok());
     let table = lines
         .filter_map(|line| {
-            let (pid, parent) = line.trim().split_once(' ')?;
-            Some((pid.parse().ok()?, parent.parse().ok()?))
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse().ok()?;
+            let parent = fields.next()?.parse().ok()?;
+            let started = fields.next()?.parse().ok()?;
+            Some((pid, (parent, started)))
         })
         .collect();
     (table, lister)
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn process_table() -> (BTreeMap<u32, u32>, Option<u32>) {
+fn process_table() -> (BTreeMap<u32, Process>, Option<u32>) {
     panic!("the native process lifecycle is proven on Linux and Windows");
 }
 
-/// Every live descendant of the test process, without the lister and its own children.
-fn descendants_in(table: &BTreeMap<u32, u32>, lister: Option<u32>) -> BTreeSet<u32> {
+/// Every live descendant of the test process, without the lister and its own children. A process
+/// counts as a child only when it started after its parent: Windows keeps the parent id of an
+/// exited parent, and that id may meanwhile belong to another process.
+fn descendants_in(table: &BTreeMap<u32, Process>, lister: Option<u32>) -> BTreeSet<Process> {
+    let current = std::process::id();
     let mut found = BTreeSet::new();
-    let mut frontier = vec![std::process::id()];
-    while let Some(parent) = frontier.pop() {
-        for (&pid, &owner) in table {
-            if owner == parent && pid != parent && Some(pid) != lister && found.insert(pid) {
-                frontier.push(pid);
+    let mut frontier = vec![(current, table.get(&current).map_or(0, |entry| entry.1))];
+    while let Some((parent, parent_started)) = frontier.pop() {
+        for (&pid, &(owner, started)) in table {
+            if owner == parent
+                && pid != parent
+                && started >= parent_started
+                && Some(pid) != lister
+                && found.insert((pid, started))
+            {
+                frontier.push((pid, started));
             }
         }
     }
     found
 }
 
-fn descendants() -> BTreeSet<u32> {
+fn descendants() -> BTreeSet<Process> {
     let (table, lister) = process_table();
     descendants_in(&table, lister)
 }
@@ -336,7 +350,7 @@ fn holders(_marker: &str) -> Vec<u32> {
 
 /// Waits up to ten seconds until no process seen during the turn is alive and the test process
 /// has no descendant left; on Linux no process may carry the node directory in its environment.
-async fn assert_no_session_process(during: &BTreeSet<u32>, directory: &TestDirectory) {
+async fn assert_no_session_process(during: &BTreeSet<Process>, directory: &TestDirectory) {
     let marker = directory.path().to_string_lossy().into_owned();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -344,7 +358,7 @@ async fn assert_no_session_process(during: &BTreeSet<u32>, directory: &TestDirec
         let alive = during
             .iter()
             .copied()
-            .filter(|pid| table.contains_key(pid))
+            .filter(|(pid, started)| table.get(pid).map(|entry| entry.1) == Some(*started))
             .collect::<Vec<_>>();
         let children = descendants_in(&table, lister);
         let holding = holders(&marker);
@@ -363,7 +377,7 @@ async fn assert_no_session_process(during: &BTreeSet<u32>, directory: &TestDirec
 async fn first_request<F>(
     requests: &mut mpsc::UnboundedReceiver<String>,
     execution: &mut F,
-) -> BTreeSet<u32>
+) -> BTreeSet<Process>
 where
     F: std::future::Future<Output = Result<WorkerOutcome, NodeRunnerError>> + Unpin,
 {

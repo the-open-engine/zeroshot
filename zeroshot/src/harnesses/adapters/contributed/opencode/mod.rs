@@ -229,7 +229,7 @@ impl OpenCodeAdapter {
                 .scratch_text()
                 .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
         );
-        plugin::reset(turn.files.home(), &scratch).map_err(|_| {
+        plugin::reset(&scratch).map_err(|_| {
             NodeRunnerError::DriverDetail("OpenCode plugin state could not be reset".to_owned())
         })?;
         let mut command = command::command(command::CommandRequest {
