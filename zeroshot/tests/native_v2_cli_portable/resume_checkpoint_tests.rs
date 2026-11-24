@@ -263,6 +263,8 @@ fn assert_suspended_resume(sdk: bool, interrupted: bool) {
     );
 }
 
+// Abrupt controller loss relies on the Linux supervisor or Windows Jobs to clean up workers.
+#[cfg(any(target_os = "linux", windows))]
 #[test]
 fn python_resume_restarts_a_lost_controller_on_its_first_call_with_or_without_checkpoints() {
     for checkpoints in [true, false] {
@@ -270,11 +272,13 @@ fn python_resume_restarts_a_lost_controller_on_its_first_call_with_or_without_ch
     }
 }
 
+#[cfg(any(target_os = "linux", windows))]
 #[test]
 fn python_resume_recovers_an_interrupted_ledger_without_a_temporary_image() {
     assert_python_resume_after_controller_loss(false, true);
 }
 
+#[cfg(any(target_os = "linux", windows))]
 fn assert_python_resume_after_controller_loss(checkpoints: bool, interrupted: bool) {
     let fixture = Fixture::new().outside_workspace();
     let mut runtime: Value =
