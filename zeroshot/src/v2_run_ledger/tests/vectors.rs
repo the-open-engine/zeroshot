@@ -126,6 +126,135 @@ async fn sqlite_record_retains_order_and_identity_across_successors() {
     exercise(&ledger).await;
 }
 
+#[tokio::test]
+async fn sqlite_rewinds_round_trip_and_copy_with_released_event_json() {
+    let root = tempfile::tempdir().assert_value();
+    let path = root.path().join("rewind.sqlite3");
+    let ledger = SqliteRunLedger::open(&path).assert_value();
+    let source = RunId::new("019ae5ab-0000-7000-8000-000000000001");
+    let successor = RunId::new("019ae5ab-0000-7000-8000-000000000002");
+    let last = RunId::new("019ae5ab-0000-7000-8000-000000000003");
+    for (run, digest) in [(&source, 'a'), (&successor, 'b'), (&last, 'c')] {
+        ledger
+            .create_or_get(create(run.as_str(), run.as_str(), digest))
+            .await
+            .assert_value();
+    }
+    let checkpoint = openengine_cluster_protocol::CheckpointId::new(r#"entry"\é"#).assert_value();
+    super::super::vectors::inherit(
+        &ledger,
+        &ledger,
+        (&source, &successor),
+        Some(checkpoint.clone()),
+    )
+    .await
+    .assert_value();
+    super::super::vectors::inherit(&ledger, &ledger, (&successor, &last), None)
+        .await
+        .assert_value();
+    drop(ledger);
+
+    let reader = SqliteRunLedger::open_read_only(&path).assert_value();
+    let first = reader
+        .snapshot_and_tail(&successor, None)
+        .await
+        .assert_value()
+        .events;
+    let copy = reader
+        .snapshot_and_tail(&last, None)
+        .await
+        .assert_value()
+        .events;
+    assert_eq!(copy.len(), 2);
+    assert_eq!(first[0].event, copy[0].event);
+    let RunEvent::Vector { vector } = &first[0].event else {
+        panic!("rewind vector")
+    };
+    assert_eq!(
+        vector.content,
+        RunVectorContent::Continuation {
+            resumed_from: source,
+            checkpoint_id: Some(checkpoint.clone())
+        }
+    );
+    let RunEvent::Vector { vector } = &copy[1].event else {
+        panic!("continuation vector")
+    };
+    assert_eq!(
+        vector.content,
+        RunVectorContent::Continuation {
+            resumed_from: successor.clone(),
+            checkpoint_id: None
+        }
+    );
+
+    let db = rusqlite::Connection::open(&path).assert_value();
+    let mut expected = serde_json::to_value(&first[0].event).assert_value();
+    expected["vector"]
+        .as_object_mut()
+        .assert_value()
+        .remove("checkpointId");
+    for part in [&successor, &last] {
+        let (raw, id): (String, String) = db.query_row(
+            "SELECT event_json, continuation_checkpoint_id FROM v2_run_events WHERE run_id = ?1 AND sequence = 1",
+            [part.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).assert_value();
+        assert_eq!(serde_json::from_str::<Value>(&raw).assert_value(), expected);
+        assert_eq!(id, checkpoint.as_str());
+    }
+
+    // The bare JSON for both rows fits one page. Restoring the (escaped) checkpoint ID must
+    // move the second row to the next page. Whitespace keeps that row valid at the exact bound.
+    db.execute(
+        "UPDATE v2_run_events SET event_json = printf('%*s', ?2 - (
+            SELECT sum(octet_length(event_json)) FROM v2_run_events WHERE run_id = ?1
+        ), '') || event_json WHERE run_id = ?1 AND sequence = 2",
+        rusqlite::params![last.as_str(), super::super::MAX_REPLAY_BYTES],
+    )
+    .assert_value();
+    let bounded = reader.snapshot_and_tail(&last, None).await.assert_value();
+    assert_eq!(bounded.events, copy[..1]);
+}
+
+#[tokio::test]
+async fn read_only_pre_rewind_ledgers_replay_without_migration() {
+    let root = tempfile::tempdir().assert_value();
+    let path = root.path().join("legacy.sqlite3");
+    let run = RunId::new("successor");
+    let ledger = SqliteRunLedger::open(&path).assert_value();
+    ledger
+        .create_or_get(create(run.as_str(), "legacy", 'f'))
+        .await
+        .assert_value();
+    let event = super::super::vector_event(
+        &run,
+        RunVectorContent::Continuation {
+            resumed_from: RunId::new("source"),
+            checkpoint_id: None,
+        },
+    )
+    .assert_value();
+    ledger
+        .append(&run, vec![event.clone()])
+        .await
+        .assert_value();
+    drop(ledger);
+
+    let db = rusqlite::Connection::open(&path).assert_value();
+    for column in ["continuation_checkpoint_id", "recorded_at_ms"] {
+        db.execute_batch(&format!("ALTER TABLE v2_run_events DROP COLUMN {column}"))
+            .assert_value();
+        let reader = SqliteRunLedger::open_read_only(&path).assert_value();
+        let page = reader.snapshot_and_tail(&run, None).await.assert_value();
+        assert_eq!(page.events[0].event, event);
+        assert_eq!(
+            page.events[0].recorded_at.is_some(),
+            column != "recorded_at_ms"
+        );
+        assert!(!db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('v2_run_events') WHERE name = 'continuation_checkpoint_id')", [], |row| row.get::<_, bool>(0)).assert_value());
+    }
+}
+
 async fn exercise_long_record(ledger: &dyn RunLedger) {
     let source = RunId::new("long-source");
     let successor = RunId::new("long-successor");

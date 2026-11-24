@@ -1154,6 +1154,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   advances the run. A failed preparation can retain its own diagnostic ledger. Group lists before
   pagination. Public history cursors identify a part and its local cursor. Ledgers, snapshots,
   provider execution references, checkpoint ownership and private archive exports remain per part.
+  SQLite keeps the released continuation event JSON readable and stores an explicit rewind's
+  checkpoint ID in the same row. Replay restores the ID before applying byte bounds or copying vectors.
   Aggregate only original work and usage. Imports seed the part's replay. A live logical watch
   follows suspension, while foreground observation returns control at the current suspension.
 - Failed and suspended local and direct-target runs retain an exclusively claimable workspace for a successor
