@@ -45,6 +45,10 @@ impl NativeV2TargetServer {
         mut stream: TcpStream,
         head: RequestHead,
     ) -> io::Result<()> {
+        // Routing only peeked these bounded headers. Consume them before early replies so closing
+        // with unread headers cannot reset the peer. Authentication still precedes all body reads.
+        let mut headers = vec![0_u8; head.encoded_len];
+        tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut headers)).await??;
         let Some(mount) = &self.files else {
             return write_http_response(&mut stream, not_found_response()).await;
         };
@@ -117,8 +121,6 @@ impl NativeV2TargetServer {
                     && *length <= MAX_FILE_TRANSFER_BYTES + MAX_FILE_HEADER_BYTES as u64 + 4
             })
             .ok_or_else(|| io::Error::other("invalid file transfer length"))?;
-        let mut headers = vec![0_u8; head.encoded_len];
-        tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut headers)).await??;
         let metadata_len =
             tokio::time::timeout(Duration::from_secs(30), stream.read_u32()).await?? as usize;
         if metadata_len > MAX_FILE_HEADER_BYTES || metadata_len as u64 + 4 > length {
