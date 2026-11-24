@@ -58,6 +58,10 @@ struct NoAllocation;
 
 #[async_trait]
 impl CapsuleAllocator for NoAllocation {
+    fn retains_suspended_ledger(&self) -> bool {
+        true
+    }
+
     async fn claim_controller(
         &self,
         _run_id: &RunId,

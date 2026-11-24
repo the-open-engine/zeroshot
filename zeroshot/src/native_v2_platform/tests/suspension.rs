@@ -19,8 +19,14 @@ mod initialization;
 #[path = "suspension/request_bounds.rs"]
 mod request_bounds;
 
+#[path = "suspension/publication.rs"]
+mod publication;
+use crate::native_v2_supervisor::publication_test_store::PublicationStore;
+
 #[derive(Default)]
 struct SuspensionStore {
+    retained_ledger: bool,
+    publication: Option<Arc<PublicationStore>>,
     published: StdMutex<Vec<RunVector>>,
     /// Set when the next retained allocation restarts a failed run instead of continuing a
     /// suspended one.
@@ -55,12 +61,19 @@ impl RunCheckpointStore for SuspensionStore {
         history: &[DurableExecution],
         vectors: &[RunVector],
     ) -> Result<(), CheckpointError> {
+        if self.retained_ledger {
+            // Like local storage, suspension publishes nothing: the ledger stays authoritative.
+            return Ok(());
+        }
         assert_eq!(
             history.len(),
             1,
             "settled wait is part of the stored continuation"
         );
         *self.published.lock().assert_value() = vectors.to_vec();
+        if let Some(store) = &self.publication {
+            store.suspend(history, vectors).await?;
+        }
         Ok(())
     }
 }
@@ -75,6 +88,10 @@ struct SuspensionAllocator {
 
 #[async_trait]
 impl CapsuleAllocator for SuspensionAllocator {
+    fn retains_suspended_ledger(&self) -> bool {
+        self.store.retained_ledger
+    }
+
     fn supports_request_ask(&self) -> bool {
         true
     }
@@ -93,6 +110,9 @@ impl CapsuleAllocator for SuspensionAllocator {
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let mut capsule = self.runtime.allocate(request).await?;
         capsule.checkpoints = Some(self.store.clone());
+        if let Some(store) = &self.store.publication {
+            capsule.cleanup = store.clone();
+        }
         Ok(capsule)
     }
     async fn reserve_retained_workspace(

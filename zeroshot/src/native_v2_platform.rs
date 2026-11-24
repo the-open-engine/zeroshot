@@ -570,6 +570,8 @@ impl NativeV2PlatformController {
         }
         let mut runtime = PortableRuntime::with_cleanup(runner, cleanup);
         runtime.checkpoints = checkpoints;
+        // Steering that sees preparation must finish before an engine can publish suspension.
+        let _control = self.lock_run_control(&run_id).await;
         let engine = PortableRunEngine::start(PortableRunEngineBootstrap {
             wait_policy: self.allocator.suspension_policy().unwrap_or_default(),
             run_id: run_id.clone(),
@@ -683,15 +685,40 @@ impl NativeV2PlatformController {
                 successor.as_str()
             )));
         }
-        crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params)
-            .await
-            .map_err(|error| match error {
-                // The ledger refuses a steer by run state: the caller's to correct.
-                RunLedgerError::InvalidEvent(message) => {
-                    NativeV2PlatformError::InvalidRequest(message.to_owned())
+        let engine = if self.allocator.retains_suspended_ledger() {
+            None
+        } else {
+            let runtime = self.runtimes.lock().await.get(&params.run_id).cloned();
+            match runtime {
+                Some(RuntimeSlot::Running(engine)) => Some(engine),
+                _ => {
+                    if self
+                        .ledger
+                        .get(&params.run_id)
+                        .await?
+                        .is_some_and(|stored| {
+                            stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+                        })
+                    {
+                        return Err(NativeV2PlatformError::InvalidRequest(
+                            crate::native_v2_supervisor::SUSPENSION_STEER_RETRY.to_owned(),
+                        ));
+                    }
+                    None
                 }
-                error => error.into(),
-            })
+            }
+        };
+        let result = match engine {
+            Some(engine) => engine.steer(params).await,
+            None => crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params).await,
+        };
+        result.map_err(|error| match error {
+            // The ledger refuses a steer by run state: the caller's to correct.
+            RunLedgerError::InvalidEvent(message) => {
+                NativeV2PlatformError::InvalidRequest(message.to_owned())
+            }
+            error => error.into(),
+        })
     }
 
     pub async fn suspend(
