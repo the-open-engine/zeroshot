@@ -153,17 +153,18 @@ impl RunLineage {
 }
 
 /// Ledger cursors contain no '@'. Splitting from the right also admits older non-UUID run IDs.
-pub(crate) fn part_cursor(part: &RunId, cursor: &Cursor) -> Cursor {
+pub fn part_cursor(part: &RunId, cursor: &Cursor) -> Cursor {
     Cursor::new(format!("{}@{}", part.as_str(), cursor.as_str()))
 }
 
-pub(crate) fn split_cursor(cursor: &Cursor) -> Option<(RunId, Cursor)> {
+/// Extract the part and its opaque local cursor. Hosts validate both against the selected run.
+pub fn split_cursor(cursor: &Cursor) -> Option<(RunId, Cursor)> {
     let (id, local) = cursor.as_str().rsplit_once('@')?;
     Some((RunId::new(id), Cursor::new(local)))
 }
 
 /// Match failure evidence to the same logical log cursor returned by replay.
-pub(crate) fn scope_diagnostic_cursors(part: &RunId, status: &mut RunStatus) {
+pub fn scope_diagnostic_cursors(part: &RunId, status: &mut RunStatus) {
     let result = match status {
         RunStatus::Finished {
             terminal_result, ..

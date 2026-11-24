@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use super::{
     created_at, HistoryPage, ObservationState, RunDefinition, RunHistorySummary, RunHistoryPhase,
 };
-use crate::native_v2_observability::lineage::part_cursor;
+pub use crate::native_v2_observability::lineage::{part_cursor, scope_diagnostic_cursors, split_cursor};
 use crate::v2_run_ledger::{initial_cursor, RunPhase};
 
 /// Qualify the current definition for the supplied ordered, authorized run parts.
@@ -74,7 +74,7 @@ pub struct RunPartsPage {
     part_after_cursor: Cursor,
     part_head_cursor: Cursor,
     part_next_cursor: Cursor,
-    pub(crate) page: HistoryPage,
+    page: HistoryPage,
 }
 
 fn copied_vector(event: &Value, part: &RunId) -> bool {
@@ -126,6 +126,11 @@ impl RunPartsPage {
             part_head_cursor: std::mem::replace(&mut page.head_cursor, head),
             page,
         })
+    }
+
+    /// Lifecycle and qualified positions for a host following this page over SSE.
+    pub fn history(&self) -> &HistoryPage {
+        &self.page
     }
 
     /// Render the viewer wire contract, preserving execution seeds and exact evidence positions.

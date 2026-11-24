@@ -944,7 +944,7 @@ where
         {
             Ok((_result, mut stream)) => {
                 let _ = ready.send(());
-                forward(&mut stream, sender, |event| Ok(event.into())).await;
+                forward(&mut stream, sender, Ok).await;
             }
             Err(error) => {
                 let _ = sender.send(Err(subscription_error(error))).await;

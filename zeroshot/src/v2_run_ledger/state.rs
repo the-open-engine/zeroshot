@@ -585,7 +585,7 @@ fn add_usage(
 
 /// A part without model work contributes zero; an unreported invocation is
 /// already represented by a present, incomplete total.
-pub(crate) fn merge_usage(
+pub fn merge_usage(
     total: &mut Option<TokenUsage>,
     part: Option<&TokenUsage>,
 ) -> Result<(), RunLedgerError> {

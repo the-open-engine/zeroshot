@@ -423,7 +423,7 @@ pub(in crate::profile_ui) async fn events(
     .take_until(async move { shutdown.cancelled().await });
     Ok(Sse::new(stream.map(|result| {
         Ok::<_, Infallible>(match result {
-            Ok(page) => history_event(&page.page.next_cursor, &page.value()),
+            Ok(page) => history_event(&page.history().next_cursor, &page.value()),
             Err(error) => history_error_event(error),
         })
     }))
@@ -488,12 +488,13 @@ impl BrowserFollow {
                     return Some(Err(error));
                 }
             };
-            self.observe_lifecycle(&page.page);
+            let history = page.history();
+            self.observe_lifecycle(history);
             let state = (
-                page.page.next_cursor.clone(),
-                LivePageState::from_page(&page.page),
+                history.next_cursor.clone(),
+                LivePageState::from_page(history),
             );
-            if page.page.events.is_empty()
+            if history.events.is_empty()
                 && self.last.as_ref() == Some(&state)
                 && state.1.can_remain_idle()
             {
@@ -507,7 +508,7 @@ impl BrowserFollow {
             }
             self.interval = LIVE_POLL_INTERVAL;
             self.last = Some(state);
-            (self.part, self.cursor) = split_cursor(&page.page.next_cursor)?;
+            (self.part, self.cursor) = split_cursor(&history.next_cursor)?;
             return Some(Ok(page));
         }
     }
@@ -528,7 +529,7 @@ impl BrowserFollow {
             .source
             .browser_page(&self.family, (&self.part, self.cursor.clone()), known_head)
             .await?;
-        if page.page.complete && page.page.finished {
+        if page.history().complete && page.history().finished {
             // A failed part may already have a confirmed retry by the time a slow reader
             // drains its last page. Recheck ownership before closing that stream.
             let current = self.source.family(&self.part).await?;
