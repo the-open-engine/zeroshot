@@ -22,15 +22,11 @@ impl LocalCliBackend {
         id: &RunId,
     ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
         let (paths, directory) = self.recorded_directory(id)?;
-        if !require_existing_ledger(&paths.ledger()).map_err(local_io)? {
-            return Err(NativeV2CliError::RunNotFound {
-                run_id: id.as_str().to_owned(),
-            });
-        }
+        require_run_ledger(&paths, id)?;
         Ok((paths, directory))
     }
 
-    fn recorded_directory(
+    pub(super) fn recorded_directory(
         &self,
         id: &RunId,
     ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
@@ -71,7 +67,7 @@ impl LocalCliBackend {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
-        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        let (paths, _directory) = self.recorded_directory(&params.run_id)?;
         Ok(read_ledger(&paths, &params.run_id).await?.1)
     }
 
@@ -81,7 +77,7 @@ impl LocalCliBackend {
         timeout: Duration,
     ) -> Result<Inspection, NativeV2CliError> {
         let deadline = Instant::now() + timeout;
-        let (paths, _directory) = self.recorded_storage(id)?;
+        let (paths, _directory) = self.recorded_directory(id)?;
         let (observation, mut status) = match read_ledger(&paths, id).await {
             Ok(recorded) => recorded,
             // A controller that still answers reports what its ledger cannot, such as a runtime
@@ -454,11 +450,22 @@ impl LocalCliBackend {
     }
 }
 
+fn require_run_ledger(paths: &PortableControllerPaths, id: &RunId) -> Result<(), NativeV2CliError> {
+    if require_existing_ledger(&paths.ledger()).map_err(local_io)? {
+        Ok(())
+    } else {
+        Err(NativeV2CliError::RunNotFound {
+            run_id: id.as_str().to_owned(),
+        })
+    }
+}
+
 /// Opens the retained ledger without a controller, a schema change or a write.
 async fn read_ledger(
     paths: &PortableControllerPaths,
     id: &RunId,
 ) -> Result<(NativeV2Observability, RunStatusResult), NativeV2CliError> {
+    require_run_ledger(paths, id)?;
     let ledger = Arc::new(SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?);
     let observation = NativeV2Observability::new(ledger);
     let status = observation

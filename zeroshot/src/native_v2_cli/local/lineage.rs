@@ -3,15 +3,16 @@ use super::*;
 use crate::native_v2_observability::lineage::{
     part_cursor, scope_diagnostic_cursors, split_cursor, LineageError, RunLineage,
 };
-use openengine_cluster_protocol::RunStatus;
+use crate::v2_run_ledger::{RunLedgerError, StoredRun};
+use openengine_cluster_protocol::{RunStatus, TokenUsage};
 
 impl LocalCliBackend {
-    /// Only admitted part ledgers may corroborate a predecessor's proposed handoff.
+    /// A proposed handoff needs independent evidence that the controller admitted this part.
     pub(crate) async fn part_recovery(
         &self,
         id: RunId,
     ) -> Result<Option<WorkspaceRecovery>, NativeV2CliError> {
-        let (paths, _directory) = match self.recorded_storage(&id) {
+        let (paths, _directory) = match self.recorded_directory(&id) {
             Ok(storage) => storage,
             Err(NativeV2CliError::RunNotFound { .. }) => return Ok(None),
             Err(error) => return Err(error),
@@ -21,7 +22,11 @@ impl LocalCliBackend {
         let Ok(document) = self.read_recovery_document(&id) else {
             return Ok(None);
         };
-        if (document.resumed_from.is_some() || document.successor_run_id.is_some())
+        // Only an admitted source may propose a successor. A new child has just a backlink
+        // until admission publishes its ledger row or its controller readiness.
+        if document.resumed_from.is_some()
+            && document.successor_run_id.is_none()
+            && !read_ready(&paths).is_ok_and(|ready| ready.run_id == id)
             && !self
                 .local_successor_was_admitted(&paths.ledger(), &id)
                 .await?
@@ -47,12 +52,7 @@ impl LocalCliBackend {
         if std::fs::metadata(ledger_path).map_err(local_io)?.len() == 0 {
             return Ok(false);
         }
-        let ledger = SqliteRunLedger::open_read_only(ledger_path).map_err(local_error)?;
-        Ok(ledger
-            .get(successor_run_id)
-            .await
-            .map_err(local_error)?
-            .is_some())
+        Ok(read_part(ledger_path, successor_run_id).await?.is_some())
     }
 
     pub(super) async fn lineage(&self, id: &RunId) -> Result<RunLineage, NativeV2CliError> {
@@ -152,7 +152,7 @@ impl LocalCliBackend {
         &self,
         lineage: &RunLineage,
         before: &RunId,
-    ) -> Result<Option<openengine_cluster_protocol::TokenUsage>, NativeV2CliError> {
+    ) -> Result<Option<TokenUsage>, NativeV2CliError> {
         let mut usage = None;
         for previous in lineage.parts().iter().take_while(|id| *id != before) {
             self.accumulate_part_usage(previous, &mut usage).await?;
@@ -163,15 +163,33 @@ impl LocalCliBackend {
     pub(super) async fn accumulate_part_usage(
         &self,
         part: &RunId,
-        usage: &mut Option<openengine_cluster_protocol::TokenUsage>,
+        usage: &mut Option<TokenUsage>,
     ) -> Result<(), NativeV2CliError> {
-        let (paths, _guard) = self.recorded_storage(part)?;
-        let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
-        let stored = ledger
-            .get(part)
-            .await?
-            .ok_or_else(|| local_message("missing run part"))?;
-        crate::v2_run_ledger::merge_usage(usage, stored.snapshot.token_usage.as_ref())?;
+        let (paths, _guard) = self.recorded_directory(part)?;
+        let path = paths.ledger();
+        let stored = if require_existing_ledger(&path).map_err(local_io)? {
+            read_part(&path, part).await
+        } else {
+            Err(RunLedgerError::Storage)
+        };
+        let part_usage = match stored {
+            Ok(Some(stored)) => stored.snapshot.token_usage,
+            Ok(None) => return Err(local_message("missing run part")),
+            // Failure to read an already confirmed ancestor loses only its accounting.
+            Err(
+                RunLedgerError::Storage
+                | RunLedgerError::SqliteStorage(_)
+                | RunLedgerError::Corrupt,
+            ) => Some(TokenUsage {
+                input_tokens: Default::default(),
+                output_tokens: Default::default(),
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+                complete: false,
+            }),
+            Err(error) => return Err(error.into()),
+        };
+        crate::v2_run_ledger::merge_usage(usage, part_usage.as_ref())?;
         Ok(())
     }
 
@@ -236,4 +254,8 @@ impl LocalCliBackend {
         runs.sort_by(|a, b| a.run_id.cmp(&b.run_id));
         Ok(RunListResult { runs })
     }
+}
+
+async fn read_part(path: &Path, part: &RunId) -> Result<Option<StoredRun>, RunLedgerError> {
+    SqliteRunLedger::open_read_only(path)?.get(part).await
 }

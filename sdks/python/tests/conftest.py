@@ -15,6 +15,9 @@ import time
 
 args = sys.argv[1:]
 log_path = os.environ.get("FAKE_ZEROSHOT_LOG")
+handoff = os.environ.get("FAKE_WATCH_HANDOFF")
+if handoff and os.path.exists(handoff):
+    os.environ["FAKE_HEAD_PART"] = "child"
 
 def option(name):
     try:
@@ -247,6 +250,9 @@ elif args and args[0] == "vectors":
 elif args and args[0] == "status":
     if os.environ.get("FAKE_WATCH_FAILURE") in ("early", "outage_failed_run"):
         print(json.dumps(projection(args[1], failed_status, "v2:2")))
+    elif handoff and os.path.exists(handoff):
+        running = {"phase": "running", "activeExecutions": []}
+        print(json.dumps(projection(args[1], running, "child@v2:1")))
     else:
         print(json.dumps(projection(args[1], {"phase": "admitted"}, "v2:0")))
 elif args and args[0] == "watch":
@@ -255,6 +261,13 @@ elif args and args[0] == "watch":
             handle.write(str(os.getpid()))
     time.sleep(float(os.environ.get("FAKE_WATCH_DELAY", "0")))
     failure = os.environ.get("FAKE_WATCH_FAILURE")
+    if handoff and not os.path.exists(handoff):
+        with open(handoff, "w"):
+            pass
+        previous = projection(args[1], request_status(), "parent@v2:2")
+        previous["cursor"] = previous.pop("atCursor")
+        print(json.dumps(previous))
+        raise SystemExit(0)
     if os.getenv("FAKE_HISTORY_PART") and option("--part") is None:
         previous = projection(args[1], request_status(), "previous:2")
         previous["partId"] = os.environ["FAKE_HISTORY_PART"]

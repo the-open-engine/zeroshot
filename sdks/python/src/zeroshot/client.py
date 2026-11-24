@@ -950,18 +950,22 @@ class Run:
             current = await self.status()
             if result := outcome(current):
                 return result
-            stream = self._client._watch(self.id, current.cursor, self.part_id)
-            async with aclosing(stream) as statuses:
-                async for event in statuses:
-                    if event.phase not in {"suspended", "finished"}:
-                        continue
-                    # Another observer may have continued the part while this event was in flight.
-                    latest = await self.status()
-                    if result := outcome(event if event.part_id == latest.part_id else latest):
-                        return result
-            if result := outcome(await self.status()):
-                return result
-            raise ProtocolError("Zeroshot watch closed before a terminal result")
+            while True:
+                stream = self._client._watch(self.id, current.cursor, self.part_id)
+                async with aclosing(stream) as statuses:
+                    async for event in statuses:
+                        if event.phase not in {"suspended", "finished"}:
+                            continue
+                        # The part may have advanced while its boundary event was in flight.
+                        latest = await self.status()
+                        if result := outcome(event if event.part_id == latest.part_id else latest):
+                            return result
+                latest = await self.status()
+                if result := outcome(latest):
+                    return result
+                if latest.part_id == current.part_id:
+                    raise ProtocolError("Zeroshot watch closed before a terminal result")
+                current = latest
 
         if wait_timeout is None:
             return await observe()

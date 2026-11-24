@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { appendHistory, readRunDetail, type RunHistoryReader } from './run-history-source';
 import { groupedControlPage } from './grouped-history';
 import { projectHistory, type HistoryEvent, type HistoryPage, type RunDetail } from './run-history';
-import { mergeRunPage } from './run-menu';
+import { mergeRunPage, searchRunMenu } from './run-menu';
 import { projectStory } from './run-story';
 import { runDetailFixture } from './test-support';
 import {
@@ -292,6 +292,19 @@ test('menu refresh removes provisional rows across multiple confirmed handoffs b
       [other, other],
     ]
   );
+});
+
+test('run search finds the current part and offers exact lookup for a prior or unloaded ID', () => {
+  const run = { ...definition(root, 'finished'), currentPartId: child, title: 'Release review' };
+  const older = '0199f33f-3b44-7d21-9000-000000000033';
+  for (const query of [root, child, 'RELEASE']) {
+    assert.deepEqual(searchRunMenu([run], query), { matches: [run], lookupId: undefined });
+  }
+  assert.deepEqual(searchRunMenu([run], ' ' + older.toUpperCase() + ' '), {
+    matches: [],
+    lookupId: older,
+  });
+  assert.deepEqual(searchRunMenu([], older.slice(0, 8)), { matches: [], lookupId: undefined });
 });
 
 test('a failed successor’s verifier link opens its own log when an earlier part reused the cursor and execution', async (t) => {

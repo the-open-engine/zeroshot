@@ -1,4 +1,4 @@
-import { mergeRunPage } from './run-menu';
+import { mergeRunPage, searchRunMenu } from './run-menu';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { AppHeader } from './AppHeader';
@@ -123,9 +123,9 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
       setLoadingList(false);
     }
   }
-  function choose(run: RunSummary) {
+  function choose(run: Pick<RunSummary, 'runId' | 'example'>) {
     setSidebar(false);
-    window.location.hash = `runs/${run.example ? 'example' : 'local'}/${encodeURIComponent(run.runId)}`;
+    window.location.hash = runLink(run.runId, run.example);
   }
   async function showExamples() {
     setExamplesOpen((open) => !open);
@@ -137,9 +137,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
         setExampleError(message(error));
       }
   }
-  const filtered = runs.filter((run) =>
-    `${run.title} ${run.runId}`.toLowerCase().includes(query.toLowerCase())
-  );
+  const { matches: filtered, lookupId } = searchRunMenu(runs, query);
   const latest = runs.find((run) => run.historyAvailable);
   // The list's periodic refresh brings the successor a suspended run gains while its page is open.
   const listed = (selection?.example ? examples : runs).find((run) => run.runId === selection?.id);
@@ -171,7 +169,17 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
               <RefreshCw size={15} className={loadingList ? 'spin' : ''} />
             </button>
           </div>
-          <label className="run-search">
+          <form
+            className="run-search"
+            id="search-runs"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (lookupId) {
+                setQuery('');
+                choose({ runId: lookupId });
+              } else if (filtered.length === 1) choose(filtered[0]);
+            }}
+          >
             <Search size={14} />
             <input
               aria-label="Search runs"
@@ -179,11 +187,19 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-          </label>
+          </form>
           <div className="run-list">
             {listError && <p className="history-inline-error">{listError}</p>}
-            {!loadingList && !listError && !filtered.length && (
-              <p className="run-empty">{query ? 'No matching runs' : 'No runs yet'}</p>
+            {lookupId ? (
+              <button type="submit" form="search-runs" className="text-button history-more">
+                Open run by ID <ArrowRight size={14} />
+              </button>
+            ) : (
+              !loadingList &&
+              !listError &&
+              !filtered.length && (
+                <p className="run-empty">{query ? 'No matching runs' : 'No runs yet'}</p>
+              )
             )}
             {filtered.map((item) => (
               <RunListItem

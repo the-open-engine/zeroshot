@@ -1340,6 +1340,21 @@ def test_local_controller_policy_reaches_every_launch_path(
     )
 
 
+def test_wait_reopens_when_another_observer_resumes_at_watch_close(
+    fake_native: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_HANDOFF", str(tmp_path / "resumed"))
+
+    async def exercise() -> None:
+        async with Client() as client:
+            result = await client.get_run("parent").wait(wait_timeout=5)
+            assert result.succeeded and result.part_id == "child"
+
+    asyncio.run(exercise())
+    watches = [row["args"] for row in read_invocations(fake_native) if row["args"][0] == "watch"]
+    assert [args[args.index("--after") + 1] for args in watches] == ["v2:0", "child@v2:1"]
+
+
 def test_logical_history_crosses_suspension_and_wait_ignores_a_superseded_question(
     fake_native: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

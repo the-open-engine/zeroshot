@@ -1,3 +1,4 @@
+import { runIdPattern } from './grouped-history';
 import type { RunSummary } from './run-history';
 
 /** A refreshed interval replaces the physical rows which may have just joined a family.
@@ -27,4 +28,13 @@ function staleStatus(old: RunSummary, current: RunSummary) {
   return old.phase === 'finished'
     ? current.phase !== 'finished'
     : old.phase === 'suspended' && ['admitted', 'running', 'stopping'].includes(current.phase);
+}
+
+/** Older parts and runs outside the loaded page can still open through their usual deep link. */
+export function searchRunMenu(runs: readonly RunSummary[], value: string) {
+  const query = value.trim().toLowerCase();
+  const matches = runs.filter((run) =>
+    [run.title, run.runId, run.currentPartId].some((field) => field?.toLowerCase().includes(query))
+  );
+  return { matches, lookupId: !matches.length && runIdPattern.test(query) ? query : undefined };
 }

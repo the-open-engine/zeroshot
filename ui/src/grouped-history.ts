@@ -2,13 +2,13 @@ import { historyCursorSequence as sequence, validateFailureContext } from './his
 import type { ControlRecord } from './control-history';
 import type { HistoryEvent, HistoryPage } from './run-history';
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export const runIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export function runPosition(value: string): { part: string; cursor: string } | undefined {
   const split = value.indexOf('@');
   if (split < 0) return;
   const part = value.slice(0, split),
     cursor = value.slice(split + 1);
-  if (!uuid.test(part)) throw invalid();
+  if (!runIdPattern.test(part)) throw invalid();
   sequence(cursor);
   return { part, cursor };
 }
@@ -73,7 +73,7 @@ function controlPositions(page: HistoryPage, part: string): HistoryEvent[] {
  * Exact part archives and example data keep their native cursors. */
 export function groupedRecords(page: HistoryPage): HistoryEvent[] {
   const part = page.partId;
-  if (!part || ![part, page.runId, page.currentPartId].every((id) => id && uuid.test(id)))
+  if (!part || ![part, page.runId, page.currentPartId].every((id) => id && runIdPattern.test(id)))
     throw invalid();
   const { lower, upper } = validWindow(page, part);
   const covered = new Set(page.omittedCursors?.map(native));
