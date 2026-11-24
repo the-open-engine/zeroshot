@@ -370,13 +370,24 @@ fn merge_options(target: &mut Value, options: &Value) {
     }
 }
 
-/// A managed session keeps the working directory Zeroshot assigned, so OpenCode's
-/// `opencode_session_move` tool is denied: it then leaves the direct tool list, the Code Mode
-/// catalog and `search`. Other rules of a node's own `permission` value stay; a string value
-/// becomes the wildcard rule. Any other `permission` value is refused instead of being dropped.
-pub(super) fn deny_session_move(config: &mut Value) -> Result<(), NodeRunnerError> {
+/// The deny rule appended to the native `permissions` array. OpenCode applies the last
+/// matching rule, so it must stay the final entry; it hides `opencode_session_move` from
+/// the direct tool list, the Code Mode catalog and `search`.
+fn session_move_rule() -> Value {
+    json!({
+        "action": "opencode_session_move",
+        "resource": "*",
+        "effect": "deny",
+    })
+}
+
+/// Applies the v1 `permission` map rule to a `serde_json::Map`. Other rules of the map stay;
+/// a string value becomes the wildcard rule. Any other `permission` value is refused instead
+/// of being dropped.
+fn apply_v1_permission_rule(
+    object: &mut serde_json::Map<String, Value>,
+) -> Result<(), NodeRunnerError> {
     const TOOL: &str = "opencode_session_move";
-    let object = config.as_object_mut().ok_or(NodeRunnerError::Driver)?;
     let mut rules = match object.remove("permission") {
         Some(Value::Object(rules)) => rules,
         Some(Value::String(all)) => {
@@ -392,6 +403,55 @@ pub(super) fn deny_session_move(config: &mut Value) -> Result<(), NodeRunnerErro
     rules.remove(TOOL);
     rules.insert(TOOL.to_owned(), json!("deny"));
     object.insert("permission".to_owned(), Value::Object(rules));
+    Ok(())
+}
+
+/// Appends the native deny rule to the `permissions` array of a `serde_json::Map`. Existing
+/// entries keep their order and the deny rule goes last. A missing or null value becomes an
+/// array holding only the rule; any other value is refused instead of being dropped.
+fn apply_native_permissions_rule(
+    object: &mut serde_json::Map<String, Value>,
+) -> Result<(), NodeRunnerError> {
+    let mut rules = match object.remove("permissions") {
+        Some(Value::Array(rules)) => rules,
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => {
+            return Err(NodeRunnerError::DriverDetail(
+                "OpenCode permissions must be an array".to_owned(),
+            ));
+        }
+    };
+    rules.push(session_move_rule());
+    object.insert("permissions".to_owned(), Value::Array(rules));
+    Ok(())
+}
+
+/// A managed session keeps the working directory Zeroshot assigned, so OpenCode's
+/// `opencode_session_move` tool is denied: it then leaves the direct tool list, the Code Mode
+/// catalog and `search`. The deny is also the last native `permissions` rule, globally and for
+/// every inline agent, because OpenCode applies the last matching rule. Other rules of a node's
+/// own `permission` value stay; a string value becomes the wildcard rule. Any other `permission`
+/// value is refused instead of being dropped.
+pub(super) fn deny_session_move(config: &mut Value) -> Result<(), NodeRunnerError> {
+    let object = config.as_object_mut().ok_or(NodeRunnerError::Driver)?;
+    apply_v1_permission_rule(object)?;
+    apply_native_permissions_rule(object)?;
+    if let Some(Value::Object(agents)) = object.get_mut("agents") {
+        for entry in agents.values_mut() {
+            if let Some(entry) = entry.as_object_mut() {
+                apply_native_permissions_rule(entry)?;
+            }
+        }
+    }
+    for key in ["agent", "mode"] {
+        if let Some(Value::Object(entries)) = object.get_mut(key) {
+            for entry in entries.values_mut() {
+                if let Some(entry) = entry.as_object_mut() {
+                    apply_v1_permission_rule(entry)?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 

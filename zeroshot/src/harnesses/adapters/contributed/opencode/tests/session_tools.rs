@@ -11,7 +11,12 @@ fn an_empty_configuration_denies_session_move() {
     command::deny_session_move(&mut config).assert_value();
     assert_eq!(
         config,
-        json!({"permission": {"opencode_session_move": "deny"}})
+        json!({
+            "permission": {"opencode_session_move": "deny"},
+            "permissions": [
+                {"action": "opencode_session_move", "resource": "*", "effect": "deny"}
+            ]
+        })
     );
 }
 
@@ -21,7 +26,12 @@ fn a_string_permission_becomes_the_wildcard_rule() {
     command::deny_session_move(&mut config).assert_value();
     assert_eq!(
         config,
-        json!({"permission": {"*": "allow", "opencode_session_move": "deny"}})
+        json!({
+            "permission": {"*": "allow", "opencode_session_move": "deny"},
+            "permissions": [
+                {"action": "opencode_session_move", "resource": "*", "effect": "deny"}
+            ]
+        })
     );
 }
 
@@ -31,7 +41,12 @@ fn a_node_permission_keeps_its_rules_but_cannot_allow_session_move() {
     command::deny_session_move(&mut config).assert_value();
     assert_eq!(
         config,
-        json!({"permission": {"bash": "ask", "opencode_session_move": "deny"}})
+        json!({
+            "permission": {"bash": "ask", "opencode_session_move": "deny"},
+            "permissions": [
+                {"action": "opencode_session_move", "resource": "*", "effect": "deny"}
+            ]
+        })
     );
 }
 
@@ -45,6 +60,85 @@ fn any_other_permission_value_is_refused() {
             "{error:?}"
         );
     }
+}
+
+#[test]
+fn native_rules_keep_their_order_and_end_with_the_deny() {
+    let mut config = json!({
+        "permissions": [
+            {"action": "*", "resource": "*", "effect": "allow"},
+            {"action": "opencode_session_move", "resource": "*", "effect": "allow"}
+        ]
+    });
+    command::deny_session_move(&mut config).assert_value();
+    assert_eq!(
+        config["permissions"],
+        json!([
+            {"action": "*", "resource": "*", "effect": "allow"},
+            {"action": "opencode_session_move", "resource": "*", "effect": "allow"},
+            {"action": "opencode_session_move", "resource": "*", "effect": "deny"}
+        ])
+    );
+}
+
+#[test]
+fn every_inline_agent_ends_with_the_deny() {
+    let mut config = json!({
+        "agents": {
+            "build": {"permissions": [{"action": "opencode_session_move", "resource": "*", "effect": "allow"}]},
+            "plan": {},
+            "broken": "x"
+        }
+    });
+    command::deny_session_move(&mut config).assert_value();
+    assert_eq!(
+        config["agents"]["build"]["permissions"],
+        json!([
+            {"action": "opencode_session_move", "resource": "*", "effect": "allow"},
+            {"action": "opencode_session_move", "resource": "*", "effect": "deny"}
+        ])
+    );
+    assert_eq!(
+        config["agents"]["plan"]["permissions"],
+        json!([{"action": "opencode_session_move", "resource": "*", "effect": "deny"}])
+    );
+    assert_eq!(config["agents"]["broken"], json!("x"));
+    assert_eq!(config["agents"].as_object().assert_value().len(), 3);
+}
+
+#[test]
+fn legacy_agents_and_modes_deny_session_move() {
+    let mut config = json!({
+        "agent": {"build": {"permission": {"bash": "ask", "opencode_session_move": "allow"}}},
+        "mode": {"review": {"permission": "allow"}}
+    });
+    command::deny_session_move(&mut config).assert_value();
+    assert_eq!(
+        config["agent"]["build"]["permission"],
+        json!({"bash": "ask", "opencode_session_move": "deny"})
+    );
+    assert_eq!(
+        config["mode"]["review"]["permission"],
+        json!({"*": "allow", "opencode_session_move": "deny"})
+    );
+}
+
+#[test]
+fn a_non_array_native_permissions_value_is_refused() {
+    for permissions in [json!({"x": 1}), json!("allow")] {
+        let mut config = json!({"permissions": permissions});
+        let error = command::deny_session_move(&mut config).expect_err("must refuse");
+        assert!(
+            matches!(&error, NodeRunnerError::DriverDetail(detail) if detail.contains("permissions")),
+            "{error:?}"
+        );
+    }
+    let mut config = json!({"agents": {"build": {"permissions": 1}}});
+    let error = command::deny_session_move(&mut config).expect_err("must refuse");
+    assert!(
+        matches!(&error, NodeRunnerError::DriverDetail(detail) if detail.contains("permissions")),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -66,6 +160,10 @@ fn the_command_configuration_denies_session_move() {
     let config: Value =
         serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
     assert_eq!(config["permission"]["opencode_session_move"], json!("deny"));
+    assert_eq!(
+        config["permissions"].as_array().assert_value().last(),
+        Some(&json!({"action": "opencode_session_move", "resource": "*", "effect": "deny"}))
+    );
 }
 
 const PROBE: &str = r#"const found = await search({ query: "session" }); const paths = (found.items || []).map((item) => item.path); let moved; try { moved = await (tools.opencode.session && tools.opencode.session.move ? tools.opencode.session.move({ directory: "." }) : tools.opencode.session_move({ directory: "." })); } catch (error) { moved = "ERR " + String((error && error.message) || error); } return JSON.stringify({ paths, moved });"#;
@@ -166,15 +264,20 @@ async fn serve(
     }
 }
 
-#[tokio::test]
-#[ignore = "requires installed OpenCode 2.4 or newer; localhost provider and a dummy key only"]
-async fn native_session_move_is_absent_from_search_and_cannot_be_called() {
+async fn native_session_move_probe(extra: Value) {
     let directory = TestDirectory::new("opencode-native-session-move");
     let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
     adapter.config.provider = "anthropic".to_owned();
     adapter.config.executable =
         std::env::var("ZEROSHOT_OPENCODE_BINARY").expect("set the explicit native OpenCode binary");
-    let config = json!({"provider":{"anthropic":{"options":{"apiKey":"stored-key"},"models":{"opaque/model":{"id":"probe-model","name":"Probe","limit":{"context":100000,"output":4096}}}}}});
+    let mut config = json!({"provider":{"anthropic":{"options":{"apiKey":"stored-key"},"models":{"opaque/model":{"id":"probe-model","name":"Probe","limit":{"context":100000,"output":4096}}}}}});
+    if let Some(extra) = extra.as_object() {
+        if let Some(config) = config.as_object_mut() {
+            for (key, value) in extra {
+                config.insert(key.clone(), value.clone());
+            }
+        }
+    }
     adapter.local_environment =
         super::native_authority::native_wire_environment(&directory, config);
     let (listener, endpoint) = super::native_authority::native_listener().await;
@@ -208,4 +311,29 @@ async fn native_session_move_is_absent_from_search_and_cannot_be_called() {
     assert!(result.contains("tools.opencode.session.rename"), "{result}");
     assert!(!result.contains("tools.opencode.session.move"), "{result}");
     assert!(result.contains("ERR Unknown tool"), "{result}");
+}
+
+#[tokio::test]
+#[ignore = "requires installed OpenCode 2.4 or newer; localhost provider and a dummy key only"]
+async fn native_session_move_is_absent_from_search_and_cannot_be_called() {
+    native_session_move_probe(json!({})).await;
+}
+
+#[tokio::test]
+#[ignore = "requires installed OpenCode 2.4 or newer; localhost provider and a dummy key only"]
+async fn native_later_allow_rules_cannot_bring_session_move_back() {
+    native_session_move_probe(json!({
+        "permissions": [
+            {"action": "*", "resource": "*", "effect": "allow"},
+            {"action": "opencode_session_move", "resource": "*", "effect": "allow"}
+        ],
+        "agents": {
+            "build": {
+                "permissions": [
+                    {"action": "opencode_session_move", "resource": "*", "effect": "allow"}
+                ]
+            }
+        }
+    }))
+    .await;
 }
