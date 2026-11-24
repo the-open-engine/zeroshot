@@ -210,6 +210,13 @@ pub trait CapsuleAllocator: Send + Sync {
         None
     }
 
+    /// Whether suspension leaves this controller's ledger authoritative for continuation.
+    /// Only stores whose `suspend` publishes nothing may retain suspended steering admission.
+    /// This policy also applies after the live engine is removed or the controller restarts.
+    fn retains_suspended_ledger(&self) -> bool {
+        false
+    }
+
     /// Acquires exclusive controller authority for the supplied public run identity.
     async fn claim_controller(
         &self,

@@ -1257,7 +1257,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Suspension keeps request admission open during host storage writes and republishes the
   complete record if a request arrives meanwhile. Final disposal and durable suspension share the
   request admission turn; force-stop remains independent. Storage replaces the full snapshot on
-  republication. Continuation restores no file locally or on a direct target and accepts no discard flag. Checkpoint IDs never become filesystem paths.
+  republication. Platform steering drains accepted appends before reading that publication snapshot
+  and refuses later steers with suspension/retry guidance, including after engine removal.
+  Allocators declare retained-ledger suspension only when their stores publish nothing; those
+  local/direct ledgers keep accepting suspended steers for their successor.
+  Continuation restores no file locally or on a direct target and accepts no discard flag. Checkpoint IDs never become filesystem paths.
   The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
   and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
   read-only boundaries reuse bytes. Local/direct storage normalizes Git into a temporary private
@@ -2463,7 +2467,9 @@ python -m mkdocs build --strict
   Native changes also require macOS product and test compilation with the UI
   feature, forge network/access and certificate trust regressions, workspace export integration and private publication regressions, focused Unix controller
   socket regression tests, and APFS workspace clone tests that
-  `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. `.github/ci-path-classifier.js` owns
+  `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. Put additional curated macOS test commands in
+  `scripts/test-macos.sh`, which CI runs after building the UI and preparing pinned Restic. Script
+  changes select the native lane. `.github/ci-path-classifier.js` owns
   fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
   CLI subprocess tests. Windows uses

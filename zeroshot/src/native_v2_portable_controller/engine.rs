@@ -162,6 +162,14 @@ impl PortableRunEngine {
         self.supervisor.suspend().await
     }
 
+    pub(crate) async fn steer(
+        &self,
+        params: openengine_cluster_protocol::RunSteerParams,
+    ) -> Result<openengine_cluster_protocol::RunSteerResult, crate::v2_run_ledger::RunLedgerError>
+    {
+        self.supervisor.steer(params).await
+    }
+
     pub(crate) fn suspending(&self) -> bool {
         self.supervisor.suspending()
     }
