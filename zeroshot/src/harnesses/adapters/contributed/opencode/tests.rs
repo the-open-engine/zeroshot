@@ -417,6 +417,9 @@ mod plugin;
 #[path = "tests/session_tools.rs"]
 mod session_tools;
 
+#[path = "tests/lifecycle.rs"]
+mod lifecycle;
+
 #[test]
 fn native_authentication_and_model_errors_preserve_machine_classification() {
     for (error, model_text) in [

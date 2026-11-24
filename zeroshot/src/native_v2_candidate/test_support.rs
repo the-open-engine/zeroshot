@@ -1,4 +1,3 @@
-#[cfg(unix)]
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,7 +5,6 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use openengine_cluster_protocol::{GraphSpec, RunId};
-#[cfg(unix)]
 use openengine_cluster_protocol::{NodeInstructions, NodeName, WorkerRef};
 use serde_json::{Value, json};
 
@@ -14,13 +12,12 @@ use serde_json::{Value, json};
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_contract::{AdmittedRun, GIT_DELIVERY_MERGE_V2_WORKER_REF};
 #[cfg(unix)]
+use crate::native_v2_contract::RunSubmission;
 use crate::native_v2_contract::{
     self, ExecutionId, ExecutionRef, NodeInstanceId, NodeInvocation, NodeRuntimeBinding,
-    RunSubmission,
 };
 use crate::native_v2_delivery::{DeliveryMode};
 use crate::native_v2_delivery::contract::delivery_result_schema;
-#[cfg(unix)]
 use crate::native_v2_runner::{NodeRunRequest, ResolvedEnvironment};
 
 static NEXT_TEMPORARY_DIRECTORY: AtomicU64 = AtomicU64::new(1);
@@ -77,7 +74,6 @@ impl Drop for TestDirectory {
     }
 }
 
-#[cfg(unix)]
 pub(crate) fn environment_name(value: &str) -> native_v2_contract::EnvironmentVariableName {
     native_v2_contract::EnvironmentVariableName::new(value)
         .assert_value_with("environment variable name")
@@ -91,7 +87,6 @@ pub(crate) async fn admit(submission: RunSubmission) -> AdmittedRun {
         .assert_value_with("admit test graph")
 }
 
-#[cfg(unix)]
 pub(crate) struct NodeRequestFixture<'a> {
     pub(crate) run_id: &'a str,
     pub(crate) node: &'a str,
@@ -104,7 +99,6 @@ pub(crate) struct NodeRequestFixture<'a> {
     pub(crate) environment: BTreeMap<native_v2_contract::EnvironmentVariableName, String>,
 }
 
-#[cfg(unix)]
 impl NodeRequestFixture<'_> {
     pub(crate) fn into_request(self) -> NodeRunRequest {
         let environment = ResolvedEnvironment::exact(&self.binding, self.environment)
