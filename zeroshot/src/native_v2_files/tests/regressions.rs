@@ -162,7 +162,9 @@ fn reclamation_refuses_a_redirected_objects_directory_and_preserves_external_sen
     .write_all(b"untouched")
     .unwrap();
     let objects = temp.path().join("store/objects");
-    std::fs::rename(&objects, temp.path().join("original-objects")).unwrap();
+    // The store has no objects yet. Remove the empty directory without a full-path rename,
+    // which would conflict with the live store's parent guards on Windows.
+    std::fs::remove_dir(&objects).unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink(&outside, &objects).unwrap();
     #[cfg(windows)]
