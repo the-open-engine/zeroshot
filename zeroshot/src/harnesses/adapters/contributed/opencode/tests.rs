@@ -479,6 +479,24 @@ fn unclassified_native_errors_and_cut_streams_remain_crashes() {
 }
 
 #[test]
+fn node_options_cannot_set_runtime_owned_controls_under_their_opencode_2_names() {
+    for name in [
+        "plugin",
+        "plugins",
+        "provider",
+        "providers",
+        "agent",
+        "agents",
+        "command",
+        "commands",
+    ] {
+        let config = HarnessConfiguration::new(json!({"options": {name: ["file:///node-plugin"]}}))
+            .assert_value();
+        assert!(native_config::validate(&config).is_err(), "{name}");
+    }
+}
+
+#[test]
 fn user_arguments_cannot_choose_the_server() {
     for args in [
         ["--standalone"].as_slice(),

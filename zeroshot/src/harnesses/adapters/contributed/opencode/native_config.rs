@@ -15,6 +15,11 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
                 "agent",
                 "mode",
                 "plugin",
+                // OpenCode 2 names of the same controls; the v1 names above still load as well.
+                "plugins",
+                "providers",
+                "agents",
+                "commands",
                 "instructions",
                 "server",
                 "username",
