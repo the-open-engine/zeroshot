@@ -11,7 +11,19 @@ fn stub(export_body: &str) -> String {
     let text = text_event("t1", "m1", "{\"response\":null}").to_string();
     let finish = finish_event("f1", "m1", "stop").to_string();
     format!(
-        "#!/bin/sh\nif [ \"$1\" = auth ] && [ \"$2\" = export ]; then echo \"$XDG_DATA_HOME\" >> export-env; echo \"$*\" >> export-args; printf '%s\\n' \"$OPENCODE_CONFIG_CONTENT\" >> export-config; {LOADS_PLUGINS}; {export_body}; exit 0; fi\nif [ \"$1\" = auth ] && [ \"$2\" = import ]; then echo \"$XDG_DATA_HOME\" >> import-env; printf '%s\\n' \"$OPENCODE_CONFIG_CONTENT\" >> import-config; cat >> import-stdin; printf '\\n' >> import-stdin; exit 0; fi\nif [ \"$1\" = auth ] && [ \"$2\" = logout ]; then echo \"$XDG_DATA_HOME\" >> logout-env; echo \"$*\" >> logout-args; exit 0; fi\necho \"$XDG_DATA_HOME\" >> run-env\n{LOADS_PLUGINS}\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
+        "#!/bin/sh\n\
+         if [ \"$1\" = auth ] && [ \"$2\" = export ]; then echo \"$XDG_DATA_HOME\" >> export-env; \
+         echo \"$*\" >> export-args; printf '%s\\n' \"$OPENCODE_CONFIG_CONTENT\" >> export-config; \
+         {LOADS_PLUGINS}; {export_body}; exit 0; fi\n\
+         if [ \"$1\" = auth ] && [ \"$2\" = import ]; then echo \"$XDG_DATA_HOME\" >> import-env; \
+         printf '%s\\n' \"$OPENCODE_CONFIG_CONTENT\" >> import-config; cat >> import-stdin; \
+         printf '\\n' >> import-stdin; exit 0; fi\n\
+         if [ \"$1\" = auth ] && [ \"$2\" = logout ]; then echo \"$XDG_DATA_HOME\" >> logout-env; \
+         echo \"$*\" >> logout-args; exit 0; fi\n\
+         echo \"$XDG_DATA_HOME\" >> run-env\n\
+         {LOADS_PLUGINS}\n\
+         cat >/dev/null\n\
+         printf '%s\\n' '{text}' '{finish}'\n"
     )
 }
 
