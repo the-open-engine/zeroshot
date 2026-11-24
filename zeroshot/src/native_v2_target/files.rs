@@ -3,7 +3,7 @@ use std::io::{Seek, Write};
 use openengine_cluster_protocol::{FileRequest, FileResponse};
 use zeroshot_engine::native_v2_cli::{FileCommand, FileCommandTransfer, NativeV2CliError};
 use zeroshot_engine::native_v2_files::{
-    FileAccess, FileReplaceRequest, TargetFileHost, new_transfer, pack, unpack,
+    FileAccess, FileReplaceRequest, FileTransfer, TargetFileHost, new_transfer, pack, unpack,
 };
 
 use super::{
@@ -64,34 +64,7 @@ pub async fn execute(
                 target: "local",
                 identity: &identity,
             };
-            match command.request {
-                FileRequest::List { scope, path } => FileReply::Json(FileResponse::List {
-                    paths: store.list(&access, scope, &path)?,
-                }),
-                FileRequest::ListMembers { selection } => FileReply::Json(FileResponse::Members {
-                    entries: store.list_members(&access, &selection)?,
-                    selection,
-                }),
-                FileRequest::Replace { address, operation } => {
-                    store.replace(
-                        &access,
-                        &FileReplaceRequest {
-                            address: address.clone(),
-                            operation: operation.clone(),
-                        },
-                        &mut staged,
-                    )?;
-                    FileReply::Json(FileResponse::Replaced { address, operation })
-                }
-                FileRequest::Remove { address } => FileReply::Json(FileResponse::Removed {
-                    removed: store.remove(&access, &address)?,
-                }),
-                FileRequest::Download { selection } => {
-                    store.download(&access, &selection, &mut staged)?;
-                    staged.rewind()?;
-                    FileReply::Tree(staged)
-                }
-            }
+            local_file_request(&store, &access, command.request, staged)?
         }
         _ => {
             return Err(NativeV2CliError::Target(
@@ -99,10 +72,55 @@ pub async fn execute(
             ));
         }
     };
+    write_reply(reply, command.transfer, download_receipt, output)
+}
+
+fn local_file_request(
+    store: &impl TargetFileHost,
+    access: &FileAccess<'_>,
+    request: FileRequest,
+    mut staged: FileTransfer,
+) -> Result<FileReply, NativeV2CliError> {
+    Ok(match request {
+        FileRequest::List { scope, path } => FileReply::Json(FileResponse::List {
+            paths: store.list(access, scope, &path)?,
+        }),
+        FileRequest::ListMembers { selection } => FileReply::Json(FileResponse::Members {
+            entries: store.list_members(access, &selection)?,
+            selection,
+        }),
+        FileRequest::Replace { address, operation } => {
+            store.replace(
+                access,
+                &FileReplaceRequest {
+                    address: address.clone(),
+                    operation: operation.clone(),
+                },
+                &mut staged,
+            )?;
+            FileReply::Json(FileResponse::Replaced { address, operation })
+        }
+        FileRequest::Remove { address } => FileReply::Json(FileResponse::Removed {
+            removed: store.remove(access, &address)?,
+        }),
+        FileRequest::Download { selection } => {
+            store.download(access, &selection, &mut staged)?;
+            staged.rewind()?;
+            FileReply::Tree(staged)
+        }
+    })
+}
+
+fn write_reply(
+    reply: FileReply,
+    transfer: FileCommandTransfer,
+    download_receipt: Option<serde_json::Value>,
+    output: &mut impl Write,
+) -> Result<(), NativeV2CliError> {
     match reply {
         FileReply::Json(response) => serde_json::to_writer(&mut *output, &response)?,
         FileReply::Tree(mut staged) => {
-            let FileCommandTransfer::Download(destination) = command.transfer else {
+            let FileCommandTransfer::Download(destination) = transfer else {
                 return Err(NativeV2CliError::Target(
                     "unexpected file tree response".to_owned(),
                 ));

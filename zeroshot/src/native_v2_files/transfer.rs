@@ -120,19 +120,12 @@ pub(super) fn copy_validated(
             .ok_or_else(|| invalid("file tree metadata exceeds limit"))?;
         advance_transfer(&mut normalized_position, header_length as u64)?;
         if let FileEntryKind::File { byte_length } = entry.kind {
-            let body_length = byte_length
-                .get()
-                .checked_add(32)
-                .ok_or_else(|| invalid("file transfer exceeds limit"))?;
-            advance_transfer(&mut position, body_length)?;
-            advance_transfer(&mut normalized_position, body_length)?;
-            let digest = copy_body(input, output, byte_length.get())?;
-            let mut expected = [0_u8; 32];
-            input.read_exact(&mut expected)?;
-            if expected != digest {
-                return Err(invalid("file transfer digest mismatch"));
-            }
-            output.write_all(&expected)?;
+            copy_validated_body(
+                input,
+                output,
+                byte_length.get(),
+                (&mut position, &mut normalized_position),
+            )?;
         }
         entries.push(IndexedEntry {
             entry,
@@ -147,6 +140,27 @@ pub(super) fn copy_validated(
     }
     output.write_all(&0_u32.to_be_bytes())?;
     Ok(entries)
+}
+
+fn copy_validated_body(
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    length: u64,
+    positions: (&mut u64, &mut u64),
+) -> Result<()> {
+    let (position, normalized_position) = positions;
+    let body_length = length
+        .checked_add(32)
+        .ok_or_else(|| invalid("file transfer exceeds limit"))?;
+    advance_transfer(position, body_length)?;
+    advance_transfer(normalized_position, body_length)?;
+    let digest = copy_body(input, output, length)?;
+    let mut expected = [0_u8; 32];
+    input.read_exact(&mut expected)?;
+    if expected != digest {
+        return Err(invalid("file transfer digest mismatch"));
+    }
+    output.write_all(&expected)
 }
 
 pub fn validate_transfer(input: &mut dyn Read) -> Result<Vec<FileEntry>> {
@@ -220,49 +234,60 @@ fn pack_entry(
         return Err(invalid("file tree metadata exceeds limit"));
     }
     if metadata.is_dir() {
-        // Listing may race source edits, but bytes are opened beneath the already pinned directory.
-        // A removed/replaced member either supplies its entire opened file or fails the transfer.
-        let mut children = Vec::new();
-        for child in std::fs::read_dir(source)? {
-            // Reserve discovered siblings before descending so pending directory listings share
-            // the same bound instead of each allocating a full tree's worth of names.
-            budget.entries += 1;
-            if budget.entries > MAX_FILE_ENTRIES {
-                return Err(invalid("file tree entry limit exceeded"));
-            }
-            children.push(child?);
-        }
-        children.sort_by_key(|child| child.file_name());
-        for child in children {
-            let name = child.file_name();
-            let text = name
-                .to_str()
-                .ok_or_else(|| invalid("file name must be portable UTF-8"))?;
-            let member = if member.is_empty() {
-                text.to_owned()
-            } else {
-                format!("{member}/{text}")
-            };
-            #[cfg(unix)]
-            let opened = paths::open_child(&file, &name)?;
-            #[cfg(windows)]
-            let opened = {
-                let opened = paths::open_source(&child.path())?;
-                if platform::file_identity(&file)?
-                    != platform::file_identity(&paths::open_source(source)?)?
-                {
-                    return Err(invalid("source directory changed"));
-                }
-                opened
-            };
-            pack_entry((&child.path(), opened), &member, output, budget)?;
-        }
+        pack_directory((source, &file), member, output, budget)?;
     } else {
         let digest = copy_body(&mut file, output, metadata.len())?;
         if file.read(&mut [0_u8; 1])? != 0 {
             return Err(invalid("source file grew during transfer"));
         }
         output.write_all(&digest)?;
+    }
+    Ok(())
+}
+
+fn pack_directory(
+    source: (&Path, &File),
+    member: &str,
+    output: &mut dyn Write,
+    budget: &mut PackBudget,
+) -> Result<()> {
+    let (source, file) = source;
+    // Listing may race source edits, but bytes are opened beneath the already pinned directory.
+    // A removed/replaced member either supplies its entire opened file or fails the transfer.
+    let mut children = Vec::new();
+    for child in std::fs::read_dir(source)? {
+        // Reserve discovered siblings before descending so pending directory listings share
+        // the same bound instead of each allocating a full tree's worth of names.
+        budget.entries += 1;
+        if budget.entries > MAX_FILE_ENTRIES {
+            return Err(invalid("file tree entry limit exceeded"));
+        }
+        children.push(child?);
+    }
+    children.sort_by_key(|child| child.file_name());
+    for child in children {
+        let name = child.file_name();
+        let text = name
+            .to_str()
+            .ok_or_else(|| invalid("file name must be portable UTF-8"))?;
+        let member = if member.is_empty() {
+            text.to_owned()
+        } else {
+            format!("{member}/{text}")
+        };
+        #[cfg(unix)]
+        let opened = paths::open_child(file, &name)?;
+        #[cfg(windows)]
+        let opened = {
+            let opened = paths::open_source(&child.path())?;
+            if platform::file_identity(file)?
+                != platform::file_identity(&paths::open_source(source)?)?
+            {
+                return Err(invalid("source directory changed"));
+            }
+            opened
+        };
+        pack_entry((&child.path(), opened), &member, output, budget)?;
     }
     Ok(())
 }

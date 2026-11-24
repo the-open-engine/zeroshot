@@ -109,50 +109,59 @@ impl TargetHttpControlAuthority {
             .await
             .map(FileReply::Json);
         }
-        if response.status() != reqwest::StatusCode::OK
-            || response.headers().contains_key(TRANSFER_ENCODING)
-            || response
-                .headers()
-                .get(CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                != Some(TARGET_FILES_MEDIA_TYPE)
-        {
-            return Err(authority_error(
-                "file download requires a complete framed file tree",
-            ));
-        }
-        let expected = response
-            .headers()
-            .get(CONTENT_LENGTH)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|length| *length <= MAX_FILE_TRANSFER_BYTES)
-            .ok_or_else(|| authority_error("invalid file download length"))?;
-        let mut staged = new_transfer(transfer.1).map_err(file_io)?;
-        let mut output = tokio::fs::File::from_std(staged.as_file().try_clone().map_err(file_io)?);
-        let mut received = 0_u64;
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), stream.next())
+        receive_tree(response, transfer.1)
             .await
-            .map_err(|_| authority_error("file download idle timeout"))?
-        {
-            let chunk = chunk
-                .map_err(|error| TargetAuthorityError::request_failed("file download", &error))?;
-            received = received
-                .checked_add(chunk.len() as u64)
-                .filter(|length| *length <= expected)
-                .ok_or_else(|| authority_error("file download exceeds length"))?;
-            output.write_all(&chunk).await.map_err(file_io)?;
-        }
-        if received != expected {
-            return Err(authority_error("incomplete file download"));
-        }
-        output.flush().await.map_err(file_io)?;
-        output.sync_all().await.map_err(file_io)?;
-        drop(output);
-        staged.rewind().map_err(file_io)?;
-        Ok(FileReply::Tree(staged))
+            .map(FileReply::Tree)
     }
+}
+
+async fn receive_tree(
+    response: reqwest::Response,
+    scratch: &Path,
+) -> Result<FileTransfer, TargetAuthorityError> {
+    if response.status() != reqwest::StatusCode::OK
+        || response.headers().contains_key(TRANSFER_ENCODING)
+        || response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            != Some(TARGET_FILES_MEDIA_TYPE)
+    {
+        return Err(authority_error(
+            "file download requires a complete framed file tree",
+        ));
+    }
+    let expected = response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|length| *length <= MAX_FILE_TRANSFER_BYTES)
+        .ok_or_else(|| authority_error("invalid file download length"))?;
+    let mut staged = new_transfer(scratch).map_err(file_io)?;
+    let mut output = tokio::fs::File::from_std(staged.as_file().try_clone().map_err(file_io)?);
+    let mut received = 0_u64;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(30), stream.next())
+        .await
+        .map_err(|_| authority_error("file download idle timeout"))?
+    {
+        let chunk =
+            chunk.map_err(|error| TargetAuthorityError::request_failed("file download", &error))?;
+        received = received
+            .checked_add(chunk.len() as u64)
+            .filter(|length| *length <= expected)
+            .ok_or_else(|| authority_error("file download exceeds length"))?;
+        output.write_all(&chunk).await.map_err(file_io)?;
+    }
+    if received != expected {
+        return Err(authority_error("incomplete file download"));
+    }
+    output.flush().await.map_err(file_io)?;
+    output.sync_all().await.map_err(file_io)?;
+    drop(output);
+    staged.rewind().map_err(file_io)?;
+    Ok(staged)
 }
 
 fn file_io(_error: std::io::Error) -> TargetAuthorityError {
