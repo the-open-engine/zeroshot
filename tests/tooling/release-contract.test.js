@@ -327,16 +327,24 @@ describe('Embedded UI distribution', () => {
   });
 });
 
-describe('CI efficiency contract', () => {
+describe('macOS regression coverage', () => {
+  const macosTests = read('scripts/test-macos.sh').replace(/[ \t]+\\\r?\n[ \t]*/g, ' ');
+
   it('executes forge access and native certificate trust regressions on macOS', () => {
     const workflow = yaml.load(read('.github/workflows/ci.yml'));
-    const step = workflow.jobs['macos-check'].steps.find(
-      (step) => step.name === 'Run macOS forge network and access regressions'
+    const steps = workflow.jobs['macos-check'].steps;
+    const restic = steps.findIndex(
+      (step) => step.name === 'Prepare pinned Restic for native controller tests'
     );
-    assert.ok(step);
-    assert.match(step.run, /cargo test --locked --package zeroshot --lib --features ui --/);
-    assert.doesNotMatch(step.run, /--no-run/);
-    const filters = step.run.split(' -- ')[1].trim().split(/\s+/);
+    const regressions = steps.findIndex((step) => step.run === 'bash scripts/test-macos.sh');
+    assert.ok(restic >= 0 && regressions > restic);
+
+    const network = macosTests
+      .split('\n')
+      .find((command) => command.includes('source_code_provider::adapters::core::network::tests'));
+    assert.ok(network);
+    assert.match(network, /^cargo test --locked --package zeroshot --lib --features ui -- /);
+    const filters = network.split(' -- ')[1].trim().split(/\s+/);
     for (const name of [
       'source_code_provider::adapters::core::network::tests::empty_uppercase_values_fall_back_to_lowercase_for_every_proxy_pair',
       'source_code_provider::adapters::core::github::access::tests::github_child_receives_only_the_ten_snapshot_network_fields',
@@ -349,41 +357,25 @@ describe('CI efficiency contract', () => {
         `macOS must execute ${name}`
       );
     }
-    const checkpoint = workflow.jobs['macos-check'].steps.find(
-      (step) => step.name === 'Run macOS checkpoint forge access regression'
-    );
-    assert.ok(checkpoint);
-    assert.match(checkpoint.run, /--test native_v2_local_delivery_gh_search_path/);
     assert.match(
-      checkpoint.run,
-      /checkpoint_resume_checks_the_restored_gh_once_before_agents_start/
-    );
-    assert.doesNotMatch(checkpoint.run, /--no-run/);
-    assert.ok(
-      workflow.jobs['macos-check'].steps.indexOf(checkpoint) >
-        workflow.jobs['macos-check'].steps.findIndex(
-          (step) => step.name === 'Prepare pinned Restic for native controller tests'
-        )
+      macosTests,
+      /^cargo test --locked --package zeroshot --features ui --test native_v2_local_delivery_gh_search_path checkpoint_resume_checks_the_restored_gh_once_before_agents_start$/m
     );
   });
 
   it('executes macOS workspace export integration and private publication regressions', () => {
-    const workflow = yaml.load(read('.github/workflows/ci.yml'));
-    const step = workflow.jobs['macos-check'].steps.find(
-      (step) => step.name === 'Run macOS workspace export regressions'
-    );
-    assert.ok(step);
     assert.match(
-      step.run,
-      /cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace/
+      macosTests,
+      /^cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace$/m
     );
     assert.match(
-      step.run,
-      /cargo test --locked --package zeroshot --features ui --lib native_v2_cli::execution::export_workspace::tests/
+      macosTests,
+      /^cargo test --locked --package zeroshot --features ui --lib native_v2_cli::execution::export_workspace::tests$/m
     );
-    assert.doesNotMatch(step.run, /--no-run/);
   });
+});
 
+describe('CI efficiency contract', () => {
   it('cancels only superseded pull-request runs and classifies both sides of renames', () => {
     const source = read('.github/workflows/ci.yml');
     const workflow = yaml.load(source);
