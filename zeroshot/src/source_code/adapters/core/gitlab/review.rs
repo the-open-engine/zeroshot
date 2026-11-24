@@ -638,7 +638,24 @@ async fn observation(
         _ => return Err(SourceDeliveryError::Rejected),
     };
     let handoff = approval_handoff(value, project);
-    Ok(receipt.observation_with_readiness(state, handoff, false))
+    let mut observation = receipt.observation_with_readiness(state, handoff, false);
+    if observation.state == SourceReviewState::Conflict {
+        observation.conflict_checks = Some(conflict_checks(value, project)?);
+    }
+    Ok(observation)
+}
+
+/// A head pipeline that is absent or belongs to another commit has not started for this head.
+fn conflict_checks(
+    value: &MergeRequest,
+    project: &Project,
+) -> Result<SourceChecks, SourceDeliveryError> {
+    match &value.head_pipeline {
+        Some(pipeline) if pipeline_associated(pipeline, value, project)? => {
+            pipeline_checks(value, project)
+        }
+        _ => Ok(SourceChecks::NotRequired),
+    }
 }
 
 fn pipeline_checks(

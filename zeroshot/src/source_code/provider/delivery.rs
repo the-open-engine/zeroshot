@@ -207,6 +207,10 @@ pub struct SourceReviewObservation {
     pub state: SourceReviewState,
     pub pull_request_ready: bool,
     pub head_update_required: bool,
+    /// Required-check evidence for the head of a [`SourceReviewState::Conflict`] review, when the
+    /// forge supplies it. `Failed`, `Pending` and `Passed` describe checks that started;
+    /// `NotRequired` means none has started, which a forge may never do for a conflicting review.
+    pub conflict_checks: Option<SourceChecks>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -495,6 +499,7 @@ impl SourceReviewReceipt {
             state,
             pull_request_ready,
             head_update_required,
+            conflict_checks: None,
         }
     }
 }

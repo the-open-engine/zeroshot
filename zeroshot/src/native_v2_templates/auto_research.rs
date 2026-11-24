@@ -255,7 +255,11 @@ fn publish(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
             },
             ChoiceBranch {
                 when: signal_guard(REVIEWER, VERDICT_FIELD, ACCEPTED)?,
-                node: named_delivery_node("checkpoint_delivery", DeliveryMode::Push)?,
+                node: named_delivery_node(
+                    "checkpoint_delivery",
+                    DeliveryMode::Push,
+                    TargetDrift::Reconcile,
+                )?,
             },
         ],
         Some(fail(
@@ -313,7 +317,7 @@ fn terminal(
             },
             ChoiceBranch {
                 when: named_delivery_signal_guard("checkpoint_delivery", &[DELIVERY_PUSHED_LABEL])?,
-                node: delivery_success("done", DeliveryMode::Push)?,
+                node: delivery_success("done", DeliveryMode::Push, TargetDrift::Reconcile)?,
             },
         ],
         None,
@@ -342,7 +346,7 @@ fn research_state(delivery: TemplateDelivery) -> Result<PayloadType, BuiltinTemp
         )])?),
     );
     if delivery == TemplateDelivery::Push {
-        add_delivery_state_fields(&mut fields, DeliveryMode::Push)?;
+        add_delivery_state_fields(&mut fields, DeliveryMode::Push, TargetDrift::Reconcile)?;
         fields.insert(
             field_name(DELIVERY_FEEDBACK_FIELD)?,
             required(PayloadType::String),
@@ -407,7 +411,10 @@ fn research_paths(delivery: TemplateDelivery) -> Result<Vec<FieldPath>, BuiltinT
 }
 
 fn push_paths() -> Result<Vec<FieldPath>, BuiltinTemplateError> {
-    let PayloadType::Record { fields } = static_value(delivery_result_schema(DeliveryMode::Push))?
+    let PayloadType::Record { fields } = static_value(delivery_result_schema_for(
+        DeliveryMode::Push,
+        TargetDrift::Reconcile,
+    ))?
     else {
         return Err(BuiltinTemplateError::InvalidStaticContract);
     };

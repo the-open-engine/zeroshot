@@ -394,3 +394,48 @@ async fn instance_links_require_cached_project_identity_and_canonical_review_ids
         &format!("{}#note_1", missing_base.url)
     ));
 }
+
+#[tokio::test]
+async fn conflicting_reviews_report_only_a_head_pipeline_that_started() {
+    let fixture = Fixture::new().await;
+    for status in ["conflict", "need_rebase"] {
+        for (pipeline, expected) in [
+            (None, SourceChecks::NotRequired),
+            (Some("running"), SourceChecks::Pending),
+            (Some("success"), SourceChecks::Passed),
+        ] {
+            let mut mr = merge_request();
+            mr["detailed_merge_status"] = json!(status);
+            mr["head_pipeline"] = pipeline.map_or(Value::Null, |status| {
+                let mut pipeline = merge_request()["head_pipeline"].clone();
+                pipeline["status"] = json!(status);
+                pipeline
+            });
+            fixture.state.lock().unwrap().review = Some(mr);
+            let observation = fixture
+                .authority
+                .inspect_review(&receipt(), credential())
+                .await
+                .unwrap();
+            assert_eq!(observation.state, SourceReviewState::Conflict);
+            assert_eq!(
+                observation.conflict_checks,
+                Some(expected),
+                "{status} {pipeline:?}"
+            );
+        }
+        let mut mr = merge_request();
+        mr["detailed_merge_status"] = json!(status);
+        mr["head_pipeline"]["status"] = json!("failed");
+        fixture.state.lock().unwrap().review = Some(mr);
+        let observation = fixture
+            .authority
+            .inspect_review(&receipt(), credential())
+            .await
+            .unwrap();
+        assert!(matches!(
+            observation.conflict_checks,
+            Some(SourceChecks::Failed { .. })
+        ));
+    }
+}

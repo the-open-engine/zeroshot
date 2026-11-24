@@ -853,6 +853,7 @@ exec /bin/cat "$HOME/payload"
         head_update: None,
         pull_request_ready: false,
         observed_required_checks: Default::default(),
+        conflict_checks: None,
     };
     include_check_logs(&mut snapshot, &[(91, output)]);
     let SourceReviewState::Open {

@@ -86,6 +86,10 @@ fn software_change_defaults_to_pr_and_keeps_all_explicit_delivery_modes() {
             vec!["--delivery", "pull_request"],
             TemplateDelivery::PullRequest,
         ),
+        (
+            vec!["--delivery", "pull_request_unsynced"],
+            TemplateDelivery::PullRequestUnsynced,
+        ),
         (vec!["--delivery", "none"], TemplateDelivery::None),
         (vec!["--push"], TemplateDelivery::Push),
         (vec!["--delivery", "push"], TemplateDelivery::Push),

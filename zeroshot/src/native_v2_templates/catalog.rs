@@ -162,6 +162,8 @@ pub enum TemplateDelivery {
     None,
     Push,
     PullRequest,
+    /// Pull-request delivery that leaves a moved or conflicting target branch alone.
+    PullRequestUnsynced,
     Merge,
     Comment,
 }
@@ -173,6 +175,7 @@ impl TemplateDelivery {
             Self::None => "none",
             Self::Push => "push",
             Self::PullRequest => "pull_request",
+            Self::PullRequestUnsynced => "pull_request_unsynced",
             Self::Merge => "merge",
             Self::Comment => "comment",
         }

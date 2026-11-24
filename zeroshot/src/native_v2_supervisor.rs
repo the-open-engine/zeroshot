@@ -795,7 +795,14 @@ fn receipt_matches_admission(admitted: &AdmittedRun, output: &Value) -> bool {
             .source
             .as_ref()
             .and_then(|source| crate::native_v2_delivery::source_target(source, mode).ok())
-            .is_some_and(|target| is_matching_success_receipt(output, mode, &target));
+            .is_some_and(|target| is_matching_success_receipt(output, mode, &target))
+            // `opened` succeeds only for a pr@2 node that declared it by accepting target drift.
+            && output
+                .get("outcome")
+                .and_then(Value::as_str)
+                .is_some_and(|outcome| {
+                    crate::native_v2_admission::sole_delivery_declares_outcome(admitted, outcome)
+                });
     }
     let Ok(Some(comment)) = crate::native_v2_admission::admitted_comment_input(admitted) else {
         return false;

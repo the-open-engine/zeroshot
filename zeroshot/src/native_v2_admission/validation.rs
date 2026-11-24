@@ -355,6 +355,37 @@ pub(crate) fn sole_delivery_node(admitted: &AdmittedRun) -> Option<(NodeName, De
     deliveries.next().is_none().then_some(selected)
 }
 
+/// Whether a delivery declaration lists `outcome` among its `delivery` signal labels.
+pub(super) fn declares_delivery_outcome(
+    declaration: &ExecutableDeclaration,
+    outcome: &str,
+) -> bool {
+    declaration
+        .contract
+        .verifier
+        .as_ref()
+        .is_some_and(|verifier| {
+            verifier.signals.iter().any(|(field, labels)| {
+                field.as_str() == crate::native_v2_delivery::DELIVERY_SIGNAL_FIELD
+                    && labels
+                        .values()
+                        .iter()
+                        .any(|label| label.as_str() == outcome)
+            })
+        })
+}
+
+/// A receipt outcome certifies delivery only when the sole Git delivery node declared it.
+pub(crate) fn sole_delivery_declares_outcome(admitted: &AdmittedRun, outcome: &str) -> bool {
+    let mut deliveries = executable_declarations(&admitted.graph.root)
+        .into_iter()
+        .filter(|declaration| DeliveryMode::from_worker(&declaration.worker).is_some());
+    match (deliveries.next(), deliveries.next()) {
+        (Some(declaration), None) => declares_delivery_outcome(&declaration, outcome),
+        _ => false,
+    }
+}
+
 pub(crate) fn writer_nodes(admitted: &AdmittedRun) -> BTreeSet<NodeName> {
     executable_declarations(&admitted.graph.root)
         .into_iter()

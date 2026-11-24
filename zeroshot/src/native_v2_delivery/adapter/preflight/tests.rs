@@ -70,6 +70,7 @@ fn observation() -> SourceReviewObservation {
         },
         pull_request_ready: false,
         head_update_required: false,
+        conflict_checks: None,
     }
 }
 

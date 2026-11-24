@@ -8,15 +8,17 @@ use openengine_cluster_protocol::{
     PolicyBinding, PolicyDefault, PolicyRef, RecordField, SeqNode, SucceedNode, WriteBinding,
 };
 
-use crate::native_v2_delivery::contract::{delivery_result_schema, delivery_signal_labels};
+use crate::native_v2_delivery::contract::{
+    TargetDrift, delivery_result_schema_for, delivery_signal_labels_for,
+};
 use crate::native_v2_delivery::DeliveryMode;
 
 use super::{
-    delivery_mode, enum_label, field_name, field_path, node_name, non_empty, static_value,
-    BuiltinTemplateError, TemplateDelivery, ACCEPTANCE_FEEDBACK_FIELD, CODE_FEEDBACK_FIELD,
-    DELIVERY_FEEDBACK_FIELD, DESCRIPTION_FIELD, DIAGNOSTIC_MESSAGE_FIELD, ISSUE_NUMBER_FIELD,
-    TASK_FIELD, TITLE_FIELD, PHASE_FIELD, CONTINUE_ITEMS_FIELD, REVIEW_CONTEXT_FIELD,
-    verdict_labels,
+    delivery_drift, delivery_mode, enum_label, field_name, field_path, node_name, non_empty,
+    static_value, BuiltinTemplateError, TemplateDelivery, ACCEPTANCE_FEEDBACK_FIELD,
+    CODE_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD, DESCRIPTION_FIELD, DIAGNOSTIC_MESSAGE_FIELD,
+    ISSUE_NUMBER_FIELD, TASK_FIELD, TITLE_FIELD, PHASE_FIELD, CONTINUE_ITEMS_FIELD,
+    REVIEW_CONTEXT_FIELD, verdict_labels,
 };
 
 pub(super) fn graph(
@@ -150,7 +152,7 @@ fn phase_type(delivery: TemplateDelivery) -> Result<PayloadType, BuiltinTemplate
     let mut labels = verdict_labels()?.values().to_vec();
     if let Some(mode) = delivery_mode(delivery) {
         labels.extend(
-            static_value(delivery_signal_labels(mode))?
+            static_value(delivery_signal_labels_for(mode, delivery_drift(delivery)))?
                 .values()
                 .iter()
                 .cloned(),
@@ -200,7 +202,7 @@ pub(super) fn software_state(
         ),
     ]);
     if let Some(mode) = delivery_mode(delivery) {
-        add_delivery_state_fields(&mut fields, mode)?;
+        add_delivery_state_fields(&mut fields, mode, delivery_drift(delivery))?;
     }
     Ok(PayloadType::Record { fields })
 }
@@ -208,6 +210,7 @@ pub(super) fn software_state(
 pub(super) fn add_delivery_state_fields(
     fields: &mut BTreeMap<FieldName, RecordField>,
     mode: DeliveryMode,
+    drift: TargetDrift,
 ) -> Result<(), BuiltinTemplateError> {
     fields.insert(
         field_name("reviewResponses")?,
@@ -222,7 +225,7 @@ pub(super) fn add_delivery_state_fields(
         field_name(ISSUE_NUMBER_FIELD)?,
         required(PayloadType::String),
     );
-    let output = static_value(delivery_result_schema(mode))?;
+    let output = static_value(delivery_result_schema_for(mode, drift))?;
     for (name, field) in record_fields(output)? {
         fields.insert(name, optional(field.value_type));
     }

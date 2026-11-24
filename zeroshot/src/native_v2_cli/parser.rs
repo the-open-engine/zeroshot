@@ -545,6 +545,8 @@ enum TemplateName {
 #[derive(Debug, Args)]
 struct DeliveryArgs {
     /// Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none.
+    ///
+    /// For software-change, pull_request_unsynced opens the pull request and still repairs CI failures and review feedback, but leaves a moved or conflicting target branch alone: it never merges the target or sends conflicts to repair. A head that is behind or conflicting reports `opened` once required CI has passed. Required checks that started are always awaited and a failure still goes to repair; if none starts for a conflicting head within two minutes, it reports `opened` without CI. Stacks reject it.
     #[arg(long, value_name = "MODE", conflicts_with_all = ["push", "pr", "ship"])]
     delivery: Option<String>,
 

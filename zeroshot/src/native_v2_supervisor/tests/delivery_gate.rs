@@ -56,14 +56,24 @@ async fn admitted_with_delivery() -> AdmittedRun {
 }
 
 async fn admitted_with_git_mode(mode: crate::native_v2_delivery::DeliveryMode) -> AdmittedRun {
+    admitted_with_git_contract(
+        mode,
+        crate::native_v2_delivery::contract::TargetDrift::Reconcile,
+    )
+    .await
+}
+
+async fn admitted_with_git_contract(
+    mode: crate::native_v2_delivery::DeliveryMode,
+    drift: crate::native_v2_delivery::contract::TargetDrift,
+) -> AdmittedRun {
+    use crate::native_v2_delivery::contract::{delivery_result_schema_for, delivery_signal_labels_for};
     let mut git_node = git_delivery_node();
     git_node["worker"] = json!(mode.worker_ref());
-    git_node["output"] = serde_json::to_value(
-        crate::native_v2_delivery::delivery_result_schema(mode).assert_value(),
-    )
-    .assert_value();
+    git_node["output"] =
+        serde_json::to_value(delivery_result_schema_for(mode, drift).assert_value()).assert_value();
     git_node["signals"] =
-        json!({"delivery": crate::native_v2_delivery::delivery_signal_labels(mode).assert_value()});
+        json!({"delivery": delivery_signal_labels_for(mode, drift).assert_value()});
     let graph = full_graph(vec![
         json!({
             "kind":"step","name":"worker","worker":"agent.worker@1",
@@ -758,6 +768,35 @@ async fn every_native_git_receipt_kind_is_independent_of_terminal_output() {
                 "{mode:?}"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn opened_receipt_certifies_only_a_node_that_declared_it() {
+    use crate::native_v2_delivery::DeliveryMode;
+    use crate::native_v2_delivery::contract::TargetDrift;
+    let mode = DeliveryMode::PullRequestV2;
+    let mut receipt = delivery_receipt();
+    receipt["mode"] = json!("pr");
+    receipt["links"] = json!({});
+    receipt
+        .as_object_mut()
+        .assert_value()
+        .remove("mergeRevision");
+    for (drift, outcome, certified) in [
+        (TargetDrift::Reconcile, "ready", true),
+        (TargetDrift::Reconcile, "opened", false),
+        (TargetDrift::Accept, "ready", true),
+        (TargetDrift::Accept, "opened", true),
+        (TargetDrift::Accept, "conflict", false),
+    ] {
+        let admitted = admitted_with_git_contract(mode, drift).await;
+        receipt["outcome"] = json!(outcome);
+        assert_eq!(
+            super::super::receipt_matches_admission(&admitted, &receipt),
+            certified,
+            "{drift:?} {outcome}"
+        );
     }
 }
 

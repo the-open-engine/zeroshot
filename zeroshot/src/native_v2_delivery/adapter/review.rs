@@ -7,7 +7,8 @@ pub(super) enum ReviewProgress {
     PullRequestReady,
     Mergeable,
     Pending,
-    Conflict,
+    /// Carries the forge's check evidence for the conflicting head, when it supplied any.
+    Conflict(Option<SourceChecks>),
     Closed,
 }
 
@@ -46,7 +47,7 @@ impl ReviewProgress {
                 observation.pull_request_ready,
                 observation.head_update_required,
             )),
-            SourceReviewState::Conflict => Ok(Self::Conflict),
+            SourceReviewState::Conflict => Ok(Self::Conflict(observation.conflict_checks)),
             SourceReviewState::Closed => Ok(Self::Closed),
         }
     }

@@ -43,11 +43,12 @@ fn delivery_contract_matches(
     diagnostic: &PayloadType,
 ) -> Result<bool, ContractValueError> {
     let field = FieldName::new(DELIVERY_SIGNAL_FIELD)?;
-    let matching = [true, false]
-        .into_iter()
-        .map(|repair| {
-            Ok(compatible_result_schema(output, mode, repair)?
-                && signals.get(&field) == Some(&signal_labels(mode, repair)?))
+    let matching = TargetDrift::variants(mode)
+        .iter()
+        .flat_map(|drift| [true, false].map(|repair| (*drift, repair)))
+        .map(|(drift, repair)| {
+            Ok(compatible_result_schema(output, mode, drift, repair)?
+                && signals.get(&field) == Some(&signal_labels(mode, drift, repair)?))
         })
         .collect::<Result<Vec<_>, ContractValueError>>()?
         .into_iter()
@@ -74,7 +75,7 @@ pub fn is_matching_success_receipt(
     };
     result.version == mode.result_version()
         && result.mode == mode.label()
-        && result.outcome == mode.success_outcome()
+        && mode.is_success_outcome(&result.outcome)
         && receipt_matches_target(&result, mode, target)
 }
 
@@ -239,15 +240,50 @@ struct DeliveryLinksWire {
     commit_url: Option<String>,
 }
 
+/// How a pull-request delivery node treats a target branch that moved or conflicts.
+///
+/// A graph selects [`TargetDrift::Accept`] by declaring `opened` in place of `conflict` on a
+/// `pr@2` node. Delivery then leaves the candidate and the published head as they are: it neither
+/// integrates the target before publication nor updates or repairs the pull request afterwards,
+/// and reports `opened` once required CI has passed on a head that is behind or conflicting. A
+/// forge may never start pull-request checks for a conflicting head, so a conflict whose required
+/// checks have not started within the poll policy's start grace also reports `opened`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TargetDrift {
+    Reconcile,
+    Accept,
+}
+
+impl TargetDrift {
+    const fn variants(mode: DeliveryMode) -> &'static [Self] {
+        match mode {
+            DeliveryMode::PullRequestV2 => &[Self::Reconcile, Self::Accept],
+            _ => &[Self::Reconcile],
+        }
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn delivery_result_schema(
     mode: DeliveryMode,
 ) -> Result<PayloadType, ContractValueError> {
-    result_schema(mode, true)
+    delivery_result_schema_for(mode, TargetDrift::Reconcile)
 }
 
-fn result_schema(mode: DeliveryMode, repair: bool) -> Result<PayloadType, ContractValueError> {
+pub(crate) fn delivery_result_schema_for(
+    mode: DeliveryMode,
+    drift: TargetDrift,
+) -> Result<PayloadType, ContractValueError> {
+    result_schema(mode, drift, true)
+}
+
+fn result_schema(
+    mode: DeliveryMode,
+    drift: TargetDrift,
+    repair: bool,
+) -> Result<PayloadType, ContractValueError> {
     let mut fields = delivery_identity_fields(mode)?;
-    fields.extend(delivery_mode_fields(mode, repair)?);
+    fields.extend(delivery_mode_fields(mode, drift, repair)?);
     Ok(PayloadType::Record {
         fields: fields.into_iter().collect(),
     })
@@ -256,9 +292,10 @@ fn result_schema(mode: DeliveryMode, repair: bool) -> Result<PayloadType, Contra
 fn compatible_result_schema(
     output: &PayloadType,
     mode: DeliveryMode,
+    drift: TargetDrift,
     repair: bool,
 ) -> Result<bool, ContractValueError> {
-    let mut expected = result_schema(mode, repair)?;
+    let mut expected = result_schema(mode, drift, repair)?;
     if output == &expected {
         return Ok(true);
     }
@@ -332,6 +369,7 @@ fn review_links_schema() -> Result<PayloadType, ContractValueError> {
 
 fn delivery_mode_fields(
     mode: DeliveryMode,
+    drift: TargetDrift,
     repair: bool,
 ) -> Result<Vec<(FieldName, RecordField)>, ContractValueError> {
     Ok(vec![
@@ -339,22 +377,39 @@ fn delivery_mode_fields(
         contract_field(
             DELIVERY_OUTCOME_FIELD,
             PayloadType::Enum {
-                values: signal_labels(mode, repair)?,
+                values: signal_labels(mode, drift, repair)?,
             },
         )?,
     ])
 }
 
+#[cfg(test)]
 pub(crate) fn delivery_signal_labels(
     mode: DeliveryMode,
 ) -> Result<NonEmptyEnumSet, ContractValueError> {
-    signal_labels(mode, true)
+    delivery_signal_labels_for(mode, TargetDrift::Reconcile)
 }
 
-fn signal_labels(mode: DeliveryMode, repair: bool) -> Result<NonEmptyEnumSet, ContractValueError> {
+pub(crate) fn delivery_signal_labels_for(
+    mode: DeliveryMode,
+    drift: TargetDrift,
+) -> Result<NonEmptyEnumSet, ContractValueError> {
+    signal_labels(mode, drift, true)
+}
+
+fn signal_labels(
+    mode: DeliveryMode,
+    drift: TargetDrift,
+    repair: bool,
+) -> Result<NonEmptyEnumSet, ContractValueError> {
     let mut labels = match mode {
         DeliveryMode::Push => vec![DELIVERY_PUSHED_LABEL],
         DeliveryMode::PullRequest => vec![DELIVERY_OPENED_LABEL],
+        DeliveryMode::PullRequestV2 if drift == TargetDrift::Accept => vec![
+            DELIVERY_READY_LABEL,
+            DELIVERY_OPENED_LABEL,
+            DELIVERY_CI_FAILED_LABEL,
+        ],
         DeliveryMode::PullRequestV2 => vec![
             DELIVERY_READY_LABEL,
             DELIVERY_CONFLICT_LABEL,
@@ -370,6 +425,25 @@ fn signal_labels(mode: DeliveryMode, repair: bool) -> Result<NonEmptyEnumSet, Co
         labels.push(DELIVERY_REPAIR_REQUIRED_LABEL);
     }
     contract_labels(&labels)
+}
+
+/// Whether the node declared the `opened` outcome that selects [`TargetDrift::Accept`].
+pub(super) fn target_drift(mode: DeliveryMode, response: &NodeResponseContract) -> TargetDrift {
+    let NodeResponseContract::Verifier { signals, .. } = response else {
+        return TargetDrift::Reconcile;
+    };
+    let declared = signals.iter().any(|(field, labels)| {
+        field.as_str() == DELIVERY_SIGNAL_FIELD
+            && labels
+                .values()
+                .iter()
+                .any(|label| label.as_str() == DELIVERY_OPENED_LABEL)
+    });
+    if declared && mode == DeliveryMode::PullRequestV2 {
+        TargetDrift::Accept
+    } else {
+        TargetDrift::Reconcile
+    }
 }
 
 pub(super) fn supports_repair(response: &NodeResponseContract) -> bool {

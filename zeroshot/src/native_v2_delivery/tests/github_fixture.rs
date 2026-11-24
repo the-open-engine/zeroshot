@@ -46,6 +46,14 @@ pub(in crate::native_v2_delivery) enum Script {
     MultipleRegistrationWaves,
     DeferredMerge,
     StrictBehind,
+    /// CI passed on a pull request whose head no longer contains its target.
+    BehindPullRequest,
+    /// A conflicting pull request whose required checks started and are still running.
+    ConflictCiRunning,
+    /// A conflicting pull request with a failed required check.
+    ConflictCiFailed,
+    /// A conflicting pull request whose required checks all passed.
+    ConflictCiPassed,
     HeadAdoptionRace,
     HeadAdoptionAfterRepair,
     HeadAdoptionRejected,
@@ -742,6 +750,20 @@ impl SourceDeliveryAuthority for FakeGitHub {
         assert_eq!(credential.expose(), expected);
         let state = self.review_state(inspection);
         let mut observation = review.observation(state);
+        if matches!(self.script, Script::BehindPullRequest) {
+            observation =
+                review.observation_with_readiness(open_review(SourceChecks::Passed), false, true);
+        }
+        let conflict_checks = match self.script {
+            Script::ConflictCiRunning => Some(SourceChecks::Pending),
+            Script::ConflictCiFailed => Some(failed_checks()),
+            Script::ConflictCiPassed => Some(SourceChecks::Passed),
+            _ => None,
+        };
+        if conflict_checks.is_some() {
+            observation = review.observation(SourceReviewState::Conflict);
+            observation.conflict_checks = conflict_checks;
+        }
         if matches!(self.script, Script::InvalidReviewObservation) {
             observation.head_branch = "zeroshot/unowned-head".to_owned();
         }

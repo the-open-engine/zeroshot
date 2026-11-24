@@ -29,7 +29,9 @@ pub use command::GitCommandFailure;
 pub use crate::source_code_provider::*;
 pub use contract::{is_matching_success_receipt, validate_delivery_contract};
 #[cfg(test)]
-pub(crate) use contract::{delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels};
+pub(crate) use contract::delivery_diagnostic_schema;
+#[cfg(test)]
+pub(crate) use contract::{delivery_result_schema, delivery_signal_labels};
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -86,6 +88,8 @@ const DELIVERY_MERGE_REVISION_FIELD: &str = "mergeRevision";
 const DELIVERY_PULL_REQUEST_ID_FIELD: &str = "pullRequestId";
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(20);
+/// How long an accepted conflict waits for a required check to start before reporting `opened`.
+const DEFAULT_CI_START_GRACE: Duration = Duration::from_secs(120);
 const REVIEW_SYNC_ATTEMPTS: usize = 10;
 const REVIEW_SYNC_DEADLINE: Duration = Duration::from_secs(60);
 const REVIEW_SYNC_INTERVAL: Duration = Duration::from_secs(1);
@@ -150,6 +154,13 @@ impl DeliveryMode {
         }
     }
 
+    /// `opened` also succeeds for a pr@2 node that accepts target drift; only such a node's
+    /// declared contract lets delivery report it.
+    fn is_success_outcome(self, outcome: &str) -> bool {
+        outcome == self.success_outcome()
+            || (self == Self::PullRequestV2 && outcome == DELIVERY_OPENED_LABEL)
+    }
+
     const fn result_version(self) -> &'static str {
         match self {
             Self::Push | Self::PullRequest | Self::MergeV1 => DELIVERY_V1_RESULT_VERSION,
@@ -195,6 +206,7 @@ impl DeliveryMode {
 pub struct DeliveryPollPolicy {
     maximum_attempts: Option<usize>,
     pub interval: Duration,
+    ci_start_grace: Duration,
 }
 
 impl DeliveryPollPolicy {
@@ -205,13 +217,22 @@ impl DeliveryPollPolicy {
         Ok(Self {
             maximum_attempts: Some(attempts),
             interval,
+            ci_start_grace: DEFAULT_CI_START_GRACE,
         })
+    }
+
+    /// Replaces how long an accepted conflict waits for a required check to start.
+    #[must_use]
+    pub const fn with_ci_start_grace(mut self, grace: Duration) -> Self {
+        self.ci_start_grace = grace;
+        self
     }
 
     const fn until_cancelled(interval: Duration) -> Self {
         Self {
             maximum_attempts: None,
             interval,
+            ci_start_grace: DEFAULT_CI_START_GRACE,
         }
     }
 
@@ -434,7 +455,10 @@ fn valid_mode_outcome(mode: DeliveryMode, outcome: &str) -> bool {
         DeliveryMode::PullRequest => outcome == DELIVERY_OPENED_LABEL,
         DeliveryMode::PullRequestV2 => matches!(
             outcome,
-            DELIVERY_READY_LABEL | DELIVERY_CONFLICT_LABEL | DELIVERY_CI_FAILED_LABEL
+            DELIVERY_READY_LABEL
+                | DELIVERY_OPENED_LABEL
+                | DELIVERY_CONFLICT_LABEL
+                | DELIVERY_CI_FAILED_LABEL
         ),
         DeliveryMode::MergeV1 | DeliveryMode::Merge | DeliveryMode::MergeV3 => matches!(
             outcome,
