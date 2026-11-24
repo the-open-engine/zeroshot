@@ -1061,6 +1061,8 @@ mod github_acceptance;
 mod output;
 #[path = "tests/policy_read.rs"]
 mod policy_read;
+#[path = "tests/queue_conflict.rs"]
+mod queue_conflict;
 #[path = "tests/recovery.rs"]
 mod recovery;
 

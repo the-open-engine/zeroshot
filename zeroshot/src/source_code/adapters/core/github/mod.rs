@@ -323,7 +323,8 @@ impl GhCliDeliveryAuthority {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<PolicySnapshot, SourceDeliveryError> {
         let mut snapshot = self.policy_snapshot(review, credential).await?;
-        queue::observe_removal(self, review, &mut snapshot, credential).await?;
+        let removal_failure =
+            queue::observe_removal(self, review, &mut snapshot, credential).await?;
         let mut logs = Vec::new();
         for job in &snapshot.failed_job_ids {
             let log = job_log_excerpt(
@@ -331,6 +332,9 @@ impl GhCliDeliveryAuthority {
                     .await,
             )?;
             logs.push((*job, log));
+        }
+        if let Some(failure) = removal_failure {
+            failure.revalidate(self, review, &mut snapshot).await?;
         }
         include_check_logs(&mut snapshot, &logs);
         Ok(snapshot)
@@ -406,7 +410,8 @@ impl GhCliDeliveryAuthority {
         if error.cleanup_unconfirmed() {
             return Err(error.clone());
         }
-        let snapshot = self.policy_snapshot(review, credential).await?;
+        let mut snapshot = self.policy_snapshot(review, credential).await?;
+        let _ = queue::observe_removal(self, review, &mut snapshot, credential).await?;
         if !error.authentication_failed()
             && matches!(error.api_status(), None | Some(405 | 409 | 422))
             && failure.rejection == Some(api::MutationRejection::RequiredCheckQueued)
@@ -430,7 +435,9 @@ impl GhCliDeliveryAuthority {
             SourceReviewState::Merged { .. } => Ok(SourceMergeRequestOutcome::Accepted),
             _ if permanent_response => Err(SourceDeliveryError::Rejected),
             SourceReviewState::Conflict => Ok(SourceMergeRequestOutcome::Conflict),
-            SourceReviewState::Open { .. } if snapshot.head_update.is_some() => {
+            SourceReviewState::Open {
+                checks: SourceChecks::NotRequired | SourceChecks::Passed,
+            } if snapshot.head_update.is_some() => {
                 Ok(SourceMergeRequestOutcome::HeadUpdateRequired)
             }
             // A changed or pending gate cannot explain away a permanent merge rejection.
@@ -571,7 +578,8 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
         if conversations::reconcile_resolutions(self, review, credential, checkpoint).await? {
             return Ok(SourceMergeRequestOutcome::ReviewBlocked);
         }
-        let snapshot = self.policy_snapshot(review, credential).await?;
+        let mut snapshot = self.policy_snapshot(review, credential).await?;
+        let _ = queue::observe_removal(self, review, &mut snapshot, credential).await?;
         let pull_request_id = snapshot.pull_request_id.clone();
         let queued = match merge_action(snapshot)? {
             MergeAction::Complete(outcome) => return Ok(outcome),

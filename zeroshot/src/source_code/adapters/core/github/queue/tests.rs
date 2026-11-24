@@ -1,6 +1,11 @@
 use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
+#[path = "pagination_tests.rs"]
+mod pagination_tests;
+#[path = "recovery_tests.rs"]
+mod recovery_tests;
+
 pub(super) fn enqueue_response() -> Value {
     json!({"data":{"enqueuePullRequest":{"mergeQueueEntry":{
         "id":"QUEUE_17","enqueuedAt":"2026-11-09T01:00:00Z","pullRequest":{
@@ -30,6 +35,13 @@ pub(super) fn queue_authority(
     actions: &[(&str, &str)],
 ) -> GhCliDeliveryAuthority {
     assert!(!states.is_empty());
+    let mut outcome = removed_queue_candidate("2026-11-09T00:00:00Z", "merged", vec![]);
+    outcome["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"] = json!([]);
+    std::fs::write(
+        root.join("queue-outcome.json"),
+        json!([outcome]).to_string(),
+    )
+    .assert_value();
     for (index, state) in states.iter().enumerate() {
         std::fs::write(
             root.join(format!("policy-{index}.json")),
@@ -923,7 +935,7 @@ async fn successful_queue_admission_is_not_resubmitted_by_polling_and_rejected_a
     for expected in [
         SourceMergeRequestOutcome::Accepted,
         SourceMergeRequestOutcome::Pending,
-        SourceMergeRequestOutcome::Accepted,
+        SourceMergeRequestOutcome::Pending,
     ] {
         assert_eq!(
             provider
@@ -1240,7 +1252,17 @@ async fn removed_queue_candidate_returns_ci_feedback_before_an_explicit_new_admi
     ] {
         assert!(diagnostic.contains(expected), "{diagnostic}");
     }
-    enqueue_accepted(&provider).await;
+    assert_eq!(
+        provider
+            .request_merge(
+                &review(),
+                SourceDeliveryCredential::token("test-token"),
+                &TestReviewCheckpoint
+            )
+            .await
+            .assert_value(),
+        SourceMergeRequestOutcome::Pending
+    );
     assert_eq!(enqueue_count(root.path()), 1);
     assert_withdrawn(&provider).await;
     enqueue_accepted(&provider).await;
@@ -1298,8 +1320,17 @@ async fn queue_failure_evidence_is_bound_to_the_current_admission_and_review() {
     ] {
         let root = tempfile::tempdir().assert_value();
         let provider = admission(root.path(), &response(&enqueue_response()));
-        let mut outcome = removed_queue_candidate("2026-11-09T01:30:00Z", "failed_checks", vec![]);
+        let mut outcome = removed_queue_candidate(
+            "2026-11-09T01:30:00Z",
+            "failed_checks",
+            vec![check_run("required", "COMPLETED", Some("FAILURE"), true)],
+        );
         *outcome.pointer_mut(pointer).assert_value() = value;
+        std::fs::write(
+            root.path().join("job-log"),
+            "##[error]required check failed",
+        )
+        .assert_value();
         let observed = inspect_outcome(root.path(), &provider, json!([outcome])).await;
         match expected {
             "rejected" => {

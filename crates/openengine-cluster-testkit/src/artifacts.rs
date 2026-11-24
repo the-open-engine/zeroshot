@@ -197,6 +197,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     artifacts.extend(crate::logs_artifacts::generate_logs_goldens().await);
     artifacts.extend(crate::agent_attach_artifacts::generate_agent_attach_goldens().await);
     artifacts.extend(crate::native_v2_observation_artifacts::artifacts());
+    artifacts.extend(crate::target_files_artifacts::artifacts());
     for (name, request) in cases {
         let response = dispatcher.dispatch(request).await;
         artifacts.push(Artifact {

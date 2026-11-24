@@ -1276,3 +1276,6 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
     );
     server.abort();
 }
+
+#[path = "tests/files.rs"]
+mod files;

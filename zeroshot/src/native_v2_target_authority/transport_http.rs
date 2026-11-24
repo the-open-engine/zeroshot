@@ -24,10 +24,14 @@ pub(super) struct RequestHead {
     pub(super) method: String,
     pub(super) path: String,
     headers: Vec<(String, String)>,
-    encoded_len: usize,
+    pub(super) encoded_len: usize,
 }
 
 impl RequestHead {
+    pub(super) fn has_header(&self, name: &str) -> bool {
+        self.headers.iter().any(|(candidate, _)| candidate == name)
+    }
+
     #[cfg(feature = "ui")]
     pub(super) fn is_ui_route(&self) -> bool {
         is_ui_target(&self.path)
@@ -38,7 +42,7 @@ impl RequestHead {
             .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
     }
 
-    fn header_exact(&self, name: &str) -> Option<&str> {
+    pub(super) fn header_exact(&self, name: &str) -> Option<&str> {
         let mut values = self
             .headers
             .iter()

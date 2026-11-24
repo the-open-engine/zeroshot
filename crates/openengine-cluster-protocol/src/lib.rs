@@ -384,3 +384,6 @@ impl JsonSchema for Generation {
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 #[error("generation {0} exceeds the JavaScript-safe integer maximum {MAX_SAFE_GENERATION}")]
 pub struct GenerationOutOfRange(pub u64);
+
+pub mod target_files;
+pub use target_files::*;

@@ -3,6 +3,7 @@ mod connections;
 mod contract;
 mod control;
 pub(super) mod credentials;
+pub(super) mod files;
 #[cfg(feature = "ui")]
 mod history;
 mod hosted_runs;

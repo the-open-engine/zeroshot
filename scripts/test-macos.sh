@@ -47,6 +47,12 @@ ZEROSHOT_REQUIRE_APFS_CLONE=1 cargo test --locked --package zeroshot --lib --fea
   native_v2_supervisor::checkpoints::filesystem::tests::macos_ \
   native_v2_supervisor::checkpoints::filesystem::tests::cancellation_after_metadata_leaves_only_the_prior_snapshot
 
+# Target files, including early authentication and framing refusals
+cargo test --locked --package openengine-cluster-protocol --test target_files
+cargo test --locked --package zeroshot --features ui --lib -- \
+  native_v2_files::tests native_v2_target_authority::tests::files
+cargo test --locked --package zeroshot --features ui --test native_v2_files
+
 # Workspace export
 cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace
 cargo test --locked --package zeroshot --features ui --lib native_v2_cli::execution::export_workspace::tests
