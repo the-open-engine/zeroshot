@@ -721,10 +721,9 @@ async fn m10_a_transport_failure_followed_by_a_merged_read_is_accepted() {
     assert_eq!(writes(&requests).len(), 1, "{requests:?}");
 }
 
-/// M11: an unconfirmed write keeps its record; the next call removes it and returns `Pending`
-/// without writing, and the call after that writes again.
+/// M11: an unconfirmed write keeps its record until the next call's write settles it.
 #[tokio::test]
-async fn m11_an_unconfirmed_write_keeps_its_record_until_the_next_calls_resolve_it() {
+async fn m11_an_unconfirmed_write_keeps_its_record_until_a_later_write_settles() {
     let fixture = Fixture::new().await;
     let authority = new_authority(&fixture).await;
     fixture.queue(version());
@@ -745,19 +744,6 @@ async fn m11_an_unconfirmed_write_keeps_its_record_until_the_next_calls_resolve_
     assert!(!format!("{error}").contains(TOKEN), "{error}");
     assert!(recorded(&authority), "the outcome is unknown");
 
-    // A read that finds the record reports it as `Pending` and releases it, without writing.
-    gate_reads_without_rule(&fixture, &open_pull(REVISION));
-    assert_eq!(
-        merge::request(&authority, &receipt(), credential())
-            .await
-            .assert_value(),
-        SourceMergeRequestOutcome::Pending
-    );
-    assert!(
-        !recorded(&authority),
-        "the record is released before the next attempt"
-    );
-
     gate_reads(
         &fixture,
         &open_pull(REVISION),
@@ -772,11 +758,17 @@ async fn m11_an_unconfirmed_write_keeps_its_record_until_the_next_calls_resolve_
             .assert_value(),
         SourceMergeRequestOutcome::Accepted
     );
-    assert!(!recorded(&authority), "the third write was confirmed");
+    assert!(
+        !recorded(&authority),
+        "the settled write releases the record it inherited"
+    );
 
     let requests = fixture.requests();
-    assert_eq!(requests.len(), 15, "{requests:?}");
-    assert_eq!(writes(&requests).len(), 2, "{requests:?}");
+    assert_eq!(requests.len(), 13, "{requests:?}");
+    let writes = writes(&requests);
+    assert_eq!(writes.len(), 2, "{requests:?}");
+    assert_eq!(writes.assert_at(0).uri, MERGE_URI, "{requests:?}");
+    assert_eq!(writes.assert_at(1).uri, MERGE_URI, "{requests:?}");
     assert_eq!(
         requests.assert_at(5).uri,
         MERGE_URI,
@@ -788,20 +780,95 @@ async fn m11_an_unconfirmed_write_keeps_its_record_until_the_next_calls_resolve_
         "the read that could not decide"
     );
     assert_eq!(
-        requests.assert_at(8).uri,
-        PULL_URI,
-        "the read that found the record"
-    );
-    assert_eq!(
-        requests.assert_at(13).uri,
+        requests.assert_at(11).uri,
         MERGE_URI,
-        "the call after that wrote again"
+        "the second call wrote without first returning `Pending`"
     );
     assert_eq!(
-        requests.assert_at(14).uri,
+        requests.assert_at(12).uri,
         PULL_URI,
         "the read that confirmed it"
     );
+}
+
+/// M23: a gate that is not ready leaves an existing record in place and sends no write.
+#[tokio::test]
+async fn m23_a_held_record_survives_a_gate_that_is_not_ready() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    remember(&authority);
+    fixture.queue(version());
+    gate_reads(
+        &fixture,
+        &open_pull(REVISION),
+        branch(0, &["ci"], true),
+        page(&[status(1, "ci", "pending", "")]),
+    );
+
+    assert_eq!(
+        merge::request(&authority, &receipt(), credential())
+            .await
+            .assert_value(),
+        SourceMergeRequestOutcome::Pending
+    );
+    assert!(
+        recorded(&authority),
+        "a gate that is not ready leaves the record in place"
+    );
+
+    let requests = fixture.requests();
+    assert!(writes(&requests).is_empty(), "{requests:?}");
+}
+
+/// M24: `withdraw` after a timed-out write and a second call still reports the settlement
+/// uncertain and keeps the record.
+#[tokio::test]
+async fn m24_withdraw_after_a_timed_out_write_and_a_second_call_still_reports_uncertain() {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    fixture.queue(version());
+    gate_reads(
+        &fixture,
+        &open_pull(REVISION),
+        branch(0, &[], false),
+        page(&[]),
+    )
+    .queue(transport_failure())
+    .queue(open_pull(REVISION).response());
+
+    let error = merge::request(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    assert!(error.retryable_operation(), "{error}");
+    assert!(recorded(&authority), "the outcome is unknown");
+
+    gate_reads(
+        &fixture,
+        &open_pull(REVISION),
+        branch(0, &["ci"], true),
+        page(&[status(1, "ci", "pending", "")]),
+    );
+    assert_eq!(
+        merge::request(&authority, &receipt(), credential())
+            .await
+            .assert_value(),
+        SourceMergeRequestOutcome::Pending
+    );
+    assert!(recorded(&authority), "the record is still held");
+
+    fixture.queue(open_pull(REVISION).response());
+    let error = merge::withdraw(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    let text = match &error {
+        SourceDeliveryError::Api(failure) => format!("{failure}"),
+        other => panic!("expected an API error, got {other:?}"),
+    };
+    assert!(
+        text.starts_with("Forgejo merge settlement remains uncertain for"),
+        "{text}"
+    );
+    assert!(recorded(&authority), "the record is still held");
 }
 
 /// M12: `merge_style` takes the default when it is allowed, otherwise the allowed order, and a

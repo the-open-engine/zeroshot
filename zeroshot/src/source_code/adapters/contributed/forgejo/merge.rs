@@ -1,9 +1,10 @@
 //! Merge, withdrawal and conflict materialization for the contributed Forgejo adapter.
 //!
-//! A merge is one synchronous write for one identity-validated review. The intent is recorded before
-//! the write and released only when the write is confirmed, so an interrupted attempt never sends a
-//! second write for the same review while its outcome is unknown. Nothing here asks the forge to
-//! force a merge, to merge when checks succeed, or to delete the head branch.
+//! A merge is one write for one identity-validated review, pinned to the reviewed head. The intent is
+//! recorded before the write and released only when a write settles or a read shows the merge, so a
+//! withdrawal never reports an attempt whose outcome is unknown as withdrawn. A later write for the
+//! same review is pinned to the same head. Nothing here asks the forge to force a merge, to merge
+//! when checks succeed, or to delete the head branch.
 
 use std::collections::BTreeSet;
 use std::sync::MutexGuard;
@@ -86,13 +87,6 @@ pub(super) async fn request(
     if pull.state == "closed" {
         return Ok(SourceMergeRequestOutcome::Pending);
     }
-    if context.record_exists()? {
-        // The recorded attempt is unconfirmed, and this read shows the pull is not merged. Releasing
-        // the record lets a later call write again: that write is pinned to the same reviewed head,
-        // and a pull the earlier attempt merged meanwhile is confirmed by the next read.
-        context.release()?;
-        return Ok(SourceMergeRequestOutcome::Pending);
-    }
 
     let observed = checks::observe_open(authority, &receipt.repository, &pull, credential).await?;
     if observed.state == SourceReviewState::Conflict {
@@ -113,6 +107,8 @@ pub(super) async fn request(
         return Ok(SourceMergeRequestOutcome::Pending);
     }
 
+    // An earlier unconfirmed attempt keeps its record: the new write is pinned to the same reviewed
+    // head, and only a settled write or a merged read releases it.
     context.remember()?;
     let (owner, name) = split_repository(&receipt.repository)?;
     let segments = ["repos", owner, name, "pulls", &receipt.review_id, "merge"];
