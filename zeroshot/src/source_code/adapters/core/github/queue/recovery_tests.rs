@@ -662,54 +662,70 @@ async fn uncertain_recovery_cannot_expose_a_conflict_before_withdrawal() {
 }
 #[tokio::test]
 async fn superseded_admission_cannot_expose_an_older_conflict_observation() {
-    let root = tempfile::tempdir().assert_value();
-    let receipt_path = root.path().join("enqueue-dynamic.json");
-    std::fs::write(&receipt_path, enqueue_response().to_string()).assert_value();
-    let provider = Arc::new(admission(
-        root.path(),
-        "/bin/cat \"$HOME/enqueue-dynamic.json\"",
-    ));
-    let program = root.path().join("gh-queue-fixture");
-    let source = std::fs::read_to_string(&program).assert_value();
-    write_executable(
-        &program,
-        source.replace(
-            "*'query QueueOutcome('*) /bin/cat",
-            "*'query QueueOutcome('*) if [ -f \"$HOME/block-next\" ]; then /bin/rm \"$HOME/block-next\"; printf blocked > \"$HOME/blocked\"; while [ ! -f \"$HOME/release\" ]; do /bin/sleep 0.005; done; fi; /bin/cat",
-        ),
-    );
-    enqueue_accepted(&provider).await;
-    set_conflict_removal(root.path(), "REMOVAL_B");
-    let mut conflict = recovery_policy(false);
-    conflict["data"]["repository"]["pullRequest"]["mergeable"] = json!("CONFLICTING");
-    conflict["data"]["repository"]["pullRequest"]["mergeStateStatus"] = json!("DIRTY");
-    set_policy(root.path(), conflict);
-    std::fs::write(root.path().join("block-next"), "").assert_value();
-    let observer = provider.clone();
-    let stalled = tokio::spawn(async move { inspect(&observer).await });
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !root.path().join("blocked").exists() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
+    for failed_queue_check in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let receipt_path = root.path().join("enqueue-dynamic.json");
+        std::fs::write(&receipt_path, enqueue_response().to_string()).assert_value();
+        let provider = Arc::new(admission(
+            root.path(),
+            "/bin/cat \"$HOME/enqueue-dynamic.json\"",
+        ));
+        let program = root.path().join("gh-queue-fixture");
+        let source = std::fs::read_to_string(&program).assert_value();
+        write_executable(
+            &program,
+            source.replace(
+                "*'query QueueOutcome('*) /bin/cat",
+                "*'query QueueOutcome('*) if [ -f \"$HOME/block-next\" ]; then /bin/rm \"$HOME/block-next\"; printf blocked > \"$HOME/blocked\"; while [ ! -f \"$HOME/release\" ]; do /bin/sleep 0.005; done; fi; /bin/cat",
+            ),
+        );
+        enqueue_accepted(&provider).await;
+        let mut outcome = removed_queue_candidate(
+            "2026-11-09T01:30:00Z",
+            "merge_conflict",
+            vec![check_run("old-queue-check", "IN_PROGRESS", None, true)],
+        );
+        outcome["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"][0]["id"] =
+            json!("REMOVAL_B");
+        let outcome_path = root.path().join("queue-outcome.json");
+        std::fs::write(&outcome_path, json!([outcome.clone()]).to_string()).assert_value();
+        let mut conflict = recovery_policy(false);
+        conflict["data"]["repository"]["pullRequest"]["mergeable"] = json!("CONFLICTING");
+        conflict["data"]["repository"]["pullRequest"]["mergeStateStatus"] = json!("DIRTY");
+        set_policy(root.path(), conflict);
+        std::fs::write(root.path().join("block-next"), "").assert_value();
+        let observer = provider.clone();
+        let stalled = tokio::spawn(async move { inspect(&observer).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !root.path().join("blocked").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .assert_value();
+        set_policy(root.path(), recovery_policy(false));
+        let mut receipt = enqueue_response();
+        receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["id"] = json!("NEW_ENTRY");
+        receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["enqueuedAt"] =
+            json!("2026-11-09T02:00:00Z");
+        std::fs::write(receipt_path, receipt.to_string()).assert_value();
+        enqueue_accepted(&provider).await;
+        if failed_queue_check {
+            outcome["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"][0]["beforeCommit"]
+                ["statusCheckRollup"]["contexts"]["nodes"][0] =
+                check_run("old-queue-check", "COMPLETED", Some("FAILURE"), true);
+            std::fs::write(outcome_path, json!([outcome]).to_string()).assert_value();
         }
-    })
-    .await
-    .assert_value();
-    set_policy(root.path(), recovery_policy(false));
-    let mut receipt = enqueue_response();
-    receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["id"] = json!("NEW_ENTRY");
-    receipt["data"]["enqueuePullRequest"]["mergeQueueEntry"]["enqueuedAt"] =
-        json!("2026-11-09T02:00:00Z");
-    std::fs::write(receipt_path, receipt.to_string()).assert_value();
-    enqueue_accepted(&provider).await;
-    std::fs::write(root.path().join("release"), "").assert_value();
-    assert_eq!(
-        stalled.await.assert_value(),
-        SourceReviewState::Open {
-            checks: SourceChecks::Pending
-        }
-    );
-    assert_eq!(enqueue_count(root.path()), 2);
-    assert_withdrawn(&provider).await;
+        std::fs::write(root.path().join("release"), "").assert_value();
+        assert_eq!(
+            stalled.await.assert_value(),
+            SourceReviewState::Open {
+                checks: SourceChecks::Pending
+            }
+        );
+        assert_eq!(enqueue_count(root.path()), 2);
+        assert_withdrawn(&provider).await;
+    }
 }
 
 #[tokio::test]

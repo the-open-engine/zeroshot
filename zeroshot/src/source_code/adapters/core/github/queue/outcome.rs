@@ -83,16 +83,28 @@ pub(in super::super) async fn observe_removal(
             .settled
             .as_ref()
             .and_then(|result| result.as_ref().ok())
-            .map(|admission| (admission.clone(), effect.recovered_removals.clone()))
+            .cloned()
     };
-    let Some((admission, recovered_removals)) = admission else {
+    let Some(admission) = admission else {
         return Ok(());
     };
     let value = authority
         .api(&review_query_arguments(review, OUTCOME_QUERY)?, credential)
         .await?;
+    let effects = authority.queue_effects.0.lock().await;
+    let Some(effect) = effects.get(&identity(review)) else {
+        return recovery::pending(snapshot);
+    };
+    if effect
+        .settled
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        != Some(&admission)
+    {
+        return recovery::pending(snapshot);
+    }
     if let Some((removal, checks)) = removed_candidate(value, review, &admission)? {
-        if recovered_removals.contains(&removal.id) {
+        if effect.recovered_removals.contains(&removal.id) {
             return recovery::pending(snapshot);
         }
         let checks = policy::queue_check_failures(Value::Array(checks))?;
@@ -103,6 +115,7 @@ pub(in super::super) async fn observe_removal(
                     "Merge queue conflict removal cannot be ordered after the current admission",
                 ));
             }
+            drop(effects);
             return recovery::recover(authority, review, snapshot, (admission, removal.id)).await;
         }
         let (diagnostic, jobs) = removal_feedback(removal, checks)?;
